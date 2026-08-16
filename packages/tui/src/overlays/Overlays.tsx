@@ -20,23 +20,6 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function HelpOverlay({ s }: { s: TuiStrings }) {
-  return (
-    <Panel title={s.helpTitle}>
-      <Text dimColor>{s.helpNav}</Text>
-      <Text dimColor>{s.helpFilter}</Text>
-      <Text dimColor>{s.helpPager}</Text>
-      <Text dimColor>{s.helpQuit}</Text>
-      <Text dimColor>{s.helpClose}</Text>
-      {/* What the numbers MEAN, not just which key does what. The token total is the one figure on
-          these screens that is routinely misread as a fault. */}
-      <Text> </Text>
-      <Text dimColor>{s.helpTokens}</Text>
-      <Text dimColor>{s.helpTokensCache}</Text>
-    </Panel>
-  )
-}
-
 export function FilterOverlay({ s, options, selected, max = Number.MAX_SAFE_INTEGER }: {
   s: TuiStrings
   /** null is the "all harnesses" entry, always first. */

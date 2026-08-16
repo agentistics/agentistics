@@ -245,50 +245,40 @@ There is **no bundled MongoDB on this path** — set `MONGO_URL` to an external 
 
 ## `tui`
 
-A live multi-screen dashboard in the terminal — no browser needed. Built with
-[Ink](https://term.ink), it updates the instant the web dashboard does, over the same
-`/api/events` SSE stream.
+An **alias for [`start`](#start)** — it opens the control center, whose **Dashboard** screen is the
+metrics dashboard this command used to be.
 
 ```bash
-agentop tui
-agentop tui --lang pt         # force Portuguese for this run
+agentop tui        # identical to: agentop start
 ```
 
-```
- agentistics  ·  live coding-assistant analytics                          ● live
+It was a second Ink application of its own: its own shell, its own keyboard, its own help panel,
+drawing the same screens. Those screens are shared code now, so what the standalone app still owned
+was a duplicate of the chrome around them — a second set of keys for the same material, and a second
+place for the two to disagree. The command is kept because people have it in their fingers and in
+their scripts.
 
- 1 Overview  2 Projects  3 Sessions  4 Costs  5 Harnesses
-
- USD 8,364.44        13.3B         262           113.4K        2d
- cost                tokens        sessions      messages      streak
-
- activity · last 30 days
- ▅▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█▅▁▁▁█▃
-
- Harnesses
- Claude       ██████████████████████████████ USD 8,363.48  13.3B tok
- Codex        ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ USD 0.01  27.6K tok
-
- 1-5/tab switch screen  ·  f filter  ·  ? help  ·  q quit
-```
+Inside the app, the dashboard is one tab away:
 
 | Key | Does |
 |-----|------|
-| `1`–`5`, `tab` | Switch screen — Overview, Projects, Sessions, Costs, Harnesses |
+| `←`/`→`, `[`/`]` | Change tab — Services, Sessions, **Dashboard**, Logs, Cheat sheet, Help, Contribute |
+| `1`–`6`, `tab` | Inside Dashboard: change screen — Overview, Projects, History, Costs, Harnesses, Hardware |
 | `f` | Filter by harness |
+| `,` / `.`, pgup/pgdn | Page a list (History, Projects, Costs) |
 | `r` | Force a refresh |
-| `?` | Keyboard help |
 | `q`, `ctrl+c` | Quit |
 
-There is no configuration wizard — it opens straight into Overview and filtering happens in-app.
-If no server is listening it starts one itself and stops it again on exit; a server that was
-already running is left alone.
+One difference worth knowing: the standalone command **started a server for itself** when none was
+listening. The control center is the screen that starts and stops that server, so its Dashboard tab
+starts nothing — when there is nothing to read it says so, and names the screen that fixes it. An
+empty dashboard rendered as zeros would be a confident answer to a question it cannot answer.
 
 Metrics match the web dashboard exactly: both price through `calcCost()`, Claude totals come from
 `stats-cache.json` and every other harness from per-session sums. A metric a harness cannot
 produce shows `N/A` rather than a misleading `0`.
 
-Needs an interactive terminal — piping it exits with a message instead of a crash.
+Needs an interactive terminal — piping it runs like `agentop server`, exactly as `start` does.
 
 ---
 

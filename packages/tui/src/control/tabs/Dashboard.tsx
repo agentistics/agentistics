@@ -1,13 +1,13 @@
 /**
  * Dashboard.tsx — the metrics dashboard, as a screen of the control center.
  *
- * It renders nothing of its own: the five screens, their strip and their keys are `DashboardView`
- * and `useDashboardNav`, the same ones `agentop tui` mounts full-screen. What lives HERE is only
- * what is true of being a tab — where the data comes from, when it may be read, and which keys are
- * left after the shell has taken its own.
+ * It renders nothing of its own: the six screens, their strip and their keys are `DashboardView`
+ * and `useDashboardNav`. What lives HERE is only what is true of being a tab — where the data
+ * comes from, when it may be read, and which keys are left after the shell has taken its own.
  *
- * WHERE THE DATA COMES FROM is the one real difference, and it is deliberate. `agentop tui` starts
- * a server for itself when none is listening; this screen is inside the application that STARTS AND
+ * WHERE THE DATA COMES FROM is the one deliberate difference from the standalone app that used to
+ * draw these screens (`agentop tui`, an alias for this one now). That command started a server for
+ * itself when none was listening; this screen is inside the application that STARTS AND
  * STOPS that server, so it starts nothing. It reads the address off `ControlStatus.services` — the
  * host has already probed it — and when there is no address it says so in a sentence naming the
  * screen that fixes it. Zeros drawn under a stopped server would be the confident-0 this codebase
@@ -46,7 +46,7 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
   onChrome: (chrome: TabChrome) => void
 }) {
   // The dashboard's OWN words (screen names, column headers, empty states) come from the TUI's
-  // string table, which is what `agentop tui` uses; the chrome around them is the control center's.
+  // string table (`src/i18n.ts`); the chrome around them is the control center's.
   const t = strings(lang)
 
   const source = useMemo(() => dashboardSource(status?.services), [status?.services])
@@ -64,7 +64,7 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
       // app out from under a list the user is choosing from, and the footer must name the keys that
       // actually work here rather than the ones that normally do.
       ? { capture: true, hints: [s.keyBack, s.keyMove, s.keySelect] }
-      : { capture: false, hints: [s.keyQuit, s.keyTabs, s.dashView, s.dashFilter, s.keyRefresh] })
+      : { capture: false, hints: [s.keyQuit, s.keyTabs, s.dashView, s.dashFilter, s.dashPage, s.keyRefresh] })
   }, [isActive, nav.capture, onChrome, s])
 
   // Clicking a cell of the strip opens that screen — resolved against the SAME fit the row was drawn

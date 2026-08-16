@@ -274,3 +274,31 @@ export const touchSessions = (
   ids: readonly string[],
   atMs: number,
 ): Promise<number> => defaultRegistry.touch(ids, atMs)
+
+export async function retireFallenSessions(
+  o: {
+    newSessionId?: string
+    conversationId?: string
+    cwd: string
+    harness: string
+    backendIds: ReadonlySet<string>
+  },
+  registry: SessionRegistry = defaultRegistry,
+): Promise<number> {
+  const list = await registry.read()
+  const nowIso = new Date().toISOString()
+  let retired = 0
+  for (const m of list) {
+    if (m.endedAt) continue
+    if (o.newSessionId && m.id === o.newSessionId) continue
+    if (o.backendIds.has(m.id)) continue
+    const sameConv = Boolean(o.conversationId && m.conversationId === o.conversationId)
+    const sameCwd = m.cwd === o.cwd && m.harness === o.harness
+    if (sameConv || sameCwd) {
+      if (await registry.patch(m.id, { endedAt: nowIso })) {
+        retired++
+      }
+    }
+  }
+  return retired
+}

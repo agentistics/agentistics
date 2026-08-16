@@ -1,6 +1,6 @@
 {
   "name": "agentistics",
-  "version": "1.8.0",
+  "version": "1.12.0",
   "description": "Local analytics dashboard for AI coding assistants — tracks tokens, cost, sessions, and activity from ~/.claude/",
   "keywords": [
     "claude",
@@ -38,7 +38,6 @@
     "build:desktop": "bun run build:binary:windows && cd packages/desktop && cargo tauri build",
     "preview": "bun run --cwd packages/web preview",
     "watch": "bun run --cwd packages/server server/otel-watcher.ts",
-    "watch:cli": "bun run packages/tui/src/index.tsx",
     "up:central": "bash central.sh up",
     "init:central": "bash central.sh init",
     "central": "bun packages/server/bin/cli.ts server --central",

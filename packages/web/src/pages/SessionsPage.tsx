@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom'
-import { Clock, Radio, Copy, Check, Bell, BellOff, Settings, Sparkles, Folder, User, Terminal } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
+import { Clock, Radio, Copy, Check, Bell, BellOff, Settings, Sparkles, Folder, User, Terminal, FileText, ChevronDown, ChevronUp, Send, Info, ExternalLink, LayoutGrid, List, ChevronLeft, ChevronRight, MessageSquare, Loader } from 'lucide-react'
 import type { HarnessId, LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
-import { sessionLabel } from '@agentistics/core'
+import { sessionLabel, sessionTokenTotal } from '@agentistics/core'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../lib/harness'
 import type { AppContext } from '../lib/app-context'
 import { Section } from '../components/Section'
@@ -38,18 +41,6 @@ export default function SessionsPage() {
   // Notification settings state & prompt banner
   const [notifSettings, setNotifSettings] = useState<NotificationSettings>(getNotificationSettings)
   const prevActivitiesRef = useRef<Record<string, SessionActivity>>({})
-  /**
-   * Whether a baseline has been taken — the fix for a notification storm on every page load.
-   *
-   * `prevActivitiesRef` starts empty, so on the FIRST poll every live session has no previous state
-   * and each one counted as a transition: opening this page with three sessions up fired three
-   * notifications and three sounds, and it did it again on every remount. The bell must ring on the
-   * TRANSITION, never on the level — the same rule the cockpit's waiting counter already follows.
-   *
-   * So the first poll RECORDS what is already true and says nothing. A session that appears after
-   * that genuinely did just appear, and is still worth reporting.
-   */
-  const baselineTakenRef = useRef(false)
 
   // Sessions map lookup helper
   const sessionsMap = useMemo(() => {
@@ -81,12 +72,8 @@ export default function SessionsPage() {
         const activities = json.liveSessionActivities || {}
         setLiveActivities(activities)
 
-        // Check state transitions for notifications — but never on the first poll; see
-        // `baselineTakenRef`. What is already running when you arrive is not news.
-        if (baselineTakenRef.current) {
-          handleSessionStateTransitions(prevActivitiesRef.current, activities, sessionsMap, pt ? 'pt' : 'en')
-        }
-        baselineTakenRef.current = true
+        // Check state transitions for notifications
+        handleSessionStateTransitions(prevActivitiesRef.current, activities, sessionsMap, pt ? 'pt' : 'en')
         prevActivitiesRef.current = activities
       } catch { /* transient — keep last known */ }
     }
@@ -103,6 +90,17 @@ export default function SessionsPage() {
   )
   const liveCount = live.length + liveProcs.length
   const notice = liveEmptyNotice({ count: liveCount, central: isCentral, unavailable: liveUnavailable, lang: pt ? 'pt' : 'en' })
+
+  // Pagination (5 by 5) and view mode state for live sessions
+  const [livePage, setLivePage] = useState(1)
+  const [liveViewMode, setLiveViewMode] = useState<'list' | 'grid'>('list')
+  const LIVE_PAGE_SIZE = 5
+  const totalLivePages = Math.max(1, Math.ceil(live.length / LIVE_PAGE_SIZE))
+  const currentLivePage = Math.min(livePage, totalLivePages)
+  const pagedLive = useMemo(() => {
+    const start = (currentLivePage - 1) * LIVE_PAGE_SIZE
+    return live.slice(start, start + LIVE_PAGE_SIZE)
+  }, [live, currentLivePage])
 
   // Handle enabling notifications from prompt banner
   async function handleEnableNotifications() {
@@ -131,7 +129,14 @@ export default function SessionsPage() {
 
   return (
     <>
-      <PageHead pt={pt} central={isCentral} />
+      <PageHead
+        pt={pt}
+        central={isCentral}
+        liveViewMode={liveViewMode}
+        setLiveViewMode={setLiveViewMode}
+        notifSettings={notifSettings}
+        onOpenNotifs={() => navigate('/settings/notifications')}
+      />
 
       {/* Notification Permission Prompt Banner */}
       {showPromptBanner && (
@@ -239,84 +244,139 @@ export default function SessionsPage() {
         </div>
       )}
 
-      {/* "Open now" real-time process detection */}
-      <Section
-        flashId="live-sessions"
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Radio size={14} />
-              <span>{pt ? 'Abertas agora' : 'Open now'}</span>
-              {liveCount > 0 && (
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>({liveCount})</span>
-              )}
-            </div>
-
-            <button
-              onClick={() => navigate('/settings/notifications')}
-              title={pt ? 'Configurar Notificações' : 'Configure Notifications'}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 11,
-                padding: '3px 8px',
-                borderRadius: 6,
-                border: '1px solid var(--border-subtle)',
-                background: 'transparent',
-                color: 'var(--text-tertiary)',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {notifSettings.enabled ? <Bell size={12} style={{ color: 'var(--anthropic-orange)' }} /> : <BellOff size={12} />}
-              <span>{pt ? 'Notificações' : 'Notifications'}</span>
-            </button>
-          </div>
-        }
-      >
-        {notice
-          ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '8px 2px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span>{notice.title}</span>
-              {notice.detail && <span style={{ fontSize: 12, lineHeight: 1.5, maxWidth: '68ch' }}>{notice.detail}</span>}
-            </div>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {live.map(s => (
-                <LiveCard
-                  key={s.session_id}
-                  s={s}
-                  pt={pt}
-                  central={isCentral}
-                  activity={liveActivities[s.session_id]}
-                  onOpen={() => setSelectedSession(s)}
-                />
-              ))}
-              {liveProcs.map((p, i) => <StartingCard key={`${p.harness}-${p.cwd}-${i}`} p={p} pt={pt} />)}
-            </div>}
-      </Section>
-
-      <Section flashId="recent-sessions" title={<><Clock size={14} /> {pt ? 'Últimas sessões' : 'Latest sessions'}</>}>
-        <RecentSessions sessions={derived.filteredSessions} lang={lang} onSelect={setSelectedSession} pinnedIds={liveIds} />
-      </Section>
+      {/* Primary Unified Sessions View */}
+      <RecentSessions
+        sessions={derived.filteredSessions}
+        lang={lang}
+        onSelect={setSelectedSession}
+        pinnedIds={liveIds}
+        activities={liveActivities}
+        viewMode={liveViewMode}
+        onViewModeChange={setLiveViewMode}
+      />
     </>
   )
 }
 
-function PageHead({ pt, central }: { pt: boolean; central?: boolean }) {
+function PageHead({
+  pt,
+  central,
+  liveViewMode,
+  setLiveViewMode,
+  notifSettings,
+  onOpenNotifs,
+}: {
+  pt: boolean
+  central?: boolean
+  liveViewMode: 'list' | 'grid'
+  setLiveViewMode: (mode: 'list' | 'grid') => void
+  notifSettings: NotificationSettings
+  onOpenNotifs: () => void
+}) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
-        <span style={{ color: 'var(--anthropic-orange)' }}><Clock size={16} /></span>
-        {pt ? 'Sessões' : 'Sessions'}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 12,
+        padding: '14px 18px',
+        borderRadius: 12,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 260 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
+          <span style={{ color: 'var(--anthropic-orange)' }}><Clock size={18} /></span>
+          {pt ? 'Sessões' : 'Sessions'}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+          {central
+            ? (pt
+                ? 'Últimas sessões do time (metadados, sem chat) — reativo aos filtros, inclusive por membro.'
+                : "The team's latest sessions (metadata, no chat) — reactive to the filters, including by member.")
+            : (pt
+                ? 'Sessões abertas agora (em tempo real) e as últimas sessões, com comando para retomar.'
+                : 'Sessions open right now (real time) and your latest sessions, with a resume command.')}
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-        {central
-          ? (pt
-              ? 'Últimas sessões do time (metadados, sem chat) — reativo aos filtros, inclusive por membro.'
-              : "The team's latest sessions (metadata, no chat) — reactive to the filters, including by member.")
-          : (pt
-              ? 'Sessões abertas agora (em tempo real) e as últimas sessões, com comando para retomar.'
-              : 'Sessions open right now (real time) and your latest sessions, with a resume command.')}
+
+      {/* Right Side Controls: View Mode TabMenu & Notifications Button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {/* TabMenu: List vs Grid Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 3, background: 'var(--bg-elevated)' }}>
+          <button
+            onClick={() => setLiveViewMode('list')}
+            title={pt ? 'Exibir em lista' : 'List view'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: 'none',
+              background: liveViewMode === 'list' ? 'var(--bg-card)' : 'transparent',
+              color: liveViewMode === 'list' ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+              fontSize: 11,
+              fontWeight: liveViewMode === 'list' ? 600 : 400,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s',
+            }}
+          >
+            <List size={13} />
+            <span>{pt ? 'Lista' : 'List'}</span>
+          </button>
+          <button
+            onClick={() => setLiveViewMode('grid')}
+            title={pt ? 'Exibir em grade' : 'Grid view'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: 'none',
+              background: liveViewMode === 'grid' ? 'var(--bg-card)' : 'transparent',
+              color: liveViewMode === 'grid' ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+              fontSize: 11,
+              fontWeight: liveViewMode === 'grid' ? 600 : 400,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s',
+            }}
+          >
+            <LayoutGrid size={13} />
+            <span>{pt ? 'Grade' : 'Grid'}</span>
+          </button>
+        </div>
+
+        {/* Notifications Settings Button */}
+        <button
+          onClick={onOpenNotifs}
+          title={pt ? 'Configurar Notificações' : 'Configure Notifications'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 11,
+            fontWeight: 500,
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all 0.15s',
+          }}
+        >
+          {notifSettings.enabled ? <Bell size={13} style={{ color: 'var(--anthropic-orange)' }} /> : <BellOff size={13} />}
+          <span>{pt ? 'Notificações' : 'Notifications'}</span>
+        </button>
       </div>
     </div>
   )
@@ -398,21 +458,100 @@ function LiveCard({
   onOpen,
   central,
   activity,
+  viewMode = 'list',
 }: {
   s: SessionMeta
   pt: boolean
   onOpen: () => void
   central?: boolean
   activity?: SessionActivity
+  viewMode?: 'list' | 'grid'
 }) {
   const cmd = central ? null : resumeCommand(s)
   const [copied, setCopied] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
+  const [promptText, setPromptText] = useState('')
+  const [sendingPrompt, setSendingPrompt] = useState(false)
+  const [promptFeedback, setPromptFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; timestamp?: number; tools?: string[] }[] | null>(null)
+  const [loadingMsgs, setLoadingMsgs] = useState(false)
+
+  const detailsRef = useRef<HTMLDivElement>(null)
+
+  // Click outside to dismiss floating details popover
+  useEffect(() => {
+    if (!showDetails) return
+    function handleClickOutside(e: MouseEvent) {
+      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
+        setShowDetails(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showDetails])
+
+  useEffect(() => {
+    if (showDetails && messages === null && !loadingMsgs) {
+      setLoadingMsgs(true)
+      fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/messages?harness=${encodeURIComponent(s.harness || 'claude')}&projectPath=${encodeURIComponent(s.project_path || '')}`)
+        .then(r => r.ok ? r.json() : [])
+        .then((msgs: any[]) => {
+          if (Array.isArray(msgs)) setMessages(msgs)
+          else setMessages([])
+        })
+        .catch(() => setMessages([]))
+        .finally(() => setLoadingMsgs(false))
+    }
+  }, [showDetails, s.session_id, s.harness, s.project_path, messages, loadingMsgs])
+
   const mins = Math.max(0, Math.round((Date.now() - lastActivityMs(s)) / 60_000))
   const title = sessionLabel(s) || (s.project_path ? (s.project_path.split('/').filter(Boolean).pop() || '') : '') || s.session_id.slice(0, 8)
+
+  async function handleSendPrompt(e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    const text = promptText.trim()
+    if (!text || sendingPrompt) return
+
+    setSendingPrompt(true)
+    setPromptFeedback(null)
+    try {
+      const res = await fetch('/api/sessions/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: s.session_id, prompt: text }),
+      })
+      const json = await res.json() as { ok?: boolean; message?: string; error?: string }
+      if (res.ok && json.ok) {
+        setPromptFeedback({
+          ok: true,
+          msg: pt ? 'Prompt enviado com sucesso para a sessão no terminal!' : 'Prompt sent successfully to session in terminal!',
+        })
+        setPromptText('')
+      } else {
+        setPromptFeedback({
+          ok: false,
+          msg: json.error || (pt ? 'Erro ao enviar prompt para a sessão.' : 'Failed to send prompt.'),
+        })
+      }
+    } catch (err: any) {
+      setPromptFeedback({
+        ok: false,
+        msg: err?.message || (pt ? 'Erro de rede ao enviar prompt.' : 'Network error.'),
+      })
+    } finally {
+      setSendingPrompt(false)
+      setTimeout(() => setPromptFeedback(null), 4000)
+    }
+  }
+
+  // All four billed counters — the conversational pair alone is a fraction of a percent.
+  const totalTokens = sessionTokenTotal(s)
 
   return (
     <div
       style={{
+        position: 'relative',
         border: '1px solid var(--border)',
         borderRadius: 12,
         padding: '16px 18px',
@@ -421,25 +560,27 @@ function LiveCard({
         flexDirection: 'column',
         gap: 12,
         boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        boxSizing: 'border-box',
+        width: '100%',
+        minWidth: 0,
+        maxWidth: '100%',
       }}
     >
-      {/* Header Row */}
+      {/* Header Row: Title on Left, Stacked Badges + Elapsed Time on Right */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
           gap: 12,
-          flexWrap: 'wrap',
         }}
       >
-        {/* Title & Harness */}
-        <div
-          onClick={onOpen}
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}
-        >
-          <span
+        {/* Title & Project Path */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+          <div
+            onClick={onOpen}
             style={{
+              cursor: 'pointer',
               fontSize: 15,
               fontWeight: 600,
               color: 'var(--text-primary)',
@@ -447,46 +588,45 @@ function LiveCard({
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
+            title={title}
           >
             {title}
-          </span>
-          <HarnessBadge harness={s.harness} />
-        </div>
-
-        {/* Status Badge & Elapsed Time */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <StatusBadge activity={activity} pt={pt} />
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Clock size={12} />
-            <span>{pt ? `há ${mins} min` : `${mins} min ago`}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Context Details (Project Path / Member) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 12, color: 'var(--text-tertiary)' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={s.project_path}
-        >
-          <Folder size={13} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.project_path}</span>
-        </div>
-
-        {central && s.user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, color: 'var(--text-secondary)' }}>
-            <User size={13} />
-            <span>{s.user}</span>
           </div>
-        )}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              color: 'var(--text-tertiary)',
+              minWidth: 0,
+            }}
+          >
+            <Folder size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.project_path}>
+              {s.project_path}
+            </span>
+            {central && s.user && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 6, color: 'var(--text-secondary)' }}>
+                <User size={12} />
+                <span>{s.user}</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Stacked Badges Cluster on Right */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <HarnessBadge harness={s.harness} />
+            <StatusBadge activity={activity} pt={pt} />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Clock size={11} />
+            <span>{pt ? `há ${mins} min` : `${mins} min ago`}</span>
+          </div>
+        </div>
       </div>
 
       {/* Command Box */}
@@ -501,9 +641,14 @@ function LiveCard({
             borderRadius: 8,
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border-subtle)',
+            width: '100%',
+            minWidth: 0,
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, overflow: 'hidden' }}>
             <Terminal size={13} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
             <code
               style={{
@@ -513,6 +658,8 @@ function LiveCard({
                 overflowX: 'auto',
                 whiteSpace: 'nowrap',
                 scrollbarWidth: 'none',
+                maxWidth: '100%',
+                display: 'block',
               }}
             >
               {cmd}
@@ -559,6 +706,269 @@ function LiveCard({
       ) : central ? null : (
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
           {pt ? 'Retomar não disponível para este harness.' : 'Resume not available for this harness.'}
+        </div>
+      )}
+
+      {/* Machine Mode Explicit Controls: Detalhes Button & Short Prompt Form */}
+      {!central && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            paddingTop: 8,
+            borderTop: '1px solid var(--border-subtle)',
+          }}
+        >
+          {/* Action Toolbar */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            {/* Detalhes Toggle Button */}
+            <button
+              onClick={() => setShowDetails(v => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: showDetails ? '1px solid var(--anthropic-orange-dim, rgba(232,105,11,0.4))' : '1px solid var(--border)',
+                background: showDetails ? 'rgba(232,105,11,0.08)' : 'var(--bg-card)',
+                color: showDetails ? 'var(--anthropic-orange)' : 'var(--text-primary)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <FileText size={13} />
+              <span>{pt ? 'Detalhes' : 'Details'}</span>
+              {showDetails ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+
+            {/* Quick link to open full drilldown modal */}
+            <button
+              onClick={onOpen}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                color: 'var(--text-tertiary)',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <ExternalLink size={12} />
+              <span>{pt ? 'Abrir no Modal' : 'Open in Modal'}</span>
+            </button>
+          </div>
+
+          {/* Short Prompt Input Bar */}
+          <form
+            onSubmit={handleSendPrompt}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 8,
+              padding: '4px 6px 4px 10px',
+            }}
+          >
+            <input
+              type="text"
+              value={promptText}
+              onChange={e => setPromptText(e.target.value)}
+              placeholder={pt ? 'Enviar short prompt para a sessão...' : 'Send short prompt to session...'}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                fontSize: 12,
+                color: 'var(--text-primary)',
+                fontFamily: 'inherit',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={sendingPrompt || !promptText.trim()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 12px',
+                borderRadius: 6,
+                background: 'var(--anthropic-orange)',
+                color: '#fff',
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: sendingPrompt || !promptText.trim() ? 'not-allowed' : 'pointer',
+                opacity: sendingPrompt || !promptText.trim() ? 0.6 : 1,
+                fontFamily: 'inherit',
+                flexShrink: 0,
+              }}
+            >
+              <Send size={11} />
+              <span>{sendingPrompt ? (pt ? 'Enviando...' : 'Sending...') : (pt ? 'Enviar Prompt' : 'Send')}</span>
+            </button>
+          </form>
+
+          {/* Prompt Feedback Toast */}
+          {promptFeedback && (
+            <div
+              style={{
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 6,
+                background: promptFeedback.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                color: promptFeedback.ok ? '#22c55e' : '#ef4444',
+                border: promptFeedback.ok ? '1px solid rgba(34,197,94,0.2)' : '1px solid rgba(239,68,68,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {promptFeedback.ok ? <Check size={12} /> : <Info size={12} />}
+              <span>{promptFeedback.msg}</span>
+            </div>
+          )}
+
+          {/* Expandable Details Panel — Floating Popover in Grid View / Inline in List View */}
+          {showDetails && (
+            <div
+              ref={detailsRef}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--anthropic-orange-dim, rgba(232,105,11,0.4))',
+                width: '100%',
+                minWidth: 0,
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+                ...(viewMode === 'grid'
+                  ? {
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      zIndex: 300,
+                      marginTop: 6,
+                      boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
+                      animation: 'ttyChatFadeIn 0.15s ease-out',
+                    }
+                  : {
+                      marginTop: 6,
+                    }),
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <MessageSquare size={13} style={{ color: 'var(--anthropic-orange)' }} />
+                  <span>{pt ? 'Últimas mensagens da conversa' : 'Recent conversation messages'}</span>
+                </div>
+                {messages && messages.length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                    {pt ? `exibindo ${Math.min(4, messages.length)} de ${messages.length}` : `showing ${Math.min(4, messages.length)} of ${messages.length}`}
+                  </span>
+                )}
+              </div>
+
+              {loadingMsgs ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
+                  <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>{pt ? 'Carregando histórico do transcript...' : 'Loading transcript history...'}</span>
+                </div>
+              ) : messages && messages.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+                  {messages.slice(-4).map((m, idx) => {
+                    const isUser = m.role === 'user'
+                    const colour = HARNESS_COLORS[s.harness] ?? 'var(--anthropic-orange)'
+                    const roleLabel = isUser ? (pt ? 'Você' : 'You') : (HARNESS_LABELS[s.harness] ?? s.harness)
+                    return (
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 2, width: '100%', minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: isUser ? 'var(--text-tertiary)' : colour }}>
+                          {roleLabel}
+                        </div>
+                        <div
+                          style={{
+                            maxWidth: '96%',
+                            minWidth: 0,
+                            padding: '8px 10px',
+                            borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+                            background: isUser ? 'rgba(59, 130, 246, 0.12)' : 'var(--bg-card)',
+                            border: isUser ? '1px solid rgba(59, 130, 246, 0.25)' : `1px solid ${colour}44`,
+                            fontSize: 12,
+                            color: 'var(--text-primary)',
+                            lineHeight: 1.5,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
+                            components={{
+                              p: ({ children }) => <span style={{ display: 'block', margin: '0 0 4px 0' }}>{children}</span>,
+                              ul: ({ children }) => <ul style={{ margin: '2px 0 4px 0', paddingLeft: 18 }}>{children}</ul>,
+                              ol: ({ children }) => <ol style={{ margin: '2px 0 4px 0', paddingLeft: 18 }}>{children}</ol>,
+                              li: ({ children }) => <li style={{ margin: '1px 0' }}>{children}</li>,
+                              code: ({ children, className }) => {
+                                const isBlock = !!className
+                                return isBlock
+                                  ? <pre style={{ background: 'var(--bg-surface)', padding: '6px 8px', borderRadius: 4, overflowX: 'auto', margin: '4px 0', fontSize: 11, maxWidth: '100%' }}><code style={{ whiteSpace: 'pre', display: 'block' }}>{children}</code></pre>
+                                  : <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{children}</code>
+                              },
+                              pre: ({ children }) => <>{children}</>,
+                            }}
+                          >
+                            {m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic', padding: '6px 0' }}>
+                  {pt ? 'Nenhuma mensagem recente encontrada nesta sessão.' : 'No recent messages found in this session.'}
+                </div>
+              )}
+
+              <button
+                onClick={onOpen}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--anthropic-orange)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  marginTop: 4,
+                  width: '100%',
+                }}
+              >
+                <ExternalLink size={12} />
+                <span>{pt ? 'Abrir Transcrição Completa e Métricas no Modal →' : 'Open Full Transcript & Metrics in Modal →'}</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

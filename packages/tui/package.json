@@ -1,11 +1,11 @@
 {
   "name": "@agentistics/tui",
-  "version": "1.7.3",
+  "version": "1.12.0",
   "private": true,
   "type": "module",
-  "main": "src/index.tsx",
+  "main": "src/control/index.ts",
   "exports": {
-    ".": "./src/index.tsx",
+    ".": "./src/control/index.ts",
     "./control": "./src/control/index.ts",
     "./control/altScreen": "./src/control/altScreen.ts",
     "./control/stream": "./src/control/stream.ts",
@@ -14,7 +14,6 @@
     "./control/i18n": "./src/control/i18n.ts"
   },
   "scripts": {
-    "dev": "bun run src/index.tsx",
     "preview": "bun run scripts/preview.tsx"
   },
   "dependencies": {

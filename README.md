@@ -115,7 +115,6 @@ bun run dev            # API (47291) + UI dev server (47292)
 |---|---|
 | `bun run dev` | API + Vite dev server in parallel |
 | `bun run watch` | OTel daemon only |
-| `bun run watch:cli` | Terminal TUI |
 | `bun test` | Unit tests |
 | `bun run build:binary` | Full build → `release/agentop` |
 
@@ -123,8 +122,9 @@ bun run dev            # API (47291) + UI dev server (47292)
 
 ## The terminal dashboard
 
-`agentop tui` is a live dashboard that needs no browser — Overview, Projects, Sessions, Costs and
-Harnesses, switched with the digits or `tab`.
+`agentop` opens the control center, and its **Dashboard** tab is a live dashboard that needs no
+browser — Overview, Projects, History, Costs, Harnesses and Hardware, switched with the digits or
+`tab`. (`agentop tui` is an alias for `agentop`.)
 
 <p align="center">
   <img src="docs/media/tui.gif" alt="agentop tui" width="100%" />

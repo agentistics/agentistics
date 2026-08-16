@@ -400,6 +400,12 @@ export async function scanProcesses(): Promise<{
   try { pids = await readdir('/proc') } catch {
     return { procs: [], unavailable: 'no-proc' }
   }
+  let harnessIndex: Awaited<ReturnType<typeof import('./sessions/harness-sessions').loadHarnessSessions>> | null = null
+  try {
+    const { loadHarnessSessions } = await import('./sessions/harness-sessions')
+    harnessIndex = await loadHarnessSessions()
+  } catch { /* best-effort */ }
+
   const btimeSec = await bootTimeSec()
   const hz = 100 // USER_HZ is 100 on every Linux this runs on; only used to scale start ticks.
   const procs: HarnessProcess[] = []
@@ -425,9 +431,13 @@ export async function scanProcesses(): Promise<{
       const cwd = await readlink(`/proc/${pid}/cwd`).catch(() => { cwdDenied = true; return '' })
       if (!cwd) return
       const startedMs = await processStartMs(pid, btimeSec, hz)
-      // An open session file beats argv: it is what the process is writing to right now.
-      const sessionId = (await sessionIdFromFds(pid, harness)) ?? sessionIdFromArgv(argv)
-      procs.push({ harness, cwd, sessionId, startedMs, pid: Number(pid) })
+      const pidNum = Number(pid)
+      const harnessRecord = harnessIndex?.byPid.get(pidNum)
+      // Harness session file beats fd and argv: it is what the harness explicitly wrote for this pid.
+      const sessionId = harnessRecord?.sessionId
+        ?? (await sessionIdFromFds(pid, harness))
+        ?? sessionIdFromArgv(argv)
+      procs.push({ harness, cwd, sessionId, startedMs, pid: pidNum })
     } catch { /* process exited or not ours — ignore */ }
   }))
   const unavailable = procs.length > 0

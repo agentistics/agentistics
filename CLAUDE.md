@@ -26,7 +26,7 @@ packages/server/bin/cli.ts  (binary entry point — agentop)
   ├── agentop setup        → server/cli-setup.ts (the same solo/central/member wizard, non-interactively scriptable; its interactive twin is the cockpit's wizard, reached from the config pane's mode row)
   ├── agentop server       → server/index.ts + server/otel-watcher.ts (always together)
   ├── agentop restart …    → bounce a mode's service (`server`/`watch` → systemd; `central` → central.sh restart; `--all` → cli-start.ts restartAllServices over every running service). `--rebuild` rebuilds before restarting instead of just bouncing (`central` → `up`; machine → `compose build --no-cache` then `compose up -d --force-recreate`; `server`/`watch` → `rebuildNativeBinary()`, i.e. `bun run bin`, which needs the repo checkout — outside one it says so and restarts the existing build). **A rebuild is a FULL rebuild**: the Docker paths pass `--no-cache`, because a cached one could hand back the very image it was asked to replace, and they say so on the way in — that build is several minutes. `--cache` is the escape hatch (reuse Docker's layer cache); `-y`/`-n` answer `central.sh up`'s "re-run interactive setup?" prompt up front, so an unattended rebuild never waits on a keypress. All of it is resolved by the pure `rebuild-flags.ts` (`parseRebuildFlags` / `centralRebuildArgs` / `composeRebuildCommands`) — the shell receives an already-decided answer, `-y` with `-n` (or `--cache` with `--no-cache`) is refused rather than resolved, and the control center's rebuild verb passes `-n` EXPLICITLY instead of relying on its piped child failing `[ -t 0 ]`. A plain `agentop central up` / `central.sh up` is not a rebuild and keeps its cached build
-  ├── agentop tui          → @agentistics/tui (Ink dashboard; language resolved via cli-lang.ts)
+  ├── agentop tui          → an ALIAS for `start`, renamed in cli.ts's one-line dispatch. There is no second Ink app: the metrics ARE the control center's `dashboard` tab, and a branch of its own would be a copy that starts identical and drifts
   ├── agentop watch        → server/otel-watcher.ts (daemon only)
   ├── agentop central …    → server/cli-central.ts (wraps central.sh: up/init/down/logs/status/restart/pull; `up` takes -y/-n and --cache/--no-cache, honored on the standalone path too)
   ├── agentop member …     → server/cli-member.ts (connect/leave/status; whoami-verified, no browser)
@@ -1127,22 +1127,26 @@ absence was a real finding.
   verified reports `fail`, never a reassuring `pass`.
 ## Terminal UI (`packages/tui`)
 
-`agentop tui` is an [Ink](https://term.ink) (React for CLIs) application; bare `agentop` and
-`agentop start` open the **control center**, a second Ink app in the same package. It replaced a
-single 938-line hand-rolled ANSI file.
+**There is ONE Ink application in this package**, the control center, and `agentop` / `agentop start`
+/ `agentop tui` all open it. `tui` used to be a second one — its own shell, its own keyboard, its own
+help panel — drawing the very screens the `dashboard` tab draws; once those screens became shared
+code (`src/dashboard/`), what the standalone app still owned was a DUPLICATE of the chrome around
+them, which is a second set of keys for the same material and a second place for the two to
+disagree. It is now renamed into `start` in `cli.ts`'s dispatch — a BRANCH of its own would be a copy
+that starts identical and drifts.
 
 ```
 packages/tui/src/
-  index.tsx          entry — runTui({ lang, port }); refuses non-TTY stdin with a message
-  App.tsx            screen router, keybindings, overlays, applyHarnessFilter
   selectors.ts       PURE AppData -> view model (the tested core)
-  i18n.ts            EN/PT terminal strings
+  i18n.ts            EN/PT strings for the dashboard's own words (columns, screen names, the pager)
   theme.ts           palette mirroring the web dark mode + HARNESS_COLOR
   useTerminalSize.ts columns/rows that follow SIGWINCH
-  data/              useAppData (fetch + SSE), ensureApi (auto-spawn the server)
-  components/        Primitives (Kpi/Bar/DataTable/fitColumns), Sparkline
-  screens/           Overview, Projects, Sessions, Costs, Harnesses
-  overlays/          help + harness filter
+  data/              useAppData (fetch + SSE)
+  components/        Primitives (Kpi/Bar/DataTable/fitColumns/Pager), Sparkline
+  screens/           Overview, Projects, History, Costs, Harnesses, Hardware
+  dashboard/         view.ts (PURE: screens, row budgets, PAGING, applyHarnessFilter),
+                     useDashboardNav (its keyboard), DashboardView (the one mounted dashboard)
+  overlays/          the harness filter
   control/           the control center — the `agentop` front door
     index.ts         runControlCenter({ lang, host, tab }) → ControlExit; the ONLY server import
     types.ts         ControlHost / ControlStatus / TabId — the presentation ↔ logic contract
@@ -1221,8 +1225,8 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   is invisible under `bun run` and only appears at compile time.
 - **Screens receive a `width` and must fit it.** `DataTable` drops columns from the right via
   `fitColumns` and `Overview` drops KPIs via `fitKpis`; declare columns most-important-first. A
-  row wider than the terminal wraps and misaligns everything below it. `App` passes
-  `columns - 2` because the shell Box has `paddingX={1}`.
+  row wider than the terminal wraps and misaligns everything below it — the shell passes
+  `columns - 2` because its Box has `paddingX={1}`.
 - **The control center owns no logic.** `cli-start.ts` decides what the state is and performs
   every action behind the `ControlHost` interface; `packages/tui/src/control` renders and reports
   intents. `cli-ui.ts` stays as the non-TTY fallback — do not delete it.
@@ -1680,7 +1684,7 @@ is and land your own copy on the target branch. A cherry-picked duplicate resolv
 ```bash
 bun run dev            # API (47291) + UI (47292) in parallel
 bun run watch          # OpenTelemetry daemon (optional)
-bun run watch:cli      # Terminal TUI (Ink)
+bun run cli            # agentop from source (bare = the control center)
 bun test               # Unit tests for pure functions
 
 # Build the binary

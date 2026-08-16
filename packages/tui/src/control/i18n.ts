@@ -49,10 +49,12 @@ export interface ControlStrings {
   keyEnds: string
   keyRefresh: string
   keyLogSource: string
-  /** The dashboard's own two keys. Its screens are digits and `tab`, never the arrows — see
+  /** The dashboard's own keys. Its screens are digits and `tab`, never the arrows — see
    *  `resolveDashboardScreen` for why the shell's `←→ screens` had to survive this tab. */
   dashView: string
   dashFilter: string
+  /** Paging, on the three screens that draw a list. Named because the arrows could not be taken. */
+  dashPage: string
   /**
    * The mouse's two hints, said only while there IS a mouse.
    *
@@ -580,6 +582,7 @@ const EN: ControlStrings = {
   keyLogSource: '[ ] source',
   dashView: '1-6/tab view',
   dashFilter: 'f harness',
+  dashPage: ', . page',
   keyMouse: 'm mouse',
   keyMouseCopy: 'shift+drag to copy',
 
@@ -757,7 +760,7 @@ const EN: ControlStrings = {
   sessionsPaneRestore: 'last time',
   restoreTitle: (n: number) =>
     n === 1 ? 'Your last session was this one:' : `Your last ${n} sessions were these:`,
-  restoreAnswer: 'enter starts them in the background · esc leaves them closed',
+  restoreAnswer: 'enter / R reopens active · L / tab go to list · esc ignore',
   sessionsKeyWhat: {
     move: 'move the cursor',
     open: 'switch between the menu and the list',
@@ -1029,6 +1032,7 @@ const PT: ControlStrings = {
   keyLogSource: '[ ] fonte',
   dashView: '1-6/tab tela',
   dashFilter: 'f assistente',
+  dashPage: ', . paginar',
   keyMouse: 'm mouse',
   keyMouseCopy: 'shift+arrastar copia',
 
@@ -1190,7 +1194,7 @@ const PT: ControlStrings = {
   sessionsPaneRestore: 'da última vez',
   restoreTitle: (n: number) =>
     n === 1 ? 'Sua última sessão foi esta:' : `Suas últimas ${n} sessões foram estas:`,
-  restoreAnswer: 'enter inicia em background · esc deixa fechadas',
+  restoreAnswer: 'enter / R reabre as ativas · L / tab ir para a listagem · esc ignora',
   sessionsKeyWhat: {
     move: 'move o cursor',
     open: 'alterna entre o menu e a lista',
@@ -1281,9 +1285,9 @@ const PT: ControlStrings = {
     // `aguardando resposta` under a band called `aguardando`.
     waiting: 'precisa de você',
     working: 'trabalhando',
-    exited: 'desligada',
-    lost: 'desligada',
-    closed: 'desligada',
+    exited: 'encerrada',
+    lost: 'desconectada',
+    closed: 'fechada',
     unknown: 'externa',
   },
   sessionsSearching: q => `busca: ${q} · esc limpa`,

@@ -5,7 +5,20 @@
  * Single entry point for the compiled binary.
  */
 
-const command = process.argv[2]
+/**
+ * `agentop tui` is an ALIAS for `agentop start`, resolved here so there is one code path.
+ *
+ * There used to be a second Ink application behind it — its own shell, its own keyboard, its own
+ * help panel — drawing the same five screens the control center's `dashboard` tab draws. Every one
+ * of those screens is shared code now (`packages/tui/src/dashboard`), so what the standalone app
+ * still owned was a DUPLICATE of the chrome around them: a second set of keys for the same
+ * material, and a second place for the two to disagree.
+ *
+ * It is renamed into `start` rather than given its own branch that opens the control center,
+ * because a branch is a copy that starts identical and drifts — a flag added to `start` would have
+ * to be remembered here. The dashboard is one keypress away inside the app.
+ */
+const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
 /**
@@ -55,7 +68,7 @@ Commands:
                 (add --central to run the team central natively, no Docker; --bg to detach)
   restart       Restart a running mode's service so it picks up new code/config
   status        Show services (server/central/member) + health
-  tui           Start the live terminal dashboard (standalone)
+  tui           Alias for 'start' — the metrics dashboard is its 'dashboard' tab
   watch         Start the background metrics daemon only
   central       Manage the team central (Docker; runs from anywhere)
   member        Configure this machine as a team member
@@ -207,7 +220,6 @@ Examples:
   agentop server
   agentop server --port 4000
   agentop restart server
-  agentop tui
   agentop watch
   agentop central up
   agentop member connect --token act1_aHR0cHM6Ly9jZW50cmFsLmV4YW1wbGU.abc123
@@ -752,13 +764,6 @@ if (command === 'server' || command === 'start' || !command) {
     import('../server/otel-watcher.ts'),
     checkVersionAndWarn(),
   ])
-} else if (command === 'tui') {
-  checkVersionAndWarn() // fire-and-forget
-  const [{ runTui }, { resolveLang }] = await Promise.all([
-    import('@agentistics/tui'),
-    import('../server/cli-lang.ts'),
-  ])
-  process.exit(await runTui({ lang: await resolveLang() }))
 } else if (command === 'watch') {
   checkVersionAndWarn() // fire-and-forget
   await import('../server/otel-watcher.ts')

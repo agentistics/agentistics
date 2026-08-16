@@ -741,9 +741,12 @@ const PT: CliStrings = {
     // Named for what it means to the READER rather than for what the machine is doing, and it
     // pairs with `precisa de aprovação` above as the distinction it is.
     waiting: 'precisa de você',
-    exited: 'desligada',
-    lost: 'desligada',
-    closed: 'desligada',
+    // The three off states are NOT one word. Which one a row is decides what you do about it: it
+    // finished, it was disconnected, or you closed it. They all printed `desligada`, which flattened
+    // the only distinction that matters on a row that is over.
+    exited: 'encerrada',
+    lost: 'desconectada',
+    closed: 'fechada',
     external: 'externa',
   },
   sessApprovalBlind: (harness: string) =>

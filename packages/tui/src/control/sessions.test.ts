@@ -1474,6 +1474,13 @@ describe('sessionAge', () => {
     const down = session('a', { state: 'exited' as SessionState, lastActiveAt: 90_000 })
     expect(sessionAge(down, 60_000, ago)).toBe('0s')
   })
+
+  // A closed row ages from when it went OFF, not from when the work began: a conversation opened
+  // yesterday and closed a minute ago reads as a day old otherwise.
+  it('ages a closed row from its last activity, not its start', () => {
+    const closed = session('a', { state: 'closed' as SessionState, startedAt: 0, lastActiveAt: 40_000 })
+    expect(sessionAge(closed, 60_000, ago)).toBe('20s')
+  })
 })
 
 describe('sessionKeyHelp', () => {

@@ -27,7 +27,7 @@ import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
-import { addSession, newSessionId, patchSession, readRegistry, removeSession } from './registry'
+import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions } from './registry'
 import { conversationForProcess, loadConversations } from './conversations'
 import { resolveBackend } from './index'
 import { scanProcesses } from '../live-sessions'
@@ -221,6 +221,16 @@ async function start(
     ...(await recordedRepo(cwd)),
   })
 
+  const liveBackend = await backend.list().catch(() => [])
+  const backendIds = new Set(liveBackend.map(b => b.id))
+  await retireFallenSessions({
+    newSessionId: id,
+    conversationId: planned.plan.conversationId,
+    cwd,
+    harness: cmd.harness,
+    backendIds,
+  })
+
   if (cmd.background) {
     console.log(`Started ${cmd.harness} session ${id}${cmd.label ? ` (${cmd.label})` : ''} in ${cwd}`)
     console.log(`Attach with: agentop session attach ${id}`)
@@ -316,6 +326,15 @@ async function batch(
       ...(spec.name ? { label: spec.name } : {}),
       ...(planned.plan.conversationId ? { conversationId: planned.plan.conversationId } : {}),
       ...(await recordedRepo(cwd)),
+    })
+    const liveBackend = await backend.list().catch(() => [])
+    const backendIds = new Set(liveBackend.map(b => b.id))
+    await retireFallenSessions({
+      newSessionId: id,
+      conversationId: planned.plan.conversationId,
+      cwd,
+      harness: spec.harness,
+      backendIds,
     })
     started.push({ id, harness: spec.harness, cwd })
   }

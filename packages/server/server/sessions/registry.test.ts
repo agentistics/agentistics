@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSessionRegistry, newSessionId } from './registry'
+import { createSessionRegistry, newSessionId, retireFallenSessions } from './registry'
 
 let dir = ''
 let file = ''
@@ -220,5 +220,32 @@ describe('what survives a round trip', () => {
     expect(rows[1]!.repo).toBeUndefined()
     // `worktree` is a claim about the directory, so anything that is not literally true is false.
     expect(rows[2]!.repo).toEqual({ repo: 'x/y', worktree: false })
+  })
+})
+
+describe('retireFallenSessions', () => {
+  it('retires old fallen sessions in the same directory or conversation, leaving live backend sessions alone', async () => {
+    const reg = createSessionRegistry(file)
+    await reg.add({ id: 's1', harness: 'claude', cwd: '/tmp/proj', conversationId: 'c1', createdAt: '2026-08-12T10:00:00.000Z' })
+    await reg.add({ id: 's2', harness: 'claude', cwd: '/tmp/other', conversationId: 'c2', createdAt: '2026-08-12T10:00:00.000Z' })
+    await reg.add({ id: 's3', harness: 'claude', cwd: '/tmp/proj', conversationId: 'c3', createdAt: '2026-08-12T10:00:00.000Z' })
+
+    // s3 is active in backend; s1 and s2 are not.
+    const backendIds = new Set(['s3'])
+
+    // Calling retireFallenSessions when spawning new session s4 in /tmp/proj
+    const retired = await retireFallenSessions({
+      newSessionId: 's4',
+      conversationId: 'c1',
+      cwd: '/tmp/proj',
+      harness: 'claude',
+      backendIds,
+    }, reg)
+
+    expect(retired).toBe(1) // s1 was retired
+    const current = await reg.read()
+    expect(current.find(s => s.id === 's1')?.endedAt).toBeDefined()
+    expect(current.find(s => s.id === 's2')?.endedAt).toBeUndefined()
+    expect(current.find(s => s.id === 's3')?.endedAt).toBeUndefined()
   })
 })

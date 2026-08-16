@@ -1,17 +1,16 @@
 /**
  * DashboardView — the metrics dashboard itself, drawn wherever it is asked for.
  *
- * ONE implementation, two entry points: `agentop tui` mounts it under its own full-screen chrome,
- * and the control center's `dashboard` tab mounts it inside a `Pane`. Neither owns a screen, a
- * column, a key or a budget of its own — a second copy of these five screens is the bug this repo
- * has already paid for once (see `task-reopen.ts`), and it would show up here as the two surfaces
- * quietly disagreeing about what a session cost.
+ * ONE implementation, mounted by the control center's `dashboard` tab. It briefly had two entry
+ * points — this and the standalone `agentop tui` — and that command is an alias now, because the
+ * second one owned nothing but a duplicate of the chrome around these screens. Nothing here owns a
+ * screen, a column, a key or a budget: a second copy of them is the bug this repo has already paid
+ * for once (see `task-reopen.ts`), and it would show up as two surfaces quietly disagreeing about
+ * what a session cost.
  *
- * What it does NOT do is fetch. The data arrives as a prop, because the two callers get it from
- * genuinely different places: full-screen, `agentop tui` starts a server if none is listening; inside
- * the control center, the server is the thing the screen next door starts and stops, so the tab reads
- * the address the host already reported and says so in words when there is nothing to read. Absence
- * is stated, never rendered as a zero.
+ * What it does NOT do is fetch. The data arrives as a prop, because the server is the thing the
+ * screen next door starts and stops: the tab reads the address the host already reported and says so
+ * in words when there is nothing to read. Absence is stated, never rendered as a zero.
  */
 
 import React from 'react'

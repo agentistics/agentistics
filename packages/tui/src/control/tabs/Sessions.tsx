@@ -199,6 +199,12 @@ type Ask =
   | { kind: 'reopenFell' }
   /** Starting a new one — the only question that needs no selected row. */
   | { kind: 'new' }
+  /** Warning when attempting to reopen sessions that are already open. */
+  | { kind: 'openWarning'; openSessions: string[] }
+  /** Sending prompt to multiple selected sessions. */
+  | { kind: 'batchPrompt'; sessions: ControlSession[] }
+  /** Killing multiple selected sessions. */
+  | { kind: 'batchKill'; sessions: ControlSession[] }
 
 export function Sessions({
   host, fleet, strings: s, width, height, isActive, run, onChrome, onExit, onRefreshFleet,
@@ -683,13 +689,40 @@ export function Sessions({
   const runAction = useCallback((a: SessionAction) => {
     if (a === 'new') { if (host.spawnSession) setAsk({ kind: 'new' }); return }
     if (a === 'search') { setAsk({ kind: 'search' }); return }
-    // Opens the panel rather than cycling blind. A control that changes something without showing
-    // what the options were, or what the current one is, is a control people stop trusting — and
-    // the hide-closed and hide-unfiled switches had nowhere to live at all.
     if (a === 'group') { setAsk({ kind: 'view' }); return }
-    // A FLEET verb: it names no row, so it must not be gated on one being selected. Refused in a
-    // SENTENCE when nothing fell, never silently — a control that does nothing and says nothing is
-    // indistinguishable from a broken one.
+
+    // Batch actions when items are marked
+    if (marked.size > 0) {
+      const markedList = (fleet?.sessions ?? []).filter(sess => marked.has(sess.id))
+      if (a === 'prompt') {
+        setAsk({ kind: 'batchPrompt', sessions: markedList })
+        return
+      }
+      if (a === 'kill') {
+        const activeMarked = markedList.filter(sess => sess.state === 'working' || sess.state === 'waiting' || sess.state === 'waiting-approval')
+        if (activeMarked.length > 0) {
+          setAsk({ kind: 'batchKill', sessions: activeMarked })
+          return
+        }
+      }
+      if (a === 'reopenFell' || a === 'resume') {
+        const openSessions = markedList.filter(sess => sess.state === 'working' || sess.state === 'waiting' || sess.state === 'waiting-approval')
+        if (openSessions.length > 0) {
+          const names = openSessions.map(s => s.title || s.id)
+          setAsk({ kind: 'openWarning', openSessions: names })
+          return
+        }
+        const restore = host.restoreSessions
+        if (restore) {
+          void run(() => restore.call(host, [...marked], true)).then(() => {
+            setMarked(new Set())
+            onRefreshFleet()
+          })
+          return
+        }
+      }
+    }
+
     if (a === 'reopenFell') {
       if (!fleet?.fell || !host.reopenFell) {
         void run(async () => ({ ok: false, message: s.sessionsNoFell }))
@@ -1498,12 +1531,15 @@ export function Sessions({
           width={width}
           height={height}
           isActive={isActive}
-          onAnswer={accept => {
+          onAnswer={action => {
             setRestoreAsked(true)
-            const restore = host.restoreSessions
-            if (!restore) return
-            void run(() => restore.call(host, restorable.map(r => r.id), accept))
-              .then(onRefreshFleet)
+            if (action === 'accept' || action === 'decline') {
+              const restore = host.restoreSessions
+              if (!restore) return
+              void run(() => restore.call(host, restorable.map(r => r.id), action === 'accept'))
+                .then(onRefreshFleet)
+            }
+            // If action === 'list', setRestoreAsked(true) hides the offer banner so user lands straight on the list of recent sessions
           }}
         />
       </Box>
@@ -2126,11 +2162,13 @@ function RestoreOffer({ rows, strings: s, width, height, isActive, onAnswer }: {
   width: number
   height: number
   isActive: boolean
-  onAnswer: (accept: boolean) => void
+  onAnswer: (action: 'accept' | 'decline' | 'list') => void
 }) {
-  useInput((_i, key) => {
-    if (key.return) return onAnswer(true)
-    if (key.escape) return onAnswer(false)
+  useInput((i, key) => {
+    const input = i.toLowerCase()
+    if (key.return || input === 'r') return onAnswer('accept')
+    if (input === 'l' || input === 'v' || key.tab) return onAnswer('list')
+    if (key.escape) return onAnswer('decline')
   }, { isActive })
 
   const now = Date.now()
@@ -2498,6 +2536,67 @@ function Question({
           const reopen = host.reopenFell
           if (!yes || !reopen) return onClose()
           onRun(() => reopen.call(host), s.actSessions.reopenFell)
+        }}
+      />
+    )
+  }
+
+  if (ask.kind === 'openWarning') {
+    return (
+      <Box flexDirection="column" width={width}>
+        <Text color={COLORS.danger} bold>Aviso: Não é possível reabrir as sessões selecionadas.</Text>
+        <Text dimColor>As seguintes sessões já estão abertas e não podem ser religadas:</Text>
+        {ask.openSessions.map(title => (
+          <Text key={title} color={COLORS.accent}>{`  • ${title}`}</Text>
+        ))}
+        <Text> </Text>
+        <Text dimColor>Pressione [Enter] ou [Esc] para fechar este aviso.</Text>
+      </Box>
+    )
+  }
+
+  if (ask.kind === 'batchPrompt') {
+    return (
+      <Box flexDirection="column" width={width}>
+        <Text dimColor>{`Enviar prompt para ${ask.sessions.length} sessões selecionadas:`}</Text>
+        <TextPrompt
+          label="Prompt para selecionadas"
+          width={width}
+          onCancel={onClose}
+          onSubmit={value => {
+            const text = value.trim()
+            const send = host.promptSession
+            if (!send || !text) return onClose()
+            onRun(async () => {
+              for (const sess of ask.sessions) {
+                await send.call(host, sess.id, text)
+              }
+              return { ok: true, message: '' }
+            }, s.actSessions.prompt)
+          }}
+        />
+      </Box>
+    )
+  }
+
+  if (ask.kind === 'batchKill') {
+    return (
+      <ConfirmPrompt
+        label={`Deseja encerrar as ${ask.sessions.length} sessões ativas selecionadas?`}
+        yesLabel={s.yes}
+        noLabel={s.no}
+        width={width}
+        onCancel={onClose}
+        onAnswer={(yes: boolean) => {
+          if (!yes) return onClose()
+          const kill = host.killSession
+          if (!kill) return onClose()
+          onRun(async () => {
+            for (const sess of ask.sessions) {
+              await kill.call(host, sess.id)
+            }
+            return { ok: true, message: '' }
+          }, s.actSessions.kill)
         }}
       />
     )

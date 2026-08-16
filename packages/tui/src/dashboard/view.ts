@@ -1,18 +1,18 @@
 /**
  * view.ts — PURE navigation and row arithmetic for the metrics dashboard.
  *
- * The dashboard is drawn in two places now — full-screen behind `agentop tui`, and inside the
- * control center's `dashboard` tab — so everything both of them have to agree about lives here,
- * against plain values, and neither of them holds a rule of its own. A second implementation of one
- * screen is the bug `task-reopen.ts` exists to have fixed once, and five screens is five chances to
- * make it.
+ * The dashboard is ONE screen of the control center now — `agentop tui` is an alias for `agentop`,
+ * and the standalone app that used to draw these screens under its own chrome is gone. Everything
+ * the screens have to agree about lives here, against plain values, so no screen holds a rule of
+ * its own: a second implementation of one screen is the bug `task-reopen.ts` exists to have fixed
+ * once, and six screens is six chances to make it.
  *
- * The height arithmetic is the half that is genuinely new. Full-screen, the dashboard had the whole
- * terminal and its screens simply drew what they had; inside a pane it has the terminal MINUS the
- * chrome, the frame and the screen strip, and Ink does not clip an overflowing child — it composites
- * it, so a screen one row too tall reads as a corrupted frame rather than as a cramped one. Every
- * screen therefore gets a budget it can actually spend, and each `*Plan` below states the order in
- * which its parts give way.
+ * The height arithmetic is why that matters. Full-screen, the old app had the whole terminal and its
+ * screens simply drew what they had; inside a pane there is the terminal MINUS the chrome, the frame
+ * and the screen strip, and Ink does not clip an overflowing child — it composites it, so a screen
+ * one row too tall reads as a corrupted frame rather than as a cramped one. Every screen therefore
+ * gets a budget it can actually spend, and each `*Plan` below states the order in which its parts
+ * give way.
  */
 
 import type { AppData, HarnessId } from '@agentistics/core'
@@ -128,13 +128,13 @@ export function stripFit(s: TuiStrings, screen: DashboardScreenId, width: number
 /**
  * What the dashboard can read right now — decided from what the HOST already reported.
  *
- * This is the one place the tab differs from the standalone app on purpose. `agentop tui` starts a
- * server for itself when none is listening (`ensureApi`), which is right for a command whose whole
- * job is to show metrics. The control center is the screen that STARTS AND STOPS that server, and a
- * tab inside it that quietly started one would contradict the button two screens away — so it starts
- * nothing, reads `ControlStatus.services`, and when there is nothing to read it says so in a sentence
- * that names the way to fix it. An empty dashboard rendered as zeros would be the confident-0 this
- * codebase refuses everywhere else.
+ * The standalone `agentop tui` used to START A SERVER for itself when none was listening, which was
+ * right for a command whose whole job was to show metrics. This app is the screen that STARTS AND
+ * STOPS that server, and a tab inside it that quietly started one would contradict the button two
+ * screens away — so it starts nothing, reads `ControlStatus.services`, and when there is nothing to
+ * read it says so in a sentence that names the way to fix it. That is the ONE behaviour the alias
+ * does not carry over, and it is deliberate: an empty dashboard rendered as zeros would be the
+ * confident-0 this codebase refuses everywhere else.
  */
 export type DashboardSource =
   | { kind: 'api'; apiBase: string }
