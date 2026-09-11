@@ -97,9 +97,19 @@ export interface NewSessionModalProps {
    * field gets left blank.
    */
   initialTask?: string
+  /**
+   * The real task this session is being started FOR, once one already exists.
+   *
+   * `initialTask` alone only ever fills the free-text label sent to `/api/fleet/new` — it never
+   * files the session under the task, because a display string carries no id. When the caller
+   * already has a real `Task`, it passes this too, so the wizard seeds `subtaskTarget` with a bare
+   * task-level attach (no subtask — the caller never asked for one) and the session that comes out
+   * the other end is actually filed, not just labeled. See spec 2026-09-11 §C.2.
+   */
+  initialTaskId?: string
 }
 
-export function NewSessionModal({ lang, onClose, onStarted, initialTask }: NewSessionModalProps) {
+export function NewSessionModal({ lang, onClose, onStarted, initialTask, initialTaskId }: NewSessionModalProps) {
   const pt = lang === 'pt'
   const [harnesses, setHarnesses] = useState<HarnessOption[] | null>(null)
   const [projects, setProjects] = useState<ProjectOption[]>([])
@@ -132,13 +142,17 @@ export function NewSessionModal({ lang, onClose, onStarted, initialTask }: NewSe
   const [cwd, setCwd] = useState('')
   const [task, setTask] = useState(initialTask ?? '')
   /**
-   * The exact SUBTASK this session will be filed under, once it exists — set only by the picker,
-   * never by the folder suggestion below (which only ever proposes a delivery TITLE, and asking a
-   * suggestion to also pick a subtask would be asking it to answer a question it never asked).
-   * `task` stays the free-text label sent at spawn either way — this is the extra, exact half that
-   * lets the attach happen automatically once the session is created.
+   * The exact TASK (and, when the picker was used, SUBTASK) this session will be filed under, once
+   * it exists. `subtaskId` is absent for a bare task-level attach — set either by `initialTaskId`
+   * (the caller already has a real task and never asked for a subtask) or by the folder suggestion
+   * resolving its guessed title against a real task (same reason, see the effect below); it is set
+   * WITH a subtask only by the picker. `task` stays the free-text label sent at spawn either way —
+   * this is the extra, exact half that lets the attach happen automatically once the session is
+   * created. See spec 2026-09-11 §C.2.
    */
-  const [subtaskTarget, setSubtaskTarget] = useState<{ taskId: string; subtaskId: string } | null>(null)
+  const [subtaskTarget, setSubtaskTarget] = useState<{ taskId: string; subtaskId?: string } | null>(
+    initialTaskId ? { taskId: initialTaskId } : null,
+  )
   /** Set when that automatic attach comes back refused because the subtask is still blocked. */
   const [subtaskBlocked, setSubtaskBlocked] = useState<
     { taskId: string; subtaskId: string; blockedBy: string[]; sessionId: string } | null
@@ -195,6 +209,11 @@ export function NewSessionModal({ lang, onClose, onStarted, initialTask }: NewSe
   /**
    * Fill the field FROM the suggestion — never over a person's own choice, and never again once
    * they have cleared it for this folder.
+   *
+   * A suggestion is only ever a TITLE guess, but when it happens to name a real, already-created
+   * task, resolving that id and seeding `subtaskTarget` (no subtask) is what turns "looks filed"
+   * into actually filed — the same root cause and the same fix as `initialTaskId` above. See spec
+   * 2026-09-11 §C.2.
    */
   useEffect(() => {
     if (suggestionDismissed) return
@@ -203,7 +222,9 @@ export function NewSessionModal({ lang, onClose, onStarted, initialTask }: NewSe
     if (next === task) return
     setTask(next)
     setTaskWasSuggested(next !== '')
-  }, [suggestion, suggestionDismissed, task, taskWasSuggested])
+    const matchedId = next ? taskRows?.find(r => r.task.title === next)?.task.id : undefined
+    setSubtaskTarget(matchedId ? { taskId: matchedId } : null)
+  }, [suggestion, suggestionDismissed, task, taskWasSuggested, taskRows])
 
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -589,7 +610,9 @@ export function NewSessionModal({ lang, onClose, onStarted, initialTask }: NewSe
         if (subtaskTarget && json.id) {
           const { taskId, subtaskId } = subtaskTarget
           const result = await attachSession(taskId, json.id, subtaskId)
-          if (!result.ok && result.reason === 'blocked') {
+          // `blocked` is a SUBTASK concept — a bare task-level attach (no `subtaskId`) can never
+          // come back refused this way, so the branch below only ever runs with a real subtask id.
+          if (!result.ok && result.reason === 'blocked' && subtaskId) {
             const detailRes = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`).catch(() => null)
             const body = detailRes?.ok ? await detailRes.json() as { task: TaskDetail } : null
             setBlockedDetail(body?.task ?? null)

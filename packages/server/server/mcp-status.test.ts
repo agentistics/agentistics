@@ -32,7 +32,7 @@ describe('mcpRunState — measured, and never a confident "offline"', () => {
   })
 
   it('says UNKNOWN, with the reason, when it could not look at all', () => {
-    expect(mcpRunState(stdio(), [], 'not-linux')).toEqual({ state: 'unknown', reason: 'not-linux' })
+    expect(mcpRunState(stdio(), [], 'unsupported-platform')).toEqual({ state: 'unknown', reason: 'unsupported-platform' })
     expect(mcpRunState(stdio(), [], 'container-isolated').state).toBe('unknown')
   })
 

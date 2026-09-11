@@ -126,6 +126,9 @@ export interface BoardCopy {
   tokenCacheWrite: string
   links: string
   blockedBy: string
+  /** The description's own collapse/expand, when it has no markdown headings to fold by. */
+  showAllDescription: string
+  showLessDescription: string
 }
 
 const EN: BoardCopy = {
@@ -220,6 +223,8 @@ const EN: BoardCopy = {
   tokenCacheWrite: 'Cache write',
   links: 'Links',
   blockedBy: 'Blocked by',
+  showAllDescription: 'Show all',
+  showLessDescription: 'Show less',
 }
 
 const PT: BoardCopy = {
@@ -316,6 +321,8 @@ const PT: BoardCopy = {
   tokenCacheWrite: 'Escrita de cache',
   links: 'Links',
   blockedBy: 'Bloqueada por',
+  showAllDescription: 'Mostrar tudo',
+  showLessDescription: 'Mostrar menos',
 }
 
 export function boardCopy(lang: Lang): BoardCopy {

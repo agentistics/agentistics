@@ -77,7 +77,11 @@ export function SessionFiling(p: SessionFilingProps) {
 
   const refresh = async () => { await reload(); await reloadDetail(); await p.onChanged() }
 
-  const here = detail?.sessions.find(s => s.id === p.session.id)?.subtaskId ?? null
+  const filedRow = detail?.sessions.find(s => s.id === p.session.id)
+  const here = filedRow?.subtaskId ?? null
+  /** True only when the session is actually filed on THIS delivery directly — not merely absent
+   *  from it, which also reads `subtaskId` as `null` via the fallback above. */
+  const directOn = filedRow != null && filedRow.subtaskId == null
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -85,13 +89,15 @@ export function SessionFiling(p: SessionFilingProps) {
     return needle ? all.filter(r => r.task.title.toLowerCase().includes(needle)) : all
   }, [rows, q])
 
-  const fileInto = async (taskId: string, subtaskId: string) => {
+  /** `subtaskId` omitted files the session directly on the delivery — see spec §4.1/§4.4. */
+  const fileInto = async (taskId: string, subtaskId?: string) => {
     setBusy(true)
     const result = await attachSession(taskId, p.session.id, subtaskId)
     setBusy(false)
-    if (!result.ok && result.reason === 'blocked') {
+    if (!result.ok && result.reason === 'blocked' && subtaskId) {
       // The dialog it opens is HANDED the answer, never asked to guess it — the ids `planAttach`
-      // named are exactly what it needs.
+      // named are exactly what it needs. A direct-on-the-delivery file can never come back
+      // `blocked` — only a subtask carries `blockedBy` — so this branch only ever fires with one.
       setBlocked({ taskId, subtaskId, blockedBy: result.blockedBy ?? [] })
       return
     }
@@ -193,6 +199,40 @@ export function SessionFiling(p: SessionFilingProps) {
     )
   }
 
+  /**
+   * The "no breakdown" option — file straight on the delivery, no subtask. Drawn like a subtask
+   * row (same radio, same icon, same list) because it is one more place the session can sit, not
+   * a lesser control — it leads the list because it is the simplest of the three shapes a task can
+   * take (spec §4.4, diagram #1).
+   */
+  const directRow = () => (
+    <button
+      key="__direct__"
+      onClick={() => void fileInto(target!.task.id)}
+      disabled={busy || directOn}
+      aria-pressed={directOn}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
+        borderRadius: 7, font: 'inherit', fontSize: 12.5, fontStyle: 'italic',
+        border: `1px solid ${directOn ? 'var(--anthropic-orange)' : 'transparent'}`,
+        background: directOn ? 'var(--anthropic-orange-dim)' : 'transparent',
+        color: directOn ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+        cursor: directOn || busy ? 'default' : 'pointer',
+      }}
+    >
+      <span style={{
+        width: 12, height: 12, borderRadius: 6, flexShrink: 0,
+        border: `1px solid ${directOn ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+        background: directOn ? 'radial-gradient(circle, var(--anthropic-orange) 0 3px, transparent 4px)' : 'transparent',
+      }} />
+      <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {pt ? '— direto na entrega —' : '— directly on the delivery —'}
+      </span>
+    </button>
+  )
+
   const body = target
     ? (
       // ── THE DELIVERY ITSELF ────────────────────────────────────────────────────────────────
@@ -210,20 +250,23 @@ export function SessionFiling(p: SessionFilingProps) {
         </div>
 
         <span style={{ ...microLabel, fontSize: 9 }}>
-          {pt ? 'Subtarefas — a sessão fica em UMA delas' : 'Subtasks — the session sits in ONE of them'}
+          {pt
+            ? 'Onde a sessão fica — direto na entrega, ou em UMA subtarefa'
+            : 'Where the session sits — directly on the delivery, or under ONE subtask'}
         </span>
+
+        <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
+          {directRow()}
+          {(detail?.subtasks ?? []).map(subtaskRow)}
+        </div>
 
         {(detail?.subtasks.length ?? 0) === 0 && !adding && (
           <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
             {pt
-              ? 'Esta entrega ainda não tem subtarefas, e uma sessão só se filia a uma subtarefa — o custo da entrega é o das partes dela. Crie a primeira aqui.'
-              : 'This delivery has no subtasks yet, and a session is only ever filed under one — a delivery’s cost is the cost of its parts. Create the first one here.'}
+              ? 'Esta entrega ainda não tem subtarefas. Filie aqui direto, ou quebre a entrega em subtarefas abaixo.'
+              : 'This delivery has no subtasks yet. File it here directly, or break the delivery into subtasks below.'}
           </p>
         )}
-
-        <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
-          {(detail?.subtasks ?? []).map(subtaskRow)}
-        </div>
 
         {adding
           ? (

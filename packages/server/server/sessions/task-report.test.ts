@@ -339,4 +339,103 @@ describe('subtaskViews — the three shapes, no session counted twice', () => {
     expect(views[0]).toEqual({ id: 's1', rollup: expect.objectContaining({ sessionsUsed: 1 }) })
     expect(views[1]!.id).toBeNull()
   })
+
+  describe('grouped subtasks — one bucket per group, never per member', () => {
+    // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.3: two or more subtasks
+    // sharing a `groupId` must collapse into ONE SubtaskView, keyed by the group id, whose rollup
+    // is the union of rows filed under ANY member — never one bucket per member, which would
+    // multiply a shared session's cost by the group's size.
+
+    it('two subtasks sharing a groupId collapse into one bucket, summing sessions filed under either member exactly once', () => {
+      const subs = [
+        subtask({ id: 's1', groupId: 'g1' }),
+        subtask({ id: 's2', groupId: 'g1' }),
+      ]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
+      ]
+      const views = subtaskViews(task(), subs, rows, metasAll, costOf)
+
+      // ONE view for the group, never two.
+      expect(views).toHaveLength(1)
+      expect(views[0]!.id).toBe('g1')
+      // Both sessions counted, once each — not doubled by appearing under two subtasks' totals.
+      expect(views[0]!.rollup.sessionsUsed).toBe(2)
+      expect(views[0]!.rollup.costUSD).toBe(8) // c1 (5) + c2 (3), summed once
+
+      // Same session set read through buildTaskDetail agrees with the task's own total — the
+      // group's bucket is a breakdown of the total, never a second, inflated sum beside it.
+      const detail = detailOf(rows, subs)
+      expect(detail.subtaskRollups).toHaveLength(1)
+      expect(detail.rollup.costUSD).toBe(8)
+    })
+
+    it('a session filed under either group member is counted in the SAME bucket, not duplicated across it', () => {
+      const subs = [
+        subtask({ id: 's1', groupId: 'g1' }),
+        subtask({ id: 's2', groupId: 'g1' }),
+        subtask({ id: 's3', groupId: 'g1' }),
+      ]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's1' }), // second session, same member
+        row({ id: 'r3', conversationId: 'c3', subtaskId: 's3' }), // a different member
+      ]
+      const detail = detailOf(rows, subs)
+
+      expect(detail.subtaskRollups).toHaveLength(1)
+      expect(detail.subtaskRollups[0]!.id).toBe('g1')
+      expect(detail.subtaskRollups[0]!.rollup.sessionsUsed).toBe(3)
+      // The group's total matches the task's own total exactly — no inflation from the group
+      // spanning three members while only two of them carry a session.
+      expect(detail.subtaskRollups[0]!.rollup.costUSD).toBe(detail.rollup.costUSD)
+      expect(detail.rollup.costUSD).toBe(10) // c1 (5) + c2 (3) + c3 (2)
+    })
+
+    it('subtasks with no groupId keep exactly today\'s behaviour — one bucket each, unaffected by a grouped sibling', () => {
+      const subs = [
+        subtask({ id: 's1' }), // ungrouped
+        subtask({ id: 's2' }), // ungrouped
+        subtask({ id: 's3', groupId: 'g1' }),
+        subtask({ id: 's4', groupId: 'g1' }),
+      ]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
+        row({ id: 'r3', conversationId: 'c3', subtaskId: 's3' }),
+        row({ id: 'r4', conversationId: 'c4', subtaskId: 's4' }),
+      ]
+      const views = subtaskViews(task(), subs, rows, metasAll, costOf)
+
+      // Four subtasks, but only three buckets: s1 and s2 stay independent (a group of one each),
+      // s3+s4 collapse into a single 'g1' bucket.
+      expect(views).toHaveLength(3)
+      const byId = new Map(views.map(v => [v.id, v]))
+      expect([...byId.keys()].sort()).toEqual(['g1', 's1', 's2'].sort())
+
+      expect(byId.get('s1')!.rollup.sessionsUsed).toBe(1)
+      expect(byId.get('s1')!.rollup.costUSD).toBe(5) // c1
+      expect(byId.get('s2')!.rollup.sessionsUsed).toBe(1)
+      expect(byId.get('s2')!.rollup.costUSD).toBe(3) // c2
+      expect(byId.get('g1')!.rollup.sessionsUsed).toBe(2)
+      expect(byId.get('g1')!.rollup.costUSD).toBe(9) // c3 (2) + c4 (7)
+    })
+
+    it('a grouped subtask with no sessions of its own still contributes zero, not a missing bucket, when a sibling has sessions', () => {
+      // The group as a whole is measured, not each member separately — a member with nothing
+      // filed under it directly must not create a second, empty view beside the group's own.
+      const subs = [
+        subtask({ id: 's1', groupId: 'g1' }),
+        subtask({ id: 's2', groupId: 'g1' }),
+      ]
+      const rows = [row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' })]
+      const views = subtaskViews(task(), subs, rows, metasAll, costOf)
+
+      expect(views).toHaveLength(1)
+      expect(views[0]!.id).toBe('g1')
+      expect(views[0]!.rollup.sessionsUsed).toBe(1)
+      expect(views[0]!.rollup.costUSD).toBe(5)
+    })
+  })
 })

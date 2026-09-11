@@ -312,6 +312,14 @@ export interface Subtask {
    * cross-task version lives.
    */
   blockedBy?: string[]
+  /**
+   * Subtasks that share a `groupId` are read as ONE bucket for rollup: a session filed under any
+   * member counts for all of them, and their `subtaskViews` rollup is the SAME object, keyed by
+   * the group id rather than by each subtask's own id — never summed per member, which is what
+   * would multiply a shared session's cost by the group's size. Absent = today's behaviour
+   * unchanged: every existing subtask, with no `groupId`, is its own group of one.
+   */
+  groupId?: string
 }
 
 /**
@@ -394,6 +402,10 @@ export function newCommentId(): string {
 
 export function newSubtaskId(): string {
   return mint('s')
+}
+
+export function newGroupId(): string {
+  return mint('g')
 }
 
 export function newFileId(): string {

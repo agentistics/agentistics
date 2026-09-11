@@ -31,6 +31,7 @@ import { SessionCreating } from '../components/sessions/SessionCreating'
 // while creating was the only thing that could announce a session; a reopen announces one too, and
 // two constants for one budget is two answers.
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
+import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
@@ -52,6 +53,8 @@ import {
   arrivalFor, reopenedSessionRoute, sessionPath, stillArriving, type SessionArrival,
 } from '../lib/sessionRoute'
 import { dedicatedTerminalPath, readTerminalPane } from '../lib/terminalSurface'
+import { ShellBand } from '../components/sessions/ShellBand'
+import { targetLabel } from '../lib/terminalTarget'
 import { TerminalRegion } from '../components/RecentSessions'
 import { sessionPlanFactor } from '../lib/costBasis'
 
@@ -124,6 +127,7 @@ export default function SessionsPage() {
    */
   const dedicatedTerminal = useLocation().pathname.endsWith('/terminal')
   const dedicatedPane = readTerminalPane(useSearchParams()[0].get('pane'))
+  const shellEnabled = ctx.shellEnabled === true
 
   /**
    * WHERE A REOPEN LANDS — one place, for all three controls on this page that can perform one.
@@ -550,9 +554,10 @@ export default function SessionsPage() {
       onViewChange={setSessionView}
       onArtifacts={onArtifacts}
       // The capability AND the user's switch, as the server reports them. Absent reads as OFF.
-      shellEnabled={ctx.shellEnabled === true}
+      shellEnabled={shellEnabled}
       // The terminal's own screen. A route, so it survives a reload and can be sent to somebody.
       onOpenTerminal={() => navigate(dedicatedTerminalPath(selected.id))}
+      onOpenShellFullscreen={() => navigate(dedicatedTerminalPath(selected.id, 'shell'))}
     />
   )
 
@@ -702,10 +707,21 @@ export default function SessionsPage() {
             <ChevronLeft size={20} />
           </button>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{
-              fontSize: 13, fontWeight: 650, color: 'var(--text-primary)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{selected.title}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <div style={{
+                fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{selected.title}</div>
+              <SessionTitleFlag
+                session={{
+                  id: selected.id, title: selected.title,
+                  ...(selected.harness ? { harness: selected.harness } : {}),
+                  ...(selected.task ? { task: selected.task } : {}),
+                }}
+                lang={pt ? 'pt' : 'en'}
+                onLinked={refresh}
+              />
+            </div>
             <div style={{
               fontSize: 10.5, color: 'var(--text-tertiary)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -715,28 +731,87 @@ export default function SessionsPage() {
             </div>
           </div>
         </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 10 }}>
-          {/* The SHELL's own dedicated screen is not built yet, and this says so rather than
-              drawing the assistant's pane under a shell's name. Nothing links here today — the
-              selector is what will make it reachable. */}
-          {dedicatedPane === 'shell' && (
-            <div role="status" style={{ fontSize: 11, color: 'var(--accent-red)', marginBottom: 8 }}>
-              {pt
-                ? 'A tela dedicada do shell ainda não existe — abaixo está o terminal do assistente.'
-                : 'The shell’s own dedicated screen does not exist yet — below is the assistant’s terminal.'}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: 10 }}>
+          {/* THE TARGET SELECTOR. One screen, two panes, and neither segment may be called
+              "Terminal" — that ambiguity is exactly what phase 1 avoided by naming the shell a
+              shell. It is a ROUTE and not a state, so a reload and a shared link land on the pane
+              you were looking at. Withheld when this machine serves no shell: a segment whose only
+              outcome is a refusal is worse than no segment. */}
+          {shellEnabled && (
+            <div role="tablist" aria-label={pt ? 'Qual terminal' : 'Which terminal'} style={{
+              // RIGHT, like the band's. One control, one shape, one SIDE — a control that changes
+              // corner between the docked band and this screen is one the reader has to find again.
+              display: 'flex', gap: 4, flexShrink: 0, alignSelf: 'flex-end',
+              padding: 3, borderRadius: 8, background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+            }}>
+              {(['assistant', 'shell'] as const).map(target => {
+                const on = dedicatedPane === target
+                // ONE VOCABULARY. The band and this screen ask the same question, so they may not
+                // word it differently — and the CLI segment is named after the harness on the
+                // screen rather than after a concept.
+                const label = targetLabel(
+                  target === 'assistant' ? 'cli' : 'shell',
+                  selected.harness,
+                  pt ? 'pt' : 'en',
+                )
+                return (
+                  <button
+                    key={target}
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => navigate(dedicatedTerminalPath(selected.id, target), { replace: true })}
+                    style={{
+                      // 44px is the MOBILE figure; on a desktop it would turn a segmented control
+                      // into a row of buttons.
+                      minHeight: isMobile ? 44 : 26, padding: isMobile ? '0 16px' : '0 12px',
+                      borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: 12, fontWeight: 650, border: 'none',
+                      background: on ? 'var(--bg-surface)' : 'transparent',
+                      color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                      boxShadow: on ? '0 1px 2px rgba(0,0,0,0.18)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
             </div>
           )}
-          <TerminalRegion
-            /* DEDICATED: you asked for this screen, so focus is the consent and there is no arm
-               button; on a phone it carries the key strip. */
-            placement="dedicated"
-            id={selected.id}
-            theme={theme === 'light' ? 'light' : 'dark'}
-            lang={pt ? 'pt' : 'en'}
-            fill
-            {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-            act={act}
-          />
+          {/* A link to `?pane=shell` on a machine that serves no shell must not quietly draw the
+              ASSISTANT's pane under a shell's name. The selector is absent there — a segment whose
+              only outcome is a refusal is worse than none — so the sentence is the only thing that
+              can say what happened. */}
+          {dedicatedPane === 'shell' && !shellEnabled && (
+            <div role="status" style={{ fontSize: 11, color: 'var(--accent-red)', flexShrink: 0 }}>
+              {pt
+                ? 'Esta máquina não está servindo shell — abaixo está o terminal do assistente.'
+                : 'This machine is not serving a shell — below is the assistant’s terminal.'}
+            </div>
+          )}
+          {dedicatedPane === 'shell' && shellEnabled ? (
+            <ShellBand
+              key={`shell-${selected.id}`}
+              placement="dedicated"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              lang={pt ? 'pt' : 'en'}
+              theme={theme === 'light' ? 'light' : 'dark'}
+              {...(selected.harness ? { harness: selected.harness } : {})}
+            />
+          ) : (
+            <TerminalRegion
+              /* DEDICATED: you asked for this screen, so focus is the consent and there is no arm
+                 button; on a phone it carries the key strip. */
+              placement="dedicated"
+              id={selected.id}
+              theme={theme === 'light' ? 'light' : 'dark'}
+              lang={pt ? 'pt' : 'en'}
+              fill
+              {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
+              act={act}
+            />
+          )}
         </div>
       </div>
     )
@@ -794,11 +869,22 @@ export default function SessionsPage() {
             </button>
 
             <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <span style={{
-                fontSize: 13, fontWeight: 650, color: 'var(--text-primary)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {selected.title}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{
+                  fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {selected.title}
+                </span>
+                <SessionTitleFlag
+                  session={{
+                    id: selected.id, title: selected.title,
+                    ...(selected.harness ? { harness: selected.harness } : {}),
+                    ...(selected.task ? { task: selected.task } : {}),
+                  }}
+                  lang={pt ? 'pt' : 'en'}
+                  onLinked={refresh}
+                />
               </span>
               {/* The state stays, on its own line: it is the one fact that changes while you read,
                   and the row below is a conversation that does not repeat it. */}

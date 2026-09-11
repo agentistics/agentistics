@@ -15,13 +15,19 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, Pin, PinOff, Plus, RotateCcw, Search, Send, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Clock, Pin, PinOff, Plus, RotateCcw, Search, Send, X } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
   ACTIVE_STATES, filterSessions, sessionNotify,
-  type ControlSession, type SessionGroup,
+  type ControlSession, type SessionGroup, type SessionState,
 } from '@agentistics/tui/control/session-fleet'
-import { projectGroups, showsProjectHeadings } from '../../lib/fleetGroups'
+import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
+import {
+  collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs,
+  type AsideBandId, type AsideCardColor, type AsideGroupBy,
+} from '../../lib/sessionsAsidePrefs'
+import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
+import { SessionsGroupMenu } from './SessionsGroupMenu'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
@@ -112,32 +118,6 @@ export interface SessionsAsideProps {
   }) => Promise<{ ok: boolean; message: string; id?: string }>
 }
 
-/** The colour a state is said in. `running` is its own token, not `success`, which reads teal. */
-const STATE_COLOR: Record<string, string> = {
-  working: 'var(--accent-green)',
-  waiting: 'var(--anthropic-orange)',
-  'waiting-approval': 'var(--anthropic-orange)',
-  exited: 'var(--text-tertiary)',
-  lost: 'var(--text-tertiary)',
-  closed: 'var(--text-tertiary)',
-  unknown: 'var(--text-tertiary)',
-}
-
-/**
- * The wash behind a LIVE row, so its state is readable without reading the word.
- *
- * Only the two active states get one. A tint on every row is a list with no contrast left, and the
- * point of the wash is that the handful of rows doing something stand out from the history under
- * them. It is a WASH, never the row's whole background: the selected row's own highlight has to
- * stay distinguishable from it, or selection stops being visible on exactly the rows you select
- * most.
- */
-const STATE_WASH: Record<string, string> = {
-  working: 'color-mix(in srgb, #22c55e 10%, transparent)',
-  waiting: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)',
-  'waiting-approval': 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)',
-}
-
 /**
  * What a pin is stored under.
  *
@@ -162,6 +142,31 @@ export function SessionsAside({
   const { sessionId } = useParams()
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
+  /**
+   * The aside's own arrangement — which dimension it sub-groups by, the manual order per
+   * dimension, which groups are folded, and how a card shows its status. Read once on mount, like
+   * `TaskList` seeds `readBoardPrefs()` — see `sessionsAsidePrefs.ts` for why this is
+   * `localStorage` and not `/api/preferences`.
+   */
+  const storedGroupPrefs = useMemo(readAsideGroupPrefs, [])
+  const [groupBy, setGroupByState] = useState<AsideGroupBy>(storedGroupPrefs.groupBy)
+  const setGroupBy = (v: AsideGroupBy) => { setGroupByState(v); writeAsideGroupPrefs({ groupBy: v }) }
+  const [groupOrder, setGroupOrderState] =
+    useState<Partial<Record<AsideGroupBy, string[]>>>(storedGroupPrefs.order)
+  const setGroupOrder = (by: AsideGroupBy, keys: string[]) => {
+    const next = { ...groupOrder, [by]: keys }
+    setGroupOrderState(next)
+    writeAsideGroupPrefs({ order: next })
+  }
+  const [foldedGroups, setFoldedGroupsState] = useState<Set<string>>(new Set(storedGroupPrefs.collapsed))
+  const toggleGroupFold = (key: string) => {
+    const next = new Set(foldedGroups)
+    next.has(key) ? next.delete(key) : next.add(key)
+    setFoldedGroupsState(next)
+    writeAsideGroupPrefs({ collapsed: [...next] })
+  }
+  const [cardColor, setCardColorState] = useState<AsideCardColor>(storedGroupPrefs.cardColor)
+  const setCardColor = (v: AsideCardColor) => { setCardColorState(v); writeAsideGroupPrefs({ cardColor: v }) }
   /** Which GROUP modal is open, if any. Both are the one picker — see `SessionPickModal`. */
   const [picking, setPicking] = useState<'reopen' | 'send' | null>(null)
   const [groupBusy, setGroupBusy] = useState(false)
@@ -307,22 +312,40 @@ export function SessionsAside({
    * is running, ranked by what needs you most, and everything else beneath it.
    *
    * `DEFAULT_ORDER` (`state`, via `sessionRank`) is the SAME ranking the terminal cockpit breaks
-   * ties on, so "sorted by status" means one thing in both places — `projectGroups` applies it
-   * inside each project band and orders the bands themselves by their most urgent member.
+   * ties on, so "sorted by status" means one thing in both places — `asideGroups` applies it
+   * inside each sub-group and orders the groups themselves by their most urgent member.
    *
-   * Inside a band the rows are grouped BY PROJECT (`lib/fleetGroups.ts`), and a band holding one
-   * project draws no heading at all — see that module's header. On a machine whose whole fleet sits
-   * in one checkout this therefore looks exactly as it did.
+   * Inside a band the rows are grouped by the reader's chosen dimension — project by default —
+   * via `lib/fleetGroups.ts`'s `asideGroups`, and a band holding one group draws no heading at
+   * all (see that module's header). On a machine whose whole fleet sits in one checkout this
+   * therefore looks exactly as it did.
    */
-  const bands = useMemo((): { label: string; groups: SessionGroup[] }[] => {
+  const bands = useMemo((): { id: AsideBandId; label: string; groups: SessionGroup[] }[] => {
     const rest = matched.filter(r => !pinned.has(pinKeyOf(r)))
+    const order = groupOrder[groupBy] ?? []
     return [
-      { label: pt ? 'Ativas' : 'Active', groups: projectGroups(rest.filter(r => active.has(r.state)), lang) },
+      {
+        id: 'active',
+        label: pt ? 'Ativas' : 'Active',
+        groups: asideGroups(rest.filter(r => active.has(r.state)), groupBy, lang, order),
+      },
       // Never computed while activeOnly is on — those rows are the ones the switch is withholding,
       // not a second list to render beside it.
-      { label: pt ? 'Inativas' : 'Inactive', groups: activeOnly ? [] : projectGroups(rest.filter(r => !active.has(r.state)), lang) },
+      {
+        id: 'inactive',
+        label: pt ? 'Inativas' : 'Inactive',
+        groups: activeOnly ? [] : asideGroups(rest.filter(r => !active.has(r.state)), groupBy, lang, order),
+      },
     ]
-  }, [matched, pinned, active, activeOnly, pt, lang])
+  }, [matched, pinned, active, activeOnly, pt, lang, groupBy, groupOrder])
+
+  /** The current dimension's groups, across both bands, deduped by key, in their effective
+   *  order — what the popover's reorder list edits. */
+  const groupOrderCandidates = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const b of bands) for (const g of b.groups) if (!seen.has(g.key)) seen.set(g.key, g.label)
+    return [...seen.entries()].map(([key, label]) => ({ key, label }))
+  }, [bands])
 
   const total = bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
@@ -422,6 +445,15 @@ export function SessionsAside({
             <Send size={14} />
           </button>
         )}
+        <SessionsGroupMenu
+          lang={lang}
+          groupBy={groupBy}
+          onGroupBy={setGroupBy}
+          groups={groupOrderCandidates}
+          onReorder={keys => setGroupOrder(groupBy, keys)}
+          cardColor={cardColor}
+          onCardColor={setCardColor}
+        />
       </div>
 
       {/*
@@ -586,6 +618,7 @@ export function SessionsAside({
                     onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
                     onFile={(x, y) => setLinking({ id: s.id, x, y })}
                     lang={lang}
+                    cardColor={cardColor}
                   />
                 </div>
               ))}
@@ -606,13 +639,17 @@ export function SessionsAside({
                 // The label is not unique — two dimensions can legitimately produce one word, and
                 // an empty band still holds its place in the order.
                 key={`${i}-${b.label}`}
-                label={b.label} groups={b.groups} pinned={pinned}
+                bandId={b.id}
+                label={b.label} groups={b.groups} groupBy={groupBy} pinned={pinned}
                 sessionId={sessionId} tap={tap} onPin={flip}
                 onOpen={s => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
                 {...(rowsById ? { rowsById } : {})}
                 onOpenMenu={openMenu}
                 onFile={(s, x, y) => setLinking({ id: s.id, x, y })}
                 lang={lang}
+                foldedGroups={foldedGroups}
+                onToggleGroupFold={toggleGroupFold}
+                cardColor={cardColor}
               />
             ))}
           </>
@@ -725,10 +762,16 @@ export function SessionsAside({
 
 /** One band of the two-way (active/inactive) split. Absent when it would be empty — an empty
  *  band with a heading and no rows under it is a label pretending to be information. */
-function SessionBand({ label, groups, pinned, sessionId, tap, onPin, onOpen, rowsById, onOpenMenu, onFile, lang }: {
+function SessionBand({
+  bandId, label, groups, groupBy, pinned, sessionId, tap, onPin, onOpen, rowsById, onOpenMenu,
+  onFile, lang, foldedGroups, onToggleGroupFold, cardColor,
+}: {
+  bandId: AsideBandId
   label: string
-  /** The band's rows, already grouped by project and ordered — see `lib/fleetGroups.ts`. */
+  /** The band's rows, already grouped by the chosen dimension and ordered — see
+   *  `lib/fleetGroups.ts`. */
   groups: readonly SessionGroup[]
+  groupBy: AsideGroupBy
   pinned: ReadonlySet<string>
   sessionId?: string
   tap?: number
@@ -739,12 +782,16 @@ function SessionBand({ label, groups, pinned, sessionId, tap, onPin, onOpen, row
   /** File a row under a delivery — the visible half of the gesture the menu also offers. */
   onFile: (session: ControlSession, x: number, y: number) => void
   lang: 'pt' | 'en'
+  /** Collapse keys already toggled shut — see `collapseKey` in `sessionsAsidePrefs.ts`. */
+  foldedGroups: ReadonlySet<string>
+  onToggleGroupFold: (key: string) => void
+  cardColor: AsideCardColor
 }) {
   const count = groups.reduce((n, g) => n + g.sessions.length, 0)
   if (count === 0) return null
-  // One project under this band names it twice — the band heading is directly above. See the rule
+  // One group under this band names it twice — the band heading is directly above. See the rule
   // in `fleetGroups.ts`; it is the same one the cockpit's cascade applies to its own root.
-  const headings = showsProjectHeadings(groups)
+  const headings = showsGroupHeadings(groups)
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{
@@ -755,36 +802,59 @@ function SessionBand({ label, groups, pinned, sessionId, tap, onPin, onOpen, row
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
         <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{count}</span>
       </div>
-      {groups.map(g => (
-        <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: headings ? 10 : 0 }}>
-          {headings && (
-            // Deliberately quieter than the band above it — lowercase, no letter-spacing — so the
-            // two headings read as a hierarchy rather than as two lists.
-            <div style={{
-              display: 'flex', alignItems: 'baseline', gap: 6, padding: '4px 9px 2px',
-              fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)',
-            }}>
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.label}</span>
-              <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{g.sessions.length}</span>
-            </div>
-          )}
-          {g.sessions.map(s => (
-            <SessionRow
-              key={s.id}
-              session={s}
-              selected={rowSelected(s, sessionId)}
-              pinned={pinned.has(pinKeyOf(s))}
-              {...(tap ? { tap } : {})}
-              onPin={() => onPin(s)}
-              onOpen={() => onOpen(s)}
-              {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
-              onOpenMenu={(x, y, verbs) => onOpenMenu(s, x, y, verbs)}
-              onFile={(x, y) => onFile(s, x, y)}
-              lang={lang}
-            />
-          ))}
-        </div>
-      ))}
+      {groups.map(g => {
+        const ck = collapseKey(bandId, groupBy, g.key)
+        const folded = foldedGroups.has(ck)
+        // A small dot naming the state's own color, ONLY when grouping by status — free, and
+        // consistent with the dot every row already wears. Not part of the card-color preference
+        // below, which is about the ROW cards, not this heading.
+        const dotColor = groupBy === 'status' ? STATE_COLOR[g.key as SessionState] : undefined
+        return (
+          <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: headings ? 10 : 0 }}>
+            {headings && (
+              // Deliberately quieter than the band above it — lowercase, no letter-spacing — so
+              // the two headings read as a hierarchy rather than as two lists. Clicking it folds
+              // this group, per your instruction — the click target is the heading itself.
+              <button
+                onClick={() => onToggleGroupFold(ck)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+                  background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                  padding: '4px 9px 2px', fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)',
+                  minHeight: tap,
+                }}
+              >
+                {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                {dotColor && (
+                  <span aria-hidden style={{
+                    width: 6, height: 6, borderRadius: 3, flexShrink: 0, background: dotColor,
+                  }} />
+                )}
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {g.label}
+                </span>
+                <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{g.sessions.length}</span>
+              </button>
+            )}
+            {(!headings || !folded) && g.sessions.map(s => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                selected={rowSelected(s, sessionId)}
+                pinned={pinned.has(pinKeyOf(s))}
+                {...(tap ? { tap } : {})}
+                onPin={() => onPin(s)}
+                onOpen={() => onOpen(s)}
+                {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
+                onOpenMenu={(x, y, verbs) => onOpenMenu(s, x, y, verbs)}
+                onFile={(x, y) => onFile(s, x, y)}
+                lang={lang}
+                cardColor={cardColor}
+              />
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -840,7 +910,7 @@ function EmptyReason({
 }
 
 
-function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang }: {
+function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang, cardColor }: {
   session: ControlSession; selected: boolean
   /** Minimum row height on mobile — 44px, and undefined on desktop. */
   tap?: number
@@ -856,8 +926,11 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   /** File this row under a delivery — the visible half of the gesture the menu also offers. */
   onFile?: (x: number, y: number) => void
   lang?: 'pt' | 'en'
+  /** How this card shows its state — see `sessionCardStyle.ts`. */
+  cardColor: AsideCardColor
 }) {
   const wants = sessionNotify(session)
+  const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** Where the last pointer event landed, so a picker opened from inside the row is anchored. */
@@ -877,16 +950,11 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         // Selection is a fact about where the READER is, so it uses the neutral surface tokens —
         // a lifted background and a full-height accent-free edge — and leaves every colour on this
         // list to mean exactly one thing about the SESSION.
-        background: selected ? 'var(--bg-elevated)' : (STATE_WASH[session.state] ?? 'transparent'),
+        background: cardStyle.background,
         // Two different edges, and they never collide: the STATE edge is the left rule a live row
-        // carries, and SELECTION replaces it with a brighter, full one plus an outline. The wash
-        // alone is faint by design, and an edge survives a light theme and a colour-blind reader
-        // where a 10% tint does not.
-        boxShadow: selected
-          ? 'inset 3px 0 0 var(--text-primary), inset 0 0 0 1px var(--border)'
-          : (STATE_WASH[session.state]
-            ? `inset 2px 0 0 ${STATE_COLOR[session.state] ?? 'transparent'}`
-            : undefined),
+        // carries in `wash`/`stripe` mode, and SELECTION replaces it with a brighter, full one
+        // plus an outline — `sessionCardStyle` already resolves that precedence.
+        boxShadow: cardStyle.edge,
         color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
         transition: 'background 0.15s',
@@ -894,7 +962,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       onPointerDown={e => { lastPoint.current = { x: e.clientX, y: e.clientY } }}
       onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={e => {
-        if (!selected) e.currentTarget.style.background = STATE_WASH[session.state] ?? 'transparent'
+        if (!selected) e.currentTarget.style.background = cardStyle.background
       }}
       onKeyDown={e => {
         // alt+arrows, so the plain arrows keep whatever the browser and the list do with them. A
@@ -939,6 +1007,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         session={session}
         selected={selected}
         {...(lang ? { lang } : {})}
+        {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
         {...(onFile
           // Anchored where the click landed, like the menu's own picker — the gesture stays where
           // the reader's eye already is.

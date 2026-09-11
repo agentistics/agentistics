@@ -346,6 +346,11 @@ function SubtaskRows({
           <td style={{ padding: cellPad }}>
             {subtaskSessions({
               subtaskId: t.id,
+              // The row's group siblings show the identical chip list — see
+              // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.4.
+              subtaskIds: t.groupId
+                ? subtasks.filter(s => s.groupId === t.groupId).map(s => s.id)
+                : [t.id],
               sessions,
               lang,
               mobile: isMobile,

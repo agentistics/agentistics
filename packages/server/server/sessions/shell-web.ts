@@ -13,6 +13,7 @@ import type { CliLang } from '../cli-lang'
 import { closeShells, listShells, openShell } from './shell-backend'
 import { openShellStream, shellStreamAtCapacity, shellStreamExists } from './shell-stream-web'
 import { createPaneResizer } from './pane-resize-web'
+import { readWantedGeometry } from './pane-resize'
 import { SHELL_CAP, type ShellRefusal } from './shell-spec'
 
 /** One sentence per refusal code. The module that decides never writes prose; this one never decides. */
@@ -68,6 +69,13 @@ export async function handleShellRoute(
     if (!id) return json({ error: 'bad_request' }, 400)
     if (!(await shellStreamExists(id))) return json({ error: 'not_found' }, 404)
     if (shellStreamAtCapacity()) return json({ error: 'too_many_streams' }, 503)
+    // BEFORE the first capture. A pane has one size and the last viewer to ask wins, so without
+    // this a shell last read on a phone hands a desktop frames hard-broken at 52 columns until the
+    // emulator has measured itself and the debounced resize lands. The reader states what its box
+    // holds on the way in and the first frame is already right. A resize that fails costs the
+    // width for a quarter-second and never the stream — the measurement corrects it either way.
+    const want = readWantedGeometry(url.searchParams)
+    if (want) await resizeShellPane('shell', id, want)
     return new Response(await openShellStream(id, req.signal), {
       status: 200,
       headers: {
@@ -92,7 +100,27 @@ export async function handleShellRoute(
   }
 
   if (url.pathname === '/api/shell/list' && req.method === 'GET') {
-    return json({ shells: await listShells(), cap: SHELL_CAP })
+    const shells = await listShells()
+    // `?titles=1` is OPT-IN because naming the sessions costs a fleet walk (~200 ms of pane reads),
+    // and the band asks this route on EVERY open. Only the CEILING list needs the names — and it
+    // needs them badly: a per-session shell in one repository puts every row in the same directory,
+    // so without them the picker's rows all read alike. The names come from the injected HOST, the
+    // same way `/api/shell/open` resolves the row it takes a directory from; nothing here imports
+    // the registry, which is what `shell-isolation.test.ts` asserts over this source.
+    if (url.searchParams.get('titles') !== '1' || !host.sessions) {
+      return json({ shells, cap: SHELL_CAP })
+    }
+    const fleet = await host.sessions().catch(() => null)
+    const byId = new Map((fleet?.sessions ?? []).map(r => [r.id, r.title]))
+    return json({
+      shells: shells.map(sh => {
+        const title = byId.get(sh.sessionId)
+        // A session nobody could name is left WITHOUT the field rather than given a blank one:
+        // `ceilingRows` falls back to where the shell is, which is a real answer.
+        return title ? { ...sh, sessionTitle: title } : sh
+      }),
+      cap: SHELL_CAP,
+    })
   }
 
   if (url.pathname === '/api/shell/open' && req.method === 'POST') {

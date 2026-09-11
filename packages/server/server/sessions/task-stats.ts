@@ -13,6 +13,7 @@
 
 import type { SessionMeta } from '@agentistics/core'
 import { sessionTokens, type TokenBreakdown } from '@agentistics/core'
+import type { ManagedSession } from './types'
 
 export interface Bucket {
   key: string
@@ -126,4 +127,56 @@ export function taskStats(o: {
     firstSessionAt: starts[0] ?? null,
     lastSessionAt: ends.at(-1) ?? null,
   }
+}
+
+/**
+ * `taskStats`, scoped to ONE piece of the delivery — a subtask, or the "direct" branch
+ * (`subtaskId: null`, the rows filed on the task itself, under no subtask). This is the same
+ * partition `subtaskViews` (`task-report.ts`) already applies to the ROLLUP, extended to this
+ * block: files/errors/lines/tokens/commits/models/harnesses computed over only the rows filed
+ * under this one piece, never over the whole task's rows.
+ *
+ * `rows` is expected already scoped to the task (`rowsOfTask(task, allRows)`), exactly like
+ * `subtaskViews`'s own `rows` parameter — this never re-derives that scope. Every row of a task
+ * falls into EXACTLY one bucket across the full set of calls (one per subtask, plus `null` for the
+ * direct branch), so summing every bucket's numeric fields reproduces `taskStats` computed once
+ * over the task's whole row set — the same guarantee `subtaskViews`'s three-shapes test pins for
+ * the cost/session rollup, checked here for the evidence numbers instead.
+ *
+ * **Returns `null` when NOTHING is filed under this piece** (`rows.filter(...)` is empty) — never a
+ * `TaskStats` whose every field happens to be `null`/`[]`. Those two situations are different
+ * claims: "there is no evidence block for this piece at all" (nothing was ever filed here) versus
+ * "N sessions are filed here but none of them reported files/tokens/etc" (a real, if uninformative,
+ * measurement — `taskStats` already renders that case honestly on its own, since every one of its
+ * fields is already null-safe over an empty `metas` array). A caller — e.g. `SessionTasksTab.tsx`'s
+ * subtask-scoped panel — uses the `null` return to render "nothing filed here yet" instead of a
+ * stats block full of dashes. Same rule as `HARNESS_CAPABILITIES`'s N/A-vs-real-0, applied to a
+ * whole block instead of one metric.
+ *
+ * `createdAt`/`deliveredAt` are passed straight through to `taskStats` and are NOT re-derived from
+ * the subtask's own dates — `Subtask` carries no `deliveredAt` field today, so what a subtask's own
+ * "delivery" wall time should mean is left to the caller to decide (and is out of scope for this
+ * function, which only re-partitions the evidence numbers `taskStats` already computes).
+ */
+export function subtaskStats(o: {
+  subtaskId: string | null
+  rows: readonly ManagedSession[]
+  metas: ReadonlyMap<string, SessionMeta>
+  createdAt: string
+  deliveredAt?: string
+}): TaskStats | null {
+  const mine = o.subtaskId === null
+    ? o.rows.filter(r => !r.subtaskId)
+    : o.rows.filter(r => r.subtaskId === o.subtaskId)
+  if (mine.length === 0) return null
+
+  const resolved = mine
+    .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
+    .filter((m): m is SessionMeta => m !== undefined)
+
+  return taskStats({
+    metas: resolved,
+    createdAt: o.createdAt,
+    ...(o.deliveredAt !== undefined ? { deliveredAt: o.deliveredAt } : {}),
+  })
 }

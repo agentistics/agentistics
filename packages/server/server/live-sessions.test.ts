@@ -419,12 +419,26 @@ test('an ordinary node process is not mistaken for a harness', () => {
 test('an empty scan is reported as impossible only when it genuinely is', () => {
   const base = { platform: 'linux', procReadable: true, foreignPids: 40, cwdDenied: false }
   expect(detectionUnavailable(base)).toBeNull()
-  expect(detectionUnavailable({ ...base, platform: 'darwin' })).toBe('not-linux')
+  // macOS is a supported platform now (ps + lsof) — a genuinely unreadable /proc is 'no-proc'.
   expect(detectionUnavailable({ ...base, procReadable: false })).toBe('no-proc')
   // A container without `pid: host` sees only its own processes.
   expect(detectionUnavailable({ ...base, foreignPids: 0 })).toBe('container-isolated')
   // pid: host, but the container's uid cannot ptrace the host user's processes.
   expect(detectionUnavailable({ ...base, cwdDenied: true })).toBe('permission-denied')
+})
+
+test('macOS is a supported platform, with its own reason codes', () => {
+  const mac = { platform: 'darwin', procReadable: true, foreignPids: 40, cwdDenied: false }
+  expect(detectionUnavailable(mac)).toBeNull()
+  // ps/lsof could not be run at all — the macOS equivalent of an unreadable /proc.
+  expect(detectionUnavailable({ ...mac, procReadable: false })).toBe('no-ps')
+  expect(detectionUnavailable({ ...mac, foreignPids: 0 })).toBe('container-isolated')
+  expect(detectionUnavailable({ ...mac, cwdDenied: true })).toBe('permission-denied')
+})
+
+test('a genuinely unsupported platform (Windows) says so', () => {
+  const base = { platform: 'win32', procReadable: false, foreignPids: 0, cwdDenied: false }
+  expect(detectionUnavailable(base)).toBe('unsupported-platform')
 })
 
 describe('management subcommands are not sessions', () => {

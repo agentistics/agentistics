@@ -98,8 +98,9 @@ export function runText(run: McpRunState, pt: boolean): { text: string; color: s
 /** The `LiveUnavailableReason` codes, in words — the same sentences the live-sessions panel uses. */
 function unknownReason(reason: string, pt: boolean): string {
   switch (reason) {
-    case 'not-linux': return pt ? 'esta máquina não é Linux, e /proc é a única fonte de processos aqui' : 'this machine is not Linux, and /proc is the only process source here'
+    case 'unsupported-platform': return pt ? 'esta máquina não é Linux nem macOS, e nenhuma outra fonte de processos existe aqui' : 'this machine is neither Linux nor macOS, and no other process source exists here'
     case 'no-proc': return pt ? '/proc não está acessível' : '/proc is not readable'
+    case 'no-ps': return pt ? 'não foi possível executar ps/lsof nesta máquina' : 'ps/lsof could not be run on this machine'
     case 'container-isolated': return pt ? 'este container não enxerga os processos do host' : 'this container cannot see the host’s processes'
     case 'permission-denied': return pt ? 'os processos do host não podem ser lidos por este usuário' : 'the host’s processes cannot be read by this user'
     case 'capability-off': return pt ? 'este perfil de exposição não permite ler processos' : 'this exposure profile does not allow reading processes'

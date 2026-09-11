@@ -6,6 +6,7 @@ import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
+import { handleUpgradeRoute } from './upgrade-web'
 import { buildApiResponse, buildApiResponseStream, invalidateCache } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -51,7 +52,10 @@ async function readLocalLiveSnapshot(sessions: SessionMeta[]): Promise<{
     const { getLiveSnapshot } = await import('./live-sessions')
     return await getLiveSnapshot(sessions)
   } catch {
-    return { liveSessionIds: [], liveProcesses: [], liveUnavailable: 'no-proc' }
+    // getLiveSnapshot/scanProcesses are designed never to throw — this is a defensive backstop,
+    // and its reason should still name the platform's own mechanism rather than assume Linux.
+    const reason = process.platform === 'darwin' ? 'no-ps' : 'no-proc'
+    return { liveSessionIds: [], liveProcesses: [], liveUnavailable: reason }
   }
 }
 import { AUTH_PUBLIC, isAdminPath, MFA_EXEMPT } from './index-routes'
@@ -637,6 +641,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
+    }
+
+    // "Update now" — see `upgrade-web.ts` for why the child must NOT be this process's child.
+    {
+      const res = await handleUpgradeRoute(req, url, url.searchParams.get('lang') === 'pt' ? 'pt' : 'en', clientIp)
+      if (res) return res
     }
 
     if (url.pathname === '/api/version' && req.method === 'GET') {
@@ -1703,10 +1713,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           if (body.remove === true) return json({ ok: await mod.removeSubtask(body.id) })
           // A bare `{id, done}` is the tick; anything else is a column edit. Both land on
           // `patchSubtask`, which derives `done` from `status` so the two cannot disagree.
+          // `done_needs_session` is a 422, the same shape `sessions`'s `blocked` answers with above
+          // — both name a piece of work this request cannot do YET, not a resource that is missing.
+          // `no_such_subtask` stays 404: the id named nothing.
           if (typeof body.done === 'boolean' && Object.keys(body).length === 2) {
-            return json({ ok: await mod.setSubtaskDone(body.id, body.done) })
+            const result = await mod.setSubtaskDone(body.id, body.done)
+            return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
           }
-          return json({ ok: await mod.patchSubtask(body.id, {
+          const result = await mod.patchSubtask(body.id, {
             ...(typeof body.title === 'string' ? { title: body.title } : {}),
             ...(typeof body.status === 'string' ? { status: body.status as never } : {}),
             ...(typeof body.assignee === 'string' ? { assignee: body.assignee } : {}),
@@ -1720,7 +1734,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ...(Array.isArray(body.blockedBy)
               ? { blockedBy: body.blockedBy.filter((x): x is string => typeof x === 'string') }
               : {}),
-          }) })
+          })
+          return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
         }
         const ok = await mod.addSubtask(ref, String(body.title ?? ''))
         return json({ ok }, ok ? 200 : 400)
@@ -1795,8 +1810,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         },
       )
       // 422, not 404: the task exists and the move is understood — it is missing the one thing
-      // `blocked` cannot be recorded without. A 4xx a caller can act on, with a code that says so.
-      return json(out, out.ok ? 200 : out.message === 'blocked_needs_reason' ? 422 : 404)
+      // `blocked`/`done` cannot be recorded without. A 4xx a caller can act on, with a code that
+      // says so. `done_needs_session` rides the exact same channel `blocked_needs_reason` does
+      // (spec 2026-09-11 §A.4).
+      return json(out, out.ok ? 200
+        : (out.message === 'blocked_needs_reason' || out.message === 'done_needs_session') ? 422 : 404)
     }
 
     /**

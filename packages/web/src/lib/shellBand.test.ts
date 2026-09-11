@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from 'bun:test'
 import {
   BAND_MAX_FRACTION, BAND_MIN_PX, DEFAULT_BAND_PREFS, clampBandHeight, readBandPrefs, shellErrorText,
-  shellApiUrl, shellWatching, shellWhere, writeBandPrefs, type BandPrefs,
+  bandGeometry, shellApiUrl, shellWatching, shellWhere, writeBandGeometry, writeBandPrefs, type BandPrefs,
 } from './shellBand'
 
 describe('the unwatch discipline', () => {
@@ -139,5 +139,80 @@ describe('the band prefs are a per-viewer convenience and never a hard dependenc
     expect(readBandPrefs(s).open).toBe(false)
     s.setItem('agentistics-shell-band', '{"open":"yes","height":"tall"}')
     expect(readBandPrefs(s)).toEqual({ open: false, height: DEFAULT_BAND_PREFS.height })
+  })
+})
+
+describe('the geometry the band remembers', () => {
+  const fake = (): Storage => {
+    const m = new Map<string, string>()
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => { m.set(k, v) },
+      removeItem: (k: string) => { m.delete(k) },
+      clear: () => m.clear(),
+      key: () => null,
+      get length() { return m.size },
+    } as unknown as Storage
+  }
+
+  test('a band that has never been measured remembers nothing', () => {
+    expect(bandGeometry('docked', fake())).toBeUndefined()
+    expect(bandGeometry('dedicated', fake())).toBeUndefined()
+  })
+
+  test('the last measurement survives a reload, so the next open starts at the right size', () => {
+    const s = fake()
+    writeBandGeometry('docked', { cols: 144, rows: 13 }, s)
+    expect(bandGeometry('docked', s)).toEqual({ cols: 144, rows: 13 })
+  })
+
+  // THE PLACEMENTS ARE DIFFERENT BOXES. A band under the composer is ~13 rows and the shell's own
+  // screen is ~48; one shared memory means every arrival on the dedicated screen opens at the
+  // band's height and jumps — the exact snap this memory exists to remove, from the other side.
+  test('each placement remembers its OWN box', () => {
+    const s = fake()
+    writeBandGeometry('docked', { cols: 144, rows: 13 }, s)
+    writeBandGeometry('dedicated', { cols: 144, rows: 48 }, s)
+    expect(bandGeometry('docked', s)).toEqual({ cols: 144, rows: 13 })
+    expect(bandGeometry('dedicated', s)).toEqual({ cols: 144, rows: 48 })
+  })
+
+  test('writing a geometry keeps everything else the record already held', () => {
+    const s = fake()
+    writeBandPrefs({ open: true, height: 320 }, s)
+    writeBandGeometry('docked', { cols: 200, rows: 40 }, s)
+    const back = readBandPrefs(s)
+    expect(back.open).toBe(true)
+    expect(back.height).toBe(320)
+    expect(bandGeometry('docked', s)).toEqual({ cols: 200, rows: 40 })
+  })
+
+  test('a stored geometry that does not read as one is DROPPED, never half-used', () => {
+    for (const bad of [
+      { cols: 0, rows: 13 }, { cols: 144 }, { rows: 13 }, { cols: '144', rows: 13 },
+      { cols: 1.5, rows: 13 }, { cols: 144, rows: -2 }, 'nope', null, 7,
+    ]) {
+      const s = fake()
+      s.setItem('agentistics-shell-band', JSON.stringify({ open: true, height: 240, geometry: { docked: bad } }))
+      expect(bandGeometry('docked', s), JSON.stringify(bad)).toBeUndefined()
+      // The rest of the record still reads — one unreadable field is not an unreadable record.
+      expect(readBandPrefs(s).open).toBe(true)
+    }
+  })
+
+  test('one unreadable placement never costs the other', () => {
+    const s = fake()
+    s.setItem('agentistics-shell-band', JSON.stringify({
+      open: true, height: 240, geometry: { docked: { cols: 0, rows: 0 }, dedicated: { cols: 144, rows: 48 } },
+    }))
+    expect(bandGeometry('docked', s)).toBeUndefined()
+    expect(bandGeometry('dedicated', s)).toEqual({ cols: 144, rows: 48 })
+  })
+
+  test('a storage that throws costs the memory and never the band', () => {
+    const hostile = { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } } as unknown as Storage
+    expect(() => writeBandGeometry('docked', { cols: 144, rows: 13 }, hostile)).not.toThrow()
+    expect(bandGeometry('docked', hostile)).toBeUndefined()
+    expect(readBandPrefs(hostile)).toEqual(DEFAULT_BAND_PREFS)
   })
 })

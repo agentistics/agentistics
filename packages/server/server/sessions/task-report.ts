@@ -194,11 +194,15 @@ export function attemptViews(
   return views
 }
 
-/** One rollup for a subtask, or for the direct branch (`id: null`) — sessions filed on the task
- *  itself, under no subtask. Every row of a task falls into EXACTLY one of these buckets, because
- *  `subtaskId` and "no subtaskId" partition `rowsOfTask(task, rows)` completely — the same
- *  guarantee `filedUnder` already gives every session a single owner. */
+/** One rollup for a subtask (or a group of subtasks sharing a `groupId` — see below), or for the
+ *  direct branch (`id: null`) — sessions filed on the task itself, under no subtask. Every row of a
+ *  task falls into EXACTLY one of these buckets, because `subtaskId` and "no subtaskId" partition
+ *  `rowsOfTask(task, rows)` completely — the same guarantee `filedUnder` already gives every
+ *  session a single owner. */
 export interface SubtaskView {
+  /** A plain subtask's own id, or the shared `groupId` when it is one of a group — never a
+   *  per-member id in that case, which is what stops a shared session's cost being summed once per
+   *  member. */
   id: string | null
   rollup: AttemptRollup
 }
@@ -212,6 +216,15 @@ export interface SubtaskView {
  * partitions back into a total: `TaskDetail.rollup` is computed once, over the whole set, and this
  * is only ever a breakdown of it. A subtask with no sessions filed under it yet still gets a row —
  * "nothing filed here" is a real, empty measurement, not an omission.
+ *
+ * **Grouped subtasks collapse into ONE bucket, never one per member.** Two or more subtasks sharing
+ * a `groupId` (`Subtask.groupId`, docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B)
+ * are bucketed by that group id rather than by each subtask's own id — a session filed under ANY
+ * member's `subtaskId` is counted in that one bucket, once, regardless of which specific member the
+ * session names. Summing per member would multiply a shared session's cost by the group's size,
+ * which is exactly the double-count this function exists to rule out for every other shape. A
+ * subtask with no `groupId` is unaffected — it is its own group of one, bucketed by its own id
+ * exactly as before.
  */
 export function subtaskViews(
   task: Task,
@@ -221,10 +234,23 @@ export function subtaskViews(
   costOf: (m: SessionMeta) => number,
 ): SubtaskView[] {
   const mine = subtasks.filter(s => s.taskId === task.id)
-  const views: SubtaskView[] = mine.map(s => ({
-    id: s.id,
+  // Effective bucket key: a subtask's own id, or the group id it shares with its siblings.
+  const keyOf = (s: Subtask) => s.groupId ?? s.id
+  const groups = new Map<string, Subtask[]>()
+  for (const s of mine) {
+    const key = keyOf(s)
+    const members = groups.get(key)
+    if (members) members.push(s)
+    else groups.set(key, [s])
+  }
+  const views: SubtaskView[] = [...groups.entries()].map(([key, members]) => ({
+    id: key,
+    // A session's `subtaskId` can name ANY member of the group — the union of their rows is what
+    // the group's bucket rolls up, so the same session is never counted once per member.
     rollup: rollupAttempt({
-      sessions: rollupSessionsFor(rows.filter(r => r.subtaskId === s.id), metas, costOf),
+      sessions: rollupSessionsFor(
+        rows.filter(r => members.some(m => m.id === r.subtaskId)), metas, costOf,
+      ),
     }),
   }))
   const direct = rows.filter(r => !r.subtaskId)

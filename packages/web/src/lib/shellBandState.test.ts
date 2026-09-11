@@ -110,3 +110,50 @@ describe('the band never claims to be opening with nothing in flight', () => {
     expect(shellResolveWanted(shellBandReducer(INITIAL_SHELL_BAND, { type: 'openBand' }))).toBe(true)
   })
 })
+
+describe('the refusal keeps its CODE, not only its sentence', () => {
+  const refuse = (message: string, reason?: string) =>
+    shellBandReducer(INITIAL_SHELL_BAND, { type: 'refused', message, ...(reason ? { reason } : {}) })
+
+  // The sentence is what a person reads; the CODE is what the band acts on. Only the ceiling
+  // refusal has anything to offer — a list of the open shells — and without the code the band
+  // would have to match on the sentence, which is localized and would break on a rewording.
+  test('a ceiling refusal is recognisable afterwards', () => {
+    const s = refuse('All 8 terminals are open.', 'at-cap')
+    expect(s.phase).toBe('refused')
+    expect(s.reason).toBe('at-cap')
+  })
+
+  test('a refusal with no code carries none rather than inventing one', () => {
+    expect(refuse('the network went away').reason).toBeNull()
+  })
+
+  test('retrying clears the code with the sentence — both describe an attempt that is over', () => {
+    const s = shellBandReducer(refuse('All 8 terminals are open.', 'at-cap'), { type: 'retry' })
+    expect(s.reason).toBeNull()
+    expect(s.message).toBeNull()
+  })
+
+  test('a resolved shell clears it too', () => {
+    const s = shellBandReducer(refuse('x', 'at-cap'), { type: 'resolved', shell: { id: 'a', cwd: '/x' } })
+    expect(s.reason).toBeNull()
+  })
+})
+
+describe('switching target asks for what the new target needs', () => {
+  // MEASURED in the browser: the band was opened on the CLI pane (which needs no resolving), then
+  // switched to the shell — and nothing happened. The resolve effect keys on `attempt`, which a
+  // target switch does not move, so the request that had been skipped while the CLI was showing was
+  // never made. `retry` is the action that says "ask again", and the switch is a person asking.
+  test('a band left WANTING is still wanting after the switch', () => {
+    const opened = shellBandReducer(INITIAL_SHELL_BAND, { type: 'openBand' })
+    expect(shellResolveWanted(opened)).toBe(true)
+  })
+
+  test('and a retry advances the attempt, which is what re-runs the effect', () => {
+    const opened = shellBandReducer(INITIAL_SHELL_BAND, { type: 'openBand' })
+    const again = shellBandReducer(opened, { type: 'retry' })
+    expect(again.attempt).toBe(opened.attempt + 1)
+    expect(shellResolveWanted(again)).toBe(true)
+  })
+})

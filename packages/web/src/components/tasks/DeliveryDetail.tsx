@@ -824,15 +824,99 @@ function isDescriptionFile(f: File): boolean {
 }
 
 /**
+ * Splits a description on its own markdown headings — never on prose structure this file has to
+ * guess at (bold lead-ins, paragraph breaks). `null` means the text has no heading at all, which is
+ * the common case: this task's own description is four paragraphs of **bold** lead-ins and no `#`.
+ *
+ * Content before the first heading (if any) is the LEAD — read unfolded, because it is usually one
+ * or two sentences of framing rather than a section of its own.
+ */
+const DESCRIPTION_HEADING_RE = /^(#{1,6})\s+(.+)$/
+
+function splitDescriptionHeadings(
+  text: string,
+): { lead: string; sections: Array<{ title: string; body: string }> } | null {
+  const lines = text.split('\n')
+  const lead: string[] = []
+  const sections: Array<{ title: string; body: string[] }> = []
+  let current: { title: string; body: string[] } | null = null
+  for (const line of lines) {
+    const m = line.match(DESCRIPTION_HEADING_RE)
+    if (m) {
+      if (current) sections.push(current)
+      current = { title: m[2]!.trim(), body: [] }
+    } else if (current) {
+      current.body.push(line)
+    } else {
+      lead.push(line)
+    }
+  }
+  if (current) sections.push(current)
+  if (sections.length === 0) return null
+  return {
+    lead: lead.join('\n').trim(),
+    sections: sections.map(s => ({ title: s.title, body: s.body.join('\n').trim() })),
+  }
+}
+
+/** How much of an un-headinged description shows before the reader has to ask for more. */
+const DESCRIPTION_PREVIEW_LINES = 3
+
+/**
+ * A description with no heading to fold by — the common case — becomes ONE collapsed block: a
+ * short preview plus a single toggle, never N sections invented from prose structure.
+ */
+function CollapsedDescription({ body, files, lang }: { body: string; files: TaskFile[]; lang: Lang }) {
+  const copy = boardCopy(lang)
+  const [expanded, setExpanded] = useState(false)
+  const lines = body.split('\n')
+  const hasMore = lines.length > DESCRIPTION_PREVIEW_LINES
+  if (!hasMore) return <CommentBody body={body} files={files} />
+  const shown = expanded ? body : lines.slice(0, DESCRIPTION_PREVIEW_LINES).join('\n')
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <CommentBody body={shown} files={files} />
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          justifySelf: 'start', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          fontSize: 11.5, fontWeight: 600, color: 'var(--anthropic-orange)',
+        }}
+      >{expanded ? copy.showLessDescription : copy.showAllDescription}</button>
+    </div>
+  )
+}
+
+/**
+ * The description's READ-ONLY presentation. Editing (below) always works on the whole string as
+ * one textarea — folding is how the same text is DISPLAYED, never a second data model.
+ */
+function DescriptionView({ body, files, lang }: { body: string; files: TaskFile[]; lang: Lang }) {
+  const split = useMemo(() => splitDescriptionHeadings(body), [body])
+  if (!split) return <CollapsedDescription body={body} files={files} lang={lang} />
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {split.lead && <CommentBody body={split.lead} files={files} />}
+      {split.sections.map((s, i) => (
+        <RailSection key={i} id={`description-section-${i}`} title={s.title} defaultOpen={i === 0}>
+          <CommentBody body={s.body} files={files} />
+        </RailSection>
+      ))}
+    </div>
+  )
+}
+
+/**
  * The delivery's DESCRIPTION — what the whole thing is for, editable the same way a comment is
  * written: plain text plus files pasted, dropped or attached into it. `Task.detail` already carried
  * this shape (see `commentBody.ts`); it just had no editor, so the field could be set once at
  * creation and never touched again.
  */
-function DescriptionEditor({ id, task, files, onSaved }: {
+function DescriptionEditor({ id, task, files, lang, onSaved }: {
   id: string
   task: TaskListRow['task']
   files: TaskFile[]
+  lang: Lang
   onSaved: (detail: string) => void | Promise<void>
 }) {
   const isMobile = useIsMobile()
@@ -871,7 +955,7 @@ function DescriptionEditor({ id, task, files, onSaved }: {
       ? (
         <div style={{ ...surface, padding: 14, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <CommentBody body={task.detail} files={files} />
+            <DescriptionView body={task.detail} files={files} lang={lang} />
           </div>
           <button
             onClick={() => { setText(task.detail ?? ''); setAttached([]); setEditing(true) }}
@@ -1170,6 +1254,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             id={id}
             task={detail.task}
             files={detail.files}
+            lang={lang}
             onSaved={next => run(() => editTask(id, { detail: next }))}
           />
 
@@ -1250,6 +1335,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             <SubtaskTable
               subtasks={detail.subtasks}
               sessions={detail.sessions}
+              subtaskRollups={detail.subtaskRollups}
               lang={lang}
               onAdd={title => run(() => addSubtask(id, title))}
               onPatch={(sid, patch) => run(() => patchSubtask(id, sid, patch))}

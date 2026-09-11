@@ -129,7 +129,36 @@ export function shellWhere(cwd: string | undefined): string {
 export interface BandPrefs {
   open: boolean
   height: number
+  /**
+   * The last geometry each PLACEMENT measured for its terminal, so the next open can state it
+   * before the first capture instead of snapping a quarter-second later.
+   *
+   * It is a memory of THIS browser's box, not a fact about the pane — a pane has one size and the
+   * last viewer to ask wins, which is exactly why a shell last read on a phone opens 52 columns
+   * wide on a desktop. Absent, stale and unreadable all mean the same thing here: say nothing and
+   * let the measurement that lands moments later decide.
+   *
+   * KEYED BY PLACEMENT, because they are different boxes: the band under the composer is about 13
+   * rows and the shell's own screen about 48. Measured on a real layout — one shared number made
+   * every arrival on the dedicated screen open at the band's height and jump, which is the same
+   * snap this memory exists to remove, from the other side.
+   */
+  geometry?: Partial<Record<ShellPlacement, PaneGeometry>>
+  /**
+   * WHICH terminal the band was last showing — the session's CLI pane or its shell.
+   *
+   * It is a preference and not a route because the band is a place you glance at while reading the
+   * conversation beside it; the ROUTE belongs to the dedicated screen, where the target is the
+   * whole page and a shared link must open on the right one. Read through `readTarget`, which
+   * treats absent and unreadable alike as the shell — what this band has been since phase 2.
+   */
+  target?: string
 }
+
+/** Where a shell is drawn. `docked` is the band under the composer; `dedicated` is its own screen. */
+export type ShellPlacement = 'docked' | 'dedicated'
+
+export interface PaneGeometry { cols: number; rows: number }
 
 /** ABSENT READS AS CLOSED. Nobody acquires an open shell band by having reloaded the page. */
 export const DEFAULT_BAND_PREFS: BandPrefs = { open: false, height: 240 }
@@ -148,10 +177,58 @@ export function readBandPrefs(storage?: Storage): BandPrefs {
       height: typeof r.height === 'number' && Number.isFinite(r.height)
         ? Math.max(BAND_MIN_PX, r.height)
         : DEFAULT_BAND_PREFS.height,
+      // DROPPED PER PLACEMENT when it does not read as a pair of positive whole numbers. Half a
+      // geometry is worse than none — it would be sent, refused, and the reader would never learn
+      // why — and one unreadable placement must not cost the other.
+      ...(readGeometries(r.geometry) ? { geometry: readGeometries(r.geometry)! } : {}),
+      // Kept as the RAW string: `readTarget` is the one place that decides what an unreadable
+      // value means, and duplicating that rule here would be a second answer to one question.
+      ...(typeof r.target === 'string' ? { target: r.target } : {}),
     }
   } catch {
     return DEFAULT_BAND_PREFS
   }
+}
+
+function readGeometry(v: unknown): PaneGeometry | null {
+  if (typeof v !== 'object' || v === null) return null
+  const g = v as Record<string, unknown>
+  const ok = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0
+  return ok(g.cols) && ok(g.rows) ? { cols: g.cols, rows: g.rows } : null
+}
+
+function readGeometries(v: unknown): Partial<Record<ShellPlacement, PaneGeometry>> | null {
+  if (typeof v !== 'object' || v === null) return null
+  const r = v as Record<string, unknown>
+  const out: Partial<Record<ShellPlacement, PaneGeometry>> = {}
+  for (const key of ['docked', 'dedicated'] as const) {
+    const g = readGeometry(r[key])
+    if (g) out[key] = g
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/** What this placement's box measured last time, or `undefined` for "it has never said". */
+export function bandGeometry(placement: ShellPlacement, storage?: Storage): PaneGeometry | undefined {
+  return readBandPrefs(storage).geometry?.[placement]
+}
+
+/**
+ * Record the measurement without disturbing the rest of the record.
+ *
+ * A read-modify-write rather than a field on the band's React state: the emulator reports a
+ * geometry on every layout change, and routing that through a `setState` would re-render the whole
+ * panel for a number nothing on screen shows.
+ */
+export function writeBandGeometry(
+  placement: ShellPlacement,
+  geometry: PaneGeometry,
+  storage?: Storage,
+): void {
+  try {
+    const prefs = readBandPrefs(storage)
+    writeBandPrefs({ ...prefs, geometry: { ...prefs.geometry, [placement]: geometry } }, storage)
+  } catch { /* the memory is a convenience; the band works without it */ }
 }
 
 export function writeBandPrefs(prefs: BandPrefs, storage?: Storage): void {

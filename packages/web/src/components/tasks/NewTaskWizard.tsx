@@ -22,8 +22,14 @@ import { BetaTag } from '../BetaTag'
 export interface NewTaskWizardProps {
   onDone: (taskId: string) => void | Promise<void>
   onClose: () => void
-  /** Opens the existing session wizard. The task is created first and handed over. */
-  onCreateSession: (taskId: string, title: string) => void
+  /**
+   * Opens the existing session wizard. The task is created first and handed over.
+   *
+   * Absent where a session already exists to file under it — opened from that session's own title
+   * flag, say, there is nothing for "start a new one" to mean, and `TaskComposer` already renders
+   * no such button when it gets none.
+   */
+  onCreateSession?: (taskId: string, title: string) => void
   /** Opened FROM a session — it arrives pre-linked. See `TaskComposer`. */
   session?: { id: string; title: string; harness?: string }
 }
@@ -75,7 +81,7 @@ export function NewTaskWizard({ onDone, onClose, onCreateSession, session }: New
           {...(session ? { session } : {})}
           onDone={taskId => onDone(taskId)}
           onCancel={onClose}
-          onCreateSession={onCreateSession}
+          {...(onCreateSession ? { onCreateSession } : {})}
         />
       </div>
     </div>,

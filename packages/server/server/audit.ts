@@ -42,6 +42,7 @@ export type AuditAction =
   // reuse of the fleet's: a shell is a raw PTY on this host and a session is a named assistant CLI,
   // so a reader of the log must be able to tell which of the two a keyboard was attached to.
   | 'shell.input.open' | 'shell.input.denied'
+  | 'upgrade.started' | 'upgrade.denied'
 
 export interface AuditEvent {
   action: AuditAction

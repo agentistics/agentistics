@@ -41,6 +41,34 @@ function sane(g: PaneGeometry): boolean {
 }
 
 /**
+ * The geometry a READER stated when it opened the stream, or `null` for "it said nothing".
+ *
+ * A pane has one size and the last viewer to ask wins, so a shell last read on a phone hands a
+ * desktop its first frames hard-broken at 52 columns and the band snaps a quarter-second later,
+ * once the emulator has measured itself and the debounced resize lands. Letting the reader state
+ * the size on the way in closes that window — the pane is resized BEFORE the first capture.
+ *
+ * It is untrusted input arriving before the stream exists, so it is REFUSED rather than clamped:
+ * a value nobody can read costs the caller its resize, never its stream. The ceiling is the same
+ * one `resizePlan` holds, applied here so the plan is never asked a question it would only reject.
+ */
+export function readWantedGeometry(params: URLSearchParams): PaneGeometry | null {
+  const read = (name: string): number | null => {
+    const raw = params.get(name)
+    if (!raw) return null
+    // `Number` so `1.5` and `1e400` are read as themselves and then refused — `parseInt` would
+    // truncate both into perfectly usable numbers nobody asked for.
+    const n = Number(raw)
+    return Number.isInteger(n) && n > 0 ? n : null
+  }
+  const cols = read('cols')
+  const rows = read('rows')
+  if (cols === null || rows === null) return null
+  const want = { cols, rows }
+  return sane(want) ? want : null
+}
+
+/**
  * The geometry to apply, or `null` for "do nothing".
  *
  * `null` covers three different situations on purpose — the numbers are unusable, the clamp landed

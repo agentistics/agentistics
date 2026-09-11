@@ -636,10 +636,15 @@ export interface AppData {
 
 /** Why live-session detection cannot work in this configuration. */
 export type LiveUnavailableReason =
-  /** Not a Linux host — /proc is the only process source this reads. */
-  | 'not-linux'
-  /** /proc is absent or unreadable. */
+  /** Neither Linux (/proc) nor macOS (ps + lsof) — no process source is implemented for this
+   *  platform at all (e.g. Windows; use WSL). */
+  | 'unsupported-platform'
+  /** Linux: /proc is absent or unreadable. */
   | 'no-proc'
+  /** macOS: `ps` or `lsof` could not be run (missing from PATH, or exited non-zero). Extremely
+   *  rare — both ship with the OS — but a reader that could not run its own tool must say so
+   *  rather than report a confident empty list. */
+  | 'no-ps'
   /** A container that cannot see the host's processes (no `pid: host`). */
   | 'container-isolated'
   /** The host's processes are visible but their cwd may not be read (uid mismatch). */

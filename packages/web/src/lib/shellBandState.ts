@@ -41,6 +41,15 @@ export interface ShellBandState {
   /** The refusal's own sentence, verbatim from the server. Null unless `phase === 'refused'`. */
   message: string | null
   /**
+   * The refusal's CODE, kept beside its sentence. Null when the server named none.
+   *
+   * The sentence is what a person reads; the code is what the BAND acts on, and exactly one
+   * refusal has anything to offer — the ceiling, whose answer is a list of the open shells. Without
+   * the code the band would have to match on the sentence, which is localized and would stop
+   * matching the day somebody rewords it.
+   */
+  reason: string | null
+  /**
    * How many times a person has ASKED for a shell here. `0` = never.
    *
    * It is the caller's effect dependency, and that is its whole job: an effect that resolves the
@@ -53,7 +62,7 @@ export interface ShellBandState {
 }
 
 export const INITIAL_SHELL_BAND: ShellBandState = {
-  phase: 'closed', shell: null, message: null, attempt: 0,
+  phase: 'closed', shell: null, message: null, reason: null, attempt: 0,
 }
 
 export type ShellBandAction =
@@ -65,7 +74,7 @@ export type ShellBandAction =
   | { type: 'resolving' }
   | { type: 'resolved'; shell: OpenShell }
   /** The server refused, or the request failed — the sentence is the caller's to compose. */
-  | { type: 'refused'; message: string }
+  | { type: 'refused'; message: string; reason?: string }
   /** The attempt was abandoned (the component re-ran, the session changed). NOT a failure. */
   | { type: 'cancelled' }
   /** The person asked again after a refusal. */
@@ -90,20 +99,20 @@ export function shellBandReducer(state: ShellBandState, action: ShellBandAction)
       return state.phase === 'wanted' ? { ...state, phase: 'opening' } : state
 
     case 'resolved':
-      return { ...state, phase: 'ready', shell: action.shell, message: null }
+      return { ...state, phase: 'ready', shell: action.shell, message: null, reason: null }
 
     case 'refused':
-      return { ...state, phase: 'refused', message: action.message }
+      return { ...state, phase: 'refused', message: action.message, reason: action.reason ?? null }
 
     case 'cancelled':
       // Back to WANTED, never left in `opening`: the band must not claim work nobody is doing.
       return state.phase === 'opening' ? { ...state, phase: 'wanted' } : state
 
     case 'retry':
-      return { ...state, phase: 'wanted', message: null, attempt: state.attempt + 1 }
+      return { ...state, phase: 'wanted', message: null, reason: null, attempt: state.attempt + 1 }
 
     case 'ended':
-      return { ...state, phase: 'closed', shell: null, message: null }
+      return { ...state, phase: 'closed', shell: null, message: null, reason: null }
 
     default:
       return state

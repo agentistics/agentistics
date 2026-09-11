@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { PANE_COLS, PANE_ROWS } from './tmux-cli'
-import { resizePlan } from './pane-resize'
+import { readWantedGeometry, resizePlan } from './pane-resize'
 
 describe('a SHELL pane follows the box it is drawn in', () => {
   test('it takes the geometry asked for', () => {
@@ -54,5 +54,35 @@ describe('a geometry that is not one is refused rather than resolved', () => {
     for (const want of [{ cols: 0, rows: 50 }, { cols: 120, rows: 0 }, { cols: -5, rows: 50 }, { cols: 5000, rows: 50 }]) {
       expect(resizePlan({ scope: 'shell', want, current: { cols: 120, rows: 50 } })).toBeNull()
     }
+  })
+})
+
+describe('the geometry a stream may be OPENED with', () => {
+  const q = (s: string) => readWantedGeometry(new URLSearchParams(s))
+
+  test('a pair of positive whole numbers is read', () => {
+    expect(q('id=s1&cols=144&rows=13')).toEqual({ cols: 144, rows: 13 })
+  })
+
+  test('saying nothing is not an error — it is the ordinary case', () => {
+    expect(q('id=s1')).toBeNull()
+    expect(q('id=s1&cols=144')).toBeNull()
+    expect(q('id=s1&rows=13')).toBeNull()
+  })
+
+  // A query string is untrusted input and this one arrives BEFORE the stream exists, so a value it
+  // cannot read must cost the caller the resize and never the stream.
+  test('anything that is not a pair of positive whole numbers is refused, never clamped', () => {
+    for (const s of [
+      'cols=0&rows=13', 'cols=144&rows=0', 'cols=-5&rows=13', 'cols=1.5&rows=13',
+      'cols=abc&rows=13', 'cols=144&rows=NaN', 'cols=&rows=13', 'cols=1e400&rows=13',
+    ]) {
+      expect(q(s), s).toBeNull()
+    }
+  })
+
+  test('a geometry past the ceiling is refused here too, so the plan is never asked a silly question', () => {
+    expect(q('cols=100000&rows=13')).toBeNull()
+    expect(q('cols=144&rows=100000')).toBeNull()
   })
 })

@@ -274,6 +274,7 @@ function TaskList() {
         <NewSessionModal
           lang={lang}
           initialTask={starting.title}
+          initialTaskId={starting.taskId}
           onClose={() => setStarting(null)}
           onStarted={async () => {
             const to = starting.taskId

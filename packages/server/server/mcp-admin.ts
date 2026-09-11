@@ -45,7 +45,10 @@ async function readJson(file: string): Promise<unknown> {
 async function readProcArgv(): Promise<{ procs: ProcArgv[]; unavailable: LiveUnavailableReason | null }> {
   if (!CAPS.localProcesses) return { procs: [], unavailable: 'capability-off' }
   if (process.platform !== 'linux') {
-    return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
+    // Only Linux is implemented HERE — unlike `live-sessions.ts`, which also reads macOS via
+    // `ps`/`lsof`. Reported directly as unsupported rather than through `detectionUnavailable`,
+    // whose darwin branch now describes THAT reader's own tool, not this argv-only one.
+    return { procs: [], unavailable: 'unsupported-platform' }
   }
   let pids: string[]
   try { pids = await readdir('/proc') } catch { return { procs: [], unavailable: 'no-proc' } }

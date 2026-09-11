@@ -3,7 +3,9 @@
  *
  * One component drawn in two places, deliberately: a subtask that shows five columns on the board
  * and a checkbox on the detail page is two different records as far as the reader is concerned, and
- * the one with fewer columns teaches people the fields do not exist.
+ * the one with fewer columns teaches people the fields do not exist. (`TaskTable.tsx`'s inline
+ * subitem rows mirror the base columns but do NOT yet draw the two below — a gap worth closing
+ * there too, tracked separately rather than done as a side effect of this file.)
  *
  * A subtask carries a SESSION — which piece of work is being done where — and now a ROLLUP of its
  * own: cost, rounds and tokens are still measured per SESSION, never stored on the subtask itself,
@@ -11,19 +13,29 @@
  * `attemptViews()` sums an attempt's, as a partition of the task's rows rather than a second count
  * of them — nothing here double-counts a session or invents a split the data does not record. See
  * docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md §4.2.
+ *
+ * The Cost/Tokens columns below read `p.subtaskRollups`, keyed by subtask id, and render them with
+ * the exact same formatters `TaskTable.tsx`'s own cost/tokens cells use (`useMoney()`, `fmtTokens`,
+ * `NA`) — a second formatting rule here would be a second answer for the same figure. A subtask
+ * with no session filed yet still gets a bucket from the server (`sessionsUsed: 0`, every metric
+ * `null`), and `null` renders as `NA` — never a `0` pretending to be a measurement. The `id: null`
+ * direct-branch bucket (sessions filed straight on the delivery) is deliberately NOT drawn as a row
+ * here — that footer is `s-2cb8108f97`'s job, once this lands.
  */
 
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { COLUMN_ORDER, STATUS, microLabel, surface, type BoardStatus } from './board'
+import { COLUMN_ORDER, STATUS, fmtTokens, microLabel, numeric, surface, type BoardStatus } from './board'
 import { SessionPicker } from './SessionPicker'
 import { DatePicker } from '../DatePicker'
 import { TaskProgressBar } from './TaskProgressBar'
 import { subtaskSessions } from './SubtaskSessions'
 import { SubtaskBlockedBy } from './SubtaskBlockedBy'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import type { Subtask, TaskSessionRow, TaskStatus } from '../../lib/tasks'
+import { useMoney } from './money'
+import { costCaveat, costCellFor, subtaskRollupOf } from './subtaskRollup'
+import type { Subtask, SubtaskView, TaskSessionRow, TaskStatus } from '../../lib/tasks'
 
 function StatusPick({ value, lang, onPick }: {
   value: TaskStatus
@@ -83,6 +95,9 @@ export interface SubtaskTableProps {
   subtasks: Subtask[]
   /** The DELIVERY's sessions. Each row shows the ones filed under it — see `SubtaskSessions`. */
   sessions: readonly TaskSessionRow[]
+  /** One rollup per subtask (and the `id: null` direct-branch bucket this table does not draw
+   *  yet) — `TaskDetail.subtaskRollups`, straight off the server's `subtaskViews()`. */
+  subtaskRollups: readonly SubtaskView[]
   lang: Lang
   onAdd: (title: string) => void | Promise<void>
   onPatch: (id: string, patch: Partial<Subtask>) => void | Promise<void>
@@ -98,6 +113,7 @@ export interface SubtaskTableProps {
 export function SubtaskTable(p: SubtaskTableProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(p.lang)
+  const money = useMoney()
   const [draft, setDraft] = useState('')
   const [linking, setLinking] = useState<string | null>(null)
 
@@ -117,11 +133,17 @@ export function SubtaskTable(p: SubtaskTableProps) {
         </div>
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
         <thead>
           <tr>
-            {[copy.subtasks, 'Status', copy.owner, copy.start, copy.due, copy.sessions, ''].map((h, i) => (
-              <th key={i} style={{ ...microLabel, textAlign: 'left', padding: '6px 9px', fontWeight: 600 }}>
+            {[copy.subtasks, 'Status', copy.owner, copy.start, copy.due, copy.sessions, copy.cost, copy.tokens, ''].map((h, i) => (
+              <th
+                key={i}
+                style={{
+                  ...microLabel, padding: '6px 9px', fontWeight: 600,
+                  textAlign: h === copy.cost || h === copy.tokens ? 'right' : 'left',
+                }}
+              >
                 {h}
               </th>
             ))}
@@ -130,12 +152,15 @@ export function SubtaskTable(p: SubtaskTableProps) {
         <tbody>
           {p.subtasks.length === 0 && (
             <tr>
-              <td colSpan={7} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
+              <td colSpan={9} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
                 {copy.nothingBrokenOut}
               </td>
             </tr>
           )}
-          {p.subtasks.map(t => (
+          {p.subtasks.map(t => {
+            const r = subtaskRollupOf(p.subtaskRollups, t.id)
+            const cost = costCellFor(r)
+            return (
             <tr key={t.id}>
               <td style={{ ...cell, minWidth: 180 }}>
                 <input
@@ -196,6 +221,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, minWidth: 190 }}>
                 {subtaskSessions({
                   subtaskId: t.id,
+                  // The row's group siblings show the identical chip list — see
+                  // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.4.
+                  subtaskIds: t.groupId
+                    ? p.subtasks.filter(s => s.groupId === t.groupId).map(s => s.id)
+                    : [t.id],
                   sessions: p.sessions,
                   lang: p.lang,
                   mobile: isMobile,
@@ -205,15 +235,36 @@ export function SubtaskTable(p: SubtaskTableProps) {
                 })}
               </td>
               <td style={{ ...cell, textAlign: 'right' }}>
+                {/* `r` absent (no bucket at all) reads exactly like an empty one — the "not
+                    measured yet" answer for a subtask nobody has filed a session under. */}
+                {cost.kind === 'credits' ? (
+                  <span style={{ ...numeric, fontSize: 12 }}>{cost.premiumRequests} req</span>
+                ) : (
+                  <span
+                    style={{
+                      ...numeric, fontSize: 12,
+                      color: cost.kind === 'na' || cost.usd === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)',
+                    }}
+                    title={costCaveat(r)}
+                  >{money(cost.kind === 'money' ? cost.usd : null)}</span>
+                )}
+              </td>
+              <td style={{ ...cell, textAlign: 'right' }}>
+                <span style={{ ...numeric, fontSize: 12, color: !r || r.tokens === null ? 'var(--text-tertiary)' : undefined }}>
+                  {fmtTokens(r?.tokens ?? null)}
+                </span>
+              </td>
+              <td style={{ ...cell, textAlign: 'right' }}>
                 <button
                   onClick={() => void p.onRemove(t.id)} title={copy.remove}
                   style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'inline-flex' }}
                 ><Trash2 size={12} /></button>
               </td>
             </tr>
-          ))}
+            )
+          })}
           <tr>
-            <td colSpan={7} style={{ ...cell }}>
+            <td colSpan={9} style={{ ...cell }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%' }}>
                 <Plus size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <input

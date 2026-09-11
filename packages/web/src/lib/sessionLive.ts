@@ -83,13 +83,17 @@ export function liveEmptyNotice(o: {
 
 /** Why each configuration cannot see the host's assistants, and what to change. EN + PT. */
 const LIVE_UNAVAILABLE_DETAIL: Record<LiveUnavailableReason, { en: string; pt: string }> = {
-  'not-linux': {
-    en: 'Open assistants are detected by reading /proc, which only exists on Linux. Everything else on this page is unaffected.',
-    pt: 'Assistentes abertos são detectados lendo /proc, que só existe no Linux. O resto desta página não é afetado.',
+  'unsupported-platform': {
+    en: 'Open assistants are detected by reading Linux’s /proc or macOS’s process list. Neither exists here (Windows). Everything else on this page is unaffected — WSL on this same machine can run agentop with live detection.',
+    pt: 'Assistentes abertos são detectados lendo o /proc do Linux ou a lista de processos do macOS. Nenhum dos dois existe aqui (Windows). O resto desta página não é afetado — o WSL nesta mesma máquina roda o agentop com detecção ao vivo.',
   },
   'no-proc': {
     en: '/proc could not be read, so no running assistant can be observed.',
     pt: 'Não foi possível ler /proc, então nenhum assistente em execução pode ser observado.',
+  },
+  'no-ps': {
+    en: 'This machine’s `ps`/`lsof` could not be run, so no running assistant can be observed.',
+    pt: 'Não foi possível executar `ps`/`lsof` nesta máquina, então nenhum assistente em execução pode ser observado.',
   },
   'container-isolated': {
     en: 'This machine runs in a container with its own process namespace, so assistants running on the host are invisible to it. Add `pid: host` to docker/machine.yml, or run the machine natively.',

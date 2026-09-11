@@ -26,6 +26,11 @@ import type { Lang } from './copy'
 import type { TaskSessionRow } from '../../lib/tasks'
 
 export interface SubtaskSessionsProps {
+  /** This subtask's own id, plus every sibling sharing its `groupId` — the id alone when
+   *  ungrouped. A session filed under ANY member shows here, so every member of a group
+   *  renders the identical chip list — see docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.4. */
+  subtaskIds: readonly string[]
+  /** Where a NEW session gets filed — this row's own id, never a sibling's. */
   subtaskId: string
   /** The DELIVERY's sessions — every one of them. This filters to the ones filed here. */
   sessions: readonly TaskSessionRow[]
@@ -40,7 +45,7 @@ export interface SubtaskSessionsProps {
 }
 
 export function subtaskSessions(p: SubtaskSessionsProps): React.ReactNode {
-  const mine = p.sessions.filter(s => s.subtaskId === p.subtaskId)
+  const mine = p.sessions.filter(s => s.subtaskId && p.subtaskIds.includes(s.subtaskId))
   const pt = p.lang === 'pt'
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>

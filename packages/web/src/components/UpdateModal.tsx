@@ -1,7 +1,10 @@
 import React, { useEffect, useCallback, useState } from 'react'
-import { X, ArrowUpCircle, Terminal, Download, Copy, Check } from 'lucide-react'
+import { X, ArrowUpCircle, Terminal, Download, Copy, Check, Loader2 } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
 import { copyText } from '../lib/clipboard'
+import {
+  UPGRADE_POLL_MS, UPGRADE_WAIT_MS, browserReloadEnv, clearAppCaches, upgradeArrived,
+} from '../lib/appReload'
 
 interface Props {
   current: string
@@ -15,6 +18,20 @@ interface Props {
 }
 
 export function UpdateModal({ current, latest, lang, isCentral, isMember, onClose }: Props) {
+  /**
+   * `idle → confirm → running → (reload | timeout | refused)`.
+   *
+   * There is no `done`: the machine coming back IS the end, and what announces it is the page
+   * reloading. A modal that said "updated" and left the old bundle on screen would be the exact
+   * lie this control exists to remove.
+   */
+  const [phase, setPhase] = useState<'idle' | 'confirm' | 'running' | 'refused' | 'timeout'>('idle')
+  const [note, setNote] = useState('')
+  // Set when the modal closes mid-flight, so the poll stops rather than reloading a page the
+  // reader has moved on from.
+  const goneRef = React.useRef(false)
+  useEffect(() => () => { goneRef.current = true }, [])
+
   const handleKey = useCallback(
     (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() },
     [onClose],
@@ -43,6 +60,17 @@ export function UpdateModal({ current, latest, lang, isCentral, isMember, onClos
         close: 'Fechar',
         copy: 'Copiar',
         copied: 'Copiado',
+        now: 'Atualizar agora',
+        confirmTitle: 'Atualizar agora?',
+        confirmBody: (v: string) =>
+          `Isto baixa a versão ${v} nesta máquina, substitui o binário e reinicia o serviço. A página recarrega sozinha quando ele voltar. As sessões em tmux não são afetadas.`,
+        confirmYes: 'Sim, atualizar',
+        confirmNo: 'Cancelar',
+        working: 'Atualizando — o servidor vai reiniciar…',
+        waiting: 'Esperando a máquina voltar…',
+        reloading: 'Recarregando com a versão nova…',
+        timedOut: 'A máquina não voltou a tempo. Ela pode ainda estar atualizando — recarregue em um minuto, ou use o comando abaixo.',
+        orByHand: 'Ou faça no terminal',
       }
     : {
         title: 'New version available',
@@ -61,7 +89,64 @@ export function UpdateModal({ current, latest, lang, isCentral, isMember, onClos
         close: 'Close',
         copy: 'Copy',
         copied: 'Copied',
+        now: 'Update now',
+        confirmTitle: 'Update now?',
+        confirmBody: (v: string) =>
+          `This downloads version ${v} on this machine, replaces the binary and restarts the service. The page reloads itself once it is back. Your tmux sessions are not affected.`,
+        confirmYes: 'Yes, update',
+        confirmNo: 'Cancel',
+        working: 'Updating — the server is about to restart…',
+        waiting: 'Waiting for the machine to come back…',
+        reloading: 'Reloading on the new version…',
+        timedOut: 'The machine did not come back in time. It may still be upgrading — reload in a minute, or use the command below.',
+        orByHand: 'Or do it in a terminal',
       }
+
+  /**
+   * Ask the machine to upgrade itself, then WATCH for it to come back.
+   *
+   * The route answers `started` and nothing else, because the process that would say "done" is the
+   * one the upgrade restarts — so every failed poll from here is the ordinary case and is ignored
+   * until the ceiling. When the version it names is the one we asked for, the service worker and
+   * its caches are emptied and the page reloads: the programmatic form of the ctrl+shift+R this
+   * release flow has needed every single time.
+   */
+  const start = useCallback(async () => {
+    setPhase('running')
+    setNote(t.working)
+    try {
+      const res = await fetch(`/api/upgrade?lang=${lang === 'pt' ? 'pt' : 'en'}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({})) as { ok?: boolean; message?: string }
+      if (!res.ok || !body.ok) {
+        // The server's OWN sentence: it knows which of the four refusals this is.
+        setPhase('refused')
+        setNote(body.message ?? t.timedOut)
+        return
+      }
+    } catch {
+      setPhase('refused')
+      setNote(t.timedOut)
+      return
+    }
+
+    setNote(t.waiting)
+    const until = Date.now() + UPGRADE_WAIT_MS
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, UPGRADE_POLL_MS))
+      if (goneRef.current) return
+      // `no-store`: the one request that must not be answered by the very cache being replaced.
+      const info = await fetch('/api/version', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() as Promise<{ current?: string }> : null)
+        .catch(() => null)
+      if (!upgradeArrived(info, latest)) continue
+      setNote(t.reloading)
+      await clearAppCaches(browserReloadEnv())
+      window.location.reload()
+      return
+    }
+    setPhase('timeout')
+    setNote(t.timedOut)
+  }, [lang, latest, t])
 
   return (
     <div
@@ -130,13 +215,90 @@ export function UpdateModal({ current, latest, lang, isCentral, isMember, onClos
           <VersionPill label={t.latest} version={latest} accent="var(--accent-green)" />
         </div>
 
+        {/* UPDATE NOW — the whole point is that nobody has to open a terminal for this. It is
+            ABSENT on a central (its upgrade is a compose rebuild, and `upgrade-gate.ts` refuses the
+            route there anyway) and it ASKS before running: this downloads and executes a binary and
+            restarts the service serving the page. */}
+        {!isCentral && (
+          <div style={{ padding: '0 24px 16px' }}>
+            {phase === 'idle' && (
+              <button
+                onClick={() => setPhase('confirm')}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  width: '100%', minHeight: 44, borderRadius: 10, border: 'none', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700,
+                  background: 'var(--anthropic-orange)', color: '#fff',
+                }}
+              >
+                <ArrowUpCircle size={16} />
+                {t.now}
+              </button>
+            )}
+
+            {phase === 'confirm' && (
+              <div style={{
+                background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: 10, padding: '14px 16px',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  {t.confirmTitle}
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.6 }}>
+                  {t.confirmBody(latest)}
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={start}
+                    style={{
+                      minHeight: 44, padding: '0 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                      background: 'var(--anthropic-orange)', color: '#fff',
+                    }}
+                  >
+                    {t.confirmYes}
+                  </button>
+                  <button
+                    onClick={() => setPhase('idle')}
+                    style={{
+                      minHeight: 44, padding: '0 16px', borderRadius: 8, cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    {t.confirmNo}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* A REFUSAL IS THE SERVER'S OWN SENTENCE, shown verbatim — the route knows whether this
+                profile has host power, whether this is a central and whether one is already
+                running, and a generic "could not update" would name none of them. */}
+            {(phase === 'running' || phase === 'refused' || phase === 'timeout') && (
+              <div
+                role="status"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 12, lineHeight: 1.6,
+                  color: phase === 'running' ? 'var(--text-secondary)' : 'var(--accent-red)',
+                }}
+              >
+                {phase === 'running' && <Loader2 size={14} className="ag-spin" />}
+                <span>{note}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* How to update */}
         <div style={{ padding: '0 24px 24px' }}>
           <div style={{
             fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
             letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 14,
           }}>
-            {t.howTo}
+            {isCentral ? t.howTo : t.orByHand}
           </div>
 
           {isCentral ? (

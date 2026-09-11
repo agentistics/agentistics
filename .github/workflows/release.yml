@@ -210,9 +210,32 @@ jobs:
           mkdir -p release
           bun build --compile packages/server/bin/cli.ts --outfile ./release/agentop
 
+      # Alpine and other musl-based distros have no glibc dynamic linker at all — the glibc binary
+      # above fails there with a bare "not found" that names no missing library (the kernel is
+      # looking for /lib64/ld-linux-x86-64.so.2, which does not exist, and the shell reports that
+      # ENOENT as though the file itself were missing). install.sh picks between the two by
+      # checking `ldd --version` for "musl". Cross-compiled from this same glibc runner — Bun
+      # downloads the musl runtime for the target rather than needing one installed here.
+      - name: Compile musl binary (cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile ./release/agentop-musl
+
       - name: Compile Windows binary (cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun build --compile --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop.exe
+
+      # Same cross-compile pattern as the musl and Windows binaries above — Bun downloads the
+      # macOS runtime for each target rather than needing a macOS machine to build on. TWO
+      # binaries because Apple Silicon and Intel Macs are different architectures with no
+      # universal fallback the way glibc/musl share one ISA; install.sh picks between them off
+      # `uname -m`.
+      - name: Compile macOS binary (Intel, cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-x64
+
+      - name: Compile macOS binary (Apple Silicon, cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-arm64
 
       - name: Upload Windows binary artifact
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
@@ -225,6 +248,41 @@ jobs:
       - name: Smoke test
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: ./release/agentop --help
+
+      # The runner itself is glibc, so the musl binary cannot be exec'd directly here — it needs an
+      # actual musl system. Alpine via Docker is the cheapest one, and it is also where the binary
+      # needs libstdc++/libgcc (verified by hand: Bun's own runtime links them even in its musl
+      # build, and Alpine's base image ships neither) — installing them here doubles as a check
+      # that install.sh's own musl branch names the right packages.
+      - name: Smoke test (musl)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: |
+          docker run --rm -v "$(pwd)/release:/release:ro" alpine:latest sh -c '
+            apk add --no-cache libstdc++ libgcc >/dev/null &&
+            cp /release/agentop-musl /tmp/agentop-musl &&
+            chmod +x /tmp/agentop-musl &&
+            /tmp/agentop-musl --help
+          '
+
+      # This runner is glibc/x86_64 Linux and can execute neither macOS binary — there is no
+      # emulator here the way Docker gave the musl binary a real place to run. What CAN be
+      # verified without a macOS machine is that Bun actually produced two DIFFERENT, genuine
+      # Mach-O executables rather than, say, two copies of the same file or a truncated download:
+      # `file` reads the Mach-O magic bytes and reports the architecture it finds. This is a
+      # header check, not a functional smoke test — it would not catch a binary that starts and
+      # then crashes. A real run needs a `runs-on: macos-latest` job, which this repo does not
+      # have yet.
+      - name: Verify macOS binaries (Mach-O header check — not a functional test)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: |
+          for f in ./release/agentop-darwin-x64 ./release/agentop-darwin-arm64; do
+            echo "== $f =="
+            file "$f"
+          done
+          file ./release/agentop-darwin-x64   | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-x64 is not a Mach-O binary"; exit 1; }
+          file ./release/agentop-darwin-arm64 | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-arm64 is not a Mach-O binary"; exit 1; }
+          file ./release/agentop-darwin-x64   | grep -qi 'x86_64' || { echo "::error::agentop-darwin-x64 is not x86_64"; exit 1; }
+          file ./release/agentop-darwin-arm64 | grep -qi 'arm64'  || { echo "::error::agentop-darwin-arm64 is not arm64"; exit 1; }
 
       - name: Generate changelog
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
@@ -318,12 +376,15 @@ jobs:
           # failure at the first step. Upload into it instead when it is already there.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists — uploading the binaries into it"
-            gh release upload "$TAG" ./release/agentop ./release/agentop.exe $VSIX --clobber
+            gh release upload "$TAG" ./release/agentop ./release/agentop-musl ./release/agentop-darwin-x64 ./release/agentop-darwin-arm64 ./release/agentop.exe $VSIX --clobber
           else
             gh release create "$TAG" \
               --title "v${VERSION}" \
               --notes-file /tmp/release-notes.md \
               ./release/agentop \
+              ./release/agentop-musl \
+              ./release/agentop-darwin-x64 \
+              ./release/agentop-darwin-arm64 \
               ./release/agentop.exe \
               $VSIX
           fi
@@ -347,6 +408,9 @@ jobs:
             --title "Latest build ($(date -u +'%Y-%m-%d %H:%M UTC'))" \
             --notes-file /tmp/release-notes.md \
             ./release/agentop \
+            ./release/agentop-musl \
+            ./release/agentop-darwin-x64 \
+            ./release/agentop-darwin-arm64 \
             ./release/agentop.exe \
             $VSIX
 

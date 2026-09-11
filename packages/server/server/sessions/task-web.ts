@@ -384,6 +384,11 @@ export async function addSubtask(ref: string, title: string): Promise<boolean> {
  * `done` is never taken from the caller — it is derived from `status`, because two fields for one
  * fact drift and a row reading `done: false, status: 'done'` has no correct interpretation. A
  * caller that ticks the box sends `status: 'done'`; one that moves the status gets the tick free.
+ *
+ * A move INTO `done` requires a session filed under this specific subtask — see
+ * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §A.2. The guard is
+ * `found.status !== 'done'`: a patch that is not actually a transition into `done` (editing the due
+ * date of an already-done subtask) must not re-trigger it.
  */
 export async function patchSubtask(subtaskId: string, patch: {
   title?: string
@@ -395,11 +400,15 @@ export async function patchSubtask(subtaskId: string, patch: {
   notes?: string
   /** Sanitized against this subtask's OWN siblings — see `sanitizeSubtaskBlockedBy`. */
   blockedBy?: string[]
-}): Promise<boolean> {
+}): Promise<{ ok: true } | { ok: false; message: 'no_such_subtask' | 'done_needs_session' }> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
-  if (!found) return false
+  if (!found) return { ok: false, message: 'no_such_subtask' }
   const status = patch.status ?? found.status
+  if (status === 'done' && found.status !== 'done') {
+    const hasSession = w.rows.some(r => r.subtaskId === subtaskId)
+    if (!hasSession) return { ok: false, message: 'done_needs_session' }
+  }
   await w.store.upsertSubtask({
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
@@ -419,7 +428,7 @@ export async function patchSubtask(subtaskId: string, patch: {
     } : {}),
     updatedAt: new Date().toISOString(),
   })
-  return true
+  return { ok: true }
 }
 
 export async function removeSubtask(subtaskId: string): Promise<boolean> {
@@ -431,7 +440,9 @@ export async function removeSubtask(subtaskId: string): Promise<boolean> {
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<boolean> {
+export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
+  { ok: true } | { ok: false; message: 'no_such_subtask' | 'done_needs_session' }
+> {
   return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' })
 }
 
@@ -701,6 +712,20 @@ export async function markTask(
       })
     }
   }
+  /*
+   * `done` requires a session filed under the task — same shape as `blocked_needs_reason` above,
+   * checked BEFORE the write so it binds the browser, the CLI and the MCP alike. `rowsOfTask`
+   * counts a session ANYWHERE under the task — filed directly, or under any of its subtasks,
+   * regardless of `subtaskId` — so this one check is correct for a task with subtasks, without
+   * subtasks, or a mix, with no new counting logic (see
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §A.3). The guard is
+   * `task.status !== 'done'`: a move that is not actually a transition into `done` (re-marking an
+   * already-done task) must not re-trigger it. Computed once and reused below for the
+   * delivery-evidence block, rather than calling `rowsOfTask` a second time.
+   */
+  const mine = to === 'done' && task.status !== 'done' ? rowsOfTask(task, w.rows) : undefined
+  if (mine && mine.length === 0) return { ok: false, message: 'done_needs_session' }
+
   // `done` is the ONE status that stamps a delivery. Every other move is a change of where the work
   // stands, and stamping one of those would close rounds-to-delivery on work that is not delivered.
   const done = to === 'done'
@@ -743,8 +768,8 @@ export async function markTask(
 
   if (!done) return { ok: true }
 
-  const mine = rowsOfTask(task, w.rows)
-  const dirs = [...new Set(mine.map(r => r.cwd).filter(Boolean))]
+  const rows = mine ?? rowsOfTask(task, w.rows)
+  const dirs = [...new Set(rows.map(r => r.cwd).filter(Boolean))]
   const bySha = new Map<string, { sha: string; message: string; atMs: number }>()
   for (const dir of dirs) {
     // Deduped by sha: two sessions of one task routinely share a checkout, and the same commit read

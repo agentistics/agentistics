@@ -36,14 +36,34 @@ export interface SessionFactsProps {
    */
   onFile?: () => void
   lang?: 'pt' | 'en'
+  /**
+   * Overrides the meta line's state-word color only — set by the Sessions aside's "neutral
+   * background" card-color mode. The rest of the meta line (harness, model, delivery chip) keeps
+   * its own colors regardless. Absent keeps the current wants-driven color on the state word
+   * (orange when the session wants a person, tertiary otherwise), which is what the collapsed
+   * rail's tooltip still gets: this is a Sessions-aside preference, not a fact about the row itself.
+   */
+  metaColor?: string
 }
 
-export function SessionFacts({ session, selected = false, onFile, lang = 'en' }: SessionFactsProps) {
+export function SessionFacts({ session, selected = false, onFile, lang = 'en', metaColor }: SessionFactsProps) {
   const wants = sessionNotify(session)
   return (
-    <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* The DELIVERY's name, read above the title rather than folded into the meta line below —
+          the meta line's Bookmark segment (onFile) still does the filing gesture; this is purely
+          about where the name is READ. */}
+      {session.task && (
+        <span style={{
+          fontSize: 9.5, color: 'var(--text-tertiary)', fontWeight: 600,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {session.task}
+        </span>
+      )}
       <span style={{
-        fontSize: 12.5, fontWeight: selected || wants ? 650 : 500,
+        fontSize: session.task ? 13.5 : 12.5,
+        fontWeight: (selected || wants ? 650 : 500) + (session.task ? 50 : 0),
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
         {session.title}
@@ -52,7 +72,7 @@ export function SessionFacts({ session, selected = false, onFile, lang = 'en' }:
         display: 'flex', alignItems: 'center', gap: 5, minWidth: 0,
         fontSize: 10.5, color: wants ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
       }}>
-        <span style={{ flexShrink: 0 }}>{session.stateLabel}</span>
+        <span style={{ flexShrink: 0, color: metaColor }}>{session.stateLabel}</span>
         <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
         <span style={{
           color: (HARNESS_COLORS as Record<string, string>)[session.harness] ?? 'var(--text-tertiary)',

@@ -28,7 +28,7 @@ import { sessionPath } from '../../lib/sessionRoute'
  *
  * Only the ACTIVE states are marked. A dot on every row is a rail with no contrast left, and the
  * point of the marker is that the handful of sessions doing something stand out from the history
- * under them — the same reasoning `STATE_WASH` records for the open list.
+ * under them — the same reasoning `sessionCardStyle.ts` records for the open list.
  */
 function stateDot(state: string): string | null {
   if (state === 'waiting' || state === 'waiting-approval') return 'var(--anthropic-orange)'

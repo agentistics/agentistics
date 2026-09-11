@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 import { inputWsUrl, streamUrl, type TerminalScope } from './terminalEndpoint'
 
 describe('a scope decides which route a terminal talks to', () => {
@@ -31,6 +31,29 @@ describe('a scope decides which route a terminal talks to', () => {
     for (const s of scopes) {
       expect(streamUrl(s, 'i')).toStartWith('/api/')
       expect(inputWsUrl(s, 'i', 'http:', 'h')).toStartWith('ws://')
+    }
+  })
+})
+
+describe('the geometry a stream may open with', () => {
+  test('is absent unless the caller has one', () => {
+    expect(streamUrl('shell', 's1')).toBe('/api/shell/stream?id=s1')
+  })
+
+  test('rides the stream URL, so the pane is already the right size on the FIRST frame', () => {
+    // Without it the first capture is whatever width the pane was left at by the last viewer, and
+    // the band visibly snaps a moment later. The numbers are the box's own last measurement.
+    expect(streamUrl('shell', 's1', { cols: 144, rows: 13 }))
+      .toBe('/api/shell/stream?id=s1&cols=144&rows=13')
+  })
+
+  test('a geometry that is not a pair of positive whole numbers is left off entirely', () => {
+    for (const g of [
+      { cols: 0, rows: 13 }, { cols: 144, rows: 0 },
+      { cols: -1, rows: 13 }, { cols: 1.5, rows: 13 },
+      { cols: Number.NaN, rows: 13 }, { cols: 144, rows: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(streamUrl('shell', 's1', g), JSON.stringify(g)).toBe('/api/shell/stream?id=s1')
     }
   })
 })

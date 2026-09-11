@@ -2719,10 +2719,19 @@ harness must not break.
 - **Binary mode**: `agentop server` sets `SERVE_STATIC=1`; `index.ts` then binds **two ports with one shared request handler** — `PORT` (47291) is the api + mcp endpoint, `WEB_PORT` (47292) serves the web dashboard (the URL you open). Same handler → the SPA on 47292 makes same-origin `/api/*` calls that resolve locally, so 91 stays api+mcp and 92 is the dashboard. The startup log lists `web` (92) above `api` (91)
 - **Machine in Docker**: `docker/machine.yml` runs a solo/member machine in a container — reuses the central image (minus Mongo/central mode), mounts the host harness dirs read-only + `~/.agentistics` read-write, host networking. Offered as the `docker` option in the control center's Services tab. Run the machine in Docker **or** natively, never both
 - **Live sessions are host-process detection, and every layer must stay honest about it.**
-  `live-sessions.ts` reads `/proc` on the machine serving the request; a central never does this
-  for members (it has no visibility into them) — members report their own snapshot over the
-  reverse-channel WebSocket, filtered by that connection's sharing rules exactly like their
-  metrics, so **a repository a member withholds does not appear on the central either**. Rules:
+  `live-sessions.ts` reads the machine's own process list on Linux (`/proc`) and macOS (`ps` +
+  `lsof`, via `macos-processes.ts` pure parsers + `macos-processes-io.ts` IO — no `/proc`
+  equivalent exists there); a central never does this for members (it has no visibility into
+  them) — members report their own snapshot over the reverse-channel WebSocket, filtered by that
+  connection's sharing rules exactly like their metrics, so **a repository a member withholds
+  does not appear on the central either**. Rules:
+  - **The macOS reader has a STATED LIMIT this repo's other readers don't carry: it was written
+    against `ps`/`lsof`'s documented output shapes, never measured against a live Mac** (no macOS
+    machine was available when it was built). Its own header names the two consequences —
+    `command=`'s space-joined argv cannot distinguish an argument containing a space from two
+    arguments, and `comm=` is assumed to print the full executable path the way it does for an
+    ordinary (non-app) process there, unlike Linux's kernel-truncated 15-character `comm`. Verify
+    against a real Mac before trusting it the way the Linux path is trusted.
   - **A process cwd is matched against `sessionAtCwd`, which accepts EITHER `current_cwd` or
     `project_path` — never `sessionCwd()`.** The two disagree precisely in the worktree case this
     repo mandates: `claude` is launched at the repo root and its kernel cwd stays there, while the
@@ -2730,7 +2739,8 @@ harness must not break.
     NEITHER end and reported every session closed. It stays EXACT on both paths — a prefix test
     would let a process in `$HOME` claim every session on the machine.
   - **An empty list is never rendered as a zero when detection is impossible.** `scanProcesses`
-    returns a `LiveUnavailableReason` (not Linux, no `/proc`, a container that cannot see the host,
+    returns a `LiveUnavailableReason` (an unsupported platform — neither Linux nor macOS, so
+    Windows — an unreadable `/proc` or a failed `ps`/`lsof`, a container that cannot see the host,
     one whose uid cannot read a host cwd, or the capability being off) and `liveEmptyNotice`
     (`web/src/lib/sessionLive.ts`, pure, EN+PT) is the ONE place that turns it into a sentence —
     the same N/A-versus-a-confident-0 rule `HARNESS_CAPABILITIES` applies to metrics.
@@ -2739,12 +2749,19 @@ harness must not break.
     assistants run as the host user. `docker/machine.yml` sets `pid: host` and documents
     the `user:` line as a deliberate opt-in that trades the hardening for the feature.
     `docker/central.yml` (the central) deliberately has NO `pid: host` — its own processes are not
-    what anyone is asking about.
-  - **The /proc read is gated by `CAPS.localProcesses` inside the handler** (`readLocalLiveSnapshot`
-    in `index.ts`), NOT by registering the path in `capability-guard.ts`: `/api/live-sessions` also
-    carries the members' self-reported snapshots on a central, and a blanket 403 would take the
-    central's "Open now" down with the host read. `capability-guard.test.ts` pins that exemption
-    and asserts the module has exactly one import site.
+    what anyone is asking about. (Docker on macOS runs a Linux VM, so this container path is
+    Linux-only regardless of the host OS — it is not how the native macOS reader is exercised.)
+  - **The process read is gated by `CAPS.localProcesses` inside the handler**
+    (`readLocalLiveSnapshot` in `index.ts`), NOT by registering the path in `capability-guard.ts`:
+    `/api/live-sessions` also carries the members' self-reported snapshots on a central, and a
+    blanket 403 would take the central's "Open now" down with the host read.
+    `capability-guard.test.ts` pins that exemption and asserts the module has exactly one import
+    site.
+  - **`mcp-admin.ts`'s separate `/proc` reader (for MCP server processes, matched on argv rather
+    than being a harness) stays Linux-only on purpose** — it answers `'unsupported-platform'`
+    directly on macOS rather than through `detectionUnavailable`'s darwin branch, which now
+    describes `live-sessions.ts`'s own `ps`/`lsof` reader and would otherwise claim a tool this
+    reader never runs failed.
 - **`packages/server/server/embedded-dist.generated.ts`** is in `.gitignore` — auto-generated, never commit it
 - **`packages/server/` modules** are server-only — never import them from `packages/web/src/` (Vite would try to bundle them and fail on Node/Bun APIs)
 - **`@agentistics/core`** is the shared package — import types, pricing, and formatters from there; never duplicate them inline

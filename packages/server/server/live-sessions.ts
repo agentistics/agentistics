@@ -315,18 +315,21 @@ export function harnessOfProcess(
  */
 export function detectionUnavailable(o: {
   platform: string
+  /** Whether this platform's own process source could be read at all: Linux's /proc, or macOS's
+   *  `ps`/`lsof` pair. */
   procReadable: boolean
   /** Processes visible besides this one's own. A container without `pid: host` sees only itself. */
   foreignPids: number
-  /** A process was identified as a harness but its cwd link could not be read. */
+  /** A process was identified as a harness but its cwd could not be read. */
   cwdDenied: boolean
 }): LiveUnavailableReason | null {
-  if (o.platform !== 'linux') return 'not-linux'
-  if (!o.procReadable) return 'no-proc'
+  if (o.platform !== 'linux' && o.platform !== 'darwin') return 'unsupported-platform'
+  if (!o.procReadable) return o.platform === 'darwin' ? 'no-ps' : 'no-proc'
   if (o.foreignPids === 0) return 'container-isolated'
-  // Reading `/proc/<pid>/cwd` of another user's process needs a matching uid or CAP_SYS_PTRACE.
-  // The container image runs as uid 10001 while the host user is typically 1000, so `pid: host`
-  // on its own yields a full process list whose cwds are all unreadable.
+  // Reading another user's process cwd needs a matching uid (Linux: or CAP_SYS_PTRACE; macOS:
+  // `lsof` refuses another user's open files outright without root). The container image runs as
+  // uid 10001 while the host user is typically 1000, so `pid: host` on its own yields a full
+  // process list whose cwds are all unreadable.
   if (o.cwdDenied) return 'permission-denied'
   return null
 }
@@ -440,12 +443,53 @@ export function sessionIdFromArgv(argv: string[]): string | undefined {
   return undefined
 }
 
-/** Read every running harness process (Linux /proc only): which harness it is, its cwd, the session
- *  it resumed when argv says so, and when it started. [] on non-Linux hosts or unreadable /proc. */
+/**
+ * The macOS scan, overlaid with the same `harness-sessions.ts` index the Linux path reads —
+ * Claude Code's own `~/.claude/sessions/<pid>.json` is a plain file, not a `/proc` read, so it is
+ * exactly as available here. It is the STRONGEST identity signal (the harness's own record for
+ * this pid), so it OVERWRITES the argv/fd-derived id `scanMacProcesses` already filled in, never
+ * only patching a gap — matching the `??` chain's priority order in the Linux branch below.
+ *
+ * A dynamic import, not a static one: `macos-processes-io.ts` imports several pure helpers back
+ * out of THIS module (`harnessOfProcess`, `sessionIdFromArgv`, `sessionIdFromFdPaths`), and a
+ * static two-way import between the files is the shape of bug a build tool resolves inconsistently
+ * depending on which side loads first — the same reason `harness-sessions` is imported this way
+ * a few lines below.
+ */
+async function scanMacProcessesWithHarnessIndex(): Promise<{
+  procs: HarnessProcess[]
+  unavailable: LiveUnavailableReason | null
+}> {
+  const { scanMacProcesses } = await import('./macos-processes-io')
+  const result = scanMacProcesses()
+  if (result.psFailed) return { procs: [], unavailable: 'no-ps' }
+
+  try {
+    const { loadHarnessSessions } = await import('./sessions/harness-sessions')
+    const harnessIndex = await loadHarnessSessions()
+    for (const p of result.procs) {
+      if (p.pid === undefined) continue
+      const rec = harnessIndex.byPid.get(p.pid)
+      if (rec?.sessionId) p.sessionId = rec.sessionId
+    }
+  } catch { /* best-effort, same as the Linux path */ }
+
+  const unavailable = result.procs.length > 0
+    ? null
+    : detectionUnavailable({
+      platform: 'darwin', procReadable: true, foreignPids: result.foreignPids, cwdDenied: result.cwdDenied,
+    })
+  return { procs: result.procs, unavailable }
+}
+
+/** Read every running harness process (Linux /proc, macOS `ps`+`lsof`): which harness it is, its
+ *  cwd, the session it resumed when argv says so, and when it started. [] on any other platform,
+ *  or when this platform's own process source could not be read. */
 export async function scanProcesses(): Promise<{
   procs: HarnessProcess[]
   unavailable: LiveUnavailableReason | null
 }> {
+  if (process.platform === 'darwin') return scanMacProcessesWithHarnessIndex()
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }

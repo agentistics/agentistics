@@ -39,7 +39,7 @@ test('isLive true within threshold, false outside', () => {
 // --- what an empty "Open now" is allowed to claim ------------------------------------------------
 
 const ALL_REASONS: LiveUnavailableReason[] =
-  ['not-linux', 'no-proc', 'container-isolated', 'permission-denied', 'capability-off']
+  ['unsupported-platform', 'no-proc', 'no-ps', 'container-isolated', 'permission-denied', 'capability-off']
 
 test('a non-empty panel says nothing', () => {
   expect(liveEmptyNotice({ count: 1, lang: 'en' })).toBeNull()
@@ -70,7 +70,7 @@ test('every impossible configuration explains itself in both languages, and none
   }
   // Guards the loop: a reason added to the union without copy must fail here, not pass silently.
   expect(checked).toBe(ALL_REASONS.length)
-  expect(checked).toBe(5)
+  expect(checked).toBe(6)
 })
 
 test('a central explains the member channel instead of its own host', () => {

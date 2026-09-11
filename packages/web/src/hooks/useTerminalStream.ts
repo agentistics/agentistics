@@ -49,8 +49,21 @@ export interface TerminalStream {
   reconnect: () => void
 }
 
-export function useTerminalStream(id: string | null, scope: TerminalScope = 'fleet'): TerminalStream {
+/**
+ * @param want the geometry this reader's box holds, stated ONCE when the stream opens so the pane is
+ *   already the right size on the first frame (`terminalEndpoint.ts` carries the why). It is read
+ *   through a ref and is deliberately NOT a dependency: it changes on every layout tick, and
+ *   re-opening an SSE stream for it would trade a quarter-second of wrong width for a reconnect per
+ *   animation frame. The steady-state answer is the debounced `POST .../resize`.
+ */
+export function useTerminalStream(
+  id: string | null,
+  scope: TerminalScope = 'fleet',
+  want?: { cols: number; rows: number },
+): TerminalStream {
   const [state, dispatch] = useReducer(terminalReducer, INITIAL_TERMINAL_STATE)
+  const wantRef = useRef(want)
+  wantRef.current = want
   // Bumped by reconnect() to force the effect to tear down and re-open, even for the same id.
   const [nonce, setNonce] = useState(0)
   const reconnect = useCallback(() => setNonce(n => n + 1), [])
@@ -64,7 +77,7 @@ export function useTerminalStream(id: string | null, scope: TerminalScope = 'fle
     // Fresh id → clear any previous session's frame before a single byte of the new one arrives.
     dispatch({ type: 'connecting' })
 
-    const es = new EventSource(streamUrl(scope, id))
+    const es = new EventSource(streamUrl(scope, id, wantRef.current))
 
     // Has this connection drawn anything yet? While false, a timeout or an error means the channel
     // never established — worth saying so. Once true, a drop is a transient blip: keep the screen and

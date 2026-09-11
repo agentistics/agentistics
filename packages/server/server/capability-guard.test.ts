@@ -23,6 +23,9 @@ const localCaps = capabilitiesFor('local', {
 describe('routeCapability', () => {
   it('maps the shell route', () => {
     expect(routeCapability('/api/exec')).toBe('localShell')
+    // It downloads a release binary, EXECUTES it and restarts the service serving the page. If
+    // this ever stops resolving, a published profile gains a remote code-execution button.
+    expect(routeCapability('/api/upgrade')).toBe('localShell')
   })
 
   it('maps the session fleet routes to localShell', () => {

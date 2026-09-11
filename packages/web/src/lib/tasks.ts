@@ -201,6 +201,12 @@ export interface Subtask {
    * this one. See `task-attach.ts`'s `planAttach` — the rule lives on the server; this is the fact.
    */
   blockedBy?: string[]
+  /**
+   * Subtasks that share a `groupId` are read as ONE bucket: a session filed under any member
+   * counts for all of them. Absent = not grouped — every subtask is its own group of one. See
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.2.
+   */
+  groupId?: string
 }
 export interface TaskFile {
   id: string; taskId: string; name: string; size: number

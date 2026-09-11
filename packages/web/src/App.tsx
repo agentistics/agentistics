@@ -103,6 +103,7 @@ import { PAGE_INSET, PAGE_MAX_WIDTH } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionStatsMenu } from './components/sessions/SessionStatsMenu'
+import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -1899,7 +1900,7 @@ export default function AppLayout() {
   // A CENTRAL's fleet is the RELAY's, for the machine the aside's picker chose. Set once, here,
   // because the poller is module-scoped and every surface reads the same snapshot.
   useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
-  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
+  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported, refresh: headerFleetRefresh } = useFleet(lang === 'pt' ? 'pt' : 'en')
   /**
    * "Active only" needs a fleet to intersect against, on EITHER page. An exposed profile with no
    * host power, or a central with no machine chosen, both report `unsupported` here — offering the
@@ -3060,6 +3061,15 @@ export default function AppLayout() {
           }}>
             {selectedFleetSession.title}
           </span>
+          <SessionTitleFlag
+            session={{
+              id: selectedFleetSession.id, title: selectedFleetSession.title,
+              ...(selectedFleetSession.harness ? { harness: selectedFleetSession.harness } : {}),
+              ...(selectedFleetSession.task ? { task: selectedFleetSession.task } : {}),
+            }}
+            lang={lang === 'pt' ? 'pt' : 'en'}
+            onLinked={headerFleetRefresh}
+          />
           {/* Gives up before the title does: the name is what identifies the session, and the state
               is repeated on its own row in the aside two centimetres away. */}
           <span style={{
@@ -3160,29 +3170,14 @@ export default function AppLayout() {
         }} />
       )}
 
-      {/* NOT ON A CENTRAL. The conversation is not relayed — the reverse channel's chat route
-          answers 410 — so a Chat tab there is a control that cannot do what it says, and choosing
-          it drops the reader back onto the same relayed screen with a sentence explaining that the
-          screen is all there is. The release note for this claimed the toggle was already withheld;
-          it was not, because the gate keys on `conversationBlind`, a MACHINE-LOCAL sentence that
-          `reduceMachineFleetRow` deliberately strips from the wire — so on a relayed row it is
-          always `undefined` and the tab was always offered. `isCentral` is the fact that decides
-          this, and it is the one the relay cannot lose. */}
-      {selectedFleetSession && !isCentral && selectedFleetSession.conversationBlind === undefined && (
-        <div role="tablist" style={{
-          display: 'flex', gap: 3, padding: 2, borderRadius: 9, flexShrink: 0,
-          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-        }}>
-          <Segment
-            on={sessionView === 'chat'} onClick={() => setSessionView('chat')}
-            icon={<MessagesSquare size={13} />} label={lang === 'pt' ? 'Conversa' : 'Chat'}
-          />
-          <Segment
-            on={sessionView === 'terminal'} onClick={() => setSessionView('terminal')}
-            icon={<TerminalSquare size={13} />} label="Terminal"
-          />
-        </div>
-      )}
+      {/* THE `Conversa | Terminal` TOGGLE IS GONE FROM THE HEADER, and its absence is the design.
+          A SESSION OPENS ON ITS CONVERSATION — that is what a session is — and the terminals are
+          reached from the BAND at the foot of the panel, which offers both of them BY NAME
+          (`Claude Code` and `Shell`). What this toggle did was ask "which view" in a second place
+          and a second vocabulary, while the band underneath asked "which terminal" in a third; a
+          reader had to hold all of it to answer one question. The band is now the one door, and the
+          dedicated screen the one full-page view. `sessionView` survives for the routes that still
+          name a view (a deep link, the reopen flow); nothing on screen sets it any more. */}
 
       {/* THE ARTIFACTS BUTTON, beside the view tabs — the panel is a view OF this session, so it
           belongs with the two that already are.

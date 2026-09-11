@@ -26,7 +26,7 @@ describe('runText — the word "offline" is never used', () => {
   })
 
   it('turns every unavailability code into a sentence, and passes an unknown one through', () => {
-    for (const reason of ['not-linux', 'no-proc', 'container-isolated', 'permission-denied', 'capability-off']) {
+    for (const reason of ['unsupported-platform', 'no-proc', 'no-ps', 'container-isolated', 'permission-denied', 'capability-off']) {
       const d = runText({ state: 'unknown', reason }, false).detail!
       expect(d).not.toBe(reason)
       expect(d.length).toBeGreaterThan(10)
