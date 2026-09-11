@@ -238,4 +238,6 @@ Every change writes through `writeAsideGroupPrefs` immediately (no separate "sav
   in favor of `asideGroups`/`showsGroupHeadings`, adds `applyManualOrder` and the status word
   table)
 - `packages/web/src/components/nav/SessionsGroupMenu.tsx` — new
+- `packages/web/src/components/sessions/SessionFacts.tsx` — extended with an optional
+  `metaColor` override, for the `neutral` card-color mode's colored state word
 - `packages/web/src/components/nav/SessionsAside.tsx` — wires all of the above in
