@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSessionRegistry, newSessionId, retireFallenSessions } from './registry'
+import { createSessionRegistry, newSessionId, retireFallenSessions, retireSession } from './registry'
 
 let dir = ''
 let file = ''
@@ -247,6 +247,42 @@ describe('retireFallenSessions', () => {
     expect(current.find(s => s.id === 's1')?.endedAt).toBeDefined()
     expect(current.find(s => s.id === 's2')?.endedAt).toBeUndefined()
     expect(current.find(s => s.id === 's3')?.endedAt).toBeUndefined()
+  })
+})
+
+describe('retireSession', () => {
+  // `task-source.ts`'s `loadTaskWorld` reads task/subtask links ONLY from registry rows — see
+  // `retireSession`'s own docstring. `removeSession` on a filed session silently erased it (and its
+  // cost) from its task; a kill must keep the row and mark it ended instead, exactly like reopen
+  // already retires a predecessor rather than removing it.
+  it('marks the row ended rather than deleting it, keeping its task attribution', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), taskId: 't-1', subtaskId: 'st-1' })
+    await retireSession('a1', r)
+    const rows = await r.read()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.id).toBe('a1')
+    expect(rows[0]!.endedAt).toBeDefined()
+    expect(rows[0]!.taskId).toBe('t-1')
+    expect(rows[0]!.subtaskId).toBe('st-1')
+  })
+
+  // Planting the old defect (calling `remove` unconditionally instead of patching) makes this
+  // fail: the row disappears instead of surviving with `endedAt` set.
+  it('would fail this way if it removed instead of patched', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), taskId: 't-1' })
+    await retireSession('a1', r)
+    const rows = await r.read()
+    expect(rows.length).toBeGreaterThan(0) // a plain `remove(id)` would leave this empty
+  })
+
+  it('falls back to removing when the row cannot be patched at all', async () => {
+    // An id the registry never held: `patch` reports false and there is nothing left to keep, so
+    // the fallback runs — and, correctly, changes nothing observable either.
+    const r = createSessionRegistry(file)
+    await retireSession('ghost', r)
+    expect(await r.read()).toEqual([])
   })
 })
 

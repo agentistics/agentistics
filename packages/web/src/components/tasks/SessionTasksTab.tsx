@@ -24,6 +24,7 @@ import { boardCopy } from './copy'
 import { TaskComposer } from './TaskComposer'
 import { detachSession, useTaskDetail, useTaskList } from '../../lib/tasks'
 import { DeliveryDetail } from './DeliveryDetail'
+import { SubtaskDetail } from './SubtaskDetail'
 import { SessionFiling } from './SessionFiling'
 import { BetaTag } from '../BetaTag'
 
@@ -66,15 +67,21 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
   const refresh = async () => { await reload(); await reloadDetail(); p.onChanged?.() }
 
   /**
-   * The PART this session sits in, by name.
+   * The PART this session sits in, resolved to the SUBTASK itself rather than just its title.
    *
    * Read off the delivery's own session rows rather than from anything the fleet carries: the
    * fleet knows the delivery (that is the badge on the row) and nothing about which subtask, and
    * inventing one from the first subtask would name a part nobody chose.
+   *
+   * The full `Subtask` (not merely its title) is what lets the panel below render a SUBTASK-scoped
+   * view (`SubtaskDetail`) instead of the task-wide `DeliveryDetail` — see
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §C.5. Showing the task's own
+   * status/priority/dates and its whole-delivery evidence numbers next to a session that only ever
+   * touched one piece of the work is the exact bug that fix exists to close.
    */
   const here = useMemo(() => {
     const sub = detail?.sessions.find(r => r.id === p.session.id)?.subtaskId
-    return sub ? detail?.subtasks.find(t => t.id === sub)?.title : undefined
+    return sub ? detail?.subtasks.find(t => t.id === sub) : undefined
   }, [detail, p.session.id])
 
   const unlink = async () => {
@@ -103,7 +110,7 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
                 <span style={{ flex: 1 }} />
                 {here && (
                   <span style={{ ...pill(), fontSize: 10 }}>
-                    {pt ? 'na parte' : 'in'} {here}
+                    {pt ? 'na parte' : 'in'} {here.title}
                   </span>
                 )}
               </div>
@@ -132,16 +139,30 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
               </div>
             </div>
 
-            {/* THE DELIVERY ITSELF — the same component the board's own page draws. */}
+            {/* THE DELIVERY ITSELF — the same component the board's own page draws, unless this
+                session is filed under one specific SUBTASK, where the honest numbers are that
+                subtask's own slice rather than the whole task's — see §C.5. */}
             {detail
               ? (
-                <DeliveryDetail
-                  id={detail.task.id}
-                  detail={detail}
-                  lang={p.lang}
-                  reload={refresh}
-                  dense
-                />
+                here
+                  ? (
+                    <SubtaskDetail
+                      taskId={detail.task.id}
+                      subtask={here}
+                      detail={detail}
+                      lang={p.lang}
+                      reload={refresh}
+                    />
+                  )
+                  : (
+                    <DeliveryDetail
+                      id={detail.task.id}
+                      detail={detail}
+                      lang={p.lang}
+                      reload={refresh}
+                      dense
+                    />
+                  )
               )
               : (
                 <div style={{ ...surface, padding: 12, fontSize: 12, color: 'var(--text-tertiary)' }}>

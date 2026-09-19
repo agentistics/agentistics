@@ -15,6 +15,16 @@ describe('chatNote', () => {
     expect(chatNote('background task reported back', false).tab).toBe('agents')
     expect(chatNote('a skill was loaded', false).tab).toBe('skills')
     expect(chatNote('an image was attached', false).tab).toBe('gallery')
+    expect(chatNote('the assistant viewed an image', false).tab).toBe('gallery')
+  })
+
+  it('an attachment and a VIEWED image read as different facts, not the same chip twice', () => {
+    // The reported bug: both said "uma imagem foi anexada", which is false for a Read the assistant
+    // did on its own — nobody attached anything, and its arrow opened a Gallery with nothing in it.
+    const attached = chatNote('an image was attached', true)
+    const viewed = chatNote('the assistant viewed an image', true)
+    expect(attached.label).not.toBe(viewed.label)
+    expect(viewed.label).toBe('o assistente abriu uma imagem')
   })
 
   it('does NOT send a command note to a feed of hundreds with no step to land on', () => {

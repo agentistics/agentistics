@@ -54,6 +54,101 @@ export interface ActiveTimeResult {
 }
 
 /**
+ * The running total of a walk over `TurnEvent`s — everything `computeActiveTime` needs to carry
+ * from one event to the next, and nothing else.
+ *
+ * It is a separate type because this walk has to be RESUMABLE. A live transcript is read in
+ * pieces as its session writes it (see `transcript-cursor.ts`), and the alternative — keeping every
+ * event of the session so the whole array can be re-walked — is one object per timestamped line
+ * held for as long as the session runs. There is nothing to keep: the fold below reads each event
+ * once and forgets it.
+ */
+export interface ActiveTimeState {
+  totalMs: number
+  turns: number
+  measuredTurns: number
+  /** Whether any event carried a usable timestamp — the difference between `0` and `undefined`. */
+  sawTime: boolean
+  /** When the open turn began, or null when none is open. */
+  turnStart: number | null
+  /** The last usable timestamp seen. A turn closes HERE, not at the prompt that starts the next. */
+  last: number | null
+}
+
+/** A walk that has seen nothing. */
+export function emptyActiveTime(): ActiveTimeState {
+  return { totalMs: 0, turns: 0, measuredTurns: 0, sawTime: false, turnStart: null, last: null }
+}
+
+/**
+ * Advance `state` over `events`, in transcript order. Mutates `state`; returns nothing.
+ *
+ * This is the body of the loop `computeActiveTime` has always run — the rule itself is stated in
+ * this file's header and is unchanged. It deliberately does NOT close the open turn: whether more
+ * events are coming is the caller's knowledge, and closing early would end a turn at the last line
+ * that happened to be written when a poll landed.
+ */
+export function foldActiveTime(state: ActiveTimeState, events: Iterable<TurnEvent>): void {
+  for (const e of events) {
+    const ts = Number.isFinite(e.ts) ? e.ts : NaN
+    // `last` is advanced AFTER the branches below: a turn must be closed at the last event of that
+    // turn, not at the prompt that starts the next one — otherwise every idle gap is counted back in.
+    if (!Number.isNaN(ts)) state.sawTime = true
+
+    if (typeof e.measuredMs === 'number' && Number.isFinite(e.measuredMs) && e.measuredMs >= 0) {
+      // The harness measured this turn. Its number replaces anything we would reconstruct — but
+      // only when a turn is actually open, so a stray metric line can't invent a turn.
+      if (state.turnStart !== null) {
+        state.totalMs += e.measuredMs
+        state.turns++
+        state.measuredTurns++
+        state.turnStart = null
+      }
+      if (!Number.isNaN(ts)) state.last = ts
+      continue
+    }
+
+    if (e.turnEnd && !Number.isNaN(ts)) {
+      if (state.turnStart !== null) {
+        state.totalMs += Math.max(0, ts - state.turnStart)
+        state.turns++
+        state.turnStart = null
+      }
+      state.last = ts
+      continue
+    }
+
+    if (e.userPrompt && !Number.isNaN(ts)) {
+      if (state.turnStart !== null && state.last !== null) {
+        state.totalMs += Math.max(0, state.last - state.turnStart)
+        state.turns++
+      }
+      state.turnStart = ts
+    }
+    if (!Number.isNaN(ts)) state.last = ts
+  }
+}
+
+/**
+ * The answer as of right now, WITHOUT ending the walk.
+ *
+ * The final turn ends at the last event seen — which for a running session is simply the newest
+ * line, exactly as the one-shot version has always treated the end of a file. `state` is left
+ * untouched so the same walk can be resumed when the session writes more; closing the turn in
+ * place would make the next fold count the time before it twice.
+ */
+export function finishActiveTime(state: ActiveTimeState): ActiveTimeResult {
+  let totalMs = state.totalMs
+  let turns = state.turns
+  if (state.turnStart !== null && state.last !== null) {
+    totalMs += Math.max(0, state.last - state.turnStart)
+    turns++
+  }
+  if (!state.sawTime) return { activeMinutes: undefined, turns: 0, measuredTurns: 0 }
+  return { activeMinutes: Math.round(totalMs / 60000), turns, measuredTurns: state.measuredTurns }
+}
+
+/**
  * Applies THE RULE above to one session's events.
  *
  * A `measuredMs` event closes the open turn with the harness's own number. A `userPrompt` closes
@@ -62,60 +157,9 @@ export interface ActiveTimeResult {
  * order can never subtract time.
  */
 export function computeActiveTime(events: TurnEvent[]): ActiveTimeResult {
-  let totalMs = 0
-  let turns = 0
-  let measuredTurns = 0
-  let sawTime = false
-  let turnStart: number | null = null
-  let last: number | null = null
-
-  for (const e of events) {
-    const ts = Number.isFinite(e.ts) ? e.ts : NaN
-    // `last` is advanced AFTER the branches below: a turn must be closed at the last event of that
-    // turn, not at the prompt that starts the next one — otherwise every idle gap is counted back in.
-    if (!Number.isNaN(ts)) sawTime = true
-
-    if (typeof e.measuredMs === 'number' && Number.isFinite(e.measuredMs) && e.measuredMs >= 0) {
-      // The harness measured this turn. Its number replaces anything we would reconstruct — but
-      // only when a turn is actually open, so a stray metric line can't invent a turn.
-      if (turnStart !== null) {
-        totalMs += e.measuredMs
-        turns++
-        measuredTurns++
-        turnStart = null
-      }
-      if (!Number.isNaN(ts)) last = ts
-      continue
-    }
-
-    if (e.turnEnd && !Number.isNaN(ts)) {
-      if (turnStart !== null) {
-        totalMs += Math.max(0, ts - turnStart)
-        turns++
-        turnStart = null
-      }
-      last = ts
-      continue
-    }
-
-    if (e.userPrompt && !Number.isNaN(ts)) {
-      if (turnStart !== null && last !== null) {
-        totalMs += Math.max(0, last - turnStart)
-        turns++
-      }
-      turnStart = ts
-    }
-    if (!Number.isNaN(ts)) last = ts
-  }
-
-  // The final turn ends at the last event of the transcript.
-  if (turnStart !== null && last !== null) {
-    totalMs += Math.max(0, last - turnStart)
-    turns++
-  }
-
-  if (!sawTime) return { activeMinutes: undefined, turns: 0, measuredTurns: 0 }
-  return { activeMinutes: Math.round(totalMs / 60000), turns, measuredTurns }
+  const state = emptyActiveTime()
+  foldActiveTime(state, events)
+  return finishActiveTime(state)
 }
 
 /** Convenience wrapper for adapters that only need the number. */

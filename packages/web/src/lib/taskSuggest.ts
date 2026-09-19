@@ -86,3 +86,23 @@ export function suggestDelivery(o: {
   if (!task) return null
   return { taskId: task.id, title: task.title, sameFolder: best.n }
 }
+
+/**
+ * Whether the delivery field should offer `suggestion` as a clickable HINT right now — and the
+ * whole reason this exists is what it does NOT do: it never returns a value to WRITE into the
+ * field. The wizard used to fill the field FROM the suggestion on an effect, which on resolving
+ * also seeded `subtaskTarget` — silently FILING the session under a delivery nobody had chosen.
+ * `initialTask`/`initialTaskId`, passed explicitly by a caller that already created the delivery,
+ * are a person's own choice made a moment earlier and are untouched by this — they seed `task`
+ * directly, never through a suggestion.
+ *
+ * Only worth showing while the field is still EMPTY: a hint for a different delivery once someone
+ * has typed or picked one of their own is noise, not help, and — because it is never written in —
+ * there is nothing here to "dismiss" any more. Clicking it is exactly the same act as picking it
+ * from `TaskPicker`.
+ */
+export function deliveryHint(
+  task: string, suggestion: DeliverySuggestion | null,
+): DeliverySuggestion | null {
+  return task === '' ? suggestion : null
+}

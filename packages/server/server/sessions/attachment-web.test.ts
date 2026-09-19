@@ -1,8 +1,63 @@
 import { describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 import {
-  ATTACHMENT_DIR, attachmentImageType, attachmentMediaType, attachmentPathByName, resolveAttachmentRead,
+  ATTACHMENT_DIR, attachmentImageType, attachmentMediaType, attachmentMessageOf, attachmentPathByName,
+  parseAttachmentLog, resolveAttachmentRead, resolveAttachmentReadReal,
 } from './attachment-web'
+
+describe('attachmentMessageOf — what one delivered message carried', () => {
+  const a = join(ATTACHMENT_DIR, '5990e2ad-image.png')
+  const b = join(ATTACHMENT_DIR, '950e5db0-shot.jpg')
+
+  it('records the stored image paths the message named, in order', () => {
+    // The shape `composeReply` builds: the paths on their own lines, then what was typed.
+    expect(attachmentMessageOf('conv', 7, `${a}\n${b}\n\nolha isso`))
+      .toEqual({ conversationId: 'conv', atMs: 7, paths: [a, b], images: 2 })
+  })
+
+  it('counts an image path it cannot serve, so the record is visibly short', () => {
+    expect(attachmentMessageOf('conv', 7, `${a}\n/home/me/Desktop/typed.png\nhi`))
+      .toEqual({ conversationId: 'conv', atMs: 7, paths: [a], images: 2 })
+  })
+
+  it('writes no record for a message with no image, or with no conversation to key it by', () => {
+    expect(attachmentMessageOf('conv', 7, 'just words, see diagram.png in the repo')).toBeNull()
+    expect(attachmentMessageOf('conv', 7, `${join(ATTACHMENT_DIR, 'c0847d8c-pasted.txt')}\nhere`)).toBeNull()
+    expect(attachmentMessageOf('', 7, `${a}\nhi`)).toBeNull()
+  })
+})
+
+describe('parseAttachmentLog', () => {
+  const log = [
+    // Uploads, keyed by the managed SESSION the upload route knew — as every line on disk today is.
+    JSON.stringify({ sessionId: 'ab407b77de', atMs: 1, path: '/s/old.png' }),
+    JSON.stringify({ sessionId: '196c9da3ef', atMs: 2, path: '/s/new.png' }),
+    // Messages, keyed by the CONVERSATION: one written before a reopen and one after share it.
+    JSON.stringify({ conversationId: 'b5e1c0eb', atMs: 3, paths: ['/s/m1.png'], images: 1 }),
+    JSON.stringify({ conversationId: 'b5e1c0eb', atMs: 4, paths: ['/s/m2.png', 7], images: 2 }),
+    JSON.stringify({ conversationId: 'other', atMs: 5, paths: ['/s/x.png'], images: 1 }),
+    '{ not json',
+    JSON.stringify({ conversationId: 'b5e1c0eb', paths: ['/s/no-time.png'], images: 1 }),
+  ].join('\n')
+
+  it('keys uploads by session and messages by conversation, so a reopen splits neither', () => {
+    const out = parseAttachmentLog(log, { sessionId: '196c9da3ef', conversationId: 'b5e1c0eb' })
+    expect(out.sends).toEqual([{ sessionId: '196c9da3ef', atMs: 2, path: '/s/new.png' }])
+    expect(out.messages.map(m => m.atMs)).toEqual([3, 4])
+    // A non-string entry is dropped and `images` is kept, so that message now reads as SHORT.
+    expect(out.messages[1]).toEqual({ conversationId: 'b5e1c0eb', atMs: 4, paths: ['/s/m2.png'], images: 2 })
+  })
+
+  it('an upload-only log (every file written before this change) yields no messages', () => {
+    const uploadsOnly = log.split('\n').slice(0, 2).join('\n')
+    expect(parseAttachmentLog(uploadsOnly, { sessionId: 'ab407b77de', conversationId: 'b5e1c0eb' }))
+      .toEqual({ sends: [{ sessionId: 'ab407b77de', atMs: 1, path: '/s/old.png' }], messages: [] })
+  })
+
+  it('an empty key matches nothing', () => {
+    expect(parseAttachmentLog(log, { sessionId: '', conversationId: '' })).toEqual({ sends: [], messages: [] })
+  })
+})
 
 describe('resolveAttachmentRead', () => {
   it('resolves a plain path inside the attachment directory', () => {
@@ -27,6 +82,25 @@ describe('resolveAttachmentRead', () => {
 
   it('refuses an empty path', () => {
     expect(resolveAttachmentRead('')).toBeNull()
+  })
+})
+
+describe('resolveAttachmentReadReal — the REAL (symlink-resolved) recheck the reading route applies', () => {
+  // The full symlink-escape guarantee (a link INSIDE the attachments directory pointing OUTSIDE it
+  // is refused, one pointing at another file inside it resolves to that file) is `realContained`'s
+  // own logic, tested against a disposable tmpdir in `real-contained.test.ts` — this machine's REAL
+  // `ATTACHMENT_DIR` already holds live attachments and must never be written to by a test (see
+  // `sdd/scratch/sessions/00-shared-rules.md`). What is tested here, read-only, is the WIRING: the
+  // lexical refusal short-circuits before any disk access, and a lexically-valid path that simply
+  // is not there answers the same `null` the lexical check already promised.
+  it('refuses a lexically-invalid path without any disk access', async () => {
+    expect(await resolveAttachmentReadReal('/etc/passwd')).toBeNull()
+    expect(await resolveAttachmentReadReal('')).toBeNull()
+    expect(await resolveAttachmentReadReal(join(ATTACHMENT_DIR, '..', '..', '.ssh', 'id_rsa'))).toBeNull()
+  })
+
+  it('refuses a lexically-valid path that does not exist on disk', async () => {
+    expect(await resolveAttachmentReadReal(join(ATTACHMENT_DIR, 'nonexistent-2f8e9a-file.png'))).toBeNull()
   })
 })
 

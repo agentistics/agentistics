@@ -42,6 +42,10 @@ export type AuditAction =
   // reuse of the fleet's: a shell is a raw PTY on this host and a session is a named assistant CLI,
   // so a reader of the log must be able to tell which of the two a keyboard was attached to.
   | 'shell.input.open' | 'shell.input.denied'
+  // The disabled-shell empty state's temporary "Enable now" button — the in-memory override
+  // (`shell-override-store.ts`) was set. Its own action, distinct from `shell.input.open`: this
+  // one widens what the shell routes will answer for the rest of the process, not one channel.
+  | 'shell.override.enabled'
   | 'upgrade.started' | 'upgrade.denied'
 
 export interface AuditEvent {

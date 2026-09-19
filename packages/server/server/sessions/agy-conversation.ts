@@ -105,3 +105,38 @@ export function agyLogFromFds(targets: readonly string[]): string | null {
   if (found.size !== 1) return null
   return [...found][0]!
 }
+
+/**
+ * Which pids among the ones given cannot be trusted, because they share a log with another pid.
+ *
+ * agy names its log by SECOND (`cli-<YYYYMMDD_HHMMSS>.log`), so two processes started within the
+ * same wall-clock second open the IDENTICAL file — and MEASURED against two real agy 1.2.5
+ * processes spawned together (2026-09-17), this is not merely an attribution question the way
+ * `conversationFromAgyLog`'s "last wins" rule assumes (written for ONE process opening a SECOND
+ * conversation of its own). Two DIFFERENT processes writing into one file is not "interleaved but
+ * both present": of two processes that each completed a full turn, only ONE `Created conversation`
+ * line survived in the shared file at all — the other's write was silently lost, not merely
+ * reordered. So there is no line in such a file that can be safely attributed to either pid, and
+ * every pid sharing that path must be refused — the mirror of `agyLogFromFds`'s existing "two
+ * distinct logs on one process REFUSE", inverted: two processes on one log refuse.
+ *
+ * PURE: takes the log each pid already resolved to (`null` for a pid with no agy log open, which
+ * never collides with anything), and answers which of them may NOT be trusted. A pid alone with
+ * its log, or a pid with no log at all, is never in the answer.
+ */
+export function agyLogCollisions(
+  logByPid: ReadonlyMap<number, string | null>,
+): ReadonlySet<number> {
+  const pidsByLog = new Map<string, number[]>()
+  for (const [pid, log] of logByPid) {
+    if (!log) continue
+    const pids = pidsByLog.get(log)
+    if (pids) pids.push(pid)
+    else pidsByLog.set(log, [pid])
+  }
+  const collided = new Set<number>()
+  for (const pids of pidsByLog.values()) {
+    if (pids.length > 1) for (const pid of pids) collided.add(pid)
+  }
+  return collided
+}

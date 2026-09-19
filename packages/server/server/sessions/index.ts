@@ -48,7 +48,7 @@ export * from './types'
 export { SPAWN_SPECS, planSpawn } from './spawn-spec'
 export { reconcileSessions, resolveSessionRef } from './session-ref'
 export {
-  addSession, newSessionId, patchSession, readRegistry, removeSession, touchSessions,
+  addSession, newSessionId, patchSession, readRegistry, removeSession, retireSession, touchSessions,
 } from './registry'
 export { SESSION_POLL_MS, createSessionsPoller, type SessionSnapshot } from './sessions-host'
 export { APPROVAL_SPECS, approvalFor, type ApprovalSpec } from './approval-spec'

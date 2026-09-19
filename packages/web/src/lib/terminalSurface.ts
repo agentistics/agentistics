@@ -23,9 +23,19 @@ export type TerminalPlacement =
   | 'replacing'
   /** Its own screen, at its own route. */
   | 'dedicated'
+  /**
+   * The session's own pane, shown in the RIGHT slot (`lib/panelSlots.ts`'s `cli` panel).
+   *
+   * Its own value rather than a reuse of `replacing` or `dedicated`: it is neither. It does not
+   * replace the conversation (the composer beside it keeps working, exactly as `docked` leaves it)
+   * and it is not the terminal's own screen (there is no route here — the slot's own close is the
+   * way out). It carries the SAME consent rules as `replacing`, because both are placements you went
+   * to on purpose: focus is the gate, and a phone gets the key strip.
+   */
+  | 'aside'
 
 export const TERMINAL_PLACEMENTS: readonly TerminalPlacement[] = [
-  'card', 'docked', 'replacing', 'dedicated',
+  'card', 'docked', 'replacing', 'dedicated', 'aside',
 ]
 
 /**
@@ -107,4 +117,18 @@ export function dedicatedTerminalPath(sessionId: string, pane: TerminalPane = 'a
  */
 export function readTerminalPane(raw: string | null | undefined): TerminalPane {
   return raw === 'shell' ? 'shell' : 'assistant'
+}
+
+/**
+ * WHICH DEDICATED PANE A BAND'S OWN TARGET OPENS.
+ *
+ * `ShellBand`'s "full screen" control used to navigate to the SHELL's dedicated screen
+ * unconditionally, whichever of `cli`/`shell` the band was actually showing — the docked band's
+ * `target` (`terminalTarget.ts`) and the route's own `pane` (this module) are two names for the
+ * same axis and nothing mapped one to the other. Pressing "full screen" while reading the Claude
+ * Code pane opened the shell's screen instead, silently: the URL changed, a terminal rendered, and
+ * it was the wrong one. One mapping closes it, so a THIRD name for this axis is never invented.
+ */
+export function paneForTarget(target: 'cli' | 'shell'): TerminalPane {
+  return target === 'shell' ? 'shell' : 'assistant'
 }

@@ -1,21 +1,28 @@
 import { test, expect } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   aggregateState,
   bootModeFor,
   bootOptionsFor,
   buildService,
   logRuntime,
+  needsProcessLinkRetry,
   parseBootState,
   parseContainerFacts,
   parseElapsedSeconds,
   pidsToKill,
   centralStartNotes,
+  sessionsPollerOptions,
   startOptionsFor,
   targetRuntimes,
 } from './cli-start'
 import { cliStrings } from './cli-i18n'
 import type { BootMechanism } from './cli-start'
 import type { RuntimeId, ServiceRuntimeState } from '@agentistics/tui/control'
+import type { SessionBackend } from './sessions/types'
+import { readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
+import { stripComments } from './strip-comments'
 
 // Regression for the "kill and restart" self-termination bug: the CLI health check
 // (`isServerRunning` → fetch to PORT) leaves a keep-alive client socket open, so
@@ -602,4 +609,110 @@ test('boot options are offered whatever the service state, unlike starts and res
   const running = buildService('agentistics', 'agentistics', up, BOOT_S, { bootOptions: options })
   expect(running.startOptions).toEqual([])
   expect(running.bootOptions).toHaveLength(1)
+})
+
+// FIXWAVE 1, Finding 3: `linkProcessConversationSoon` (the actual trigger call inside
+// `spawnManaged`, the one piece of the sessions-web-conversation-link fix with no test anywhere)
+// is not itself exported or easily driven without a real backend — but the DECISION of whether it
+// should run at all is pure, and this is the seam. Deleting the call site's `if
+// (needsProcessLinkRetry(...))` guard, or getting its condition wrong, is now something a test can
+// catch without spawning anything real.
+test('needsProcessLinkRetry fires only for a harness with a process-log route and no id yet', () => {
+  // antigravity: the one harness with a `HARNESS_PROCESS_LOGS` entry and no `assignId` — the exact
+  // shape the retry exists for.
+  expect(needsProcessLinkRetry('antigravity', undefined)).toBe(true)
+})
+
+test('needsProcessLinkRetry is a no-op once assignId/resumeId already settled the link', () => {
+  // claude and copilot always have a `conversationId` by the time this is asked (their SpawnSpec
+  // has `assignId`), so retrying would cost a `/proc` sweep and a `scanProcesses()` every spawn for
+  // nothing — this is what stops that, and it is asked with the id ALREADY set, the real shape
+  // `spawnManaged` calls it in.
+  expect(needsProcessLinkRetry('claude', 'c-1')).toBe(false)
+  expect(needsProcessLinkRetry('copilot', 'c-1')).toBe(false)
+  // Antigravity itself, once linked by any route (a future assignId, or an earlier attempt of this
+  // very loop), must not keep retrying either.
+  expect(needsProcessLinkRetry('antigravity', 'agy-1')).toBe(false)
+})
+
+test('needsProcessLinkRetry is a no-op for a harness with no process-log route at all', () => {
+  // codex/kimi/gemini have neither `assignId` nor a `HARNESS_PROCESS_LOGS` entry — scheduling the
+  // retry for them would spend the whole ~12s budget finding nothing, poll after poll.
+  for (const harness of ['codex', 'kimi', 'gemini'] as const) {
+    expect(needsProcessLinkRetry(harness, undefined)).toBe(false)
+  }
+})
+
+// FIXWAVE 1 round 2, Finding 1 (CRITICAL): the collision guard in `sessions-host.ts`'s poll loop is
+// entirely gated on `if (o.resolveProcessLog)`, and `resolveProcessLog` was never one of the options
+// `ensureSessionsPoller` passed to `createSessionsPoller` for the production, continuous `/api/fleet`
+// poller — despite being imported in this very file and used inline inside the spawn-time retry.
+// Every unit test that exercised the collision guard constructed `createSessionsPoller({ …,
+// resolveProcessLog: async () => … })` directly, so nothing ever asserted the REAL wiring carried it
+// — round 2's reviewer live-reproduced the exact cross-link this whole fix wave exists to prevent
+// (two antigravity sessions started together, sharing one log by second, cross-linked to the same
+// conversation on one ordinary poll) against the running server. `sessionsPollerOptions` is the exact
+// object `ensureSessionsPoller` hands to `createSessionsPoller`; asserting against IT rather than
+// re-deriving the same facts is what makes this fail the moment the real wiring regresses.
+test('the production poller wiring carries resolveProcessLog — the collision guard\'s own input', () => {
+  const fakeBackend = {} as SessionBackend
+  const opts = sessionsPollerOptions(fakeBackend)
+  expect(opts.backend).toBe(fakeBackend)
+  // Identity, not merely "a function": a wrapper that silently drops the pid/harness or swallows
+  // errors differently from the real reader would pass a `typeof === 'function'` check and still be
+  // wrong. Same for the two others the collision guard is built from.
+  expect(opts.resolveProcessLog).toBe(resolveProcessLog)
+  expect(opts.readProcessConversation).toBe(readProcessConversation)
+  expect(typeof opts.recordConversation).toBe('function')
+})
+
+/**
+ * `linkProcessConversationSoon` — the spawn-time retry (FIXWAVE 1's own doc-comment calls it "the
+ * whole of the fix") — does real `/proc` and tmux I/O and is not exported, so it cannot safely be
+ * driven from a unit test (this suite never spawns a real backend — see the housekeeping rule that
+ * keeps these tests off the owner's live tmux socket). Round 1's Finding 3 named exactly this: the
+ * one line in `spawnManaged` that triggers it — `if (needsProcessLinkRetry(...))
+ * linkProcessConversationSoon(id, req.harness)` — was exercised by no test, and deleting it left the
+ * entire suite green (round 2 re-confirmed this by planting it). The DECISION is already covered by
+ * `needsProcessLinkRetry`'s own tests above; what was missing is proof the real `spawnManaged` still
+ * ACTS on it. This scans the real, comment-stripped source of `spawnManaged` for the actual call —
+ * matching `response-policy-composition.test.ts`'s pattern for the identical problem (a wiring gap a
+ * type checker and a green suite both miss) — so a plant of the call site fails this test rather than
+ * passing silently a second time.
+ */
+function extractTopLevelFunction(src: string, name: string): string {
+  const signature = `function ${name}(`
+  const start = src.indexOf(signature)
+  if (start === -1) throw new Error(`no top-level function named "${name}" found`)
+  // The parameter list itself can hold an inline object TYPE (`req: { harness: HarnessId, … }`),
+  // whose own `{`/`}` would fool a plain `indexOf('{', start)` into treating the parameter's brace
+  // as the function's body — so the parameter list is closed by PAREN depth alone, ignoring braces
+  // entirely, before the body's opening brace is even looked for.
+  let depth = 0
+  let i = start + signature.length - 1
+  for (; i < src.length; i++) {
+    if (src[i] === '(') depth++
+    else if (src[i] === ')') { depth--; if (depth === 0) { i++; break } }
+  }
+  if (depth !== 0) throw new Error(`unbalanced parameter list for "${name}"`)
+  const bodyOpen = src.indexOf('{', i)
+  if (bodyOpen === -1) throw new Error(`no opening brace found for "${name}"`)
+  const bodyClose = src.indexOf('\n}', bodyOpen)
+  if (bodyClose === -1) throw new Error(`no top-level closing brace found for "${name}"`)
+  return src.slice(start, bodyClose)
+}
+
+test('spawnManaged still fires the process-link retry when needsProcessLinkRetry says so', () => {
+  const src = stripComments(readFileSync(join(import.meta.dir, 'cli-start.ts'), 'utf8'))
+  const body = extractTopLevelFunction(src, 'spawnManaged')
+
+  // Sanity check first, so the assertions below are not vacuously true against the wrong slice.
+  expect(body).toContain('backend.spawn(')
+
+  expect(body).toContain('needsProcessLinkRetry(')
+  const gateIndex = body.indexOf('needsProcessLinkRetry(')
+  // The trigger call must appear close after the gate — inside the `if` it guards, not merely
+  // somewhere else in the function.
+  const after = body.slice(gateIndex, gateIndex + 200)
+  expect(after).toContain('linkProcessConversationSoon(')
 })

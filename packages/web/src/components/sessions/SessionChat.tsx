@@ -37,7 +37,7 @@ import { ApprovalCard } from './ApprovalCard'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { useTerminalStream } from '../../hooks/useTerminalStream'
-import { isImagePath, openComposerLightbox } from '../../lib/attachmentPreview'
+import { isImagePath, openComposerLightbox, previousPersonTurnMs } from '../../lib/attachmentPreview'
 import { promptCountLabel } from '../../lib/promptCount'
 import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
@@ -77,8 +77,10 @@ import { attachmentName, isImageAttachment, splitMessage } from '../../lib/messa
 import { overlayPadding } from '../../lib/mobileOverlay'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { handleComposerDrop } from '../../lib/mentionInsert'
+import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 
-import type { AttachmentSend } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -93,6 +95,8 @@ interface ChatPayload {
    * substituted for a path can find its file again. Absent when nothing was ever attached here.
    */
   attachmentSends?: AttachmentSend[]
+  /** What each delivered message CARRIED, for this conversation — see `AttachmentMessage`. */
+  attachmentMessages?: AttachmentMessage[]
 }
 
 export interface SessionChatProps {
@@ -1339,6 +1343,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>): void {
     if (!canPrompt) return
+    // A tree row dragged onto the composer (§6.1, gesture 1) — checked FIRST, and never a case of
+    // "nothing was dropped": `handled: false` means "not a repo entry", so the OS-file path below
+    // still runs for an ordinary file dropped from outside the browser.
+    const mention = handleComposerDrop(session.id, e.dataTransfer, {
+      readRepoEntry: dt => readRepoDrag(dt, session.id),
+      harness: session.harness as HarnessId,
+    })
+    if (mention.handled) { e.preventDefault(); return }
     if (e.dataTransfer.files.length === 0) return
     e.preventDefault()
     pick(e.dataTransfer.files)
@@ -1466,7 +1478,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-      onDragOver={e => { if (canPrompt && e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+      onDragOver={e => {
+        if (!canPrompt) return
+        if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(REPO_DRAG_MIME)) {
+          e.preventDefault()
+        }
+      }}
       onDrop={onDrop}
     >
       <div
@@ -1506,6 +1523,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
+              {...(payload?.attachmentMessages
+                ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
+                : {})}
               anchorId={turnAnchorId('turn', i)}
               {...(canPrompt ? { onReply: onReplyToTurn } : {})}
               {

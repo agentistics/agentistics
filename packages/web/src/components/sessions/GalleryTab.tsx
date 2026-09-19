@@ -35,7 +35,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FileQuestion, FileText, Grid2x2, Images, List, Paperclip, PlayCircle } from 'lucide-react'
+import { Eye, FileQuestion, FileText, Grid2x2, Images, List, Paperclip, PlayCircle } from 'lucide-react'
 import { agoLabel } from '../../lib/artifactTabs'
 import {
   effectiveScope, filterGallery, formatBytes, galleryImageKey, galleryImages,
@@ -48,6 +48,7 @@ import { overlayPadding } from '../../lib/mobileOverlay'
 import { goToTurn } from '../../lib/turnScroll'
 import { useAttachmentSizes } from '../../hooks/useAttachmentSizes'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { isFocusedRow, ROW_FLASH } from '../../lib/noteFocus'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { SessionRowMenu } from './SessionRowMenu'
 
@@ -69,13 +70,20 @@ export interface GalleryTabProps {
    * disappeared" unless the panel says what actually happened. Reported exactly that way.
    */
   older?: string
+  /**
+   * The path a note's chip asked for — see `noteFocus.ts`. The row it names flashes and scrolls
+   * into view; a path no shown row carries focuses nothing, which is `ArtifactsAside`'s own notice
+   * to give, not this component's — it decides nothing about whether the reference exists, only
+   * how to show the one row that matches.
+   */
+  focusStep?: string
 }
 
 /** How long a touch has to hold to mean "right-click". The same 500ms the session rows use. */
 const LONG_PRESS_MS = 500
 
 export function GalleryTab({
-  sessionId, groups: allGroups, lang, view, onViewChange, scope, onScopeChange, older,
+  sessionId, groups: allGroups, lang, view, onViewChange, scope, onScopeChange, older, focusStep,
 }: GalleryTabProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
@@ -94,6 +102,23 @@ export function GalleryTab({
   // back to everything rather than emptying a gallery whose switch is not even drawn.
   const shown = effectiveScope(scope, sides)
   const groups = useMemo(() => filterGallery(allGroups, shown), [allGroups, shown])
+
+  /**
+   * A FOCUS MAY NEVER BE DEFEATED BY THIS PANEL'S OWN FILTER. The chip asked for one specific row;
+   * if the reader had "You" selected and the row is the assistant's, `groups` alone would silently
+   * hide the very thing the click was for, and `rowsCarry` (asked one level up, in
+   * `ArtifactsAside.tsx`) would report it as unfound when it is only unshown. So a reference that
+   * exists SOMEWHERE in the gallery but not in the currently filtered view widens the scope to
+   * `all` — a genuinely missing reference is untouched, and stays `ArtifactsAside`'s to report.
+   */
+  useEffect(() => {
+    if (focusStep === undefined) return
+    const inShown = groups.some(g => g.files.some(f => f.path === focusStep))
+    if (inShown) return
+    const inAny = allGroups.some(g => g.files.some(f => f.path === focusStep))
+    if (inAny) onScopeChange('all')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusStep, allGroups])
 
   /** The flat run the lightbox steps through — the WHOLE gallery, see `galleryImages`. */
   const images = useMemo(() => galleryImages(groups), [groups])
@@ -259,6 +284,7 @@ export function GalleryTab({
                     size={sizes[file.name]}
                     broken={broken[file.name] === true}
                     onBroken={() => markBroken(file.name)}
+                    focused={isFocusedRow(file.path, focusStep)}
                     {...(file.kind !== 'other' && broken[file.name] !== true
                       ? { onOpen: () => openLightbox(galleryImageKey(group.index, i)) }
                       : {})}
@@ -272,6 +298,7 @@ export function GalleryTab({
                   key={`${file.path}-${i}`}
                   file={file} pt={pt} isMobile={isMobile}
                   size={sizes[file.name]}
+                  focused={isFocusedRow(file.path, focusStep)}
                   {...(file.kind !== 'other' && broken[file.name] !== true
                     ? { onOpen: () => openLightbox(galleryImageKey(group.index, i)) }
                     : {})}
@@ -323,7 +350,12 @@ export function GalleryTab({
   )
 }
 
-/** The heading over one message's files: when it was sent, how many, and what was typed. */
+/**
+ * The heading over one group's files: when it was sent, how many, and what was typed — OR, for a
+ * group with a `label` of its own (`viewedGroups`), that label instead of the generic count. "N
+ * files" says nothing when the files were neither sent nor written, and would read as one of those
+ * two by default.
+ */
 function GroupHeading({ group, pt, now }: { group: GalleryGroup; pt: boolean; now: number }) {
   const when = agoLabel(group.at, now, pt)
   const n = group.files.length
@@ -334,8 +366,10 @@ function GroupHeading({ group, pt, now }: { group: GalleryGroup; pt: boolean; no
         fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
         color: 'var(--text-tertiary)',
       }}>
-        <Paperclip size={10} style={{ flexShrink: 0 }} />
-        {n} {pt ? (n === 1 ? 'arquivo' : 'arquivos') : (n === 1 ? 'file' : 'files')}
+        {group.label ? <Eye size={10} style={{ flexShrink: 0 }} /> : <Paperclip size={10} style={{ flexShrink: 0 }} />}
+        {group.label ? `${pt ? group.label.pt : group.label.en} · ${n}` : (
+          <>{n} {pt ? (n === 1 ? 'arquivo' : 'arquivos') : (n === 1 ? 'file' : 'files')}</>
+        )}
         {/* WHEN it was sent. Absent when the transcript carried no timestamp — nothing invented,
             the same rule the live feed follows. */}
         {when !== '' && (
@@ -408,17 +442,26 @@ function FileFacts({ file, size, pt }: { file: GalleryFile; size: number | undef
   )
 }
 
-function RowItem({ file, size, pt, isMobile, onOpen, onMenu }: {
+function RowItem({ file, size, pt, isMobile, focused, onOpen, onMenu }: {
   file: GalleryFile
   size: number | undefined
   pt: boolean
   isMobile: boolean
+  /** Is this the row a note's chip named? See `noteFocus.ts`. Flashes and scrolls into view. */
+  focused?: boolean
   onOpen?: () => void
   onMenu: (x: number, y: number) => void
 }) {
   const handlers = useMenuHandlers(onMenu)
+  // The behaviour is `SkillButton`'s, deliberately: same flash (`ROW_FLASH`), same `scrollIntoView`
+  // — "the one you asked for" must not look like a different thing in two tabs of one panel.
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [focused])
   return (
     <div
+      ref={ref}
       {...handlers}
       {...(onOpen ? { onClick: onOpen, role: 'button', tabIndex: 0 } : {})}
       title={file.path}
@@ -426,6 +469,7 @@ function RowItem({ file, size, pt, isMobile, onOpen, onMenu }: {
         display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0,
         minHeight: isMobile ? 44 : 0, padding: '6px 6px', borderRadius: 8,
         cursor: onOpen ? 'pointer' : 'default',
+        ...(focused ? { animation: ROW_FLASH } : {}),
       }}
     >
       <span style={{ flexShrink: 0, color: 'var(--text-tertiary)', display: 'flex' }}>
@@ -443,7 +487,7 @@ function RowItem({ file, size, pt, isMobile, onOpen, onMenu }: {
   )
 }
 
-function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, onOpen, onMenu }: {
+function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, focused, onOpen, onMenu }: {
   file: GalleryFile
   sessionId: string
   size: number | undefined
@@ -451,13 +495,20 @@ function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, onOpen, o
   isMobile: boolean
   broken: boolean
   onBroken: () => void
+  /** Is this the tile a note's chip named? See `noteFocus.ts`. Flashes and scrolls into view. */
+  focused?: boolean
   onOpen?: () => void
   onMenu: (x: number, y: number) => void
 }) {
   const handlers = useMenuHandlers(onMenu)
   const previewable = file.kind !== 'other' && !broken
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [focused])
   return (
     <div
+      ref={ref}
       {...handlers}
       {...(onOpen ? { onClick: onOpen, role: 'button', tabIndex: 0 } : {})}
       title={file.path}
@@ -465,6 +516,7 @@ function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, onOpen, o
         display: 'flex', flexDirection: 'column', minWidth: 0,
         border: '1px solid var(--border-subtle)', borderRadius: 10, overflow: 'hidden',
         background: 'var(--bg-elevated)', cursor: onOpen ? 'pointer' : 'default',
+        ...(focused ? { animation: ROW_FLASH } : {}),
       }}
     >
       <div style={{

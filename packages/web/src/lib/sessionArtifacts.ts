@@ -72,6 +72,48 @@ export function hasUnlistedWrites(turns: readonly Turnish[]): boolean {
   return turns.some(t => (t?.tools ?? []).some(c => c.opaqueWrite === true))
 }
 
+/**
+ * WHY THE COUNT OF WRITTEN FILES IS SHORT — the two sentences that qualify it, in order.
+ *
+ * The aside's header is the only surviving statement of how many files a session wrote (`N files ·
+ * M new`), and it undercounts for two unrelated reasons. Both were reported as the panel having
+ * missed something it wrote, and both had a surface on the file lists that are gone; this is the
+ * ONE place that decides what is said and in which order, so the two facts cannot drift apart or
+ * get a third wording somewhere else.
+ *
+ *  - **`unlisted`** — the session wrote through commands whose paths cannot be read AT ALL (an
+ *    interpreter fed a heredoc), so those files are in no count. Composed here, in this panel's own
+ *    words, because nothing server-side words it: `hasUnlistedWrites` above is the browser's own
+ *    reading of turns it already has. **It may not point at the count**, and said "not in this
+ *    count" for a release: the header's `N files` span is drawn only when `artifacts.length > 0`,
+ *    and this flag's PRIMARY case is a session that wrote through opaque commands ALONE — exactly
+ *    when there is no count beside it and the sentence names something the reader cannot see. The
+ *    fact was right and the deixis was wrong, so the sentence now stands on its own.
+ *  - **`outside`** — files that ARE counted elsewhere but sit outside the session's own folder, so
+ *    the read route refuses them. Passed through **VERBATIM**: the server already worded it
+ *    (`fleet-web.ts`'s `listSessionArtifacts`), it holds a COUNT and never the paths, and composing
+ *    a second sentence for something the server has already said is how two surfaces come to
+ *    disagree about one fact.
+ *
+ * `unlisted` leads because it is the wider limit — a file it covers is not merely unopenable, it is
+ * unnameable — and that is the order the retired list footer printed them in.
+ *
+ * An empty array is the ordinary case and must draw NOTHING: an absent sentence costs no line.
+ */
+export function artifactShortfall(
+  { unlisted, outside, lang }: { unlisted?: boolean; outside?: string; lang: 'pt' | 'en' },
+): string[] {
+  const out: string[] = []
+  if (unlisted === true) {
+    out.push(lang === 'pt'
+      ? 'A sessão também escreveu por comandos cujos caminhos não dá para ler; esses arquivos não aparecem aqui, nem contados nem listados.'
+      : 'The session also wrote through commands whose paths cannot be read; those files are neither counted nor listed here.')
+  }
+  // VERBATIM, never reworded — see above.
+  if (outside) out.push(outside)
+  return out
+}
+
 export function artifactsFromTurns(turns: readonly Turnish[]): Artifact[] {
   // Insertion order is the transcript's order, which is what makes "first touch" answerable.
   const seen = new Map<string, { first: string; touches: number; order: number; live: boolean }>()

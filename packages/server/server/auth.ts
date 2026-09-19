@@ -21,7 +21,9 @@ import { TEAM_CENTRAL, TEAM_PASSWORD, TEAM_SESSION_SECRET, TEAM_TLS, CENTRAL_USE
 import { getAccount } from './accounts'
 import { CAPS, PROFILE } from './exposure'
 import { chatAllowed } from './chat-gate'
-import { shellAllowed } from './sessions/shell-gate'
+import { shellAllowedNow } from './sessions/shell-gate'
+import { getShellOverride } from './sessions/shell-override-store'
+import { editorAllowed } from './sessions/editor-gate'
 import { readPreferences } from './preferences'
 import type { Principal } from './iam-types'
 
@@ -316,8 +318,14 @@ export async function handleSession(req: Request): Promise<Response> {
   const required = Boolean(TEAM_PASSWORD)
   const authed = isAuthed(req)
   const aggregatorOnly = TEAM_CENTRAL && !CENTRAL_USER
-  // Unreadable preferences are not consent: chat and the shell stay off rather than falling open.
-  const prefs = await readPreferences().catch(() => ({} as { chatEnabled?: boolean; shellEnabled?: boolean }))
+  // Unreadable preferences read the same as ABSENT ones do for each of these three switches —
+  // OFF for chat (`chatAllowed`'s own strict rule, unchanged), ON for shell/editor when the profile
+  // is capable (`shellAllowed`/`editorAllowed`'s owner-decided rule, 2026-09-14). A failed read is
+  // not a person answering "no" to either question; it is simply not knowing, and each gate's own
+  // rule for "not knowing" applies exactly as it would to a preferences file with the key missing.
+  const prefs = await readPreferences().catch(() => ({} as {
+    chatEnabled?: boolean; shellEnabled?: boolean; editorEnabled?: boolean
+  }))
   return new Response(
     JSON.stringify({
       authed,
@@ -340,9 +348,23 @@ export async function handleSession(req: Request): Promise<Response> {
       chatEnabled: chatAllowed(CAPS.localChat, prefs.chatEnabled),
       // The same split, for the per-session utility SHELL: the capability AND the user's own
       // switch, separate from `capabilities.localShell` (the profile alone) so Settings can say
-      // "your profile allows this, you have it off". Unreadable preferences are not consent here
-      // either — `shellAllowed` reads an absent switch as OFF.
-      shellEnabled: shellAllowed(CAPS.localShell, prefs.shellEnabled),
+      // "your profile allows this, you have it off". `shellAllowedNow` reads an absent (or
+      // unreadable) switch as ON when the profile is capable — owner decision, 2026-09-14 — still
+      // narrowed by an explicit `false` and, always, by `capable` itself. It ALSO folds in the
+      // in-memory "Enable now" override (`shell-override-store.ts`) — this is the EFFECTIVE answer
+      // every shell route actually gives, so a session that pressed "Enable now" sees the Shell tab
+      // and a working band without a page reload, the moment this endpoint is re-read.
+      shellEnabled: shellAllowedNow(CAPS.localShell, prefs.shellEnabled, getShellOverride()),
+      // The override's OWN raw value, reported apart from the combined `shellEnabled` above so the
+      // Settings screen can say WHICH of the two is in force — "ligado até reiniciar o servidor" is
+      // a different sentence from "ligado" (the ordinary preference), and collapsing them into one
+      // boolean would make that sentence unreachable.
+      shellOverride: getShellOverride(),
+      // The same split, for the repository explorer: the capability AND the user's own switch,
+      // separate from `capabilities.localShell` (the profile alone) so Settings can say "your
+      // profile allows this, you have it off". Rides the SAME capability as the shell — see
+      // `sessions/editor-gate.ts` for why there is no dedicated `localEditor` flag.
+      editorEnabled: editorAllowed(CAPS.localShell, prefs.editorEnabled),
     }),
     { status: 200, headers: JSON_CT },
   )

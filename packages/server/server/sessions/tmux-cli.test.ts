@@ -8,6 +8,7 @@ import {
   serverOptionsArgs, HISTORY_LIMIT, PANE_COLS, PANE_ROWS,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs,
   type TerminalProfile, tmuxListIsEmptyState, SHELL_SOCKET, TMUX_SOCKET, listSessionsArgs, resizeWindowArgs,
+  pasteBufferName, setBufferArgs, pasteBufferArgs,
 } from './tmux-cli'
 
 /** A colour-neutral profile: neither a 256-colour terminfo entry nor a truecolor invoker. */
@@ -169,6 +170,28 @@ describe('the other argv builders', () => {
 
   it('builds the Enter argv through the named one, so there is a single answer', () => {
     expect(sendKeysEnterArgs('a1')).toEqual(sendKeysNamedArgs('a1', 'Enter'))
+  })
+})
+
+describe('the paste-buffer primitive', () => {
+  it('names one buffer per pane, so two sessions pasting at once never collide', () => {
+    expect(pasteBufferName('a1')).toBe('agentop-paste-a1')
+    expect(pasteBufferName('a1')).not.toBe(pasteBufferName('a2'))
+  })
+
+  it('writes the whole payload as ONE argv element — no stdin, no shell escaping', () => {
+    expect(setBufferArgs('agentop-paste-a1', 'line one\nline two; rm -rf /'))
+      .toEqual(['-L', 'agentop', 'set-buffer', '-b', 'agentop-paste-a1', 'line one\nline two; rm -rf /'])
+  })
+
+  it('pastes bracketed (-p) and deletes the buffer after (-d), never left behind', () => {
+    expect(pasteBufferArgs('a1', 'agentop-paste-a1'))
+      .toEqual(['-L', 'agentop', 'paste-buffer', '-p', '-d', '-b', 'agentop-paste-a1', '-t', 'agentop-a1'])
+  })
+
+  it('runs on whichever socket it is asked to, exactly like every other builder here', () => {
+    expect(setBufferArgs('b', 'x', SHELL_SOCKET).slice(0, 2)).toEqual(['-L', SHELL_SOCKET])
+    expect(pasteBufferArgs('a1', 'b', SHELL_SOCKET).slice(0, 2)).toEqual(['-L', SHELL_SOCKET])
   })
 })
 

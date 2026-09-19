@@ -1,6 +1,8 @@
 import { describe, expect, it, test } from 'bun:test'
 import {
-  BAND_MAX_FRACTION, BAND_MIN_PX, DEFAULT_BAND_PREFS, clampBandHeight, readBandPrefs, shellErrorText,
+  BAND_FULLSCREEN_OVERSHOOT_PX, BAND_MIN_PX, BAND_SNAP_THRESHOLD_PX, DEFAULT_BAND_PREFS,
+  clampBandHeight, readBandPrefs, resolveBandHeight, resolveStudioBandDrag, shellErrorText,
+  wantsFullscreen,
   bandGeometry, shellApiUrl, shellWatching, shellWhere, writeBandGeometry, writeBandPrefs, type BandPrefs,
 } from './shellBand'
 
@@ -36,11 +38,14 @@ describe('the band geometry', () => {
     expect(clampBandHeight(-40, 900)).toBe(BAND_MIN_PX)
   })
 
-  it('it never takes more than its share of the viewport', () => {
-    expect(clampBandHeight(10_000, 900)).toBe(Math.round(900 * BAND_MAX_FRACTION))
+  // UX PASS ITEM 7: the old fixed 70%-of-viewport ceiling is gone — the band may be dragged all
+  // the way up to the measured centre column's own height (never more).
+  it('the ceiling is the measured column, not a fraction of it', () => {
+    expect(clampBandHeight(10_000, 900)).toBe(900)
+    expect(clampBandHeight(500, 900)).toBe(500)
   })
 
-  it('a viewport too short for the floor still yields the floor, never a negative box', () => {
+  it('a column too short for the floor still yields the floor, never a negative box', () => {
     // The ceiling would be below the floor here; a max/min written the other way round returns a
     // height the flex column cannot lay out.
     expect(clampBandHeight(200, 100)).toBe(BAND_MIN_PX)
@@ -48,6 +53,91 @@ describe('the band geometry', () => {
 
   it('a height that is not a number falls back to the floor', () => {
     expect(clampBandHeight(Number.NaN, 900)).toBe(BAND_MIN_PX)
+  })
+
+  it('an unmeasured column (0, NaN) never becomes a ceiling', () => {
+    expect(clampBandHeight(5000, 0)).toBe(5000)
+    expect(clampBandHeight(5000, Number.NaN)).toBe(5000)
+  })
+})
+
+describe('resolveBandHeight — the free-resize snap (design item 7)', () => {
+  it('an ordinary height, well short of the column, is never full', () => {
+    expect(resolveBandHeight(400, 900)).toEqual({ height: 400, full: false })
+  })
+
+  it('within the snap threshold of the column\'s own top, it SNAPS to fill it exactly', () => {
+    const wanted = 900 - BAND_SNAP_THRESHOLD_PX // right at the edge of the threshold
+    expect(resolveBandHeight(wanted, 900)).toEqual({ height: 900, full: true })
+  })
+
+  it('one pixel short of the threshold is still an ordinary height', () => {
+    const wanted = 900 - BAND_SNAP_THRESHOLD_PX - 1
+    expect(resolveBandHeight(wanted, 900)).toEqual({ height: wanted, full: false })
+  })
+
+  it('asking for MORE than the column still snaps to exactly the column\'s height', () => {
+    expect(resolveBandHeight(10_000, 900)).toEqual({ height: 900, full: true })
+  })
+
+  it('dragging DOWN from full releases it, symmetrically — same function, no separate rule', () => {
+    // The next drag starts from the column's own height (what `full` rendered) and moves down by
+    // more than the threshold: back to an ordinary height, not full.
+    const startedFull = resolveBandHeight(900, 900)
+    expect(startedFull.full).toBe(true)
+    const draggedDown = resolveBandHeight(startedFull.height - BAND_SNAP_THRESHOLD_PX - 20, 900)
+    expect(draggedDown.full).toBe(false)
+  })
+
+  it('an unmeasured column never snaps — there is nothing to snap TO', () => {
+    expect(resolveBandHeight(5000, 0)).toEqual({ height: 5000, full: false })
+    expect(resolveBandHeight(5000, Number.NaN)).toEqual({ height: 5000, full: false })
+  })
+
+  it('the floor still applies underneath the snap logic', () => {
+    expect(resolveBandHeight(10, 900)).toEqual({ height: BAND_MIN_PX, full: false })
+  })
+})
+
+describe('wantsFullscreen / resolveStudioBandDrag — the Studio full-screen threshold', () => {
+  it('an ordinary height, well short of the column, never wants full screen', () => {
+    expect(wantsFullscreen(400, 900)).toBe(false)
+  })
+
+  it('reaching exactly the column top (ordinary `full`) is not YET full screen', () => {
+    expect(wantsFullscreen(900, 900)).toBe(false)
+  })
+
+  it('one pixel short of the overshoot threshold is still not full screen', () => {
+    expect(wantsFullscreen(900 + BAND_FULLSCREEN_OVERSHOOT_PX - 1, 900)).toBe(false)
+  })
+
+  it('right at the overshoot threshold PAST the column, it wants full screen', () => {
+    expect(wantsFullscreen(900 + BAND_FULLSCREEN_OVERSHOOT_PX, 900)).toBe(true)
+  })
+
+  it('dragged all the way to the top of the screen — the reported freeze — wants full screen', () => {
+    expect(wantsFullscreen(10_000, 900)).toBe(true)
+  })
+
+  it('an unmeasured column never wants full screen — there is no top edge to have gone past', () => {
+    expect(wantsFullscreen(10_000, 0)).toBe(false)
+    expect(wantsFullscreen(10_000, Number.NaN)).toBe(false)
+  })
+
+  it('resolveStudioBandDrag bundles the ordinary snap with the fullscreen want, in one call', () => {
+    expect(resolveStudioBandDrag(400, 900)).toEqual({ height: 400, full: false, fullscreen: false })
+    expect(resolveStudioBandDrag(900, 900)).toEqual({ height: 900, full: true, fullscreen: false })
+  })
+
+  it('once past the overshoot, height/full stay exactly what the ORDINARY snap would have answered', () => {
+    // The whole point: the band is never told to remember the raw, enormous overshoot as its own
+    // height — `height`/`full` here are identical to `resolveBandHeight(10_000, 900)` alone, so
+    // leaving full screen can fall back to this record and land on a sane, column-filling band
+    // rather than on whatever the drag's raw number happened to be.
+    const dragged = resolveStudioBandDrag(10_000, 900)
+    expect(dragged).toEqual({ height: 900, full: true, fullscreen: true })
+    expect({ height: dragged.height, full: dragged.full }).toEqual(resolveBandHeight(10_000, 900))
   })
 })
 
@@ -122,6 +212,18 @@ describe('the band prefs are a per-viewer convenience and never a hard dependenc
     expect(readBandPrefs(s)).toEqual(prefs)
   })
 
+  // design item 7
+  it('round-trips `full` too, omitted (not `false`) when it was never set', () => {
+    const s = memory()
+    writeBandPrefs({ open: true, height: 900, full: true }, s)
+    expect(readBandPrefs(s)).toEqual({ open: true, height: 900, full: true })
+
+    const s2 = memory()
+    writeBandPrefs({ open: true, height: 260 }, s2)
+    expect(readBandPrefs(s2)).toEqual({ open: true, height: 260 })
+    expect('full' in readBandPrefs(s2)).toBe(false)
+  })
+
   it('no stored value reads as CLOSED — the band is never opened by a machine nobody asked', () => {
     expect(readBandPrefs(memory()).open).toBe(false)
   })
@@ -173,8 +275,10 @@ describe('the geometry the band remembers', () => {
     const s = fake()
     writeBandGeometry('docked', { cols: 144, rows: 13 }, s)
     writeBandGeometry('dedicated', { cols: 144, rows: 48 }, s)
+    writeBandGeometry('aside', { cols: 96, rows: 30 }, s)
     expect(bandGeometry('docked', s)).toEqual({ cols: 144, rows: 13 })
     expect(bandGeometry('dedicated', s)).toEqual({ cols: 144, rows: 48 })
+    expect(bandGeometry('aside', s)).toEqual({ cols: 96, rows: 30 })
   })
 
   test('writing a geometry keeps everything else the record already held', () => {

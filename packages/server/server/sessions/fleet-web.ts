@@ -21,6 +21,7 @@ import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
 import { conversationOfRow } from './row-conversation'
+import { attachmentMessageOf, recordAttachmentMessage } from './attachment-web'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { ProjectSearchResult } from '@agentistics/tui/control'
@@ -259,13 +260,25 @@ export async function runFleetAction(
     : undefined
 
   switch (req.action) {
-    case 'approve':
+    case 'approve': {
       if (!host.answerSession) return { ok: false, message: s.sessionsNoHost }
       // `text` rides along for the FREE-TEXT option, where picking is only the first of three
       // steps — see `answerSession`. Every other option ignores it.
+      //
+      // AN ANSWER'S ATTACHMENTS ARE DELIBERATELY NOT RECORDED HERE. A free-text answer lands in the
+      // transcript as a pure `tool_result` under an `AskUserQuestion` — nobody's turn, and never a
+      // marker turn — so a record stamped for it matches no marker, sits inside the WINDOW of the
+      // next actual marker turn, and forces that turn's count to disagree with its own markers:
+      // a turn that would otherwise resolve draws a chip instead. It also cost a background fleet
+      // read on every text answer for a record nothing could ever use.
       return await host.answerSession(req.id, req.choice, text)
+    }
     case 'prompt': {
       if (!host.promptSession) return { ok: false, message: s.sessionsNoHost }
+      // Taken BEFORE the message is typed, so the record can never be stamped later than the turn
+      // the harness writes for it — the resolver refuses a record from after the turn it is asked
+      // about, and a submit that waits on the pane takes hundreds of milliseconds.
+      const sentAtMs = Date.now()
       const out = await host.promptSession(req.id, text)
       // RECORDED ONLY ON A CONFIRMED DELIVERY, and recorded HERE rather than in the browser: a
       // queue held by the tab that sent it is a queue no other device can see, which is the whole
@@ -287,6 +300,10 @@ export async function runFleetAction(
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
             const conv = row ? conversationOfRow(row) : ''
             if (conv) recordPrompt(conv, text)
+            // What this message CARRIED, off the text that was just typed — see
+            // `attachmentMessageOf`. The same row lookup serves both, so it costs nothing more.
+            const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
+            if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
         })()
       }
@@ -618,7 +635,7 @@ export async function readFleetPullRequests(
 /** What a search that could not run answers: no rows, and no claim about how many there are. */
 const EMPTY_PROJECT_SEARCH: ProjectSearchResult = {
   options: [],
-  totals: { repo: 0, project: 0, folder: 0 },
+  totals: { repo: 0, worktree: 0, project: 0, folder: 0 },
 }
 
 export interface FleetNewOptions {
@@ -655,7 +672,11 @@ export interface FleetNewOptions {
   }[]
   /** Ranked places, from the LOCAL store — so the picker answers with no network and a cold cache.
    *  CAPPED per kind: what fits on screen, never how many there are. See `projectTotals`. */
-  projects: { path: string; label: string; repo?: string; detail: string; source: string }[]
+  projects: {
+    path: string; label: string; repo?: string; detail: string; source: string
+    /** True only for a LINKED worktree — never its own main checkout. See `ProjectKind`. */
+    worktree?: boolean
+  }[]
   /**
    * How many places of each kind MATCHED, before the cap — the number the tabs carry.
    *
@@ -724,6 +745,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
         ...(p.repo ? { repo: p.repo } : {}),
         detail: p.detail,
         source: p.source,
+        ...(p.worktree ? { worktree: true } : {}),
       })),
       /**
        * HOW MANY of each kind matched, which is NOT how many rows came back.

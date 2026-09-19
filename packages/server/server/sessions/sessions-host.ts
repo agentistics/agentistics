@@ -28,6 +28,7 @@ import { planAdoptions } from './session-adopt'
 // The claim for harnesses that cannot be handed a conversation id. See `task-attribution.ts`.
 import { planFirstSightingClaims } from './task-attribution'
 import { HARNESS_PROCESS_LOGS } from './harness-session-file'
+import { agyLogCollisions } from './agy-conversation'
 import { loadConversations, type Conversation } from './conversations'
 import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
 import { emptyHarnessSessionIndex, type HarnessSessionIndex } from './harness-sessions'
@@ -97,6 +98,45 @@ export interface SessionsPoller {
   poll(): Promise<SessionSnapshot>
 }
 
+/**
+ * One attempt at the OTHER exact link — the conversation named in the log a harness's own process
+ * holds open (`HARNESS_PROCESS_LOGS`; antigravity only today, see `agy-conversation.ts`).
+ *
+ * Extracted from the poll loop below so a caller with exactly ONE freshly spawned row can retry it
+ * on its own schedule — see `linkProcessConversationSoon` in `cli-start.ts`'s spawn wiring, and the
+ * header there for why the poll loop alone is not enough. `pid` is a parameter rather than resolved
+ * here so a caller walking many rows (the poll loop) still pays for `listPanePids()` once, not once
+ * per row. `knownLog`, when given, skips re-resolving the pid's `/proc/<pid>/fd` — the caller has
+ * already paid for it to run `agyLogCollisions` (see the poll loop and `linkProcessConversationSoon`
+ * below), and it must never be asked twice: a pid whose pane exits between the two reads would
+ * resolve differently the second time, on a check whose whole point is the answer being the SAME
+ * fact both times.
+ *
+ * Returns `true` only once the link is actually RECORDED. A write that throws — `patchSession`
+ * runs inside the registry's own cross-process file lock and can genuinely fail — must read as "not
+ * linked, try again", not as success: `linkProcessConversationSoon`'s retry loop treats `true` as
+ * terminal (`if (linked) return`), so reporting success on a failed write would spend this
+ * session's one dedicated retry window on nothing and fall back entirely to the ordinary poll.
+ */
+export async function linkProcessConversation(o: {
+  id: string
+  harness: HarnessId
+  pid: number
+  knownLog?: string | null
+  readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+  recordConversation: (id: string, conversationId: string, link: 'assigned') => Promise<unknown>
+}): Promise<boolean> {
+  if (!HARNESS_PROCESS_LOGS[o.harness]) return false
+  const found = await o.readProcessConversation(o.harness, o.pid, o.knownLog).catch(() => null)
+  if (!found) return false
+  try {
+    await o.recordConversation(o.id, found, 'assigned')
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function createSessionsPoller(o: {
   backend: SessionBackend
   readRegistry: () => Promise<ManagedSession[]>
@@ -147,7 +187,15 @@ export function createSessionsPoller(o: {
    *
    * Injected like every other read here, so the poller stays testable without a `/proc`.
    */
-  readProcessConversation?: (harness: HarnessId, pid: number) => Promise<string | null>
+  readProcessConversation?: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+  /**
+   * Which log a pid holds open, WITHOUT reading its content — see `process-conversation.ts`'s
+   * `resolveProcessLog`. Used to build the collision guard (`agyLogCollisions`) BEFORE any content
+   * is trusted: a fleet with two live agy processes sharing one log (they name it by SECOND) must
+   * never have either one linked from it, and that can only be known by resolving every candidate
+   * pid's log FIRST. Optional like every other `/proc` read here.
+   */
+  resolveProcessLog?: (harness: HarnessId, pid: number) => Promise<string | null>
   /**
    * Persist the name a managed row was given INSIDE the harness (`/rename`), so the title survives
    * the process.
@@ -405,20 +453,59 @@ export function createSessionsPoller(o: {
       // Recorded as `assigned` rather than `observed`: this is the harness's own statement about
       // the conversation it created, read out of the process WE spawned into WE own's pane — not
       // the first-sighting claim below, which infers from time and directory and refuses on any
-      // ambiguity. Asked only of a row with NO link yet, and only for a harness that has an entry,
-      // so it costs one `/proc` sweep per unlinked agy session and nothing at all on a fleet
-      // without one.
+      // ambiguity. The content read is asked only of a row with NO link yet; the COLLISION check
+      // below additionally sweeps `/proc/<pid>/fd` for every LIVE process of such a harness this
+      // poll already knows about (not only our own unlinked rows — see its own comment), which costs
+      // one extra sweep per already-linked live agy session too. Still nothing at all on a fleet
+      // without one, which is the case that matters: this whole block is a no-op there.
       const procLinkStart = performance.now()
       let procLinkWrites = 0
       if (o.recordConversation && o.readProcessConversation) {
+        // THE COLLISION GUARD, resolved BEFORE any content is trusted — see `agyLogCollisions`'s
+        // own header for what was actually measured. `HARNESS_PROCESS_LOGS` names its log by
+        // SECOND, so two live processes of such a harness — anywhere on this machine, not only
+        // among our own unlinked rows, because the process that collides with ours need not be one
+        // agentop started — can hold the identical file open, and the file's content then cannot be
+        // attributed to either of them. Every candidate pid's log is resolved once, up front, so the
+        // read below never has to guess which pid a line belongs to.
+        const logByPid = new Map<string, string | null>()
+        if (o.resolveProcessLog) {
+          const candidates = new Map<string, HarnessId>()
+          for (const p of processes) {
+            if (p.pid !== undefined && HARNESS_PROCESS_LOGS[p.harness]) {
+              candidates.set(String(p.pid), p.harness)
+            }
+          }
+          // Belt and braces: a row's own pane pid, in case `scanProcesses` (a `/proc` scan matched
+          // by command line) missed one that tmux's own bookkeeping still knows about.
+          for (const m of registry) {
+            if (!HARNESS_PROCESS_LOGS[m.harness]) continue
+            const pid = panePids?.get(m.id)
+            if (pid !== undefined) candidates.set(String(pid), m.harness)
+          }
+          await Promise.all([...candidates].map(async ([pidKey, harness]) => {
+            logByPid.set(pidKey, await o.resolveProcessLog!(harness, Number(pidKey)).catch(() => null))
+          }))
+        }
+        const collidedPids = agyLogCollisions(
+          new Map([...logByPid].map(([pidKey, log]) => [Number(pidKey), log])),
+        )
+
         for (const m of registry) {
           if (m.conversationId || !HARNESS_PROCESS_LOGS[m.harness]) continue
           const pid = panePids?.get(m.id)
           if (!pid) continue
-          const found = await o.readProcessConversation(m.harness, pid).catch(() => null)
-          if (!found) continue
-          procLinkWrites++
-          await o.recordConversation(m.id, found, 'assigned').catch(() => undefined)
+          // REFUSE rather than read a log another live process also has open — see the header
+          // above. Left unlinked exactly as a pid with no log at all is: the next poll re-resolves,
+          // so a collision that clears (one process ends) is retried, never permanently refused.
+          if (collidedPids.has(pid)) continue
+          const linked = await linkProcessConversation({
+            id: m.id, harness: m.harness, pid,
+            knownLog: logByPid.get(String(pid)),
+            readProcessConversation: o.readProcessConversation,
+            recordConversation: o.recordConversation,
+          })
+          if (linked) procLinkWrites++
         }
       }
       markFleetPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)

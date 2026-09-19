@@ -249,6 +249,37 @@ export function clearHistoryArgs(id: string, socket?: string): string[] {
   return sock(['clear-history', '-t', tmuxName(id)], socket)
 }
 
+/** The buffer name a paste uses — one per pane, so two sessions pasting at once never collide. */
+export function pasteBufferName(id: string): string {
+  return `agentop-paste-${id}`
+}
+
+/**
+ * `set-buffer` writes the WHOLE clipboard payload as one argv element — no stdin, no shell, so a
+ * paste with `;` or a literal `C-c` byte in it is stored verbatim rather than interpreted the way
+ * `sendKeysLiteralArgs`'s own text already is. This is the write half; `pasteBufferArgs` is the read.
+ */
+export function setBufferArgs(bufferName: string, data: string, socket?: string): string[] {
+  return sock(['set-buffer', '-b', bufferName, data], socket)
+}
+
+/**
+ * Insert the buffer into the pane as ONE atomic paste, then delete it (`-d`) — never left behind
+ * for the next paste to (mis)read.
+ *
+ * `-p` wraps the buffer in bracketed-paste control codes IF, AND ONLY IF, the program in the pane
+ * has itself requested bracketed paste mode (tmux's own rule — `paste-buffer(1)`) — this builder
+ * asks for it unconditionally and tmux decides per pane whether it applies. That is what lets a
+ * multi-line paste land as ONE atomic input rather than one `Enter` per line: a program that
+ * requested bracketed paste sees the `\x1b[200~…\x1b[201~` markers and knows the newlines inside are
+ * part of a paste, not separate keystrokes: exactly the same primitive a real terminal emulator
+ * uses to paste into the SAME pane when attached directly, so this is not a new behaviour, only a
+ * new way of reaching the one tmux already has.
+ */
+export function pasteBufferArgs(id: string, bufferName: string, socket?: string): string[] {
+  return sock(['paste-buffer', '-p', '-d', '-b', bufferName, '-t', tmuxName(id)], socket)
+}
+
 export function listSessionsArgs(socket?: string): string[] {
   return sock(['list-sessions', '-F', LIST_FORMAT], socket)
 }

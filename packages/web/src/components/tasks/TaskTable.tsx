@@ -45,11 +45,15 @@ import { ChipSelect, statusOptions } from './ChipSelect'
 import { StatusChip } from './StatusChip'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { subtaskSessions } from './SubtaskSessions'
+import { SubtaskGroupMenu } from './SubtaskGroupMenu'
+import { groupOf, isGroupMember, isGroupSubtask } from './subtaskGroups'
+import { subtaskRollupOf } from './subtaskRollup'
 import { PickerMenu } from './PickerMenu'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import type {
-  Subtask, TaskClaim, TaskDetail, TaskListRow, TaskSessionRow, TaskStatus,
+  StatusWriteResult, Subtask, SubtaskPatch, SubtaskView, TaskClaim, TaskDetail, TaskListRow,
+  TaskSessionRow, TaskStatus,
 } from '../../lib/tasks'
 
 /** The words the "sorted by" note uses. Kept beside `COLUMNS`, whose labels they mirror. */
@@ -275,17 +279,23 @@ export const subtaskColumns = (lang: Lang): string[] => {
 }
 
 function SubtaskRows({
-  subtasks, indent, cols, sessions, lang, onPatch, onRemove, onLinkSession, onUnfile, onOpenSession,
+  subtasks, subtaskRollups, indent, cols, sessions, lang, onPatch, onRemove, onCreateGroup,
+  onLinkSession, onUnfile, onOpenSession,
 }: {
   subtasks: Subtask[]
+  /** The delivery's own `TaskDetail.subtaskRollups` — read here only for a GROUP's own
+   *  `groupProgress` (§F.1); the rest of this row's numbers stay off this table by design (see the
+   *  file's own doc comment: a subtask has no rollup of its own in the board's inline view). */
+  subtaskRollups: readonly SubtaskView[]
   indent: number
   /** How many task columns the group's table has — the filler cell has to close the row exactly. */
   cols: number
   /** The DELIVERY's sessions. Each subtask draws the ones filed under IT — see `SubtaskSessions`. */
   sessions: readonly TaskSessionRow[]
   lang: Lang
-  onPatch: (id: string, patch: Partial<Subtask>) => void
+  onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
   onRemove: (id: string) => void
+  onCreateGroup: (title: string) => Promise<string | null>
   onLinkSession: (subtaskId: string) => void
   onUnfile: (sessionId: string) => void
   onOpenSession?: (sessionId: string) => void
@@ -300,32 +310,60 @@ function SubtaskRows({
   const filler = Math.max(0, cols - 5)
   return (
     <>
-      {subtasks.map(t => (
+      {subtasks.map(t => {
+        // See `SubtaskTable`'s own row for the full §F.1 reasoning — this mirrors it exactly, over
+        // the same `subtasks` pool (already scoped to one delivery).
+        const isMember = isGroupMember(t)
+        const isGroup = isGroupSubtask(t)
+        const view = subtaskRollups.find(v => v.id === t.id)
+        const parentGroup = isMember ? groupOf(t, subtasks) : undefined
+        return (
         <tr key={t.id} style={{ background: 'var(--bg-surface)' }}>
           <td style={{ padding: cellPad }} />
           <td style={{ padding: cellPad, paddingLeft: indent }}>
             <input
               value={t.title}
-              onChange={e => onPatch(t.id, { title: e.target.value })}
+              onChange={e => void onPatch(t.id, { title: e.target.value })}
               style={{
                 ...bare,
                 color: t.done ? 'var(--text-tertiary)' : 'var(--text-secondary)', fontSize: 12.5,
                 textDecoration: t.done ? 'line-through' : 'none',
               }}
             />
+            {isGroup && view?.groupProgress && (
+              <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} height={3} />
+            )}
+            {isMember && (
+              <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                {lang === 'pt' ? 'parte do grupo: ' : 'part of group: '}
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {parentGroup?.title ?? (lang === 'pt' ? '(não encontrado)' : '(not found)')}
+                </span>
+              </div>
+            )}
           </td>
           <td style={{ padding: cellPad }}>
-            <ChipSelect
-              compact
-              value={t.status}
-              options={statusOptions(STATUS, COLUMN_ORDER)}
-              onPick={v => onPatch(t.id, { status: v as TaskStatus })}
-            />
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' }}>
+              <ChipSelect
+                compact
+                value={t.status}
+                options={statusOptions(STATUS, COLUMN_ORDER)}
+                onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
+              />
+              <SubtaskGroupMenu
+                subtask={t}
+                siblings={subtasks}
+                lang={lang}
+                onPatch={onPatch}
+                onCreateGroup={onCreateGroup}
+                onRemove={onRemove}
+              />
+            </span>
           </td>
           <td style={{ padding: cellPad }}>
             <input
               value={t.assignee ?? ''} placeholder="—"
-              onChange={e => onPatch(t.id, { assignee: e.target.value })}
+              onChange={e => void onPatch(t.id, { assignee: e.target.value })}
               style={bare}
             />
           </td>
@@ -333,24 +371,22 @@ function SubtaskRows({
           <td style={{ padding: cellPad }}>
             <DatePicker
               value={t.startDate ?? ''} label="" placeholder="—" lang="en"
-              onChange={v => onPatch(t.id, { startDate: v })}
+              onChange={v => void onPatch(t.id, { startDate: v })}
             />
           </td>
           <td style={{ padding: cellPad }}>
             <DatePicker
               value={t.dueDate ?? ''} label="" placeholder="—" lang="en"
               min={t.startDate || undefined}
-              onChange={v => onPatch(t.id, { dueDate: v })}
+              onChange={v => void onPatch(t.id, { dueDate: v })}
             />
           </td>
           <td style={{ padding: cellPad }}>
-            {subtaskSessions({
+            {/* A MEMBER can never hold a session (§F.1, refused server-side) — no filing control,
+                and never a chip list unioned from its group's sessions (superseded §B.4). */}
+            {!isMember && subtaskSessions({
               subtaskId: t.id,
-              // The row's group siblings show the identical chip list — see
-              // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.4.
-              subtaskIds: t.groupId
-                ? subtasks.filter(s => s.groupId === t.groupId).map(s => s.id)
-                : [t.id],
+              subtaskIds: [t.id],
               sessions,
               lang,
               mobile: isMobile,
@@ -370,7 +406,8 @@ function SubtaskRows({
             ><Trash2 size={12} /></button>
           </td>
         </tr>
-      ))}
+        )
+      })}
     </>
   )
 }
@@ -389,8 +426,14 @@ export interface TaskTableProps {
   onCreate: (title: string, status: TaskStatus) => void
   onExpand: (id: string) => void
   onAddSubtask: (ref: string, title: string) => void
-  onPatchSubtask: (ref: string, id: string, patch: Partial<Subtask>) => void
+  /** Returns the write's outcome — the group-forming gestures (§F.1) need it to show
+   *  `invalid_group`/`subtask_has_sessions`/`group_field_conflict` instead of swallowing a refusal,
+   *  the same standard `SubtaskTable`'s own `onPatch` already holds this board to. */
+  onPatchSubtask: (ref: string, id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
   onRemoveSubtask: (ref: string, id: string) => void
+  /** Mint a new GROUP subtask (§F.1) and return its id, or `null` on failure — see
+   *  `SubtaskTable`'s own `onCreateGroup`. */
+  onCreateGroupSubtask: (ref: string, title: string) => Promise<string | null>
   onBatchStatus: (ids: string[], status: TaskStatus) => void
   onBatchDelete: (ids: string[]) => void
   /**
@@ -721,11 +764,13 @@ export function TaskTable(p: TaskTableProps) {
                                 {cols.length > 5 && <td colSpan={cols.length - 5} />}
                               </tr>
                               <SubtaskRows
-                                subtasks={subs} indent={34} cols={cols.length}
+                                subtasks={subs} subtaskRollups={detail?.subtaskRollups ?? []}
+                                indent={34} cols={cols.length}
                                 sessions={detail?.sessions ?? []}
                                 lang={p.lang ?? 'en'}
                                 onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
                                 onRemove={id => p.onRemoveSubtask(row.task.id, id)}
+                                onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
                                 onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
                                 onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
                                 onOpenSession={p.onOpenSession}

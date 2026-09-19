@@ -58,3 +58,37 @@ describe('the set is closed and matches the channel', () => {
     expect([...CTRL_SHORTCUTS].sort()).toEqual(['a', 'c', 'd', 'e', 'k', 'l', 'u', 'w'])
   })
 })
+
+describe('copy — Ctrl+C (and its cousins) with a selection', () => {
+  // Reported: selecting text and pressing Ctrl+C sent an interrupt instead of copying. Plain
+  // Ctrl+C was in `CTRL_SHORTCUTS` unconditionally, so it always took the browser's own copy away.
+  test('Ctrl+C with a selection copies, not interrupts', () => {
+    expect(shortcutDecision(ev({ key: 'c' }), true)).toBe('copy')
+  })
+
+  test('Ctrl+C with NO selection still interrupts, exactly as before', () => {
+    expect(shortcutDecision(ev({ key: 'c' }), false)).toBe('take')
+    expect(shortcutDecision(ev({ key: 'c' }))).toBe('take') // hasSelection defaults to false
+  })
+
+  test('Cmd+C with a selection copies too', () => {
+    expect(shortcutDecision(ev({ key: 'c', ctrlKey: false, metaKey: true }), true)).toBe('copy')
+  })
+
+  test('Ctrl+Shift+C with a selection copies too — shift does not refuse the copy decision', () => {
+    expect(shortcutDecision(ev({ key: 'c', shiftKey: true }), true)).toBe('copy')
+  })
+
+  test('a selection does not turn an unrelated ctrl combo into a copy', () => {
+    expect(shortcutDecision(ev({ key: 'w' }), true)).toBe('take')
+    expect(shortcutDecision(ev({ key: 'z' }), true)).toBe('leave')
+  })
+
+  test('Alt+C is never a copy, selection or not', () => {
+    expect(shortcutDecision(ev({ key: 'c', altKey: true }), true)).toBe('leave')
+  })
+
+  test('case does not decide the copy check either', () => {
+    expect(shortcutDecision(ev({ key: 'C' }), true)).toBe('copy')
+  })
+})

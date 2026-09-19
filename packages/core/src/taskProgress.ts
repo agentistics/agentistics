@@ -33,3 +33,18 @@ export function taskProgress(done: number, total: number): TaskProgress {
     complete: capped === total,
   }
 }
+
+/**
+ * A subtask GROUP's own progress, from its members' `done` flags
+ * (docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §F.1: a group's status is what its
+ * members' statuses say, the same way a task's is what its subtasks say). This is the SAME
+ * round-down, no-bar-without-anything-to-measure rule as `taskProgress`, read one hierarchy level
+ * down — not a second rule, which is why it is a thin call into it rather than its own arithmetic.
+ *
+ * Takes plain booleans rather than `Subtask[]` so it stays reachable from both sides of the
+ * server/web boundary: a server route holding real `Subtask` records and a future UI holding the
+ * wire's mirror type can both pass `members.map(m => m.done)` through the one rule.
+ */
+export function groupProgress(memberDone: readonly boolean[]): TaskProgress {
+  return taskProgress(memberDone.filter(Boolean).length, memberDone.length)
+}

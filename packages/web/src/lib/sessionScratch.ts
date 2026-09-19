@@ -40,6 +40,9 @@ export interface CachedChat {
   turns: unknown[]
   live?: boolean
   unavailable?: string
+  /** The server's real attachments directory — see `attachmentUrl.ts`'s `setAttachmentsDir`, which
+   *  `chatFeed.ts` calls with this the moment a read carries it. */
+  attachmentsDir?: string
 }
 
 /** A `Storage`-shaped dependency, so the behaviour is testable without a browser. */

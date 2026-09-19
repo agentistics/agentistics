@@ -62,6 +62,157 @@ export function apportionModelUsage(
   }
 }
 
+/** The subset of a session `claudeExactUsageByDay` reads. Structural, so `SessionMeta` stays the
+ *  source of truth. */
+export interface ClaudeDaySession {
+  model?: string
+  start_time?: string
+  daily?: Record<string, DayUsage>
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+}
+
+/**
+ * Per-day, per-model Claude usage a set of sessions can answer for EXACTLY — the one thing
+ * `dailyModelTokens` cannot, because it carries a per-model TOTAL with no day-by-day split at all
+ * (see `apportionModelUsage`'s header for why that gets guessed). A session's own `daily` field,
+ * or its lifetime counters when it has none, is a measurement rather than a guess.
+ *
+ * A day is present in the returned map — "covered" — when at least one session in `sessions`
+ * carries `daily[<that day>]` (its counters, zero or not, are still the truth for that day), or,
+ * for a session with no `daily` at all, when that session's START day is it — the same
+ * whole-session-on-its-start-day rule this file already applies wherever a record predates the
+ * field or its harness's adapter does not produce it.
+ *
+ * `days` restricts which days can ever be covered — pass the CURRENT filter's day set, or a
+ * session's whole lifetime leaks into a window that never asked for it. Absent from the map means
+ * "nothing in scope can answer for this day", never a zero: the caller falls back to
+ * `apportionModelUsage` for those.
+ *
+ * KNOWN LIMITATION, not fixed here: a session with NO `daily` that straddles midnight UTC files
+ * its WHOLE lifetime total on its start day (the branch below), same as everywhere else this file
+ * applies that fallback — `reconciliation.md`'s Defect D, an explicitly ruled-in limit, not
+ * Defect A. If `dailyModelTokens` also carries a (correctly split) entry for the NEXT day, that
+ * next day is priced by `apportionModelUsage` on top of a start day that already contains its
+ * share — over-counting the overlap. `reconcileClaudeDayCoverage` cannot catch this: it only ever
+ * demotes a day whose exact total is SIGNIFICANTLY LESS than the cache's, and a day carrying an
+ * adjacent day's tokens too is never less. See `useData.test.ts`'s
+ * "a no-daily session straddling midnight" test, which documents the current (over-counting)
+ * behaviour rather than asserting it away.
+ */
+export function claudeExactUsageByDay(
+  sessions: readonly ClaudeDaySession[],
+  days: ReadonlySet<string>,
+  modelSet: ReadonlySet<string> | null = null,
+): Map<string, Record<string, import('@agentistics/core').ModelUsage>> {
+  const byDay = new Map<string, Record<string, import('@agentistics/core').ModelUsage>>()
+  const add = (
+    day: string,
+    model: string,
+    delta: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number },
+  ) => {
+    if (modelSet && !modelSet.has(model)) return
+    let bucket = byDay.get(day)
+    if (!bucket) { bucket = {}; byDay.set(day, bucket) }
+    const entry = bucket[model] ?? (bucket[model] = {
+      inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+      webSearchRequests: 0, costUSD: 0,
+    })
+    entry.inputTokens += delta.inputTokens
+    entry.outputTokens += delta.outputTokens
+    entry.cacheReadInputTokens += delta.cacheReadInputTokens
+    entry.cacheCreationInputTokens += delta.cacheCreationInputTokens
+  }
+
+  for (const s of sessions) {
+    const model = s.model
+    if (!model) continue
+    if (s.daily) {
+      for (const [day, d] of Object.entries(s.daily)) {
+        if (!days.has(day)) continue
+        add(day, model, {
+          inputTokens: d.input_tokens || 0,
+          outputTokens: d.output_tokens || 0,
+          cacheReadInputTokens: d.cache_read_input_tokens || 0,
+          cacheCreationInputTokens: d.cache_creation_input_tokens || 0,
+        })
+      }
+    } else {
+      const day = dayKey(s.start_time)
+      if (!day || !days.has(day)) continue
+      add(day, model, {
+        inputTokens: s.input_tokens ?? 0,
+        outputTokens: s.output_tokens ?? 0,
+        cacheReadInputTokens: s.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: s.cache_creation_input_tokens ?? 0,
+      })
+    }
+  }
+  return byDay
+}
+
+/**
+ * "Covered" (`claudeExactUsageByDay`) means "at least one in-scope session touches this day" — and
+ * that is a claim about PRESENCE, not about the LOCAL STORE being COMPLETE for that day. Claude
+ * Code's 30-day retention can delete a transcript before this product ever computed the session
+ * into `~/.agentistics/sessions/**`, `archiveMode` is not always `consolidate`/`full`, and even
+ * then "the member's deep history exists ONLY aggregated... the individual session docs cover a
+ * fraction of it" (see CLAUDE.md's team-mode section). A thin session sitting alone on a day
+ * `dailyModelTokens` recorded as enormous is not evidence the day was quiet — it is evidence the
+ * local store is missing the rest of it, and pricing THAT as if it were the whole day is worse
+ * than the apportioned guess it replaced: it looks exact and it is not.
+ *
+ * So a day with an entry in `dailyModelTokens` is trusted only when the sessions' own total for
+ * that day is not SIGNIFICANTLY LESS than that entry's total — the same total
+ * `apportionModelUsage` would otherwise have split. `CLAUDE_DAY_COVERAGE_RATIO` is deliberately
+ * loose enough to tolerate the ordinary drift between two INDEPENDENTLY computed totals — Claude
+ * Code's own cache versus this product's session parser measured ~0.002% apart on the 246b2b32
+ * fixture (the session total came out slightly ABOVE the cache's there, which passes trivially at
+ * any ratio ≤ 1) — while still catching what the reviewed case represents: a store missing SIX
+ * ORDERS OF MAGNITUDE of a day's real activity is not rounding noise. A ratio close to 1.0 would
+ * demote genuinely complete days over that ordinary drift and lose the fix `claudeExactUsageByDay`
+ * exists for; nothing in this repo suggests that drift ever reaches double digits, so 0.9 leaves
+ * ample room on the complete side without leaving the gap the reviewer measured open on the other.
+ *
+ * A day with NO entry in `dailyModelTokens` has nothing to cross-check against — the OLD
+ * apportionment loop could not have produced anything for it either (it only ever iterates that
+ * same array), so trusting the session there is no worse than the pre-Defect-A behaviour and is
+ * left alone.
+ *
+ * Does NOT catch the over-counting case named in `claudeExactUsageByDay`'s header (a no-`daily`
+ * session straddling midnight): that day's exact total is never LESS than the cache's, since it
+ * contains an adjacent day's tokens IN ADDITION to its own — this check only ever demotes a day
+ * for having too little, never for having too much.
+ */
+export const CLAUDE_DAY_COVERAGE_RATIO = 0.9
+
+export function reconcileClaudeDayCoverage(
+  exactByDay: ReadonlyMap<string, Record<string, import('@agentistics/core').ModelUsage>>,
+  dailyModelTokens: readonly { date: string; tokensByModel: Record<string, number> }[],
+  ratio: number = CLAUDE_DAY_COVERAGE_RATIO,
+): Map<string, Record<string, import('@agentistics/core').ModelUsage>> {
+  const cacheTotalByDay = new Map<string, number>()
+  for (const day of dailyModelTokens) {
+    if (typeof day.date !== 'string' || day.date.length < 10) continue
+    const key = day.date.slice(0, 10)
+    const total = Object.values(day.tokensByModel ?? {}).reduce((s, n) => s + (n || 0), 0)
+    cacheTotalByDay.set(key, (cacheTotalByDay.get(key) ?? 0) + total)
+  }
+
+  const out = new Map<string, Record<string, import('@agentistics/core').ModelUsage>>()
+  for (const [day, perModel] of exactByDay) {
+    const cacheTotal = cacheTotalByDay.get(day)
+    if (cacheTotal === undefined) { out.set(day, perModel); continue } // nothing to cross-check
+    const exactTotal = Object.values(perModel).reduce((s, u) => s + usageTokenTotal(u), 0)
+    if (cacheTotal <= 0 || exactTotal >= cacheTotal * ratio) out.set(day, perModel)
+    // else: the store answers for too little of this day — fall back to apportionment, and let
+    // the caller count it as estimated. Never repaired by inventing the missing sessions.
+  }
+  return out
+}
+
 /**
  * Close the day series against the headline it decomposes.
  *
@@ -416,10 +567,22 @@ export function calcLongestStreak(activeDates: Set<string>): number {
   return longest
 }
 
-/** Blended cost per token using global model usage proportions */
+/**
+ * Blended cost per token using global model usage proportions.
+ *
+ * `cacheWrite` is unchanged — still the blend, by model volume, of each model's 5-minute-TTL
+ * `cacheWrite` rate, exactly as before this field existed. `cacheWrite1h` is its twin: the SAME
+ * per-model volume weights, priced at each model's `cacheWrite1h` rate instead (imported off
+ * `MODEL_PRICING` via `getModelPrice` — never a hand-typed 2x, see `packages/core/src/types.ts`).
+ * Computing it needs no TTL split at THIS aggregate level (there is none — `modelUsage` here is
+ * `statsCache.modelUsage`/`globalModelUsage`, which nothing in the pipeline accumulates a 1h/5m
+ * split into): it only needs "what would this same volume have cost, entirely at the 1h rate",
+ * which `getModelPrice` already answers per model. `blendedSessionCost` below is what actually
+ * SELECTS between the two, per session, using that session's own real split.
+ */
 export function blendedCostPerToken(modelUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>) {
   let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0
-  let weightedInput = 0, weightedOutput = 0, weightedCacheRead = 0, weightedCacheWrite = 0
+  let weightedInput = 0, weightedOutput = 0, weightedCacheRead = 0, weightedCacheWrite = 0, weightedCacheWrite1h = 0
 
   for (const [modelId, u] of Object.entries(modelUsage)) {
     const price = getModelPrice(modelId)
@@ -431,6 +594,7 @@ export function blendedCostPerToken(modelUsage: Record<string, { inputTokens: nu
     weightedOutput += u.outputTokens * price.output
     weightedCacheRead += u.cacheReadInputTokens * price.cacheRead
     weightedCacheWrite += u.cacheCreationInputTokens * price.cacheWrite
+    weightedCacheWrite1h += u.cacheCreationInputTokens * price.cacheWrite1h
   }
 
   return {
@@ -438,6 +602,10 @@ export function blendedCostPerToken(modelUsage: Record<string, { inputTokens: nu
     output: totalOutput > 0 ? weightedOutput / totalOutput : 15,
     cacheRead: totalCacheRead > 0 ? weightedCacheRead / totalCacheRead : 0.3,
     cacheWrite: totalCacheWrite > 0 ? weightedCacheWrite / totalCacheWrite : 3.75,
+    // Sonnet-class fallback at the same 2x-base-input rate `MODEL_PRICING` derives every row's
+    // `cacheWrite1h` at (see `packages/core/src/types.ts`) — matches the pre-existing convention
+    // of restating the Sonnet-class numbers here rather than importing the fallback object.
+    cacheWrite1h: totalCacheWrite > 0 ? weightedCacheWrite1h / totalCacheWrite : 6,
   }
 }
 
@@ -450,13 +618,32 @@ export type BlendedRates = ReturnType<typeof blendedCostPerToken>
  * column) wrote this by hand over `input` and `output` only, so a session with no model was priced
  * on the 4 % of its volume that is not cache. Pricing the cache as fresh input would be the
  * opposite error — about tenfold too high — which is why the four rates exist separately.
+ *
+ * The cache-write portion is TTL-aware, unlike `rates.cacheWrite` alone: a session WITHOUT a model
+ * id can still carry its own `cache_creation_1h_input_tokens`/`cache_creation_5m_input_tokens` (see
+ * `ModelUsage.cacheCreation1hInputTokens`) — the model is unknown, not the TTL split — so each
+ * portion is priced at its own blended rate (`rates.cacheWrite1h` / `rates.cacheWrite`). Same
+ * BOTH-OR-NEITHER rule `calcCost` applies: a session with only one TTL half stated, or with
+ * neither (an older transcript, a non-Claude harness — genuinely no way to know the split here),
+ * is priced the way this function always has — the WHOLE counter at the single blended 5-minute
+ * rate, the conservative reading.
  */
-export function blendedSessionCost(s: Parameters<typeof sessionTokens>[0], rates: BlendedRates): number {
+export function blendedSessionCost(
+  s: Parameters<typeof sessionTokens>[0]
+    & Pick<SessionMeta, 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'>,
+  rates: BlendedRates,
+): number {
   const b = sessionTokens(s)
+  const has1hSplit = s.cache_creation_1h_input_tokens !== undefined
+    && s.cache_creation_5m_input_tokens !== undefined
+  const cacheWriteCost = has1hSplit
+    ? ((s.cache_creation_1h_input_tokens ?? 0) / 1_000_000) * rates.cacheWrite1h
+      + ((s.cache_creation_5m_input_tokens ?? 0) / 1_000_000) * rates.cacheWrite
+    : (b.cacheWrite / 1_000_000) * rates.cacheWrite
   return (b.input / 1_000_000) * rates.input
     + (b.output / 1_000_000) * rates.output
     + (b.cacheRead / 1_000_000) * rates.cacheRead
-    + (b.cacheWrite / 1_000_000) * rates.cacheWrite
+    + cacheWriteCost
 }
 
 export function filterByHarness<T extends { harness?: HarnessId }>(sessions: T[], harness?: HarnessId): T[] {
@@ -1623,6 +1810,29 @@ export function computeDerivedStats(
     const globalModelUsage = effectiveStatsCache.modelUsage ?? {}
     const dateFiltered = filters.dateRange !== 'all' || !!filters.customStart || !!filters.customEnd
 
+    /**
+     * DEFECT A's fix: the exact per-day Claude usage this window's own sessions can answer for.
+     *
+     * Empty whenever the range cannot be enumerated (`!rangeBounded` — the same gate
+     * `filteredSessions`' per-day slice already applies), which is exactly the case for the
+     * unfiltered/all-time view — so this changes nothing when there is no date filter. `days` is
+     * `rangeDays`, not the whole session set, or a session's lifetime would leak past the window.
+     */
+    const claudeSessionsInScope: ClaudeDaySession[] = rangeBounded
+      ? selectedSessions.filter(s => (s.harness ?? 'claude') === 'claude')
+      : []
+    // Presence of a session on a day is not proof the local store is COMPLETE for that day — see
+    // `reconcileClaudeDayCoverage`'s header. Every consumer below reads through the RECONCILED
+    // map, never the raw one.
+    const exactClaudeUsageByDay = reconcileClaudeDayCoverage(
+      claudeExactUsageByDay(claudeSessionsInScope, rangeDays, modelSet),
+      filteredDailyModelTokens,
+    )
+    // How many of the window's days still had to be priced by `apportionModelUsage` because no
+    // in-scope session could answer for them. Surfaced on the cost KPI so an estimate never reads
+    // as a measurement — see `costEstimateNote`. Stays 0 outside the date-filtered branch below.
+    let costEstimatedDays = 0
+
     let filteredModelUsage: Record<string, import('@agentistics/core').ModelUsage>
 
     if (cacheBlindScope || nonClaudeHarness || harnessesFiltered) {
@@ -1654,11 +1864,17 @@ export function computeDerivedStats(
         }
       }
     } else if (dateFiltered) {
-      // Build approximate model usage from dailyModelTokens (date-filtered, Claude-only).
-      // We only have total tokens per model per day, so we split input/output using
-      // global proportions from statsCache as an approximation.
+      // Build model usage per day: EXACT from the sessions' own counters wherever
+      // `exactClaudeUsageByDay` covers the day, apportioned from `dailyModelTokens`' global
+      // proportions everywhere else — Defect A was pricing every day this way even on the days
+      // the exact data was sitting one map away in `filteredSessions`.
       filteredModelUsage = {}
+      let estimatedDayCount = 0
       for (const day of filteredDailyModelTokens) {
+        if (!isDateStr(day.date)) continue
+        const key = day.date.slice(0, 10)
+        if (exactClaudeUsageByDay.has(key)) continue // priced exactly below, never apportioned too
+        estimatedDayCount++
         for (const [model, totalTok] of Object.entries(day.tokensByModel)) {
           if (modelSet && !modelSet.has(model)) continue
           if (!filteredModelUsage[model]) {
@@ -1670,7 +1886,7 @@ export function computeDerivedStats(
           }
           const entry = filteredModelUsage[model]
           // Same apportionment the day-cost series uses — one implementation, so the two can
-          // never price the same day differently.
+          // never price the same (uncovered) day differently.
           const split = apportionModelUsage(totalTok, globalModelUsage[model])
           entry.inputTokens              += split.inputTokens
           entry.outputTokens             += split.outputTokens
@@ -1678,6 +1894,26 @@ export function computeDerivedStats(
           entry.cacheCreationInputTokens += split.cacheCreationInputTokens
         }
       }
+      // The covered days' EXACT contribution, merged in regardless of whether `dailyModelTokens`
+      // has an entry for them — a session-only day the cache has not caught up to yet still
+      // prices right instead of contributing nothing.
+      for (const perModel of exactClaudeUsageByDay.values()) {
+        for (const [model, u] of Object.entries(perModel)) {
+          if (!filteredModelUsage[model]) {
+            filteredModelUsage[model] = {
+              inputTokens: 0, outputTokens: 0,
+              cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+              webSearchRequests: 0, costUSD: 0,
+            }
+          }
+          const entry = filteredModelUsage[model]
+          entry.inputTokens              += u.inputTokens
+          entry.outputTokens             += u.outputTokens
+          entry.cacheReadInputTokens     += u.cacheReadInputTokens
+          entry.cacheCreationInputTokens += u.cacheCreationInputTokens
+        }
+      }
+      costEstimatedDays = estimatedDayCount
       // Supplement with non-Claude sessions in range (unified view, date-filtered)
       for (const sess of nonClaudeInRange) {
         // Per-model split: a multi-model session (Antigravity parent + folded subagents)
@@ -1784,21 +2020,33 @@ export function computeDerivedStats(
       // Claude's half. `dailyModelTokens` is the ONLY day series Claude has, and it carries a
       // per-model total with no input/output/cache split — so the split is apportioned from the
       // global per-model proportions, exactly as `filteredModelUsage` already does a few lines
-      // above. When a date filter is active those two are built from the same rows and the day
-      // series sums to the headline; with no filter the headline comes from the CUMULATIVE
-      // `modelUsage` instead, which covers history the daily series no longer retains. That gap
-      // is the residue, and it is real spend — reported, never folded into a day it did not
-      // happen on.
+      // above, UNLESS `exactClaudeUsageByDay` covers the day, in which case this uses the same
+      // exact counters the headline now prices from — or the day chart and the headline would
+      // disagree about the very day Defect A was fixed for. When a date filter is active those two
+      // are built from the same rows and the day series sums to the headline; with no filter the
+      // headline comes from the CUMULATIVE `modelUsage` instead, which covers history the daily
+      // series no longer retains. That gap is the residue, and it is real spend — reported, never
+      // folded into a day it did not happen on.
       for (const day of filteredDailyModelTokens) {
         if (!isDateStr(day.date)) continue
+        const key = day.date.slice(0, 10)
+        const exact = exactClaudeUsageByDay.get(key)
         let dayCost = 0
         let dayTokens = 0
-        for (const [model, totalTok] of Object.entries(day.tokensByModel)) {
-          if (modelSet && !modelSet.has(model)) continue
-          dayCost += calcCost(apportionModelUsage(totalTok, globalModelUsage[model]), model)
-          dayTokens += totalTok
+        if (exact) {
+          for (const [model, u] of Object.entries(exact)) {
+            if (modelSet && !modelSet.has(model)) continue
+            dayCost += calcCost(u, model)
+            dayTokens += usageTokenTotal(u)
+          }
+        } else {
+          for (const [model, totalTok] of Object.entries(day.tokensByModel)) {
+            if (modelSet && !modelSet.has(model)) continue
+            dayCost += calcCost(apportionModelUsage(totalTok, globalModelUsage[model]), model)
+            dayTokens += totalTok
+          }
         }
-        if (dayCost > 0 || dayTokens > 0) addDayCost('claude', day.date.slice(0, 10), dayCost, dayTokens, 0)
+        if (dayCost > 0 || dayTokens > 0) addDayCost('claude', key, dayCost, dayTokens, 0)
       }
 
       // Claude's SESSIONS also carry a day, and they reach further back than `dailyModelTokens`
@@ -2122,6 +2370,12 @@ export function computeDerivedStats(
       allTimeTotalSessions,
       totalToolCalls,
       totalCostUSD,
+      /** How many days of a date-filtered window were priced by `apportionModelUsage`'s
+       *  global-proportions guess because no in-scope session could answer for them exactly.
+       *  `0` outside a date filter, and `0` inside one when the sessions covered every day —
+       *  never a confident measurement when part of `totalCostUSD` was estimated. Feeds
+       *  `costEstimateNote` next to the cost KPI. */
+      costEstimatedDays,
       /** `totalCostUSD` decomposed by day and harness, plus the part no day can carry.
        *  Feeds the plan cost basis — see `billing.ts` in @agentistics/core. */
       apiCostByDay,

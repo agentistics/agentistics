@@ -109,6 +109,18 @@ describe('classifyUserEntry — isMeta', () => {
     expect(meta('Base directory for this skill: /x').note).toContain('skill')
   })
 
+  /**
+   * THE REPORTED BUG: both `[Image:` shapes read as "an image was attached", which is false for the
+   * second one — nobody attached anything, the ASSISTANT opened an image with `Read` and it got
+   * resized for display. They must be told apart, or the chip lies and its Gallery link opens a
+   * list that was never built to hold what it is pointing at.
+   */
+  it('an attached image and a VIEWED one are different facts and get different notes', () => {
+    expect(meta('[Image: source: /tmp/x.png]').note).toBe('an image was attached')
+    expect(meta('[Image: original 2150x1328, displayed at 2000x1235.]').note)
+      .toBe('the assistant viewed an image')
+  })
+
   it('is system even for an unrecognised meta entry — the flag is the harness saying so', () => {
     const out = meta('something nobody has seen before')
     expect(out.kind).toBe('system')

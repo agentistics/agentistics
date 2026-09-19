@@ -44,6 +44,8 @@ import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, resolvePinnedRows,
   subscribePinnedSessions, togglePinnedSession,
 } from '../../lib/pinnedSessions'
+import { fellGroupDismissed, readDismissedFell, writeDismissedFell } from '../../lib/fellDismissal'
+import { endDispatch, tryBeginDispatch } from '../../lib/dispatchGuard'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -170,6 +172,20 @@ export function SessionsAside({
   /** Which GROUP modal is open, if any. Both are the one picker — see `SessionPickModal`. */
   const [picking, setPicking] = useState<'reopen' | 'send' | null>(null)
   const [groupBusy, setGroupBusy] = useState(false)
+  /*
+   * A SECOND, SYNCHRONOUS guard against the group verb firing twice.
+   *
+   * `groupBusy` already disables the modal's confirm button, but that is REACT STATE: it only takes
+   * effect once a render has committed, and two `click` events dispatched close enough together (a
+   * fast double-click, or a stray double dispatch) can both run their handler before that render
+   * lands — both would then call `act()`. The decision itself (`tryBeginDispatch`/`endDispatch`) is
+   * a plain, tested function in `dispatchGuard.ts`; this ref is just the mutable box it reads and
+   * writes synchronously, in the same tick the first click's handler runs.
+   */
+  const groupActingRef = useRef(false)
+  /** The exact set of fallen ids the "reopen what fell" banner was last dismissed for — see
+   *  `fellDismissal.ts`. Read once on mount; a dismiss updates it (and persists it) directly. */
+  const [dismissedFell, setDismissedFell] = useState<string[] | null>(readDismissedFell)
 
   /*
    * THE TWO GROUP VERBS, derived from the rows the server already shaped.
@@ -194,7 +210,13 @@ export function SessionsAside({
   )
 
   const canAct = Boolean(act) && !hideNew
-  const showFell = canAct && groupRows.fellRows.length > 0
+  const fellIds = useMemo(() => groupRows.fellRows.map(r => r.id), [groupRows.fellRows])
+  // Dismissing hides the banner for the EXACT group it named — the moment the machine reports a
+  // different set of fallen ids (one more session fell, or one of these was reopened on its own and
+  // the rest are still down), that is a new fact and the banner is shown again. See `fellDismissal.ts`.
+  const fellDismissed = fellGroupDismissed(dismissedFell, fellIds)
+  const showFell = canAct && groupRows.fellRows.length > 0 && !fellDismissed
+  const dismissFell = () => { setDismissedFell(fellIds); writeDismissedFell(fellIds) }
   // One session is not a broadcast — the row's own composer is right there and says so better.
   const showSend = canAct && groupRows.sendable > 1
   /**
@@ -256,7 +278,7 @@ export function SessionsAside({
       // message. The row it came FROM names the wait; see `reopenedSessionRoute`.
       if (out.ok && action === 'resume' && out.id) {
         const from = rows.find(r => r.id === id)
-        const r = reopenedSessionRoute(out.id, from ? { harness: from.harness, title: from.title } : undefined)
+        const r = reopenedSessionRoute(out.id, from ? { id, harness: from.harness, title: from.title } : { id })
         navigate(r.path, r.options)
       }
     })
@@ -465,20 +487,38 @@ export function SessionsAside({
         * outcome is a refusal is a button that teaches the wrong thing.
         */}
       {showFell && (
-        <button
-          onClick={() => setPicking('reopen')}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            margin: '0 2px', padding: '9px 12px', borderRadius: 9, cursor: 'pointer', minHeight: tap,
-            border: '1px solid var(--anthropic-orange)', background: 'rgba(232,146,90,0.08)',
-            color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-          }}
-        >
-          <RotateCcw size={14} />
-          {pt
-            ? (groupRows.fellRows.length === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${groupRows.fellRows.length} sessões que caíram`)
-            : (groupRows.fellRows.length === 1 ? 'Reopen 1 session that fell' : `Reopen ${groupRows.fellRows.length} sessions that fell`)}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 2px' }}>
+          <button
+            onClick={() => setPicking('reopen')}
+            style={{
+              flex: 1, minWidth: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              padding: '9px 12px', borderRadius: 9, cursor: 'pointer', minHeight: tap,
+              border: '1px solid var(--anthropic-orange)', background: 'rgba(232,146,90,0.08)',
+              color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            <RotateCcw size={14} />
+            {pt
+              ? (groupRows.fellRows.length === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${groupRows.fellRows.length} sessões que caíram`)
+              : (groupRows.fellRows.length === 1 ? 'Reopen 1 session that fell' : `Reopen ${groupRows.fellRows.length} sessions that fell`)}
+          </button>
+          {/* Hides the banner until a DIFFERENT crash group shows up — never on the server, never
+              discarding anything. Every row stays reopenable one at a time from its own menu. */}
+          <button
+            onClick={dismissFell}
+            aria-label={pt ? 'Dispensar' : 'Dismiss'}
+            title={pt ? 'Dispensar' : 'Dismiss'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              width: tap ?? 30, minHeight: tap, padding: 0, borderRadius: 9, cursor: 'pointer',
+              border: '1px solid var(--border-subtle)', background: 'transparent',
+              color: 'var(--text-tertiary)', fontFamily: 'inherit',
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
       )}
 
       {picking && act && (
@@ -489,6 +529,10 @@ export function SessionsAside({
           busy={groupBusy}
           onClose={() => { if (!groupBusy) setPicking(null) }}
           onConfirm={(ids, text) => {
+            // Checked and set SYNCHRONOUSLY, before anything async or any state update — see
+            // `groupActingRef`'s own comment and `dispatchGuard.ts`. `groupBusy` still drives the
+            // modal's disabled look.
+            if (!tryBeginDispatch(groupActingRef)) return
             setGroupBusy(true)
             /*
              * The GROUP is addressed, never a row: the id is the anchor the route needs and `ids`
@@ -498,7 +542,7 @@ export function SessionsAside({
              */
             void act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
               .then(out => { setNotice(out.message); setPicking(null) })
-              .finally(() => setGroupBusy(false))
+              .finally(() => { endDispatch(groupActingRef); setGroupBusy(false) })
           }}
         />
       )}

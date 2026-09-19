@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { suggestDelivery, type SuggestSession, type SuggestTask } from './taskSuggest'
+import { deliveryHint, suggestDelivery, type SuggestSession, type SuggestTask } from './taskSuggest'
 
 const HERE = '/home/u/repo'
 
@@ -83,5 +83,29 @@ describe('suggestDelivery', () => {
 
   it('says nothing without a folder to reason about', () => {
     expect(suggestDelivery({ cwd: '', sessions: [at(HERE, 'ALM board')], tasks: [task()] })).toBeNull()
+  })
+})
+
+/**
+ * THE REPORTED BUG: the "Entrega (opcional)" field must start EMPTY, with no suggestion
+ * pre-selected — even when `suggestDelivery` above has a strong, matching answer available. It may
+ * only ever be OFFERED as a hint a person clicks.
+ */
+describe('deliveryHint — the field starts EMPTY, even with a matching suggestion available', () => {
+  const suggestion = { taskId: 't1', title: 'ALM board', sameFolder: 3 }
+
+  it('offers the hint while the field is still empty', () => {
+    // THE INITIAL STATE: an empty field, a suggestion sitting right there — and it stays a hint,
+    // never the field's own value.
+    expect(deliveryHint('', suggestion)).toEqual(suggestion)
+  })
+
+  it('offers nothing once the field already holds a value — a person\'s own or a caller\'s', () => {
+    expect(deliveryHint('Mobile', suggestion)).toBeNull()
+    expect(deliveryHint(suggestion.title, suggestion)).toBeNull()
+  })
+
+  it('offers nothing when there is no suggestion to offer', () => {
+    expect(deliveryHint('', null)).toBeNull()
   })
 })

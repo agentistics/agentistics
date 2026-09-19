@@ -1,92 +1,27 @@
 /**
- * attachmentPreview.ts — PURE. Which lines of a turn's text are image ATTACHMENTS, not prose.
+ * attachmentPreview.ts — PURE. Which parts of a turn's text are image ATTACHMENTS, not prose.
  *
  * An attachment here is a PATH — see `attachment-web.ts`'s header: the composer types a line into a
  * tmux pane, so `send()` joins the quote, then one line per attachment's own path, then whatever was
- * typed. The transcript records exactly that, verbatim, so this rule reads the same turn text
+ * typed. The transcript records exactly that, verbatim, so the same rule reads the same turn text
  * whether it is the client's own echo or the harness's own record — one rule, not two.
  *
- * The heuristic is deliberately narrow: a line that is JUST a path (no spaces) ending in a known
- * image extension. Prose that happens to mention "see diagram.png in the repo" has spaces around
- * the name and is left alone; a bare attachment line never does, because that is how it was built.
+ * The PATH rule itself (`isImagePath`, `splitImageAttachments`) now lives in `@agentistics/core` and
+ * is re-exported here unchanged: the server reads a delivered message with it to record what that
+ * message carried, and a second copy would let the record and the render disagree.
+ *
+ * The MARKER rule (`splitImageMarkers`) lives there too, for the same reason: the server counts a
+ * turn's own leading markers to check them against its `imagePasteIds` and its companion entry
+ * (`attachment-companion.ts`) before it will ever hand back a real thumbnail, and a second copy of
+ * the count here could disagree with the one that gated the resolution.
  */
 
-import type { AttachmentSend } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'])
-
-export function isImagePath(path: string): boolean {
-  const dot = path.lastIndexOf('.')
-  if (dot < 0) return false
-  return IMAGE_EXTENSIONS.has(path.slice(dot + 1).toLowerCase())
-}
-
-/** A path-shaped line: no whitespace, and not empty. Prose never qualifies. */
-function looksLikeBarePath(line: string): boolean {
-  return line !== '' && !/\s/.test(line)
-}
-
-export interface SplitAttachments {
-  /** The image paths found, in the order they appeared. */
-  images: string[]
-  /** The remaining text, with those lines removed and no blank line left in their place. */
-  text: string
-}
-
-export function splitImageAttachments(text: string): SplitAttachments {
-  const images: string[] = []
-  const kept: string[] = []
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (looksLikeBarePath(trimmed) && isImagePath(trimmed)) images.push(trimmed)
-    else kept.push(line)
-  }
-  return { images, text: kept.join('\n').trim() }
-}
-
-/**
- * `[Image #4]` — what the HARNESS writes where an image was, and it is not prose.
- *
- * A separate rule from `splitImageAttachments` because it answers about a different kind of thing.
- * That one finds a PATH the composer typed, which names a file this product can open. This one
- * finds a MARKER Claude Code substituted into the turn it recorded: an ordinal and nothing else, so
- * there is no file behind it and never will be — the honest render is a chip saying which image it
- * was, not a thumbnail we cannot produce.
- *
- * It exists because of what a QUEUED prompt looks like on arrival. A harness that is mid-turn holds
- * what arrives and commits the queue as ONE turn (see `echoMatch.ts`), so two prompts sent a minute
- * apart come back merged, with every image of both collected at the front:
- *
- *     [Image #4] [Image #5] [Image #6]1. a visao geral...
- *
- * — markers running straight into the first word, which is how a message with three screenshots on
- * it read as a message beginning with square brackets. The merging itself is the harness's, not
- * ours, and cannot be undone from here; the markers are ours to draw properly.
- *
- * LEADING ONLY, like `splitMessage`, and for a stronger reason than symmetry: this repo's own
- * conversations quote these markers while discussing them, so a rule matching anywhere would eat a
- * line somebody actually wrote. Every marker measured on real transcripts sits at the very start.
- */
-export interface SplitMarkers {
-  /** The ordinals, in the order the harness numbered them. */
-  markers: number[]
-  /** What is left once the leading run is removed. */
-  text: string
-}
-
-const LEADING_MARKER = /^\s*\[Image #(\d+)\]/
-
-export function splitImageMarkers(text: string): SplitMarkers {
-  const markers: number[] = []
-  let rest = text
-  for (;;) {
-    const m = LEADING_MARKER.exec(rest)
-    if (!m) break
-    markers.push(Number(m[1]))
-    rest = rest.slice(m[0].length)
-  }
-  return { markers, text: markers.length > 0 ? rest.trim() : text }
-}
+export {
+  isImagePath, splitImageAttachments, type SplitAttachments,
+  splitImageMarkers, type SplitMarkers,
+} from '@agentistics/core'
 
 
 // --- a marker that CAN find its file ----------------------------------------
@@ -107,28 +42,104 @@ export const SEND_WINDOW_MS = 60 * 60_000
  * The comment above says a marker has no file behind it. That was WRONG, and this is the
  * correction: agentop wrote those files itself (185 of them on the machine this was measured on)
  * and knew the session it was typing them into. What was missing was never the file — it was the
- * record that we sent it, which `attachment-log`/`attachment-web.ts` now keeps.
+ * record that we sent it, which `attachment-web.ts` now keeps.
  *
  * ALL-OR-NOTHING, deliberately. Drawing the WRONG image under a message is worse than drawing a
  * chip: a chip says "an image was here", which is true and useless, while a wrong thumbnail is
- * false and convincing. So markers resolve only when the sends in the window account for them
- * EXACTLY — same count, one file per marker. A second message in the window, a file since deleted,
- * a marker the harness numbered from elsewhere: each makes the count disagree, and the chip stays.
+ * false and convincing. So markers resolve only when the record accounts for them EXACTLY — same
+ * count, one file per marker — and every case that cannot be settled answers `null`.
  *
  * The ordinals are the harness's numbering across its WHOLE conversation, so they are a count here
  * and never an index into anything of ours.
+ *
+ * TWO RECORDS, and which one is asked is decided by WHEN the turn happened:
+ *
+ * - **Messages** (`AttachmentMessage`) — what each delivered message carried, read off the text at
+ *   the moment it was typed. Once a conversation has ONE such record, this build is the one writing
+ *   them and every message it delivers is recorded, so for every turn from then on they are the only
+ *   evidence. The turn's markers must equal the images of the messages delivered AFTER the previous
+ *   person's turn (`sinceMs`) and at or before this one: a harness commits its queue as one turn, so
+ *   everything sent in that interval is this turn, and everything sent before the previous turn was
+ *   that turn's. That bound is load-bearing — most messages arrive with their paths intact (185
+ *   turns kept them against 34 that became markers on the machine this was measured on), and a
+ *   message already SHOWN as paths in an earlier turn must never be offered to a later marker.
+ * - **Uploads** (`AttachmentSend`) — the older record, stamped when a file was written rather than
+ *   when it was sent. A turn from before the conversation's first message record is resolved exactly
+ *   as it always was, by counting uploads in the window. That rule could not tell a previous
+ *   message's files, or one removed from the composer, from this turn's: measured, a message with
+ *   four markers sat in a window holding seven uploads, and it drew chips. It is kept for history,
+ *   never extended.
  */
 export function resolveMarkerPaths(input: {
   markers: readonly number[]
   turnAtMs: number
   sends: readonly AttachmentSend[]
+  /** What delivered messages carried, for this turn's conversation. */
+  messages?: readonly AttachmentMessage[]
+  /** When the previous PERSON's turn was recorded — see `previousPersonTurnMs`. */
+  sinceMs?: number | null
 }): string[] | null {
   if (input.markers.length === 0) return null
+  const messages = input.messages ?? []
+  const firstMessageAt = messages.reduce((min, m) => Math.min(min, m.atMs), Number.POSITIVE_INFINITY)
+  if (input.turnAtMs >= firstMessageAt) {
+    return resolveFromMessages(input.markers.length, input.turnAtMs, messages, input.sinceMs ?? null)
+  }
   const inWindow = input.sends
     .filter(s => s.atMs <= input.turnAtMs && input.turnAtMs - s.atMs <= SEND_WINDOW_MS)
     .sort((a, b) => a.atMs - b.atMs)
   if (inWindow.length !== input.markers.length) return null
   return inWindow.map(s => s.path)
+}
+
+function resolveFromMessages(
+  count: number,
+  turnAtMs: number,
+  messages: readonly AttachmentMessage[],
+  sinceMs: number | null,
+): string[] | null {
+  const mine = messages
+    .filter(m => m.atMs <= turnAtMs && turnAtMs - m.atMs <= SEND_WINDOW_MS)
+    .filter(m => sinceMs === null || m.atMs > sinceMs)
+    .sort((a, b) => a.atMs - b.atMs)
+  if (mine.length === 0) return null
+  // A message that named an image this machine cannot serve is short, and a short message cannot be
+  // accounted for — pairing around the gap would put a neighbour's file under the wrong marker.
+  if (mine.some(m => m.paths.length !== m.images)) return null
+  const paths = mine.flatMap(m => m.paths)
+  return paths.length === count ? paths : null
+}
+
+/**
+ * When the last turn a PERSON wrote before `index` was recorded, in ms.
+ *
+ * The lower bound of the messages a marker turn may be made of (see `resolveMarkerPaths`). A turn
+ * the HARNESS wrote under the user's role — a system note, a background task line — is not a
+ * message anybody sent, so it closes no interval. A person's turn with no timestamp closes it
+ * without saying where, and NEITHER CASE MAY EVER READ AS "NO BOUND": both are answered with
+ * `Infinity`, because nothing after an unknown boundary can be proven to belong to this turn, so
+ * nothing resolves, and the chip stays.
+ *
+ * This used to return `null` when the loop ran off the front of `turns` — a person's earlier turn
+ * that is simply OUT OF VIEW, which is the ordinary case after a long agentic run: the chat view
+ * caps a read at 400 turns, and `resolveMarkerPaths` reads `null` as "no bound", accepting every
+ * message before this one INCLUDING a previous person turn's, wherever it actually was. A wrong
+ * pairing there is not merely a wrong chip, it can be a WRONG THUMBNAIL when the counts happen to
+ * agree. "Out of view" and "no message could exist before this" are indistinguishable from here —
+ * `turns` is a window, not the whole conversation — so both answer the same way the harness's own
+ * unstamped turn already does: an unknown boundary is `Infinity`, never a bound of nothing at all.
+ */
+export function previousPersonTurnMs(
+  turns: readonly { role: 'user' | 'assistant'; at?: string; system?: string; task?: unknown }[],
+  index: number,
+): number {
+  for (let i = Math.min(index, turns.length) - 1; i >= 0; i--) {
+    const t = turns[i]!
+    if (t.role !== 'user' || t.system !== undefined || t.task !== undefined) continue
+    const ms = t.at ? Date.parse(t.at) : Number.NaN
+    return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
+  }
+  return Number.POSITIVE_INFINITY
 }
 
 /**

@@ -185,6 +185,10 @@ test('THE UTILITY SHELL rides localShell, by prefix', () => {
   expect(routeCapability('/api/shell/open')).toBe('localShell')
   expect(routeCapability('/api/shell/list')).toBe('localShell')
   expect(routeCapability('/api/shell/close')).toBe('localShell')
+  // The disabled-shell empty state's "Enable now" button — it sets the in-memory override, but it
+  // is still a route that starts the same PTY power once the override lands, so it rides the same
+  // capability as every other shell route rather than a softer one.
+  expect(routeCapability('/api/shell/enable-now')).toBe('localShell')
 })
 
 test('a shell route nobody has written yet is guarded by having been ADDED', () => {

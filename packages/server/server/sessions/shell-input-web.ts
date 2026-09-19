@@ -95,6 +95,11 @@ export function openShellInputSocket(ws: InputSocket): void {
       if (ok) nudgeShell(id)
       return ok
     },
+    sendPaste: async text => {
+      const ok = await terminal.sendPaste(id, text)
+      if (ok) nudgeShell(id)
+      return ok
+    },
     emit: ack => { try { ws.send(encodeAck(ack)) } catch { /* socket already closed */ } },
   })
 }

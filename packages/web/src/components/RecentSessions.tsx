@@ -22,7 +22,8 @@ import { operatorId, recordPromptSend, resolveAuthor } from '../lib/promptAudit'
 import { getTerminalZoom, setTerminalZoom, subscribeTerminalZoom, ZOOM_STEP, ZOOM_MIN, ZOOM_MAX } from '../lib/terminalZoom'
 import { consentMode, keyStripShown, type TerminalPlacement } from '../lib/terminalSurface'
 import { createPaneResizer } from '../lib/paneResizeRequest'
-import { KEY_STRIP, ctrlKeyFor, keyBytes, stripKeyLabel } from '../lib/keyStrip'
+import { ctrlKeyFor, keyBytes, stripEntries, stripKeyLabel } from '../lib/keyStrip'
+import { clipboardPasteAvailable, pasteFromClipboard } from '../lib/clipboardPaste'
 import { getPinnedIds, isSessionPinned, togglePinnedSession, subscribePinnedSessions, pinnedServerSnapshot, MAX_PINNED } from '../lib/pinnedSessions'
 import { getOpenModalSession, setOpenModalSession, subscribeOpenModalSession } from '../lib/openModalSession'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -1725,6 +1726,9 @@ const TYPING_T = {
     connecting: 'Conectando o teclado à sessão…',
     unavailable: 'Não foi possível abrir o canal de escrita.',
     notDelivered: 'Não entregue:',
+    // I1: before this, a denied/blocked clipboard permission and an empty clipboard were the exact
+    // same thing to the person — a tap that produced nothing anywhere on the page.
+    pasteDenied: 'Não foi possível ler a área de transferência — verifique a permissão do navegador.',
   },
   en: {
     live: 'Typing straight into the session — keys (incl. Ctrl+C) reach the process.',
@@ -1733,6 +1737,7 @@ const TYPING_T = {
     connecting: 'Connecting the keyboard to the session…',
     unavailable: 'The write channel could not be opened.',
     notDelivered: 'Not delivered:',
+    pasteDenied: 'Could not read the clipboard — check the browser permission.',
   },
 } as const
 
@@ -1854,6 +1859,11 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
     setStripNote(null)
     write.send(keyBytes(key))
   }
+  /** A paste never goes through `sendKeys` — it is one atomic message, not a keystroke burst — and
+   *  never through the ctrl-armed composition either: pasting cancels an armed ctrl the same way a
+   *  strip press for any other key would leave it hanging otherwise. */
+  const sendPasteText = (text: string) => { setCtrlArmed(false); write.sendPaste(text) }
+  const clipboardReadable = useMemo(() => clipboardPasteAvailable(), [])
   const tw = TYPING_T[lang]
   // The one honest status for the keystroke channel: connecting → live, a drop, or a not-delivered.
   const typingNotice: { tone: 'live' | 'wait' | 'bad'; text: string } | null =
@@ -1918,7 +1928,7 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
       >
         <Suspense fallback={<div style={{ padding: 16, fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{lang === 'pt' ? 'Carregando o emulador…' : 'Loading the emulator…'}</div>}>
           {/* key={id}: a new session gets a brand-new emulator, so no content leaks across. */}
-          <SessionTerminal key={id} frame={state.frame} theme={theme} showCursor={status.showCursor} zoom={zoom} interactive={interactive} onInput={sendKeys} onGeometry={resizer.request} />
+          <SessionTerminal key={id} frame={state.frame} theme={theme} showCursor={status.showCursor} zoom={zoom} interactive={interactive} onInput={sendKeys} onPaste={sendPasteText} onGeometry={resizer.request} />
         </Suspense>
       </div>
       {/* THE KEY STRIP — mobile only, and never in a dashboard card (`keyStripShown`). Without it a
@@ -1928,7 +1938,7 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
           judges both identically — a key it would refuse cannot reach the wire by a side door. */}
       {showStrip && write.ready && (
         <div style={{ display: 'flex', gap: 6, flexShrink: 0, overflowX: 'auto' }}>
-          {KEY_STRIP.map(entry => {
+          {stripEntries(clipboardReadable).map(entry => {
             const armed = entry.kind === 'modifier' && ctrlArmed
             return (
               <button
@@ -1937,6 +1947,14 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
                   e.stopPropagation()
                   if (entry.kind === 'modifier') { setStripNote(null); setCtrlArmed(a => !a); return }
                   setCtrlArmed(false)
+                  if (entry.kind === 'paste') {
+                    // I1: a denied/blocked clipboard permission must not be the same silence as an
+                    // empty clipboard — `pasteFromClipboard`'s result says which one happened.
+                    void pasteFromClipboard(sendPasteText).then(result => {
+                      setStripNote(result === 'denied' ? tw.pasteDenied : null)
+                    })
+                    return
+                  }
                   write.send(keyBytes(entry.key))
                 }}
                 aria-pressed={entry.kind === 'modifier' ? ctrlArmed : undefined}

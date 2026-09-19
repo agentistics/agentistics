@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { edgeHint, resolveArtifactLayout } from './artifactLayout'
+import {
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, edgeHint, PANEL_MIN_WIDTH, resolveArtifactLayout,
+} from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
   resolveArtifactLayout({ open: true, width: 1440, isMobile: false, listExpandedByUser: false, ...o })
@@ -92,5 +94,34 @@ describe('the edge hint carries the step it names', () => {
       events: [{ kind: 'ran', text: 'ls', live: true, ref: '' }],
     })
     expect(h && 'ref' in h).toBe(false)
+  })
+})
+
+// item 6 — the right aside's own drag cap, raised from a flat 900px to the room the viewport
+// actually has, always leaving `ASIDE_DRAG_CENTRE_MIN` for the centre column.
+describe('artifactsPanelMax', () => {
+  it('on an ordinary 1440px screen, the cap is far past the old flat 900px', () => {
+    expect(artifactsPanelMax(1440)).toBe(1440 - ASIDE_DRAG_CENTRE_MIN)
+    expect(artifactsPanelMax(1440)).toBeGreaterThan(900)
+  })
+
+  it('on a wide monitor, the cap grows with it — never stuck at a fixed number', () => {
+    expect(artifactsPanelMax(2560)).toBe(2560 - ASIDE_DRAG_CENTRE_MIN)
+    expect(artifactsPanelMax(3840)).toBeGreaterThan(artifactsPanelMax(2560))
+  })
+
+  it('always leaves exactly the centre floor clear, never less', () => {
+    const viewport = 1920
+    expect(viewport - artifactsPanelMax(viewport)).toBe(ASIDE_DRAG_CENTRE_MIN)
+  })
+
+  it('a viewport too narrow for both figures still returns a usable floor, never negative', () => {
+    expect(artifactsPanelMax(500)).toBe(PANEL_MIN_WIDTH)
+    expect(artifactsPanelMax(0)).toBe(PANEL_MIN_WIDTH)
+  })
+
+  it('an unmeasured or nonsense viewport is the same safe floor', () => {
+    expect(artifactsPanelMax(Number.NaN)).toBe(PANEL_MIN_WIDTH)
+    expect(artifactsPanelMax(-100)).toBe(PANEL_MIN_WIDTH)
   })
 })

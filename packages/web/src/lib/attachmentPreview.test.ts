@@ -1,5 +1,6 @@
 import { describe, expect, test, test as it } from 'bun:test'
-import { isImagePath, openComposerLightbox, splitImageAttachments, splitImageMarkers, resolveMarkerPaths, SEND_WINDOW_MS } from './attachmentPreview'
+import { isImagePath, openComposerLightbox, previousPersonTurnMs, splitImageAttachments, splitImageMarkers, resolveMarkerPaths, SEND_WINDOW_MS } from './attachmentPreview'
+import type { AttachmentMessage } from '@agentistics/core'
 
 describe('isImagePath', () => {
   test('recognises known image extensions, case-insensitively', () => {
@@ -102,6 +103,127 @@ test('the ordinals are a count, never an index', () => {
   const s = [snd(T - 2, '/a/a.png'), snd(T - 1, '/a/b.png')]
   expect(resolveMarkerPaths({ markers: [4, 5], turnAtMs: T, sends: s }))
     .toEqual(resolveMarkerPaths({ markers: [1, 2], turnAtMs: T, sends: s }))
+})
+
+// --- a marker paired against the MESSAGE it came in ---------------------------
+
+const msg = (atMs: number, paths: string[], images = paths.length): AttachmentMessage =>
+  ({ conversationId: 'c', atMs, paths, images })
+
+describe('a conversation with no message record resolves exactly as before', () => {
+  // The pin for every conversation this change must not touch: one that was never sent to by the
+  // build that records messages. Each case is the upload rule's own answer, asked three ways.
+  const cases: Array<{ markers: number[]; sends: ReturnType<typeof snd>[] }> = [
+    { markers: [4, 5, 6], sends: [snd(T - 3000, '/a/c.png'), snd(T - 9000, '/a/a.png'), snd(T - 6000, '/a/b.png')] },
+    { markers: [1, 2], sends: [snd(T - 1, '/a/a.png')] },
+    { markers: [1], sends: [snd(T - SEND_WINDOW_MS, '/a/a.png')] },
+    { markers: [1], sends: [snd(T + 1, '/a/a.png')] },
+    { markers: [4, 5], sends: [] },
+  ]
+  test('omitting messages, an empty list, and only records from AFTER the turn all agree', () => {
+    for (const c of cases) {
+      const before = resolveMarkerPaths({ markers: c.markers, turnAtMs: T, sends: c.sends })
+      expect(resolveMarkerPaths({ ...c, turnAtMs: T, messages: [] })).toEqual(before)
+      expect(resolveMarkerPaths({ ...c, turnAtMs: T, messages: [msg(T + 60_000, ['/a/later.png'])], sinceMs: T - 1 }))
+        .toEqual(before)
+    }
+  })
+})
+
+describe('resolving against delivered messages', () => {
+  test('THE MEASURED CASE: four markers, seven uploads in the hour, the message carried four', () => {
+    // Replayed from a real conversation: three files attached forty minutes earlier for another
+    // message, four attached together for this one. The upload rule counted seven and drew chips.
+    const earlier = ['/s/87d32d2e-image.png', '/s/b515b064-image.png', '/s/ccc2bb77-image.png']
+    const mine = ['/s/b3e3d1c3-1.png', '/s/82de2098-3.png', '/s/addee503-2.png', '/s/a657b798-legendas.png']
+    const sends = [
+      ...earlier.map((p, i) => snd(T - 2_449_000 + i * 8000, p)),
+      ...mine.map((p, i) => snd(T - 330_000 + i * 100, p)),
+    ]
+    expect(resolveMarkerPaths({ markers: [1, 2, 3, 4], turnAtMs: T, sends })).toBe(null)
+    const messages = [msg(T - 2_400_000, earlier), msg(T - 2000, mine)]
+    // The earlier message was the previous person's turn (its paths survived as text), so it closes
+    // the interval and only this message is offered.
+    expect(resolveMarkerPaths({ markers: [1, 2, 3, 4], turnAtMs: T, sends, messages, sinceMs: T - 2_390_000 }))
+      .toEqual(mine)
+  })
+
+  test('a queue committed as ONE turn is every message in the interval, in the order sent', () => {
+    const messages = [msg(T - 5000, ['/a/c.png']), msg(T - 9000, ['/a/a.png', '/a/b.png'])]
+    expect(resolveMarkerPaths({ markers: [8, 9, 10], turnAtMs: T, sends: [], messages, sinceMs: T - 60_000 }))
+      .toEqual(['/a/a.png', '/a/b.png', '/a/c.png'])
+  })
+
+  test('resolveMarkerPaths’ own contract: an explicit `null` bound accepts everything in the window', () => {
+    // `previousPersonTurnMs` itself never produces `null` any more (see its own header) — this pins
+    // `resolveMarkerPaths`’ documented meaning of the value in isolation, for any caller that does.
+    expect(resolveMarkerPaths({ markers: [1], turnAtMs: T, sends: [], messages: [msg(T - 10, ['/a/a.png'])], sinceMs: null }))
+      .toEqual(['/a/a.png'])
+  })
+
+  // Every case below answers null — THE REFUSAL SURVIVES. A wrong thumbnail is false and convincing.
+  test('a message already shown in an earlier turn is never offered to a later marker', () => {
+    // 185 turns kept their paths against 34 that became markers: the common case, not an edge.
+    const messages = [msg(T - 40_000, ['/a/shown-as-path.png'])]
+    expect(resolveMarkerPaths({ markers: [3], turnAtMs: T, sends: [], messages, sinceMs: T - 30_000 })).toBe(null)
+  })
+
+  test('once a conversation records messages, uploads are no longer evidence', () => {
+    // Uploads that WOULD have matched, beside a message record that does not: the message wins,
+    // and the answer is a chip rather than a pairing the upload rule cannot vouch for.
+    const sends = [snd(T - 20, '/a/x.png'), snd(T - 10, '/a/y.png')]
+    const messages = [msg(T - 5, ['/a/x.png'])]
+    expect(resolveMarkerPaths({ markers: [1, 2], turnAtMs: T, sends, messages, sinceMs: T - 60_000 })).toBe(null)
+    expect(resolveMarkerPaths({ markers: [1, 2], turnAtMs: T, sends, messages: [msg(T - 5, [])], sinceMs: T - 60_000 }))
+      .toBe(null)
+  })
+
+  test('one too few, or one too many, resolves nothing', () => {
+    const messages = [msg(T - 5, ['/a/a.png', '/a/b.png'])]
+    expect(resolveMarkerPaths({ markers: [1], turnAtMs: T, sends: [], messages, sinceMs: null })).toBe(null)
+    expect(resolveMarkerPaths({ markers: [1, 2, 3], turnAtMs: T, sends: [], messages, sinceMs: null })).toBe(null)
+  })
+
+  test('a message that named an image this machine cannot serve is short, and resolves nothing', () => {
+    const messages = [msg(T - 5, ['/a/a.png'], 2)]
+    expect(resolveMarkerPaths({ markers: [1], turnAtMs: T, sends: [], messages, sinceMs: null })).toBe(null)
+    expect(resolveMarkerPaths({ markers: [1, 2], turnAtMs: T, sends: [], messages, sinceMs: null })).toBe(null)
+  })
+
+  test('a message after the turn, or older than the window, is not this turn’s', () => {
+    const early = msg(T - 100, ['/a/first.png'])
+    expect(resolveMarkerPaths({ markers: [1], turnAtMs: T, sends: [], messages: [early, msg(T + 1, ['/a/a.png'])], sinceMs: T - 50 }))
+      .toBe(null)
+    expect(resolveMarkerPaths({
+      markers: [1], turnAtMs: T, sends: [], messages: [msg(T - SEND_WINDOW_MS - 1, ['/a/a.png'])], sinceMs: null,
+    })).toBe(null)
+  })
+
+  test('a previous person turn with no timestamp proves nothing belongs to this one', () => {
+    const messages = [msg(T - 5, ['/a/a.png'])]
+    expect(resolveMarkerPaths({ markers: [1], turnAtMs: T, sends: [], messages, sinceMs: Number.POSITIVE_INFINITY })).toBe(null)
+  })
+})
+
+describe('previousPersonTurnMs', () => {
+  const at = (ms: number) => new Date(ms).toISOString()
+  test('finds the last person turn before the index, skipping what the harness wrote', () => {
+    const turns = [
+      { role: 'user' as const, at: at(T - 900) },
+      { role: 'assistant' as const, at: at(T - 800) },
+      { role: 'user' as const, at: at(T - 700), system: 'command output' },
+      { role: 'user' as const, at: at(T - 600), task: { label: 'x', running: false } },
+      { role: 'user' as const, at: at(T) },
+    ]
+    expect(previousPersonTurnMs(turns, 4)).toBe(T - 900)
+    // Nothing before index 0 — out of view, same as never having a bound. See the function's own
+    // header: this used to be `null`, which `resolveMarkerPaths` reads as "no bound" and would have
+    // let a message from before this window pair with a marker that is not its own.
+    expect(previousPersonTurnMs(turns, 0)).toBe(Number.POSITIVE_INFINITY)
+  })
+  test('a person turn with no usable time closes the interval without saying where', () => {
+    expect(previousPersonTurnMs([{ role: 'user' }, { role: 'user', at: at(T) }], 1)).toBe(Number.POSITIVE_INFINITY)
+  })
 })
 
 /**

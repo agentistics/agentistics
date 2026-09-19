@@ -128,6 +128,7 @@ import { markFleetPhase, timeFleetPhase } from './sessions/fleet-profile'
 // rows from the same decision rather than mapping the fleet a second time.
 import { toControlSession } from './sessions/control-session'
 import { planTaskReopen, taskReopenSucceeded, type TaskReopenPlan } from './sessions/task-reopen'
+import { attemptReopenRow } from './sessions/reopen-attempt'
 import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, readsMarkerSelect } from './sessions/approval-spec'
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
@@ -144,7 +145,8 @@ import {
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
-import { readProcessConversation } from './sessions/process-conversation'
+import { readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
+import { agyLogCollisions } from './sessions/agy-conversation'
 import { idleServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
 import { memoryBudget } from './sessions/memory-budget'
@@ -154,11 +156,14 @@ import { readMemory, readRss } from './sessions/memory-probe'
 import { conversationHeldBy } from './sessions/conversation-claim'
 import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
-import type { ManagedSession, SpawnPlanError } from './sessions/types'
+import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, touchSessions,
+  addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
-import { createSessionsPoller, type SessionsPoller, type SessionSnapshot } from './sessions/sessions-host'
+import {
+  createSessionsPoller, linkProcessConversation, type SessionsPoller, type SessionSnapshot,
+} from './sessions/sessions-host'
+import { HARNESS_PROCESS_LOGS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
@@ -1454,10 +1459,21 @@ async function execAttachTicket(ticket: AttachTicket, s: CliStrings): Promise<vo
  */
 let sessionsPoller: SessionsPoller | null = null
 
-async function ensureSessionsPoller(): Promise<SessionsPoller> {
-  if (sessionsPoller) return sessionsPoller
-  const backend = await resolveBackend()
-  sessionsPoller = createSessionsPoller({
+/**
+ * The production poller's options — extracted from `ensureSessionsPoller` so a test can inspect the
+ * exact object the running server builds without constructing the singleton (which needs a real
+ * backend) or waiting on a poll.
+ *
+ * FIXWAVE 1 round 2, Finding 1: `resolveProcessLog` was IMPORTED and used inline inside
+ * `linkProcessConversationSoon`'s own retry loop, but never reached this object — so the collision
+ * guard in `sessions-host.ts`'s poll loop (gated on `if (o.resolveProcessLog)`) was silently dead
+ * code on every ordinary `/api/fleet` poll. Two antigravity sessions spawned in the same second and
+ * still alive past the retry window got cross-linked to one shared log's conversation on the very
+ * next poll — confirmed live. `cli-start.test.ts` asserts this object carries `resolveProcessLog`
+ * by identity, so deleting it here fails a test instead of shipping quietly again.
+ */
+export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeof createSessionsPoller>[0] {
+  return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     loadHarnessSessions,
     // Written once per session, not once per poll — the poller only calls this when the harness's
@@ -1472,6 +1488,14 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
     // takes no heartbeat.
     readProcessConversation,
+    // Which log a live pid holds open, WITHOUT reading its content — the collision guard's own
+    // input (see `sessions-host.ts`'s `createSessionsPoller` doc for `resolveProcessLog`, and
+    // `agy-conversation.ts` for what it protects). This is the ONE production caller of
+    // `createSessionsPoller` behind the continuous `/api/fleet` poll — the poller `cli-session.ts`
+    // and `events/producer.ts` build for a one-shot command / the event daemon pass no
+    // `recordConversation` at all, so their procLink write block never runs and they have nothing
+    // to guard.
+    resolveProcessLog,
     // The `/rename` name, persisted so the title survives the process — same once-per-change
     // discipline. See `ManagedSession.harnessName` and `pickTitle`.
     recordHarnessName: (id, name, since) =>
@@ -1479,7 +1503,13 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
     adoptSessions: async records => { for (const r of records) await addSession(r) },
-  })
+  }
+}
+
+async function ensureSessionsPoller(): Promise<SessionsPoller> {
+  if (sessionsPoller) return sessionsPoller
+  const backend = await resolveBackend()
+  sessionsPoller = createSessionsPoller(sessionsPollerOptions(backend))
   return sessionsPoller
 }
 
@@ -1520,6 +1550,112 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
 async function sessionViewPref(): Promise<{ sessionView: SessionViewPrefs }> {
   const stored = (await readPreferences()).sessionView
   return { sessionView: stored ?? DEFAULT_SESSION_VIEW }
+}
+
+/**
+ * How long antigravity's OWN log gets to name a fresh session's conversation before this machine
+ * gives up on it for this spawn — see `linkProcessConversationSoon` below.
+ *
+ * Measured against a live agy 1.2.5: the CLI opens its per-process log and writes `Created
+ * conversation …` into it roughly 1-1.5s after spawn — whether or not the folder is one it has ever
+ * seen before, and so whether or not the first-run trust dialog is ever answered. Ten attempts a
+ * second and a bit apart comfortably outlasts that, with room for a slow machine.
+ */
+const PROC_LINK_ATTEMPTS = 10
+const PROC_LINK_INTERVAL_MS = 1_200
+
+/**
+ * Should `linkProcessConversationSoon` run at all for this plan? PURE, so a test can assert the
+ * exact gate without spawning anything real — see FIXWAVE 1, Finding 3: the trigger call below was
+ * the one piece of this whole fix with no test anywhere, and deleting it left `bun tsc --noEmit`
+ * clean and the full server suite green.
+ *
+ * `true` only where BOTH hold: nothing already settled the link (`assignId`/`resumeId` already
+ * stamped a `conversationId` onto the plan — retrying would be pointless, and calling it anyway
+ * would cost a `/proc` sweep and a `scanProcesses()` every spawn of every harness, not only
+ * antigravity's), and the harness has a `HARNESS_PROCESS_LOGS` entry at all (today: antigravity
+ * only — claude/copilot never reach here because they always have a `conversationId`; codex/kimi/
+ * gemini have no entry and would spend the retry's whole budget finding nothing, poll after poll).
+ */
+export function needsProcessLinkRetry(
+  harness: HarnessId,
+  conversationId: string | undefined,
+): boolean {
+  return !conversationId && HARNESS_PROCESS_LOGS[harness] !== null
+}
+
+/**
+ * Retry the process-log link for ONE freshly spawned row, on this machine's own schedule —
+ * fire-and-forget, never awaited by the spawn response.
+ *
+ * ## Why the ordinary 5s poll is not enough
+ *
+ * `readProcessConversation` is this harness's ONLY chance at an exact link (see
+ * `HARNESS_PROCESS_LOGS` — antigravity has no `assignId` and no session record of its own), and it
+ * is a `/proc/<pid>/fd` read: once the process exits, the chance is gone forever, and nothing can
+ * recover it after the fact (see `session-view.ts`'s `metricsOf`, which refuses to guess one back
+ * from a directory). That chance was being handed entirely to whichever browser tab happened to be
+ * polling `/api/fleet` — and a short-lived session (killed at agy's own first-run trust dialog, or
+ * simply closed) can end before that tab's next tick, OR before it ever polls at all: the wizard's
+ * own `waitForRow` stops the INSTANT the new row appears in a fleet read, which is often under a
+ * second after spawn — well before agy has written the line this reads (measured ~1-1.5s). Reported
+ * as a session started from the web whose chat pane never has anything to show, and that cannot be
+ * reopened once it ends, both are this: the window this file owns is the whole of the fix, because
+ * nothing downstream can recover a link this machine never captured.
+ *
+ * So this machine gives the process its own several seconds, independent of any client — a session
+ * created from `agentop session batch`, with no browser open at all, gets exactly the same chance a
+ * dashboard tab would have given it.
+ *
+ * ## FIXWAVE 1, Finding 1 — the collision guard applies HERE too, and matters more here
+ *
+ * agy names its log by SECOND, so a `session batch` launch — several antigravity rows spawned
+ * together, each running this exact loop — is precisely the shape that collides: two of them can
+ * share one log file, and (measured live) that file's content is not reliably preserved for both
+ * writers. This loop's whole reason to exist is checking EARLIER than the ordinary poll, which
+ * makes the collision window, not just the fix's own target window, more likely to be hit here —
+ * so every attempt re-resolves EVERY live process-log-capable process this machine can see
+ * (`scanProcesses`, not only this row) and refuses rather than trusts a shared log, exactly as the
+ * poll loop now does.
+ */
+function linkProcessConversationSoon(id: string, harness: HarnessId): void {
+  if (!HARNESS_PROCESS_LOGS[harness]) return
+  void (async () => {
+    for (let attempt = 0; attempt < PROC_LINK_ATTEMPTS; attempt++) {
+      await new Promise(r => setTimeout(r, PROC_LINK_INTERVAL_MS))
+      // Read back first: an ordinary poll (this machine's own, or one this loop already ran) may
+      // have already linked it, and a row that is retired (reopened, or its process ended and
+      // something else took the id) is no longer this loop's to touch.
+      const row = (await readRegistry().catch(() => [])).find(m => m.id === id)
+      if (!row || row.conversationId) return
+      const backend = await resolveBackend()
+      const panePids = await backend.listPanePids?.().catch(() => undefined)
+      const pid = panePids?.get(id)
+      if (!pid) continue
+
+      // THE COLLISION GUARD — see the header above. Every live process-log-capable pid this machine
+      // can see, ours included, resolved to its log BEFORE any content is read.
+      const candidates = new Map<number, HarnessId>([[pid, harness]])
+      const { procs } = await scanProcesses().catch(() => ({ procs: [] }))
+      for (const p of procs) {
+        if (p.pid !== undefined && HARNESS_PROCESS_LOGS[p.harness]) candidates.set(p.pid, p.harness)
+      }
+      const logByPid = new Map<number, string | null>()
+      await Promise.all([...candidates].map(async ([candPid, candHarness]) => {
+        logByPid.set(candPid, await resolveProcessLog(candHarness, candPid).catch(() => null))
+      }))
+      if (agyLogCollisions(logByPid).has(pid)) continue // refuse this attempt; retry next tick
+
+      const linked = await linkProcessConversation({
+        id, harness, pid,
+        knownLog: logByPid.get(pid),
+        readProcessConversation,
+        recordConversation: (sid, conversationId, link) =>
+          patchSession(sid, { conversationId, conversationLink: link }),
+      }).catch(() => false)
+      if (linked) return
+    }
+  })()
 }
 
 async function spawnManaged(req: {
@@ -1601,6 +1737,12 @@ async function spawnManaged(req: {
     // grouping fell through to its last path segment as though it were a project.
     ...(await recordedRepo(req.cwd)),
   })
+
+  // Give this harness's one exact-link chance its own several seconds, independent of whichever
+  // client happens to be polling — see the header above `linkProcessConversationSoon`.
+  if (needsProcessLinkRetry(req.harness, planned.plan.conversationId)) {
+    linkProcessConversationSoon(id, req.harness)
+  }
 
   const convId = planned.plan.conversationId ?? req.resumeId
   const liveBackend = await backend.list().catch(() => [])
@@ -1736,23 +1878,65 @@ async function reopenEntries(
   let skipped = plan.skipped.length
   for (const row of plan.reopen) {
     const m = row.entry
-    const r = await spawnManaged({
-      harness: m.harness,
-      cwd: m.cwd,
-      resumeId: row.resumeId,
-      label: row.label,
-      attach: false,
-      // The task travels with the session, whichever set this reopen was chosen from: a fall does
-      // not un-file the work someone filed.
-      ...(m.task ? { task: m.task } : {}),
-    }, s)
-    if (!r.ok) { skipped++; continue }
-    opened++
-    if (r.id) await patchSession(r.id, { conversationId: row.resumeId })
-    // Retired, so a laptop closed and opened twice does not leave two dead twins and one live
-    // session standing under the same name.
-    await patchSession(m.id, { endedAt: new Date().toISOString() })
-    if (m.note && r.id) await patchSession(r.id, { note: m.note })
+    /*
+     * ONE REOPEN AT A TIME PER CONVERSATION — exactly the door `resumeSession` already locks (see
+     * `resume-lock.ts`). `plan` above is built from a SNAPSHOT: the registry and the backend as they
+     * were when this call started. Two `reopenFell` calls racing each other (a double click, two
+     * browser tabs both reacting to the same fallen group, a retry) can both read that snapshot
+     * before either has spawned or retired anything, and both would then plan to reopen the SAME
+     * conversation — measured on the isolated preview: two concurrent calls, four live rows for two
+     * fallen conversations. `attemptReopenRow` (`reopen-attempt.ts`) is the check made a SECOND
+     * time, once this row's turn under the lock comes, against a FRESH read — which is what lets the
+     * second racer see the first racer's own new row and stand down instead of starting a twin.
+     *
+     * `withResumeLock` is IN-PROCESS memory (a plain `Map` at module scope in `resume-lock.ts`), so
+     * this closes the race COMPLETELY only between two callers inside the SAME process — two
+     * `reopenFell` requests both landing on this one `agentop server`. A `reopenFell` fired from a
+     * separately-run cockpit process at the same instant has its OWN lock instance and is not
+     * serialised by it; the fresh-read recheck inside `attemptReopenRow` still narrows that case (it
+     * reads the registry file and the backend, which any process can see) without being a hard
+     * exclusion the way the same-process case is. Same class of stated limit `registry.ts` already
+     * carries for cross-process writes.
+     */
+    const outcome = await withResumeLock(row.resumeId, () => attemptReopenRow(row.resumeId, m.id, {
+      freshState: async () => {
+        const freshBackend = await resolveBackend()
+        const [freshEntries, freshAlive] = await Promise.all([
+          readRegistry().catch(() => [] as ManagedSession[]),
+          freshBackend.list().catch(() => []).then(l => new Set(l.filter(b => b.alive).map(b => b.id))),
+        ])
+        return { entries: freshEntries, aliveIds: freshAlive }
+      },
+      holderOf: async () =>
+        conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId, m.id),
+      spawn: () => spawnManaged({
+        harness: m.harness,
+        cwd: m.cwd,
+        resumeId: row.resumeId,
+        label: row.label,
+        attach: false,
+        // The task travels with the session, whichever set this reopen was chosen from: a fall does
+        // not un-file the work someone filed.
+        ...(m.task ? { task: m.task } : {}),
+      }, s),
+      onSpawned: async newId => {
+        if (newId) await patchSession(newId, { conversationId: row.resumeId })
+        // Retired, so a laptop closed and opened twice does not leave two dead twins and one live
+        // session standing under the same name.
+        await patchSession(m.id, { endedAt: new Date().toISOString() })
+        if (m.note && newId) await patchSession(newId, { note: m.note })
+      },
+    }))
+    if (outcome.kind === 'opened') opened++
+    else if (outcome.kind === 'held') {
+      // Somebody else's attempt for this exact conversation landed first, in the time between the
+      // plan being built and this row's turn under the lock. Reported the same way `planTaskReopen`
+      // reports any other twin: the work is on screen, under another row, and this was never a
+      // failure.
+      plan.heldElsewhere.push({ id: m.id, holder: outcome.holder ?? { id: row.resumeId, label: row.label, kind: 'managed' } })
+    } else {
+      skipped++
+    }
   }
   forgetConversations()
   return { plan, opened, skipped }
@@ -3062,11 +3246,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const blocked = await backend.unavailable()
       if (blocked) return { ok: false, message: blocked }
       if (!(await backend.kill(id))) return { ok: false, message: s.sessKillUnconfirmed(id) }
-      // MARKED finished, never deleted. Removing the row took with it the only record of which
-      // conversation this was — the store had not caught up, so there was nothing left to offer as
-      // reopenable and the session simply vanished from the screen. A session you end is still a
-      // thing that happened, and picking it back up is the ordinary next thing to want.
-      if (!(await patchSession(id, { endedAt: new Date().toISOString() }))) await removeSession(id)
+      // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
+      // took with it the only record of which conversation this was — the store had not caught up,
+      // so there was nothing left to offer as reopenable and the session simply vanished from the
+      // screen. A session you end is still a thing that happened, and picking it back up is the
+      // ordinary next thing to want.
+      await retireSession(id)
       forgetConversations()
       return { ok: true, message: s.sessKilled(id) }
     },
@@ -3662,6 +3847,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(c.remote ? { repo: repoShortName(c.remote) } : {}),
         detail: candidatePath(c, homedir()),
         source: c.source,
+        ...(c.worktree ? { worktree: true } : {}),
       })) }
     },
 

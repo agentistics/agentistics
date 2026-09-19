@@ -17,8 +17,13 @@
  * `https:` and cannot be forged into another scheme. That is what makes the allowance narrow enough
  * to add at all. It is deliberately not `'self'` — which would let any same-origin page frame the
  * dashboard — and deliberately not a wildcard.
+ *
+ * Exported so `response-policy.ts` can admit the SAME scheme into the media routes' own
+ * `frame-ancestors` — a PDF opened inside the VS Code dashboard tab is framed by `vscode-webview:`
+ * too (`frame-ancestors` checks every ancestor, not just the immediate parent), and a second
+ * literal of this string is a second place for the scheme to drift out of sync with this one.
  */
-const EDITOR_FRAME_SOURCE = 'vscode-webview:'
+export const EDITOR_FRAME_SOURCE = 'vscode-webview:'
 
 export function buildCsp(opts: { dev: boolean; embed?: boolean }): string {
   // Dev runs the SPA on Vite's port talking to this server, with an HMR websocket.

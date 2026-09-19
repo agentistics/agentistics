@@ -6,18 +6,21 @@ import type { InputAck } from './input-protocol'
 function harness(over: Partial<InputChannelDeps> = {}) {
   const sent: string[] = []
   const keys: string[] = []
+  const pasted: string[] = []
   const acks: InputAck[] = []
   const deps: InputChannelDeps = {
     async sendText(text) { sent.push(text); return true },
     async sendKey(key) { keys.push(key); return true },
+    async sendPaste(text) { pasted.push(text); return true },
     emit(ack) { acks.push(ack) },
     ...over,
   }
-  return { deps, sent, keys, acks }
+  return { deps, sent, keys, pasted, acks }
 }
 
 const textMsg = (seq: number, data: string) => JSON.stringify({ seq, kind: 'text', data })
 const keyMsg = (seq: number, name: string) => JSON.stringify({ seq, kind: 'key', name })
+const pasteMsg = (seq: number, data: string) => JSON.stringify({ seq, kind: 'paste', data })
 
 /** Let the internal promise chain settle. */
 const settle = () => new Promise<void>(r => setTimeout(r, 0))
@@ -37,6 +40,7 @@ describe('createInputChannel — ordering', () => {
         return true
       },
       async sendKey() { return true },
+      async sendPaste() { return true },
       emit(a) { acks.push(a) },
     }
     const ch = createInputChannel(deps)
@@ -75,6 +79,16 @@ describe('createInputChannel — confirmations', () => {
     expect(sent).toEqual(['x'])
     expect(keys).toEqual(['C-c'])
   })
+
+  test('a paste message routes to sendPaste, never to sendText', async () => {
+    const { deps, sent, pasted, acks } = harness()
+    const ch = createInputChannel(deps)
+    ch.submit(pasteMsg(1, 'line one\nline two\nline three'))
+    for (let i = 0; i < 50 && acks.length < 1; i++) await settle()
+    expect(pasted).toEqual(['line one\nline two\nline three'])
+    expect(sent).toEqual([])
+    expect(acks).toEqual([{ seq: 1, ok: true }])
+  })
 })
 
 describe('createInputChannel — honest failure', () => {
@@ -92,6 +106,7 @@ describe('createInputChannel — honest failure', () => {
     const deps: InputChannelDeps = {
       async sendText() { calls++; if (calls === 1) throw new Error('backend down'); return true },
       async sendKey() { return true },
+      async sendPaste() { return true },
       emit(a) { acks.push(a) },
     }
     const ch = createInputChannel(deps)

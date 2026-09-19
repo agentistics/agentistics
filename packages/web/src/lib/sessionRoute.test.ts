@@ -78,6 +78,11 @@ describe('reopenedSessionRoute — the landing carries the wait', () => {
     expect(stillArriving(arrivalFor(null, 'new-1', true, 0), 'new-1', 0)).toBe(true)
   })
 
+  test('the row the reopen was asked about travels as `retires`, and only when it is known', () => {
+    expect(reopenedSessionRoute('new-1', { id: 'old-1', harness: 'claude' }).options.state.retires).toBe('old-1')
+    expect('retires' in reopenedSessionRoute('new-1', { harness: 'claude' }).options.state).toBe(false)
+  })
+
   test('an id with slashes is still one path segment', () => {
     expect(reopenedSessionRoute('external:agy:/home/x:1').path)
       .toBe(sessionPath('external:agy:/home/x:1'))

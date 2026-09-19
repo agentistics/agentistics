@@ -24,6 +24,12 @@ export interface ProjectCandidate {
   /** How many sessions have run here — the tiebreaker, and a hint that this is a real workspace. */
   sessions: number
   /**
+   * True only for a LINKED worktree of a repository — never the repository's own main checkout.
+   * `undefined` means "not yet measured" (see `mergeWalkedAndHistory`); a caller that renders
+   * before it is resolved should treat that the same as `false`, exactly as `projectKind` does.
+   */
+  worktree?: boolean
+  /**
    * Why this candidate is being offered.
    *
    * `cwd` is the directory the user is standing in and is ALWAYS offered first, even with no history
@@ -225,4 +231,35 @@ export function withFixedCandidates(
     out.set(c.path, existing ? { ...existing, source: c.source } : c)
   }
   return [...out.values()]
+}
+
+/**
+ * Merge WALKED candidates (which know worktree-ness for FREE, from the walk's own `readdir`) with
+ * HISTORY candidates (which know remotes and recency, but nothing about the directory itself as it
+ * is right now) — PURE, so the fs cost of measuring `worktree` stays entirely in the caller.
+ *
+ * History REPLACES a walked entry wholesale on a shared path — it is the richer record, see the
+ * module doc — except for `worktree`: the walk already measured that for free and a session record
+ * has no way to know it at all. Losing it here is THE REPORTED BUG: a session started inside a git
+ * worktree records the shared repository's own `git_remote`, so a plain object-replace let a
+ * worktree the walk had correctly flagged surface a remote and read as a repository's own main
+ * checkout (`projectKind` treats a recorded remote as proof of `'repo'` unless `worktree` says
+ * otherwise).
+ *
+ * A path history knows that the walk never visited (outside the scan depth, or outside `$HOME`)
+ * comes out with `worktree: undefined` — there was nothing to carry over — and the caller measures
+ * it separately, bounded by how many directories this machine has actually worked in rather than by
+ * the whole walked tree.
+ */
+export function mergeWalkedAndHistory(
+  walked: readonly ProjectCandidate[],
+  history: readonly ProjectCandidate[],
+): ProjectCandidate[] {
+  const byPath = new Map<string, ProjectCandidate>()
+  for (const c of walked) byPath.set(c.path, c)
+  for (const c of history) {
+    const known = byPath.get(c.path)
+    byPath.set(c.path, known?.worktree !== undefined ? { ...c, worktree: known.worktree } : c)
+  }
+  return [...byPath.values()]
 }

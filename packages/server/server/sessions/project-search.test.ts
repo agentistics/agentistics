@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import { projectKind } from '@agentistics/core'
 import {
-  buildCandidates, candidatePath, matchScore, searchCandidates, withFixedCandidates,
-  type ProjectCandidate,
+  buildCandidates, candidatePath, matchScore, mergeWalkedAndHistory, searchCandidates,
+  withFixedCandidates, type ProjectCandidate,
 } from './project-search'
 
 const cand = (over: Partial<ProjectCandidate> = {}): ProjectCandidate => ({
@@ -127,6 +128,39 @@ describe('withFixedCandidates', () => {
   it('adds a typed path history has never seen', () => {
     const merged = withFixedCandidates([], [cand({ path: '/fresh/clone', source: 'typed' })])
     expect(merged.map(c => c.source)).toEqual(['typed'])
+  })
+})
+
+describe('mergeWalkedAndHistory — the walk\'s worktree flag must survive being replaced by history', () => {
+  it('THE REPORTED BUG: a history entry with a remote must not erase a walked worktree flag', () => {
+    // The walk found `.git` as a FILE here — a linked worktree — and knows nothing about its
+    // remote. A session recorded in that same directory carries the shared repository's own
+    // remote. Losing `worktree` on the merge is exactly what made the worktree read as `repo`.
+    const walked = [cand({ path: '/repo/a/.claude/worktrees/x', source: 'repo', worktree: true, remote: '' })]
+    const history = [cand({ path: '/repo/a/.claude/worktrees/x', source: 'history', worktree: undefined, remote: 'github.com/org/repo' })]
+    const merged = mergeWalkedAndHistory(walked, history)
+    expect(merged).toHaveLength(1)
+    // History's remote and source win (it is the richer record) — but the worktree flag the walk
+    // already measured for free must not be thrown away.
+    expect(merged[0]).toMatchObject({ source: 'history', remote: 'github.com/org/repo', worktree: true })
+    expect(projectKind({ source: merged[0]!.source, remote: merged[0]!.remote, worktree: merged[0]!.worktree }))
+      .toBe('worktree')
+  })
+
+  it('a plain repository (not a worktree) merges exactly as before', () => {
+    const walked = [cand({ path: '/repo/a', source: 'repo', worktree: false, remote: '' })]
+    const history = [cand({ path: '/repo/a', source: 'history', worktree: undefined, remote: 'github.com/org/repo' })]
+    expect(mergeWalkedAndHistory(walked, history)[0]).toMatchObject({ worktree: false })
+  })
+
+  it('a history path the walk never visited is left unresolved, for the caller to measure', () => {
+    const history = [cand({ path: '/outside/the/walk', worktree: undefined })]
+    expect(mergeWalkedAndHistory([], history)[0]!.worktree).toBeUndefined()
+  })
+
+  it('a walked path with no history entry keeps its own flag untouched', () => {
+    const walked = [cand({ path: '/only/walked', source: 'folder', worktree: false })]
+    expect(mergeWalkedAndHistory(walked, [])[0]).toMatchObject({ worktree: false })
   })
 })
 

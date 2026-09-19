@@ -28,7 +28,7 @@ import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
-import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions } from './registry'
+import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { conversationForProcess, loadConversations } from './conversations'
 import { resolveBackend } from './index'
 import { scanProcesses } from '../live-sessions'
@@ -958,7 +958,10 @@ async function kill(ref: string, backend: SessionBackend): Promise<number> {
     console.error(`Could not confirm ${id} was killed — it may still be running. Its registry entry was kept.`)
     return 1
   }
-  await removeSession(id)
+  // MARKED finished, never deleted — see `retireSession`'s own docstring. A session filed under a
+  // task must go on resolving in `loadTaskWorld`'s rows after `agentop session kill`, exactly as it
+  // already does behind the web/cockpit kill verb.
+  await retireSession(id)
   console.log(`Killed ${id}.`)
   return 0
 }

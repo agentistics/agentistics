@@ -620,6 +620,10 @@ export interface ControlStrings {
   wizSourceTyped: string
   wizSourceHistory: string
   wizSourceRepo: string
+  /** A LINKED worktree, distinct from `wizSourceRepo` — it is part of a repository, not one of
+   *  its own. `ProjectOption.source` alone cannot say this (a worktree still reads `'repo'`
+   *  there); read from `ProjectOption.worktree` instead, ahead of the `source` checks. */
+  wizSourceWorktree: string
   /** The rename / note prompts, and the kill confirmation. */
   sessionsRenamePrompt: string
   sessionsNotePrompt: string
@@ -1280,6 +1284,7 @@ const EN: ControlStrings = {
   wizSourceTyped: 'typed',
   wizSourceHistory: 'worked here before',
   wizSourceRepo: 'git repo',
+  wizSourceWorktree: 'worktree',
   sessionsRenamePrompt: 'Name this session',
   sessionsNotePrompt: 'Describe this session',
   sessionsKillConfirm: (title: string) => `Stop "${title}"? The assistant running in it is ended.`,
@@ -1849,6 +1854,7 @@ const PT: ControlStrings = {
   wizSourceTyped: 'digitado',
   wizSourceHistory: 'já trabalhou aqui',
   wizSourceRepo: 'repo git',
+  wizSourceWorktree: 'worktree',
   sessionsRenamePrompt: 'Dê um nome a esta sessão',
   sessionsNotePrompt: 'Descreva esta sessão',
   sessionsKillConfirm: (title: string) => `Encerrar "${title}"? O assistente que roda nela é finalizado.`,

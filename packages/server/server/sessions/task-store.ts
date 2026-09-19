@@ -20,6 +20,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { normalizeStagedSession } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { migratePriority, migrateStatus, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -300,6 +301,20 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     ...(str(t.startDate) ? { startDate: str(t.startDate)! } : {}),
     ...(str(t.sessionId) ? { sessionId: str(t.sessionId)! } : {}),
     ...(str(t.notes) ? { notes: str(t.notes)! } : {}),
+    // SUPERSEDED (§F) — see the field's own docblock in `task-model.ts`. Still round-tripped so the
+    // already-shipped §B-era UI keeps reading what it wrote; `subtaskViews` no longer buckets on it.
+    ...(str(t.groupId) ? { groupId: str(t.groupId)! } : {}),
+    // The hierarchy fields (§F.1). Both have to be carried here or the write is a no-op: `patchSubtask`
+    // stamps them, the next `read()` drops them, and the group `subtaskViews`/`planAttach` resolve
+    // never exists. `isGroup` is kept only when `true` — absent means "not a group," and a stray
+    // `false` written by an older client is read the same as absent rather than as a distinct value.
+    ...(t.isGroup === true ? { isGroup: true } : {}),
+    ...(str(t.parentGroupId) ? { parentGroupId: str(t.parentGroupId)! } : {}),
+    // A staged session draft (t-918cc82233) — same reason the hierarchy fields above are carried
+    // here explicitly: written by `patchSubtask` and dropped silently by the next `read()` unless
+    // this whitelist parses it back. `normalizeStagedSession` is total and never repairs a
+    // half-read draft, the same rule `normalizeSessionPresets` applies to a saved preset.
+    ...(normalizeStagedSession(t.stagedSession) ? { stagedSession: normalizeStagedSession(t.stagedSession)! } : {}),
   }
 }
 
@@ -447,7 +462,21 @@ export function createTaskStore(file: string): TaskStore {
       return enqueue(async () => {
         const book = await read()
         if (!book.subtasks.some(t => t.id === id)) return false
-        await write({ ...book, subtasks: book.subtasks.filter(t => t.id !== id) })
+        // A GROUP's former MEMBERS become ordinary loose subtasks again — the natural fallback,
+        // since a member without a group is exactly what a loose subtask is (§F.1). Done in the
+        // SAME write as the deletion, under the same lock, or a crash between the two could leave a
+        // member pointing at an id nothing names — permanently, since nothing else ever clears
+        // `parentGroupId` and `subtaskViews`'s member-exclusion filter would keep excluding it
+        // forever with no UI/API path back (unlike `attemptViews`'s handling of a dangling
+        // `attemptId`, which folds an orphan into a documented "unattributed" bucket rather than
+        // losing track of it). Only a record whose `parentGroupId` names THIS id is touched — every
+        // other subtask, member of another group or not, is passed through untouched.
+        await write({
+          ...book,
+          subtasks: book.subtasks
+            .filter(t => t.id !== id)
+            .map(t => (t.parentGroupId === id ? { ...t, parentGroupId: undefined } : t)),
+        })
         return true
       })
     },

@@ -35,6 +35,7 @@ import { StreakBreakdownButton } from '../components/StreakBreakdownButton'
 import { PlanValuePanel } from '../components/PlanValuePanel'
 import { HomeComparisons } from '../components/HomeComparisons'
 import { planCostSubtitle, planScopeHarnesses, planScopeNote } from '../lib/costBasis'
+import { costEstimateNote } from '../lib/costEstimateNote'
 
 import type { CardId } from '../lib/cardOrder'
 
@@ -129,6 +130,11 @@ export default function HomePage() {
       const planUsable = costBasis === 'plan' && planBasis.basis !== null && planBasis.basis.coverage.computable
       const showPlan = planUsable && planBasis.basis !== null
       const shownUSD = showPlan && planBasis.basis ? planBasis.basis.planCostUSD : d.totalCostUSD
+      // Defect A's fix prices every day it can from the sessions' own counters and falls back to
+      // `apportionModelUsage`'s guess only for the days nothing in scope can answer — reported
+      // here so that guess never reads as a measurement. Only on the API sub-line: the plan
+      // basis's own subtitle already states its coverage in days.
+      const estimateNote = !showPlan ? costEstimateNote(d.costEstimatedDays, lang === 'pt' ? 'pt' : 'en') : null
       card = (
         <StatCard
           label={showPlan ? (lang === 'pt' ? 'Custo do plano' : 'Plan cost') : (lang === 'pt' ? 'Custo estimado' : 'Est. cost')}
@@ -136,7 +142,7 @@ export default function HomePage() {
           // Sized by whichever currency renders wider, so flipping USD ⇄ BRL never resizes the
           // headline — BRL is ~5× the amount and can carry an extra digit.
           sizeBasis={widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
-          sub={showPlan ? planCostSub(lang) : costCardSub(lang, filters.harness)}
+          sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote].filter(Boolean).join('\n')}
           // Belt and braces beside the shorter text: every card in a grid row shares its height,
           // so this one may never be the one that stretches it.
           subNoWrap={showPlan}

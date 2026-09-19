@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { highlight, languageOf, type TokenKind } from '../../lib/codeHighlight'
+import { buildHighlightColors, type CodeThemeVariant } from '../../lib/monacoTheme'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeft, Check, Copy, FileText } from 'lucide-react'
 import type { Artifact } from '../../lib/sessionArtifacts'
@@ -44,9 +45,9 @@ export interface ArtifactDocProps {
 /**
  * The file, as something to read: a gutter of line numbers beside coloured code.
  *
- * The colours are the application's own tokens rather than an editor theme's, so a file read here
- * looks like the product it is read in — and they follow light and dark with it, which a fixed
- * palette from a highlighter's stylesheet would not.
+ * The colours are derived from the editor's palette via `buildHighlightColors`, which ensures
+ * they use the same contrast-compliant tints as the editor (4.5:1 WCAG AA) and follow light and
+ * dark themes automatically. A file read here matches the product and changes with the theme.
  *
  * A language the lexer does not know renders PLAIN and still numbered. Mis-colouring is worse than
  * no colouring: a string drawn as code tells the reader something false about the file, and this
@@ -55,14 +56,33 @@ export interface ArtifactDocProps {
 function CodeView({ text, name }: { text: string; name: string }) {
   const lang = languageOf(name)
   const lines = highlight(text, lang)
+
+  // Detect the current theme from <html data-theme> and build colour map from the palette.
+  const [themeAttr, setThemeAttr] = useState<string | null>(
+    typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme')
+  )
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    setThemeAttr(root.getAttribute('data-theme'))
+    const observer = new MutationObserver(() => setThemeAttr(root.getAttribute('data-theme')))
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  const variant = (themeAttr === 'light' ? 'light' : 'dark') as CodeThemeVariant
+  const colours = buildHighlightColors(variant)
+
   const colour: Record<TokenKind, string> = {
-    plain: 'var(--text-secondary)',
-    comment: 'var(--text-tertiary)',
-    string: 'var(--accent-green, #22c55e)',
-    number: 'var(--anthropic-orange)',
-    keyword: '#a78bfa',
-    punct: 'var(--text-tertiary)',
+    plain: colours.plain,
+    comment: colours.comment,
+    string: colours.string,
+    number: colours.number,
+    keyword: colours.keyword,
+    punct: colours.punct,
   }
+
   return (
     <div style={{
       borderRadius: 9, background: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
@@ -84,7 +104,7 @@ function CodeView({ text, name }: { text: string; name: string }) {
               }}>{i + 1}</td>
               <td style={{ padding: '0 12px 0 0', whiteSpace: 'pre', verticalAlign: 'top' }}>
                 {toks.length === 0
-                  ? '\u00a0'
+                  ? ' '
                   : toks.map((t, j) => (
                     <span key={j} style={{ color: colour[t.kind] }}>{t.text}</span>
                   ))}
@@ -96,6 +116,7 @@ function CodeView({ text, name }: { text: string; name: string }) {
     </div>
   )
 }
+
 
 /** The cap the server applies, restated in words rather than in bytes. */
 const MIB = 1024 * 1024

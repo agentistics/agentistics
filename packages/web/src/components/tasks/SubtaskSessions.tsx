@@ -26,9 +26,17 @@ import type { Lang } from './copy'
 import type { TaskSessionRow } from '../../lib/tasks'
 
 export interface SubtaskSessionsProps {
-  /** This subtask's own id, plus every sibling sharing its `groupId` — the id alone when
-   *  ungrouped. A session filed under ANY member shows here, so every member of a group
-   *  renders the identical chip list — see docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.4. */
+  /**
+   * The ids whose filed sessions should show here — every real caller passes exactly `[id]` today
+   * (a plain subtask's own id, or a §F GROUP's own id). This used to be "the subtask's id plus
+   * every sibling sharing its `groupId`" under §B's shared-bucket model (docs/superpowers/specs/
+   * 2026-09-11-alm-session-linking-ux.md §B.4), where a session filed under ANY member showed on
+   * every sibling's chip list. §F (same doc, §F.1) SUPERSEDED that: a group MEMBER can never hold a
+   * session of its own (`task-attach.ts`'s `subtask_in_group` refusal), so there is no longer a
+   * union of members to compute — a group's chip list is just the sessions filed on the group's own
+   * id, exactly like a loose subtask. The field stays an array rather than a bare id because a
+   * caller passing one id and a caller passing several cost this component nothing to tell apart.
+   */
   subtaskIds: readonly string[]
   /** Where a NEW session gets filed — this row's own id, never a sibling's. */
   subtaskId: string

@@ -34,7 +34,7 @@ test('a name that merely CONTAINS a runtime word is not a local model', () => {
 
 test('a local model is free — not the shared fallback price', () => {
   const p = getModelPrice('ollama-local/qwen2.5-coder-7b')
-  expect(p).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+  expect(p).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 })
   expect(calcCost(usage(2050, 67), 'ollama-local/qwen2.5-coder-7b')).toBe(0)
 })
 

@@ -6,6 +6,7 @@ import {
   forgetChatTailContent, forgetChatTailPaths, readChatWindow, readRecentChatTurns,
   resolveChatTranscriptPath,
 } from './chat-tail'
+import { ATTACHMENT_DIR } from './attachment-web'
 
 const SESSION_ID = 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f56789'
 
@@ -407,6 +408,110 @@ describe('readChatWindow — the cap is a fact about the READ, and it says so', 
   })
 })
 
+describe('a marker turn resolves through its own companion — attachment-companion.ts', () => {
+  let root: string
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'chat-companion-')) })
+  afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+
+  const a = join(ATTACHMENT_DIR, '7f06ed4a-image.png')
+  const b = join(ATTACHMENT_DIR, '005d6e1c-image.png')
+
+  const marker = (text: string, promptId: string, pasteIds: number[]) => line({
+    type: 'user',
+    promptId,
+    imagePasteIds: pasteIds,
+    message: { content: [{ type: 'text', text }] },
+  })
+
+  const companion = (promptId: string, paths: string[]) => line({
+    type: 'user',
+    promptId,
+    isMeta: true,
+    turnCompanion: true,
+    message: { content: paths.map(p => ({ type: 'text', text: `[Image: source: ${p}]` })) },
+  })
+
+  test('exact match: the turn carries the resolved paths, and the companion draws no turn of its own', async () => {
+    const path = join(root, 'a.jsonl')
+    await writeFile(path, [
+      marker('[Image #1] [Image #2]look at this', 'p1', [1, 2]),
+      companion('p1', [a, b]),
+    ].join('\n') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    // ONE turn — the marker's. The companion is plumbing, not a message; it must never appear as
+    // its own "an image was attached" chip once its paths have been folded into the turn beside it.
+    expect(out.length).toBe(1)
+    expect(out[0]!.imagePaths).toEqual([a, b])
+    expect(out[0]!.text).toBe('[Image #1] [Image #2]look at this')
+  })
+
+  test('a count mismatch resolves nothing — the chip stays, never a wrong thumbnail', async () => {
+    const path = join(root, 'b.jsonl')
+    await writeFile(path, [
+      // The companion names three paths; the turn claims only two markers and two pasteIds.
+      marker('[Image #1] [Image #2]oi', 'p2', [1, 2]),
+      companion('p2', [a, b, join(ATTACHMENT_DIR, 'extra.png')]),
+    ].join('\n') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    expect(out.length).toBe(1)
+    expect(out[0]!.imagePaths).toBeUndefined()
+  })
+
+  test('a companion path outside the attachments directory is not served, and the turn does not resolve', async () => {
+    const path = join(root, 'c.jsonl')
+    await writeFile(path, [
+      marker('[Image #1] [Image #2]oi', 'p3', [1, 2]),
+      companion('p3', [a, '/etc/passwd']),
+    ].join('\n') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    expect(out.length).toBe(1)
+    expect(out[0]!.imagePaths).toBeUndefined()
+  })
+
+  test('a marker turn with no companion at all falls back untouched — no imagePaths field', async () => {
+    const path = join(root, 'd.jsonl')
+    await writeFile(path, marker('[Image #1]sozinho', 'p4', [1]) + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    expect(out.length).toBe(1)
+    expect(out[0]!.imagePaths).toBeUndefined()
+    expect(out[0]!.text).toBe('[Image #1]sozinho')
+  })
+
+  /**
+   * THE PIN: a conversation this change may never touch behaves EXACTLY as the original
+   * implementation, compared against that behaviour directly rather than against the new code run
+   * twice — a prior attempt at this fix compared the new code against itself and a reviewer caught
+   * it. `turnCompanion` also marks a skill's loaded body beside the turn that invoked it
+   * (`chat-envelope.ts`'s `META_KINDS`), which is unrelated to images and must still become the
+   * ordinary "a skill was loaded" system note it always has.
+   */
+  test('a non-image turnCompanion (a skill load) is unaffected — still the system note it always was', async () => {
+    const path = join(root, 'skill.jsonl')
+    await writeFile(path, line({
+      type: 'user',
+      promptId: 'p5',
+      isMeta: true,
+      turnCompanion: true,
+      message: { content: 'Base directory for this skill: /opt/elsewhere/thing' },
+    }) + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    expect(out).toEqual([
+      { role: 'user', text: 'a skill was loaded', system: 'a skill was loaded' },
+    ])
+  })
+
+  test('the same resolution reaches the six-row tail reader, not only the full chat window', async () => {
+    const path = join(root, 'tail.jsonl')
+    await writeFile(path, [
+      marker('[Image #1]oi', 'p6', [1]),
+      companion('p6', [a]),
+    ].join('\n') + '\n')
+    const out = await readRecentChatTurns(path, 6)
+    expect(out.length).toBe(1)
+    expect(out[0]!.imagePaths).toEqual([a])
+  })
+})
+
 describe('the tool call carries the id its step is opened with', () => {
   let root: string
 
@@ -576,5 +681,62 @@ describe('a system note carries WHICH thing it is about, where the body named on
     const [turn] = await turnsOf('Continue from where you left off.')
     expect(turn?.system).toBe('the session was resumed')
     expect(turn?.systemRef).toBeUndefined()
+  })
+})
+
+describe('the assistant VIEWED an image — viewed-image.ts, end to end', () => {
+  let root: string
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'chat-tail-viewed-')); forgetChatTailContent() })
+  afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+
+  const readUse = (uuid: string, parentUuid: string, id: string, filePath: string, name = 'Read') => line({
+    type: 'assistant', uuid, parentUuid,
+    message: { content: [{ type: 'tool_use', id, name, input: { file_path: filePath } }] },
+  })
+  const imageResult = (uuid: string, parentUuid: string, toolUseId: string) => line({
+    type: 'user', uuid, parentUuid,
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: [{ type: 'image' }] }] },
+  })
+  const viewedCompanion = (uuid: string, parentUuid: string) => line({
+    type: 'user', uuid, parentUuid, isMeta: true, turnCompanion: true,
+    message: { content: '[Image: original 2223x888, displayed at 2000x799. Multiply coordinates by 1.11 to map to original image.]' },
+  })
+
+  test('names the note correctly and carries the Read call’s own file_path as systemRef — never "an image was attached"', async () => {
+    const path = join(root, 'a.jsonl')
+    await writeFile(path, [
+      readUse('u1', 'p0', 'toolu_1', '/repo/screenshot.png'),
+      imageResult('r1', 'u1', 'toolu_1'),
+      viewedCompanion('c1', 'r1'),
+    ].join('\n') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    const note = out.find(t => t.system !== undefined)
+    expect(note?.system).toBe('the assistant viewed an image')
+    expect(note?.systemRef).toBe('/repo/screenshot.png')
+  })
+
+  test('THE MEASURED CASE, through the real reader: three Reads, one companion, pairs with the THIRD', async () => {
+    const path = join(root, 'b.jsonl')
+    await writeFile(path, [
+      readUse('u1', 'p0', 'toolu_1', '/repo/small-a.png'),
+      imageResult('r1', 'u1', 'toolu_1'),
+      readUse('u2', 'r1', 'toolu_2', '/repo/small-b.png'),
+      imageResult('r2', 'u2', 'toolu_2'),
+      readUse('u3', 'r2', 'toolu_3', '/repo/big-resized.jpg'),
+      imageResult('r3', 'u3', 'toolu_3'),
+      viewedCompanion('c1', 'r3'),
+    ].join('\n') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    const note = out.find(t => t.system !== undefined)
+    expect(note?.systemRef).toBe('/repo/big-resized.jpg')
+  })
+
+  test('a companion whose chain cannot be traced carries the note and no reference — never a guess', async () => {
+    const path = join(root, 'c.jsonl')
+    await writeFile(path, viewedCompanion('c1', 'nowhere-in-this-file') + '\n')
+    const out = (await readChatWindow(path, 10)).turns
+    expect(out).toHaveLength(1)
+    expect(out[0]!.system).toBe('the assistant viewed an image')
+    expect(out[0]!.systemRef).toBeUndefined()
   })
 })

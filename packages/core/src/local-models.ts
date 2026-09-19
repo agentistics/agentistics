@@ -26,4 +26,4 @@ export function isLocalModelId(modelId: string): boolean {
 }
 
 /** What a local call costs, per 1M tokens, in every column. */
-export const LOCAL_MODEL_PRICE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const
+export const LOCAL_MODEL_PRICE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 } as const

@@ -65,7 +65,7 @@ function lexical(raw: string, cwd: string): string {
 }
 
 /** A NUL byte in the first chunk. The same test `file(1)` starts from, and enough for this. */
-function looksBinary(buf: Buffer): boolean {
+export function looksBinary(buf: Buffer): boolean {
   return buf.subarray(0, 8000).includes(0)
 }
 

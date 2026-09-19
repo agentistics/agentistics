@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  TASK_STATUSES, isClosed, legacyTaskId, migrateLegacyTasks, migrateStatus, newAttemptId, newTaskId,
-  statusAfterAttach,
+  TASK_STATUSES, groupMembers, isClosed, isGroupMember, isGroupSubtask, legacyTaskId,
+  migrateLegacyTasks, migrateStatus, newAttemptId, newTaskId, statusAfterAttach,
 } from './task-model'
+import type { Subtask } from './task-model'
 
 describe('legacyTaskId', () => {
   it('is stable for the same name, so migrating twice yields one task', () => {
@@ -92,5 +93,37 @@ describe('statusAfterAttach', () => {
     for (const s of ['in_progress', 'blocked', 'in_review', 'done', 'abandoned'] as const) {
       expect(statusAfterAttach(s)).toBeNull()
     }
+  })
+})
+
+const subtask = (over: Partial<Subtask> = {}): Subtask => ({
+  id: 's1', taskId: 't1', title: 'a piece of work', done: false, status: 'todo',
+  createdAt: '2026-09-17T10:00:00.000Z', updatedAt: '2026-09-17T10:00:00.000Z',
+  ...over,
+})
+
+describe('isGroupSubtask / isGroupMember (§F.1)', () => {
+  it('reads `isGroup` and `parentGroupId` as booleans, absent included', () => {
+    expect(isGroupSubtask(subtask({ isGroup: true }))).toBe(true)
+    expect(isGroupSubtask(subtask())).toBe(false)
+    expect(isGroupMember(subtask({ parentGroupId: 'g1' }))).toBe(true)
+    expect(isGroupMember(subtask())).toBe(false)
+  })
+})
+
+describe('groupMembers', () => {
+  it('returns every subtask naming this group, and nothing else', () => {
+    const subs = [
+      subtask({ id: 'g1', isGroup: true }),
+      subtask({ id: 'm1', parentGroupId: 'g1' }),
+      subtask({ id: 'm2', parentGroupId: 'g1' }),
+      subtask({ id: 's1' }), // loose — not a member
+      subtask({ id: 'm9', parentGroupId: 'g2' }), // a DIFFERENT group
+    ]
+    expect(groupMembers('g1', subs).map(s => s.id)).toEqual(['m1', 'm2'])
+  })
+
+  it('answers empty for a group with no members yet', () => {
+    expect(groupMembers('g1', [subtask({ id: 'g1', isGroup: true })])).toEqual([])
   })
 })

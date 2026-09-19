@@ -22,11 +22,14 @@
 // own note on why a cache there would miss by construction. Two readers, two budgets.
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { splitImageMarkers } from '@agentistics/core'
 import { PROJECTS_DIR } from '../config'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
 import { classifyUserEntry, type UserEntry } from './chat-envelope'
+import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
+import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
 import type { ChatTurn } from './chat-turn'
 import { MAX_TAIL_BYTES, TAIL_BYTES, readTailBytes, windowLines } from './transcript-window'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
@@ -280,6 +283,62 @@ function userTurn(entry: UserEntry): ChatTurn {
       }
 }
 
+/**
+ * Is this raw entry a `turnCompanion` naming ONLY images — and if so, record its paths and say so,
+ * so the caller skips rendering it as its own turn.
+ *
+ * `turnCompanion` also marks a skill's loaded body beside the turn that invoked it (see
+ * `chat-envelope.ts`'s `META_KINDS`), which is NOT this — those keep going through the ordinary
+ * `extractUserEntry` path below and are still shown as the note they always were. Only a companion
+ * `parseImageCompanion` actually recognises is consumed here, structurally, rather than drawn as its
+ * own "an image was attached" chip beside the marker turn it already describes.
+ */
+function noteImageCompanion(
+  e: Record<string, unknown>, companions: Map<string, string[]>,
+): boolean {
+  if (e.type !== 'user' || e.isMeta !== true || e.turnCompanion !== true) return false
+  const promptId = typeof e.promptId === 'string' ? e.promptId : null
+  if (!promptId) return false
+  const content = (e.message as Record<string, unknown> | undefined)?.content
+  const paths = parseImageCompanion(content)
+  if (!paths) return false
+  companions.set(promptId, paths)
+  return true
+}
+
+/**
+ * The turn one classified entry becomes, with its identity carried where the shape allows it.
+ *
+ * A PERSON entry gets its own `[Image #N]` markers resolved through the companion the walk has
+ * already seen — see `attachment-companion.ts`; a companion match requires the turn's own
+ * `promptId` and `imagePasteIds`, so this reads nothing that was not already on the raw entry.
+ *
+ * A "the assistant viewed an image" note gets its `systemRef` the same way: the raw text is the one
+ * place the harness's own shape survives (`classifyUserEntry` already reduced it to a note), and
+ * `resolveViewedImagePath` walks the entry's OWN `parentUuid` chain to the exact `Read` call it
+ * describes — see `viewed-image.ts`. `lines`/`index` are the raw transcript and this entry's
+ * position in it, which is ALL that resolver needs; nothing else in this module reads them either.
+ */
+function markerAwareUserTurn(
+  e: Record<string, unknown>, entry: UserEntry, companions: ReadonlyMap<string, string[]>,
+  lines: readonly string[], index: number,
+): ChatTurn {
+  const turn = userTurn(entry)
+  if (entry.kind === 'person') {
+    const promptId = typeof e.promptId === 'string' ? e.promptId : null
+    const pasteIds = Array.isArray(e.imagePasteIds) ? e.imagePasteIds : null
+    if (!promptId || !pasteIds) return turn
+    const companion = companions.get(promptId)
+    if (!companion) return turn
+    const markerCount = splitImageMarkers(entry.text).markers.length
+    const resolved = resolveCompanionImages(companion, markerCount, pasteIds.length)
+    return resolved ? { ...turn, imagePaths: resolved } : turn
+  }
+  if (!VIEWED_IMAGE_RE.test(rawEntryText(e).trim())) return turn
+  const ref = resolveViewedImagePath(lines, index)
+  return ref ? { ...turn, systemRef: ref } : turn
+}
+
 function extractAssistantText(e: Record<string, unknown>): string | null {
   if (e.type !== 'assistant') return null
   const msgContent = (e.message as Record<string, unknown> | undefined)?.content
@@ -416,6 +475,12 @@ async function readTurnsFromTail(
   const taskTurns: Array<{ id: string; turn: ChatTurn }> = []
   /** Ids whose `<task-notification>` has already arrived. */
   const finishedTasks = new Set<string>()
+  /**
+   * A marker turn's OWN companion, by `promptId` — see `attachment-companion.ts`. The walk runs
+   * BACKWARDS and a companion sits AFTER its marker turn in the file (append-only JSONL), so it is
+   * always seen and recorded here before the marker turn itself is reached.
+   */
+  const companions = new Map<string, string[]>()
   // Set once, on the first substantive (non-blank, parseable) line the loop inspects — which is the
   // NEWEST event in the transcript. Only there does "no text yet" mean "busy right now"; the same
   // shape earlier in the file is just an ordinary tool call whose result and follow-up text already
@@ -447,8 +512,12 @@ async function readTurnsFromTail(
       continue
     }
 
+    // A `turnCompanion` naming only images is plumbing, not a message — it is folded into the
+    // marker turn it describes below, never drawn as its own "an image was attached" chip.
+    if (noteImageCompanion(e, companions)) continue
+
     const userEntry = extractUserEntry(e)
-    if (userEntry) { add(userTurn(userEntry)); continue }
+    if (userEntry) { add(markerAwareUserTurn(e, userEntry, companions, lines, i)); continue }
     const queued = extractQueuedEntry(e)
     if (queued) { add(userTurn(queued)); continue }
     const assistantText = extractAssistantText(e)
@@ -536,6 +605,12 @@ export async function readChatWindow(
   const taskTurns: Array<{ id: string; turn: ChatTurn }> = []
   /** Ids whose `<task-notification>` has already arrived. */
   const finishedTasks = new Set<string>()
+  /**
+   * A marker turn's OWN companion, by `promptId` — see `attachment-companion.ts`. The walk runs
+   * BACKWARDS and a companion sits AFTER its marker turn in the file (append-only JSONL), so it is
+   * always seen and recorded here before the marker turn itself is reached.
+   */
+  const companions = new Map<string, string[]>()
   let newest = true
   // Hoisted so the walk can report WHERE it stopped — see `older` at the return.
   let i = lines.length - 1
@@ -566,8 +641,12 @@ export async function readChatWindow(
       continue
     }
 
+    // A `turnCompanion` naming only images is plumbing, not a message — it is folded into the
+    // marker turn it describes below, never drawn as its own "an image was attached" chip.
+    if (noteImageCompanion(e, companions)) continue
+
     const userEntry = extractUserEntry(e)
-    if (userEntry) { add(userTurn(userEntry)); continue }
+    if (userEntry) { add(markerAwareUserTurn(e, userEntry, companions, lines, i)); continue }
     const queued = extractQueuedEntry(e)
     if (queued) { add(userTurn(queued)); continue }
 

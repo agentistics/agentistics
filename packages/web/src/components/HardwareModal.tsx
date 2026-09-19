@@ -224,8 +224,12 @@ function ServiceCard(p: { proc: ProcessMetrics | undefined; title: string; lang:
   )
 }
 
-/** The content, independent of the frame it is drawn in. */
-function HardwareBody(p: {
+/**
+ * The content, independent of the frame it is drawn in. Exported: `HardwarePanel.tsx` (the
+ * right-slot rendering, design §1/item 3) draws the SAME body inside its own chrome, so the two
+ * surfaces cannot drift into reporting different figures for one machine.
+ */
+export function HardwareBody(p: {
   lang: Lang
   hardware: HardwareSnapshot | null
   error: string | null
@@ -533,18 +537,23 @@ function HardwareBody(p: {
 }
 
 /**
- * The modal. `esc` closes it; the maximize toggle swaps the frame, not the content; focus returns
- * to the control that opened it.
+ * THE POLL, shared by the modal and `HardwarePanel.tsx` (the right-slot rendering, design §1/
+ * item 3) — one fetch loop, one 403 sentence, one `lastRefreshed` clock, so the two surfaces can
+ * never disagree about what this machine is doing right now. Every 5s, for as long as the caller
+ * keeps the hook mounted — the caller decides when that is (the modal: always, while open; the
+ * panel: only while the right slot actually shows it).
  */
-export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => void }) {
-  const isMobile = useIsMobile()
-  const [maximized, setMaximized] = useState(false)
+export function useHardwareSnapshot(lang: Lang): {
+  hardware: HardwareSnapshot | null
+  loading: boolean
+  error: string | null
+  lastRefreshed: Date | null
+  refresh: () => void
+} {
   const [hardware, setHardware] = useState<HardwareSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
-  // Whatever had the keyboard when this opened — the icon in the header, or the tile in the sheet.
-  const opener = useRef<HTMLElement | null>(typeof document === 'undefined' ? null : (document.activeElement as HTMLElement))
 
   const fetchData = useCallback(async () => {
     try {
@@ -572,6 +581,20 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
     const timer = setInterval(() => void fetchData(), 5000)
     return () => clearInterval(timer)
   }, [fetchData])
+
+  return { hardware, loading, error, lastRefreshed, refresh: () => { setLoading(true); void fetchData() } }
+}
+
+/**
+ * The modal. `esc` closes it; the maximize toggle swaps the frame, not the content; focus returns
+ * to the control that opened it.
+ */
+export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => void }) {
+  const isMobile = useIsMobile()
+  const [maximized, setMaximized] = useState(false)
+  const { hardware, loading, error, lastRefreshed, refresh } = useHardwareSnapshot(lang)
+  // Whatever had the keyboard when this opened — the icon in the header, or the tile in the sheet.
+  const opener = useRef<HTMLElement | null>(typeof document === 'undefined' ? null : (document.activeElement as HTMLElement))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -637,7 +660,7 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <button
               type="button"
-              onClick={() => { setLoading(true); void fetchData() }}
+              onClick={refresh}
               disabled={loading}
               className="ag-tap-icon"
               style={btn}

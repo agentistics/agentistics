@@ -3,9 +3,9 @@ import { projectKind, takePerKind, type ProjectKind } from '@agentistics/core'
 import { KIND_TABS, kindCount, kindEmpty, kindHint, kindLabel, kindMore } from './projectTabs'
 
 describe('the tabs', () => {
-  it('opens on All, and offers exactly three kinds beside it', () => {
+  it('opens on All, and offers exactly four kinds beside it', () => {
     expect(KIND_TABS[0]).toBe('all')
-    expect(KIND_TABS).toEqual(['all', 'repo', 'project', 'folder'])
+    expect(KIND_TABS).toEqual(['all', 'repo', 'worktree', 'project', 'folder'])
   })
 
   it('names every tab in both languages, and hints every one', () => {
@@ -78,13 +78,20 @@ describe('projectKind — the division the tabs are built on', () => {
     expect(projectKind({ source: 'cwd' })).toBe('folder')
   })
 
+  it('a linked worktree outranks even a recorded remote — THE REPORTED BUG', () => {
+    // A session started inside a git worktree records the shared repository's own remote, so a
+    // bare `remote !== ''` check alone read the worktree as the repository's own main checkout.
+    expect(projectKind({ source: 'history', remote: 'github.com/o/r', worktree: true })).toBe('worktree')
+    expect(projectKind({ source: 'repo', worktree: true })).toBe('worktree')
+  })
+
   it('the kinds are MUTUALLY EXCLUSIVE — that is what makes the division clear', () => {
     const seen = new Set<ProjectKind>()
     for (const c of [
       { source: 'history', remote: 'o/r' }, { source: 'history', remote: '' },
-      { source: 'folder', remote: '' },
+      { source: 'folder', remote: '' }, { source: 'history', remote: 'o/r', worktree: true },
     ]) seen.add(projectKind(c))
-    expect([...seen].sort()).toEqual(['folder', 'project', 'repo'])
+    expect([...seen].sort()).toEqual(['folder', 'project', 'repo', 'worktree'])
   })
 })
 
@@ -123,14 +130,14 @@ describe('kindCount / kindMore — the tabs say what is THERE, not what fits', (
    * with about twenty repositories. Twelve is `PROJECTS_PER_KIND`, the per-kind cap — so every tab
    * showed the same number, always, whatever the machine held.
    */
-  const totals = { repo: 21, project: 34, folder: 58 }
+  const totals = { repo: 21, worktree: 9, project: 34, folder: 58 }
 
   it('a tab counts what matched, not the rows it was given', () => {
     expect(kindCount('repo', 12, totals)).toBe(21)
   })
 
-  it('ALL counts every kind, not the rows on screen', () => {
-    expect(kindCount('all', 36, totals)).toBe(113)
+  it('ALL counts every kind, INCLUDING worktrees, not the rows on screen', () => {
+    expect(kindCount('all', 36, totals)).toBe(122)
   })
 
   it('with no totals from the server the tab counts its rows — and claims nothing more', () => {

@@ -44,6 +44,7 @@ import '@xterm/xterm/css/xterm.css'
 import { xtermTheme, type TerminalFrame } from '../lib/terminalStream'
 import { shortcutDecision } from '../lib/terminalShortcuts'
 import { terminalScrollTop, stillFollowing } from '../lib/terminalScroll'
+import { sanitizePasteText } from '@agentistics/core'
 
 interface Props {
   frame: TerminalFrame | null
@@ -60,6 +61,14 @@ interface Props {
   interactive?: boolean
   /** Receives each raw `onData` chunk while `interactive`. Wired to the write channel by the parent. */
   onInput?: (data: string) => void
+  /**
+   * Receives a PASTE, and ONLY a paste, as one whole string — never split, never routed through
+   * `onInput`. xterm's own `onData` cannot tell a paste from typing (both arrive as a chunk of
+   * text), so this component intercepts the DOM `paste` event itself, in the CAPTURE phase, before
+   * xterm's own `paste`/`onData` handling ever sees it (see the mount effect). Absent, or while not
+   * `interactive`, a paste falls through to `onInput` exactly as before.
+   */
+  onPaste?: (text: string) => void
   /**
    * HOW MANY CELLS THIS BOX COULD SHOW at natural size — reported whenever it changes, so the
    * parent can ask the server to resize the PANE to match.
@@ -124,7 +133,7 @@ function naturalSize(term: Terminal): { w: number; h: number } | null {
   return null
 }
 
-export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onGeometry }: Props) {
+export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onPaste, onGeometry }: Props) {
   // boxRef is the fixed viewport the parent sizes; scaleRef takes the SCALED footprint so the page
   // lays out correctly; hostRef holds the emulator at its natural cols×rows pixels and is the thing
   // the transform shrinks.
@@ -148,6 +157,9 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
   // latest one without re-subscribing (and never captures a stale closure).
   const onInputRef = useRef<Props['onInput']>(onInput)
   onInputRef.current = onInput
+  // Same reason: the DOM `paste` listener below is attached once, for the emulator's life.
+  const onPasteRef = useRef<Props['onPaste']>(onPaste)
+  onPasteRef.current = onPaste
   // Read through a ref for the same reason `onInput` is: the key handler is attached ONCE for the
   // emulator's life, so a value captured in its closure would be the one from the first render —
   // a terminal that went interactive later would keep leaving every shortcut to the browser.
@@ -163,6 +175,21 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
   /** The LIVE SCREEN's row count from the last frame — the grid holds history above it. `fit` needs
    *  it to leave the box exactly enough slack to scroll the screen's first row up to the top. */
   const screenRowsRef = useRef(0)
+  /**
+   * True exactly while `paint` has BAILED on an active selection with a frame still waiting.
+   *
+   * `term.reset()` (inside `paint` itself) unconditionally fires xterm's OWN `onSelectionChange` as
+   * a side effect of clearing the selection service — regardless of whether anything was selected.
+   * The first version of the selection-hold fix called `paint()` from that listener whenever
+   * `!term.hasSelection()`, which is true on EVERY ordinary frame: `paint` → `reset()` → fires
+   * `onSelectionChange` → `paint()` again → `reset()` → … — an infinite synchronous recursion that
+   * crashed the tab on the very first frame of any interactive terminal, selection or not (measured:
+   * `RangeError: Maximum call stack size exceeded` in `SelectionService.clearSelection`). This flag
+   * is what tells the listener apart: it is set ONLY when `paint` bailed for a real reason, and
+   * cleared before the catch-up repaint runs, so that repaint's own `reset()` finds it `false` and
+   * the loop never restarts.
+   */
+  const heldForSelectionRef = useRef(false)
 
   /**
    * Fit the natural cols×rows grid into the box by scaling the PIXELS — never by resizing the
@@ -237,6 +264,15 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
     const box = boxRef.current
     const { frame: f, showCursor: cur } = pendingRef.current
     if (!term || disposedRef.current || !readyRef.current || !f) return
+
+    // NEVER paint over an active selection. `term.reset()` below clears xterm's own selection
+    // service unconditionally, so a frame arriving mid-copy silently cancelled the very thing the
+    // user was trying to copy — reported as "não consigo copiar nada do terminal". The frame stays
+    // in `pendingRef` (already the latest one) and this repaints itself the moment the selection
+    // clears, via the `onSelectionChange` listener registered in the mount effect below. The flag
+    // (not a bare `hasSelection()` check there) is what stops that listener recursing into this
+    // same `reset()` — see `heldForSelectionRef`'s own comment.
+    if (term.hasSelection()) { heldForSelectionRef.current = true; return }
 
     // SCROLL model. A capture carries up to `TERMINAL_VIEW_LINES` (200) lines of scrollback+screen,
     // routinely MORE than one pane-height. The emulator is therefore sized to hold EVERY shipped
@@ -318,6 +354,9 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
     let ro: ResizeObserver | null = null
     let disposeRender: { dispose: () => void } | null = null
     let disposeData: { dispose: () => void } | null = null
+    let disposeSelection: { dispose: () => void } | null = null
+    let pasteTarget: HTMLDivElement | null = null
+    let onPasteEvent: ((e: ClipboardEvent) => void) | null = null
     const stopFallback = () => { if (fallback) { clearInterval(fallback); fallback = null } }
 
     // Gate the first paint on the renderer having actually MEASURED its cells — not merely on a
@@ -362,6 +401,19 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
       })
       termRef.current = term
       disposeRender = term.onRender(onRender)
+      // A frame held back by `paint`'s `hasSelection` guard while the user was selecting repaints
+      // itself the moment the selection is gone — otherwise it would wait for the NEXT frame from
+      // the read channel, which on a quiet screen can be a long time (or never, if nothing changes).
+      // Gated on `heldForSelectionRef`, not a bare `hasSelection()` check: `reset()` inside `paint`
+      // itself fires this SAME event on every ordinary frame (selection or not), and calling
+      // `paint()` unconditionally here recursed into that `reset()` forever — see the ref's comment.
+      disposeSelection = term.onSelectionChange(() => {
+        if (disposedRef.current || !readyRef.current) return
+        if (heldForSelectionRef.current && !term.hasSelection()) {
+          heldForSelectionRef.current = false
+          paint()
+        }
+      })
       /**
        * THE SHORTCUTS THE TERMINAL OWNS, and only while it owns the keyboard.
        *
@@ -375,12 +427,17 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
        * whenever a terminal was on screen would be a browser the person cannot close.
        *
        * Returning `true` lets xterm handle the key as usual; the `preventDefault` beside it is what
-       * stops the browser doing its own thing with the same press.
+       * stops the browser doing its own thing with the same press. `copy` returns `false` instead —
+       * a copy-with-selection must stop xterm's OWN key handling too (which would otherwise still
+       * turn Ctrl+C into `\x03` regardless of `preventDefault`), so the browser's native copy is the
+       * only thing that runs.
        */
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== 'keydown') return true
         if (!interactiveRef.current) return true
-        if (shortcutDecision(e) === 'take') e.preventDefault()
+        const decision = shortcutDecision(e, term.hasSelection())
+        if (decision === 'copy') return false
+        if (decision === 'take') e.preventDefault()
         return true
       })
 
@@ -389,6 +446,42 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
       disposeData = term.onData((d: string) => onInputRef.current?.(d))
       term.open(host)
       fallback = setInterval(markReady, 60)
+
+      /**
+       * PASTE, intercepted before xterm ever sees it.
+       *
+       * xterm's own `onData` cannot tell a paste from typing — both arrive as a chunk of text — so
+       * `splitInput` (the typed-keystroke allowlist) refused a multi-line one outright rather than
+       * decomposing it into a turn per line, which is worse. A paste needs to travel as ONE atomic
+       * payload the server hands to a dedicated primitive (bracketed `tmux paste-buffer`), and the
+       * only reliable way to know "this specific chunk is a paste" is the DOM `paste` event itself.
+       *
+       * Registered on `boxRef` in the CAPTURE phase — an ANCESTOR of xterm's own textarea, so this
+       * fires before the event reaches it — and `stopPropagation` there keeps it from ever reaching
+       * xterm's own `paste` listeners (registered on the textarea/element, bubble phase), which would
+       * otherwise ALSO fire and hand the same text to `onData` a second time. Only intercepted while
+       * `interactive` and a handler is actually wired; otherwise it falls through to xterm's default
+       * (unchanged for any caller that has not opted in).
+       *
+       * `sanitizePasteText` runs here too, NOT because the client is trusted — the server
+       * (`input-protocol.ts`) re-applies the exact same function and is the actual authority — but
+       * because a clipboard payload carrying a planted bracketed-paste end marker
+       * (`\x1b[201~touch …\r`) is a real command-injection payload, and refusing it before it ever
+       * leaves the browser is strictly better than refusing it a round trip later. Same shared
+       * `@agentistics/core` function on both sides, so the two can never disagree about what
+       * "sanitized" means.
+       */
+      onPasteEvent = (e: ClipboardEvent) => {
+        if (!interactiveRef.current || !onPasteRef.current) return
+        const raw = e.clipboardData?.getData('text/plain')
+        e.preventDefault()
+        e.stopPropagation()
+        if (!raw) return
+        const text = sanitizePasteText(raw)
+        if (text) onPasteRef.current(text)
+      }
+      pasteTarget = boxRef.current
+      pasteTarget?.addEventListener('paste', onPasteEvent, true)
 
       // Re-fit whenever the BOX changes width (accordion open, window resize) OR the emulator's own
       // natural size changes (a resize to a new column count). `hostRef` wraps the emulator and is
@@ -408,8 +501,11 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
       ro?.disconnect()
       disposeRender?.dispose()
       disposeData?.dispose()
+      disposeSelection?.dispose()
+      if (pasteTarget && onPasteEvent) pasteTarget.removeEventListener('paste', onPasteEvent, true)
       readyRef.current = false
       geomRef.current = { cols: 0, rows: 0 }
+      heldForSelectionRef.current = false
       if (termRef.current) { termRef.current.dispose(); termRef.current = null }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -62,6 +62,12 @@ export const CHAT_NOTES: Record<string, ChatNote> = {
     'Uma imagem foi enviada para a conversa.',
     'gallery',
   ),
+  'the assistant viewed an image': n(
+    'o assistente abriu uma imagem',
+    'The assistant opened an image to look at it — nobody sent it.',
+    'O assistente abriu uma imagem para olhar — ninguém a enviou.',
+    'gallery',
+  ),
 
   // ---- Explain only. Each is the harness talking to itself; none has a place to go. ----
   'system reminder': n(

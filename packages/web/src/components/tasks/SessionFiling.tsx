@@ -22,18 +22,37 @@
 
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, Check, CornerDownRight, ExternalLink, Plus, Search, Unlink, X } from 'lucide-react'
+import { ArrowLeft, Check, CornerDownRight, ExternalLink, Plus, Search, Unlink, Users, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import { useDismissOverlay } from '../../lib/dismissOverlay'
 import {
   addSubtask, attachSession, createTask, detachSession, useTaskDetail, useTaskList,
-  type Subtask, type TaskListRow,
+  type AttachRefusalReason, type Subtask, type TaskListRow,
 } from '../../lib/tasks'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
+import { classifyForFiling, type FilingRow } from './subtaskFiling'
 import { STATUS, button, field, microLabel, pill, surface, type BoardStatus } from './board'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { BetaTag } from '../BetaTag'
+
+/**
+ * The sentence for a refusal `fileInto` does not open a dedicated dialog for. `blocked` is handled
+ * separately (`BlockedSubtaskResolve`) and never reaches this. `subtask_in_group` names the actual
+ * rule (§F.1); everything else this endpoint could still answer (a stale reference, a dropped
+ * request) gets an honest "nothing changed" rather than pretending to explain a cause the client
+ * cannot actually distinguish.
+ */
+function attachRefusalMessage(reason: AttachRefusalReason, pt: boolean): string {
+  if (reason === 'subtask_in_group') {
+    return pt
+      ? 'Esta subtarefa pertence a um grupo e não pode receber uma sessão diretamente — filie no grupo em vez dela.'
+      : 'This subtask belongs to a group and cannot hold a session directly — file it on the group instead.'
+  }
+  return pt
+    ? 'Não foi possível filiar a sessão aqui. Nada mudou — tente de novo.'
+    : 'Could not file the session here. Nothing changed — try again.'
+}
 
 export interface SessionFilingProps {
   session: { id: string; title: string; harness?: string; task?: string }
@@ -74,6 +93,14 @@ export function SessionFiling(p: SessionFilingProps) {
   const [adding, setAdding] = useState(false)
   /** Set when the server refuses an attach because the subtask is still blocked. */
   const [blocked, setBlocked] = useState<{ taskId: string; subtaskId: string; blockedBy: string[] } | null>(null)
+  /**
+   * Any OTHER refusal — `blocked` opens its own dialog above; every other reason (most notably
+   * `subtask_in_group`, §F.1: the target is a group MEMBER, which can never hold a session) used to
+   * fall through here with nothing shown, so the dialog looked as if the file had succeeded while
+   * the session stayed exactly where it was. Same lightweight pattern `BlockedSubtaskResolve` uses
+   * for its own non-blocked refusal, rather than a second modal component for one sentence.
+   */
+  const [fileError, setFileError] = useState<string | null>(null)
 
   const refresh = async () => { await reload(); await reloadDetail(); await p.onChanged() }
 
@@ -92,13 +119,21 @@ export function SessionFiling(p: SessionFilingProps) {
   /** `subtaskId` omitted files the session directly on the delivery — see spec §4.1/§4.4. */
   const fileInto = async (taskId: string, subtaskId?: string) => {
     setBusy(true)
+    setFileError(null)
     const result = await attachSession(taskId, p.session.id, subtaskId)
     setBusy(false)
-    if (!result.ok && result.reason === 'blocked' && subtaskId) {
-      // The dialog it opens is HANDED the answer, never asked to guess it — the ids `planAttach`
-      // named are exactly what it needs. A direct-on-the-delivery file can never come back
-      // `blocked` — only a subtask carries `blockedBy` — so this branch only ever fires with one.
-      setBlocked({ taskId, subtaskId, blockedBy: result.blockedBy ?? [] })
+    if (!result.ok) {
+      if (result.reason === 'blocked' && subtaskId) {
+        // The dialog it opens is HANDED the answer, never asked to guess it — the ids `planAttach`
+        // named are exactly what it needs. A direct-on-the-delivery file can never come back
+        // `blocked` — only a subtask carries `blockedBy` — so this branch only ever fires with one.
+        setBlocked({ taskId, subtaskId, blockedBy: result.blockedBy ?? [] })
+        return
+      }
+      // Every OTHER refusal (most notably `subtask_in_group`, §F.1) used to fall through here
+      // silently — the dialog just sat there as if nothing had been asked, with the session left
+      // exactly where it was and no reason on screen for why the radio never moved.
+      setFileError(attachRefusalMessage(result.reason, pt))
       return
     }
     setMoving(false)
@@ -164,8 +199,13 @@ export function SessionFiling(p: SessionFilingProps) {
     </div>
   )
 
-  /** One row of the subtask list — a radio, because exactly one of them is true. */
-  const subtaskRow = (st: Subtask) => {
+  /**
+   * One PICKABLE row of the subtask list — a radio, because exactly one of them is true. Covers
+   * both a loose subtask and a GROUP (§F.1: a group is a normal filing target, just like a loose
+   * subtask), which is why it takes a `group` flag rather than being two near-identical copies —
+   * the only difference is the small marker that tells the two apart.
+   */
+  const subtaskRow = (st: Subtask, opts?: { group?: boolean }) => {
     const on = here === st.id
     return (
       <button
@@ -188,15 +228,68 @@ export function SessionFiling(p: SessionFilingProps) {
           border: `1px solid ${on ? 'var(--anthropic-orange)' : 'var(--border)'}`,
           background: on ? 'radial-gradient(circle, var(--anthropic-orange) 0 3px, transparent 4px)' : 'transparent',
         }} />
-        <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />
+        {opts?.group
+          ? <Users size={11} style={{ opacity: 0.7, flexShrink: 0 }} />
+          : <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />}
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {st.title}
         </span>
-        <span style={{ marginLeft: 'auto', ...microLabel, fontSize: 9.5 }}>
+        {opts?.group && (
+          <span style={{ ...pill('var(--text-tertiary)'), fontSize: 9, padding: '1px 6px', flexShrink: 0 }}>
+            {pt ? 'grupo' : 'group'}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', ...microLabel, fontSize: 9.5, flexShrink: 0 }}>
           {statusLabel(st.status, p.lang)}
         </span>
       </button>
     )
+  }
+
+  /**
+   * A group MEMBER (§F.1) — never pickable, the server refuses it outright (`subtask_in_group`).
+   * Drawn inert (dimmed, no radio, `disabled`) rather than omitted: the reader still sees this piece
+   * of work exists and where it sits, but nothing here invites a click that would only round-trip to
+   * a refusal. The explanation is ON the row (not only in a hover `title`, which a phone never
+   * shows) — naming the group is what makes "why can't I pick this" answer itself.
+   */
+  const memberRow = (st: Subtask, groupTitle: string | undefined) => (
+    <div
+      key={st.id}
+      aria-disabled="true"
+      title={pt
+        ? `Faz parte do grupo${groupTitle ? ` "${groupTitle}"` : ''} — sessões vão no grupo, não aqui.`
+        : `Part of the group${groupTitle ? ` "${groupTitle}"` : ''} — sessions go to the group, not here.`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
+        borderRadius: 7, fontSize: 12.5, border: '1px solid transparent',
+        color: 'var(--text-tertiary)', opacity: 0.6, cursor: 'not-allowed',
+      }}
+    >
+      <span style={{ width: 12, flexShrink: 0 }} />
+      <CornerDownRight size={11} style={{ opacity: 0.5, flexShrink: 0 }} />
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {st.title}
+      </span>
+      <span style={{
+        marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0,
+        ...pill('var(--text-tertiary)'), fontSize: 9, padding: '1px 6px', maxWidth: 130,
+      }}>
+        <Users size={9} style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {groupTitle ?? (pt ? 'grupo' : 'group')}
+        </span>
+      </span>
+    </div>
+  )
+
+  /** Render one classified row (`subtaskFiling.ts`) — a loose subtask and a group share the
+   *  pickable row; a group member gets its own inert one. */
+  const filingRow = (row: FilingRow) => {
+    if (row.kind === 'group') return subtaskRow(row.subtask, { group: true })
+    if (row.kind === 'member') return memberRow(row.subtask, row.groupTitle)
+    return subtaskRow(row.subtask)
   }
 
   /**
@@ -255,9 +348,15 @@ export function SessionFiling(p: SessionFilingProps) {
             : 'Where the session sits — directly on the delivery, or under ONE subtask'}
         </span>
 
+        {fileError && (
+          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--accent-red)', lineHeight: 1.5 }}>
+            {fileError}
+          </p>
+        )}
+
         <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
           {directRow()}
-          {(detail?.subtasks ?? []).map(subtaskRow)}
+          {classifyForFiling(detail?.subtasks ?? []).map(filingRow)}
         </div>
 
         {(detail?.subtasks.length ?? 0) === 0 && !adding && (

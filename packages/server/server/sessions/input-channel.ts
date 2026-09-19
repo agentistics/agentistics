@@ -23,6 +23,8 @@ export interface InputChannelDeps {
   sendText(text: string): Promise<boolean>
   /** Press one NAMED key (`C-c`, `Enter`) — `sendKeysNamedArgs`, pre-bound to the id. */
   sendKey(key: string): Promise<boolean>
+  /** Deliver a whole clipboard PASTE atomically — bracketed `paste-buffer`, pre-bound to the id. */
+  sendPaste(text: string): Promise<boolean>
   /** Deliver one ack back to the client. */
   emit(ack: InputAck): void
 }
@@ -46,7 +48,9 @@ export function createInputChannel(deps: InputChannelDeps): InputChannel {
     const m = parsed.msg
     let ok = false
     try {
-      ok = m.kind === 'text' ? await deps.sendText(m.text) : await deps.sendKey(m.key)
+      ok = m.kind === 'text' ? await deps.sendText(m.text)
+        : m.kind === 'key' ? await deps.sendKey(m.key)
+        : await deps.sendPaste(m.text)
     } catch {
       // A backend that threw is not a reason to report success and not a reason to tear the socket
       // down: the keystroke did not land, so the client is told so and the next one is still handled.

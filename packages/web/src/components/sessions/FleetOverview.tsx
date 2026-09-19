@@ -14,13 +14,14 @@
 import { useMemo } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Activity, Bell, FolderGit2, Power } from 'lucide-react'
-import type { Baseline } from '@agentistics/core'
+import type { Baseline, SessionPreset } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { formatUptime, summarizeFleet } from '../../lib/fleetSummary'
 import { ActivityHeatmap } from '../ActivityHeatmap'
 import { formatDay, linePoints, trendChart, trendTicks, type TrendSeries } from '../../lib/trendLines'
 import { ProfilePanel } from './ProfilePanel'
+import { PresetShelf } from './PresetShelf'
 
 export interface HeatmapDay { date: string; value: number; sessions: number; tools: number }
 
@@ -65,10 +66,21 @@ export interface FleetOverviewProps {
    * cards above already say what the fleet is doing when there is one to summarize.
    */
   baseline?: Baseline
+  /**
+   * The saved "quick launch" session templates — see `@agentistics/core`'s `sessionPresets.ts`.
+   * Rendered as their own band (`PresetShelf`) above whatever this screen otherwise shows, since a
+   * preset is useful precisely on the screen with nothing selected — the same reasoning that put it
+   * on `FleetOverview` rather than a page of its own (board note, s-d85c7d9d9d). Absent or empty
+   * renders nothing; both props travel together, so a caller can never offer presets with no way
+   * to act on a click.
+   */
+  sessionPresets?: readonly SessionPreset[]
+  onSelectPreset?: (preset: SessionPreset) => void
 }
 
 export function FleetOverview({
   lang, rows, loading, unsupported, unavailable, heatmap, heatmapByHarness, baseline,
+  sessionPresets, onSelectPreset,
 }: FleetOverviewProps) {
   // Where the session list IS depends on the layout — see the paragraph below.
   const isMobile = useIsMobile()
@@ -77,26 +89,39 @@ export function FleetOverview({
   const pt = lang === 'pt'
   const s = useMemo(() => summarizeFleet(rows, Date.now()), [rows])
 
+  // NEVER on a central (`unsupported`) — it hosts no sessions of its own, so a preset here would
+  // have nowhere to launch. Otherwise shown regardless of whether the fleet below is loading, empty
+  // or full: the shelf is a saved PREFERENCE, not a fact about what the poll returned.
+  const shelf = !unsupported && sessionPresets && sessionPresets.length > 0 && onSelectPreset
+    ? <PresetShelf lang={lang} presets={sessionPresets} onSelect={onSelectPreset} />
+    : null
+
   if (loading || unsupported || unavailable || rows.length === 0) {
     // A GENUINELY empty fleet — not loading, not refused, not a failed poll masquerading as
     // "nothing running". The profile is a statement about this machine's own history and has
     // nothing to do with why the live list is blank right now, so it renders only in this one case.
     const genuinelyEmpty = !loading && !unsupported && !unavailable
     return (
-      <Notice text={loading
-        ? (pt ? 'Lendo as sessões desta máquina…' : 'Reading this machine’s sessions…')
-        : unsupported
-          ? (pt
-              ? 'Esta instalação não pode ler sessões. Um central agrega várias máquinas e não hospeda as sessões de nenhuma delas, e um perfil de exposição sem poder sobre o host também recusa essa leitura — então não há frota para resumir aqui, o que é diferente de uma frota vazia.'
-              : 'This install cannot read sessions. A central aggregates many machines and hosts none of their sessions, and an exposure profile with no host power refuses the read too — so there is no fleet to summarize here, which is not the same as an empty one.')
-          : unavailable
-            ? unavailable
-            : (pt
-                ? 'Nenhuma sessão nesta máquina ainda. Inicie uma pelo agentop e ela aparece aqui.'
-                : 'No sessions on this machine yet. Start one with agentop and it shows up here.')}
-      >
-        {genuinelyEmpty && <ProfilePanel baseline={baseline} pt={pt} />}
-      </Notice>
+      <div style={{
+        padding: isMobile ? '16px 14px 0' : `28px ${PAGE_INSET}px 0`,
+        maxWidth: PAGE_MAX_WIDTH, margin: '0 auto', width: '100%', boxSizing: 'border-box',
+      }}>
+        {shelf}
+        <Notice text={loading
+          ? (pt ? 'Lendo as sessões desta máquina…' : 'Reading this machine’s sessions…')
+          : unsupported
+            ? (pt
+                ? 'Esta instalação não pode ler sessões. Um central agrega várias máquinas e não hospeda as sessões de nenhuma delas, e um perfil de exposição sem poder sobre o host também recusa essa leitura — então não há frota para resumir aqui, o que é diferente de uma frota vazia.'
+                : 'This install cannot read sessions. A central aggregates many machines and hosts none of their sessions, and an exposure profile with no host power refuses the read too — so there is no fleet to summarize here, which is not the same as an empty one.')
+            : unavailable
+              ? unavailable
+              : (pt
+                  ? 'Nenhuma sessão nesta máquina ainda. Inicie uma pelo agentop e ela aparece aqui.'
+                  : 'No sessions on this machine yet. Start one with agentop and it shows up here.')}
+        >
+          {genuinelyEmpty && <ProfilePanel baseline={baseline} pt={pt} />}
+        </Notice>
+      </div>
     )
   }
 
@@ -120,6 +145,7 @@ export function FleetOverview({
       width: '100%',
       boxSizing: 'border-box',
     }}>
+      {shelf}
       <h1 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>
         {pt ? 'Suas sessões' : 'Your sessions'}
       </h1>

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { filedUnder, planAttach, reconcileAttachment, sanitizeSubtaskBlockedBy } from './task-attach'
+import {
+  checkParentGroup, filedUnder, planAttach, reconcileAttachment, sanitizeSubtaskBlockedBy,
+} from './task-attach'
 
 const SUBS = [
   { id: 's1', taskId: 't1', done: false },
@@ -97,6 +99,40 @@ describe('planAttach', () => {
     expect(planAttach({ target: { kind: 'subtask', id: 's3' }, taskIds: TASKS, subtasks: scoped }))
       .toEqual({ ok: true, taskId: 't1', subtaskId: 's3' })
   })
+
+  describe('a GROUP MEMBER can never hold a session (§F.1)', () => {
+    it('refuses filing directly on a member, with a NAMED reason — never a silent no-op', () => {
+      const withGroup = [
+        ...SUBS,
+        { id: 'g1', taskId: 't1', done: false },
+        { id: 'm1', taskId: 't1', done: false, parentGroupId: 'g1' },
+      ]
+      expect(planAttach({ target: { kind: 'subtask', id: 'm1' }, taskIds: TASKS, subtasks: withGroup }))
+        .toEqual({ ok: false, reason: 'subtask_in_group' })
+    })
+
+    it('the GROUP itself is filed on exactly like any other subtask', () => {
+      const withGroup = [
+        ...SUBS,
+        { id: 'g1', taskId: 't1', done: false },
+        { id: 'm1', taskId: 't1', done: false, parentGroupId: 'g1' },
+      ]
+      expect(planAttach({ target: { kind: 'subtask', id: 'g1' }, taskIds: TASKS, subtasks: withGroup }))
+        .toEqual({ ok: true, taskId: 't1', subtaskId: 'g1' })
+    })
+
+    it('a member refuses BEFORE its own blockedBy is even considered', () => {
+      // Whether a member's own blockers are done is moot when it can never receive a session
+      // either way — `subtask_in_group` must win regardless of what `blockedBy` says.
+      const withGroup = [
+        ...SUBS,
+        { id: 'g1', taskId: 't1', done: false },
+        { id: 'm1', taskId: 't1', done: false, parentGroupId: 'g1', blockedBy: [] },
+      ]
+      expect(planAttach({ target: { kind: 'subtask', id: 'm1' }, taskIds: TASKS, subtasks: withGroup }))
+        .toEqual({ ok: false, reason: 'subtask_in_group' })
+    })
+  })
 })
 
 describe('sanitizeSubtaskBlockedBy', () => {
@@ -130,6 +166,93 @@ describe('sanitizeSubtaskBlockedBy', () => {
   it('dedupes', () => {
     expect(sanitizeSubtaskBlockedBy({ subtaskId: 's3', taskId: 't1', ids: ['s1', 's1', 's2'], siblings: SIBLINGS }))
       .toEqual(['s1', 's2'])
+  })
+})
+
+describe('checkParentGroup — where a MEMBER may point its parentGroupId (§F.1)', () => {
+  const SIBLINGS_WITH_GROUP = [
+    { id: 'g1', taskId: 't1', isGroup: true },
+    { id: 'g2', taskId: 't2', isGroup: true }, // a group of a DIFFERENT task
+    { id: 's1', taskId: 't1' }, // a loose subtask — not a group
+    { id: 'm1', taskId: 't1' },
+  ]
+
+  it('accepts a group of the SAME task', () => {
+    expect(checkParentGroup({
+      subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'g1',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: true })
+  })
+
+  it('refuses a reference to a subtask that does not exist', () => {
+    expect(checkParentGroup({
+      subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'gone',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+  })
+
+  it('refuses a reference to a subtask that is not actually a group', () => {
+    expect(checkParentGroup({
+      subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 's1',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+  })
+
+  it('refuses a group that belongs to a DIFFERENT parent task — a group cannot span two tasks', () => {
+    expect(checkParentGroup({
+      subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'g2',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+  })
+
+  it('refuses a self-reference', () => {
+    expect(checkParentGroup({
+      subtaskId: 'g1', taskId: 't1', isGroup: false, parentGroupId: 'g1',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+  })
+
+  it('refuses when the subtask BEING PATCHED is itself a group — a group can never be a member', () => {
+    expect(checkParentGroup({
+      subtaskId: 'g1', taskId: 't1', isGroup: true, parentGroupId: 'g1',
+      siblings: SIBLINGS_WITH_GROUP,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+    // Even naming a DIFFERENT, otherwise-valid group — a group is never a member of anything.
+    const twoGroups = [...SIBLINGS_WITH_GROUP, { id: 'g3', taskId: 't1', isGroup: true }]
+    expect(checkParentGroup({
+      subtaskId: 'g3', taskId: 't1', isGroup: true, parentGroupId: 'g1',
+      siblings: twoGroups,
+    })).toEqual({ ok: false, reason: 'invalid_group' })
+  })
+
+  describe('`hasSession` — joining a group must not orphan a session already filed on the subtask', () => {
+    it('accepts an otherwise-valid join when `hasSession` is false (or omitted)', () => {
+      expect(checkParentGroup({
+        subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'g1',
+        siblings: SIBLINGS_WITH_GROUP, hasSession: false,
+      })).toEqual({ ok: true })
+      // Omitted entirely — defaults to false, so every pre-existing call site above is unaffected.
+      expect(checkParentGroup({
+        subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'g1',
+        siblings: SIBLINGS_WITH_GROUP,
+      })).toEqual({ ok: true })
+    })
+
+    it('refuses an otherwise-valid join with `subtask_has_sessions` when `hasSession` is true', () => {
+      expect(checkParentGroup({
+        subtaskId: 'm1', taskId: 't1', isGroup: false, parentGroupId: 'g1',
+        siblings: SIBLINGS_WITH_GROUP, hasSession: true,
+      })).toEqual({ ok: false, reason: 'subtask_has_sessions' })
+    })
+
+    it('a subtask that is itself a group is still `invalid_group` even with a session, never subtask_has_sessions', () => {
+      // `isGroup` is checked first: whether it happens to carry a session is moot when it could
+      // never be a member to begin with, and the caller should learn the more fundamental reason.
+      expect(checkParentGroup({
+        subtaskId: 'g1', taskId: 't1', isGroup: true, parentGroupId: 'g1',
+        siblings: SIBLINGS_WITH_GROUP, hasSession: true,
+      })).toEqual({ ok: false, reason: 'invalid_group' })
+    })
   })
 })
 

@@ -22,6 +22,18 @@
  * The caller applies this ONLY while the emulator is focused and the write channel is open. A
  * page-level handler that swallowed `ctrl+w` whenever a terminal existed somewhere on screen would
  * be a browser the person cannot close.
+ *
+ * COPY is the one exception to "take only what the channel can deliver": `Ctrl+C` is in
+ * `CTRL_SHORTCUTS` (it sends the interrupt), but with a SELECTION on screen the same keystroke must
+ * copy instead — sending an interrupt while someone is mid-copy both loses the selection (xterm's
+ * `reset()` clears it on the next frame) and answers a copy attempt with SIGINT. `hasSelection` is
+ * read from the emulator by the caller and decides between the two; the same combo without a
+ * selection still interrupts exactly as before. Cmd+C and Ctrl+Shift+C never reached `CLAIMED` in
+ * the first place, but the copy decision covers them too because the CALLER must return `false` from
+ * `attachCustomKeyEventHandler` for a real copy — merely not calling `preventDefault` (what `leave`
+ * means everywhere else) is not enough: xterm's OWN key handling still runs unless the handler
+ * returns exactly `false`, and it would otherwise still emit `\x03` regardless of what the browser
+ * does with the keystroke.
  */
 
 /**
@@ -45,12 +57,19 @@ export interface ShortcutEvent {
 }
 
 /**
- * `take` = the terminal handles it and the browser must not; `leave` = the browser keeps it.
+ * `take` = the terminal handles it and the browser must not; `leave` = the browser keeps it;
+ * `copy` = a copy-with-selection — the caller must return `false` from
+ * `attachCustomKeyEventHandler` (not merely skip `preventDefault`) so xterm sends nothing and the
+ * browser's native copy fires on the selection.
  *
- * `shiftKey` is refused before the letter is even looked at, which is also why case cannot decide
- * anything: a capital arrives WITH shift, and shift already refuses.
+ * `shiftKey` is refused before the letter is even looked at for `take`/`leave`, which is also why
+ * case cannot decide anything there: a capital arrives WITH shift, and shift already refuses. The
+ * `copy` check runs first and does not exclude `shiftKey` — Ctrl+Shift+C must copy too.
  */
-export function shortcutDecision(e: ShortcutEvent): 'take' | 'leave' {
+export function shortcutDecision(e: ShortcutEvent, hasSelection = false): 'take' | 'leave' | 'copy' {
+  if (
+    hasSelection && !e.altKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c'
+  ) return 'copy'
   if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return 'leave'
   return CLAIMED.has(e.key.toLowerCase()) ? 'take' : 'leave'
 }

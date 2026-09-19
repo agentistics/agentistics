@@ -23,6 +23,7 @@ export function kindLabel(tab: ProjectTab, pt: boolean): string {
     case 'all': return pt ? 'Tudo' : 'All'
     // "Repositório" rather than "Git": the word names the thing, not the tool that makes it one.
     case 'repo': return pt ? 'Repositórios' : 'Repositories'
+    case 'worktree': return pt ? 'Worktrees' : 'Worktrees'
     case 'project': return pt ? 'Projetos' : 'Projects'
     case 'folder': return pt ? 'Pastas' : 'Folders'
   }
@@ -37,8 +38,12 @@ export function kindHint(tab: ProjectTab, pt: boolean): string {
         : 'Everything startable here, from the best known to the least.'
     case 'repo':
       return pt
-        ? 'Diretórios que são repositórios git — com remote registrado ou com um .git encontrado.'
-        : 'Directories that are git repositories — a recorded remote, or a .git that was found.'
+        ? 'Repositórios: o checkout principal — com remote registrado ou com um .git encontrado.'
+        : 'Repositories: the main checkout — a recorded remote, or a .git directory that was found.'
+    case 'worktree':
+      return pt
+        ? 'Worktrees vinculados a um repositório — um segundo lugar de trabalho, não um segundo repositório.'
+        : 'Worktrees linked to a repository — a second place to work, not a second repository.'
     case 'project':
       return pt
         ? 'Sem git, mas com sessões já rodadas ali: lugares onde você trabalha.'
@@ -96,7 +101,7 @@ export function kindCount(
   tab: ProjectTab, rows: number, totals: Record<ProjectKind, number> | undefined,
 ): number {
   if (!totals) return rows
-  if (tab === 'all') return totals.repo + totals.project + totals.folder
+  if (tab === 'all') return totals.repo + totals.worktree + totals.project + totals.folder
   return totals[tab]
 }
 

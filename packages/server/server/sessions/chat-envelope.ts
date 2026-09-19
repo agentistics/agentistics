@@ -69,6 +69,9 @@
 // The PURE half of the skills table — never the reader, which would drag `config.ts` and its
 // import-time environment reads into this parser. See `skill-source.ts`'s header.
 import { HARNESS_SKILLS, skillNameFromDir } from './skill-source'
+// Shared with `chat-tail.ts`, which pairs this SAME shape with the `Read` call it describes — one
+// regex, so the classification here and the pairing there can never disagree about what counts.
+import { VIEWED_IMAGE_RE } from './viewed-image'
 
 
 /** What a `user` entry turns out to be. */
@@ -187,6 +190,17 @@ const META_KINDS: Array<{ test: RegExp; note: string; ref?: (text: string) => st
   { test: /^Another Claude session sent a message:/, note: 'a message from another session' },
   // agentop's own peer message, from the event channel — the same family, and measured beside it.
   { test: /^The coordinator sent a message/, note: 'a message from another session' },
+  /*
+   * TWO SHAPES SHARE THE SAME `[Image:` PREFIX, and they are not the same fact. `source:` is a
+   * person's ATTACHMENT — see `attachment-companion.ts` — and is consumed structurally before a
+   * turn ever reaches this table (folded into the marker turn it describes, in `chat-tail.ts`), so
+   * what reaches here is either a companion that could not be read that way, or the OTHER shape:
+   * `original WxH, displayed at …`, written when the ASSISTANT opens an image with `Read` and it
+   * gets resized for display — nobody attached anything. Checked FIRST, because both would
+   * otherwise match the generic row below it; measured across every real transcript this table's
+   * header already surveys, these are the only two `[Image:` prefixes that exist.
+   */
+  { test: VIEWED_IMAGE_RE, note: 'the assistant viewed an image' },
   { test: /^\[Image:/, note: 'an image was attached' },
   { test: /^Continue from where you left off\./, note: 'the session was resumed' },
   { test: /^\[Cross-session idle notice\]/, note: 'an idle notice about another session' },

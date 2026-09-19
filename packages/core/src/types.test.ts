@@ -127,6 +127,7 @@ describe('getModelPrice', () => {
       output: 15,
       cacheRead: 0.30,
       cacheWrite: 3.75,
+      cacheWrite1h: 6,
     })
   })
 
@@ -136,6 +137,7 @@ describe('getModelPrice', () => {
       output: 25,
       cacheRead: 0.50,
       cacheWrite: 6.25,
+      cacheWrite1h: 10,
     })
   })
 
@@ -151,6 +153,7 @@ describe('getModelPrice', () => {
       output: 15,
       cacheRead: 0.3,
       cacheWrite: 3.75,
+      cacheWrite1h: 6,
     })
   })
 
@@ -208,6 +211,73 @@ describe('calcCost', () => {
     const base = calcCost(usage({ inputTokens: 500_000 }), 'claude-opus-4-6')
     const double = calcCost(usage({ inputTokens: 1_000_000 }), 'claude-opus-4-6')
     expect(double).toBeCloseTo(base * 2)
+  })
+})
+
+// calcCost — 1h vs 5m cache-write TTL (Anthropic bills a 1-hour-TTL cache write at 2x base
+// input and a 5-minute-TTL one at 1.25x; see MODEL_PRICING's `cacheWrite1h`).
+
+describe('calcCost — cache-write TTL breakdown', () => {
+  test('1h-only cache write is priced at 2x input, not the 1.25x 5-minute rate', () => {
+    // claude-sonnet-4-6: input $3/M → cacheWrite1h $6/M (2x), cacheWrite (5m) $3.75/M (1.25x).
+    const cost = calcCost(usage({
+      cacheCreationInputTokens: 1_000_000,
+      cacheCreation1hInputTokens: 1_000_000,
+      cacheCreation5mInputTokens: 0,
+    }), 'claude-sonnet-4-6')
+    expect(cost).toBeCloseTo(6)
+  })
+
+  test('5m-only cache write, stated explicitly, prices the same as the plain 1.25x rate', () => {
+    const cost = calcCost(usage({
+      cacheCreationInputTokens: 1_000_000,
+      cacheCreation1hInputTokens: 0,
+      cacheCreation5mInputTokens: 1_000_000,
+    }), 'claude-sonnet-4-6')
+    expect(cost).toBeCloseTo(3.75)
+  })
+
+  test('a mix of 1h and 5m cache writes sums each portion at its own rate', () => {
+    // claude-opus-4-8: cacheWrite1h $10/M, cacheWrite (5m) $6.25/M.
+    const cost = calcCost(usage({
+      cacheCreationInputTokens: 1_000_000,
+      cacheCreation1hInputTokens: 800_000,
+      cacheCreation5mInputTokens: 200_000,
+    }), 'claude-opus-4-8')
+    // 800k * $10/M + 200k * $6.25/M = 8 + 1.25
+    expect(cost).toBeCloseTo(9.25)
+  })
+
+  test('the legacy shape — no TTL breakdown at all — keeps pricing the whole counter at the 5-minute rate, unchanged', () => {
+    const cost = calcCost(usage({ cacheCreationInputTokens: 1_000_000 }), 'claude-opus-4-8')
+    expect(cost).toBeCloseTo(6.25)
+  })
+
+  test('a session priced before vs after the fix: the exact understatement on a fixture', () => {
+    const beforeFix = calcCost(usage({ cacheCreationInputTokens: 1_000_000 }), 'claude-opus-4-8')
+    const afterFix = calcCost(usage({
+      cacheCreationInputTokens: 1_000_000,
+      cacheCreation1hInputTokens: 800_000,
+      cacheCreation5mInputTokens: 200_000,
+    }), 'claude-opus-4-8')
+    expect(beforeFix).toBeCloseTo(6.25)
+    expect(afterFix).toBeCloseTo(9.25)
+    expect(afterFix - beforeFix).toBeCloseTo(3) // understated by $3 on this 1M-token fixture
+  })
+
+  test('a HALF-present breakdown (one TTL field set, the other genuinely undefined) is treated as NO breakdown — never a partial one that drops the unstated remainder', () => {
+    // claude-opus-4-8: cacheWrite1h $10/M, cacheWrite (5m) $6.25/M. Only 30k of the session's
+    // 100k cache-write tokens are stated as 1h; the other 70k have no stated TTL at all — a `||`
+    // gate would price the stated 30k at $10/M (=$0.30) and silently drop the other 70k at NO
+    // rate, which is the exact under-reporting direction this feature exists to fix.
+    const cost = calcCost(usage({
+      cacheCreationInputTokens: 100_000,
+      cacheCreation1hInputTokens: 30_000,
+      // cacheCreation5mInputTokens intentionally left undefined — a half-present breakdown.
+    }), 'claude-opus-4-8')
+    // Falls back to the conservative "no breakdown" reading: the WHOLE counter at the 5m rate.
+    expect(cost).toBeCloseTo(0.625)
+    expect(cost).not.toBeCloseTo(0.30)
   })
 })
 
@@ -472,7 +542,7 @@ describe('repoShortName', () => {
 // ---------------------------------------------------------------------------
 
 describe('getModelPrice prefix resolution', () => {
-  const FALLBACK = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
+  const FALLBACK = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 }
 
   test('every id the Antigravity harness actually reports resolves to its REAL price', () => {
     // Suffixed ids must hit their base model, never the Sonnet fallback.

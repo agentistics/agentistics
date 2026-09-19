@@ -75,10 +75,10 @@ export function BlockedSubtaskResolve(p: BlockedSubtaskResolveProps) {
 
   const finishBlockers = async (ids: readonly string[]) => {
     setStep('finishing')
-    const ok = await Promise.all(
+    const results = await Promise.all(
       ids.map(id => patchSubtask(p.taskId, id, { status: 'done' })),
     )
-    if (ok.every(Boolean)) { await p.onResolved(); return }
+    if (results.every(r => r.ok)) { await p.onResolved(); return }
     setError(pt
       ? 'Não foi possível marcar todos os bloqueios como concluídos. Nada foi perdido — tente de novo.'
       : 'Could not mark every blocker done. Nothing was lost — try again.')

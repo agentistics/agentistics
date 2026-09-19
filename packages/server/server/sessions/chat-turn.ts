@@ -130,4 +130,15 @@ export interface ChatTurn {
    * the chip then behaves exactly as it always has, and a guessed reference would match no row.
    */
   systemRef?: string
+  /**
+   * The real files behind THIS turn's `[Image #N]` markers, in order — resolved on THIS machine,
+   * through the harness's own companion entry (`attachment-companion.ts`), Claude only.
+   *
+   * Present only when the companion accounts for the turn's markers EXACTLY; absent otherwise,
+   * which leaves the browser's own chip-vs-thumbnail fallback (`resolveMarkerPaths`) to decide —
+   * so an older turn, or one whose companion did not survive a read window, still gets whatever
+   * that heuristic can prove. Never partial: a turn this could not resolve for carries no field at
+   * all rather than an incomplete list, the same all-or-nothing rule the browser's own rule keeps.
+   */
+  imagePaths?: string[]
 }

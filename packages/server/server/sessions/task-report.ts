@@ -7,14 +7,14 @@
  * written to have fixed once.
  */
 
-import type { SessionMeta } from '@agentistics/core'
-import { sessionTokenTotal } from '@agentistics/core'
+import type { SessionMeta, TaskProgress } from '@agentistics/core'
+import { groupProgress, sessionTokenTotal } from '@agentistics/core'
 import type {
   Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile,
 } from './task-model'
-import { legacyTaskId } from './task-model'
+import { groupMembers, isGroupMember, isGroupSubtask, legacyTaskId } from './task-model'
 import { rollupAttempt, type AttemptRollup, type RollupSession } from './task-rollup'
-import { taskStats, type TaskStats } from './task-stats'
+import { scopedTaskStats, taskStats, type TaskStats } from './task-stats'
 import type { ManagedSession } from './types'
 
 /** A rollup row: an attempt, or the sessions of a task that name no attempt. */
@@ -194,22 +194,39 @@ export function attemptViews(
   return views
 }
 
-/** One rollup for a subtask (or a group of subtasks sharing a `groupId` — see below), or for the
- *  direct branch (`id: null`) — sessions filed on the task itself, under no subtask. Every row of a
- *  task falls into EXACTLY one of these buckets, because `subtaskId` and "no subtaskId" partition
- *  `rowsOfTask(task, rows)` completely — the same guarantee `filedUnder` already gives every
- *  session a single owner. */
+/** One rollup for a subtask, a GROUP (§F.1), or the direct branch (`id: null`) — sessions filed on
+ *  the task itself, under no subtask. Every row of a task falls into EXACTLY one of these buckets:
+ *  a group MEMBER never appears here at all (it can never hold a session, so it has nothing to roll
+ *  up — see `subtaskViews`), and everything else partitions `rowsOfTask(task, rows)` completely, the
+ *  same guarantee `filedUnder` already gives every session a single owner. */
 export interface SubtaskView {
-  /** A plain subtask's own id, or the shared `groupId` when it is one of a group — never a
-   *  per-member id in that case, which is what stops a shared session's cost being summed once per
-   *  member. */
+  /** A loose subtask's own id, or a GROUP's own id — never a per-member id, because a member can
+   *  never be the target of a filing to begin with. */
   id: string | null
   rollup: AttemptRollup
+  /**
+   * Set only when `id` names a GROUP (§F.1) — its own progress, from its members' `status`
+   * (`groupProgress`, `@agentistics/core`, the same round-down rule `taskProgress` applies to a
+   * task's own subtasks, one level down). Computed here rather than left for a reader to re-derive:
+   * a caller counting `done` members itself would be a second implementation of the one rounding
+   * rule this whole feature is built to keep single. Absent for a loose subtask or the direct
+   * (`id: null`) bucket — neither has members to compute a percentage over.
+   */
+  groupProgress?: TaskProgress
+  /**
+   * The same delivery-evidence numbers `TaskDetail.stats` carries for the whole task, re-partitioned
+   * to this bucket's own rows — files/errors/lines/tokens/commits/models/harnesses/duration. `null`
+   * when nothing is filed under this bucket yet (see `scopedTaskStats`'s own null-vs-empty-block
+   * distinction), never a block whose every field happens to be null. See
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §C.5.
+   */
+  stats: TaskStats | null
 }
 
 /**
- * A rollup per subtask, plus one `id: null` bucket for the sessions filed on the delivery directly
- * — the same pattern `attemptViews` already applies to attempts, over the same partition.
+ * A rollup per BUCKETABLE subtask (a loose subtask, or a GROUP — §F.1), plus one `id: null` bucket
+ * for the sessions filed on the delivery directly — the same pattern `attemptViews` already applies
+ * to attempts, over the same partition.
  *
  * `rows` is expected already scoped to the task (`rowsOfTask(task, allRows)`), exactly like
  * `attemptViews`'s own `rows` parameter — this never re-derives that scope, and never re-sums the
@@ -217,14 +234,17 @@ export interface SubtaskView {
  * is only ever a breakdown of it. A subtask with no sessions filed under it yet still gets a row —
  * "nothing filed here" is a real, empty measurement, not an omission.
  *
- * **Grouped subtasks collapse into ONE bucket, never one per member.** Two or more subtasks sharing
- * a `groupId` (`Subtask.groupId`, docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B)
- * are bucketed by that group id rather than by each subtask's own id — a session filed under ANY
- * member's `subtaskId` is counted in that one bucket, once, regardless of which specific member the
- * session names. Summing per member would multiply a shared session's cost by the group's size,
- * which is exactly the double-count this function exists to rule out for every other shape. A
- * subtask with no `groupId` is unaffected — it is its own group of one, bucketed by its own id
- * exactly as before.
+ * **A GROUP MEMBER (`Subtask.parentGroupId` set) gets NO bucket of its own at all** — this
+ * SUPERSEDES the §B "shared bucket" model (docs/superpowers/specs/
+ * 2026-09-11-alm-session-linking-ux.md §F, which replaces §B.2–§B.5). Under §F.1 a member can never
+ * hold a session directly (refused at filing time, `subtask_in_group` — `task-attach.ts`), so there
+ * is nothing for it to roll up; publishing an always-empty view for it would be the same "measured,
+ * and confidently zero" defect this codebase refuses everywhere else for a metric that was never
+ * measurable to begin with. **A GROUP's own bucket is the sessions filed DIRECTLY on the group's own
+ * subtask record** — simpler than §B's union-of-members, because under §F a member is never the
+ * target of a filing, so there is nothing to union. A loose subtask (neither `isGroup` nor
+ * `parentGroupId`) is bucketed by its own id, completely unaffected by any of this — exactly
+ * today's pre-§B behaviour.
  */
 export function subtaskViews(
   task: Task,
@@ -234,33 +254,67 @@ export function subtaskViews(
   costOf: (m: SessionMeta) => number,
 ): SubtaskView[] {
   const mine = subtasks.filter(s => s.taskId === task.id)
-  // Effective bucket key: a subtask's own id, or the group id it shares with its siblings.
-  const keyOf = (s: Subtask) => s.groupId ?? s.id
-  const groups = new Map<string, Subtask[]>()
+  // Every subtask that is NOT a group member gets its own bucket, keyed by its own id — a loose
+  // subtask exactly as before, a group by the same rule (its rollup is simply the rows filed on
+  // its own id, since no member can ever carry one).
+  const bucketable = mine.filter(s => !isGroupMember(s))
+  // One pass over `mine`, building the group -> members mapping `groupMembers` would otherwise
+  // re-derive per group inside the `.map()` below (an O(groups × subtasks) re-scan instead of this
+  // single O(subtasks) pass) — same membership `groupMembers` computes, just computed once. Order
+  // matches `groupMembers`'s own "in the order they were created": `mine` is already in that order,
+  // and this appends members as they are encountered.
+  const membersByGroup = new Map<string, Subtask[]>()
   for (const s of mine) {
-    const key = keyOf(s)
-    const members = groups.get(key)
-    if (members) members.push(s)
-    else groups.set(key, [s])
+    if (!isGroupMember(s)) continue
+    const list = membersByGroup.get(s.parentGroupId!)
+    if (list) list.push(s)
+    else membersByGroup.set(s.parentGroupId!, [s])
   }
-  const views: SubtaskView[] = [...groups.entries()].map(([key, members]) => ({
-    id: key,
-    // A session's `subtaskId` can name ANY member of the group — the union of their rows is what
-    // the group's bucket rolls up, so the same session is never counted once per member.
-    rollup: rollupAttempt({
-      sessions: rollupSessionsFor(
-        rows.filter(r => members.some(m => m.id === r.subtaskId)), metas, costOf,
-      ),
-    }),
-  }))
+  const views: SubtaskView[] = bucketable.map(s => {
+    const mineRows = rows.filter(r => r.subtaskId === s.id)
+    return {
+      id: s.id,
+      rollup: rollupAttempt({ sessions: rollupSessionsFor(mineRows, metas, costOf) }),
+      stats: scopedTaskStats({
+        rows: mineRows, metas, createdAt: task.createdAt,
+        ...(task.deliveredAt ? { deliveredAt: task.deliveredAt } : {}),
+      }),
+      ...(isGroupSubtask(s)
+        ? { groupProgress: groupProgress((membersByGroup.get(s.id) ?? []).map(m => m.done)) }
+        : {}),
+    }
+  })
   const direct = rows.filter(r => !r.subtaskId)
   if (direct.length > 0) {
     views.push({
       id: null,
       rollup: rollupAttempt({ sessions: rollupSessionsFor(direct, metas, costOf) }),
+      stats: scopedTaskStats({
+        rows: direct, metas, createdAt: task.createdAt,
+        ...(task.deliveredAt ? { deliveredAt: task.deliveredAt } : {}),
+      }),
     })
   }
   return views
+}
+
+/**
+ * What is VISIBLE from a session filed on a GROUP (§F.2): the group itself and every one of its
+ * members — never a sibling subtask/group of the same parent task, and never the parent task.
+ * Visibility is downward-only, and the boundary is where the session is filed — the same
+ * "hierarchy is a filter, never a merge" reasoning `rowsOfTask` already applies at the task level
+ * (§A.3 of docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md).
+ *
+ * Returns the empty list for anything that is not, right now, an actual group — the id names no
+ * subtask, or names one that is not `isGroup: true`. This is the pure building block a route/UI
+ * scoping a session's aside to its group would filter subtasks/comments/rows against; it does not
+ * itself touch comments (`TaskComment` carries no `subtaskId` today — comments stay task-wide, per
+ * §C.5) or sessions — a caller filters those by the ids this returns.
+ */
+export function groupVisibility(groupId: string, subtasks: readonly Subtask[]): readonly string[] {
+  const group = subtasks.find(s => s.id === groupId)
+  if (!group || !isGroupSubtask(group)) return []
+  return [group.id, ...groupMembers(groupId, subtasks).map(m => m.id)]
 }
 
 /**

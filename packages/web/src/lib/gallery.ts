@@ -60,14 +60,16 @@ export interface GalleryFile {
  * `sent` files are attachments in `~/.agentistics/attachments`, addressed by NAME through the
  * attachment route. `produced` files are ones the SESSION wrote — a screenshot, a diagram, a PDF —
  * which live wherever the session put them and are addressed by PATH through `/api/fleet/media`,
- * behind the same allowlist the file tab reads through.
+ * behind the same allowlist the file tab reads through. `viewed` files are ones the assistant
+ * OPENED with `Read` and never wrote or was sent — see `viewedGroups` — and are addressed either
+ * way depending on where they actually sit; `galleryFileUrl` decides which.
  *
  * The distinction is on the FILE and not on the group because a reader is asking "what images are
  * in this conversation", not "which route serves them" — but a `<img src>` needs the answer, and
  * guessing it from the path would break the moment somebody attaches a file from outside the
  * attachments folder.
  */
-export type GalleryOrigin = 'sent' | 'produced'
+export type GalleryOrigin = 'sent' | 'produced' | 'viewed'
 
 export interface GalleryGroup {
   /**
@@ -84,6 +86,14 @@ export interface GalleryGroup {
   text: string
   /** In the order they were attached. Never empty — a message with none is not a group. */
   files: GalleryFile[]
+  /**
+   * A heading of the group's OWN, when "N files" would not say what the group actually is —
+   * `producedGroups`/`galleryGroups` never set this (a sent group is named by its own message, a
+   * produced one has always read simply as its file count), and `viewedGroups` sets it because
+   * "N files" beside a picture nobody sent or wrote would read as a sent or produced group by
+   * default. EN/PT so `GroupHeading` never has to know which language it is in.
+   */
+  label?: { en: string; pt: string }
 }
 
 /** The extension, uppercased. `''` when there is none — never invented from the bytes. */
@@ -282,6 +292,68 @@ export function producedGroups(
   return files.length === 0 ? [] : [{ index: -1, text: '', files }]
 }
 
+/** A tool call the browser already reads as file-carrying — shared shape with `chat-turn.ts`. */
+interface ToolCall {
+  name: string
+  canonical?: string
+  detail?: string
+}
+
+/**
+ * What the SESSION VIEWED — images opened with `Read` and never sent or written.
+ *
+ * Asked for directly: a chip reading "an image was attached" for an image the ASSISTANT opened on
+ * its own (Claude Code writes a resize note beside a `Read` of an oversized image — see the
+ * server's `viewed-image.ts`) pointed at a Gallery that had never been built to hold what it was
+ * describing, because the gallery had exactly two sources and this is neither. Built the same way
+ * the server's own write-allowlist is (`artifactPathsFromTurns`): walk every turn's tool calls,
+ * select by the shared vocabulary (`canonical ?? name`) so a non-Claude harness's own name for the
+ * same tool is not silently excluded, and take the ones that are shaped like a path to an image.
+ *
+ * ONE GROUP, not one per read — the same call `producedGroups` makes and for the same reason: a
+ * viewed file has no message of its own, only the turn that read it, so grouping by turn would make
+ * a row per file with no heading worth reading.
+ *
+ * DEDUPED BY PATH, unlike a sent file (which legitimately appears twice if sent twice): re-reading
+ * the SAME screenshot five times while iterating on it is not five distinct pictures to show, and
+ * the first sighting is kept — the order a reader would recognise the conversation reaching it.
+ *
+ * NO CONTAINMENT CHECK HAPPENS HERE. Whether a thumbnail can actually be shown is decided the moment
+ * the browser asks for one — `galleryFileUrl` picks the same routes the sent/produced sides already
+ * go through, under their EXISTING rules, never widened for this. A path neither inside the
+ * attachments directory nor already in the session's write-allowlist is listed with no thumbnail,
+ * through the very "broken image" fallback every other gallery tile already has.
+ */
+export function viewedGroups(
+  turns: readonly { tools?: readonly ToolCall[] }[],
+): GalleryGroup[] {
+  const seen = new Set<string>()
+  const files: GalleryFile[] = []
+  for (const t of turns) {
+    for (const call of t.tools ?? []) {
+      if ((call.canonical ?? call.name) !== 'Read') continue
+      const p = call.detail?.trim()
+      // A truncated detail (`toolDetail` ellipsises past 200 chars) names no file — the same guard
+      // the server's own allowlist applies before trusting one.
+      if (!p || p.endsWith('…') || attachmentKind(p) !== 'image' || seen.has(p)) continue
+      seen.add(p)
+      const name = attachmentName(p)
+      files.push({ path: p, name, kind: 'image', format: fileFormat(name), origin: 'viewed' })
+    }
+  }
+  // `-2`, not `-1`: `producedGroups` already uses `-1` for the identical "no message" sentinel, and
+  // a session that both WROTE and READ a file (verified live: a screenshot it produced, then
+  // re-opened to check) puts one of each group on screen together. Two groups sharing `index: -1`
+  // collided as the `<section>` key in `GalleryTab` (a live React "two children with the same key"
+  // warning) and, worse, as `galleryImageKey`'s identity for the lightbox — `-1:0` named the FIRST
+  // group's first file, so a click on the second group's own row could open the wrong picture in
+  // the lightbox. Both readings only ever test `index >= 0` ("has a message"), never `=== -1`, so a
+  // second negative sentinel changes nothing they mean by it.
+  return files.length === 0 ? [] : [{
+    index: -2, text: '', files,
+    label: { en: 'Viewed by the session', pt: 'Visto pela sessão' },
+  }]
+}
 
 /** Which half of the gallery is being shown. */
 export type GalleryScope = 'all' | 'user' | 'llm'
@@ -303,7 +375,9 @@ export function gallerySides(groups: readonly GalleryGroup[]): { user: number; l
   let llm = 0
   for (const g of groups) {
     for (const f of g.files) {
-      if (f.origin === 'produced') llm += 1
+      // `viewed` sits beside `produced` on purpose: both are things the ASSISTANT did, and the
+      // "Assistant" tab is the honest place to find either — neither was sent by the person.
+      if (f.origin === 'produced' || f.origin === 'viewed') llm += 1
       else user += 1
     }
   }
@@ -340,8 +414,16 @@ export function filterGallery(
   groups: readonly GalleryGroup[], scope: GalleryScope,
 ): GalleryGroup[] {
   if (scope === 'all') return [...groups]
-  const want = scope === 'llm' ? 'produced' : 'sent'
+  // `llm` is "not sent" rather than "produced" alone, so a viewed file — the assistant's, same as a
+  // produced one — stays under the tab that already means "the assistant's side" (see
+  // `gallerySides`); the two must agree about which origins that tab covers.
   return groups
-    .map(g => ({ ...g, files: g.files.filter(f => (f.origin ?? 'sent') === want) }))
+    .map(g => ({
+      ...g,
+      files: g.files.filter(f => {
+        const origin = f.origin ?? 'sent'
+        return scope === 'llm' ? origin !== 'sent' : origin === 'sent'
+      }),
+    }))
     .filter(g => g.files.length > 0)
 }

@@ -102,6 +102,11 @@ export function openInputSocket(ws: InputSocket): void {
       if (ok) nudgeTerminal(id)
       return ok
     },
+    sendPaste: async text => {
+      const ok = await (await getBackend()).sendPaste(id, text)
+      if (ok) nudgeTerminal(id)
+      return ok
+    },
     emit: ack => { try { ws.send(encodeAck(ack)) } catch { /* socket already closed */ } },
   })
 }

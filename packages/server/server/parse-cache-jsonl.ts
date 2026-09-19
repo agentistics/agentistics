@@ -1,10 +1,8 @@
-import { readFile } from 'fs/promises'
 import type { SessionMeta, SessionAgentMetrics } from '@agentistics/core'
-import {
-  parseSessionJsonl, activeMinutesFromClaudeJsonl, contextTokensFromClaudeJsonl,
-  compactsFromClaudeJsonl, skillUsesFromClaudeJsonl, type CompactStats,
-} from './jsonl'
-import { extractAgentMetrics } from './agent-metrics'
+import { finishActiveTime } from '@agentistics/core'
+import { parseSessionJsonl, finishClaudeSession, finishCompacts, type CompactStats } from './jsonl'
+import { finishAgentMetrics } from './agent-metrics'
+import { claudeTranscriptState } from './transcript-state'
 import { enrichFromSubagentTranscripts } from './subagent-metrics'
 import { basename } from 'path'
 import { safeStat } from './utils'
@@ -60,7 +58,15 @@ export async function cachedParseSession(
   const hit = cache.get<SessionMeta>('session', stamp, variant)
   if (hit) return hit
 
-  const parsed = await parseSessionJsonl(filePath, sessionId, fallbackPath, source)
+  // A MISS IS WHERE THE LIVE SESSIONS LIVE. A transcript that is being written to changes its
+  // stamp on every turn, so it misses here on every build — which is exactly the case
+  // `transcript-state.ts` exists for: it folds the bytes written since the last miss instead of
+  // re-reading the file. A file it cannot read at all falls through to the one-shot parser, which
+  // answers with an empty session, as this path always has.
+  const read = await claudeTranscriptState(filePath)
+  const parsed = read
+    ? await finishClaudeSession(read.state, filePath, sessionId, fallbackPath, source)
+    : await parseSessionJsonl(filePath, sessionId, fallbackPath, source)
   cache.set('session', stamp, parsed, variant)
   return parsed
 }
@@ -129,21 +135,6 @@ export interface EnrichResult {
  */
 const ENRICH_SHAPE = 'v4'
 
-/** The first `claude-*` model in the transcript's opening 200 lines — the same scan
- *  `scanProjectDir` did inline, kept identical on purpose. */
-function deriveModel(lines: string[]): string | null {
-  for (const raw of lines.slice(0, 200)) {
-    const line = raw.trim()
-    if (!line) continue
-    try {
-      const e = JSON.parse(line)
-      const m = e.message?.model
-      if (e.type === 'assistant' && typeof m === 'string' && m && m.startsWith('claude-')) return m
-    } catch { /* skip */ }
-  }
-  return null
-}
-
 /**
  * The whole enrichment of one transcript, cached as a unit.
  *
@@ -175,19 +166,23 @@ export async function cachedEnrich(
   const hit = cache.get<EnrichResult>('enrich', stamp, variant)
   if (hit) return withSubagentNumbers(hit, filePath)
 
-  const content = await readFile(filePath, 'utf-8').catch(() => '')
-  if (!content) return null
+  // The same walk `cachedParseSession` finishes into a `SessionMeta` — see `transcript-state.ts`.
+  // This used to be six separate passes over a second full copy of the file, each re-parsing every
+  // line to answer one question; they are folded off one pass now, and only over what is new.
+  const read = await claudeTranscriptState(filePath)
+  if (!read || read.stamp.size === 0) return null
 
-  const lines = content.split('\n')
-  const model = deriveModel(lines)
-  const metrics = extractAgentMetrics(lines, metaModel || model || '')
+  const state = read.state
+  const model = state.modelFirst200 || null
+  const metrics = finishAgentMetrics(state.agents, metaModel || model || '')
   const result: EnrichResult = {
     model,
-    activeMinutes: activeMinutesFromClaudeJsonl(lines) ?? null,
-    contextTokens: contextTokensFromClaudeJsonl(lines) ?? null,
+    activeMinutes: finishActiveTime(state.active).activeMinutes ?? null,
+    contextTokens: state.contextTokensAny > 0 ? state.contextTokensAny : null,
     agentMetrics: metrics.totalInvocations > 0 ? metrics : null,
-    compact: compactsFromClaudeJsonl(lines),
-    skillUses: skillUsesFromClaudeJsonl(lines),
+    compact: finishCompacts(state.compact),
+    // Copied, not shared — the walk goes on writing to it. See `finishClaudeSession`.
+    skillUses: { ...state.skillUses },
   }
   cache.set('enrich', stamp, result, variant)
   return withSubagentNumbers(result, filePath)

@@ -28,8 +28,8 @@ import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ChatTurn } from './chat-turn'
-import type { AttachmentSend } from '@agentistics/core'
-import { readAttachmentSends } from './attachment-web'
+import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
+import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
 import { pendingFor, type PendingPrompt } from './pending-prompts'
@@ -44,6 +44,11 @@ export interface ChatPayload {
    * serves and resolves only when the record accounts for a turn's markers exactly.
    */
   attachmentSends?: AttachmentSend[]
+  /**
+   * What each delivered message CARRIED, keyed by this CONVERSATION — the record that answers the
+   * question `attachmentSends` could only approximate by upload time. See `AttachmentMessage`.
+   */
+  attachmentMessages?: AttachmentMessage[]
   /**
    * Already-localized reason there is no conversation to show.
    *
@@ -71,6 +76,17 @@ export interface ChatPayload {
    * nothing and letting it read as "there was never anything here".
    */
   older?: string
+  /**
+   * This machine's REAL attachments directory (`ATTACHMENT_DIR`), carried on the turns that can
+   * actually name one — see `attachmentUrl.ts`'s `galleryFileUrl`. The browser side used to GUESS it
+   * from the default layout (`~/.agentistics/attachments/`), which stops matching the moment
+   * `AGENTISTICS_DIR` relocates the data directory: a `viewed` file the assistant re-read out of the
+   * (relocated) attachments directory then routed through the session-media route instead of the
+   * attachments route, and the gallery reported a file that was right there as no longer on disk.
+   * The server knows its own configured directory outright, so it says so once rather than the
+   * client guessing at a layout that is only usually true.
+   */
+  attachmentsDir?: string
 }
 
 /** The most turns one read returns. A conversation of thousands must not arrive as one response. */
@@ -214,10 +230,12 @@ export async function readSessionChat(
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
-  const sends = await readAttachmentSends(id)
+  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId })
   return {
     turns: read.turns,
+    attachmentsDir: ATTACHMENT_DIR,
     ...(sends.length > 0 ? { attachmentSends: sends } : {}),
+    ...(messages.length > 0 ? { attachmentMessages: messages } : {}),
     live,
     ...(pending.length > 0 ? { pending } : {}),
     ...(read.older

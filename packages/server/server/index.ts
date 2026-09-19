@@ -24,7 +24,7 @@ import { PROJECTS_DIR, AGENTISTICS_DATA_DIR } from './config'
 import { safeReadDir } from './utils'
 import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
-import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS } from './auth'
+import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
 
 /**
@@ -61,12 +61,14 @@ async function readLocalLiveSnapshot(sessions: SessionMeta[]): Promise<{
 import { AUTH_PUBLIC, isAdminPath, MFA_EXEMPT } from './index-routes'
 import { CAPS, PROFILE } from './exposure'
 import { chatAllowed } from './chat-gate'
-import { shellAllowed } from './sessions/shell-gate'
+import { shellAllowedNow } from './sessions/shell-gate'
+import { getShellOverride, setShellOverride } from './sessions/shell-override-store'
+import { editorAllowed } from './sessions/editor-gate'
 import { limiter, RULES, rateRuleFor, tooManyRequests } from './rate-limit'
 import { resolveClientIp } from './client-ip'
 import { corsHeadersFor } from './cors'
 import { csrfVerdict } from './csrf'
-import { securityHeaders } from './security-headers'
+import { applyBaselineHeaders, OPAQUE_MEDIA_CSP } from './response-policy'
 import { TRUST_PROXY, ALLOWED_ORIGINS, TEAM_TLS, TEAM_SESSION_SECRET_ENV, TEAM_SESSION_SECRET, setResolvedSessionSecret } from './config'
 import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
@@ -396,9 +398,11 @@ async function handleRequest(req: Request, server: Server<WSData>): Promise<Resp
   // single scheme no web page can present (`security-headers.ts`), and everything the fleet routes
   // can do stays behind `localShell` regardless.
   const embed = PROFILE === 'local'
-  for (const [k, v] of Object.entries(securityHeaders({ tls: TEAM_TLS, dev: !SERVE_STATIC, isApi, embed }))) {
-    res.headers.set(k, v)
-  }
+  // The OWASP baseline, plus the one allowlisted exception for the media routes' opaque-byte
+  // responses — see `response-policy.ts` (`applyBaselineHeaders`) for what it does and why. Kept
+  // as a real function rather than inlined here so a test can call the SAME code this route calls,
+  // instead of a copy of it that can silently drift.
+  applyBaselineHeaders(res, { tls: TEAM_TLS, dev: !SERVE_STATIC, isApi, embed })
   // A sliding-session refresh recorded by the auth gate. Appended (not set) so a route that
   // issues its own cookie — login, logout — is never overwritten.
   const refreshed = refreshedCookies.get(req)
@@ -1551,6 +1555,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE REPOSITORY EXPLORER. Same shape as the utility shell's own gate a few lines up: two
+    // gates, enforced HERE and not only in the UI, because these routes read and write arbitrary
+    // files on the host — a hidden tab is not a closed door.
+    if (url.pathname === '/api/fleet/tree' || url.pathname.startsWith('/api/fleet/tree/')) {
+      if (!editorAllowed(CAPS.localShell, (await readPreferences()).editorEnabled)) {
+        return new Response(JSON.stringify({ error: 'editor_disabled' }), {
+          status: 403,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      const { handleEditorTreeRoute } = await import('./sessions/editor-web')
+      const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+      const editorLang = fleetLang(url.searchParams.get('lang'))
+      const res = await handleEditorTreeRoute(req, url, await hostForFleet(editorLang), editorLang)
+      if (res) {
+        for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
+        return res
+      }
+    }
+
     // The task board. `capability-guard.ts` has already refused these on an exposed profile; the
     // handlers hold no arithmetic of their own (see `task-web.ts`).
     // The page's own filters, read off the query string. The board is scoped exactly as every other
@@ -1689,12 +1713,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ? { subtaskId: body.subtaskId }
             : {})
         if (result.ok) return json({ ok: true })
-        // `blocked` is a 422, the same status `markTask`'s own `blocked_needs_reason` answers with
-        // — both name a piece of work this request cannot do YET, not a resource that is missing.
-        // Everything else stays 404: the ref, the session or the subtask named nothing.
+        // `blocked` and `subtask_in_group` are both 422, the same status `markTask`'s own
+        // `blocked_needs_reason` answers with — each names a piece of work this request cannot do,
+        // not a resource that is missing (the target subtask is a real, existing MEMBER of a group,
+        // §F.1 — it is simply never allowed to hold a session). Everything else stays 404: the ref,
+        // the session or the subtask named nothing.
         return json(
           { ok: false, reason: result.reason, ...(result.blockedBy ? { blockedBy: result.blockedBy } : {}) },
-          result.reason === 'blocked' ? 422 : 404,
+          result.reason === 'blocked' || result.reason === 'subtask_in_group' ? 422 : 404,
         )
       }
       if (verb === 'links') {
@@ -1713,12 +1739,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           if (body.remove === true) return json({ ok: await mod.removeSubtask(body.id) })
           // A bare `{id, done}` is the tick; anything else is a column edit. Both land on
           // `patchSubtask`, which derives `done` from `status` so the two cannot disagree.
-          // `done_needs_session` is a 422, the same shape `sessions`'s `blocked` answers with above
-          // — both name a piece of work this request cannot do YET, not a resource that is missing.
-          // `no_such_subtask` stays 404: the id named nothing.
+          // `done_needs_session`/`invalid_group`/`subtask_has_sessions`/`group_field_conflict` are
+          // 422, the same shape `sessions`'s `blocked` answers with above — each names a piece of
+          // work this request cannot do, not a resource that is missing. `no_such_subtask` stays
+          // 404: the id named nothing.
           if (typeof body.done === 'boolean' && Object.keys(body).length === 2) {
             const result = await mod.setSubtaskDone(body.id, body.done)
             return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
+          }
+          // A staged session draft (t-918cc82233): `null` clears, an object is validated HERE before
+          // the write — a malformed one (no prompt, a relative cwd) is refused outright (400) rather
+          // than silently dropped, which would look on screen like the save had succeeded.
+          let stagedSessionPatch: import('./sessions/task-model').Subtask['stagedSession'] | null | undefined
+          if (body.stagedSession === null) {
+            stagedSessionPatch = null
+          } else if (body.stagedSession !== undefined) {
+            const { normalizeStagedSession } = await import('@agentistics/core')
+            const normalized = normalizeStagedSession(body.stagedSession)
+            if (!normalized) return json({ error: 'bad_staged_session' }, 400)
+            stagedSessionPatch = normalized
           }
           const result = await mod.patchSubtask(body.id, {
             ...(typeof body.title === 'string' ? { title: body.title } : {}),
@@ -1734,11 +1773,39 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ...(Array.isArray(body.blockedBy)
               ? { blockedBy: body.blockedBy.filter((x): x is string => typeof x === 'string') }
               : {}),
+            // SUPERSEDED (§F) — kept only so the §B-era UI keeps working. `null` is the CLEAR and
+            // is matched explicitly: an omitted `groupId` leaves the column alone, a null removes it.
+            ...(typeof body.groupId === 'string'
+              ? { groupId: body.groupId }
+              : body.groupId === null ? { groupId: null } : {}),
+            // Join/leave a group (§F.1). `patchSubtask` validates the reference server-side
+            // (`invalid_group`, 422) — this is pass-through, not a second copy of that rule.
+            ...(typeof body.parentGroupId === 'string'
+              ? { parentGroupId: body.parentGroupId }
+              : body.parentGroupId === null ? { parentGroupId: null } : {}),
+            ...(stagedSessionPatch !== undefined ? { stagedSession: stagedSessionPatch } : {}),
           })
-          return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
+          return json(
+            result,
+            result.ok
+              ? 200
+              : (result.message === 'done_needs_session' || result.message === 'invalid_group'
+                  || result.message === 'subtask_has_sessions'
+                  || result.message === 'group_field_conflict'
+                  || result.message === 'subtask_in_group'
+                ? 422
+                : 404),
+          )
         }
-        const ok = await mod.addSubtask(ref, String(body.title ?? ''))
-        return json({ ok }, ok ? 200 : 400)
+        // `isGroup: true` creates a GROUP (§F.1) instead of an ordinary subtask — decided only at
+        // creation, `addSubtask` never offers a way to change it afterwards. The new id travels
+        // back so a caller minting a group (rather than an ordinary subtask) can join members to
+        // it in the same flow — a bare `{ ok }` gave the "create a group with…" gesture nothing to
+        // join against.
+        const newId = await mod.addSubtask(ref, String(body.title ?? ''), {
+          ...(body.isGroup === true ? { isGroup: true } : {}),
+        })
+        return json({ ok: newId !== null, id: newId }, newId !== null ? 200 : 400)
       }
       if (verb === 'claim') {
         // `release: true` gives it back; anything else takes it. One verb, because a caller holding
@@ -2059,14 +2126,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    // Reading an attachment BACK — the chat's inline image preview. `resolveAttachmentRead` is the
-    // whole of the security model here: a message carries the attachment's path verbatim (see
+    // Reading an attachment BACK — the chat's inline image preview. `resolveAttachmentReadReal` is
+    // the whole of the security model here: a message carries the attachment's path verbatim (see
     // attachment-web.ts's header), so this route necessarily accepts a path, and that function is
-    // what stops it becoming an arbitrary local file read. A path outside the attachment directory,
-    // or one naming nothing, gets exactly the same 404 — the difference is not this reader's to say.
+    // what stops it becoming an arbitrary local file read — including through a symlink planted
+    // inside the attachments directory (its own REAL, `realpath`-resolved recheck, the same one
+    // `editor-fs.ts` applies to the Studio's tree). A path outside the attachment directory, or one
+    // naming nothing, gets exactly the same 404 — the difference is not this reader's to say.
     if (url.pathname === '/api/fleet/attachment' && req.method === 'GET') {
-      const { resolveAttachmentRead } = await import('./sessions/attachment-web')
-      const resolved = resolveAttachmentRead(url.searchParams.get('path') ?? '')
+      const { resolveAttachmentReadReal } = await import('./sessions/attachment-web')
+      const resolved = await resolveAttachmentReadReal(url.searchParams.get('path') ?? '')
       if (!resolved) {
         return new Response(null, { status: 404, headers: CORS_HEADERS })
       }
@@ -2095,6 +2164,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // directory. HEAD answers the SIZE without the bytes, which is what the
     // list column is for — a size fetched by downloading the file is not a size, it is a download.
     //
+    // `attachmentPathByNameReal` is what actually decides what gets served — the lexical check alone
+    // refuses an escape spelled in the request but says nothing about a symlink planted inside the
+    // directory pointing elsewhere, the same REAL (`realpath`-resolved) recheck `/api/fleet/attachment`
+    // applies above.
+    //
     // Guarded by the `/api/fleet` PREFIX in `capability-guard.ts` (localShell) and 404'd on a
     // central with the rest of `/api/fleet*`, both above — neither needs a new entry, which is the
     // point of the prefix.
@@ -2102,9 +2176,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // A refused name, a type the table does not name and a missing file all get the same bare 404. Which of the three
     // it was is not this reader's to say, and the path is never echoed back.
     if (url.pathname === '/api/fleet/attachment/by-name' && (req.method === 'GET' || req.method === 'HEAD')) {
-      const { attachmentPathByName, attachmentMediaType } = await import('./sessions/attachment-web')
+      const { attachmentPathByNameReal, attachmentMediaType } = await import('./sessions/attachment-web')
       const name = url.searchParams.get('name') ?? ''
-      const resolved = attachmentPathByName(name)
+      const resolved = await attachmentPathByNameReal(name)
       const type = resolved === null ? null : attachmentMediaType(name)
       if (resolved === null || type === null) {
         return new Response(null, { status: 404, headers: CORS_HEADERS })
@@ -2433,7 +2507,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             'Content-Type': out.mime,
             'Content-Disposition': `inline; filename="${out.name.replace(/[^\w.-]/g, '_')}"`,
             'X-Content-Type-Options': 'nosniff',
-            'Content-Security-Policy': "default-src 'none'; sandbox",
+            // The media marker: `applyBaselineHeaders` recognises it and REPLACES it with the media
+            // policy (this plus `frame-ancestors 'self'`, and `vscode-webview:` on an embedding
+            // profile), instead of the dashboard baseline — which is why this panel's PDF frame no
+            // longer draws the browser's "cannot display" glyph. See `response-policy.ts`.
+            'Content-Security-Policy': OPAQUE_MEDIA_CSP,
             // A session rewrites the file it is working on; a cached copy would show the old one.
             'Cache-Control': 'no-store',
           },
@@ -2572,7 +2650,33 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
-      if (!shellAllowed(CAPS.localShell, (await readPreferences()).shellEnabled)) {
+      // "ENABLE NOW" — the disabled-shell empty state's temporary button. It sets the in-memory
+      // override (`shell-override-store.ts`) and nothing else: never `preferences.json`, which is
+      // "Enable permanently"'s own door (`PUT /api/preferences`, unchanged). Checked BEFORE the
+      // `shellAllowedNow` gate below on purpose — that gate is what this very route exists to get
+      // past, so gating IT with itself would refuse the one request that is supposed to work while
+      // the preference is off. `CAPS.localShell` still applies first: an override can only ever
+      // restore what the PREFERENCE narrowed, never what the exposure profile denied outright.
+      if (url.pathname === '/api/shell/enable-now' && req.method === 'POST') {
+        if (!CAPS.localShell) {
+          return new Response(JSON.stringify({ error: 'shell_disabled' }), {
+            status: 403,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        if (!isAuthed(req)) {
+          return new Response(JSON.stringify({ error: 'auth_required' }), {
+            status: 401,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        setShellOverride(true)
+        void writeAudit({ action: 'shell.override.enabled', ip: clientIp })
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      if (!shellAllowedNow(CAPS.localShell, (await readPreferences()).shellEnabled, getShellOverride())) {
         return new Response(JSON.stringify({ error: 'shell_disabled' }), {
           status: 403,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

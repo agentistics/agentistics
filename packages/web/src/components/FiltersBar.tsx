@@ -3,6 +3,7 @@ import type { Filters, DateRange, Project, Lang, HarnessId } from '@agentistics/
 import { formatModel, formatProjectName, repoShortName } from '@agentistics/core'
 import { Layers, Cpu, ChevronDown, SlidersHorizontal, X, CalendarDays, Check, Users, GitBranch, Search, Plus, Blocks, Radio, Server, FolderOpen, Tag as TagIcon } from 'lucide-react'
 import type { TagDef } from '../lib/tagMatch'
+import { countActiveFilters } from '../lib/activeFilterCount'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { ProjectsModal } from './ProjectsModal'
 import type { MemberPresence } from '@agentistics/core'
@@ -289,7 +290,8 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
    * that.
    *
    * One function, called by both clear buttons, sitting next to the count so the two are read
-   * together. Anything added to the list below has to be answered here.
+   * together. Anything added to the list in `countActiveFilters` (`lib/activeFilterCount.ts`) has
+   * to be answered here too.
    */
   const clearAllFilters = () => {
     onChange({
@@ -300,19 +302,10 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
     onActiveOnlyChange?.(false)
   }
 
-  // Number of dimensions currently active — shown as the badge on the "+ Filter" button.
-  const activeFilterCount = [
-    (filters.users?.length ?? 0) > 0,
-    (filters.harnesses?.length ?? 0) > 0,
-    filters.presence !== undefined,
-    hasRepoFilter,
-    hasTagFilter,
-    hasProjects,
-    hasModelFilter,
-    (filters.teams?.length ?? 0) > 0,
-    (filters.machines?.length ?? 0) > 0,
-    Boolean(onActiveOnlyChange && activeOnly),
-  ].filter(Boolean).length
+  // Number of dimensions currently active — shown as the badge on the "+ Filter" button. THE ONE
+  // count: the Sessions workspace's collapsed Filtros trigger reads the same function, so the two
+  // badges can never drift apart from each other.
+  const activeFilterCount = countActiveFilters(filters, Boolean(onActiveOnlyChange && activeOnly))
 
   // Outside click closes the "+ Filter" menu and any open dimension picker together.
   useEffect(() => {

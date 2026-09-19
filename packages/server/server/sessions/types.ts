@@ -483,6 +483,15 @@ export interface SessionBackend {
    */
   sendKey(id: string, key: string): Promise<boolean>
   /**
+   * Deliver a whole clipboard PASTE as one atomic write — never decomposed into a `text` + `Enter`
+   * per line the way a typed chunk is. Uses tmux's own `set-buffer` + `paste-buffer -p` (bracketed
+   * paste), the same primitive a real terminal client uses when pasting into an attached pane, so a
+   * multi-line paste lands as one input the harness or shell treats as a paste rather than as a
+   * burst of submitted lines. `false` when the backend could not deliver it; never a throw, for the
+   * same reason as `sendTextRaw`.
+   */
+  sendPaste(id: string, text: string): Promise<boolean>
+  /**
    * Kill the session and report whether it is confirmed GONE afterwards. "Already gone" (the
    * session finished or was removed between `list` and this call) counts as success — the caller
    * asked for the outcome, not for one particular command to have run. A `false` means the backend

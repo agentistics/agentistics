@@ -8,7 +8,7 @@ import {
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs,
-  clearHistoryArgs,
+  clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
   showPrefixArgs, trimCapture,
   type TerminalProfile,
 } from './tmux-cli'
@@ -17,6 +17,7 @@ import { probeDependency } from './dependency-probe'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
 import { writeToPane } from './pane-writer'
+import { sanitizePasteText } from '@agentistics/core'
 import type {
   BackendInitialPrompt, BackendSession, BackendSpawn, SessionBackend, TerminalCapture,
 } from './types'
@@ -96,6 +97,17 @@ async function tmux(args: string[]): Promise<{ code: number; out: string; err: s
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+/**
+ * What `sendPaste` sends, and the text it sanitizes to — PURE, so the argv shape, the sanitizer,
+ * and the buffer deletion can all be proven (`backend-tmux.test.ts`) without spawning tmux or going
+ * through the pane's write lock. `sendPaste` below is the thin IO wrapper around this.
+ */
+export function pasteWriteArgs(id: string, text: string): { setArgs: string[]; pasteArgs: string[]; text: string } {
+  const name = pasteBufferName(id)
+  const safe = sanitizePasteText(text)
+  return { setArgs: setBufferArgs(name, safe), pasteArgs: pasteBufferArgs(id, name), text: safe }
+}
 
 /**
  * Type text and submit it, as two separate `send-keys` calls — UNDER THE PANE'S WRITE LOCK.
@@ -384,6 +396,25 @@ export const tmuxBackend: SessionBackend = {
         await tmux(clearHistoryArgs(id))
       }
       return ok
+    })
+  },
+
+  // LOCKED like every other write: a keystroke landing mid-paste is the same collision
+  // `pane-writer.ts` exists to prevent. `set-buffer` first, THEN `paste-buffer -d` — a failed
+  // set never pastes stale content from a previous buffer of the same name.
+  //
+  // `sanitizePasteText` runs AGAIN here, even though `input-protocol.ts` (`parseInputMessage`)
+  // already sanitized everything that reaches this call through the WS write channel. This is the
+  // actual PRIMITIVE that writes into a tmux buffer and pastes it into a live pane — the second
+  // boundary the C1 fix applies to, same reasoning as `redact.ts`'s two boundaries: the check that
+  // matters is the one at the place doing the dangerous thing, not only the one a caller is
+  // expected to have already made. A future caller of this backend that forgot to route through
+  // `input-protocol.ts` gets the same guarantee for free.
+  async sendPaste(id: string, text: string) {
+    return writeToPane(id, async () => {
+      const { setArgs, pasteArgs } = pasteWriteArgs(id, text)
+      if ((await tmux(setArgs)).code !== 0) return false
+      return (await tmux(pasteArgs)).code === 0
     })
   },
 

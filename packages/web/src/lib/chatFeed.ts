@@ -31,6 +31,7 @@
  */
 
 import { sessionScratch, type CachedChat } from './sessionScratch'
+import { setAttachmentsDir } from './attachmentUrl'
 
 /** Matches the fleet poll. The transcript only changes when a turn lands, so faster buys nothing. */
 export const FOREGROUND_POLL_MS = 3000
@@ -253,6 +254,10 @@ async function read(e: LiveEntry): Promise<void> {
     const next = JSON.parse(text) as CachedChat
     e.raw = text
     e.ended = next.live === false
+    // The gallery's `galleryFileUrl` needs the server's REAL attachments directory to route a
+    // `viewed` file correctly under a relocated `AGENTISTICS_DIR` — set here, before the listeners
+    // (which render the gallery from these very turns) are notified.
+    if (next.attachmentsDir) setAttachmentsDir(next.attachmentsDir)
     // Write through, so the NEXT visit starts where this one ended.
     sessionScratch.writeChat(e.key, next)
     for (const cb of [...e.listeners]) cb(next)

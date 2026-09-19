@@ -44,6 +44,32 @@ const KIND_COLOR: Record<ProjectOption['source'], string> = {
   folder: COLORS.muted,
   typed: COLORS.secondary,
 }
+
+/**
+ * The word next to a candidate — PURE, so it is testable without an `Ink` render.
+ *
+ * A folder that was merely FOUND on disk must not read like one you have worked in — the words are
+ * the only thing distinguishing them, since both are just a directory name on a row.
+ *
+ * `worktree` is checked FIRST, ahead of `source`: a linked worktree still carries `source: 'repo'`
+ * (it "has a `.git`", same as its main checkout — see `project-source.ts`), so without this a
+ * worktree row read "git repo" here, the exact confusion the web wizard's "Worktrees" tab exists to
+ * remove. A git SUBMODULE also carries `source: 'repo'` and `worktree: false` (its `.git` file's
+ * content names `.git/modules/`, not `.git/worktrees/` — see `dir-scan.ts`'s `classifyGitFile`), so
+ * it correctly keeps reading `wizSourceRepo` here, same as before this change.
+ */
+export function wizSourceWord(
+  o: Pick<ProjectOption, 'source' | 'worktree'>,
+  s: Pick<ControlStrings, 'wizSourceWorktree' | 'wizSourceCwd' | 'wizSourceTyped' | 'wizSourceHistory' | 'wizSourceRepo'>,
+): string {
+  if (o.worktree) return s.wizSourceWorktree
+  if (o.source === 'cwd') return s.wizSourceCwd
+  if (o.source === 'typed') return s.wizSourceTyped
+  if (o.source === 'history') return s.wizSourceHistory
+  if (o.source === 'repo') return s.wizSourceRepo
+  return ''
+}
+
 import { TextPrompt } from '../Prompt'
 import { TaskChoice } from '../TaskChoice'
 import { truncate } from '../../components/Primitives'
@@ -498,14 +524,7 @@ function ProjectSearch({ host, strings: s, width, height, isActive, onPick }: {
   // Label, hint, the field itself — and the table's header row.
   const page = Math.max(1, height - 4)
 
-  // A folder that was merely FOUND on disk must not read like one you have worked in — the words
-  // are the only thing distinguishing them, since both are just a directory name on a row.
-  const sourceWord = (o: ProjectOption): string =>
-    o.source === 'cwd' ? s.wizSourceCwd
-      : o.source === 'typed' ? s.wizSourceTyped
-      : o.source === 'history' ? s.wizSourceHistory
-      : o.source === 'repo' ? s.wizSourceRepo
-      : ''
+  const sourceWord = (o: ProjectOption): string => wizSourceWord(o, s)
 
   const table: ProjectRow[] = list.map(o => ({
     name: o.label, repo: o.repo ?? '', path: o.detail, why: sourceWord(o),

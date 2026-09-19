@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sessionTime } from '../../lib/sessionTime'
 import { asideCache, asideKey } from '../../lib/asideCache'
-import { BarChart3, ChevronRight, ListChecks, PanelRight, X } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, PanelRight, X } from 'lucide-react'
 import { fmt, fmtCost, type CostBasis, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { sessionStats, statReason } from '../../lib/sessionStats'
@@ -64,6 +64,22 @@ export interface SessionStatsMenuProps {
    * panel with a piece off the screen.
    */
   touch?: boolean
+  /**
+   * `'button'` (default) is the header's own bordered pill, unchanged. `'tab'` is the SAME visual
+   * language as the workspace strip's own "Filtros" tab (design item 4, screenshot 7) — a small
+   * pill hanging BELOW the strip rather than sitting IN it, reached from `App.tsx`'s
+   * `sessionMetricsBounds` wrapper. Only the TRIGGER changes shape; the dropdown card below it is
+   * untouched — same position, same content, same open/close behaviour — because the brief asks for
+   * the button to move, not for the card it opens to be rebuilt.
+   */
+  variant?: 'button' | 'tab'
+  /**
+   * The dropdown's own ceiling in `'tab'` mode — `metricsTabBounds(...).panelMaxWidth`
+   * (`lib/sessionsFiltersPanel.ts`), the room clear of BOTH asides. Ignored in `'button'` mode,
+   * where the card has always opened leftward from the header's own right edge with no neighbour
+   * to clear. Defaults to the card's ordinary 300px when not given.
+   */
+  panelMaxWidth?: number
   /**
    * The basis the DASHBOARD is on, which is where this card opens.
    *
@@ -114,7 +130,7 @@ export interface SessionStatsMenuProps {
 
 export function SessionStatsMenu({
   harness, sessionId, meta, lang, currency, brlRate, startedModel, startedEffort, touch = false,
-  costBasis = 'api', planFactor = null, onOpenFull, task, onOpenTask,
+  variant = 'button', panelMaxWidth, costBasis = 'api', planFactor = null, onOpenFull, task, onOpenTask,
 }: SessionStatsMenuProps) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
@@ -189,47 +205,44 @@ export function SessionStatsMenu({
       ? (pt ? `${label} não reporta isso` : `${label} does not report this`)
       : (pt ? 'ainda não registrado' : 'not recorded yet')
 
-  return (
-    <div ref={boxRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        aria-expanded={open}
-        aria-label={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
-        title={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-          height: touch ? 44 : 30, minWidth: touch ? 44 : 0, padding: touch ? '0 8px' : '0 10px',
-          borderRadius: 9, cursor: 'pointer', flexShrink: 0,
-          border: touch && !open ? 'none' : '1px solid ' + (open ? 'var(--anthropic-orange)' : 'var(--border-subtle)'),
-          background: open ? 'var(--anthropic-orange-dim)' : (touch ? 'transparent' : 'var(--bg-elevated)'),
-          color: open ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-          fontFamily: 'inherit', fontSize: 12,
-        }}
-      >
-        <BarChart3
-          size={touch ? 18 : 14}
-          {...(s.context && !open ? { color: contextTone(s.context.fraction) } : {})}
-        />
-        {/* The context percentage rides the BUTTON, because it is the one figure that changes what
-            you do next — a conversation near its window is one to finish rather than extend. It is
-            absent, not zero, when it cannot be known. Its OWN colour follows how full the window
-            is (`contextTone`, the same ramp the bar inside uses) rather than the button's open/
-            closed state — that state still wins while the menu is open, where the accent border
-            already says "this is active" and a red 96% fighting it for attention reads as a fault. */}
-        {s.context && (
-          <span style={{ fontWeight: 650, ...(open ? {} : { color: contextTone(s.context.fraction) }) }}>
-            {Math.floor(s.context.fraction * 100)}%
-          </span>
-        )}
-      </button>
+  const contextGlyph = (
+    <>
+      <BarChart3
+        size={touch ? 18 : (variant === 'tab' ? 12 : 14)}
+        {...(s.context && !open ? { color: contextTone(s.context.fraction) } : {})}
+      />
+      {/* The context percentage rides the BUTTON, because it is the one figure that changes what
+          you do next — a conversation near its window is one to finish rather than extend. It is
+          absent, not zero, when it cannot be known. Its OWN colour follows how full the window
+          is (`contextTone`, the same ramp the bar inside uses) rather than the button's open/
+          closed state — that state still wins while the menu is open, where the accent border
+          already says "this is active" and a red 96% fighting it for attention reads as a fault. */}
+      {s.context && (
+        <span style={{ fontWeight: 650, ...(open ? {} : { color: contextTone(s.context.fraction) }) }}>
+          {Math.floor(s.context.fraction * 100)}%
+        </span>
+      )}
+    </>
+  )
 
-      {open && (
-        <div style={{
-          position: 'absolute', top: touch ? 48 : 36, right: 0, zIndex: 60,
+  // THE DROPDOWN — computed ONCE, read by BOTH triggers below. Its CONTENT never changes with
+  // `variant` (design item 4 — "keeping its existing dropdown unchanged"); only its HORIZONTAL
+  // ANCHOR does, and only because the trigger itself moved. The `'button'` trigger sits at the
+  // header's own right edge, so the card opens LEFTWARD from it (`right: 0`) — the only direction
+  // with room. The `'tab'` trigger sits right after "Filtros", a short distance from the LEFT
+  // aside, so the same leftward card would swallow that aside whole; it opens RIGHTWARD instead
+  // (`left: 0`), toward the session's own content, clamped to `panelMaxWidth` — the room
+  // `metricsTabBounds` (`lib/sessionsFiltersPanel.ts`) already measured clear of BOTH asides.
+  const panel = open && (
+      <div style={{
+          position: 'absolute', top: touch ? 48 : 36, zIndex: 60,
+          ...(variant === 'tab' ? { left: 0 } : { right: 0 }),
           // On a phone it is measured from the VIEWPORT, not given a fixed width: this control sits
           // near the right edge of a 390px bar, so a 300px panel anchored to it would hang a piece
           // of itself off the screen.
-          ...(touch ? { width: 'min(300px, calc(100vw - 24px))' } : { width: 300 }),
+          ...(touch
+            ? { width: 'min(300px, calc(100vw - 24px))' }
+            : { width: variant === 'tab' ? (panelMaxWidth ?? 300) : 300 }),
           padding: 12, borderRadius: 12,
           background: 'var(--bg-elevated)', border: '1px solid var(--border)',
           boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
@@ -474,7 +487,55 @@ export function SessionStatsMenu({
             </button>
           )}
         </div>
-      )}
+  )
+
+  if (variant === 'tab') {
+    // THE SAME PILL THE "FILTROS" TAB WEARS (design item 4, screenshot 7) — hanging BELOW the
+    // workspace strip rather than sitting IN it, so the header carries only the title and the
+    // right-slot switcher.
+    return (
+      <div ref={boxRef} style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          aria-label={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
+          title={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
+            border: '1px solid var(--border)', borderTop: 'none',
+            borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
+            color: open ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+            cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
+          }}
+        >
+          {contextGlyph}
+          {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
+        {panel}
+      </div>
+    )
+  }
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-label={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
+        title={pt ? 'Métricas desta sessão' : 'This session’s metrics'}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+          height: touch ? 44 : 30, minWidth: touch ? 44 : 0, padding: touch ? '0 8px' : '0 10px',
+          borderRadius: 9, cursor: 'pointer', flexShrink: 0,
+          border: touch && !open ? 'none' : '1px solid ' + (open ? 'var(--anthropic-orange)' : 'var(--border-subtle)'),
+          background: open ? 'var(--anthropic-orange-dim)' : (touch ? 'transparent' : 'var(--bg-elevated)'),
+          color: open ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+          fontFamily: 'inherit', fontSize: 12,
+        }}
+      >
+        {contextGlyph}
+      </button>
+      {panel}
     </div>
   )
 }

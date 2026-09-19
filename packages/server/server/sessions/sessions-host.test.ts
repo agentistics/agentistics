@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import type { HarnessId } from '@agentistics/core'
 import type { HarnessProcess } from '../live-sessions'
 import type { BackendSession, ManagedSession, SessionBackend } from './types'
-import { createSessionsPoller } from './sessions-host'
+import { createSessionsPoller, linkProcessConversation } from './sessions-host'
 
 const NOW = 1_786_600_000_000
 
@@ -24,6 +25,7 @@ function fakeBackend(o: {
   frames?: Record<string, string[]>
   unavailable?: string
   onCapture?: (id: string) => void
+  panePids?: Record<string, number>
 }): SessionBackend {
   return {
     id: 'tmux',
@@ -41,6 +43,8 @@ function fakeBackend(o: {
     async sendText() { return true },
     async sendTextRaw() { return true },
     async sendKey() { return true },
+    async sendPaste() { return true },
+    ...(o.panePids ? { async listPanePids() { return new Map(Object.entries(o.panePids!)) } } : {}),
   }
 }
 
@@ -523,5 +527,259 @@ describe('first-sighting claims', () => {
     })
     await p.poll()
     expect(calls).toEqual([])
+  })
+})
+
+describe('linkProcessConversation', () => {
+  const args = (over: Partial<{
+    id: string
+    harness: HarnessId
+    pid: number
+    knownLog: string | null
+    readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+    recordConversation: (id: string, conversationId: string, link: 'assigned') => Promise<unknown>
+  }> = {}) => ({
+    id: 'm1',
+    harness: 'antigravity' as HarnessId,
+    pid: 4242,
+    readProcessConversation: async () => 'conv-1',
+    recordConversation: async () => undefined,
+    ...over,
+  })
+
+  it('records the id the process log names, as an exact (assigned) link', async () => {
+    const calls: Array<[string, string, string]> = []
+    const linked = await linkProcessConversation(args({
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]); return undefined },
+    }))
+    expect(linked).toBe(true)
+    expect(calls).toEqual([['m1', 'conv-1', 'assigned']])
+  })
+
+  it('writes nothing for a harness with no process-log source', async () => {
+    const calls: unknown[] = []
+    const linked = await linkProcessConversation(args({
+      harness: 'claude',
+      recordConversation: async (...a) => { calls.push(a) },
+    }))
+    expect(linked).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when the log names no conversation yet', async () => {
+    const calls: unknown[] = []
+    const linked = await linkProcessConversation(args({
+      readProcessConversation: async () => null,
+      recordConversation: async (...a) => { calls.push(a) },
+    }))
+    expect(linked).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when the log read throws', async () => {
+    const calls: unknown[] = []
+    const linked = await linkProcessConversation(args({
+      readProcessConversation: async () => { throw new Error('/proc gone') },
+      recordConversation: async (...a) => { calls.push(a) },
+    }))
+    expect(linked).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  /**
+   * `patchSession` runs inside the registry's own cross-process file lock and can genuinely
+   * reject — this is the exact race `registry.ts` documents at length. A `true` return here is
+   * TERMINAL in `linkProcessConversationSoon`'s retry loop (`if (linked) return`), so reporting
+   * success on a failed write would silently spend the session's one dedicated retry window on
+   * nothing, falling back entirely to the ordinary 5s poll.
+   */
+  it('reports FALSE, not true, when the registry write itself fails', async () => {
+    const linked = await linkProcessConversation(args({
+      recordConversation: async () => { throw new Error('registry write lock timed out') },
+    }))
+    expect(linked).toBe(false)
+  })
+
+  it('trusts a pre-resolved log instead of asking `readProcessConversation` to resolve it again', async () => {
+    const seen: Array<string | null | undefined> = []
+    await linkProcessConversation(args({
+      knownLog: '/some/cli-20260917_120000.log',
+      readProcessConversation: async (_h, _pid, knownLog) => { seen.push(knownLog); return 'conv-1' },
+    }))
+    expect(seen).toEqual(['/some/cli-20260917_120000.log'])
+  })
+})
+
+describe('poll: process-log conversation link', () => {
+  it('records the exact link once a row has a pid and a process-owned conversation', async () => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1')],
+        frames: { m1: ['x'] },
+        panePids: { m1: 777 },
+      }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      readProcessConversation: async (_harness, pid) => (pid === 777 ? 'agy-conv' : null),
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([['m1', 'agy-conv', 'assigned']])
+  })
+
+  it('never asks for a row that already carries a link', async () => {
+    const reads: number[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1')],
+        frames: { m1: ['x'] },
+        panePids: { m1: 777 },
+      }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity', conversationId: 'already' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      readProcessConversation: async (_harness, pid) => { reads.push(pid); return 'agy-conv' },
+      recordConversation: async () => undefined,
+    })
+    await p.poll()
+    expect(reads).toEqual([])
+  })
+
+  it('writes nothing when the pane pid is not yet known to the backend', async () => {
+    // The exact reproduction: a row spawned this instant, before `tmux list-panes` has anything to
+    // say about it. Absence of a pid must never be treated as "nothing to link" forever — see
+    // `linkProcessConversationSoon` in cli-start.ts, which retries this on its own schedule.
+    const calls: unknown[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['x'] } }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      readProcessConversation: async () => 'agy-conv',
+      recordConversation: async (...a) => { calls.push(a) },
+    })
+    await p.poll()
+    expect(calls).toEqual([])
+  })
+})
+
+describe('poll: the same-second log collision', () => {
+  /**
+   * THE REPRODUCED BUG. agy names its log by SECOND, so two processes started together open the
+   * SAME file — measured live 2026-09-17, and the file's content is not reliably preserved for
+   * both writers (of two processes that each completed a turn, only one `Created conversation`
+   * line survived at all). So the two rows here must NEITHER be linked, even though
+   * `readProcessConversation` is (deliberately, to prove the guard and not the read, is what
+   * refuses) willing to answer for both.
+   */
+  it('links NEITHER of two rows whose pids resolve to the identical log', async () => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1'), backendSession('m2')],
+        frames: { m1: ['x'], m2: ['x'] },
+        panePids: { m1: 111, m2: 222 },
+      }),
+      readRegistry: async () => [
+        managed('m1', { harness: 'antigravity' }),
+        managed('m2', { harness: 'antigravity' }),
+      ],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      resolveProcessLog: async () => 'cli-20260917_203310.log', // the SAME log for both pids
+      readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([])
+  })
+
+  it('links a row normally when its pid is the ONLY one on its log', async () => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1'), backendSession('m2')],
+        frames: { m1: ['x'], m2: ['x'] },
+        panePids: { m1: 111, m2: 222 },
+      }),
+      readRegistry: async () => [
+        managed('m1', { harness: 'antigravity' }),
+        managed('m2', { harness: 'antigravity' }),
+      ],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      resolveProcessLog: async (_h, pid) => `cli-log-for-${pid}.log`, // DIFFERENT logs
+      readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    expect(calls.sort()).toEqual([['m1', 'conv-of-111', 'assigned'], ['m2', 'conv-of-222', 'assigned']])
+  })
+
+  /**
+   * The collision must be checked machine-wide, not only among OUR unlinked rows — the process
+   * sharing the log need not be one agentop started or even know about as a managed row. Modeled
+   * here via `scanProcesses`, which the poller already reads for reasons unrelated to this row.
+   */
+  it('refuses a row whose log is shared with a LIVE process agentop never registered', async () => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1')],
+        frames: { m1: ['x'] },
+        panePids: { m1: 111 },
+      }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
+      // An UNMANAGED antigravity process (pid 999) this machine can see but has no registry row for.
+      scanProcesses: async () => ({
+        procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
+      }),
+      now: () => NOW,
+      resolveProcessLog: async () => 'cli-20260917_203310.log', // same log as the unmanaged one
+      readProcessConversation: async () => 'agy-conv',
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([])
+  })
+
+  it('recovers on the NEXT poll once the collision clears (one process ended)', async () => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1')],
+        frames: { m1: ['x'] },
+        panePids: { m1: 111 },
+      }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
+      scanProcesses: async () => ({
+        procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
+      }),
+      now: () => NOW,
+      resolveProcessLog: async (_h, pid) => (pid === 999 ? 'cli-20260917_203310.log' : 'cli-20260917_203310.log'),
+      readProcessConversation: async () => 'agy-conv',
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([]) // still colliding
+
+    // The other process is gone: `scanProcesses` no longer reports pid 999.
+    const p2 = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1')],
+        frames: { m1: ['x'] },
+        panePids: { m1: 111 },
+      }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      resolveProcessLog: async () => 'cli-20260917_203310.log',
+      readProcessConversation: async () => 'agy-conv',
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p2.poll()
+    expect(calls).toEqual([['m1', 'agy-conv', 'assigned']])
   })
 })

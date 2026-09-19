@@ -34,8 +34,26 @@ interface Props {
 }
 
 
-/** Current-month spend using global modelUsage proportions, same method as useDerivedStats. */
-function computeMonthCost(statsCache: StatsCache, monthStart: Date, now: Date): number {
+/**
+ * Current-month spend using global modelUsage proportions, same method as useDerivedStats.
+ *
+ * The cache-write portion is TTL-aware WHEN `g` (`statsCache.modelUsage[modelId]`) states the
+ * split — `g` is `ModelUsage`-shaped, so it CAN carry `cacheCreation1hInputTokens`/
+ * `cacheCreation5mInputTokens` (see that field's own doc). Apportioned by the SAME `tokens/gTotal`
+ * share every other counter here already uses, so a 1h/5m split found this way stays consistent
+ * with how the day's input/output/cacheRead shares are derived.
+ *
+ * In practice this stays the "genuinely cannot know" fallback today: `statsCache.modelUsage` is
+ * Claude's own `stats-cache.json` aggregate (recent days added by this server's
+ * `supplementStatsCache`, which also has no TTL granularity to accumulate — see `data.ts`), and
+ * neither source has ever written the two split fields onto it. So `has1hSplit` is false for every
+ * real row today and this prices the whole apportioned cache-write volume at the 5-minute rate,
+ * exactly as before this field existed — the conservative reading, not a guess, same as `calcCost`
+ * falls back to for a record with no breakdown. The branch exists so a future aggregate-level split
+ * (the natural follow-up the round-2 review names) is priced correctly the day it lands, without
+ * anyone having to remember this function.
+ */
+export function computeMonthCost(statsCache: StatsCache, monthStart: Date, now: Date): number {
   const globalModelUsage = statsCache.modelUsage ?? {}
   let total = 0
   for (const day of statsCache.dailyModelTokens ?? []) {
@@ -52,7 +70,14 @@ function computeMonthCost(statsCache: StatsCache, monthStart: Date, now: Date): 
         total += (tokens * g.inputTokens / gTotal / 1_000_000) * price.input
         total += (tokens * g.outputTokens / gTotal / 1_000_000) * price.output
         total += (tokens * g.cacheReadInputTokens / gTotal / 1_000_000) * price.cacheRead
-        total += (tokens * g.cacheCreationInputTokens / gTotal / 1_000_000) * price.cacheWrite
+        const has1hSplit = g.cacheCreation1hInputTokens !== undefined
+          && g.cacheCreation5mInputTokens !== undefined
+        if (has1hSplit) {
+          total += (tokens * (g.cacheCreation1hInputTokens ?? 0) / gTotal / 1_000_000) * price.cacheWrite1h
+          total += (tokens * (g.cacheCreation5mInputTokens ?? 0) / gTotal / 1_000_000) * price.cacheWrite
+        } else {
+          total += (tokens * g.cacheCreationInputTokens / gTotal / 1_000_000) * price.cacheWrite
+        }
       } else {
         // Fallback: 70% input / 30% output at Sonnet rates
         total += (tokens * 0.7 / 1_000_000) * 3 + (tokens * 0.3 / 1_000_000) * 15

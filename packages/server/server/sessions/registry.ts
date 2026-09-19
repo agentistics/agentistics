@@ -340,6 +340,25 @@ export const touchSessions = (
   atMs: number,
 ): Promise<number> => defaultRegistry.touch(ids, atMs)
 
+/**
+ * The ONE way a kill ends a session's registry row. It marks the row ended rather than deleting
+ * it: `task-source.ts`'s `loadTaskWorld` reads task/subtask links only from registry rows, so
+ * `removeSession` on a filed session silently erased it — and its cost — from its task, and a
+ * reopen had to recreate it from scratch. Same rule reopen already follows (a retired predecessor
+ * stays listed, never removed) — a session you end is still a thing that happened, and the row
+ * must go on resolving in the task board and reconciling to `exited` with Reopen offered.
+ *
+ * `removeSession` is only the FALLBACK, for the rare case the patch itself cannot be written (a
+ * store that could not be read or locked) — a stray row is recoverable, a silently vanished one
+ * is not.
+ */
+export async function retireSession(
+  id: string,
+  registry: SessionRegistry = defaultRegistry,
+): Promise<void> {
+  if (!(await registry.patch(id, { endedAt: new Date().toISOString() }))) await registry.remove(id)
+}
+
 export async function retireFallenSessions(
   o: {
     newSessionId?: string

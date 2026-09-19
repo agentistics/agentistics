@@ -187,8 +187,25 @@ describe('handleSession', () => {
     // The VALUE is deliberately not asserted: it is this machine's own switch, so a test that
     // pinned it passed on a machine with the shell off and FAILED on one with it on — which is
     // what happened here the day the switch was flipped. What this route owes is the FIELD, as a
-    // boolean, separate from the capability. The rule it carries ("absent reads as OFF") is a
-    // property of `shellAllowed` and is pinned in `sessions/shell-gate.test.ts`, where it depends
+    // boolean, separate from the capability. The rule it carries — an absent preference now reads
+    // as ON (owner decision, 2026-09-14), narrowed only by `capable` and by an explicit `false` — is
+    // a property of `shellAllowed` and is pinned in `sessions/shell-gate.test.ts`, where it depends
     // on nothing but its arguments.
+  })
+
+  it('reports editorEnabled the same way it reports shellEnabled', async () => {
+    const res = await handleSession(new Request('http://x/api/team/session'))
+    const body = await res.json() as Record<string, unknown>
+    expect(typeof body['editorEnabled']).toBe('boolean')
+  })
+
+  it('reports shellOverride as its own boolean, apart from the combined shellEnabled', async () => {
+    // Settings needs to tell "ligado" (the ordinary preference) from "ligado até reiniciar o
+    // servidor" (the temporary override) — two different sentences over what would otherwise be
+    // one boolean. `shell-override-store.ts` resets to `false` on every fresh process, so this is
+    // the one value this route CAN pin without depending on this machine's own preferences file.
+    const body = (await (await handleSession(new Request('http://localhost/api/team/session'))).json()) as
+      Record<string, unknown>
+    expect(body['shellOverride']).toBe(false)
   })
 })

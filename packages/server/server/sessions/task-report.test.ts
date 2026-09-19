@@ -9,7 +9,9 @@
 
 import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
-import { buildTaskDetail, buildTaskList, reposOfRows, subtaskViews } from './task-report'
+import {
+  buildTaskDetail, buildTaskList, groupVisibility, reposOfRows, subtaskViews,
+} from './task-report'
 import type { Subtask, Task } from './task-model'
 import type { ManagedSession } from './types'
 
@@ -336,106 +338,220 @@ describe('subtaskViews — the three shapes, no session counted twice', () => {
     ]
     const views = subtaskViews(task(), subs, rows, metasAll, costOf)
     expect(views).toHaveLength(2)
-    expect(views[0]).toEqual({ id: 's1', rollup: expect.objectContaining({ sessionsUsed: 1 }) })
+    expect(views[0]).toEqual({
+      id: 's1', rollup: expect.objectContaining({ sessionsUsed: 1 }), stats: expect.anything(),
+    })
     expect(views[1]!.id).toBeNull()
   })
 
-  describe('grouped subtasks — one bucket per group, never per member', () => {
-    // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.3: two or more subtasks
-    // sharing a `groupId` must collapse into ONE SubtaskView, keyed by the group id, whose rollup
-    // is the union of rows filed under ANY member — never one bucket per member, which would
-    // multiply a shared session's cost by the group's size.
+  describe('subtask groups — a hierarchy level, never a shared bucket (§F)', () => {
+    // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §F SUPERSEDES §B.2–§B.5: a group
+    // is a real hierarchy level (`Subtask.isGroup`), not a label two subtasks share. A MEMBER
+    // (`Subtask.parentGroupId` set) can never hold a session of its own (refused at filing time,
+    // `subtask_in_group` — `task-attach.ts`), so it gets NO bucket of its own at all — not an
+    // always-empty one — and a group's own bucket is the sessions filed DIRECTLY on the group's own
+    // id, never a union of its members' (there is nothing to union: a member is never the target of
+    // a filing to begin with).
 
-    it('two subtasks sharing a groupId collapse into one bucket, summing sessions filed under either member exactly once', () => {
+    it("a group's own bucket is the sessions filed directly on the GROUP's own id", () => {
       const subs = [
-        subtask({ id: 's1', groupId: 'g1' }),
-        subtask({ id: 's2', groupId: 'g1' }),
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 's1', parentGroupId: 'g1' }),
+        subtask({ id: 's2', parentGroupId: 'g1' }),
       ]
-      const rows = [
-        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
-        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
-      ]
+      const rows = [row({ id: 'r1', conversationId: 'c1', subtaskId: 'g1' })]
       const views = subtaskViews(task(), subs, rows, metasAll, costOf)
 
-      // ONE view for the group, never two.
       expect(views).toHaveLength(1)
       expect(views[0]!.id).toBe('g1')
-      // Both sessions counted, once each — not doubled by appearing under two subtasks' totals.
-      expect(views[0]!.rollup.sessionsUsed).toBe(2)
-      expect(views[0]!.rollup.costUSD).toBe(8) // c1 (5) + c2 (3), summed once
-
-      // Same session set read through buildTaskDetail agrees with the task's own total — the
-      // group's bucket is a breakdown of the total, never a second, inflated sum beside it.
-      const detail = detailOf(rows, subs)
-      expect(detail.subtaskRollups).toHaveLength(1)
-      expect(detail.rollup.costUSD).toBe(8)
+      expect(views[0]!.rollup.sessionsUsed).toBe(1)
+      expect(views[0]!.rollup.costUSD).toBe(5) // c1
     })
 
-    it('a session filed under either group member is counted in the SAME bucket, not duplicated across it', () => {
+    it('a group MEMBER gets NO bucket of its own at all — not an always-empty one', () => {
       const subs = [
-        subtask({ id: 's1', groupId: 'g1' }),
-        subtask({ id: 's2', groupId: 'g1' }),
-        subtask({ id: 's3', groupId: 'g1' }),
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 's1', parentGroupId: 'g1' }),
       ]
-      const rows = [
-        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
-        row({ id: 'r2', conversationId: 'c2', subtaskId: 's1' }), // second session, same member
-        row({ id: 'r3', conversationId: 'c3', subtaskId: 's3' }), // a different member
-      ]
-      const detail = detailOf(rows, subs)
+      const views = subtaskViews(task(), subs, [], metasAll, costOf)
 
-      expect(detail.subtaskRollups).toHaveLength(1)
-      expect(detail.subtaskRollups[0]!.id).toBe('g1')
-      expect(detail.subtaskRollups[0]!.rollup.sessionsUsed).toBe(3)
-      // The group's total matches the task's own total exactly — no inflation from the group
-      // spanning three members while only two of them carry a session.
-      expect(detail.subtaskRollups[0]!.rollup.costUSD).toBe(detail.rollup.costUSD)
-      expect(detail.rollup.costUSD).toBe(10) // c1 (5) + c2 (3) + c3 (2)
+      // Only the group appears — the member is absent entirely, never present with a zeroed rollup.
+      expect(views).toHaveLength(1)
+      expect(views[0]!.id).toBe('g1')
+      expect(views.some(v => v.id === 's1')).toBe(false)
     })
 
-    it('subtasks with no groupId keep exactly today\'s behaviour — one bucket each, unaffected by a grouped sibling', () => {
+    it('a stray row filed under a member (which the write path refuses) is not folded into the group bucket either — `subtaskViews` reads only rows filed on the GROUP\'s own id', () => {
       const subs = [
-        subtask({ id: 's1' }), // ungrouped
-        subtask({ id: 's2' }), // ungrouped
-        subtask({ id: 's3', groupId: 'g1' }),
-        subtask({ id: 's4', groupId: 'g1' }),
-      ]
-      const rows = [
-        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
-        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
-        row({ id: 'r3', conversationId: 'c3', subtaskId: 's3' }),
-        row({ id: 'r4', conversationId: 'c4', subtaskId: 's4' }),
-      ]
-      const views = subtaskViews(task(), subs, rows, metasAll, costOf)
-
-      // Four subtasks, but only three buckets: s1 and s2 stay independent (a group of one each),
-      // s3+s4 collapse into a single 'g1' bucket.
-      expect(views).toHaveLength(3)
-      const byId = new Map(views.map(v => [v.id, v]))
-      expect([...byId.keys()].sort()).toEqual(['g1', 's1', 's2'].sort())
-
-      expect(byId.get('s1')!.rollup.sessionsUsed).toBe(1)
-      expect(byId.get('s1')!.rollup.costUSD).toBe(5) // c1
-      expect(byId.get('s2')!.rollup.sessionsUsed).toBe(1)
-      expect(byId.get('s2')!.rollup.costUSD).toBe(3) // c2
-      expect(byId.get('g1')!.rollup.sessionsUsed).toBe(2)
-      expect(byId.get('g1')!.rollup.costUSD).toBe(9) // c3 (2) + c4 (7)
-    })
-
-    it('a grouped subtask with no sessions of its own still contributes zero, not a missing bucket, when a sibling has sessions', () => {
-      // The group as a whole is measured, not each member separately — a member with nothing
-      // filed under it directly must not create a second, empty view beside the group's own.
-      const subs = [
-        subtask({ id: 's1', groupId: 'g1' }),
-        subtask({ id: 's2', groupId: 'g1' }),
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 's1', parentGroupId: 'g1' }),
       ]
       const rows = [row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' })]
       const views = subtaskViews(task(), subs, rows, metasAll, costOf)
 
       expect(views).toHaveLength(1)
       expect(views[0]!.id).toBe('g1')
-      expect(views[0]!.rollup.sessionsUsed).toBe(1)
-      expect(views[0]!.rollup.costUSD).toBe(5)
+      expect(views[0]!.rollup.sessionsUsed).toBe(0)
+    })
+
+    it('a loose subtask (no isGroup, no parentGroupId) is completely unaffected, beside a group', () => {
+      const subs = [
+        subtask({ id: 's1' }), // loose
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 's2', parentGroupId: 'g1' }),
+      ]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 'g1' }),
+      ]
+      const detail = detailOf(rows, subs)
+
+      expect(detail.subtaskRollups).toHaveLength(2)
+      const byId = new Map(detail.subtaskRollups.map(v => [v.id, v]))
+      expect([...byId.keys()].sort()).toEqual(['g1', 's1'].sort())
+      expect(byId.get('s1')!.rollup.sessionsUsed).toBe(1)
+      expect(byId.get('s1')!.rollup.costUSD).toBe(5) // c1
+      expect(byId.get('g1')!.rollup.sessionsUsed).toBe(1)
+      expect(byId.get('g1')!.rollup.costUSD).toBe(3) // c2
+      // The task's own total still closes over everything, unaffected by the member's exclusion.
+      expect(detail.rollup.costUSD).toBe(8)
+    })
+
+    it("a group's own progress is computed from its MEMBERS' status, round DOWN, and is absent for a loose subtask", () => {
+      const subs = [
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 'm1', parentGroupId: 'g1', status: 'done', done: true }),
+        subtask({ id: 'm2', parentGroupId: 'g1', status: 'todo', done: false }),
+        subtask({ id: 'm3', parentGroupId: 'g1', status: 'todo', done: false }),
+        subtask({ id: 's1' }), // loose, unaffected
+      ]
+      const views = subtaskViews(task(), subs, [], metasAll, costOf)
+      const group = views.find(v => v.id === 'g1')!
+      const loose = views.find(v => v.id === 's1')!
+
+      expect(group.groupProgress).toEqual({ done: 1, total: 3, percent: 33, complete: false })
+      expect(loose.groupProgress).toBeUndefined()
+    })
+
+    it('a group with no members yet draws no progress bar — "nobody joined it" is not 0%', () => {
+      const subs = [subtask({ id: 'g1', isGroup: true })]
+      const views = subtaskViews(task(), subs, [], metasAll, costOf)
+      expect(views[0]!.groupProgress).toEqual({ done: 0, total: 0, percent: null, complete: false })
+    })
+  })
+
+  describe('groupVisibility — downward-only from where a session is filed (§F.2)', () => {
+    it('a group reveals itself and every one of its members', () => {
+      const subs = [
+        subtask({ id: 'g1', isGroup: true }),
+        subtask({ id: 's1', parentGroupId: 'g1' }),
+        subtask({ id: 's2', parentGroupId: 'g1' }),
+        subtask({ id: 's3' }), // a loose sibling — never visible from the group
+      ]
+      expect([...groupVisibility('g1', subs)].sort()).toEqual(['g1', 's1', 's2'].sort())
+    })
+
+    it('names nothing for an id that is not an actual group', () => {
+      const subs = [subtask({ id: 's1' })] // a loose subtask, not a group
+      expect(groupVisibility('s1', subs)).toEqual([])
+      expect(groupVisibility('nope', subs)).toEqual([])
+    })
+
+    it('a group with no members yet reveals only itself', () => {
+      const subs = [subtask({ id: 'g1', isGroup: true })]
+      expect(groupVisibility('g1', subs)).toEqual(['g1'])
+    })
+  })
+
+  /**
+   * `SubtaskView.stats` — the same evidence numbers `TaskDetail.stats` carries for the whole
+   * delivery, re-partitioned per bucket. See §C.5 of
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md and `scopedTaskStats`'s own doc
+   * comment in `task-stats.ts`.
+   */
+  describe('subtaskViews — stats, the same partition applied to the evidence numbers', () => {
+    const statsMeta = (id: string, over: Partial<SessionMeta> = {}) =>
+      meta({ session_id: id, files_modified: 0, lines_added: 0, lines_removed: 0, git_commits: 0, ...over })
+
+    it('a bucket with no rows filed under it gets stats: null, never an all-null block', () => {
+      const subs = [subtask({ id: 's1' }), subtask({ id: 's2' })]
+      const rows = [row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' })]
+      const views = subtaskViews(task(), subs, rows, metasAll, costOf)
+      expect(views.find(v => v.id === 's2')!.stats).toBeNull()
+      expect(views.find(v => v.id === 's1')!.stats).not.toBeNull()
+    })
+
+    it('each subtask bucket carries only its own rows\' evidence numbers, never the whole task\'s', () => {
+      const subs = [subtask({ id: 's1' }), subtask({ id: 's2' })]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
+      ]
+      const metas = metasOf(
+        statsMeta('c1', { files_modified: 3, lines_added: 20, lines_removed: 5, git_commits: 1 }),
+        statsMeta('c2', { files_modified: 99, lines_added: 999, lines_removed: 999, git_commits: 9 }),
+      )
+      const views = subtaskViews(task(), subs, rows, metas, costOf)
+      expect(views.find(v => v.id === 's1')!.stats!.filesModified).toBe(3)
+      expect(views.find(v => v.id === 's2')!.stats!.filesModified).toBe(99)
+    })
+
+    it('the direct branch\'s stats block covers only the rows filed on the delivery itself', () => {
+      const subs = [subtask({ id: 's1' })]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1' }), // direct
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's1' }),
+      ]
+      const metas = metasOf(
+        statsMeta('c1', { files_modified: 3 }),
+        statsMeta('c2', { files_modified: 99 }),
+      )
+      const views = subtaskViews(task(), subs, rows, metas, costOf)
+      expect(views.find(v => v.id === null)!.stats!.filesModified).toBe(3)
+    })
+
+    it('a legacy `groupId` no longer buckets anything — §F supersedes §B, so two subtasks that still carry the same `groupId` get their OWN separate stats blocks, never a merged one', () => {
+      // §B's shared-bucket model keyed on `groupId`; §F replaces it with `isGroup`/`parentGroupId`
+      // and `subtaskViews` no longer reads `groupId` at all (see the field's own doc comment in
+      // `task-model.ts`). `groupId` is kept only as an inert, still-writable column for the
+      // already-shipped §B-era UI to keep compiling — it must never resurrect the old union-of-
+      // members behaviour here.
+      const subs = [
+        subtask({ id: 's1', groupId: 'g1' }),
+        subtask({ id: 's2', groupId: 'g1' }),
+      ]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's2' }),
+      ]
+      const metas = metasOf(
+        statsMeta('c1', { files_modified: 3, lines_added: 20, lines_removed: 5, git_commits: 1 }),
+        statsMeta('c2', { files_modified: 7, lines_added: 4, lines_removed: 1, git_commits: 2 }),
+      )
+      const views = subtaskViews(task(), subs, rows, metas, costOf)
+      expect(views).toHaveLength(2)
+      expect(views.find(v => v.id === 's1')!.stats!.filesModified).toBe(3)
+      expect(views.find(v => v.id === 's2')!.stats!.filesModified).toBe(7)
+    })
+
+    it('the whole task\'s stats equal the sum of every bucket\'s (subtasks + the direct branch)', () => {
+      const subs = [subtask({ id: 's1' }), subtask({ id: 's2' })]
+      const rows = [
+        row({ id: 'r1', conversationId: 'c1' }), // direct
+        row({ id: 'r2', conversationId: 'c2', subtaskId: 's1' }),
+        row({ id: 'r3', conversationId: 'c3', subtaskId: 's2' }),
+      ]
+      const metas = metasOf(
+        statsMeta('c1', { files_modified: 5 }),
+        statsMeta('c2', { files_modified: 7 }),
+        statsMeta('c3', { files_modified: 11 }),
+      )
+      const detail = buildTaskDetail({
+        task: task(), attempts: [], rows, metas, costOf, comments: [], subtasks: subs, files: [],
+      })
+      const sum = detail.subtaskRollups.reduce((a, v) => a + (v.stats?.filesModified ?? 0), 0)
+      expect(sum).toBe(23) // 5 + 7 + 11
+      expect(detail.stats.filesModified).toBe(23)
     })
   })
 })

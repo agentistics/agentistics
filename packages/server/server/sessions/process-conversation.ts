@@ -48,20 +48,42 @@ async function openFiles(pid: number): Promise<string[]> {
 }
 
 /**
- * The conversation the process at `pid` is writing, or `null` when nothing here can say.
+ * Which log the process at `pid` holds open for this harness, or `null` when nothing here can say.
  *
- * `null` covers every distinguishable failure on purpose: this answer feeds
- * `recordConversation`, which writes a link that is then treated as exact everywhere, so the only
- * two outcomes worth having are a conversation somebody can point at and no answer at all.
+ * Split out from `readProcessConversation` so a caller can resolve MANY pids' logs FIRST — to run
+ * `agyLogCollisions` (`agy-conversation.ts`) — before reading any of their content. That check has
+ * to happen before the read: once two processes are writing into the SAME file, nothing in it can
+ * be safely attributed to either of them, so there is no "read first, decide after" that is safe.
  */
-export async function readProcessConversation(
+export async function resolveProcessLog(
   harness: HarnessId,
   pid: number,
 ): Promise<string | null> {
   const source = HARNESS_PROCESS_LOGS[harness]
   if (!source) return null
+  return source.logFromFds(await openFiles(pid))
+}
 
-  const log = source.logFromFds(await openFiles(pid))
+/**
+ * The conversation the process at `pid` is writing, or `null` when nothing here can say.
+ *
+ * `null` covers every distinguishable failure on purpose: this answer feeds
+ * `recordConversation`, which writes a link that is then treated as exact everywhere, so the only
+ * two outcomes worth having are a conversation somebody can point at and no answer at all.
+ *
+ * `knownLog`, when given, is trusted over resolving fresh — a caller that already ran the
+ * collision check above has already paid for this pid's `/proc/<pid>/fd` sweep, and asking again
+ * on a fleet with a live agy process would sweep it twice every poll for no reason.
+ */
+export async function readProcessConversation(
+  harness: HarnessId,
+  pid: number,
+  knownLog?: string | null,
+): Promise<string | null> {
+  const source = HARNESS_PROCESS_LOGS[harness]
+  if (!source) return null
+
+  const log = knownLog !== undefined ? knownLog : await resolveProcessLog(harness, pid)
   if (!log) return null
 
   try {

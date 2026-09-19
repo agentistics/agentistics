@@ -363,6 +363,21 @@ html.ag-viewport-locked > body {
   .ag-tap-icon::after { left: calc(0px - var(--ag-tap-grow)); right: calc(0px - var(--ag-tap-grow)); }
 }
 
+/* --- .ag-tree-row-menu: the tree row's "⋯" button, revealed by the row around it -----------------
+   Hidden by default on a mouse-driven layout — a `⋯` painted on every row of a long tree is more
+   noise than the rows it sits beside — and shown while the ROW (not the button itself) is hovered
+   or holds keyboard focus, so tabbing onto a row reveals its own menu button exactly as hovering it
+   would. On a phone there is no hover to reveal anything with, so the mobile rule below makes it
+   unconditionally visible — the design's own "a 44px ⋯ on every row" on touch. */
+.ag-tree-row-menu { opacity: 0; }
+.ag-tree-row:hover .ag-tree-row-menu,
+.ag-tree-row:focus-within .ag-tree-row-menu {
+  opacity: 1;
+}
+@media (max-width: 767px) {
+  .ag-tree-row-menu { opacity: 1; }
+}
+
 /* ── The focus ring ──────────────────────────────────────────────────────────
    NOTHING IN THIS APP FOCUSES WHITE. Asked for directly, and the browser is what does it: with no
    `outline` of our own the UA default applies, and Chrome's `outline: auto` on a dark surface draws
@@ -698,6 +713,23 @@ textarea,
 .ag-hint-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ag-hint-pulse { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .ag-working-spin { animation: none; } }
+
+/* --- .ag-resize-handle / .ag-resize-grip: the visible grip on a draggable edge (design item 6) ---
+   The HANDLE keeps its own hit area exactly as it was (this class adds no size); the GRIP is a small
+   decorative pill inside it, `pointer-events: none` so it never steals the drag. Idle = subtle grey
+   (`--border-subtle`, already theme-aware in both palettes); hover OR an active drag = the accent.
+   `:active` on a plain (non-link) element stays applied for as long as the mouse button is held,
+   even if the pointer drifts off the handle mid-drag — the CSS pseudo-class already does the "hover
+   or drag" reading a JS-tracked boolean would have to reimplement. */
+.ag-resize-handle { position: relative; }
+.ag-resize-grip {
+  position: absolute; top: 50%; left: 50%; border-radius: 999px;
+  background: var(--border-subtle); pointer-events: none;
+  transition: background 0.15s ease;
+}
+.ag-resize-handle:hover .ag-resize-grip,
+.ag-resize-handle:active .ag-resize-grip,
+.ag-resize-handle:focus-visible .ag-resize-grip { background: var(--anthropic-orange); }
 
 /* The row's pin. Hidden until the row is hovered or something in it has focus — a column of pin
    glyphs down an unpinned list is noise beside the titles they sit next to — but always visible

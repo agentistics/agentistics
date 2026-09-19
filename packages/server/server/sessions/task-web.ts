@@ -6,6 +6,7 @@
  * delivery cost", and the two would drift.
  */
 
+import type { StagedSessionDraft } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
@@ -14,12 +15,12 @@ import { scopeMetas, type TaskFilter } from './task-filter'
 import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
 import {
-  legacyTaskId, migratePriority, newCommentId, newEventId, newFileId, newLinkId, newSubtaskId,
-  newTaskId, statusAfterAttach, subtaskDone,
+  isGroupMember, legacyTaskId, migratePriority, newCommentId, newEventId, newFileId, newLinkId,
+  newSubtaskId, newTaskId, statusAfterAttach, subtaskDone,
   type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
-import { planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
+import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
 import { planMove } from './task-rank'
 import { compareBy } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
@@ -364,18 +365,31 @@ export async function removeComment(commentId: string): Promise<boolean> {
   return await w.store.removeComment(commentId)
 }
 
-export async function addSubtask(ref: string, title: string): Promise<boolean> {
+/**
+ * Add a subtask — loose by default, or a GROUP (§F.1) when `o.isGroup` is true. `isGroup` is decided
+ * only here: nothing today offers a way to convert an existing subtask into a group afterwards (or
+ * a group back into a loose subtask), so a group's shape is fixed at creation.
+ *
+ * Returns the new subtask's id, or `null` on failure — the "create a group with…" gesture needs the
+ * id back to join both the picked sibling and the row it was started from to it in the same flow
+ * (`patchSubtask({ parentGroupId })`), which a bare boolean could not carry.
+ */
+export async function addSubtask(
+  ref: string, title: string, o: { isGroup?: boolean } = {},
+): Promise<string | null> {
   const t = title.trim()
-  if (!t) return false
+  if (!t) return null
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
-  if (!task) return false
+  if (!task) return null
   const now = new Date().toISOString()
+  const id = newSubtaskId()
   await w.store.upsertSubtask({
-    id: newSubtaskId(), taskId: task.id, title: t,
+    id, taskId: task.id, title: t,
     status: 'todo', done: false, createdAt: now, updatedAt: now,
+    ...(o.isGroup === true ? { isGroup: true } : {}),
   })
-  return true
+  return id
 }
 
 /**
@@ -389,6 +403,46 @@ export async function addSubtask(ref: string, title: string): Promise<boolean> {
  * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §A.2. The guard is
  * `found.status !== 'done'`: a patch that is not actually a transition into `done` (editing the due
  * date of an already-done subtask) must not re-trigger it.
+ *
+ * `parentGroupId` (joining/leaving a group, §F.1) is checked BEFORE any of the above: a bad
+ * reference is refused outright (`invalid_group`) rather than silently dropped, because joining a
+ * group is a deliberate act and a caller who asked to join something needs to know it did not
+ * happen — see `checkParentGroup`. Joining a group is ALSO refused when the subtask already has a
+ * session filed on it (`subtask_has_sessions`) — a MEMBER never gets a rollup bucket of its own
+ * (`subtaskViews` excludes it outright), so that session's cost would silently drop out of every
+ * visible breakdown the instant it joins, while the task's own total keeps counting it.
+ *
+ * The `done_needs_session` gate below is SKIPPED for a group MEMBER (`Subtask.parentGroupId` set):
+ * `task-attach.ts`'s `planAttach` unconditionally refuses filing a session on a member
+ * (`subtask_in_group`), so a member can never satisfy "a session filed under this specific
+ * subtask" — checking it here would make `done` permanently unreachable for every member and
+ * defeat the whole point of `groupProgress` (§F.1): a member earns `done` through its own
+ * completion (comments/attachments/status), never through a session it can never carry. A subtask
+ * that is itself a GROUP (`isGroup: true`) keeps the gate unchanged — it is filed on exactly like a
+ * loose subtask and still needs one of its own to close.
+ *
+ * That membership check runs against the EFFECTIVE post-patch `parentGroupId`
+ * (`nextParentGroupId`), never against `found`'s pre-patch value: a single PATCH can combine
+ * leaving a group (`parentGroupId: ''`) with `status: 'done'` in one call, and `found` still names
+ * the OLD group while the record actually being written is already a loose subtask. Gating on the
+ * stale value let a member leave its group and reach `done` with zero sessions filed on it, in one
+ * request — the exact invariant this gate exists to hold.
+ *
+ * **The legacy `groupId` (§B) and the current `isGroup`/`parentGroupId` pair (§F) may never both
+ * name a group on the same record** — two independent, unreconciled "which group" answers on one
+ * subtask. Refused (`group_field_conflict`, the same 422 shape as `invalid_group`) rather than
+ * having one silently win over the other, checked ONLY when this patch actually writes to one of
+ * the two fields — an old row that already carries a stale `groupId` from before this rule existed
+ * is left alone until the caller next touches either column. `isGroup` itself is never checked here
+ * because it is decided at creation and this patch type offers no way to change it.
+ *
+ * `stagedSession` (board task t-918cc82233) is refused with `subtask_in_group` when this subtask is
+ * a group MEMBER — reusing `isGroupMember`, never reimplementing the rule `task-attach.ts` already
+ * states for filing a real session: a member can never receive one, so a draft that could never be
+ * fired there is refused at the same point, judged against the EFFECTIVE post-patch
+ * `parentGroupId` (`nextParentGroupId`) for the same reason the `done` gate below is. CLEARING the
+ * draft (`stagedSession: null`) is never refused this way — a stale draft left over from before a
+ * subtask joined a group must still be removable.
  */
 export async function patchSubtask(subtaskId: string, patch: {
   title?: string
@@ -400,15 +454,94 @@ export async function patchSubtask(subtaskId: string, patch: {
   notes?: string
   /** Sanitized against this subtask's OWN siblings — see `sanitizeSubtaskBlockedBy`. */
   blockedBy?: string[]
-}): Promise<{ ok: true } | { ok: false; message: 'no_such_subtask' | 'done_needs_session' }> {
+  /**
+   * SUPERSEDED (§F) — see `Subtask.groupId`'s own docblock in `task-model.ts`. Still writable so
+   * the §B-era UI keeps working until it moves to `parentGroupId`; no longer read by `subtaskViews`.
+   */
+  groupId?: string | null
+  /**
+   * Join (a group's own subtask id) or leave (`null`) a group — §F.1. Refused with
+   * `invalid_group` when the id does not name an actual group of this SAME task, or when this
+   * subtask is itself a group (a group can never be a member); refused with
+   * `subtask_has_sessions` when this subtask already has a session filed on it — see
+   * `checkParentGroup`.
+   */
+  parentGroupId?: string | null
+  /** Set (a validated draft) or clear (`null`) the staged session — see this function's own note. */
+  stagedSession?: StagedSessionDraft | null
+}): Promise<
+  {
+    ok: true
+  } | {
+    ok: false
+    message:
+      | 'no_such_subtask' | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions'
+      | 'group_field_conflict' | 'subtask_in_group'
+  }
+> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return { ok: false, message: 'no_such_subtask' }
+
+  // Computed once, before any of the checks below: whether THIS subtask id already has a session
+  // filed on it right now, regardless of what it is currently filed under. Read by `checkParentGroup`
+  // (`subtask_has_sessions`) and by the `done_needs_session` gate further down — both ask the exact
+  // same question.
+  const hasSession = w.rows.some(r => r.subtaskId === found.id)
+
+  // The EFFECTIVE post-patch `parentGroupId` — what this subtask's group membership will be AFTER
+  // this write, not what `found` (the pre-patch record) currently holds. A single PATCH can combine
+  // leaving a group (`parentGroupId: ''`) with `status: 'done'` in the same call, so the
+  // `done_needs_session` gate below must judge the record it is actually about to write, never the
+  // stale one — see this function's own docblock.
+  const nextParentGroupId = patch.parentGroupId !== undefined
+    ? (patch.parentGroupId?.trim() ? patch.parentGroupId.trim() : undefined)
+    : found.parentGroupId
+
+  // The superseded `groupId` (§B) and the current `isGroup`/`parentGroupId` pair (§F) may never
+  // both name a group on one record — see this function's own docblock. Checked only when this
+  // patch actually touches one of the two fields, against the EFFECTIVE post-patch state of both.
+  if (patch.groupId !== undefined || patch.parentGroupId !== undefined) {
+    const nextGroupId = patch.groupId !== undefined
+      ? (patch.groupId?.trim() ? patch.groupId.trim() : undefined)
+      : found.groupId
+    if (nextGroupId && (found.isGroup === true || nextParentGroupId)) {
+      return { ok: false, message: 'group_field_conflict' }
+    }
+  }
+
+  if (patch.parentGroupId !== undefined && patch.parentGroupId !== null) {
+    const wanted = patch.parentGroupId.trim()
+    if (wanted) {
+      const check = checkParentGroup({
+        subtaskId: found.id,
+        taskId: found.taskId,
+        isGroup: found.isGroup === true,
+        parentGroupId: wanted,
+        siblings: w.book.subtasks,
+        hasSession,
+      })
+      if (!check.ok) return { ok: false, message: check.reason }
+    }
+  }
+
   const status = patch.status ?? found.status
-  if (status === 'done' && found.status !== 'done') {
-    const hasSession = w.rows.some(r => r.subtaskId === subtaskId)
+  // See this function's own docblock: a group MEMBER can never hold a session, so the gate is
+  // unreachable for it by construction and is skipped rather than left to refuse forever. Judged on
+  // `nextParentGroupId` (the post-patch value), not `found` — see above.
+  if (status === 'done' && found.status !== 'done' && !isGroupMember({ parentGroupId: nextParentGroupId })) {
     if (!hasSession) return { ok: false, message: 'done_needs_session' }
   }
+
+  // SETTING a staged draft on a group member is refused for the exact reason `planAttach` refuses
+  // to file a real session there — a draft that could never be fired on this row is not a draft
+  // worth saving. CLEARING (`null`) is always allowed: a stale draft left over from before this
+  // subtask joined a group must still be removable. Judged on `nextParentGroupId`, same as `done`.
+  if (patch.stagedSession !== undefined && patch.stagedSession !== null
+    && isGroupMember({ parentGroupId: nextParentGroupId })) {
+    return { ok: false, message: 'subtask_in_group' }
+  }
+
   await w.store.upsertSubtask({
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
@@ -426,6 +559,20 @@ export async function patchSubtask(subtaskId: string, patch: {
         subtaskId: found.id, taskId: found.taskId, ids: patch.blockedBy, siblings: w.book.subtasks,
       }),
     } : {}),
+    // `undefined` is what the store writes as "absent": `JSON.stringify` drops the key, so the
+    // subtask reads back as its own group of one — the pre-group behaviour, exactly.
+    ...(patch.groupId !== undefined
+      ? { groupId: patch.groupId?.trim() ? patch.groupId.trim() : undefined }
+      : {}),
+    // Already validated above (or cleared, or left alone) — this only ever writes the trimmed,
+    // checked value (the same `nextParentGroupId` the gate above judged), `undefined` to leave the
+    // column alone.
+    ...(patch.parentGroupId !== undefined ? { parentGroupId: nextParentGroupId } : {}),
+    // `null` clears (the store drops the key, same convention as every other identity field here);
+    // an object SETS it, already validated above. `undefined` leaves the column alone.
+    ...(patch.stagedSession !== undefined
+      ? { stagedSession: patch.stagedSession ?? undefined }
+      : {}),
     updatedAt: new Date().toISOString(),
   })
   return { ok: true }
@@ -441,8 +588,17 @@ export async function removeSubtask(subtaskId: string): Promise<boolean> {
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
 export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
-  { ok: true } | { ok: false; message: 'no_such_subtask' | 'done_needs_session' }
+  {
+    ok: true
+  } | {
+    ok: false
+    message:
+      | 'no_such_subtask' | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions'
+      | 'group_field_conflict' | 'subtask_in_group'
+  }
 > {
+  // Only ever passes `status`, so `group_field_conflict`/`subtask_in_group` cannot actually fire
+  // through this path — the union member exists to match `patchSubtask`'s own return type exactly.
   return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' })
 }
 
@@ -586,7 +742,7 @@ export type AttachResult =
   | {
     ok: false
     reason: 'no_such_task' | 'no_such_session' | 'no_such_subtask' | 'needs_subtask'
-      | 'wrong_delivery' | 'blocked'
+      | 'wrong_delivery' | 'blocked' | 'subtask_in_group'
     /** Set only for `reason: 'blocked'` — the subtask ids still open. */
     blockedBy?: readonly string[]
   }
@@ -602,13 +758,15 @@ export async function attachSession(
   const row = w.rows.find(r => r.id === sessionId)
   if (!row) return { ok: false, reason: 'no_such_session' }
 
-  // A DELIVERY DOES NOT TAKE SESSIONS: without a subtask this refuses, and the surfaces offer
-  // "create one and move it here" rather than filing at the wrong level.
+  // Direct filing under the task is allowed too — `o.subtaskId` is optional. `planAttach` decides
+  // the pair either way, which is what makes this a MOVE rather than an add: filing under a
+  // subtask replaces a direct filing and filing under the task clears the subtask.
   const plan = planAttach({
     target: o.subtaskId ? { kind: 'subtask', id: o.subtaskId } : { kind: 'task', id: task.id },
     taskIds: w.book.tasks.map(t => t.id),
     subtasks: w.book.subtasks.map(st => ({
       id: st.id, taskId: st.taskId, done: st.done, blockedBy: st.blockedBy,
+      parentGroupId: st.parentGroupId,
     })),
   })
   if (!plan.ok) {

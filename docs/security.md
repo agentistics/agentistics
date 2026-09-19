@@ -532,14 +532,26 @@ page's origin is `http:` or `https:` and cannot be forged into another scheme, s
 ability to frame anything, and `lan` / `public` are untouched — they keep `frame-ancestors 'none'`
 and the legacy header. `security-headers.test.ts` pins both directions.
 
+The Studio's MEDIA responses (`/api/fleet/media`, `/api/fleet/tree/media`) are the one exception to
+`frame-ancestors 'none'`, because the Studio shows a PDF in an `<iframe>` of the dashboard itself.
+They carry `default-src 'none'; sandbox; frame-ancestors 'self'` (plus `vscode-webview:` on `local`)
+and, where the profile does not embed, `X-Frame-Options: SAMEORIGIN` — never `ALLOW`, never absent
+off `local`. Measured in Chromium: the same origin renders the PDF, a foreign origin is refused with a
+`frame-ancestors` violation. `applyBaselineHeaders` (`response-policy.ts`) is the one function that
+composes this and `index.ts` calls it; `response-policy.test.ts` tests that function, not a copy.
+
 ## 8c. Managing a machine's sessions from a central — what is guaranteed, and what is not
 
 Reaching into another machine's live sessions is the most powerful thing a central can be asked to
 relay. Four things make it safe enough to offer, and one thing it explicitly does not promise.
 
-**It is off until the machine turns it on.** Absent consent reads as OFF — the same rule
-`chat-gate.ts` applies to the local shell, and deliberately not the `shareMode` migration rule that
-treats absence as the old default. Treating absence as ON here would hand every already-connected
+**It is off until the machine turns it on.** Absent consent reads as OFF — the rule `chat-gate.ts`
+applies to the dashboard chat, and deliberately not the `shareMode` migration rule that treats
+absence as the old default. (The SHELL and the Studio no longer share that reading: since
+2026-09-14 an absent `shellEnabled`/`editorEnabled` reads as ON, because both are standing entries
+of the session's own bottom bar — see `shell-gate.ts`. That reversal is about a switch on the
+machine's OWN dashboard; relaying a machine's sessions to a CENTRAL is a different grant and keeps
+the strict reading.) Treating absence as ON here would hand every already-connected
 machine to its central on upgrade.
 
 **Only the machine's OWN accounts.** `machineOwnedBy` (`iam-view.ts`) is deliberately narrower than

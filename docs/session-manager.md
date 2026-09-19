@@ -587,15 +587,25 @@ break: `list-sessions -L agentop` cannot see another socket at all. `shell-isola
 asserts it over the modules' own source, with comments stripped first — those modules are *required*
 to explain themselves in terms of the registry.
 
-### Two gates, and absent reads OFF
+### Two gates, and an absent preference reads as ON since 2026-09-14
 
 - `CAPS.localShell` — the exposure profile's answer, already false outside `local`.
 - `preferences.shellEnabled` — the user's own switch, which may only ever NARROW.
 
 A raw shell is strictly more powerful than the chat, which `chat-gate.ts` already calls the most
-powerful thing this server does: the chat at least spawns a NAMED assistant CLI. So absent reads as
-OFF, it is a separate switch from `chatEnabled`, it is enforced in `index.ts` before the routes
-rather than only in the UI, and a central refuses outright.
+powerful thing this server does: the chat at least spawns a NAMED assistant CLI. So it is a
+separate switch from `chatEnabled`, it is enforced in `index.ts` before the routes rather than only
+in the UI, and a central refuses outright.
+
+**Owner decision, 2026-09-14: an absent preference now reads as ON** (subject to `capable`), not
+off — reversing the strict rule this section carried before. The bottom bar under every session's
+composer (`panelBar.ts`) offers Claude Code, Shell and Studio as three standing entries of one
+control, and the call is that Shell belongs there from the first run, the same way the session's
+own Claude Code pane always has. `editor-gate.ts` (the Studio) carries the identical reversal for
+the identical reason; `chat-gate.ts` and the `shareMode` migration keep their own strict "absent
+reads OFF" reading, unargued with. An explicit `false` is still respected exactly as before, and
+the security gate (`capable`) is exactly as strict as it always was — only the reading of an unset
+preference changed.
 
 ### A ceiling, never a timer
 

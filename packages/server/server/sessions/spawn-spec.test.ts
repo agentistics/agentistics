@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { HARNESS_ORDER, SPAWN_SPECS_MODEL_IDS } from '@agentistics/core'
-import { SPAWN_SPECS, conversationLinkable, planSpawn } from './spawn-spec'
+import { SPAWN_SPECS, conversationLinkGoneForever, conversationLinkable, planSpawn } from './spawn-spec'
 
 describe('SPAWN_SPECS', () => {
   it('has an entry for every harness', () => {
@@ -233,6 +233,34 @@ describe('conversationLinkable', () => {
     // presented as the conversation the row is in.
     for (const harness of ['codex', 'kimi', 'gemini'] as const) {
       expect(conversationLinkable(harness)).toBe(false)
+    }
+  })
+})
+
+describe('conversationLinkGoneForever', () => {
+  it('is true ONLY for the harness whose sole route needs the live process', () => {
+    // antigravity has neither `assignId` nor a session-file route — `HARNESS_PROCESS_LOGS` (a
+    // `/proc/<pid>/fd` read) is its only way to an exact link, and that answer stops existing the
+    // moment the process exits. See the header above the function for why this must be a DIFFERENT
+    // question from `conversationLinkable`, which stays true for antigravity throughout.
+    expect(conversationLinkGoneForever('antigravity')).toBe(true)
+  })
+
+  it('is false for a harness with an assign flag or a session-file route', () => {
+    // claude and copilot record the link at spawn (or while the harness's own file exists) through a
+    // mechanism that has nothing to do with the process's own open fd — an ended, unlinked session of
+    // either is a different fact (or, for claude, cannot happen at all) and this function is not the
+    // one that answers it.
+    expect(conversationLinkGoneForever('claude')).toBe(false)
+    expect(conversationLinkGoneForever('copilot')).toBe(false)
+  })
+
+  it('is false for a harness that was never linkable in the first place', () => {
+    // codex, kimi and gemini are `!conversationLinkable` already — `sessConversationBlind` names
+    // that, and this function exists for the narrower, DIFFERENT case `conversationLinkable` cannot
+    // tell apart: a harness that CAN link, in principle, but only within a window that has closed.
+    for (const harness of ['codex', 'kimi', 'gemini'] as const) {
+      expect(conversationLinkGoneForever(harness)).toBe(false)
     }
   })
 })

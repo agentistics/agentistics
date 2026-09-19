@@ -104,6 +104,65 @@ describe('which conversation a row continues from', () => {
       expect(c.conversationBlind).toBeUndefined()
     }
   })
+
+  describe('a harness whose only link needs the LIVE process (antigravity)', () => {
+    it('stays quiet while the row is still running — it is within its own capture window', () => {
+      // `linkProcessConversationSoon` (cli-start.ts) gives a fresh antigravity spawn several
+      // seconds of its own before giving up. Telling a session a few seconds old that its link is
+      // gone FOREVER would be a false sentence about a window it has not finished using yet.
+      const c = toControlSession(
+        view({ harness: 'antigravity', status: 'running', activity: 'working' }), S, LIVE,
+      )
+      expect(c.conversationBlind).toBeUndefined()
+    })
+
+    it('stays quiet on a row the backend still hosts but this poll could not read', () => {
+      // `v.status === 'running'` with no `activity` read this tick is the GENUINELY ambiguous
+      // case: the backend DOES still have the pane, only this one poll's capture failed — the
+      // process behind it may well still be alive. Fixwave 1 corrected an EARLIER version of this
+      // test that used `status: 'lost'` (this suite's default) for the same claim — that is a
+      // DIFFERENT fact (see the next test) and the two must not share one assertion.
+      const c = toControlSession(view({ harness: 'antigravity', status: 'running' }), S, LIVE)
+      expect(c.conversationBlind).toBeUndefined()
+    })
+
+    it('says the link is gone FOREVER once the row has actually ended unlinked', () => {
+      // `v.status === 'exited'` is `session-view.ts`'s own reading of `Boolean(managed.endedAt)` —
+      // the one moment this machine can be sure the process (and with it, `/proc/<pid>/fd`) is gone.
+      const c = toControlSession(
+        view({ harness: 'antigravity', status: 'exited', activity: 'exited' }), S, LIVE,
+      )
+      expect(c.conversationId).toBeUndefined()
+      expect(c.conversationBlind).toBe(S.sessConversationLost('antigravity'))
+      // A different sentence from the structural one — this harness CAN link, in principle.
+      expect(c.conversationBlind).not.toBe(S.sessConversationBlind('antigravity'))
+    })
+
+    /**
+     * FIXWAVE 1 — Finding 2. `v.status === 'lost'` is `session-ref.ts`'s `!found` branch: the
+     * BACKEND has no record of this row at all. CLAUDE.md names the ordinary way this happens — a
+     * reboot takes tmux and leaves the registry, so every managed session reconciles to `lost` —
+     * and it is also what a raw `tmux kill-session` (outside agentop's own kill flow) produces.
+     * There is no pid left here to ever read `/proc/<pid>/fd` from again, which is exactly the fact
+     * `conversationLinkGoneForever`'s own doc comment asks about. Reproduced live: a synthetic
+     * antigravity row with no matching tmux session, no `conversationId`, no `endedAt`, answered
+     * `GET /api/fleet` with a disabled Reopen carrying NO reason at all, before this fix.
+     */
+    it('ALSO says the link is gone forever on a row the backend has lost entirely', () => {
+      const c = toControlSession(view({ harness: 'antigravity', status: 'lost' }), S, LIVE)
+      expect(c.conversationBlind).toBe(S.sessConversationLost('antigravity'))
+    })
+
+    it('says nothing once ended WITH a link — there is nothing left to explain', () => {
+      const c = toControlSession(
+        view({
+          harness: 'antigravity', status: 'exited', activity: 'exited', conversationId: 'agy-1',
+        }),
+        S, LIVE,
+      )
+      expect(c.conversationBlind).toBeUndefined()
+    })
+  })
 })
 
 describe('a dialog agentop can SEE and cannot READ', () => {

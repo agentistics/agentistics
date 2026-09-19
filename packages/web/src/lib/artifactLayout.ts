@@ -159,3 +159,29 @@ export function panelWidth(available: number, requested: number): number {
   if (room < PANEL_MIN_WIDTH) return Math.min(requested, Math.max(PANEL_MIN_WIDTH, room))
   return Math.min(requested, room)
 }
+
+/**
+ * The centre column's own floor when the right aside is being DRAGGED (UX pass item 6) — separate
+ * from `CHAT_MIN_WIDTH`, which is the conversation's floor once `panelWidth` has already decided
+ * there IS a split. This is the number a DRAG is clamped against directly, and the owner asked for
+ * a specific, smaller figure than the conversation's ordinary floor: "leaving ~360px for the centre
+ * column", not the 420px `CHAT_MIN_WIDTH` states elsewhere. The two are allowed to differ — a
+ * reader actively dragging the handle can already see the centre column narrowing and is choosing
+ * this trade-off on purpose, which is a different moment from the ordinary layout `panelWidth`
+ * degrades on its own.
+ */
+export const ASIDE_DRAG_CENTRE_MIN = 360
+
+/**
+ * How far the right aside may be DRAGGED, given the viewport it is dragged in (item 6).
+ *
+ * The cap used to be a flat 900px regardless of screen size — reported as too narrow on a wide
+ * monitor, where 900px is barely half the width available. `artifactsPanelMax` replaces it with
+ * ROOM: the viewport itself, minus what the centre column keeps no matter how the aside is dragged.
+ * `PANEL_MIN_WIDTH` is the floor under that — a viewport too narrow to spare both figures still
+ * returns a usable minimum rather than a negative or zero width.
+ */
+export function artifactsPanelMax(viewportWidth: number): number {
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) return PANEL_MIN_WIDTH
+  return Math.max(PANEL_MIN_WIDTH, viewportWidth - ASIDE_DRAG_CENTRE_MIN)
+}

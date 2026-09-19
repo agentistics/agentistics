@@ -13,6 +13,8 @@ describe('consent follows the SURFACE, never the session', () => {
     expect(consentMode('replacing')).toBe('focus')
     expect(consentMode('docked')).toBe('focus')
     expect(consentMode('dedicated')).toBe('focus')
+    // The session's own pane, opened in the panel-slots' right slot — the same rule as `replacing`.
+    expect(consentMode('aside')).toBe('focus')
   })
 
   test('a terminal merely PRESENT keeps the button', () => {
@@ -23,7 +25,7 @@ describe('consent follows the SURFACE, never the session', () => {
 
   test('every placement answers, and the set is closed', () => {
     for (const p of TERMINAL_PLACEMENTS) expect(['focus', 'button']).toContain(consentMode(p))
-    expect([...TERMINAL_PLACEMENTS]).toEqual(['card', 'docked', 'replacing', 'dedicated'])
+    expect([...TERMINAL_PLACEMENTS]).toEqual(['card', 'docked', 'replacing', 'dedicated', 'aside'])
   })
 })
 
@@ -32,7 +34,7 @@ describe('the key strip', () => {
     // A soft keyboard has no `esc`, no `tab` and no arrows at all — so without it there is no
     // leaving `vim` and no Ctrl+C. The shell band has had it since phase 2; the assistant's own
     // terminal never did.
-    for (const p of ['docked', 'replacing', 'dedicated'] as TerminalPlacement[]) {
+    for (const p of ['docked', 'replacing', 'dedicated', 'aside'] as TerminalPlacement[]) {
       expect(keyStripShown(p, true)).toBe(true)
     }
   })

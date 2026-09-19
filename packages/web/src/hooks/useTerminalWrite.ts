@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { inputWsUrl, type TerminalScope } from '../lib/terminalEndpoint'
-import { inputReasonText, splitInput } from '../lib/terminalKeys'
+import { MAX_PASTE_TEXT, inputReasonText, splitInput } from '../lib/terminalKeys'
 import {
   INITIAL_CHANNEL,
   channelReducer,
@@ -32,6 +32,13 @@ export interface TerminalWrite {
   /** Feed one raw `onData` chunk. Classifies, then sends it as text or a named key — or drops it
    *  (blocked by the allowlist, or the channel is not open). Never echoes locally. */
   send: (data: string) => void
+  /**
+   * Send a whole clipboard PASTE as ONE atomic message — never through `splitInput`, which would
+   * refuse a multi-line one outright or (worse) decompose it into a turn per line. The one
+   * client-side check is the length cap (`MAX_PASTE_TEXT`); everything else the server itself
+   * refuses. Never echoes locally, exactly like `send`.
+   */
+  sendPaste: (text: string) => void
   /** The honesty state — phase + pending + undelivered — for the consumer to render a status. */
   state: ChannelState
   /** True once the socket is open and consent stands: typing will actually be delivered. */
@@ -165,7 +172,27 @@ export function useTerminalWrite(
     }
   }, [])
 
+  const sendPaste = useCallback((text: string) => {
+    const ws = wsRef.current
+    if (!ws || !openRef.current) return
+    if (text.length === 0) return // a genuine no-op, exactly like `splitInput`'s `empty`
+    if (text.length > MAX_PASTE_TEXT) {
+      // REFUSED here, never truncated — sending a silently shortened paste would type less than
+      // the person copied, and `sendPaste` promises the server gets the whole thing or nothing.
+      dispatch({ type: 'refused', reason: 'paste_too_long' })
+      return
+    }
+    const seq = seqRef.current++
+    dispatch({ type: 'send', id: seq })
+    try {
+      ws.send(JSON.stringify({ seq, kind: 'paste', data: text }))
+    } catch {
+      openRef.current = false
+      dispatch({ type: 'closed', reason: 'connection_lost' })
+    }
+  }, [])
+
   const reason = state.error ? inputReasonText(state.error, lang) : null
   const ready = state.armed && state.phase === 'open'
-  return { send, state, ready, reason }
+  return { send, sendPaste, state, ready, reason }
 }

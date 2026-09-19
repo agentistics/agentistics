@@ -22,6 +22,13 @@
  * refuse. `C-z` (suspend) and `C-\` (SIGQUIT) are outside `KEY_ALLOWLIST` on purpose, and sending
  * one would earn a `bad_key` ack for a keystroke the person had every reason to expect to work —
  * the strip says so instead, which is the honest half of the same refusal.
+ *
+ * `paste` is the one entry that is CONDITIONAL. A phone has no Ctrl+V and no native paste gesture
+ * into a canvas-rendered terminal, so without this the clipboard is unreachable from a soft
+ * keyboard entirely. It needs `navigator.clipboard.readText()` — not every browser/context grants
+ * that (it is permission- and HTTPS-gated) — so `stripEntries` takes the availability as a plain
+ * boolean rather than reading `navigator` itself, which is what keeps this module PURE and
+ * testable without a DOM.
  */
 
 import type { NamedKey } from './terminalKeys'
@@ -31,6 +38,8 @@ export type StripEntry =
   | { id: string; kind: 'key'; key: NamedKey }
   /** Arms the control modifier for the NEXT character typed. Sends nothing itself. */
   | { id: string; kind: 'modifier' }
+  /** Reads the clipboard and sends it as one atomic PASTE — never through the key channel. */
+  | { id: string; kind: 'paste' }
 
 /** The strip, in the order the design names it. */
 export const KEY_STRIP: readonly StripEntry[] = [
@@ -43,9 +52,23 @@ export const KEY_STRIP: readonly StripEntry[] = [
   { id: 'right', kind: 'key', key: 'Right' },
 ]
 
+/** The `paste` entry, appended only when the clipboard can actually be read — see `stripEntries`. */
+export const PASTE_ENTRY: StripEntry = { id: 'paste', kind: 'paste' }
+
+/**
+ * The entries to show, given whether this browser/context can READ the clipboard
+ * programmatically. Appends `paste` at the end rather than inserting it among the navigation keys,
+ * so the strip's existing order (and every existing screenshot of it) is unchanged when paste is
+ * unavailable.
+ */
+export function stripEntries(clipboardReadable: boolean): readonly StripEntry[] {
+  return clipboardReadable ? [...KEY_STRIP, PASTE_ENTRY] : KEY_STRIP
+}
+
 const LABELS: Record<string, string> = {
   esc: 'esc', tab: 'tab', ctrl: 'ctrl',
   up: '↑', down: '↓', left: '←', right: '→',
+  paste: 'paste',
 }
 
 /** What the button reads. A glyph where one exists, the word where it does not — never an id. */

@@ -130,6 +130,39 @@ export function taskStats(o: {
 }
 
 /**
+ * `taskStats`, over an already-scoped ROW SET — the shared primitive behind `subtaskStats` below
+ * and `subtaskViews`'s GROUPED buckets (`task-report.ts`), which cannot express their partition as
+ * a single `subtaskId` (a group's bucket is the union of several subtasks' rows). Resolves each
+ * row's `SessionMeta` and delegates to `taskStats`.
+ *
+ * **Returns `null` when `rows` is empty** — never a `TaskStats` whose every field happens to be
+ * `null`/`[]`. Those two situations are different claims: "there is no evidence block for this
+ * piece at all" (nothing was ever filed here) versus "N sessions are filed here but none of them
+ * reported files/tokens/etc" (a real, if uninformative, measurement — `taskStats` already renders
+ * that case honestly on its own, since every one of its fields is already null-safe over an empty
+ * `metas` array). Same rule as `HARNESS_CAPABILITIES`'s N/A-vs-real-0, applied to a whole block
+ * instead of one metric.
+ */
+export function scopedTaskStats(o: {
+  rows: readonly ManagedSession[]
+  metas: ReadonlyMap<string, SessionMeta>
+  createdAt: string
+  deliveredAt?: string
+}): TaskStats | null {
+  if (o.rows.length === 0) return null
+
+  const resolved = o.rows
+    .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
+    .filter((m): m is SessionMeta => m !== undefined)
+
+  return taskStats({
+    metas: resolved,
+    createdAt: o.createdAt,
+    ...(o.deliveredAt !== undefined ? { deliveredAt: o.deliveredAt } : {}),
+  })
+}
+
+/**
  * `taskStats`, scoped to ONE piece of the delivery — a subtask, or the "direct" branch
  * (`subtaskId: null`, the rows filed on the task itself, under no subtask). This is the same
  * partition `subtaskViews` (`task-report.ts`) already applies to the ROLLUP, extended to this
@@ -143,15 +176,15 @@ export function taskStats(o: {
  * over the task's whole row set — the same guarantee `subtaskViews`'s three-shapes test pins for
  * the cost/session rollup, checked here for the evidence numbers instead.
  *
- * **Returns `null` when NOTHING is filed under this piece** (`rows.filter(...)` is empty) — never a
- * `TaskStats` whose every field happens to be `null`/`[]`. Those two situations are different
- * claims: "there is no evidence block for this piece at all" (nothing was ever filed here) versus
- * "N sessions are filed here but none of them reported files/tokens/etc" (a real, if uninformative,
- * measurement — `taskStats` already renders that case honestly on its own, since every one of its
- * fields is already null-safe over an empty `metas` array). A caller — e.g. `SessionTasksTab.tsx`'s
- * subtask-scoped panel — uses the `null` return to render "nothing filed here yet" instead of a
- * stats block full of dashes. Same rule as `HARNESS_CAPABILITIES`'s N/A-vs-real-0, applied to a
- * whole block instead of one metric.
+ * A caller — e.g. `SessionTasksTab.tsx`'s subtask-scoped panel — uses the `null` return (see
+ * `scopedTaskStats` above) to render "nothing filed here yet" instead of a stats block full of
+ * dashes.
+ *
+ * **Ungrouped only.** This filters by a single `subtaskId` and is exactly right for the direct
+ * branch and for a subtask with no `groupId`. A GROUPED subtask's bucket is the union of every
+ * member's rows and is computed in `subtaskViews` itself via `scopedTaskStats`, never here — a
+ * caller asking this function for one member's id alone would see only that member's rows, not the
+ * group's, disagreeing with the rollup it sits beside.
  *
  * `createdAt`/`deliveredAt` are passed straight through to `taskStats` and are NOT re-derived from
  * the subtask's own dates — `Subtask` carries no `deliveredAt` field today, so what a subtask's own
@@ -168,14 +201,9 @@ export function subtaskStats(o: {
   const mine = o.subtaskId === null
     ? o.rows.filter(r => !r.subtaskId)
     : o.rows.filter(r => r.subtaskId === o.subtaskId)
-  if (mine.length === 0) return null
-
-  const resolved = mine
-    .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
-    .filter((m): m is SessionMeta => m !== undefined)
-
-  return taskStats({
-    metas: resolved,
+  return scopedTaskStats({
+    rows: mine,
+    metas: o.metas,
     createdAt: o.createdAt,
     ...(o.deliveredAt !== undefined ? { deliveredAt: o.deliveredAt } : {}),
   })

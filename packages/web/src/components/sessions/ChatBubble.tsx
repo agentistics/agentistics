@@ -32,7 +32,7 @@ import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { splitSlashLine } from '../../lib/slashLine'
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
-import type { AttachmentSend } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
 import { echoStatus } from '../../lib/echoStatus'
 import { messageTime } from '../../lib/messageTime'
@@ -81,12 +81,26 @@ export interface ChatTurn {
    * carried no time; the stamp is then simply not drawn, never replaced by "now".
    */
   at?: string
+  /**
+   * The real files behind this turn's `[Image #N]` markers, ALREADY resolved on the server through
+   * the harness's own companion entry — see `chat-turn.ts`'s own doc on the field. Preferred over
+   * `resolveMarkerPaths`'s own heuristic whenever present; that heuristic remains the fallback for
+   * a turn this was not resolved for.
+   */
+  imagePaths?: string[]
 }
 
 export interface ChatBubbleProps {
   turn: ChatTurn
   /** What agentop typed into this session's pane, so a `[Image #N]` marker can find its file. */
   attachmentSends?: readonly AttachmentSend[]
+  /** What each delivered message carried, for this conversation — see `AttachmentMessage`. */
+  attachmentMessages?: readonly AttachmentMessage[]
+  /**
+   * When the previous PERSON's turn was recorded (`previousPersonTurnMs`) — the lower bound of the
+   * messages this turn's markers may be made of. Only the list knows it; a bubble sees one turn.
+   */
+  markerSinceMs?: number | null
   lang: 'pt' | 'en'
   /** Which assistant said it, for the mark beside an assistant turn. */
   harness: string
@@ -215,7 +229,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends }: ChatBubbleProps) {
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -327,14 +341,19 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
   // composer typed; without this it ran into the first word of the prose (see `splitImageMarkers`).
   const { markers, text } = splitImageMarkers(prose)
 
-  // A marker DOES have a file behind it when agentop is the one that sent it: it wrote the image to
-  // this machine and recorded which session it typed the path into. `resolveMarkerPaths` hands back
-  // the files only when the record accounts for the markers EXACTLY — otherwise null, and the chip
-  // stays, because a wrong thumbnail is false and convincing where a chip is merely useless.
-  const markerImages = resolveMarkerPaths({
+  // THE SERVER'S OWN LINK WINS WHEN IT HAS ONE. Claude Code writes a marker turn's images into a
+  // companion entry beside it — see `chat-turn.ts`'s `imagePaths` — which the server already
+  // resolved and validated exactly, so there is nothing left to infer here. Only a turn this was
+  // NOT resolved for (an older read, a companion that did not survive a truncated window, a turn
+  // whose companion could not account for it exactly) falls back to `resolveMarkerPaths`'s own
+  // heuristic over what agentop itself sent — otherwise null, and the chip stays, because a wrong
+  // thumbnail is false and convincing where a chip is merely useless.
+  const markerImages = turn.imagePaths ?? resolveMarkerPaths({
     markers,
     turnAtMs: turn.at ? Date.parse(turn.at) || 0 : 0,
     sends: attachmentSends ?? [],
+    ...(attachmentMessages ? { messages: attachmentMessages } : {}),
+    ...(markerSinceMs !== undefined ? { sinceMs: markerSinceMs } : {}),
   })
   const shownImages = markerImages ? [...images, ...markerImages] : images
 
@@ -383,28 +402,10 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
 
   return (
     <div className="ag-bubble" {...(anchorId ? { id: anchorId } : {})} style={{
-      display: 'flex', gap: isMobile ? 6 : 10, minWidth: 0,
+      display: 'flex', minWidth: 0,
       flexDirection: mine ? 'row-reverse' : 'row',
       alignItems: 'flex-start',
     }}>
-      {mine ? (
-        <span
-          aria-hidden
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            width: 26, height: 26, borderRadius: 7, marginTop: 2,
-            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-            color: 'var(--text-tertiary)',
-          }}
-        >
-          <User size={13} />
-        </span>
-      ) : (
-        <span style={{ marginTop: 2, display: 'flex' }}>
-          <HarnessMark harness={harness} />
-        </span>
-      )}
-
       <div
         ref={bodyRef}
         onMouseUp={readSelection}
@@ -432,12 +433,17 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
         opacity: awaiting ? 0.62 : 1,
         transition: 'opacity 0.2s',
       }}>
+        {/* THE HARNESS ICON MOVED INSIDE THE BUBBLE, immediately left of the name, on the same
+            line (owner follow-up, screenshot 4 — "I want the harness icon on the LEFT of the
+            name"). It used to sit OUTSIDE the bubble as a flex sibling, at the row's own edge —
+            reported as reading like a stray mark beside the message rather than part of it. */}
         {!mine && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 7,
+            display: 'flex', alignItems: 'center', gap: 6,
             fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
             color: provisional ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
           }}>
+            <HarnessMark harness={harness} size={14} />
             <span style={{ color }}>{name}</span>
             {provisional && (
               <>
@@ -447,6 +453,26 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
                 <span>{pt ? 'escrevendo — lido da tela' : 'writing — read from the screen'}</span>
               </>
             )}
+          </div>
+        )}
+
+        {/* THE USER'S AVATAR MOVED THE SAME WAY, to the TOP-RIGHT CORNER of their own bubble
+            (owner follow-up, screenshot 4) — its own header line, mirroring the assistant's, with
+            nothing beside it: a user message carries no name to show and no header line of its
+            own before this change, so the icon is the whole of it. */}
+        {mine && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <span
+              aria-hidden
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                width: 18, height: 18, borderRadius: 5,
+                background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+                color: 'var(--text-tertiary)',
+              }}
+            >
+              <User size={10} />
+            </span>
           </div>
         )}
 

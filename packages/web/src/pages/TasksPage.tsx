@@ -381,8 +381,20 @@ function TaskList() {
             setDetails(m => new Map(m).set(id, body.task))
           }}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
-          onPatchSubtask={async (ref, sid, patch) => { await patchSubtask(ref, sid, patch); await refreshDetail(ref) }}
+          onPatchSubtask={async (ref, sid, patch) => {
+            // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show
+            // `invalid_group`/`subtask_has_sessions`/`group_field_conflict` instead of a swallowed
+            // refusal.
+            const result = await patchSubtask(ref, sid, patch)
+            await refreshDetail(ref)
+            return result
+          }}
           onRemoveSubtask={async (ref, sid) => { await removeSubtask(ref, sid); await refreshDetail(ref) }}
+          onCreateGroupSubtask={async (ref, title) => {
+            const newId = await addSubtask(ref, title, { isGroup: true })
+            await refreshDetail(ref)
+            return newId
+          }}
           onBatchStatus={(ids, status) => void toStatus(ids, status)}
           onBatchDelete={async ids => {
             for (const id of ids) await deleteTask(id)

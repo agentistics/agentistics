@@ -5,7 +5,7 @@ import {
 import { format, parseISO, subDays } from 'date-fns'
 import type { AppData, Filters, Lang, ModelUsage, SessionMeta, HarnessId } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
-import { formatModel, formatProjectName, repoShortName, calcCost, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
+import { formatModel, formatProjectName, repoShortName, calcCost, sessionCostUSD, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
 import { useDerivedStats, blendedCostPerToken, blendedSessionCost, type BlendedRates, type HarnessSummary } from '../hooks/useData'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
 
@@ -477,16 +477,12 @@ function MiniSessionsTable({ sessions, c, lang, currency, brlRate, blendedRates 
       {sessions.slice(0, 12).map((s, i) => {
         const msgs = (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
         const tools = Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-        const costUSD = s.model
-          ? calcCost({
-              inputTokens: s.input_tokens ?? 0,
-              outputTokens: s.output_tokens ?? 0,
-              cacheReadInputTokens: s.cache_read_input_tokens ?? 0,
-              cacheCreationInputTokens: s.cache_creation_input_tokens ?? 0,
-              webSearchRequests: 0,
-              costUSD: 0,
-            }, s.model)
-          : blendedSessionCost(s, blendedRates)
+        // `sessionCostUSD` prices per model (and, when the transcript reconciled it, per TTL —
+        // see `ModelUsage.cacheCreation1hInputTokens`); a hand-built `calcCost` call here used to
+        // leave those two optional fields off, so a session WITH a known model still priced its
+        // 1h-TTL cache writes at the flat 5-minute rate. `blendedSessionCost` is the fallback only
+        // for a session `sessionCostUSD` cannot price at all (no model, no `model_usage`).
+        const costUSD = sessionCostUSD(s) ?? blendedSessionCost(s, blendedRates)
         return (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: cols, gap: 6, padding: '4px 0', borderBottom: `1px solid ${c.border}40`, alignItems: 'center' }}>
             <div style={{ color: c.textSec }}>{s.start_time ? format(parseISO(s.start_time), 'MM/dd HH:mm') : '—'}</div>

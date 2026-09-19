@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { KEY_STRIP, ctrlKeyFor, keyBytes, stripKeyLabel } from './keyStrip'
+import { KEY_STRIP, PASTE_ENTRY, ctrlKeyFor, keyBytes, stripEntries, stripKeyLabel } from './keyStrip'
 import { classifyInput, type NamedKey } from './terminalKeys'
 
 /** Every named key the strip claims to send must survive the client allowlist. */
@@ -76,5 +76,22 @@ describe('ctrl composes with the NEXT character typed', () => {
     // A soft keyboard can deliver a whole composed word; that is not `ctrl` plus one letter.
     expect(ctrlKeyFor('cd')).toBeNull()
     expect(ctrlKeyFor('')).toBeNull()
+  })
+})
+
+describe('stripEntries — paste is CONDITIONAL, everything else is not', () => {
+  it('adds nothing when the clipboard cannot be read', () => {
+    expect(stripEntries(false)).toEqual(KEY_STRIP)
+  })
+
+  it('appends paste at the END when the clipboard can be read — the existing order is untouched', () => {
+    const entries = stripEntries(true)
+    expect(entries.slice(0, KEY_STRIP.length)).toEqual([...KEY_STRIP])
+    expect(entries[entries.length - 1]).toEqual(PASTE_ENTRY)
+    expect(entries.length).toBe(KEY_STRIP.length + 1)
+  })
+
+  it('paste has a readable label, never its internal id', () => {
+    expect(stripKeyLabel('paste')).toBe('paste')
   })
 })

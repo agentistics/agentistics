@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { agyLogFromFds, conversationFromAgyLog } from './agy-conversation'
+import { agyLogCollisions, agyLogFromFds, conversationFromAgyLog } from './agy-conversation'
 
 /**
  * The fixtures are REAL lines, captured on 2026-09-08 from agy 1.1.27 on this machine — the log of
@@ -108,5 +108,46 @@ describe('agyLogFromFds', () => {
   /** The same file counted twice (a dup'd fd) is still one file, and must not read as ambiguity. */
   it('accepts the same log appearing on two descriptors', () => {
     expect(agyLogFromFds([LOG, LOG])).toBe(LOG)
+  })
+})
+
+/**
+ * Reproduced live 2026-09-17: two real agy 1.2.5 processes, spawned within the same wall-clock
+ * second, both `/proc/<pid>/fd/1` resolved to `cli-20260917_203310.log`, and after both completed
+ * a full turn the file held exactly ONE `Created conversation` line, not two — the other write was
+ * lost, not merely reordered. `agyLogCollisions` is the guard: it never trusts a log more than one
+ * live pid has open.
+ */
+describe('agyLogCollisions', () => {
+  const SHARED = '/home/mithrandir/.gemini/antigravity-cli/log/cli-20260917_203310.log'
+  const OTHER = '/home/mithrandir/.gemini/antigravity-cli/log/cli-20260917_154127.log'
+
+  it('refuses both pids that share one log', () => {
+    const collided = agyLogCollisions(new Map([[111, SHARED], [222, SHARED]]))
+    expect(collided.has(111)).toBe(true)
+    expect(collided.has(222)).toBe(true)
+    expect(collided.size).toBe(2)
+  })
+
+  it('refuses every pid sharing the log when three or more collide', () => {
+    const collided = agyLogCollisions(new Map([[1, SHARED], [2, SHARED], [3, SHARED]]))
+    expect([...collided].sort()).toEqual([1, 2, 3])
+  })
+
+  it('trusts a pid whose log nobody else has open', () => {
+    const collided = agyLogCollisions(new Map([[111, SHARED], [222, OTHER]]))
+    expect(collided.has(111)).toBe(false)
+    expect(collided.has(222)).toBe(false)
+    expect(collided.size).toBe(0)
+  })
+
+  it('never flags a pid with no agy log open', () => {
+    // `null` is "this pid has nothing to collide with", not a value that can collide with itself.
+    const collided = agyLogCollisions(new Map([[111, null], [222, null]]))
+    expect(collided.size).toBe(0)
+  })
+
+  it('answers empty for no pids at all', () => {
+    expect(agyLogCollisions(new Map()).size).toBe(0)
   })
 })

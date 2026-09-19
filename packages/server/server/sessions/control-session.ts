@@ -21,7 +21,7 @@ import { needsChoice } from './dialog-choice'
 import { pickTitle } from './harness-session-file'
 import type { ResolvedRepoFacts } from './repo-facts'
 import type { SessionView } from './session-view'
-import { conversationLinkable } from './spawn-spec'
+import { conversationLinkGoneForever, conversationLinkable } from './spawn-spec'
 
 /** The state word each session wears, and the machine-readable state beside it. */
 export function sessionState(v: SessionView): SessionState {
@@ -97,6 +97,36 @@ export function toControlSession(
       ? s.sessUnregistered(v.id.slice(0, 12))
       : s.sessUntitled(harness || '?', project),
   })
+  // Why there is no conversation link, on a row we HOST and only while it has none — two DIFFERENT
+  // facts, and conflating them is how a disabled Reopen button ended up with nothing beside it
+  // explaining why. `!conversationLinkable` is a harness that can NEVER report one (codex, kimi,
+  // gemini): true the moment the row exists, no matter its state. `conversationLinkGoneForever` is
+  // narrower — a harness that CAN (antigravity, via its own process log), but only while that
+  // process is alive.
+  //
+  // "Alive" is read off `v.status` DIRECTLY and NOT off the collapsed `state` word, on purpose.
+  // `sessionState()` folds TWO different facts into the same `'lost'` output: `v.status === 'lost'`
+  // (`session-ref.ts`'s `!found` branch — the backend has NO record of this row at all, the
+  // ORDINARY way this happens is a reboot or a raw `tmux kill-session` outside agentop's own kill
+  // flow, and there is no pid left to ever read again) and `v.status === 'running'` with no
+  // `activity` read this tick (the backend DOES still have the pane, only this one poll could not
+  // capture it — genuinely ambiguous, and the process the fd would belong to may still be alive).
+  // Reading only `state === 'exited'` therefore missed the first, and MORE common, of the two ways
+  // a process-log harness's row ends up gone: a row still carries no honest sentence and a
+  // permanently dead Reopen button after a reboot, which is not an edge case for a machine that
+  // gets rebooted. `v.status === 'exited'` covers both the agentop-retired case (`endedAt` set,
+  // stamped by `session-view.ts`'s own `finished` check) and a pane the backend still hosts whose
+  // command already died on its own — in both, the ORIGINAL process is provably gone either way.
+  // `v.status === 'running'` with unread activity is deliberately excluded: that row's process may
+  // still be alive, so it stays quiet rather than claim a link is gone that may arrive on the very
+  // next poll.
+  const conversationBlind = v.status === 'external' || v.status === 'closed' || v.conversationId || !harness
+    ? undefined
+    : !conversationLinkable(v.harness!)
+      ? s.sessConversationBlind(harness)
+      : (v.status === 'exited' || v.status === 'lost') && conversationLinkGoneForever(v.harness!)
+        ? s.sessConversationLost(harness)
+        : undefined
   return {
     id: v.id,
     title: picked.title,
@@ -157,10 +187,7 @@ export function toControlSession(
     // …and where no answer can ever exist, that is stated instead. Only on a row we HOST and only
     // while it has no id: an `external` or `closed` row was never ours to record, and a claude row
     // that has not been polled yet is about to have one. Same shape as `approvalBlind`.
-    ...(v.status !== 'external' && v.status !== 'closed' && !v.conversationId && harness
-      && !conversationLinkable(v.harness!)
-      ? { conversationBlind: s.sessConversationBlind(harness) }
-      : {}),
+    ...(conversationBlind ? { conversationBlind } : {}),
     ...(v.resume ? { resume: v.resume } : {}),
     ...(v.lastLines?.length ? { lastLines: v.lastLines } : {}),
     ...(v.chatTurns?.length ? { chatTurns: v.chatTurns } : {}),

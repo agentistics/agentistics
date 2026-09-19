@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Filters, TaskPriorityId } from '@agentistics/core'
+import type { Filters, StagedSessionDraft, TaskPriorityId, TaskProgress } from '@agentistics/core'
 import { getDateRangeFilter } from '../hooks/useData'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
@@ -202,11 +202,36 @@ export interface Subtask {
    */
   blockedBy?: string[]
   /**
-   * Subtasks that share a `groupId` are read as ONE bucket: a session filed under any member
-   * counts for all of them. Absent = not grouped — every subtask is its own group of one. See
-   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §B.2.
+   * SUPERSEDED by `isGroup`/`parentGroupId` — see docs/superpowers/specs/
+   * 2026-09-11-alm-session-linking-ux.md §F, which replaces this §B "shared bucket" model (subtasks
+   * sharing a `groupId` read as one rollup) with a real hierarchy level. Mirrored here only because
+   * the server (`task-model.ts`'s `Subtask.groupId`) still writes it, for the same §B-era UI
+   * compatibility reason — no current web code should read it for bucketing.
    */
   groupId?: string
+  /**
+   * A GROUP is a real hierarchy level (§F.1), not a label two subtasks share: a peer of a loose
+   * subtask in the listing, and the only thing a session may be filed on inside this branch of the
+   * tree — never one of its own members. Absent reads as "not a group". Mirror of the server's
+   * `Subtask.isGroup` (`task-model.ts`).
+   */
+  isGroup?: boolean
+  /**
+   * The GROUP this subtask is a MEMBER of — the group's own subtask id, from the SAME task. A
+   * member never receives a session of its own and therefore has no rollup bucket of its own
+   * either (`SubtaskView.groupProgress` lives on the GROUP's own view, not the member's); it still
+   * has its own `status`/`assignee`/dates/comments, and its `status` is what feeds the group's
+   * `groupProgress`. Absent reads as "not a member". Mirror of the server's
+   * `Subtask.parentGroupId` (`task-model.ts`).
+   */
+  parentGroupId?: string
+  /**
+   * A dormant session draft composed ahead of time on this subtask/group (t-918cc82233) — see
+   * `@agentistics/core`'s `stagedSession.ts`. Absent means no draft. Mirror of the server's
+   * `Subtask.stagedSession` (`task-model.ts`); never present on a group MEMBER
+   * (`isGroupMember`/`parentGroupId` set) — the server refuses that write outright.
+   */
+  stagedSession?: StagedSessionDraft
 }
 export interface TaskFile {
   id: string; taskId: string; name: string; size: number
@@ -219,6 +244,22 @@ export interface TaskFile {
 export interface SubtaskView {
   id: string | null
   rollup: AttemptRollup
+  /**
+   * The same delivery-evidence numbers `TaskDetail.stats` carries for the whole task, re-partitioned
+   * to this bucket's own rows. `null` when nothing is filed under this bucket yet — never a block
+   * whose every field happens to be null. See
+   * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §C.5.
+   */
+  stats: TaskStats | null
+  /**
+   * Present only when this bucket's `id` names a subtask GROUP (§F.1) — the group's own progress,
+   * computed from its members' `done` flags (`groupProgress`, `@agentistics/core`), the same
+   * round-down "no bar without anything to measure" rule `TaskProgress` already applies at the task
+   * level, read one hierarchy level down. Absent for a loose subtask's bucket and for the direct
+   * (`id: null`) one — neither has members to measure. Mirror of the server's
+   * `SubtaskView.groupProgress` (`task-report.ts`).
+   */
+  groupProgress?: TaskProgress
 }
 
 export interface TaskDetail {
@@ -357,28 +398,56 @@ export function useTaskDetail(ref: string | undefined, filters?: Filters) {
   return { detail, error, reload: load }
 }
 
-export async function markTask(
+/**
+ * A status write the server can refuse for a NAMED reason — same shape `attachSession` uses for
+ * `blocked`. `done_needs_session` is `task-web.ts`'s refusal of a `done` with no session filed
+ * under the task or subtask yet; the caller opens the matching dialog rather than reporting a bare
+ * failure, so the rule reads as a question and not as a bug. `invalid_group`/`subtask_has_sessions`/
+ * `group_field_conflict` are `patchSubtask`'s own refusals of a bad `parentGroupId` write (§F.1 of
+ * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md) — see `checkParentGroup`
+ * (`task-attach.ts`). A refusal with no `reason` is anything else (a bad ref, a network hiccup) —
+ * nothing this shape names, so there is nothing to ask about.
+ */
+export type StatusRefusalReason =
+  | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions' | 'group_field_conflict'
+const STATUS_REFUSAL_REASONS: readonly StatusRefusalReason[] =
+  ['done_needs_session', 'invalid_group', 'subtask_has_sessions', 'group_field_conflict']
+export type StatusWriteResult = { ok: true } | { ok: false; reason?: StatusRefusalReason }
+
+async function postStatus(path: string, body: unknown): Promise<StatusWriteResult> {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) return { ok: true }
+    // A 422 is the server refusing a `blocked` with nothing to say, a `done` with no session
+    // filed, or a group write it cannot honor — every one of them names a piece of work this
+    // request cannot do YET. Read the body for WHICH one; anything else stays a bare refusal.
+    if (res.status === 422) {
+      const refused = await res.json().catch(() => null) as { message?: string } | null
+      if (refused?.message && (STATUS_REFUSAL_REASONS as readonly string[]).includes(refused.message)) {
+        return { ok: false, reason: refused.message as StatusRefusalReason }
+      }
+    }
+    return { ok: false }
+  } catch {
+    return { ok: false }
+  }
+}
+
+export function markTask(
   ref: string,
   status: TaskStatus,
   o: { reason?: string; blockedBy?: string[]; actor?: string } = {},
-): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status,
-        ...(o.reason ? { reason: o.reason } : {}),
-        ...(o.blockedBy ? { blockedBy: o.blockedBy } : {}),
-        ...(o.actor ? { actor: o.actor } : {}),
-      }),
-    })
-    // A 422 is the server refusing a `blocked` with nothing to say — the caller opens the dialog
-    // rather than reporting a failure, so the rule reads as a question and not as a bug.
-    return res.ok
-  } catch {
-    return false
-  }
+): Promise<StatusWriteResult> {
+  return postStatus(`/api/tasks/${encodeURIComponent(ref)}`, {
+    status,
+    ...(o.reason ? { reason: o.reason } : {}),
+    ...(o.blockedBy ? { blockedBy: o.blockedBy } : {}),
+    ...(o.actor ? { actor: o.actor } : {}),
+  })
 }
 
 async function post(path: string, body: unknown): Promise<boolean> {
@@ -434,11 +503,31 @@ export const editTask = (ref: string, patch: TaskFieldPatch) =>
 export const addComment = (ref: string, author: string, body: string) =>
   post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { author, body })
 
-export const addSubtask = (ref: string, title: string) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { title })
+/**
+ * Add a subtask — loose by default, or a GROUP (§F.1) when `isGroup` is true — and return its new
+ * id, or `null` on failure. The id is what the group-forming gesture needs next: minting the group
+ * is only step one of "create a group with…", which then joins both this row and the picked
+ * sibling to it via `patchSubtask({ parentGroupId })`.
+ */
+export async function addSubtask(
+  ref: string, title: string, o: { isGroup?: boolean } = {},
+): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, ...(o.isGroup ? { isGroup: true } : {}) }),
+    })
+    if (!res.ok) return null
+    const body = await res.json().catch(() => null) as { id?: unknown } | null
+    return typeof body?.id === 'string' ? body.id : null
+  } catch {
+    return null
+  }
+}
 
 export const setSubtaskDone = (ref: string, id: string, done: boolean) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id, done })
+  postStatus(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id, done })
 
 export async function deleteTask(ref: string): Promise<boolean> {
   try {
@@ -495,6 +584,11 @@ export const removeLink = (ref: string, remove: string) =>
 export type AttachRefusalReason =
   | 'no_such_task' | 'no_such_session' | 'no_such_subtask' | 'needs_subtask' | 'wrong_delivery'
   | 'blocked'
+  /**
+   * §F.1: the target is a group MEMBER (`Subtask.parentGroupId` set) — only the group itself may
+   * hold a session (`task-attach.ts`'s `planAttach`). File on the group's own id instead.
+   */
+  | 'subtask_in_group'
   // This function's own addition — the server can never say a request never reached it.
   | 'network'
 
@@ -544,16 +638,92 @@ export const editComment = (ref: string, id: string, body: string) =>
 export const removeComment = (ref: string, id: string) =>
   post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { id, remove: true })
 
-export const patchSubtask = (
-  ref: string,
-  id: string,
-  patch: Partial<Pick<Subtask,
-    'title' | 'status' | 'assignee' | 'dueDate' | 'startDate' | 'sessionId' | 'notes' | 'blockedBy'
-  >>,
-) => post(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id, ...patch })
+/**
+ * A subtask patch, plus the one field `Partial<Subtask>` cannot express: `parentGroupId` is
+ * `string | undefined` on the record itself (absent = "leave it alone" everywhere else in this
+ * app), but joining/leaving a group (§F.1) needs a THIRD state — `null` CLEARS it (leave the
+ * group) — so it is typed apart rather than folded into `Partial<Pick<Subtask, …>>`.
+ */
+export type SubtaskPatch = Partial<Pick<Subtask,
+  'title' | 'status' | 'assignee' | 'dueDate' | 'startDate' | 'sessionId' | 'notes' | 'blockedBy'
+>> & {
+  /** Join (a group's own subtask id) or leave (`null`) a group — see `checkParentGroup`
+   *  (`task-attach.ts`). Absent leaves membership alone. */
+  parentGroupId?: string | null
+}
+
+export const patchSubtask = (ref: string, id: string, patch: SubtaskPatch) =>
+  postStatus(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id, ...patch })
 
 export const removeSubtask = (ref: string, id: string) =>
   post(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id, remove: true })
+
+/**
+ * Save (or replace) a subtask/group's staged session draft (t-918cc82233).
+ *
+ * A structured result, not a bare boolean: the one refusal worth naming is `subtask_in_group` — the
+ * target is a group MEMBER, which can never hold a session and therefore never a draft either (see
+ * `task-attach.ts`'s identical refusal for filing a real one). The UI should never actually reach
+ * this for a member row (the compose control is withheld there), so this is defence in depth.
+ */
+export type StagedSessionWriteResult = { ok: true } | { ok: false; reason?: 'subtask_in_group' }
+
+export async function saveStagedSession(
+  ref: string, subtaskId: string, draft: StagedSessionDraft,
+): Promise<StagedSessionWriteResult> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: subtaskId, stagedSession: draft }),
+    })
+    if (res.ok) return { ok: true }
+    if (res.status === 422) {
+      const body = await res.json().catch(() => null) as { message?: string } | null
+      if (body?.message === 'subtask_in_group') return { ok: false, reason: 'subtask_in_group' }
+    }
+    return { ok: false }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/** Discard a subtask/group's staged draft, keeping the subtask itself untouched. */
+export const clearStagedSession = (ref: string, subtaskId: string) =>
+  post(`/api/tasks/${encodeURIComponent(ref)}/subtasks`, { id: subtaskId, stagedSession: null })
+
+/**
+ * Turn a staged draft's `attachmentIds` (TaskFile ids) into real local paths the new session can be
+ * pointed at — the same `/api/fleet/attach` store the ordinary composer uses, so a freshly spawned
+ * session reads these exactly as it would read anything else attached through the chat.
+ *
+ * One attachment that cannot be read (deleted since the draft was composed, a transient network
+ * error) is SKIPPED rather than failing the whole fire — a session started with N-1 of N attachments
+ * is still the session that was asked for; one started with none because of a single bad file is not.
+ */
+export async function materializeStagedAttachments(
+  lang: 'pt' | 'en', attachmentIds: readonly string[], files: readonly TaskFile[],
+): Promise<string[]> {
+  const paths: string[] = []
+  for (const fileId of attachmentIds) {
+    const meta = files.find(f => f.id === fileId)
+    if (!meta) continue
+    try {
+      const got = await fetch(fileUrl(fileId))
+      if (!got.ok) continue
+      const blob = await got.blob()
+      const form = new FormData()
+      form.append('file', new File([blob], meta.name))
+      const res = await fetch(`/api/fleet/attach?lang=${lang}`, { method: 'POST', body: form })
+      if (!res.ok) continue
+      const body = await res.json() as { ok: boolean; path?: string }
+      if (body.ok && body.path) paths.push(body.path)
+    } catch {
+      // One bad attachment must not sink the rest — see this function's own note.
+    }
+  }
+  return paths
+}
 
 /**
  * TAKE a task, or give it back.

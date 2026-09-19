@@ -106,6 +106,14 @@ function isAllPrintable(data: string): boolean {
  */
 export const MAX_TEXT_PER_MESSAGE = 8192
 
+/**
+ * The server refuses a `paste` message longer than this (`MAX_PASTE_TEXT` in input-protocol.ts).
+ * Larger than `MAX_TEXT_PER_MESSAGE` on purpose — a paste is a person's clipboard, not a keystroke
+ * burst, and this is the client-side mirror so an over-length paste is refused with a sentence
+ * BEFORE it is sent, exactly as `MAX_TEXT_PER_MESSAGE` is mirrored for typed text.
+ */
+export const MAX_PASTE_TEXT = 65536
+
 /** A trailing line ending, and nothing after it. */
 const TRAILING_NEWLINE = /^([\s\S]*?)(?:\r\n|\r|\n)$/
 
@@ -196,6 +204,10 @@ const REASON_TEXT: Record<string, { en: string; pt: string }> = {
   too_long: {
     en: 'that input was too long to send at once — send it from the line composer',
     pt: 'essa entrada é longa demais para enviar de uma vez — use o compositor de linha',
+  },
+  paste_too_long: {
+    en: 'that paste was too long to send — copy less at once',
+    pt: 'esse texto colado é longo demais para enviar — copie menos de uma vez',
   },
   send_failed: { en: 'not delivered — the key did not reach the session', pt: 'não entregue — a tecla não chegou à sessão' },
   error: { en: 'the write channel hit an error', pt: 'o canal de escrita encontrou um erro' },

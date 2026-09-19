@@ -15,9 +15,10 @@
 
 import {
   capturePaneAnsiArgs, paneInfoArgs, parsePaneInfo, SHELL_SOCKET, sendKeysLiteralArgs,
-  sendKeysNamedArgs, clearHistoryArgs,
+  sendKeysNamedArgs, clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
 } from './tmux-cli'
 import type { TerminalCapture } from './types'
+import { sanitizePasteText } from '@agentistics/core'
 
 export interface TmuxResult { code: number; out: string; err: string }
 export type TmuxRun = (args: string[]) => Promise<TmuxResult>
@@ -29,6 +30,8 @@ export interface ShellTerminal {
   sendText(id: string, text: string): Promise<boolean>
   /** Press ONE named key (`C-c`, `Enter`, `Escape`). */
   sendKey(id: string, key: string): Promise<boolean>
+  /** Deliver a whole clipboard PASTE atomically — bracketed `paste-buffer`, on the SHELL socket. */
+  sendPaste(id: string, text: string): Promise<boolean>
 }
 
 /** The byte a terminal emits for ctrl+l. */
@@ -77,6 +80,16 @@ export function createShellTerminal(run: TmuxRun): ShellTerminal {
         await run(clearHistoryArgs(id, SHELL_SOCKET))
       }
       return ok
+    },
+
+    // `sanitizePasteText` runs AGAIN here — see `backend-tmux.ts`'s twin for why: this is the
+    // primitive that actually writes the buffer tmux pastes into the pane, a second boundary
+    // independent of whatever the WS channel above it already checked.
+    async sendPaste(id, text) {
+      const name = pasteBufferName(id)
+      const safe = sanitizePasteText(text)
+      if ((await run(setBufferArgs(name, safe, SHELL_SOCKET))).code !== 0) return false
+      return (await run(pasteBufferArgs(id, name, SHELL_SOCKET))).code === 0
     },
   }
 }

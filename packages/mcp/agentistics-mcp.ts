@@ -207,7 +207,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_status",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. Move a task: backlog | todo | in_progress | blocked | in_review | done | abandoned. Only `done` stamps a delivery and closes rounds-to-delivery; `abandoned` records that the work was given up on, which is a real outcome and not a failure to report. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. Pass `actor` (who you are) so the move is recorded against you in the activity log.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. Move a task: backlog | todo | in_progress | blocked | in_review | done | abandoned. Only `done` stamps a delivery and closes rounds-to-delivery; `abandoned` records that the work was given up on, which is a real outcome and not a failure to report. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. Pass `actor` (who you are) so the move is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -243,14 +243,18 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_subtask",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `assignee`, `dueDate`, `startDate` or `blockedBy` to edit one. A subtask carries the same columns its parent does, but no cost of its own: cost is measured per SESSION and rolls up to the task — the PARENT task is only the group the subtasks are delivered under. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `assignee`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/assignee/dates/comments still exist and feed the group's progress percentage.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string" },
         title: { type: "string" },
         id: { type: "string" },
-        done: { type: "boolean" },
+        done: {
+          type: "boolean",
+          description:
+            "Send ALONE with `id` (no other field) for the tick — `{id, done}` is a fast path straight to the done/todo transition. Sent TOGETHER with `parentGroupId` (or any other named field below) in the same call, `done` is silently dropped rather than applied — this tool forwards only the named fields when one is present. Send them as two separate calls instead: join/leave the group first, then set `done` in its own call.",
+        },
         status: {
           type: "string",
           enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
@@ -263,6 +267,16 @@ const TOOLS: Tool[] = [
           items: { type: "string" },
           description:
             "Full replacement list of SIBLING subtask ids (same parent task) that must be done before this one. Requires `id` — a subtask being created has no siblings to name yet.",
+        },
+        isGroup: {
+          type: "boolean",
+          description:
+            "Create this subtask as a GROUP instead of an ordinary subtask. Only meaningful together with `title` (creation) — a group's shape cannot be changed afterwards.",
+        },
+        parentGroupId: {
+          type: "string",
+          description:
+            "Join this subtask (named by `id`) to the group whose id this names — a group of the SAME parent task. Pass an empty string to leave the current group. Refused (422, `invalid_group`) if the id is not an actual group of this task, or if this subtask is itself a group. Refused (422, `subtask_has_sessions`) if this subtask already has a session filed on it — detach it first. **Do not send `done` in this same call** — see `done`'s own description; make it a second call.",
         },
       },
       required: ["ref"],
@@ -359,7 +373,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_session",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. File a SESSION under a task, which is what makes the task measurable: its cost, tokens, rounds and harness all come from the sessions filed under it. Pass `subtaskId` to file it under one of the task's subtasks (the unit of WORK, for a task broken into steps); omit it to file the session directly on the task itself (the unit of DELIVERY, for a task simple enough not to need subtasks). Both can be used on the same task — some sessions direct, some under subtasks — and each subtask's own rollup plus the directly-filed sessions' own rollup are both readable via agentistics_task's `subtaskRollups` (keyed by subtask id, with `id: null` for the direct ones), so the breakdown never disappears. Use agentistics_task to read the subtasks, or agentistics_task_subtask to create one, then pass `ref` + `sessionId` (a managed session id or conversation id) + optionally `subtaskId`. Pass `detach` with a session id to unfile one. The task inherits the session's repository when it has none.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. File a SESSION under a task, which is what makes the task measurable: its cost, tokens, rounds and harness all come from the sessions filed under it. Pass `subtaskId` to file it under one of the task's subtasks (the unit of WORK, for a task broken into steps) — this INCLUDES a subtask GROUP (see agentistics_task_subtask's `isGroup`), which holds a session exactly like any other subtask; omit `subtaskId` to file the session directly on the task itself (the unit of DELIVERY, for a task simple enough not to need subtasks). Both can be used on the same task — some sessions direct, some under subtasks — and each subtask's own rollup plus the directly-filed sessions' own rollup are both readable via agentistics_task's `subtaskRollups` (keyed by subtask id, with `id: null` for the direct ones), so the breakdown never disappears. **Filing on a subtask that is a MEMBER of a group (has a `parentGroupId`) is refused (422, `subtask_in_group`)** — a member can never hold a session, only the group itself can; file on the group's own id instead. Use agentistics_task to read the subtasks, or agentistics_task_subtask to create one, then pass `ref` + `sessionId` (a managed session id or conversation id) + optionally `subtaskId`. Pass `detach` with a session id to unfile one. The task inherits the session's repository when it has none.",
     inputSchema: {
       type: "object",
       properties: {
@@ -651,17 +665,29 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         // `sessionId` is deliberately NOT here: a subtask holds any number of sessions and the
         // link lives on the SESSION (`agentistics_task_session` with `subtaskId`). Editing a
         // one-session field beside that would be a second, unreconciled answer to the same question.
-        const cols = ["status", "assignee", "dueDate", "startDate", "title"] as const;
+        // `parentGroupId` is here too (§F.1: joining/leaving a group) — it is typed as a plain
+        // string in the tool schema, with `""` meaning "leave", so it matches the same
+        // `typeof === "string"` filter as every other column and needs no special casing.
+        const cols = ["status", "assignee", "dueDate", "startDate", "title", "parentGroupId"] as const;
         const named = cols.filter(c => typeof a?.[c] === "string");
         // `blockedBy` is an ARRAY, so it never matches the string-valued `cols` filter above and
         // was silently dropped — a subtask genuinely can be blocked by a sibling (`Subtask.blockedBy`,
         // enforced server-side in `patchSubtask`/`task-attach.ts`), this tool just never offered it.
         const blockedBy = Array.isArray(a?.blockedBy) ? { blockedBy: a.blockedBy } : {};
+        // NOTE: when ANY named column (incl. `parentGroupId`) is present, this branch never
+        // forwards `done` at all — a caller combining `parentGroupId` with `done: true` in one call
+        // gets no error and `done` is just dropped. The same is true of every other named column
+        // (`status`, `assignee`, …); fixing that general mechanism is a bigger, separate change and
+        // deliberately out of scope here. The `parentGroupId`/`done` case is instead documented as a
+        // limitation on both fields' own tool-schema descriptions above: callers are told to send
+        // them as two separate calls.
         const payload = a?.id !== undefined
           ? (named.length > 0 || Array.isArray(a?.blockedBy)
             ? { id: a.id, ...Object.fromEntries(named.map(c => [c, a[c]])), ...blockedBy }
             : { id: a.id, done: a?.done === true })
-          : { title: a?.title };
+          // `isGroup: true` creates a GROUP (§F.1) instead of an ordinary subtask — creation only,
+          // `addSubtask` offers no way to change it afterwards.
+          : { title: a?.title, ...(a?.isGroup === true ? { isGroup: true } : {}) };
         const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/subtasks`, payload);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }

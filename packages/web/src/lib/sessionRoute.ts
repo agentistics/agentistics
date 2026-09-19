@@ -96,7 +96,7 @@ export function stillArriving(
 /** What a caller hands `navigate()` to land on a session it has just been given the id of. */
 export interface SessionRoute {
   path: string
-  options: { state: { creating: { harness?: string; label?: string } } }
+  options: { state: { creating: { harness?: string; label?: string }; retires?: string } }
 }
 
 /**
@@ -106,10 +106,14 @@ export interface SessionRoute {
  * its title, and a wait that names neither is a bare spinner. Both are optional because two of the
  * callers have the id and nothing else; the state is still carried, because its presence is what
  * tells the page "this is coming" rather than "this id names nothing".
+ *
+ * `from.id` — the row the reopen was ASKED ABOUT, which the server has already retired — travels as
+ * `retires`. It is what lets the unsaved-Studio guard tell a reopen of the open session (asking could
+ * keep nothing: `unsavedLeave.ts`'s `navigationRetiresStudio`) from any other navigation.
  */
 export function reopenedSessionRoute(
   id: string,
-  from?: { harness?: string; title?: string },
+  from?: { id?: string; harness?: string; title?: string },
 ): SessionRoute {
   return {
     path: sessionPath(id),
@@ -119,6 +123,7 @@ export function reopenedSessionRoute(
           ...(from?.harness ? { harness: from.harness } : {}),
           ...(from?.title ? { label: from.title } : {}),
         },
+        ...(from?.id ? { retires: from.id } : {}),
       },
     },
   }

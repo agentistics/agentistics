@@ -33,6 +33,13 @@ describe('every shell tmux call names the shell socket', () => {
     // whole phase is designed around, and it would still work.
     expect(t.calls.some(a => a.includes(TMUX_SOCKET))).toBe(false)
   })
+
+  test('so does a paste — both the set-buffer write and the paste-buffer read', async () => {
+    const t = fakeTmux()
+    await createShellTerminal(t.run).sendPaste('s1', 'a\nb\nc')
+    expect(t.calls.length).toBe(2)
+    for (const args of t.calls) expect(args.slice(0, 2)).toEqual(['-L', SHELL_SOCKET])
+  })
 })
 
 describe('capture', () => {
@@ -98,6 +105,24 @@ describe('the writes report what actually happened', () => {
     await term.sendKey('s1', 'Enter')
     expect(t.calls[0]).toContain('-l')
     expect(t.calls[1]).not.toContain('-l')
+  })
+
+  test('a paste is a THIRD, distinct shape — set-buffer then bracketed paste-buffer', async () => {
+    const t = fakeTmux()
+    await createShellTerminal(t.run).sendPaste('s1', 'multi\nline\npaste')
+    expect(t.calls[0]).toEqual(['-L', SHELL_SOCKET, 'set-buffer', '-b', 'agentop-paste-s1', 'multi\nline\npaste'])
+    expect(t.calls[1]).toEqual(['-L', SHELL_SOCKET, 'paste-buffer', '-p', '-d', '-b', 'agentop-paste-s1', '-t', 'agentop-s1'])
+  })
+
+  test('a failed set-buffer never pastes — the read is not attempted', async () => {
+    const t = fakeTmux({ 'set-buffer': { code: 1, out: '', err: 'nope' } })
+    expect(await createShellTerminal(t.run).sendPaste('s1', 'x')).toBe(false)
+    expect(t.calls.length).toBe(1)
+  })
+
+  test('a failed paste-buffer is reported false too', async () => {
+    const t = fakeTmux({ 'paste-buffer': { code: 1, out: '', err: 'no such session' } })
+    expect(await createShellTerminal(t.run).sendPaste('s1', 'x')).toBe(false)
   })
 })
 

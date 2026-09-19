@@ -8,8 +8,13 @@
  * work in.
  *
  * So this is now the SAME two-step shape `SessionFiling`'s unfiled face uses — pick a delivery,
- * then one of its subtasks, with "create" offered at both steps — returning the exact ids a spawn
- * needs to attach the session once it exists. **It never enforces `blockedBy` itself**: this
+ * then either file directly on it or pick one of its subtasks, with "create" offered at every
+ * step — returning the exact ids a spawn needs to attach the session once it exists. The direct
+ * row mirrors `SessionFiling`'s (spec `docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md`
+ * §C.1): reported directly as a session created here reading "filed" everywhere that joins by
+ * title string while never actually attaching, because this picker had no way to say "no subtask"
+ * and `NewSessionModal`'s `subtaskTarget` only ever files for real when it is given one.
+ * **It never enforces `blockedBy` itself**: this
  * session has not been created yet, so there is nothing yet to refuse filing, and the rule lives in
  * exactly one place (`task-attach.ts`'s `planAttach`, reached through `attachSession`) — the CALLER
  * finds out the subtask is blocked the moment it actually tries to file the session it just spawned,
@@ -28,9 +33,10 @@ import { overlayPadding } from '../../lib/mobileOverlay'
 
 export interface TaskPickerPick {
   taskId: string
-  subtaskId: string
+  /** Omitted = file directly on the delivery, no subtask — see the direct row below. */
+  subtaskId?: string
   taskTitle: string
-  subtaskTitle: string
+  subtaskTitle?: string
 }
 
 export interface TaskPickerProps {
@@ -65,6 +71,13 @@ export function TaskPicker(p: TaskPickerProps) {
     await p.onPick({
       taskId: chosen.task.id, subtaskId: st.id, taskTitle: chosen.task.title, subtaskTitle: st.title,
     })
+    p.onClose()
+  }
+
+  /** File straight on the delivery — no subtask. Mirrors `SessionFiling`'s direct row (spec §4.4). */
+  const pickDirect = async () => {
+    if (!chosen) return
+    await p.onPick({ taskId: chosen.task.id, taskTitle: chosen.task.title })
     p.onClose()
   }
 
@@ -137,19 +150,38 @@ export function TaskPicker(p: TaskPickerProps) {
 
         <span style={{ ...microLabel, fontSize: 9 }}>
           {pt
-            ? 'Subtarefas — a sessão vai ficar em UMA delas'
-            : 'Subtasks — the session will sit in ONE of them'}
+            ? 'Onde a sessão fica — direto na entrega, ou em UMA subtarefa'
+            : 'Where the session sits — directly on the delivery, or under ONE subtask'}
         </span>
 
         {(detail?.subtasks.length ?? 0) === 0 && !adding && (
           <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
             {pt
-              ? 'Esta entrega ainda não tem subtarefas, e uma sessão só se filia a uma subtarefa — crie a primeira aqui.'
-              : 'This delivery has no subtasks yet, and a session is only ever filed under one — create the first one here.'}
+              ? 'Esta entrega ainda não tem subtarefas. Escolha "direto na entrega" abaixo, ou quebre em subtarefas.'
+              : 'This delivery has no subtasks yet. Pick "directly on the delivery" below, or break it into subtasks.'}
           </p>
         )}
 
         <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
+          <button
+            key="__direct__"
+            onClick={() => void pickDirect()}
+            disabled={busy}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+              minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
+              borderRadius: 7, font: 'inherit', fontSize: 12.5, fontStyle: 'italic',
+              border: '1px solid transparent', background: 'transparent',
+              color: 'var(--text-secondary)', cursor: busy ? 'default' : 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-card-hover)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {pt ? '— direto na entrega —' : '— directly on the delivery —'}
+            </span>
+          </button>
           {(detail?.subtasks ?? []).map(st => (
             <button
               key={st.id}

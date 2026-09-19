@@ -6,7 +6,7 @@ import {
   Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   Clock, Code2, Cpu, Database, DollarSign, Download,
-  FileCode, FileDown, FileText, Flame, FolderOpen, GitBranch,
+  FileCode, FileDown, FileText, Flame, FolderOpen, FolderTree, GitBranch,
   GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
   PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
@@ -18,6 +18,8 @@ import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote, sessionPlanFactor } from './lib/costBasis'
 import { bootLoading } from './lib/bootPhase'
+import { editorEnabledFor } from './lib/editorGate'
+import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
 import type { LoadProgress } from './hooks/useData'
@@ -25,9 +27,9 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useAccessibility } from './hooks/useAccessibility'
 import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
-import type { BillingSettings, CostBasis, Filters, HarnessId, HealthIssue, SavedComparison, TeamConfig } from '@agentistics/core'
+import type { BillingSettings, CostBasis, Filters, HarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
@@ -70,7 +72,10 @@ import { Login } from './components/Login'
 import { ModeSwitch } from './components/nav/ModeSwitch'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
-import { openArtifacts, toggleArtifacts, useArtifacts } from './lib/artifactsStore'
+import { openArtifacts } from './lib/artifactsStore'
+import { isPanelShown, usePanelSlots } from './lib/panelSlots'
+import { shouldHandleGlobally } from './lib/studioShortcuts'
+import { runStudioShortcut } from './lib/studioSearchRequest'
 import { SessionsAside } from './components/nav/SessionsAside'
 import { SessionsRail } from './components/nav/SessionsRail'
 import { getPinnedIds } from './lib/pinnedSessions'
@@ -82,7 +87,7 @@ import { AsideResizer } from './components/nav/AsideResizer'
 import { modeOfPath } from './lib/workspaceMode'
 import { ASIDE_DEFAULT } from './lib/asideWidth'
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
-import { Segment } from './components/sessions/SessionPanel'
+import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
 import { MemberConnectionStatus } from './components/MemberConnectionStatus'
 import { OwnerSetup } from './components/OwnerSetup'
@@ -96,6 +101,9 @@ import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
 import { runningConversationIds } from './lib/activeConversations'
+import { countActiveFilters } from './lib/activeFilterCount'
+import { filtrosPanelInert, sessionsFiltersShouldReturnFocus, filtrosPanelBounds, metricsTabBounds } from './lib/sessionsFiltersPanel'
+import { useRightAsideEdge } from './lib/rightAsideEdge'
 import { CentralSessions } from './components/sessions/CentralSessions'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
@@ -144,8 +152,16 @@ interface TeamSessionState {
    *  Undefined on an older server, which had no switch — treated as "the capability decides",
    *  so upgrading the web ahead of the server never hides a chat that still works. */
   chatEnabled?: boolean
-  /** The same, for `/api/shell/*`. Undefined reads as OFF — see `AppContext.shellEnabled`. */
+  /** The same, for `/api/shell/*`. Undefined reads as OFF — see `AppContext.shellEnabled`. Already
+   *  folds in the in-memory "Enable now" override — see `shellOverride` below for its raw value. */
   shellEnabled?: boolean
+  /** The override's own raw value, apart from the combined `shellEnabled` above — see
+   *  `AppContext.shellOverride`. */
+  shellOverride?: boolean
+  /** The same, for the repository explorer's `/api/fleet/tree*`. Already RESOLVED by the server
+   *  (`sessions/editor-gate.ts`): the capability AND the switch. Undefined reads as OFF — see
+   *  `AppContext.editorEnabled`. */
+  editorEnabled?: boolean
 }
 
 export interface IamAccount { id: string; name: string; email: string; role: 'owner' | 'member'; memberships: { teamId: string; role: 'manager' | 'user' }[]; mustChangePassword: boolean }
@@ -1009,6 +1025,8 @@ const TOPBAR_H = 44
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
 
+const FILTROS_PANEL_ID = 'sessions-filtros-panel'
+
 /** Themed hover tooltip for the collapsed sidebar (icons only). Renders via a portal so it
  *  escapes the sidebar's overflow clipping. Active only when `show` is true (i.e. collapsed);
  *  when expanded the label is already visible, so it just renders its child untouched. */
@@ -1351,6 +1369,30 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
   )
 }
 
+// --- the Studio button's own pure parts (§2 of the slots/references design) -----------------------
+//
+// Pulled out of `AppLayout` — a thousand-line component with no test file of its own — so each piece
+// can be asserted directly rather than only by clicking through the whole page in a browser.
+
+/** `localStorage`'s own shape, narrowed to what these two need, so a test can hand in one that throws. */
+type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void }
+
+export const STUDIO_SEEN_KEY = 'agentistics.studio.seen'
+
+/**
+ * Whether the dot has already fired. Tolerates a storage whose `getItem` throws (a private window,
+ * a wiped store) by answering "not seen yet" — the safer of the two wrong answers, since it shows a
+ * dot rather than hiding a real one.
+ */
+export function readStudioSeen(storage: Pick<StorageLike, 'getItem'>): boolean {
+  try { return storage.getItem(STUDIO_SEEN_KEY) === '1' } catch { return false }
+}
+
+/** Marks the dot seen for good. Never throws even when the storage does (private mode). */
+export function writeStudioSeen(storage: Pick<StorageLike, 'setItem'>): void {
+  try { storage.setItem(STUDIO_SEEN_KEY, '1') } catch { /* private mode */ }
+}
+
 export default function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -1373,6 +1415,17 @@ export default function AppLayout() {
       Array<'members' | 'teams' | 'machines' | 'presence' | 'repos' | 'tags' | 'projects' | 'models'>
     : undefined
   const isMobile = useIsMobile()
+  /**
+   * The viewport's own width, tracked reactively — `useIsMobile` only answers a boolean at its own
+   * 768px breakpoint, and `filtrosPanelBounds` needs the actual figure at every size above it (the
+   * fallback right edge for a closed artifacts aside, and the ceiling on an unbounded wide monitor).
+   */
+  const [viewportW, setViewportW] = useState(() => (typeof window === 'undefined' ? 1440 : window.innerWidth))
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>('en')
@@ -1419,12 +1472,26 @@ export default function AppLayout() {
   }, [])
   useEffect(() => { if (teamSession?.central) reloadIam() }, [teamSession?.central, reloadIam])
 
-  useEffect(() => {
-    fetch('/api/team/session')
+  /**
+   * Re-reads the session so every capability+preference the server resolves — `editorEnabled`
+   * (through `editorGate.ts`), `shellEnabled`, `chatEnabled`, `central`, … — can catch up without a
+   * reload. This used to be a mount-only effect, so a switch flipped in Settings (`SessionsSettings`)
+   * never reached a page that had already read the old answer: the settings screen itself updated
+   * (it re-reads `/api/preferences` on its own), but every Studio entry stayed gone, or stayed
+   * present, exactly as it was at boot. The browser must not re-derive the resolved flag from a
+   * capability plus a preference itself — that is what `editorGate.ts`'s own header warns against —
+   * so the fix is to ask the SERVER again rather than mirror a guess into context.
+   *
+   * `resolveTeamSessionRefresh` is what keeps a transient failure from wiping out everything already
+   * known (`central`, `capabilities`, …) back to the bare boot default — see its own header.
+   */
+  const refreshTeamSession = useCallback(() => {
+    return fetch('/api/team/session')
       .then(r => r.ok ? (r.json() as Promise<TeamSessionState>) : null)
-      .then(s => setTeamSession(s ?? { required: false, authed: true }))
-      .catch(() => setTeamSession({ required: false, authed: true }))
+      .then(s => setTeamSession(prev => resolveTeamSessionRefresh(prev, s, { required: false, authed: true })))
+      .catch(() => setTeamSession(prev => resolveTeamSessionRefresh(prev, null, { required: false, authed: true })))
   }, [])
+  useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
 
   useEffect(() => {
     fetch('/api/team/status')
@@ -1501,6 +1568,15 @@ export default function AppLayout() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comparisons: next }),
+    })
+  }, [])
+  const [sessionPresets, setSessionPresets] = useState<SessionPreset[]>([])
+  const saveSessionPresets = useCallback(async (next: SessionPreset[]) => {
+    setSessionPresets(next)
+    await fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionPresets: next }),
     })
   }, [])
   const [costBasisState, setCostBasisState] = useState<CostBasis>('api')
@@ -1834,12 +1910,15 @@ export default function AppLayout() {
   }, [isMobile])
 
   /**
-   * How much width the filter bar actually has in the strip, and what it therefore draws.
+   * How much width the DASHBOARD's own inline `FiltersBar` actually has in its strip, and what it
+   * therefore draws.
    *
    * The strip's middle is `overflow: hidden` so it can never paint over the view tabs again — but a
    * clipped control is unreachable with nothing on screen saying so, which is worse. So the bar is
    * TOLD how much room it has and gives the date block up first (`headerFit.ts` owns that order and
-   * its thresholds). Only one of the two strips is mounted at a time, so one ref serves both.
+   * its thresholds). The sessions workspace no longer mounts an inline bar of its own to squeeze —
+   * its Filtros controls hang below the strip instead (see `sessionTopBar`'s own tab) — so only
+   * `dashboardTopBar` sets this ref today.
    */
   const [filterSlotEl, setFilterSlotEl] = useState<HTMLDivElement | null>(null)
   const [filterSlotW, setFilterSlotW] = useState(0)
@@ -1874,9 +1953,32 @@ export default function AppLayout() {
     return () => ro.disconnect()
   }, [actionsEl])
 
-  // The compensating padding is not space the bar may draw in, so it is taken off first.
-  /** The artifacts panel's open flag and count — see `artifactsStore` for why it is not a prop. */
-  const artifacts = useArtifacts()
+  /**
+   * THE STUDIO'S FIRST-OPEN DOT (§2 of the slots/references design). `studioOn` is "on screen in ANY
+   * slot" — `panelSlots.ts`'s own `isPanelShown`, which is `true` whether the Studio sits in the
+   * right slot, the bottom slot, or a collapsed bottom band (the panel is still THERE, only its
+   * screen is hidden).
+   *
+   * `studioSeen` replaces the Studio entry's old `NewTag`: a corner DOT rather than a word, cleared
+   * for good the first time the Studio opens. Guarded like every other `localStorage` flag in this
+   * file (`readStudioSeen`/`writeStudioSeen`, pulled out as pure functions below `AppLayout` so a
+   * test can hand in a storage whose accessors throw) — a private window or a wiped store just shows
+   * the dot every time, which is the safer of the two wrong answers.
+   *
+   * CLEARED FROM ONE PLACE — an effect on `studioOn` turning true, not any one button's own
+   * `onClick` — so every route into the Studio marks the dot seen the same way, wherever the panel
+   * bar that draws it happens to render (the bottom band's own bar now, never the header — see
+   * `lib/panelBar.ts`'s `PanelBar`). Published on `AppContext` (`studioSeen`) so the bar can read it
+   * from wherever `SessionsPage`/`SessionPanel` mount it.
+   */
+  const { layout: slotLayout } = usePanelSlots()
+  const studioOn = isPanelShown(slotLayout, 'studio')
+  const [studioSeen, setStudioSeen] = useState(() => readStudioSeen(localStorage))
+  useEffect(() => {
+    if (!studioOn || studioSeen) return
+    setStudioSeen(true)
+    writeStudioSeen(localStorage)
+  }, [studioOn, studioSeen])
 
   /**
    * Active sessions only — the fleet's own dimension (see `FiltersBar`'s doc comment on
@@ -1890,6 +1992,128 @@ export default function AppLayout() {
   useEffect(() => { setActiveOnly(inSessionsWorkspace) }, [inSessionsWorkspace])
 
   /**
+   * The Filtros tab — a small pill hanging BELOW the sessions-workspace strip (see `sessionTopBar`
+   * for where it renders), the same pattern the dashboard's own "Estatísticas" tab uses
+   * (`fleetOpen`/`toggleFleet`, below) and the mobile filter band's grid-rows animation:
+   * `gridTemplateRows` 0fr↔1fr for the glide, a CLIP flag so the growing panel is
+   * `overflow: hidden` only WHILE it animates — never once it has settled — or the `+ Filtro`
+   * popover it holds would open into a box still clipping it.
+   *
+   * COLLAPSED BY DEFAULT (unlike `fleetOpen`, which opens by default on desktop): these are the
+   * filters that narrow the fleet, not read-only stats, and the header strip already carries the
+   * session title and the fleet-wide `activeOnly` switch is reachable from inside the panel — there
+   * is nothing lost by starting closed. Persisted PER BROWSER, not per session, because it is a
+   * standing preference about how this workspace looks, the same reasoning `fleetOpen` documents.
+   */
+  const SESSIONS_FILTERS_OPEN_KEY = 'agentistics-sessions-filters-open'
+  const [sessionsFiltersOpen, setSessionsFiltersOpen] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(SESSIONS_FILTERS_OPEN_KEY)
+      if (stored !== null) return stored === '1'
+    } catch { /* private mode */ }
+    return false
+  })
+  const [sessionsFiltersClip, setSessionsFiltersClip] = useState(false)
+  /** The panel's own clipped wrapper (carries `inert` while collapsed) and its trigger — both
+   *  needed to answer "is focus inside the thing about to become unreachable" on collapse. */
+  const sessionsFiltersPanelRef = useRef<HTMLDivElement | null>(null)
+  const sessionsFiltersTriggerRef = useRef<HTMLButtonElement | null>(null)
+  /**
+   * NOT a functional `setState` updater with side effects inside it (the shape `toggleFleet` below
+   * uses) — that runs the focus check and the `localStorage` write every time React (StrictMode
+   * included) re-invokes the updater to verify purity, which is harmless for a `localStorage` write
+   * but not for a focus move. `sessionsFiltersOpen` is read directly instead: this function is only
+   * ever reached from the one button's `onClick`, so there is no concurrent-update race to guard
+   * against here the way there can be for a value derived from a fast-changing prop.
+   */
+  const toggleSessionsFilters = () => {
+    const next = !sessionsFiltersOpen
+    const focusInsidePanel = !!(
+      sessionsFiltersPanelRef.current
+      && document.activeElement
+      && sessionsFiltersPanelRef.current.contains(document.activeElement)
+    )
+    if (sessionsFiltersShouldReturnFocus(next, focusInsidePanel)) {
+      sessionsFiltersTriggerRef.current?.focus()
+    }
+    setSessionsFiltersOpen(next)
+    setSessionsFiltersClip(true)
+    try { localStorage.setItem(SESSIONS_FILTERS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
+  }
+  // The tab's own badge — the same count `FiltersBar` shows on its "Ver filtros ativos" chip once
+  // the panel is open. See `activeFilterCount.ts` for why this cannot simply be read off the
+  // component instead.
+  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly)
+
+  /**
+   * WHERE THE FILTROS PANEL MAY SIT — see `filtrosPanelBounds`'s own doc comment for the review
+   * finding this replaces (a fixed 440px cap that overlapped the artifacts aside's tabs at
+   * 1024×768, because that aside renders narrower there than its own 620px default).
+   *
+   * The LEFT edge is exact today — this file owns the fleet aside's width as state, the same
+   * figure `sessionTopBar`'s left-anchor already used — so there is nothing to measure for it.
+   * The RIGHT edge is the one this file has no live figure for: `useRightAsideEdge` reads it from
+   * `SessionsPage`'s own `ResizeObserver`, `null` meaning "no aside on screen" (closed, or a route
+   * with no `SessionsPage` mounted), which `filtrosPanelBounds` falls back to the viewport for.
+   *
+   * `viewportW` needs its own listener — `useIsMobile` only answers a boolean at its own
+   * breakpoint, not the width this arithmetic needs at every size above it.
+   */
+  const rightAsideEdge = useRightAsideEdge()
+  const filtrosBounds = filtrosPanelBounds(
+    { left: 0, right: (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + PAGE_INSET },
+    rightAsideEdge === null ? null : { left: rightAsideEdge, right: viewportW },
+    viewportW,
+  )
+  /**
+   * THE SESSION-METRICS TAB, hanging beside "Filtros" (design item 4, screenshot 7) — its own
+   * left edge and its dropdown's ceiling, both derived from `filtrosBounds` through
+   * `metricsTabBounds` (`lib/sessionsFiltersPanel.ts`), never re-measured independently: the two
+   * tabs share one room, clear of both asides, and a second computation of that room is a second
+   * place for it to disagree with the first.
+   *
+   * `filtrosTabW` is MEASURED off the Filtros trigger's own box (`sessionsFiltersTriggerRef`,
+   * already attached there for focus-return) rather than estimated from its label — the badge's
+   * digit count and the EN/PT label both shift it, and a guessed width is exactly the fixed-cap
+   * mistake `filtrosPanelBounds`'s own header already tells this story about, one level down.
+   */
+  const [filtrosTabW, setFiltrosTabW] = useState(0)
+  /**
+   * A CALLBACK ref, deliberately not a plain `useRef` + `useEffect` keyed on unrelated deps
+   * (`lang`, the filter count). This component returns an early `<LoadingScreen>` on its first
+   * several renders (`bootLoading` and the team-session gates, above) — the button this measures
+   * does not exist in the DOM at all until data has loaded, and an effect gated on `lang`/the
+   * filter count never fires again once THAT render finally reaches this JSX, because neither
+   * dependency happens to have changed between "loading" and "loaded". Measured live: the effect
+   * ran twice during the loading phase, both times against a `null` ref, and the tab it feeds sat
+   * at `filtrosTabW = 0` — overlapping the Filtros button — for the rest of the session. A
+   * callback ref fires exactly when THIS node attaches or detaches, on whichever render that is,
+   * the same pattern `Studio.tsx`'s own `measure` uses for its tree/editor split.
+   */
+  const filtrosTriggerObserver = useRef<ResizeObserver | null>(null)
+  const setFiltrosTriggerEl = useCallback((el: HTMLButtonElement | null) => {
+    sessionsFiltersTriggerRef.current = el
+    filtrosTriggerObserver.current?.disconnect()
+    filtrosTriggerObserver.current = null
+    if (el === null) return
+    // `getBoundingClientRect().width` (the BORDER box) on every callback — never
+    // `entries[0].contentRect.width`, which is the CONTENT box and reads ~22px narrower on this
+    // button (10px+1px of padding/border per side). A `ResizeObserver` fires once synchronously
+    // on `.observe()`, so that narrower figure overwrote the correct one from the very first
+    // frame: the metrics tab measured live at x394 instead of x410, OVERLAPPING the Filtros
+    // button — silent because nothing here ever changes size again, so it never re-corrects.
+    const measure = () => setFiltrosTabW(el.getBoundingClientRect().width)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    filtrosTriggerObserver.current = ro
+  }, [])
+  useEffect(() => () => filtrosTriggerObserver.current?.disconnect(), [])
+  const METRICS_TAB_GAP = 6
+  const metricsBounds = metricsTabBounds(filtrosBounds, filtrosTabW, METRICS_TAB_GAP)
+
+  /**
    * The selected session's title/tabs/actions row, lifted UP into this shared header from
    * `SessionPanel` — which used to draw its own second bordered strip directly under this one, the
    * same information said twice in two different boxes. `useFleet` is a SHARED poll (see
@@ -1900,7 +2124,7 @@ export default function AppLayout() {
   // A CENTRAL's fleet is the RELAY's, for the machine the aside's picker chose. Set once, here,
   // because the poller is module-scoped and every surface reads the same snapshot.
   useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
-  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported, refresh: headerFleetRefresh } = useFleet(lang === 'pt' ? 'pt' : 'en')
+  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
   /**
    * "Active only" needs a fleet to intersect against, on EITHER page. An exposed profile with no
    * host power, or a central with no machine chosen, both report `unsupported` here — offering the
@@ -1926,6 +2150,46 @@ export default function AppLayout() {
   const headerSessionMeta = selectedFleetSession?.conversationId !== undefined
     ? data?.sessions?.find(x => x.session_id === selectedFleetSession.conversationId)
     : undefined
+
+  /**
+   * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
+   * Studio wherever it lives, `Ctrl/Cmd+Shift+F` opens it (in its last slot) and switches to a
+   * whole-tree content search. Registered on `document` rather than on some element, because
+   * neither shortcut has a natural "focused" owner — the reader could be reading the conversation,
+   * sitting in the tree, or anywhere else on the page.
+   *
+   * GATED here to the Sessions workspace and a session actually selected — NOT to the editor gate
+   * itself, unlike the Studio's own header entry a few hundred lines below
+   * (`selectedFleetSession && appCtx.editorEnabled`). That gate lives on `appCtx`, built AFTER this
+   * component's early loading-screen returns, and a hook may never sit after a conditional return —
+   * placed there once, it fired on some renders and not others (data loading vs. loaded) and React
+   * refused to reconcile the mismatched hook count. Reading the raw server flag a second time up
+   * here to recompute the gate early would itself be exactly the "two gates that can disagree"
+   * shape `editorGate.test.ts` polices (`appCtx` is the ONE producer, asserted over the source) —
+   * so this effect skips the check instead: a `showPanel('studio')`/search request fired while the
+   * gate is actually closed lands on `panelSlots.ts`'s own `resolveForGates`, which already treats a
+   * gated-off Studio as absent wherever it is read, so an ungated write here is inert rather than
+   * wrong. This position, alongside every other hook `selectedFleetSession` itself depends on, is
+   * called on EVERY render regardless of loading state.
+   *
+   * `shouldHandleGlobally` (`lib/studioShortcuts.ts`) is the ONE gate on the KEYSTROKE — never
+   * re-derived here — and `runStudioShortcut` (`lib/studioSearchRequest.ts`) is the SAME function
+   * each Monaco instance's own registered command calls (`RepoFileEditor.tsx`), so a keystroke typed
+   * inside a file and one typed anywhere else in the workspace can never disagree about what either
+   * shortcut does.
+   */
+  useEffect(() => {
+    if (!inSessionsWorkspace || !selectedFleetSession) return
+    const onKey = (e: KeyboardEvent) => {
+      const shortcut = shouldHandleGlobally(e, e.target as { tagName?: string; isContentEditable?: boolean } | null)
+      if (shortcut === null) return
+      e.preventDefault()
+      runStudioShortcut(shortcut)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [inSessionsWorkspace, selectedFleetSession])
+
   // The Chat/Terminal choice lives in the URL (`?view=`) rather than in state here or in
   // `SessionPanel`, so the ONE control (now in this shared header) and the ONE reader (the panel,
   // still deciding which component to mount) can never disagree about which view is showing without
@@ -2055,6 +2319,9 @@ export default function AppLayout() {
   const [chatModel, setChatModel] = useState<ChatModelId | null>(null)
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState('ping')
+  // The repository explorer's autosave switch. A plain preference, loaded with the rest below and
+  // defaulting to OFF — it is not a capability, so it is never read off `/api/team/session`.
+  const [editorAutosave, setEditorAutosave] = useState(false)
 
   const [cardPrecision, setCardPrecisionState] = useState<Record<string, boolean>>({})
   const precisionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2108,13 +2375,14 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; cardOrder?: string[]; chatModel?: string; chatSoundEnabled?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; cardOrder?: string[]; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
       setBilling(nextBilling)
       setCostBasisState(nextBilling.costBasis ?? 'api')
       setComparisons(normalizeComparisons((prefs as Record<string, unknown>).comparisons))
+      setSessionPresets(normalizeSessionPresets((prefs as Record<string, unknown>).sessionPresets))
       if (prefs.lang) setLangState(prefs.lang)
       if (prefs.theme) {
         setThemeState(prefs.theme)
@@ -2125,6 +2393,9 @@ export default function AppLayout() {
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
       if (prefs.chatModel) setChatModel(prefs.chatModel as ChatModelId)
       if (prefs.chatSoundEnabled !== undefined) setChatSoundEnabled(prefs.chatSoundEnabled)
+      // Absent reads as OFF, so this is `=== true` rather than the `!== undefined` guard above —
+      // autosave was never on before it had a switch, and an upgrade must not turn it on.
+      setEditorAutosave(prefs.editorAutosave === true)
       setInstallDismissedPref(prefs.installDismissed === true)
       if ((prefs as Record<string, unknown>).chatSoundId) setChatSoundId((prefs as Record<string, unknown>).chatSoundId as string)
       // Resolve the archive mode (migrates the legacy archiveSessions boolean). Only reached on
@@ -2209,7 +2480,13 @@ export default function AppLayout() {
         if (rates.brlRate && rates.brlRate > 1) setBrlRate(rates.brlRate)
         if (rates.pricing) {
           for (const [id, price] of Object.entries(rates.pricing)) {
-            MODEL_PRICING[id] = price
+            // `/api/rates` states the 5-minute-TTL rate only (see `rates.ts`, which skips the
+            // page's 1h column). The 1-hour rate is derived here the same way MODEL_PRICING's own
+            // built-in table derives it: 2x base input, never fetched or guessed — see
+            // `packages/core/src/types.ts`'s `cacheWrite1h`. Without this, a live/community/
+            // official price replacing the built-in row would silently drop the field and price
+            // every 1h-TTL cache write at `undefined` (NaN) the moment `/api/rates` responds.
+            MODEL_PRICING[id] = { ...price, cacheWrite1h: price.input * 2 }
           }
         }
       })
@@ -2314,10 +2591,11 @@ export default function AppLayout() {
    * compacts a bar that would have fitted.
    */
   const stripExtra = (!isCentral && billingReady.ready && planBasis.basis !== null) ? COST_BASIS_W : 0
-  // The SESSIONS strip does not centre its filters at all — its slot carries no padding — so it
-  // is charged none. It was being charged `actionsW` for a padding that is not there, which is
-  // the same double-subtraction seen from its other side.
-  const stripPad = inSessionsWorkspace ? 0 : stripPadding(filterSlotW, actionsW, FULL_BAR_W + stripExtra)
+  // The SESSIONS strip mounts no inline `FiltersBar` of its own to centre or squeeze any more (see
+  // `sessionTopBar`'s Filtros tab), so `filterSlotEl` is never set there and `filterSlotW` is
+  // already 0 on that route — `stripPadding(0, …)` answers 0 on its own, which is what makes a
+  // plain, unconditional call here correct for both strips without an `inSessionsWorkspace` branch.
+  const stripPad = stripPadding(filterSlotW, actionsW, FULL_BAR_W + stripExtra)
   const stripFit = headerFit(Math.max(0, filterSlotW - stripPad), stripExtra)
 
   const setCostBasis = useCallback((b: CostBasis) => {
@@ -2993,6 +3271,7 @@ export default function AppLayout() {
     lang, theme, currency, setCurrency, brlRate,
     billing, saveBilling, costBasis, setCostBasis, planBasis, billingReady, openBillingSetup,
     comparisons, saveComparisons,
+    sessionPresets, saveSessionPresets,
     tags: tagsList, monthCommitment,
     chatModel, setChatModel, chatSoundEnabled, setChatSoundEnabled, chatSoundId, setChatSoundId,
     savePreferences,
@@ -3011,6 +3290,18 @@ export default function AppLayout() {
     isCentral,
     capabilities: teamSession?.capabilities,
     shellEnabled: teamSession?.shellEnabled === true,
+    shellOverride: teamSession?.shellOverride === true,
+    // Already resolved by the server (capability AND switch) — never re-derived here. Undefined on
+    // an older server reads as OFF, so the Studio is simply absent there. `editorEnabledFor` also
+    // subtracts a CENTRAL, and this is the only place that happens: `editor-gate.ts` carries no
+    // central term, so the server says `true` there while the whole `/api/fleet` prefix is refused.
+    // Publishing the narrowed value closes every consumer at once — see `lib/editorGate.ts`.
+    editorEnabled: editorEnabledFor(teamSession?.editorEnabled, isCentral),
+    // The one way a page can make the line above catch up after `SessionsSettings` flips the
+    // preference: ask the server again, never mirror the toggle's own guess into context.
+    refreshTeamSession,
+    studioSeen,
+    editorAutosave, setEditorAutosave,
     me: iam?.account,
     teams: teamsList,
     machines: machinesList,
@@ -3061,15 +3352,10 @@ export default function AppLayout() {
           }}>
             {selectedFleetSession.title}
           </span>
-          <SessionTitleFlag
-            session={{
-              id: selectedFleetSession.id, title: selectedFleetSession.title,
-              ...(selectedFleetSession.harness ? { harness: selectedFleetSession.harness } : {}),
-              ...(selectedFleetSession.task ? { task: selectedFleetSession.task } : {}),
-            }}
-            lang={lang === 'pt' ? 'pt' : 'en'}
-            onLinked={headerFleetRefresh}
-          />
+          {/* THE TASK CONTROL MOVED DOWN (design item 3) — `SessionTitleFlag` now renders at the
+              bottom bar's left end (`SessionPanel.tsx`'s `taskControl`), with a clipboard icon
+              instead of a flag. The header is left with only the title and its state, per the
+              owner's drawing: "the top bar becomes clean and dedicated to the title etc." */}
           {/* Gives up before the title does: the name is what identifies the session, and the state
               is repeated on its own row in the aside two centimetres away. */}
           <span style={{
@@ -3082,51 +3368,15 @@ export default function AppLayout() {
         </div>
       )}
 
-      {/* THE FILTERS, in the centre. They are the element that gives up width FIRST: the title
-          identifies what you are looking at and the actions are how you act on it, while a narrowed
-          filter bar is still a filter bar — its own `+ Filtro` popover holds everything it drops. */}
-      {/* NO `overflow: hidden` HERE. It was added as the no-overlap guarantee and it also clipped
-          the bar's own popovers — the `+ Filtro` menu opened into a hidden box, so the button read
-          as dead. A clipping ancestor cannot tell a popover from an overflowing row. The overlap is
-          prevented where it is caused instead: `headerFit` collapses the date block before the row
-          can outgrow this slot, and the bar's own root is capped at 100%. */}
-      {/* THE FLOOR IS THE NARROWEST TIER'S OWN WIDTH — `MIN_BAR_W`, not a number typed here. It was
-          `minWidth: 90`, 122px under it, so on a tablet the strip went on taking width after
-          `headerFit` had run out of tiers: the bar cannot wrap and cannot clip, so its controls
-          crushed together and the `+` ended up welded to the button beside it. Below this the TITLE
-          gives instead, and a title ellipsises. */}
-      <div ref={setFilterSlotEl} style={{ flex: 1, minWidth: MIN_BAR_W, display: 'flex', justifyContent: 'center' }}>
-        <FiltersBar
-          inline
-          dateCompact={stripFit.date === 'compact'}
-          activeFiltersIcon={stripFit.activeFilters === 'icon'}
-          addFilterIcon={stripFit.addFilter === 'icon'}
-          only={SESSIONS_FILTER_DIMS}
-          activeOnly={activeOnly}
-          onActiveOnlyChange={setActiveOnly}
-          filters={filters}
-          onChange={setFilters}
-          projects={availableProjects}
-          sessionCountByProject={sessionCountByProject}
-          models={models}
-          modelGroups={modelGroups}
-          modelsInProject={modelsInProject}
-          users={[]}
-          // HARNESSES come from the FLEET here and from the metrics everywhere else. The bar offered
-          // all six the metrics know while the list it filters holds whatever is running — three on
-          // this machine — so picking "antigravity" emptied the list. Nothing was broken; there were
-          // genuinely no antigravity rows. But a filter that can only ever answer "nothing" is
-          // indistinguishable from one that is failing, and it was reported as exactly that. An
-          // option is a promise that something might be behind it.
-          // The WHOLE fleet's assistants, not just the ones the current switches can show — see
-          // `fleetFilterOptions`. The ones being withheld are MARKED rather than dropped, because a
-          // dimension that disappears reads as "this product does not know about my other
-          // assistants", which the Compare page contradicts two clicks away.
-          harnesses={fleetOptions.harnessesAll as typeof availableHarnesses}
-          harnessesOutOfView={fleetOptions.harnessesAll.filter(h => !fleetOptions.harnesses.includes(h))}
-          lang={lang}
-        />
-      </div>
+      {/* Nothing lives in this centre slot any more. The owner asked for the header to hold only
+          the session title and its own utilities — the Filtros controls used to sit here as a
+          119px bordered button (still technically IN the header, just compressed, which is what
+          review flagged), and now hang from a TAB below the strip instead (see the end of this
+          bar), the same technique the dashboard's own "Estatísticas" tab already uses. This empty
+          `flex: 1` spacer is what still pins the title left and the action cluster right — the job
+          the removed button, and the inline `FiltersBar` before it, both did for this slot while
+          either lived here. */}
+      <div style={{ flex: 1, minWidth: 0 }} />
 
       {/* The magnifier pair, here for the reason it is in the dashboard's strip: this workspace
           renders no <header>, so without it the lenses would have no control on this route. */}
@@ -3134,41 +3384,6 @@ export default function AppLayout() {
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
       </div>
-
-      {/* HARDWARE, on this route too. The whole action cluster is hidden in the sessions workspace
-          — correctly, for the totals and the page-data Live toggle, neither of which describes a
-          fleet that polls itself — and this button went with it. It answers "what is this machine
-          doing right now", which is MORE relevant here than anywhere else: this is the screen where
-          you watch that machine run several assistants at once. Reported as missing.
-          It sits on the LIST side of the rule below, because it is about the machine and not about
-          the session you have open. */}
-      {!isCentral && (
-        <button
-          onClick={() => setHardwareOpen(true)}
-          title={lang === 'pt' ? 'Recursos de hardware' : 'Hardware resources'}
-          aria-label={lang === 'pt' ? 'Recursos de hardware' : 'Hardware resources'}
-          aria-haspopup="dialog"
-          style={{
-            width: 30, height: 30, flexShrink: 0, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', borderRadius: 8, border: '1px solid var(--border)',
-            background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
-          }}
-        >
-          <Cpu size={14} />
-        </button>
-      )}
-
-      {/* A RULE, not more gap. Everything to the left narrows the LIST; everything to the right is
-          about the session you have open — two different questions that were sitting in one
-          undifferentiated row of controls, which is what "entulhado" describes. A one-pixel line
-          costs nothing and says where the row changes subject; the group after it keeps a wider
-          gap of its own so the eye lands on the break rather than counting buttons. */}
-      {selectedFleetSession && (
-        <span aria-hidden style={{
-          width: 1, alignSelf: 'stretch', margin: '4px 4px 4px 2px', flexShrink: 0,
-          background: 'var(--border-subtle)',
-        }} />
-      )}
 
       {/* THE `Conversa | Terminal` TOGGLE IS GONE FROM THE HEADER, and its absence is the design.
           A SESSION OPENS ON ITS CONVERSATION — that is what a session is — and the terminals are
@@ -3186,63 +3401,18 @@ export default function AppLayout() {
           conversation, and the conversation does not leave the machine. A control that cannot work
           is not rendered inert — the same rule the fleet's verbs keep. The sentence is on the row
           in the panel's place, so the absence is explained where the button would have been. */}
-      {/* WHAT THIS CONVERSATION HAS SPENT. The context percentage rides the button, because it is
-          the one figure that changes what you do next: a session near its window is one to finish
-          rather than extend. The record comes from the store by CONVERSATION id — a session the
-          store has not seen yet reads as "not recorded yet", never as zero. */}
-      {selectedFleetSession && (
-        <SessionStatsMenu
-          harness={selectedFleetSession.harness}
-          sessionId={selectedFleetSession.conversationId ?? selectedFleetSession.id}
-          meta={headerSessionMeta}
-          lang={lang === 'pt' ? 'pt' : 'en'}
-          currency={currency}
-          brlRate={brlRate}
-          costBasis={costBasis}
-          planFactor={sessionPlanFactor(planBasis.basis, selectedFleetSession.harness)}
-          /* THE FULL READING opens as a TAB in the right aside (`SessionsPage` supplies it),
-             not as a second dialog over the session. Withheld when the store has no record —
-             the same fact that decides whether that tab exists at all, read here from the same
-             lookup so the link and the tab can never disagree. */
-          {...(headerSessionMeta ? { onOpenFull: () => openArtifacts('metrics') } : {})}
-          {...(selectedFleetSession.model ? { startedModel: selectedFleetSession.model } : {})}
-          {...(selectedFleetSession.effort ? { startedEffort: selectedFleetSession.effort } : {})}
-          /* THE DELIVERY this session is filed under, one click from the figures it spent. The
-             fleet row carries the NAME, and the name is a ref the board resolves — see
-             `lib/sessionTaskLink.ts`, which is why this costs no id lookup. */
-          {...(selectedFleetSession.task ? { task: selectedFleetSession.task } : {})}
-          onOpenTask={ref => navigate(`/tasks/${encodeURIComponent(ref)}`)}
-        />
-      )}
+      {/* WHAT THIS CONVERSATION HAS SPENT used to render HERE, in the header row, as a bordered
+          "66%" button — MOVED below, beside the "Filtros" tab (design item 4, screenshot 7): an
+          arrow in the owner's own screenshot points from this exact spot to a new hanging tab next
+          to Filtros. See `sessionMetricsTab` near the end of this bar. */}
 
-      {selectedFleetSession && !isCentral && (
-        <button
-          onClick={toggleArtifacts}
-          aria-pressed={artifacts.open}
-          title={lang === 'pt'
-            ? 'Conteúdo desta sessão — arquivos, docs, atividade, galeria e skills'
-            : 'This session’s contents — files, docs, activity, gallery and skills'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
-            height: 30, padding: '0 10px', borderRadius: 9, cursor: 'pointer',
-            border: '1px solid ' + (artifacts.open ? 'var(--anthropic-orange)' : 'var(--border-subtle)'),
-            background: artifacts.open ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-            color: artifacts.open ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-            fontFamily: 'inherit', fontSize: 12,
-          }}
-        >
-          {/* A DOCUMENT, and no number.
-              The count went because it counts everything the session ever touched — past fifty on
-              an ordinary afternoon — and a figure nobody acts on is furniture with a number on it.
-              What deserves attention is a file being written NOW, which has its own announcement on
-              the edge of the screen (`edgeHint`) and names the action instead of counting it.
-              `FileText` rather than a panel glyph: a panel glyph says "something opens here" and
-              leaves the reader to find out what. No single icon covers docs, the live feed AND the
-              gallery, so it names what the panel opens on nine times out of ten and the tooltip
-              carries the rest. `Files` (two sheets) was tried and reads as "copy". */}
-          <FileText size={14} />
-        </button>
-      )}
+      {/* THE PANEL SWITCHER MOVED DOWN TOO (this pass's design item 1/2) — `Conteúdo · Studio ·
+          Claude Code · Shell · Hardware` no longer renders here at all. It is now the bottom band's
+          own bar (`SessionPanel.tsx`'s `PanelBar`, computed there from the very `slotLayout`/
+          `artifactsStore` state this header used to read on its own) — one panel bar, not two
+          copies of it agreeing by convention. The header is left with only the title, the
+          magnifier and the "⋯" session-actions menu, per the owner's drawing: "the top bar becomes
+          clean and dedicated to the title etc." */}
 
       {selectedSessionRow && (
         <SessionActions
@@ -3255,12 +3425,208 @@ export default function AppLayout() {
           // until the next poll carries the new row. See `reopenedSessionRoute`.
           onOpened={id => {
             const r = reopenedSessionRoute(id, {
+              id: selectedSessionRow.id,
               harness: selectedSessionRow.harness,
               title: selectedSessionRow.title,
             })
             navigate(r.path, r.options)
           }}
         />
+      )}
+
+      {/* THE FILTROS TAB — hangs BELOW the strip, the exact technique `dashboardTopBar`'s own
+          "Estatísticas" tab uses: `position: absolute; top: 100%`, `borderTop: none`, rounded
+          bottom corners, a small pill rather than a row-width control. It anchors to the fixed
+          `<TopBar>` div this whole bar rides inside (that div's `position: fixed` is the nearest
+          POSITIONED ancestor, so `top: 100%` lands on the strip's own bottom edge no matter what
+          this row's own layout is doing) — same anchor, same reasoning as Estatísticas.
+
+          BOUNDED BY THE ROOM THAT IS ACTUALLY THERE, never a fixed span or a fixed cap — both were
+          tried and both broke. `TopBar`'s own root is `left: 0; right: 0`, the whole viewport, and
+          an earlier version of this panel inherited that same span: reproduced by review at 1440,
+          the card ran x 52→1388, painting over the fleet aside's own search field, over the open
+          conversation, and over the artifacts aside's tab row. The FIX AFTER THAT one anchored the
+          left edge correctly (`sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth` is the exact
+          figure `TopBar` itself already receives as `asideWidth`, plus `PAGE_INSET`) but capped the
+          width at a fixed 440px, reasoning that the artifacts aside's DEFAULT drag width (620px)
+          would always leave that much clear — re-review at 1024×768 found that aside renders at
+          439px there, not 620px, so the fixed cap overlapped its "Studio" and "Live" tabs by 15px.
+          `filtrosBounds` (`lib/sessionsFiltersPanel.ts`'s `filtrosPanelBounds`) is the durable
+          answer: the left edge is still this file's own exact figure, but the right edge is now
+          `useRightAsideEdge()` — the artifacts aside's LIVE left edge, measured in `SessionsPage.tsx`
+          with a `ResizeObserver` and reported through `rightAsideEdge.ts` (a different file, no
+          ancestor of this one, the same bridge `artifactsStore.ts` already is for that aside's open
+          flag) — falling back to the viewport's own width when the aside is not on screen at all.
+          Re-measured on every drag, open/close and window resize; see that module's own comment for
+          what the two triggers cover between them.
+
+          zIndex 10, not 300: `TopBar` itself is the z-300 stacking context this whole bar lives
+          inside, so a CHILD's z-index only orders it among the STRIP'S OWN other floating pieces —
+          `SessionActions`'s dropdown (z 21), the stats menu, the hardware popover — never against
+          the page or the asides, which is decided by `TopBar`'s OWN z 300 regardless of what is set
+          here. At 300 this panel painted OVER those three; reproduced by review pressing "Ações da
+          sessão" with the panel open and seeing only its last two rows, the ones below the panel's
+          lower edge. At 10 it still floats above the page and both asides while those three menus
+          reliably paint above IT.
+
+          Always MOUNTED, never conditionally rendered: the grid-rows animation (0fr↔1fr, the same
+          curve the mobile filter band uses) needs the collapsed state to still be in the DOM to
+          glide out of it. `sessionsFiltersClip` keeps this `overflow: hidden` only WHILE the row is
+          animating — collapsing OR expanding — and lets it go `visible` once expansion has settled,
+          or the `+ Filtro` popover inside `FiltersBar` would open into a box still clipping it.
+          `e.target !== e.currentTarget` on `onTransitionEnd` matters here specifically because
+          `FiltersBar`'s own chip rows animate their OWN `grid-template-rows` — a `transitionend`
+          bubbling up from one of those would otherwise lift the clip before THIS row has finished
+          expanding.
+
+          `inert` while collapsed (`filtrosPanelInert`, `lib/sessionsFiltersPanel.ts`) — the clip is
+          a purely VISUAL fact and, on its own, leaves every control inside still reachable by Tab
+          and announced by a screen reader. Reproduced by review: 12 Tab presses from the closed
+          trigger crossed nine hidden controls, "Limpar filtros" among them — Enter there silently
+          clears every dimension AND turns "Só ativas" off, filling the list with everything on
+          record. If focus was inside the panel at the moment it collapses (`toggleSessionsFilters`,
+          above), it is moved back to the trigger rather than left to fall wherever the browser
+          resets an `inert`ed focus to. */}
+      <div style={{
+        position: 'absolute', top: '100%',
+        left: filtrosBounds.left,
+        zIndex: 10, pointerEvents: 'none',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', pointerEvents: 'auto' }}>
+          <button
+            ref={setFiltrosTriggerEl}
+            onClick={toggleSessionsFilters}
+            aria-expanded={sessionsFiltersOpen}
+            aria-controls={FILTROS_PANEL_ID}
+            title={lang === 'pt' ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
+              border: '1px solid var(--border)', borderTop: 'none',
+              borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
+              color: sessionsFiltersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+              cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
+            }}
+          >
+            {lang === 'pt' ? 'Filtros' : 'Filters'}
+            {sessionsActiveFilterCount > 0 && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
+                background: 'var(--anthropic-orange)', color: '#fff',
+                fontSize: 9.5, fontWeight: 700,
+              }}>
+                {sessionsActiveFilterCount}
+              </span>
+            )}
+            {sessionsFiltersOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
+
+          <div
+            id={FILTROS_PANEL_ID}
+            style={{
+              display: 'grid',
+              gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
+              transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+              width: filtrosBounds.width, maxWidth: 'calc(100vw - 48px)',
+            }}
+            onTransitionEnd={e => {
+              if (e.target !== e.currentTarget) return
+              if (sessionsFiltersOpen) setSessionsFiltersClip(false)
+            }}
+          >
+            <div
+              ref={sessionsFiltersPanelRef}
+              inert={filtrosPanelInert(sessionsFiltersOpen)}
+              style={{
+                overflow: (!sessionsFiltersOpen || sessionsFiltersClip) ? 'hidden' : 'visible',
+                minHeight: 0,
+              }}
+            >
+              <div style={{
+                marginTop: 6, padding: '10px 12px', borderRadius: 10,
+                border: '1px solid var(--border)', background: 'var(--bg-surface)',
+                boxShadow: '0 10px 28px rgba(0,0,0,0.3)',
+              }}>
+                <FiltersBar
+                  only={SESSIONS_FILTER_DIMS}
+                  activeOnly={activeOnly}
+                  onActiveOnlyChange={setActiveOnly}
+                  filters={filters}
+                  onChange={setFilters}
+                  projects={availableProjects}
+                  sessionCountByProject={sessionCountByProject}
+                  models={models}
+                  modelGroups={modelGroups}
+                  modelsInProject={modelsInProject}
+                  users={[]}
+                  /* HARNESSES come from the FLEET here and from the metrics everywhere else. The bar
+                     offered all six the metrics know while the list it filters holds whatever is
+                     running — three on this machine — so picking "antigravity" emptied the list.
+                     Nothing was broken; there were genuinely no antigravity rows. But a filter that
+                     can only ever answer "nothing" is indistinguishable from one that is failing,
+                     and it was reported as exactly that. An option is a promise that something might
+                     be behind it. The WHOLE fleet's assistants, not just the ones the current
+                     switches can show — see `fleetFilterOptions`. The ones being withheld are MARKED
+                     rather than dropped, because a dimension that disappears reads as "this product
+                     does not know about my other assistants", which the Compare page contradicts two
+                     clicks away. */
+                  harnesses={fleetOptions.harnessesAll as typeof availableHarnesses}
+                  harnessesOutOfView={fleetOptions.harnessesAll.filter(h => !fleetOptions.harnesses.includes(h))}
+                  lang={lang}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* THE SESSION-METRICS TAB (design item 4, screenshot 7) — the header's old "66%" button, now
+          hanging beside "Filtros" instead of sitting in the strip. `variant="tab"` is the ONLY thing
+          that changed on `SessionStatsMenu`: same props, same dropdown, same content — see that
+          component's own header. Absent exactly when the button was: no selected session, or
+          (inside the component) no context figure to show.
+
+          ITS OWN `position: absolute` SIBLING of the Filtros wrapper above — NOT a flex child beside
+          it. A flex row was tried first and put 356px of dead air between the two: the Filtros
+          COLUMN's flex-item width follows its widest DESCENDANT, and the collapsed filter panel
+          keeps its full `filtrosBounds.width` (~440px) the whole time — `grid-template-rows: 0fr`
+          collapses HEIGHT, never width — so the column occupied that width even while showing only
+          its own button. `metricsBounds.left` (`metricsTabBounds`, `lib/sessionsFiltersPanel.ts`) is
+          computed against the FILTROS BUTTON's own measured width instead, which is what actually
+          puts this tab immediately after it regardless of whether the filter panel is open. */}
+      {selectedFleetSession && (
+        <div style={{
+          position: 'absolute', top: '100%',
+          left: metricsBounds.left,
+          zIndex: 10, pointerEvents: 'none',
+        }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <SessionStatsMenu
+              variant="tab"
+              panelMaxWidth={metricsBounds.panelMaxWidth}
+              harness={selectedFleetSession.harness}
+              sessionId={selectedFleetSession.conversationId ?? selectedFleetSession.id}
+              meta={headerSessionMeta}
+              lang={lang === 'pt' ? 'pt' : 'en'}
+              currency={currency}
+              brlRate={brlRate}
+              costBasis={costBasis}
+              planFactor={sessionPlanFactor(planBasis.basis, selectedFleetSession.harness)}
+              /* THE FULL READING opens as a TAB in the right aside (`SessionsPage` supplies it),
+                 not as a second dialog over the session. Withheld when the store has no record —
+                 the same fact that decides whether that tab exists at all, read here from the same
+                 lookup so the link and the tab can never disagree. */
+              {...(headerSessionMeta ? { onOpenFull: () => openArtifacts('metrics') } : {})}
+              {...(selectedFleetSession.model ? { startedModel: selectedFleetSession.model } : {})}
+              {...(selectedFleetSession.effort ? { startedEffort: selectedFleetSession.effort } : {})}
+              /* THE DELIVERY this session is filed under, one click from the figures it spent. The
+                 fleet row carries the NAME, and the name is a ref the board resolves — see
+                 `lib/sessionTaskLink.ts`, which is why this costs no id lookup. */
+              {...(selectedFleetSession.task ? { task: selectedFleetSession.task } : {})}
+              onOpenTask={ref => navigate(`/tasks/${encodeURIComponent(ref)}`)}
+            />
+          </div>
+        </div>
       )}
     </div>
   ) : null
@@ -3684,9 +4050,10 @@ export default function AppLayout() {
       {/* Page chrome — the MOBILE dashboard's, and only that.
           The sessions workspace used to render this too, on desktop, purely to carry `FiltersBar`:
           a whole sticky band with its own rule, one row of controls in it, directly beneath the
-          fixed strip that was already there. The filters now ride IN that strip (see
-          `sessionTopBar`), so the workspace has ONE bar and this element is not rendered in it at
-          all — on mobile it never was, because `SessionsPage` draws its own bars.
+          fixed strip that was already there. The filters hang from that fixed strip now instead
+          (see `sessionTopBar`'s own Filtros tab, hanging below it), so the workspace has ONE bar
+          and this element is not rendered in it at all — on mobile it never was, because
+          `SessionsPage` draws its own bars.
           The root cause of "the pane's own header scrolled away" was never this strip's presence —
           it was `<main>` lacking a DEFINITE height to clip to, fixed at the wrapper `<div>` above.
           On DESKTOP the dashboard now does the same thing, for the same reason (see

@@ -1,4 +1,4 @@
-import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, HarnessId, Project } from '@agentistics/core'
+import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, SessionPreset, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, HarnessId, Project } from '@agentistics/core'
 import type { useDerivedStats } from '../hooks/useData'
 import type { PlanBasisView } from '../hooks/usePlanBasis'
 import type { A11yState } from '../hooks/useAccessibility'
@@ -82,6 +82,10 @@ export interface AppContext {
   /** Persists the COMPLETE settings object. `writePreferencesTo` merges shallowly, so a partial
    *  save would replace the whole timeline with the fragment. */
   saveBilling: (next: BillingSettings) => Promise<void>
+  /** Saved "quick launch" session templates — see `@agentistics/core`'s `sessionPresets.ts`.
+   *  Per-machine, local only, same as `comparisons`. */
+  sessionPresets: SessionPreset[]
+  saveSessionPresets: (next: SessionPreset[]) => Promise<void>
 
   /** Which basis every cost figure is expressed in. Plumbed exactly like `currency`.
    *  Always `'api'` on a central, which cannot price a fleet from one operator's timeline. */
@@ -184,11 +188,53 @@ export interface AppContext {
 
   /** What `/api/shell/*` will ACTUALLY answer: `CAPS.localShell` AND the user's own switch. It is
    *  separate from `capabilities.localShell` (the profile alone) for the reason `chatEnabled` is:
-   *  Settings has to be able to say "your profile allows this, you have it off". Undefined on an
-   *  older server that has no switch — read as OFF, because a raw shell is opt-in and absence is
-   *  never consent (`shell-gate.ts`), which is the OPPOSITE of the reading chat takes for its own
-   *  flag and deliberately so: chat was on before it had a switch, and this never was. */
+   *  Settings has to be able to say "your profile allows this, you have it off". `shell-gate.ts`
+   *  itself now reads an ABSENT preference as ON (owner decision, 2026-09-14 — Studio and Shell ship
+   *  on by default, still narrowed by `capable` and by an explicit `false`); this field's own
+   *  `undefined` is a DIFFERENT absence — the context has not loaded yet, or an older server sends
+   *  no such field at all — and reads as OFF here for the ordinary reason any not-yet-known value
+   *  does: `SessionsPage`/`SessionPanel` gate on `=== true`, never on "not `=== false`". */
   shellEnabled?: boolean
+
+  /** The in-memory "Enable now" override's own raw value (`shell-override-store.ts`), reported
+   *  apart from the combined `shellEnabled` above so a reader can say WHICH of the two put it on:
+   *  "ligado" (the ordinary preference) and "ligado até reiniciar o servidor" (this override) are
+   *  different sentences, and collapsing them into one boolean makes the second unreachable.
+   *  `undefined` is the same not-loaded-yet reading every other flag on this object carries. */
+  shellOverride?: boolean
+
+  /** What `/api/fleet/tree*` will ACTUALLY answer: `CAPS.localShell` AND the user's own switch,
+   *  resolved by the server (`sessions/editor-gate.ts`) and reported by `GET /api/team/session`.
+   *  The UI may NEVER re-derive it from `capabilities.localShell` + a preference — the resolved
+   *  flag is the one answer, exactly as `shellEnabled` is for the shell. `editor-gate.ts` reads an
+   *  ABSENT preference as ON now (owner decision, 2026-09-14, matching `shellEnabled` above); this
+   *  field's own `undefined` is the context-not-loaded-yet / older-server case and reads as OFF for
+   *  the same reason `shellEnabled`'s does. It also has a CENTRAL subtracted from it before it is
+   *  published (`lib/editorGate.ts`) — the whole `/api/fleet` prefix is refused there, and a
+   *  consumer must not have to know that. When this is not `true` the Studio is ABSENT, never a
+   *  greyed-out entry. */
+  editorEnabled?: boolean
+
+  /** The Studio panel's first-open dot, cleared for good the first time it opens in ANY slot —
+   *  `panelBar.ts`'s own `PanelBar` reads it wherever the bar renders (`ShellBand`'s desktop bar,
+   *  `StudioBand`'s bar, or the no-terminal fallback band). Kept on `AppContext` rather than local
+   *  to one of those, because `usePanelSlots()`'s `isPanelShown` is what clears it and that must
+   *  stay true regardless of which surface actually opened the Studio. */
+  studioSeen: boolean
+
+  /** Re-reads `/api/team/session` and re-publishes everything above from a fresh answer — the ONE
+   *  way `SessionsSettings` can make `editorEnabled` (and `shellEnabled`, `chatEnabled`, …) catch up
+   *  with a preference it just changed, without a reload and without re-deriving the resolved flag
+   *  itself. Optional so a caller built for tests need not fabricate a live fetch. */
+  refreshTeamSession?: () => Promise<void>
+
+  /** The user's own autosave switch INSIDE the repository explorer's editor. A convenience, not a
+   *  gate: it is a plain preference read from `/api/preferences` like `chatSoundEnabled`, and it
+   *  is deliberately NOT coupled to `editorEnabled` — that one is a security gate riding a
+   *  capability, this one only widens the window in which a save can race an agent's own write.
+   *  Absent reads as OFF for both, but only one of them is a capability's business. */
+  editorAutosave: boolean
+  setEditorAutosave: (v: boolean) => void
 
   /** The tag definitions `useDerivedStats` resolves a tag filter against.
    *

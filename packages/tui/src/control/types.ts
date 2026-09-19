@@ -1775,6 +1775,15 @@ export interface ProjectOption {
    * found on disk · `folder` any other directory found on disk · `typed` a path given in full.
    */
   source: 'cwd' | 'history' | 'repo' | 'folder' | 'typed'
+  /**
+   * True only for a LINKED worktree of a repository — never its own main checkout, and never a
+   * git SUBMODULE (also a `.git` FILE, but its content names `.git/modules/`, not
+   * `.git/worktrees/` — see `dir-scan.ts`'s `classifyGitFile`). Absent means "not a worktree", the
+   * same rule `projectKind` (`@agentistics/core`) reads it by. The terminal wizard reads it too
+   * (`SessionWizard.tsx`'s `sourceWord`, ahead of the `source` checks — a worktree still carries
+   * `source: 'repo'`), so a worktree row is no longer labelled "git repo" there either.
+   */
+  worktree?: boolean
 }
 
 export interface SpawnSessionRequest {

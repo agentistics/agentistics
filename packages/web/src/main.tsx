@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import AppRouter from './AppRouter'
 import { RootErrorBoundary } from './components/RootErrorBoundary'
+import { installHistoryPopGuard } from './lib/historyPopGuard'
 import './index.css'
 
 /**
@@ -62,6 +63,13 @@ window.addEventListener('load', () => {
   // broken sequence rather than the next legitimate one.
   window.setTimeout(() => { try { sessionStorage.removeItem(RELOADED) } catch { /* ignore */ } }, 5_000)
 })
+
+/**
+ * BEFORE THE FIRST RENDER, OR IT DOES NOTHING. `popstate` listeners on `window` run in the order they
+ * were added, and `BrowserRouter` adds its own as it mounts; a Back/Forward that would drop unsaved
+ * Studio buffers can only be held by a listener that runs first. See `lib/historyPopGuard.ts`.
+ */
+installHistoryPopGuard()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

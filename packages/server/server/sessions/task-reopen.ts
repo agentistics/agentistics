@@ -25,6 +25,25 @@
  *    conversation", and one of the twins stopped itself because it could see files changing under
  *    it. `liveIds` cannot see this: it is keyed by ROW, so a row that is `lost` while a DIFFERENT
  *    row drives its conversation passes every check here.
+ *  - **A conversation this SAME plan already claimed is not claimed twice.** `inUse` only ever
+ *    answers about a session that is ALREADY live, so it says nothing about two ROWS resolving to
+ *    the identical conversation within one call — a retired predecessor whose `conversationId` was
+ *    never cleared, or two fallen rows that both happen to name the same recorded id. Measured on
+ *    the isolated preview reproducing "reopen what fell": two concurrent calls each read the
+ *    registry before either had retired anything, each resolved the SAME row to the SAME
+ *    `conversationId`, and the fleet ended up with two live rows driving one transcript. The fix for
+ *    the concurrency itself lives at the call site (see `resume-lock.ts`); THIS is the backstop for
+ *    the case where one single planning pass is handed the same conversation more than once — the
+ *    second row is skipped rather than spawning a twin of the first.
+ *  - **An empty (or otherwise falsy) resolved id never claims anything.** `claimed` is keyed on
+ *    `conv.sessionId`, so without this rule TWO rows a broken `conversationFor` handed the
+ *    degenerate id `''` would collide on that empty string exactly as if they shared a real
+ *    conversation, and the second would be silently skipped as a "duplicate" of the first. Neither
+ *    real caller produces `''` today (a resolver that cannot resolve returns `null`, not an empty
+ *    id) — but that was true "by luck", not by anything this function enforced, and this rule's own
+ *    job is to be the enforcement. So a falsy id is never added to `claimed` and never blocks
+ *    another row via it: both rows are planned, each on its own (equally degenerate) terms, rather
+ *    than one silently vanishing into the other's shadow.
  */
 
 import { conversationHeldBy, type ConversationHolder } from './conversation-claim'
@@ -81,17 +100,25 @@ export function planTaskReopen(o: {
 }): TaskReopenPlan {
   const plan: TaskReopenPlan = { reopen: [], already: [], skipped: [], heldElsewhere: [] }
   const inUse = o.inUse ?? new Map<string, ConversationHolder>()
+  // One conversation, at most one row in `plan.reopen` — see the header. Only conversations this
+  // plan actually decided to REOPEN go in here; one that was refused into `heldElsewhere` claims
+  // nothing, so a later row resolving to a genuinely different conversation is still free.
+  const claimed = new Set<string>()
   for (const entry of o.entries) {
     // Ending a session is a decision; "open the task" must not quietly undo every one of them.
     if (entry.endedAt) continue
     if (o.liveIds.has(entry.id)) { plan.already.push(entry.id); continue }
     const conv = o.conversationFor(entry)
     if (!conv) { plan.skipped.push(entry.id); continue }
+    // A falsy id (`''`) is never claimed and never checked against a claim — see the header. Only a
+    // genuine id can collide with another genuine id.
+    if (conv.sessionId && claimed.has(conv.sessionId)) { plan.skipped.push(entry.id); continue }
     // Checked AFTER the conversation is resolved, and against THAT conversation rather than the
     // row's recorded one: the resolver is what decides which conversation this reopen would
     // actually open, so it is the only id whose being taken means anything.
     const holder = conversationHeldBy(inUse, conv.sessionId, entry.id)
     if (holder) { plan.heldElsewhere.push({ id: entry.id, holder }); continue }
+    if (conv.sessionId) claimed.add(conv.sessionId)
     plan.reopen.push({ entry, resumeId: conv.sessionId, label: entry.label ?? conv.title })
   }
   return plan
@@ -106,4 +133,28 @@ export function planTaskReopen(o: {
  */
 export function taskReopenSucceeded(plan: TaskReopenPlan, started: number): boolean {
   return started > 0 || plan.already.length > 0 || plan.heldElsewhere.length > 0
+}
+
+/**
+ * The check made a SECOND time, right before actually spawning — PURE.
+ *
+ * `plan.reopen` is built from a snapshot: the registry and the backend as they were at the START of
+ * the call. A concurrent reopen for the SAME conversation (a double click, two tabs, two crash-group
+ * calls racing each other) can read that same snapshot before either has spawned or retired
+ * anything, and both would then plan to open it. The caller re-reads the registry and the alive ids
+ * FRESH, under a per-conversation lock (`resume-lock.ts`), and asks this question with that fresher
+ * answer: has somebody else's attempt — for this same conversation, by any route — already landed?
+ *
+ * `excludeId` is the row being replaced. It is never held by its own reopen: a row about to be
+ * retired is not yet ended at the moment this runs, and refusing the very gesture it exists to
+ * perform is a lock nobody keeps.
+ */
+export function conversationAlreadyOpen(
+  freshEntries: readonly ManagedSession[],
+  aliveIds: ReadonlySet<string>,
+  resumeId: string,
+  excludeId: string,
+): boolean {
+  return freshEntries.some(e =>
+    e.id !== excludeId && !e.endedAt && e.conversationId === resumeId && aliveIds.has(e.id))
 }

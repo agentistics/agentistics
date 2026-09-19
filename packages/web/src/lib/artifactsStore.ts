@@ -18,6 +18,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
+import { getPanelLayout, hidePanel, rightSlotShowing, showPanel } from './panelSlots'
 
 export interface ArtifactsState {
   /** Which session the count and the open flag describe. `null` before one is selected. */
@@ -90,21 +91,70 @@ export function setArtifactCount(sessionId: string, count: number): void {
 }
 
 export function openArtifacts(tab?: string, ref?: string): void {
-  emit({
+  // THE STUDIO IS NO LONGER A MODE OF THIS PANEL — see `panelSlots.ts`. This is kept as a thin
+  // compatibility shim so the header button and the mobile session menu (which both still call
+  // `openArtifacts('studio')`) need no second import: a request for it opens the STUDIO panel in
+  // its own slot and touches nothing here. This store's `open`/`dismissed`/`tabRequest` describe the
+  // CONTENTS panel alone, exactly as `contents` is its own `PanelId` in the new model.
+  if (tab === 'studio') { showPanel('studio'); return }
+  const show = () => emit({
     ...state, open: true,
     // `ref` names a STEP to open once the tab is there — the edge strip names an action, and
     // pressing it should land on that row rather than on the top of a feed to be searched.
     ...(tab === undefined ? {} : { tabRequest: { tab, at: Date.now(), ...(ref ? { ref } : {}) } }),
   })
+  // CONTENTS AND WHATEVER ELSE HOLDS THE RIGHT SLOT SHARE IT. Opening Contents while ANY panel sits
+  // there — the Studio, and now `cli`/`shell` too (C2, this defect's second showing: I2 fixed it for
+  // the Studio alone and the same gap reopened the moment `cli`/`shell` could reach the slot) — must
+  // DISPLACE it, asking first only when the Studio is dirty, through the very `hidePanel` that
+  // already asks for a direct close — or Contents lights as "open" behind a panel the reader never
+  // left: the header's button, a note chip's `openArtifacts('live', ref)`, the metrics card's
+  // `openArtifacts('metrics')` and the right switcher's own "Conteúdo" tab all go through this one
+  // function. `after` is what fixes the second half of that: Contents opens only once the occupant
+  // has actually gone, whether that is immediate (nothing dirty) or after the reader answers
+  // "discard" — never eagerly, which is what let it light up behind a Studio kept via "Continuar
+  // editando". `hidePanel` only ever asks for the Studio (`panelSlots.hidePanel`'s own studio-only
+  // hold) — displacing `cli`/`shell` here asks nothing, which is correct: nothing of theirs is
+  // dropped by leaving the slot.
+  const occupant = getPanelLayout().right
+  if (occupant !== null) { hidePanel(occupant, show); return }
+  show()
 }
 
-/** Closing is also a DECISION not to be reopened automatically — see `ArtifactsState.dismissed`. */
+/**
+ * Closing is also a DECISION not to be reopened automatically — see `ArtifactsState.dismissed`.
+ *
+ * IT NO LONGER ASKS ABOUT THE STUDIO. This panel used to unmount the Studio along with itself — one
+ * DOM tree, one close — so a close with dirty Monaco buffers was a silent discard, and the question
+ * was asked here, in the one function every close went through. The Studio is now its OWN panel
+ * (`panelSlots.ts`), placed in its own slot independently of this one: closing Contents no longer
+ * touches it at all, so asking about its buffers here would hold a close that drops nothing. The
+ * hold moved with the buffers — `panelSlots.ts`'s `showPanel` / `hidePanel` ask before the Studio
+ * itself is displaced or closed, through the very same `unsavedBuffers.ts`.
+ */
 export function closeArtifacts(): void {
+  closeNow()
+}
+
+function closeNow(): void {
   emit({ ...state, open: false, dismissed: true })
 }
 
+/**
+ * TOGGLE READS THE SAME "WHAT IS SHOWN" SELECTOR THE HEADER'S `aria-pressed` DOES (C2), not this
+ * store's own `open` flag in isolation. Found live, after the displacement fix above: `state.open`
+ * stays whatever it last was set to by THIS store alone, and `cli`/`shell` reaching the right slot
+ * through the switcher's own tab (which calls `panelSlots.openPanel` directly, never
+ * `openArtifacts`/`closeArtifacts`) does not touch it. So opening Contents, then picking `cli` from
+ * the switcher, left `state.open === true` while the slot showed the terminal — and the header
+ * button's NEXT press, reading only `state.open`, called `closeArtifacts()` instead of displacing
+ * `cli`: the button visibly did nothing (the terminal stayed, `aria-pressed` stayed `false`, which
+ * was already correct) and it took a THIRD press to actually reach Contents. `rightSlotShowing` is
+ * the one place that already reconciles the slot's own occupant with this store's flag; reading it
+ * here as well is what makes one press behave like Contents is either showing or it is not.
+ */
 export function toggleArtifacts(): void {
-  if (state.open) closeArtifacts(); else openArtifacts()
+  if (rightSlotShowing(getPanelLayout(), state.open) === 'contents') closeArtifacts(); else openArtifacts()
 }
 
 /** For tests: forget everything. */

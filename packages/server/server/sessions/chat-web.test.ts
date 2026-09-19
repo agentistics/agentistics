@@ -118,3 +118,15 @@ test('a reader that resolves and reads fine still carries no refusal', async () 
   const out = await readSessionChat(hostWith('waiting'), 'en', 'sess1', okReader as never)
   expect(out.unavailable).toBeUndefined()
 })
+
+test('a successful read carries the server\'s REAL attachments directory — the gallery cannot ' +
+  'guess a relocated AGENTISTICS_DIR on its own', async () => {
+  const { ATTACHMENT_DIR } = await import('./attachment-web')
+  const okReader = () => ({
+    resolve: async () => '/some/found/transcript.jsonl',
+    read: async () => ({ turns: [], older: false }),
+    readRecent: async () => ({ turns: [], older: false }),
+  })
+  const out = await readSessionChat(hostWith('waiting'), 'en', 'sess1', okReader as never)
+  expect(out.attachmentsDir).toBe(ATTACHMENT_DIR)
+})

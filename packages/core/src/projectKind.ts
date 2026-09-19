@@ -6,10 +6,16 @@
  * with an icon. Reported as exactly that: no clear division between what is a git repository and
  * what is a project.
  *
- * ## The three kinds, most specific first
+ * ## The four kinds, most specific first
  *
- * - `repo` — the directory IS a git repository. Either the store recorded a remote for it, or the
- *   home walk found a `.git`. This is the strongest thing that can be known about a directory.
+ * - `repo` — the directory is a git repository's MAIN checkout. Either the store recorded a
+ *   remote for it, or the home walk found a `.git` DIRECTORY. This is the strongest thing that can
+ *   be known about a directory.
+ * - `worktree` — a LINKED worktree of a repository (`.git` is a FILE pointing at the main
+ *   checkout, not a directory). It is part of a repository, never a repository of its own — a
+ *   worktree offered under "Repositories" reads as a second, unrelated clone, and a session
+ *   started there is exactly as real a place to work as the main checkout, just not the same kind
+ *   of place. See `ProjectKindInput.worktree`.
  * - `project` — no git, but sessions have RUN here. It is a place someone works.
  * - `folder` — neither: a directory the walk found, a path typed in full, a cwd with no history.
  *
@@ -29,10 +35,10 @@
  * that kind matching, never because a different kind used up the budget.
  */
 
-/** The three kinds. `PROJECT_KIND_ORDER` is the order they are offered in. */
-export type ProjectKind = 'repo' | 'project' | 'folder'
+/** The four kinds. `PROJECT_KIND_ORDER` is the order they are offered in. */
+export type ProjectKind = 'repo' | 'worktree' | 'project' | 'folder'
 
-export const PROJECT_KIND_ORDER: ProjectKind[] = ['repo', 'project', 'folder']
+export const PROJECT_KIND_ORDER: ProjectKind[] = ['repo', 'worktree', 'project', 'folder']
 
 /**
  * What a candidate carries that decides its kind.
@@ -45,11 +51,20 @@ export interface ProjectKindInput {
   source: string
   /** Normalised remote, or the short `org/repo`, or `''` when none is known. */
   remote?: string | undefined
+  /**
+   * True only for a LINKED worktree — measured off the directory's own `.git` (a FILE there, not
+   * a directory), never guessed from a path convention. Outranks `remote`: a worktree of a
+   * repository the store also recorded a remote for is still a worktree, not a second "repo" row
+   * standing beside its own main checkout — which is exactly the reported bug (a worktree showing
+   * under "Repositories", carrying the main checkout's own `org/repo` label).
+   */
+  worktree?: boolean | undefined
 }
 
 export function projectKind(c: ProjectKindInput): ProjectKind {
-  // A remote is proof. `source: 'repo'` is the walk saying it saw a `.git` and never looked further
-  // — also proof, and the only evidence a freshly cloned repository has.
+  if (c.worktree) return 'worktree'
+  // A remote is proof. `source: 'repo'` is the walk saying it saw a `.git` DIRECTORY and never
+  // looked further — also proof, and the only evidence a freshly cloned repository has.
   if ((c.remote ?? '') !== '' || c.source === 'repo') return 'repo'
   // Sessions have run here. Not a repository, but a place someone works.
   if (c.source === 'history') return 'project'
@@ -70,7 +85,7 @@ export function takePerKind<T>(
   ranked: readonly T[], kindOf: (item: T) => ProjectKind, perKind: number,
 ): T[] {
   if (perKind <= 0) return []
-  const seen: Record<ProjectKind, number> = { repo: 0, project: 0, folder: 0 }
+  const seen: Record<ProjectKind, number> = { repo: 0, worktree: 0, project: 0, folder: 0 }
   const out: T[] = []
   for (const item of ranked) {
     const k = kindOf(item)
@@ -95,7 +110,7 @@ export function takePerKind<T>(
 export function countPerKind<T>(
   ranked: readonly T[], kindOf: (item: T) => ProjectKind,
 ): Record<ProjectKind, number> {
-  const out: Record<ProjectKind, number> = { repo: 0, project: 0, folder: 0 }
+  const out: Record<ProjectKind, number> = { repo: 0, worktree: 0, project: 0, folder: 0 }
   for (const item of ranked) out[kindOf(item)] += 1
   return out
 }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
   fileFormat, formatBytes, galleryFileCount, galleryGroups, galleryImageKey, galleryImages,
-  galleryMenuEntries, parseGalleryView, type GalleryTurn, producedGroups, gallerySides, filterGallery, parseGalleryScope, effectiveScope } from './gallery'
+  galleryMenuEntries, parseGalleryView, type GalleryTurn, producedGroups, gallerySides, filterGallery,
+  parseGalleryScope, effectiveScope, viewedGroups } from './gallery'
 
 const DIR = '/home/u/.agentistics/attachments'
 const shot = `${DIR}/724e7aa8-image.png`
@@ -174,9 +175,59 @@ describe('what the SESSION produced', () => {
   })
 })
 
+describe('viewedGroups — images the session opened with Read, never sent or produced', () => {
+  const read = (path: string) => ({ tools: [{ name: 'Read', detail: path }] })
+
+  it('lists an image the session Read, labelled as its own group', () => {
+    const out = viewedGroups([read('/repo/screenshot.png')])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.label).toEqual({ en: 'Viewed by the session', pt: 'Visto pela sessão' })
+    // -2, not producedGroups' -1: see viewedGroups' own header — the two "no message" groups must
+    // not collide as a React key or as galleryImageKey's lightbox identity.
+    expect(out[0]!.index).toBe(-2)
+    expect(out[0]!.files).toEqual([{
+      path: '/repo/screenshot.png', name: 'screenshot.png', kind: 'image', format: 'PNG', origin: 'viewed',
+    }])
+  })
+
+  it('never collides with producedGroups’ own "-1" sentinel — verified live: a React duplicate-key warning and a wrong lightbox target both traced to this', () => {
+    expect(viewedGroups([read('/repo/screenshot.png')])[0]!.index).not.toBe(-1)
+  })
+
+  it('ignores a Read of anything that is not an image', () => {
+    expect(viewedGroups([read('/repo/notes.txt')])).toEqual([])
+    expect(viewedGroups([read('/repo/report.pdf')])).toEqual([])
+  })
+
+  it('ignores every OTHER tool — this is about what was VIEWED, not what ran', () => {
+    expect(viewedGroups([{ tools: [{ name: 'Write', detail: '/repo/out.png' }] }])).toEqual([])
+    expect(viewedGroups([{ tools: [{ name: 'Bash', detail: 'ls' }] }])).toEqual([])
+  })
+
+  it('matches a non-Claude harness’s own name for the tool via `canonical`', () => {
+    const out = viewedGroups([{ tools: [{ name: 'view_image', canonical: 'Read', detail: '/repo/a.png' }] }])
+    expect(out[0]!.files[0]!.path).toBe('/repo/a.png')
+  })
+
+  it('a truncated detail names no file, the same guard the write-allowlist applies', () => {
+    expect(viewedGroups([read(`/repo/${'a'.repeat(200)}…`)])).toEqual([])
+  })
+
+  it('DEDUPES a path read more than once — the same picture inspected five times is one row', () => {
+    const out = viewedGroups([read('/repo/shot.png'), read('/repo/shot.png'), read('/repo/other.png')])
+    expect(out[0]!.files.map(f => f.path)).toEqual(['/repo/shot.png', '/repo/other.png'])
+  })
+
+  it('a session that viewed nothing produces no block', () => {
+    expect(viewedGroups([])).toEqual([])
+    expect(viewedGroups([{ tools: undefined }, {}])).toEqual([])
+  })
+})
+
 describe('the two sides of the gallery', () => {
   const sent = { path: '/a/x.png', name: 'x.png', kind: 'image' as const, format: 'PNG', origin: 'sent' as const }
   const made = { path: '/b/y.png', name: 'y.png', kind: 'image' as const, format: 'PNG', origin: 'produced' as const }
+  const seen = { path: '/c/z.png', name: 'z.png', kind: 'image' as const, format: 'PNG', origin: 'viewed' as const }
   const groups = [
     { index: 0, text: 'veja', files: [sent] },
     { index: -1, text: '', files: [made] },
@@ -189,6 +240,13 @@ describe('the two sides of the gallery', () => {
   it('a file with no origin is the person’s — every group written before this existed', () => {
     expect(gallerySides([{ index: 0, text: '', files: [{ ...sent, origin: undefined }] }]))
       .toEqual({ user: 1, llm: 0 })
+  })
+
+  it('a VIEWED file sits on the assistant’s side too — nobody sent it', () => {
+    expect(gallerySides([...groups, { index: -1, text: '', files: [seen] }]))
+      .toEqual({ user: 1, llm: 2 })
+    expect(filterGallery([...groups, { index: -1, text: '', files: [seen] }], 'llm').flatMap(g => g.files.map(f => f.origin)))
+      .toEqual(['produced', 'viewed'])
   })
 
   it('filters per FILE, and drops a group left with nothing', () => {

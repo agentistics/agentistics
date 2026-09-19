@@ -86,13 +86,13 @@ export function StopSessionConfirm(p: StopSessionConfirmProps) {
   const end = async (finish: boolean) => {
     if (finish && part && filed) {
       const ok = await patchSubtask(filed.task.id, part.id, { status: 'done' })
-      if (!ok) { p.onNotice(copy.couldNotMarkDelivered); return }
+      if (!ok.ok) { p.onNotice(copy.couldNotMarkDelivered); return }
       // The delivery follows its parts, and only when there are none left open. Its failure is
       // reported and does NOT hold up the stop: the part is already closed, and leaving the
       // session running over a delivery status would be the wrong thing to protect.
       if (part.last) {
         const closed = await markTask(filed.task.id, 'done')
-        if (!closed) p.onNotice(copy.couldNotMarkDelivered)
+        if (!closed.ok) p.onNotice(copy.couldNotMarkDelivered)
       }
     }
     await p.onStop()
