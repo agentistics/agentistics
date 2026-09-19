@@ -4,13 +4,30 @@
  * A dialog, not an inline row: composing a prompt plus attachments needs room a table cell cannot
  * give it, and the same shape serves both "new draft" and "edit the existing one" (`initial`).
  *
+ * THE ASSISTANT/FOLDER/MODEL/EFFORT FIELDS ARE THE NEW-SESSION WIZARD'S OWN PICKERS
+ * (`HarnessPicker`, `ProjectPicker`, `ModelSelect`, `EffortPicker`), not a second, hand-rolled set —
+ * this dialog shipped with a native `<select>` for the harness and raw free-text `<input>`s for the
+ * folder/model/effort, which is exactly the anti-pattern `formBits.tsx`'s own header warns about: a
+ * second dialog that restates a control instead of importing it reads as a different product one
+ * click away from the one that got it right, and a typed model/effort id the harness does not
+ * recognise fails at spawn with nothing on screen explaining why. `useFleetNewOptions` is the same
+ * fetch `NewSessionModal` runs, shared rather than duplicated. What is DELIBERATELY skipped from the
+ * wizard: the delivery/task-picker step and the title question — this dialog is already scoped to
+ * one exact subtask/group of one exact delivery, so there is nothing to ask about either.
+ *
+ * Model and effort are ABSENT (not merely disabled) until a harness is chosen and that harness
+ * actually names some — `visibleQuestions`, the same gate `NewSessionModal` renders its own step 1
+ * through — because a free-text field a person can type garbage into is worse than no field at all.
+ *
  * Attachments reuse the board's own file store — never a second one. Picking "Attach" uploads a
  * fresh file exactly the way `TaskFiles.tsx`'s own picker does (`onUpload`, which the caller wires to
  * `uploadFile()`), and the result is referenced by id; "Add an existing file" lets the draft point at
  * something already on the delivery (a spec somebody else attached) without uploading it twice. Only
  * the harness/model/effort/cwd fields are optional here (unlike `SessionPreset`, whose harness is
  * required) — see `@agentistics/core`'s `stagedSession.ts` for why: firing a draft missing one of
- * these falls back to the ordinary wizard, pre-filled, rather than demanding everything up front.
+ * these falls back to the ordinary wizard, pre-filled, rather than demanding everything up front —
+ * which is also why nothing here validates model/effort against the harness's closed set: that check
+ * belongs to launch time, exactly as `stagedSession.ts`'s own header states.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -18,13 +35,15 @@ import { createPortal } from 'react-dom'
 import { Paperclip, Plus, Trash2, X } from 'lucide-react'
 import { validateStagedSessionDraft, type StagedSessionDraft } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { HarnessMark } from '../sessions/HarnessMark'
-import { HARNESS_LABELS } from '../../lib/harness'
-import { fileUrl, type TaskFile } from '../../lib/tasks'
+import { useFleetNewOptions } from '../../hooks/useFleetNewOptions'
+import { HarnessPicker } from '../sessions/HarnessPicker'
+import { ProjectPicker } from '../sessions/ProjectPicker'
+import { ModelSelect } from '../sessions/ModelSelect'
+import { EffortPicker } from '../sessions/EffortPicker'
+import { toWizardHarness, unsetText, visibleQuestions } from '../../lib/wizardSteps'
+import { type TaskFile } from '../../lib/tasks'
 import { button, field, microLabel, pill, surface } from './board'
 import { boardCopy, type Lang } from './copy'
-
-interface HarnessChoice { id: string; label: string }
 
 export interface StagedSessionComposeProps {
   lang: Lang
@@ -47,7 +66,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
 
   const [prompt, setPrompt] = useState(p.initial?.prompt ?? '')
   const [attachmentIds, setAttachmentIds] = useState<string[]>(p.initial?.attachmentIds ?? [])
-  const [harness, setHarness] = useState(p.initial?.harness ?? '')
+  const [harnessId, setHarnessId] = useState(p.initial?.harness ?? '')
   const [model, setModel] = useState(p.initial?.model ?? '')
   const [effort, setEffort] = useState(p.initial?.effort ?? '')
   const [cwd, setCwd] = useState(p.initial?.cwd ?? '')
@@ -56,20 +75,44 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
   const [uploading, setUploading] = useState(false)
   const [pickingExisting, setPickingExisting] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  /** The model picker's own open state — held here for the same reason `NewSessionModal` holds it:
+   *  `esc` must close the popover before it closes the dialog. */
+  const [modelOpen, setModelOpen] = useState(false)
 
-  // The harnesses THIS machine can start — same source `SessionPresetsSection`/`PresetShelf` read,
-  // so a draft can never name an assistant this machine cannot spawn.
-  const [harnesses, setHarnesses] = useState<HarnessChoice[] | null>(null)
+  // The harnesses/folders THIS machine can start/reach — the SAME `/api/fleet/new` fetch the
+  // ordinary new-session wizard runs, so a draft can never name an assistant this machine cannot
+  // spawn or a folder it cannot resolve, and the two dialogs can never disagree about either list.
+  const { harnesses, projects, projectTotals, query, setQuery, searching } = useFleetNewOptions(p.lang)
+
+  const harness = useMemo(() => harnesses?.find(h => h.id === harnessId) ?? null, [harnesses, harnessId])
+  const wizardHarness = useMemo(() => harness ? toWizardHarness(harness) : null, [harness])
+  const questions = visibleQuestions(wizardHarness)
+  const modelUnset = unsetText(harness?.defaultModel, pt)
+  const effortUnset = unsetText(harness?.defaultEffort, pt)
+
+  /**
+   * Switching assistants: keep a model/effort the NEW one also names, drop anything it cannot
+   * accept — the same rule `NewSessionModal` applies on a harness change, applied only to a
+   * deliberate PICK rather than to every render, so an initial draft's model/effort survives while
+   * `harnesses` is still loading rather than being wiped before the fetch can even resolve it.
+   */
+  function selectHarness(id: string) {
+    const next = harnesses?.find(h => h.id === id) ?? null
+    const nextWizard = next ? toWizardHarness(next) : null
+    setHarnessId(id)
+    setModel(m => (nextWizard && nextWizard.models.some(x => x.id === m)) ? m : '')
+    setEffort(e => (nextWizard && nextWizard.efforts.includes(e)) ? e : '')
+  }
+
   useEffect(() => {
-    let alive = true
-    fetch(`/api/fleet/new?lang=${p.lang}`)
-      .then(r => (r.ok ? r.json() : null))
-      .then((json: { harnesses?: { id: string; label: string }[] } | null) => {
-        if (alive) setHarnesses(json?.harnesses?.map(h => ({ id: h.id, label: h.label })) ?? [])
-      })
-      .catch(() => { if (alive) setHarnesses([]) })
-    return () => { alive = false }
-  }, [p.lang])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (modelOpen) setModelOpen(false)
+      else if (!saving) p.onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [modelOpen, saving, p])
 
   const attached = useMemo(
     () => attachmentIds.map(id => p.taskFiles.find(f => f.id === id)).filter((f): f is TaskFile => !!f),
@@ -94,7 +137,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
     const draft: StagedSessionDraft = {
       prompt,
       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-      ...(harness.trim() ? { harness: harness.trim() } : {}),
+      ...(harnessId ? { harness: harnessId } : {}),
       ...(model.trim() ? { model: model.trim() } : {}),
       ...(effort.trim() ? { effort: effort.trim() } : {}),
       ...(cwd.trim() ? { cwd: cwd.trim() } : {}),
@@ -116,8 +159,6 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
     }
   }
 
-  const harnessOptions = harnesses ?? []
-
   return createPortal(
     <div
       role="dialog" aria-modal="true" aria-label={p.initial ? copy.edit : copy.compose}
@@ -130,7 +171,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
     >
       <div style={{
         background: 'var(--bg-surface)', border: '1px solid var(--border)',
-        borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '90vh',
+        borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '90vh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         <header style={{
@@ -153,7 +194,19 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
           ><X size={16} /></button>
         </header>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20, display: 'grid', gap: 14 }}>
+        {/*
+          * `display: 'flex', flexDirection: 'column'` — the same shape `NewSessionModal`'s own step
+          * content uses, and NOT `display: 'grid'` (what this div used to be). A grid item's
+          * `min-width` defaults to `auto`, so a flex-wrap row nested inside one (the harness cards,
+          * the folder picker's tab strip) is measured at its UNWRAPPED width and is allowed to
+          * overflow its track rather than shrink — "grid blowout". Measured at 390px: the harness
+          * row rendered 459px wide inside a 348px column, `Gemini CLI`'s right edge at x=430, cut
+          * off by the dialog's own `overflow: hidden` rather than wrapping onto a second line. A
+          * flex COLUMN container does not have this failure mode — its children are stretched to
+          * the container's own width on the cross axis by `align-items: stretch`, which the nested
+          * flex-wrap row then genuinely wraps inside.
+          */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
               {copy.prompt}
@@ -165,48 +218,67 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
             />
           </div>
 
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr' }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
-                {copy.harness}
-              </div>
-              <select
-                value={harness} onChange={e => setHarness(e.target.value)}
-                disabled={harnesses === null} style={field(isMobile)}
-              >
-                <option value="">{copy.harnessAsk}</option>
-                {harnessOptions.map(h => (
-                  <option key={h.id} value={h.id}>
-                    {(HARNESS_LABELS as Record<string, string>)[h.id] ?? h.label}
-                  </option>
-                ))}
-              </select>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
+              {copy.harness}
             </div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
-                {copy.cwd}
-              </div>
-              <input
-                value={cwd} onChange={e => setCwd(e.target.value)} placeholder="/home/user/repo"
-                style={field(isMobile)}
-              />
-            </div>
+            <HarnessPicker lang={p.lang} harnesses={harnesses} value={harnessId} onChange={selectHarness} />
+            {!harnessId && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-tertiary)' }}>{copy.harnessAsk}</div>
+            )}
+          </div>
+
+          {/* ABSENT, not disabled, until the harness names some — a closed dropdown whose only
+              entry is "the assistant's default" is a control nobody can use, and a raw text field
+              here is the exact bug this dialog is being fixed for. */}
+          {questions.model && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 {copy.model}
               </div>
-              <input value={model} onChange={e => setModel(e.target.value)} style={field(isMobile)} />
+              <ModelSelect
+                lang={p.lang}
+                open={modelOpen}
+                onOpenChange={setModelOpen}
+                value={model}
+                onChange={setModel}
+                options={wizardHarness!.models}
+                unsetLabel={modelUnset}
+              />
             </div>
+          )}
+
+          {questions.effort && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 {copy.effort}
               </div>
-              <input value={effort} onChange={e => setEffort(e.target.value)} style={field(isMobile)} />
+              <EffortPicker efforts={wizardHarness!.efforts} value={effort} onChange={setEffort} />
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-tertiary)' }}>
+                {pt ? `Sem escolha: ${effortUnset}.` : `Left unset: ${effortUnset}.`}
+              </div>
             </div>
-          </div>
-          {!cwd.trim() && (
-            <div style={{ marginTop: -8, fontSize: 11, color: 'var(--text-tertiary)' }}>{copy.cwdAsk}</div>
           )}
+
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
+              {copy.cwd}
+            </div>
+            <ProjectPicker
+              lang={p.lang}
+              isMobile={isMobile}
+              projects={projects}
+              projectTotals={projectTotals}
+              query={query}
+              onQueryChange={setQuery}
+              searching={searching}
+              value={cwd}
+              onChange={setCwd}
+            />
+            {!cwd.trim() && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-tertiary)' }}>{copy.cwdAsk}</div>
+            )}
+          </div>
 
           <div>
             <div style={{

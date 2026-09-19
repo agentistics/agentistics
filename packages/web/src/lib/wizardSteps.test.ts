@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  STEP_ORDER, clearForHarness, modelDisplay, nextStep, prevStep, stepReady, unsetAnswer,
-  visibleQuestions, type WizardDraft,
+  STEP_ORDER, clearForHarness, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness,
+  unsetAnswer, unsetText, visibleQuestions, type HarnessAnswer, type WizardDraft,
 } from './wizardSteps'
 
 const claude = {
@@ -108,6 +108,42 @@ describe('navigation', () => {
     expect(nextStep('review')).toBe('review')
     expect(prevStep('assistant')).toBe('assistant')
     expect(prevStep('review')).toBe('message')
+  })
+})
+
+describe('toWizardHarness', () => {
+  it('uses the labelled model list when the server sent one', () => {
+    const answer: HarnessAnswer = {
+      id: 'claude', label: 'Claude Code', modelSuggestions: ['opus'],
+      models: [{ id: 'opus', label: 'Opus 5' }], supportsModel: true, efforts: ['high'],
+    }
+    expect(toWizardHarness(answer).models).toEqual([{ id: 'opus', label: 'Opus 5' }])
+  })
+  it('falls back to the bare ids when the server sent no labels', () => {
+    const answer: HarnessAnswer = {
+      id: 'codex', label: 'Codex', modelSuggestions: ['o3', 'o4-mini'],
+      supportsModel: true, efforts: [],
+    }
+    expect(toWizardHarness(answer).models).toEqual([{ id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' }])
+  })
+  it('carries the defaults only when the CLI published one', () => {
+    const answer: HarnessAnswer = {
+      id: 'claude', label: 'Claude Code', modelSuggestions: [], supportsModel: true, efforts: [],
+      defaultModel: 'sonnet',
+    }
+    expect(toWizardHarness(answer)).toMatchObject({ defaultModel: 'sonnet' })
+    expect(toWizardHarness(answer)).not.toHaveProperty('defaultEffort')
+  })
+})
+
+describe('unsetText', () => {
+  it('names the default when the CLI published one, in each language', () => {
+    expect(unsetText('sonnet', false)).toBe('Default (sonnet)')
+    expect(unsetText('sonnet', true)).toBe('Padrão (sonnet)')
+  })
+  it('falls back to the vague sentence when nothing was published', () => {
+    expect(unsetText(undefined, false)).toBe("The assistant's default")
+    expect(unsetText(undefined, true)).toBe('Padrão do assistente')
   })
 })
 

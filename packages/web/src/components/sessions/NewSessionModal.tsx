@@ -26,17 +26,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, FolderClock, FolderGit2, FolderSymlink, Folder, Loader, Paperclip, Search, X } from 'lucide-react'
-import { projectKind, type ProjectKind } from '@agentistics/core'
-import {
-  KIND_TABS, SEARCH_DEBOUNCE_MS, kindCount, kindEmpty, kindHint, kindLabel, kindMore, kindMoreText,
-  type ProjectTab,
-} from '../../lib/projectTabs'
+import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
-import { Field, Muted, inputStyle } from './formBits'
-import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { Field, inputStyle } from './formBits'
+import { HarnessPicker } from './HarnessPicker'
+import { ModelSelect, ModelId } from './ModelSelect'
+import { EffortPicker } from './EffortPicker'
+import { ProjectPicker } from './ProjectPicker'
+import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { effortColor, effortSteps } from '../../lib/effortScale'
 import { HarnessMark } from './HarnessMark'
 import { TaskPicker } from '../tasks/TaskPicker'
 import { boardCopy } from '../tasks/copy'
@@ -44,42 +42,18 @@ import { useFleet } from '../../lib/fleet'
 import { attachSession, useTaskList, type TaskDetail } from '../../lib/tasks'
 import { BlockedSubtaskResolve } from '../tasks/BlockedSubtaskResolve'
 import { deliveryHint, suggestDelivery } from '../../lib/taskSuggest'
+import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFleetNewOptions'
 import {
-  STEP_ORDER, clearForHarness, modelDisplay, nextStep, prevStep, stepReady, unsetAnswer,
-  visibleQuestions, type MissingAnswer, type StepId, type WizardDraft, type WizardHarness,
+  STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
+  visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
+  type WizardHarness,
 } from '../../lib/wizardSteps'
 
-interface HarnessOption {
-  id: string
-  label: string
-  /** The ids `--model` accepts. What is SENT. */
-  modelSuggestions: string[]
-  /**
-   * The same ids, each with the name the harness's own CLI prints — `harnessModels.ts` on the
-   * server, which carries the exact command that established every pair. Absent from an older
-   * server's answer, which is why the picker falls back to the ids rather than to nothing.
-   */
-  models?: { id: string; label: string }[]
-  supportsModel: boolean
-  efforts: string[]
-  /**
-   * What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it — see the
-   * defaults block in `spawn-spec.ts`, which is the one place either value may be established.
-   * Absent from an older server's answer, and absent today from every harness.
-   */
-  defaultModel?: string
-  defaultEffort?: string
-}
-
-interface ProjectOption {
-  path: string
-  label: string
-  repo?: string
-  detail: string
-  source: string
-  /** True only for a LINKED worktree — never its own main checkout. See `ProjectKind`. */
-  worktree?: boolean
-}
+/** The `/api/fleet/new` harness shape — see `wizardSteps.ts`'s `HarnessAnswer`, the one mapping
+ *  this and `StagedSessionCompose` both build a `WizardHarness` through. */
+type HarnessOption = HarnessAnswer
+/** The `/api/fleet/new` project shape — see `useFleetNewOptions`'s `FleetProjectOption`. */
+type ProjectOption = FleetProjectOption
 
 export interface NewSessionModalProps {
   lang: 'pt' | 'en'
@@ -141,34 +115,21 @@ export function NewSessionModal({
   lang, onClose, onStarted, initialTask, initialTaskId, initialSubtaskId, initialPreset,
 }: NewSessionModalProps) {
   const pt = lang === 'pt'
-  const [harnesses, setHarnesses] = useState<HarnessOption[] | null>(null)
-  const [projects, setProjects] = useState<ProjectOption[]>([])
-  /**
-   * How many places of each kind MATCHED — which is not how many rows came back.
-   *
-   * The server caps its answer per kind so a tab can never be emptied by another kind's budget, and
-   * the tabs then counted the rows: `Repositories 12 · Projects 12 · Folders 12` on a machine with
-   * twenty repositories. `undefined` means this server does not say, and the tabs fall back to
-   * counting rows rather than to a guess.
-   */
-  const [projectTotals, setProjectTotals] = useState<Record<ProjectKind, number> | undefined>(undefined)
-  const [query, setQuery] = useState('')
-  /**
-   * The query the SEARCH is actually run with, one debounce behind the field.
-   *
-   * The field itself stays uncontrolled-fast — every keystroke shows immediately — while the fetch
-   * waits for a pause. Before this, every character fired a full `/api/fleet/new`, which rebuilds
-   * the harness list AND reads every harness's settings files AND walks `$HOME` when the 60s cache
-   * has expired: measured at 400ms cold, so a fast typist watched the list arrive for a prefix they
-   * had already finished typing. That is the "not in real time" half of the report.
-   */
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
-  const [kindTab, setKindTab] = useState<ProjectTab>('all')
-  /** A search is in flight for a query the list has not caught up with yet. */
-  const [searching, setSearching] = useState(false)
+  // The wizard's own data source — harnesses, matching projects, and the search that drives them
+  // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
+  // see `useFleetNewOptions`'s own header.
+  const { harnesses, projects, projectTotals, query, setQuery, searching } = useFleetNewOptions(lang)
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
+  // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
+  // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
+  // list changes rather than only once, so a slow first fetch still resolves it the moment it lands.
+  useEffect(() => {
+    if (harnesses === null) return
+    setHarness(h => h
+      ?? (initialPreset?.harness ? harnesses.find(x => x.id === initialPreset.harness) ?? null : null)
+      ?? (harnesses.length === 1 ? harnesses[0]! : null))
+  }, [harnesses])
   const [cwd, setCwd] = useState('')
   const [task, setTask] = useState(initialTask ?? '')
   /**
@@ -258,94 +219,9 @@ export function NewSessionModal({
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  /**
-   * The field runs ahead; the search follows after a pause.
-   *
-   * `SEARCH_DEBOUNCE_MS` is short enough to read as immediate and long enough that typing a word is
-   * one request rather than one per letter. The FIRST value is applied with no wait, so opening the
-   * wizard does not sit empty for a fifth of a second.
-   */
-  useEffect(() => {
-    if (query === debouncedQuery) return
-    setSearching(true)
-    const t = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(t)
-  }, [query, debouncedQuery])
-
-  useEffect(() => {
-    let alive = true
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}`)
-        if (!res.ok || !alive) return
-        const json = await res.json() as {
-          harnesses: HarnessOption[]; projects: ProjectOption[]; tasks: string[]
-          projectTotals?: Record<ProjectKind, number>
-        }
-        if (!alive) return
-        setHarnesses(json.harnesses)
-        setProjects(json.projects)
-        setProjectTotals(json.projectTotals)
-        // Prefer a PRESET's own harness when this machine can actually start it; otherwise
-        // pre-select the only assistant there is — a one-item picker is a question with one answer.
-        setHarness(h => h
-          ?? (initialPreset?.harness ? json.harnesses.find(x => x.id === initialPreset.harness) ?? null : null)
-          ?? (json.harnesses.length === 1 ? json.harnesses[0]! : null))
-      } catch {
-        /* transient — the picker keeps what it had, which is better than an empty list */
-      } finally {
-        if (alive) setSearching(false)
-      }
-    }
-    void load()
-    return () => { alive = false }
-  }, [lang, debouncedQuery])
-
-  /**
-   * The rows, split by KIND, and the counts the tabs carry.
-   *
-   * `projectKind` is `@agentistics/core`'s — the same function the server caps its results with, so
-   * a row can never be counted under one kind here and budgeted under another there.
-   */
-  const byKind = useMemo(() => {
-    const out: Record<ProjectKind, ProjectOption[]> = { repo: [], worktree: [], project: [], folder: [] }
-    for (const p of projects) {
-      out[projectKind({ source: p.source, remote: p.repo, worktree: p.worktree })].push(p)
-    }
-    // Worktrees read better GROUPED by the repository they belong to, so the siblings of one
-    // checkout sit together rather than scattered across the tab by unrelated recency — "labelled
-    // with its repository" alone still leaves them in an order that says nothing about it. A
-    // worktree with no known repo (the walk found it, but no session ever recorded its remote)
-    // sorts last, under an empty key, rather than mixing in among named ones.
-    out.worktree.sort((a, b) => (a.repo ?? '￿').localeCompare(b.repo ?? '￿'))
-    return out
-  }, [projects])
-
-  /** What the list is showing. `all` keeps the server's ranking, which is the useful default. */
-  const shownProjects = kindTab === 'all' ? projects : byKind[kindTab]
-  /** Whether rows are being held back, and how many — `null` whenever that cannot be known. */
-  const shownMore = kindMore(
-    shownProjects.length,
-    projectTotals ? kindCount(kindTab, shownProjects.length, projectTotals) : undefined,
-    shownProjects.length > 0,
-  )
-
-  // Reset the answers a DIFFERENT assistant does not accept. Carrying `effort: 'high'` across to a
-  // harness whose set does not contain it would send a flag the CLI rejects at spawn.
-  const efforts = useMemo(() => effortSteps(harness?.efforts ?? []), [harness])
-
-  /** The selected assistant in the pure module's shape. One mapping, read by everything below. */
-  const wizardHarness: WizardHarness | null = useMemo(() => harness ? {
-    id: harness.id,
-    label: harness.label,
-    // The server's labelled list when it sent one; the bare ids otherwise. A missing label is
-    // rendered AS THE ID — never as an invented name, which is `modelLabel`'s own rule.
-    models: harness.models ?? harness.modelSuggestions.map(m => ({ id: m, label: m })),
-    supportsModel: harness.supportsModel,
-    efforts: harness.efforts,
-    ...(harness.defaultModel ? { defaultModel: harness.defaultModel } : {}),
-    ...(harness.defaultEffort ? { defaultEffort: harness.defaultEffort } : {}),
-  } : null, [harness])
+  /** The selected assistant in the pure module's shape. One mapping, read by everything below —
+   *  see `toWizardHarness`, shared with `StagedSessionCompose`. */
+  const wizardHarness: WizardHarness | null = useMemo(() => harness ? toWizardHarness(harness) : null, [harness])
 
   /**
    * The answers so far. Rebuilt each render rather than held as state: one source for each answer,
@@ -356,9 +232,8 @@ export function NewSessionModal({
     [harness, cwd, task, model, effort, prompt, label, attachments],
   )
 
-  // `clearForHarness` decides what survives a change of assistant, so the rule lives in one tested
-  // place: a model or an effort the NEW assistant also names is KEPT, and anything it cannot accept
-  // is dropped rather than sent as a flag the CLI rejects at spawn.
+  // What survives a change of assistant: a model or an effort the NEW assistant also names is KEPT,
+  // and anything it cannot accept is dropped rather than sent as a flag the CLI rejects at spawn.
   useEffect(() => {
     setModel(m => (wizardHarness && wizardHarness.models.some(x => x.id === m)) ? m : '')
     setEffort(e => (wizardHarness && wizardHarness.efforts.includes(e)) ? e : '')
@@ -382,22 +257,10 @@ export function NewSessionModal({
   }
   const blockedBecause = ready.ok || !ready.missing ? null : BLOCKED_BECAUSE[ready.missing]
 
-  /**
-   * WHAT HAPPENS IF YOU LEAVE IT ALONE — named where the CLI publishes it, vague where it does not.
-   *
-   * `unsetAnswer` is the rule; this is only the wording. "Default (sonnet)" tells a reader whether
-   * skipping the question was the right call, which "the assistant's default" never could — and
-   * where no default could be read out of the CLI's own output the vague sentence is the only
-   * honest one, because a named default we cannot verify is read at a glance and believed.
-   */
-  const unsetText = (published: string | undefined): string => {
-    const answer = unsetAnswer(published)
-    return answer.known
-      ? (pt ? `Padrão (${answer.value})` : `Default (${answer.value})`)
-      : (pt ? 'Padrão do assistente' : "The assistant's default")
-  }
-  const modelUnset = unsetText(harness?.defaultModel)
-  const effortUnset = unsetText(harness?.defaultEffort)
+  // WHAT HAPPENS IF YOU LEAVE IT ALONE — named where the CLI publishes it, vague where it does not.
+  // See `unsetText`'s own note, shared with `StagedSessionCompose`.
+  const modelUnset = unsetText(harness?.defaultModel, pt)
+  const effortUnset = unsetText(harness?.defaultEffort, pt)
 
   const STEP_TITLE: Record<StepId, string> = {
     assistant: pt ? 'Assistente' : 'Assistant',
@@ -796,39 +659,12 @@ export function NewSessionModal({
               is the one answer on this step that is REQUIRED. */}
           {step === 'assistant' && (<>
           <Field label={pt ? 'Assistente' : 'Assistant'}>
-            {harnesses === null ? (
-              <Muted text={pt ? 'Vendo o que está instalado…' : 'Checking what is installed…'} />
-            ) : harnesses.length === 0 ? (
-              // Not an empty picker: the machine looked and found nothing it knows how to start.
-              <Muted text={pt
-                ? 'Nenhum assistente que o agentop saiba iniciar foi encontrado nesta máquina.'
-                : 'No assistant agentop knows how to start was found on this machine.'} />
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {harnesses.map(h => {
-                  const on = harness?.id === h.id
-                  const color = (HARNESS_COLORS as Record<string, string>)[h.id] ?? 'var(--text-secondary)'
-                  const name = (HARNESS_LABELS as Record<string, string>)[h.id] ?? h.label
-                  return (
-                    <button
-                      key={h.id}
-                      onClick={() => { setHarness(h) }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '9px 13px', borderRadius: 10, cursor: 'pointer',
-                        border: `1px solid ${on ? color : 'var(--border-subtle)'}`,
-                        background: on ? `color-mix(in srgb, ${color} 14%, transparent)` : 'var(--bg-elevated)',
-                        color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 650 : 500,
-                      }}
-                    >
-                      <HarnessMark harness={h.id} size={18} />
-                      {name}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            <HarnessPicker
+              lang={lang}
+              harnesses={harnesses}
+              value={harness?.id ?? ''}
+              onChange={id => setHarness(harnesses?.find(h => h.id === id) ?? null)}
+            />
           </Field>
 
           {/* SKIPPED, not disabled, when the CLI has no such flag — see the header. Skipped for the
@@ -859,35 +695,11 @@ export function NewSessionModal({
             </Field>
           )}
 
-          {efforts.length > 0 && (
+          {visibleQuestions(wizardHarness).effort && (
             <Field label={pt ? 'Esforço (opcional)' : 'Effort (optional)'} hint={pt
               ? `Mais esforço pensa por mais tempo e custa mais. Sem escolha: ${effortUnset}.`
               : `More effort thinks for longer and costs more. Left unset: ${effortUnset}.`}>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {efforts.map(step => {
-                  const on = effort === step.value
-                  const color = effortColor(step.intensity)
-                  return (
-                    <button
-                      key={step.value}
-                      onClick={() => setEffort(on ? '' : step.value)}
-                      className={on && step.peak ? 'ag-effort-peak' : undefined}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 7,
-                        padding: '8px 13px', borderRadius: 9, cursor: 'pointer',
-                        border: `1px solid ${on ? color : 'var(--border-subtle)'}`,
-                        background: on ? `color-mix(in srgb, ${color} 16%, transparent)` : 'var(--bg-elevated)',
-                        color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        fontFamily: 'inherit', fontSize: 12.5, fontWeight: on ? 650 : 500,
-                        transition: 'background 0.15s, border-color 0.15s',
-                      }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: 4, background: color, flexShrink: 0 }} />
-                      {step.value}
-                    </button>
-                  )
-                })}
-              </div>
+              <EffortPicker efforts={wizardHarness!.efforts} value={effort} onChange={setEffort} />
             </Field>
           )}
 
@@ -912,138 +724,17 @@ export function NewSessionModal({
               siblings. Both are about the WORK rather than about the assistant. */}
           {step === 'where' && (<>
           <Field label={pt ? 'Onde' : 'Where'}>
-            <div style={{ position: 'relative', marginBottom: 8 }}>
-              <Search size={13} style={{
-                position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                color: 'var(--text-tertiary)', pointerEvents: 'none',
-              }} />
-              <input
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder={pt ? 'Buscar repositório, projeto ou pasta…' : 'Search repository, project or folder…'}
-                style={inputStyle}
-              />
-              {/* THE SEARCH SAYS IT IS RUNNING. The field answers instantly and the list follows a
-                  debounce behind it, so without this the two disagree for a moment and the list
-                  reads as stale rather than as catching up. */}
-              {searching && (
-                <Loader size={13} className="ag-working-spin" style={{
-                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                  color: 'var(--text-tertiary)', pointerEvents: 'none',
-                }} />
-              )}
-            </div>
-
-            {/* THE FOUR KINDS, AND ALL. A repository, a worktree, a project and a plain folder
-                were one list separated by an icon; the tabs are the division said in words, and
-                the counts are what make an empty tab readable as "nothing of this kind matched"
-                rather than as a broken filter. `projectKind` is `@agentistics/core`'s, so these
-                buckets and the server's per-kind budget can never disagree about what a row is.
-                All is the default and keeps the server's own ranking — the tabs FILTER it, they
-                never re-order it. */}
-            <div role="tablist" style={{
-              display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-              // FIVE equal-flex tabs at 390px truncated every label to a couple of letters
-              // ("Tu…", "Wor…") — technically no page scroll, but unreadable, which is not what
-              // "may scroll inside itself" asked for. On mobile each tab keeps its NATURAL width
-              // (measured, not shrunk) and the strip scrolls horizontally INSIDE ITSELF instead —
-              // the page as a whole must never gain a horizontal scrollbar over this row, but this
-              // row may have its own.
-              overflowX: isMobile ? 'auto' : 'visible',
-            }}>
-              {KIND_TABS.map(id => {
-                const on = kindTab === id
-                const n = kindCount(id, id === 'all' ? projects.length : byKind[id].length, projectTotals)
-                return (
-                  <button
-                    key={id}
-                    role="tab"
-                    aria-selected={on}
-                    onClick={() => setKindTab(id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      gap: 5, minHeight: 30, borderRadius: 7, border: 'none', cursor: 'pointer',
-                      background: on ? 'var(--bg-surface)' : 'transparent',
-                      color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-                      fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,
-                      ...(isMobile
-                        ? { flexShrink: 0, padding: '0 10px', whiteSpace: 'nowrap' }
-                        : { flex: 1, minWidth: 0 }),
-                    }}
-                  >
-                    <span style={isMobile ? undefined : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {kindLabel(id, pt)}
-                    </span>
-                    {/* The count is DIMMED and never coloured: it is a size, not a state. */}
-                    <span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{n}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* WHAT THIS TAB HOLDS, in a sentence. The tab names the kind and this says what the
-                kind IS — which is the whole of the report: an icon separated a repository from a
-                folder and nothing on screen ever said what the difference was. */}
-            <p style={{
-              margin: '0 0 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)',
-            }}>
-              {kindHint(kindTab, pt)}
-              {/* AND HOW MANY OF THEM ARE ON SCREEN. The tab now carries the true total, so
-                  without this line a tab reading 21 over a list of 12 looks like a broken list
-                  rather than a capped one — and the way to reach the other nine is to type. */}
-              {shownMore && <> {kindMoreText(shownMore, pt)}</>}
-            </p>
-
-            <div style={{
-              maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4,
-              border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 6,
-            }}>
-              {shownProjects.length === 0 ? (
-                /* A SENTENCE PER REASON. "Nothing matched this search" and "nothing of this kind is
-                   here" send a reader to two different actions — clear the box, or switch tab —
-                   and one shared empty box would name neither. */
-                <Muted text={kindEmpty(kindTab, query, projects.length > 0, pt)} />
-              ) : shownProjects.map(p => {
-                const on = cwd === p.path
-                return (
-                  <button
-                    key={p.path}
-                    onClick={() => setCwd(p.path)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-                      padding: '8px 10px', borderRadius: 8, border: 'none', minWidth: 0,
-                      background: on ? 'var(--anthropic-orange-dim)' : 'transparent',
-                      color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    {/* THE MARK IS THE KIND, and it is the same `projectKind` the tabs file by —
-                        so the icon and the tab a row sits under can never say different things.
-                        It used to be `p.repo ? git : folder`, which drew a repository the home walk
-                        found as a plain folder: that one has a `.git` and no RECORDED remote, and
-                        the absence of a remote is not the absence of a repository. */}
-                    {(() => {
-                      const kind = projectKind({ source: p.source, remote: p.repo, worktree: p.worktree })
-                      if (kind === 'repo') return <FolderGit2 size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
-                      // A DIFFERENT mark from `repo`, on purpose — it is PART of a repository, not
-                      // a repository of its own, and drawing it with the same icon is exactly the
-                      // "worktree offered as a repository" bug this tab exists to fix.
-                      if (kind === 'worktree') return <FolderSymlink size={15} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
-                      if (kind === 'project') return <FolderClock size={15} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
-                      return <Folder size={15} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                    })()}
-                    <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: on ? 650 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.label}
-                      </span>
-                      <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.repo ? `${p.repo} · ${p.detail}` : p.detail}
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            <ProjectPicker
+              lang={lang}
+              isMobile={isMobile}
+              projects={projects}
+              projectTotals={projectTotals}
+              query={query}
+              onQueryChange={setQuery}
+              searching={searching}
+              value={cwd}
+              onChange={setCwd}
+            />
           </Field>
 
           {/*
@@ -1293,143 +984,6 @@ function ReviewRow({ label, value, muted, mono }: {
         wordBreak: 'break-word', whiteSpace: 'pre-wrap',
       }}>{value ?? muted ?? '—'}</span>
     </div>
-  )
-}
-
-/**
- * The model picker — this application's own control, not the browser's.
- *
- * A bare `<select>` renders the platform's menu: it ignores the dashboard's palette in both
- * themes, it cannot show a value's id beside its name, and on a phone it is the one control in the
- * wizard that does not meet the 44px target every other row here does. So it is built the way
- * `FiltersBar`'s value pickers are built — a trigger, a popover, one checked row per value.
- *
- * WHAT A ROW SAYS: the name the harness's own CLI prints, and — only when the two differ — the id
- * that will actually be sent, in the trailing tag. `opus`/`Opus 5` are the same model under two
- * names, and a picker that shows only one of them leaves the reader unable to match what they
- * chose against what the CLI reports back. Where the harness publishes no name, `label === id` and
- * the tag is ABSENT rather than a repetition.
- *
- * The popover is constrained to the trigger's own width (`left: 0; right: 0`), so it cannot give
- * the page a horizontal scrollbar at any viewport — the clamping arithmetic `FiltersBar` needs
- * exists because its trigger is a small button in a bar, which is not the case here.
- *
- * `open` is the CALLER's state: the wizard owns the keyboard, and `esc` must close this before it
- * closes the dialog.
- */
-function ModelSelect({ lang, open, onOpenChange, value, onChange, options, unsetLabel }: {
-  lang: 'pt' | 'en'
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  /** The id, or `''` for "leave it to the assistant". */
-  value: string
-  onChange: (id: string) => void
-  options: { id: string; label: string }[]
-  /** The sentence for the unset row — what happens when nothing is picked, in words. */
-  unsetLabel: string
-}) {
-  const pt = lang === 'pt'
-  const isMobile = useIsMobile()
-  const wrapRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onOpenChange(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open, onOpenChange])
-
-  const chosen = modelDisplay(options, value)
-  const rowHeight = isMobile ? 44 : undefined
-
-  const row = (key: string, selected: boolean, label: string, tag: string | null, pick: () => void) => (
-    <button
-      key={key}
-      role="option"
-      aria-selected={selected}
-      onClick={() => { pick(); onOpenChange(false) }}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-        padding: isMobile ? '0 10px' : '7px 10px', minHeight: rowHeight, boxSizing: 'border-box',
-        borderRadius: 6, border: 'none', cursor: 'pointer',
-        background: selected ? 'var(--anthropic-orange-dim)' : 'transparent',
-        color: selected ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-        fontSize: 12.5, fontFamily: 'inherit', textAlign: 'left',
-      }}
-      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-card-hover)' }}
-      onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-    >
-      <span style={{ width: 14, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {selected && <Check size={12} strokeWidth={3} />}
-      </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {label}
-      </span>
-      {/* The id, and only when it is not already the label — `modelDisplay`'s rule. */}
-      {tag && <ModelId id={tag} />}
-    </button>
-  )
-
-  return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-        style={{
-          ...inputStyle,
-          display: 'flex', alignItems: 'center', gap: 8,
-          paddingLeft: 12, paddingRight: 10, minHeight: isMobile ? 44 : undefined,
-          cursor: 'pointer', textAlign: 'left',
-          borderColor: open ? 'var(--anthropic-orange)' : 'var(--border-subtle)',
-        }}
-      >
-        <span style={{
-          flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          color: chosen ? 'var(--text-primary)' : 'var(--text-tertiary)',
-        }}>
-          {chosen ? chosen.label : unsetLabel}
-        </span>
-        {chosen?.id && <ModelId id={chosen.id} />}
-        <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-      </button>
-
-      {open && (
-        <div
-          role="listbox"
-          aria-label={pt ? 'Modelo' : 'Model'}
-          style={{
-            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 10,
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-            borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-            maxHeight: 260, overflowY: 'auto', overflowX: 'hidden',
-            boxSizing: 'border-box', padding: 6,
-          }}
-        >
-          {/* The unset row FIRST, and named — "no model" is a decision the CLI acts on, not a
-              blank. It is also the row the wizard opens on, so it may never be hard to find. */}
-          {row('', value === '', unsetLabel, null, () => onChange(''))}
-          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-          {options.map(o => {
-            const shown = modelDisplay(options, o.id)!
-            return row(o.id, o.id === value, shown.label, shown.id, () => onChange(o.id))
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The id beside a model's name. Monospace and quiet: it is what is SENT, not what is read. */
-function ModelId({ id }: { id: string }) {
-  return (
-    <span style={{
-      flexShrink: 0, fontSize: 10.5, color: 'var(--text-tertiary)',
-      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    }}>{id}</span>
   )
 }
 

@@ -138,6 +138,61 @@ export function unsetAnswer(published: string | undefined | null): UnsetAnswer {
   return value === '' ? { known: false } : { known: true, value }
 }
 
+/**
+ * The `/api/fleet/new` answer's own shape for one harness — what the server actually sends, before
+ * it is collapsed into the wizard's `WizardHarness`. Named so a SECOND caller (the staged-session
+ * compose panel) can build a `WizardHarness` through the exact same mapping `NewSessionModal` uses,
+ * rather than restating it — see `toWizardHarness`.
+ */
+export interface HarnessAnswer {
+  id: string
+  label: string
+  /** The ids `--model` accepts. What is SENT. */
+  modelSuggestions: string[]
+  /** The same ids, each with the name the harness's own CLI prints. Absent from an older server's
+   *  answer, which is why callers fall back to the ids rather than to nothing. */
+  models?: { id: string; label: string }[]
+  supportsModel: boolean
+  efforts: string[]
+  /** What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it. */
+  defaultModel?: string
+  defaultEffort?: string
+}
+
+/**
+ * The one mapping from what the server sent to what the wizard's gating and pickers read.
+ *
+ * Two dialogs build a `WizardHarness` from a `HarnessAnswer` (the ordinary new-session wizard and
+ * the staged-session compose panel) — this is the single place that mapping lives, so a harness
+ * cannot be described one way in the wizard's review and another way in the compose panel's model
+ * picker.
+ */
+export function toWizardHarness(h: HarnessAnswer): WizardHarness {
+  return {
+    id: h.id,
+    label: h.label,
+    // The server's labelled list when it sent one; the bare ids otherwise. A missing label is
+    // rendered AS THE ID — never as an invented name.
+    models: h.models ?? h.modelSuggestions.map(m => ({ id: m, label: m })),
+    supportsModel: h.supportsModel,
+    efforts: h.efforts,
+    ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}),
+    ...(h.defaultEffort ? { defaultEffort: h.defaultEffort } : {}),
+  }
+}
+
+/**
+ * What to say for a model/effort question left UNSET, in words — see `unsetAnswer`'s own note for
+ * why a vague sentence is the honest one where the CLI publishes no default. Shared so the wizard's
+ * step 1 and the staged-session compose panel can never word the same unset state two ways.
+ */
+export function unsetText(published: string | undefined, pt: boolean): string {
+  const answer = unsetAnswer(published)
+  return answer.known
+    ? (pt ? `Padrão (${answer.value})` : `Default (${answer.value})`)
+    : (pt ? 'Padrão do assistente' : "The assistant's default")
+}
+
 export function nextStep(step: StepId): StepId {
   const i = STEP_ORDER.indexOf(step)
   return STEP_ORDER[Math.min(i + 1, STEP_ORDER.length - 1)]!
