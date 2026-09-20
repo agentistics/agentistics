@@ -3,11 +3,22 @@ import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createTaskStore } from './task-store'
-import type { Task } from './task-model'
+import type { Subtask, Task } from './task-model'
 
 const task = (id: string, over: Partial<Task> = {}): Task => ({
   id,
   title: id,
+  status: 'todo',
+  createdAt: '2026-09-05T10:00:00.000Z',
+  updatedAt: '2026-09-05T10:00:00.000Z',
+  ...over,
+})
+
+const subtask = (id: string, taskId: string, over: Partial<Subtask> = {}): Subtask => ({
+  id,
+  taskId,
+  title: id,
+  done: false,
   status: 'todo',
   createdAt: '2026-09-05T10:00:00.000Z',
   updatedAt: '2026-09-05T10:00:00.000Z',
@@ -39,6 +50,30 @@ describe('createTaskStore', () => {
     const book = await s.read()
     expect(book.tasks).toHaveLength(1)
     expect(book.tasks[0]!.title).toBe('second')
+  })
+
+  it('round-trips a subtask\'s blockedBy — a write that survives the very next read', async () => {
+    // The bug this pins: `sanitizeSubtask`'s field-by-field reconstruction on read is a WHITELIST
+    // (the same shape `sanitizeTask` uses for `Task.blockedBy`), and `blockedBy` was missing from
+    // it — so `upsertSubtask`/`patchSubtask` wrote the array to disk correctly and the very next
+    // `read()` silently dropped it. Found live while wiring `SubtaskActionsMenu`'s "Blocked by"
+    // step: the API response never carried the field at all despite the file on disk holding it.
+    const { s } = await store()
+    await s.upsertTask(task('t-1'))
+    await s.upsertSubtask(subtask('s-1', 't-1'))
+    await s.upsertSubtask(subtask('s-2', 't-1', { blockedBy: ['s-1'] }))
+    const found = (await s.read()).subtasks.find(t => t.id === 's-2')
+    expect(found?.blockedBy).toEqual(['s-1'])
+  })
+
+  it('drops a self-referencing blockedBy entry on read, never lets a subtask block itself', async () => {
+    const { file, s } = await store()
+    await writeFile(file, JSON.stringify({
+      tasks: [task('t-1')],
+      subtasks: [subtask('s-1', 't-1', { blockedBy: ['s-1', 's-2'] })],
+    }), 'utf8')
+    const found = (await s.read()).subtasks.find(t => t.id === 's-1')
+    expect(found?.blockedBy).toEqual(['s-2'])
   })
 
   it('patch reports false for an id nobody carries, never a silent success', async () => {

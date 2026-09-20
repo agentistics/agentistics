@@ -45,7 +45,7 @@ import { ChipSelect, statusOptions } from './ChipSelect'
 import { StatusChip } from './StatusChip'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { subtaskSessions } from './SubtaskSessions'
-import { SubtaskGroupMenu } from './SubtaskGroupMenu'
+import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import { groupOf, isGroupMember, isGroupSubtask } from './subtaskGroups'
 import { subtaskRollupOf } from './subtaskRollup'
 import { PickerMenu } from './PickerMenu'
@@ -319,7 +319,23 @@ function SubtaskRows({
         const parentGroup = isMember ? groupOf(t, subtasks) : undefined
         return (
         <tr key={t.id} style={{ background: 'var(--bg-surface)' }}>
-          <td style={{ padding: cellPad }} />
+          {/* The leading "checkbox" slot every row above this one uses for batch-select — a subtask
+              is never batch-selectable, so it was always blank here. It now carries the ONE gear
+              menu instead (`SubtaskActionsMenu`'s own doc comment): group actions and remove, the
+              two of its five sections this board already wires. Blocked-by and the staged-session
+              lifecycle are NOT here — this inline view has never had that plumbing (no compose
+              dialog, no `onSaveStagedSession`), a pre-existing gap this pass does not invent, so the
+              same component simply omits what it was not given. */}
+          <td style={{ padding: cellPad }}>
+            <SubtaskActionsMenu
+              subtask={t}
+              siblings={subtasks}
+              lang={lang}
+              onPatch={onPatch}
+              onCreateGroup={onCreateGroup}
+              onRemove={onRemove}
+            />
+          </td>
           <td style={{ padding: cellPad, paddingLeft: indent }}>
             <input
               value={t.title}
@@ -343,22 +359,12 @@ function SubtaskRows({
             )}
           </td>
           <td style={{ padding: cellPad }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' }}>
-              <ChipSelect
-                compact
-                value={t.status}
-                options={statusOptions(STATUS, COLUMN_ORDER)}
-                onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
-              />
-              <SubtaskGroupMenu
-                subtask={t}
-                siblings={subtasks}
-                lang={lang}
-                onPatch={onPatch}
-                onCreateGroup={onCreateGroup}
-                onRemove={onRemove}
-              />
-            </span>
+            <ChipSelect
+              compact
+              value={t.status}
+              options={statusOptions(STATUS, COLUMN_ORDER)}
+              onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
+            />
           </td>
           <td style={{ padding: cellPad }}>
             <input
@@ -396,15 +402,10 @@ function SubtaskRows({
             })}
           </td>
           {filler > 0 && <td colSpan={filler} />}
-          <td style={{ padding: cellPad, textAlign: 'right' }}>
-            <button
-              onClick={() => onRemove(t.id)} title="Remove"
-              style={{
-                background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', ...tap(isMobile),
-              }}
-            ><Trash2 size={12} /></button>
-          </td>
+          {/* The trailing "remove" slot stays, empty, so this row keeps the same td COUNT the
+              group's header expects (see the `filler` comment above) — the action itself moved
+              into the gear menu, leading the row, above. */}
+          <td style={{ padding: cellPad }} />
         </tr>
         )
       })}

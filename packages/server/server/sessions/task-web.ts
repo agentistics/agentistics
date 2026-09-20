@@ -16,7 +16,7 @@ import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
 import {
   isGroupMember, legacyTaskId, migratePriority, newCommentId, newEventId, newFileId, newLinkId,
-  newSubtaskId, newTaskId, statusAfterAttach, subtaskDone,
+  newSubtaskId, newTaskId, statusAfterAttach, statusAfterSubtaskProgress, subtaskDone,
   type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
@@ -575,6 +575,24 @@ export async function patchSubtask(subtaskId: string, patch: {
       : {}),
     updatedAt: new Date().toISOString(),
   })
+
+  // See `statusAfterSubtaskProgress` — a subtask (or group member, §F.1) that actually STARTS work
+  // is the same kind of evidence `statusAfterAttach` already reacts to when a session is filed
+  // directly on the task: real progress on a piece of a delivery still sitting in
+  // `backlog`/`todo` is exactly the confusion this fixes ("mudei uma subtask pra 'em andamento' e
+  // o status da task pai simplesmente continuou em 'a fazer'"). Guarded on an ACTUAL transition
+  // (`found.status !== status`) so a patch that leaves the status alone — or repeats the one it
+  // already had — never re-triggers a write nobody asked for. `markTask` re-reads the task world
+  // itself, so this always judges the task's CURRENT status, never a value cached before this
+  // subtask's own write landed.
+  if (patch.status !== undefined && status !== found.status) {
+    const parent = w.book.tasks.find(t => t.id === found.taskId)
+    if (parent) {
+      const advanced = statusAfterSubtaskProgress(parent.status, status)
+      if (advanced) await markTask(parent.id, advanced, found.title || found.id)
+    }
+  }
+
   return { ok: true }
 }
 

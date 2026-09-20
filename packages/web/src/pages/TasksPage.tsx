@@ -14,11 +14,11 @@
  * shows both and no total, and an open task shows no duration — "still running" is not "took N h".
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, BarChart3, Bot, ClipboardList, ExternalLink, FileText, Link2,
+  ArrowLeft, BarChart3, ClipboardList, ExternalLink, FileText, Link2,
   Filter, LayoutGrid, MessageSquare, Pencil, Plus, Rows3, Search, Trash2, X, XCircle,
 } from 'lucide-react'
 import { PRIORITY_ORDER, type SortSpec, type TaskPriorityId } from '@agentistics/core'
@@ -43,7 +43,6 @@ import { useMoney } from '../components/tasks/money'
 import { RailSection } from '../components/tasks/RailSection'
 import { ConfirmModal, Select } from './settings/primitives'
 import { DatePicker } from '../components/DatePicker'
-import { AgentsView } from '../components/tasks/AgentsView'
 import { BlockedDialog } from '../components/tasks/BlockedDialog'
 import { TaskProgressBar } from '../components/tasks/TaskProgressBar'
 import { BetaTag } from '../components/BetaTag'
@@ -63,7 +62,7 @@ import {
   addComment, addLink, addSubtask, createTask, deleteFile, deleteTask, editComment, fileUrl,
   attachSession, detachSession, fmtDuration, markTask, patchSubtask, removeComment, removeLink,
   removeSubtask,
-  claimTask, editTask, moveTask, setBlockedBy, uploadFile, useNextTasks, useTaskActivity,
+  editTask, moveTask, setBlockedBy, uploadFile,
   useCentralTasks, useTaskDetail, useTaskList,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
@@ -169,16 +168,10 @@ function TaskList() {
    */
   const [blocking, setBlocking] = useState<string[] | null>(null)
   const setWip = (v: Record<string, number>) => { setWipState(v); writeBoardPrefs({ wip: v }) }
+  // The board's own fleet read — for the kanban's "who is running this" join. The orchestration
+  // reads (the ready queue, the activity log) went with the Agents view; nothing else on this page
+  // needs them.
   const { fleet } = useFleet('en')
-  // The orchestration view's three reads. They poll on their own cadence — the queue changes when
-  // an agent claims something, which is not when `/api/tasks` changes.
-  const { next, reload: reloadNext } = useNextTasks()
-  const { events, reload: reloadEvents } = useTaskActivity(undefined, 60)
-  const [nowMs, setNowMs] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setNowMs(Date.now()), 60_000)
-    return () => clearInterval(t)
-  }, [])
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   /** The task whose session wizard is up — see `onCreateSession`. */
@@ -240,9 +233,6 @@ function TaskList() {
           </button>
           <button style={seg(view === 'board')} onClick={() => setView('board')}>
             <LayoutGrid size={14} /> Board
-          </button>
-          <button style={seg(view === 'agents')} onClick={() => setView('agents')}>
-            <Bot size={13} /> Agents
           </button>
           <button style={seg(view === 'table')} onClick={() => setView('table')}>
             <Rows3 size={14} /> Table
@@ -311,21 +301,6 @@ function TaskList() {
       )}
 
       {view === 'overview' && overview && <BoardOverviewView o={overview} />}
-
-      {view === 'agents' && (
-        <AgentsView
-          next={next}
-          rows={shown}
-          events={events}
-          sessions={fleet.sessions}
-          nowMs={nowMs}
-          onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
-          onRelease={async id => {
-            await claimTask(id, { by: 'you', release: true, force: true })
-            await Promise.all([reload(), reloadNext(), reloadEvents()])
-          }}
-        />
-      )}
 
       {view !== 'overview' && rows !== null && shown.length === 0 && (
         <EmptyNotice error={rows.length > 0 ? null : error} />

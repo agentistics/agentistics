@@ -21,7 +21,7 @@ import { DEFAULT_SORT, type SortSpec } from '@agentistics/core'
 
 const KEY = 'agentistics-task-board-v1'
 
-export type BoardView = 'overview' | 'board' | 'table' | 'agents'
+export type BoardView = 'overview' | 'board' | 'table'
 
 export interface BoardPrefs {
   view: BoardView
@@ -77,8 +77,11 @@ function readSort(v: unknown): SortSpec {
   return typeof s.key === 'string' ? { key: s.key as SortSpec['key'], dir } : DEFAULT_SORT
 }
 
+// A stored 'agents' value (the view existed once and could still be sitting in a browser's
+// localStorage) falls back to the default rather than naming a view this build no longer has —
+// the same rule `readSort` and `statuses` already apply to a stale key.
 const isView = (v: unknown): v is BoardView =>
-  v === 'overview' || v === 'board' || v === 'table' || v === 'agents'
+  v === 'overview' || v === 'board' || v === 'table'
 
 const statuses = (v: unknown): BoardStatus[] | null =>
   Array.isArray(v) ? v.filter((x): x is BoardStatus => COLUMN_ORDER.includes(x as BoardStatus)) : null

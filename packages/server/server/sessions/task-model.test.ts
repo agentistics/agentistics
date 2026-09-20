@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   TASK_STATUSES, groupMembers, isClosed, isGroupMember, isGroupSubtask, legacyTaskId,
   migrateLegacyTasks, migrateStatus, newAttemptId, newTaskId, statusAfterAttach,
+  statusAfterSubtaskProgress, subtaskSignalsProgress,
 } from './task-model'
 import type { Subtask } from './task-model'
 
@@ -92,6 +93,35 @@ describe('statusAfterAttach', () => {
   it('never overwrites a status that already means something more specific', () => {
     for (const s of ['in_progress', 'blocked', 'in_review', 'done', 'abandoned'] as const) {
       expect(statusAfterAttach(s)).toBeNull()
+    }
+  })
+})
+
+describe('subtaskSignalsProgress', () => {
+  it('is true only for in_progress and done', () => {
+    expect(TASK_STATUSES.filter(subtaskSignalsProgress)).toEqual(['in_progress', 'done'])
+  })
+})
+
+describe('statusAfterSubtaskProgress', () => {
+  it('advances a "nothing started" parent task when a subtask starts', () => {
+    expect(statusAfterSubtaskProgress('backlog', 'in_progress')).toBe('in_progress')
+    expect(statusAfterSubtaskProgress('todo', 'in_progress')).toBe('in_progress')
+  })
+
+  it('advances a "nothing started" parent task when a subtask skips straight to done', () => {
+    expect(statusAfterSubtaskProgress('todo', 'done')).toBe('in_progress')
+  })
+
+  it('never overwrites a parent task status that already means something more specific', () => {
+    for (const s of ['in_progress', 'blocked', 'in_review', 'done', 'abandoned'] as const) {
+      expect(statusAfterSubtaskProgress(s, 'in_progress')).toBeNull()
+    }
+  })
+
+  it('does nothing for a subtask status that is not itself evidence of started work', () => {
+    for (const s of ['backlog', 'todo', 'blocked', 'in_review', 'abandoned'] as const) {
+      expect(statusAfterSubtaskProgress('todo', s)).toBeNull()
     }
   })
 })

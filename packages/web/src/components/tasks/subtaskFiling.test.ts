@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { classifyForFiling, isPickable } from './subtaskFiling'
+import { classifyForFiling, filterFilingRows, isPickable } from './subtaskFiling'
 import type { Subtask } from '../../lib/tasks'
 
 function sub(over: Partial<Subtask> & { id: string; title: string }): Subtask {
@@ -63,5 +63,40 @@ describe('isPickable', () => {
 
   it('a group member is never pickable — filing on it is always refused server-side', () => {
     expect(isPickable({ kind: 'member' })).toBe(false)
+  })
+})
+
+describe('filterFilingRows', () => {
+  const a = sub({ id: 'a', title: 'Fix the login flow' })
+  const g = sub({ id: 'g', title: 'Reporting group', isGroup: true })
+  const m = sub({ id: 'm', title: 'Weekly export', parentGroupId: 'g' })
+  const rows = classifyForFiling([a, g, m])
+
+  it('an empty query returns every row, unchanged', () => {
+    expect(filterFilingRows(rows, '')).toEqual(rows)
+    expect(filterFilingRows(rows, '   ')).toEqual(rows)
+  })
+
+  it('matches case-insensitively on a substring of the row\'s own title', () => {
+    expect(filterFilingRows(rows, 'LOGIN')).toEqual([{ kind: 'subtask', subtask: a }])
+  })
+
+  it('matches a group by its own title, not by its members\'', () => {
+    expect(filterFilingRows(rows, 'reporting')).toEqual([{ kind: 'group', subtask: g }])
+  })
+
+  it('matches a member by its own title, never by its group\'s', () => {
+    expect(filterFilingRows(rows, 'export')).toEqual([
+      { kind: 'member', subtask: m, groupTitle: 'Reporting group' },
+    ])
+  })
+
+  it('a query matching nothing yields an empty list', () => {
+    expect(filterFilingRows(rows, 'nope')).toEqual([])
+  })
+
+  it('preserves the input order among the matches', () => {
+    const wide = filterFilingRows(rows, 'p')
+    expect(wide.map(r => r.subtask.id)).toEqual(['g', 'm'])
   })
 })

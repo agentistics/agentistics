@@ -20,6 +20,28 @@ import type { Bucket } from './task-stats'
 import type { ManagedSession } from './types'
 import { distinctConversations, rowsOfTask } from './task-report'
 
+/**
+ * One day of board-wide activity — never a zero-filled calendar.
+ *
+ * A day nothing happened on is ABSENT from the list, the same rule the dashboard's own heatmap
+ * applies (`useData.ts`'s `heatmapData`): a bar drawn at zero height for a day with no data is
+ * indistinguishable from a real quiet day, so the day is simply not a member of this array at all.
+ *
+ * `sessionsStarted` is bucketed by each session's OWN `start_time` day (UTC, `.slice(0, 10)`, the
+ * same rule `tagSessionDay` applies) — not by the day of the task that filed it, which could put a
+ * session's activity on a day it never touched. `created` and `delivered` are task-level events and
+ * are bucketed by the task's own `createdAt` / `deliveredAt` day for the same reason.
+ */
+export interface BoardDailyPoint {
+  date: string
+  /** Sessions whose OWN start day falls here — real work, not task bookkeeping. */
+  sessionsStarted: number
+  /** Tasks marked `done` on this day. */
+  delivered: number
+  /** Tasks opened on this day. */
+  created: number
+}
+
 export interface BoardOverview {
   /** Every status, always present — a column at zero is a fact, not an absence. */
   statusCounts: Record<TaskStatus, number>
@@ -36,6 +58,12 @@ export interface BoardOverview {
   avgCostPerDelivered: number | null
   /** How many tasks carry no cost at all, so the averages above name their own gap. */
   tasksWithoutCost: number
+  /**
+   * Of the DELIVERED tasks specifically, how many carry no cost — the denominator
+   * `avgCostPerDelivered` needs, since `tasksWithoutCost` also counts open work that was never
+   * going to have a cost yet.
+   */
+  deliveredWithoutCost: number
 
   avgRoundsPerTask: number | null
   avgSessionsPerTask: number | null
@@ -48,6 +76,9 @@ export interface BoardOverview {
   /** Ranked across every task's sessions. Only what was reported. */
   topModels: Bucket[]
   topHarnesses: Bucket[]
+
+  /** The board's activity over time — sorted ascending. See `BoardDailyPoint`. */
+  daily: BoardDailyPoint[]
 }
 
 function mean(values: readonly number[]): number | null {
@@ -58,6 +89,19 @@ function rank(m: Map<string, { sessions: number; tokens: number | null }>): Buck
   return [...m.entries()]
     .map(([key, v]) => ({ key, sessions: v.sessions, tokens: v.tokens }))
     .sort((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0) || b.sessions - a.sessions)
+}
+
+/** The UTC day of an ISO timestamp, or `null` for anything that is not one — never a guess. */
+function dayOf(iso: string | undefined): string | null {
+  return typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null
+}
+
+type DayCounts = { sessionsStarted: number; delivered: number; created: number }
+
+function bumpDay(m: Map<string, DayCounts>, day: string, field: keyof DayCounts): void {
+  const cur = m.get(day) ?? { sessionsStarted: 0, delivered: 0, created: 0 }
+  cur[field] += 1
+  m.set(day, cur)
 }
 
 export function buildBoardOverview(o: {
@@ -79,11 +123,16 @@ export function buildBoardOverview(o: {
   const sessionsPer: number[] = []
   const deliveryMs: number[] = []
   let tasksWithoutCost = 0
+  let deliveredWithoutCost = 0
   let totalSessions = 0
   let totalTokens: number | null = null
+  const days = new Map<string, DayCounts>()
 
   for (const task of o.tasks) {
     statusCounts[task.status] = (statusCounts[task.status] ?? 0) + 1
+
+    const createdDay = dayOf(task.createdAt)
+    if (createdDay) bumpDay(days, createdDay, 'created')
 
     // ONE CONVERSATION, COUNTED ONCE — the same rule `rollupSessionsFor` keeps, and it has to be
     // kept HERE TOO because this walk accumulates its own totals rather than going through it.
@@ -100,6 +149,9 @@ export function buildBoardOverview(o: {
     for (const r of mine) {
       const meta = r.conversationId ? o.metas.get(r.conversationId) : undefined
       if (!meta) continue
+
+      const sessionDay = dayOf(meta.start_time)
+      if (sessionDay) bumpDay(days, sessionDay, 'sessionsStarted')
 
       taskCost = (taskCost ?? 0) + o.costOf(meta)
       if (typeof meta.user_message_count === 'number') {
@@ -126,8 +178,10 @@ export function buildBoardOverview(o: {
       bump(harnesses, meta.harness ?? 'claude')
     }
 
-    if (taskCost === null) tasksWithoutCost += 1
-    else {
+    if (taskCost === null) {
+      tasksWithoutCost += 1
+      if (task.status === 'done') deliveredWithoutCost += 1
+    } else {
       costs.push(taskCost)
       if (task.status === 'done') deliveredCosts.push(taskCost)
     }
@@ -136,10 +190,16 @@ export function buildBoardOverview(o: {
     if (task.status === 'done' && task.deliveredAt) {
       const ms = Date.parse(task.deliveredAt) - Date.parse(task.createdAt)
       if (Number.isFinite(ms) && ms >= 0) deliveryMs.push(ms)
+      const deliveredDay = dayOf(task.deliveredAt)
+      if (deliveredDay) bumpDay(days, deliveredDay, 'delivered')
     }
   }
 
   const inFlight = o.tasks.filter(t => !isClosed(t.status)).length
+
+  const daily: BoardDailyPoint[] = [...days.entries()]
+    .map(([date, v]) => ({ date, ...v }))
+    .sort((a, b) => a.date.localeCompare(b.date))
 
   return {
     statusCounts,
@@ -151,6 +211,7 @@ export function buildBoardOverview(o: {
     avgCostPerTask: mean(costs),
     avgCostPerDelivered: mean(deliveredCosts),
     tasksWithoutCost,
+    deliveredWithoutCost,
     avgRoundsPerTask: mean(roundsPer),
     avgSessionsPerTask: mean(sessionsPer),
     avgDeliveryMs: mean(deliveryMs),
@@ -158,5 +219,6 @@ export function buildBoardOverview(o: {
     totalTokens,
     topModels: rank(models),
     topHarnesses: rank(harnesses),
+    daily,
   }
 }

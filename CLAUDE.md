@@ -2321,7 +2321,7 @@ packages/server/server/sessions/
   task-report.ts / task-overview.ts / task-stats.ts / task-evidence.ts / task-filter.ts
   task-web.ts       the ONE door /api/tasks, the CLI and the MCP all come through
 packages/core/src/taskSort.ts   PURE: the ordering BOTH the table and the kanban use
-packages/web/src/components/tasks/   board.ts (vocabulary) · TaskTable · TaskBoard · AgentsView ·
+packages/web/src/components/tasks/   board.ts (vocabulary) · TaskTable · TaskBoard ·
                                      BoardArrange · SubtaskTable · TaskFiles · SessionPicker ·
                                      TaskPicker · NewTaskWizard · boardPrefs (localStorage)
 ```

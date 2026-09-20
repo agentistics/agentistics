@@ -301,6 +301,15 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     ...(str(t.startDate) ? { startDate: str(t.startDate)! } : {}),
     ...(str(t.sessionId) ? { sessionId: str(t.sessionId)! } : {}),
     ...(str(t.notes) ? { notes: str(t.notes)! } : {}),
+    // A sibling-subtask blocker list — same trap as the hierarchy fields below: `patchSubtask`
+    // already sanitizes it against the delivery's own subtasks before it is written
+    // (`sanitizeSubtaskBlockedBy`, `task-attach.ts`), so this whitelist only needs to carry the
+    // array THROUGH, not re-validate it. Without this line the write round-trips (it lands on
+    // disk) and the very next `read()` drops it silently — a blocker set once and gone on the
+    // next page load, discovered while wiring `SubtaskActionsMenu`'s "Blocked by" step.
+    ...(Array.isArray(t.blockedBy)
+      ? { blockedBy: t.blockedBy.filter((v): v is string => typeof v === 'string' && v !== id) }
+      : {}),
     // SUPERSEDED (§F) — see the field's own docblock in `task-model.ts`. Still round-tripped so the
     // already-shipped §B-era UI keeps reading what it wrote; `subtaskViews` no longer buckets on it.
     ...(str(t.groupId) ? { groupId: str(t.groupId)! } : {}),

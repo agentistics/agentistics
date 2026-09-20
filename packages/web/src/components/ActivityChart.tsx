@@ -20,16 +20,26 @@ interface Props {
   forcedOverlay?: boolean
   /** Hides all toggles (metric pills, Overlay All, Axes, Legend). */
   hideControls?: boolean
+  /**
+   * Overrides the pill/legend/tooltip labels for one or more of the three slots — defaults to
+   * "Messages" / "Sessions" / "Tool Calls" when omitted, so every existing caller (the dashboard's
+   * own heatmap, `componentCatalog.tsx`'s variants) is unaffected. A caller whose data means
+   * something else — the task board's "Sessions started" / "Delivered" / "Created", say — passes
+   * its own words rather than mislabeling counts that were never messages or tool calls.
+   */
+  metricLabels?: Partial<Record<Metric, string>>
 }
 
 type Metric = 'value' | 'sessions' | 'tools'
 
-function getMetrics(theme?: 'dark' | 'light'): { key: Metric; label: string; color: string }[] {
+function getMetrics(
+  theme?: 'dark' | 'light', labels?: Partial<Record<Metric, string>>,
+): { key: Metric; label: string; color: string }[] {
   const messagesColor = theme === 'light' ? '#f97316' : '#D97706'
   return [
-    { key: 'value', label: 'Messages', color: messagesColor },
-    { key: 'sessions', label: 'Sessions', color: '#6366f1' },
-    { key: 'tools', label: 'Tool Calls', color: '#10b981' },
+    { key: 'value', label: labels?.value ?? 'Messages', color: messagesColor },
+    { key: 'sessions', label: labels?.sessions ?? 'Sessions', color: '#6366f1' },
+    { key: 'tools', label: labels?.tools ?? 'Tool Calls', color: '#10b981' },
   ]
 }
 
@@ -88,7 +98,9 @@ function ToggleBtn({ active, onClick, children }: { active: boolean; onClick: ()
   )
 }
 
-export function ActivityChart({ data, height = 180, theme, forcedMetric, forcedOverlay, hideControls }: Props) {
+export function ActivityChart({
+  data, height = 180, theme, forcedMetric, forcedOverlay, hideControls, metricLabels,
+}: Props) {
   const [metric, setMetric] = useState<Metric>(forcedMetric ?? 'value')
   const [overlayAll, setOverlayAll] = useState(forcedOverlay ?? false)
   const [showAxes, setShowAxes] = useState(true)
@@ -96,7 +108,7 @@ export function ActivityChart({ data, height = 180, theme, forcedMetric, forcedO
   const effectiveMetric: Metric = forcedMetric ?? metric
   const isOverlay = forcedOverlay ?? overlayAll
   const isLocked = forcedMetric !== undefined || forcedOverlay !== undefined || hideControls === true
-  const METRICS = getMetrics(theme)
+  const METRICS = getMetrics(theme, metricLabels)
   const DATA_METRICS = METRICS as { key: 'value'|'sessions'|'tools'; label: string; color: string }[]
 
   const maxValues = {

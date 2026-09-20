@@ -64,3 +64,23 @@ export function classifyForFiling(subtasks: readonly Subtask[]): FilingRow[] {
 export function isPickable(row: Pick<FilingRow, 'kind'>): boolean {
   return row.kind !== 'member'
 }
+
+/**
+ * Below this many subtasks, a search box is a control with nothing worth typing into — the same
+ * threshold the settings dropdown's own type-to-filter box uses (`options.length > 8`,
+ * `pages/settings/primitives.tsx`), kept here so `SessionFiling.tsx` decides "show the box" the same
+ * way the rest of the app decides "show a filter."
+ */
+export const FILING_SEARCH_MIN = 8
+
+/**
+ * Case-insensitive substring match on a row's own title — the identical rule the delivery-picker's
+ * own search already uses (`SessionFiling.tsx`'s `shown`, matching `task.title`), so the two search
+ * boxes in this one dialog behave the same way. A group MEMBER's title is what is matched, never its
+ * group's — searching "the group" is what the group row itself is for.
+ */
+export function filterFilingRows(rows: readonly FilingRow[], query: string): FilingRow[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return [...rows]
+  return rows.filter(r => r.subtask.title.toLowerCase().includes(needle))
+}

@@ -20,18 +20,25 @@
  *    so filing new work never means visiting the board.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, Check, CornerDownRight, ExternalLink, Plus, Search, Unlink, Users, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import { useDismissOverlay } from '../../lib/dismissOverlay'
+import { HARNESS_LABELS } from '../../lib/harness'
+import type { HarnessId } from '@agentistics/core'
 import {
   addSubtask, attachSession, createTask, detachSession, useTaskDetail, useTaskList,
   type AttachRefusalReason, type Subtask, type TaskListRow,
 } from '../../lib/tasks'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
-import { classifyForFiling, type FilingRow } from './subtaskFiling'
+import { classifyForFiling, filterFilingRows, FILING_SEARCH_MIN, type FilingRow } from './subtaskFiling'
+import {
+  ALL, filterRowsByHarness, filterRowsByRepo, harnessFilterOptions, harnessTabLabel,
+  repoFilterOptions, repoTabLabel,
+} from './deliveryPickerFilter'
+import { TabStrip } from '../sessions/formBits'
 import { STATUS, button, field, microLabel, pill, surface, type BoardStatus } from './board'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { BetaTag } from '../BetaTag'
@@ -88,6 +95,14 @@ export function SessionFiling(p: SessionFilingProps) {
 
   const { detail, reload: reloadDetail } = useTaskDetail(target?.task.id)
   const [q, setQ] = useState('')
+  /** The FILED branch's own search, over this delivery's subtasks — separate state from `q`
+   *  (the delivery-picker's own search box) because the two lists never show at once. */
+  const [subtaskQuery, setSubtaskQuery] = useState('')
+  /** The delivery-picker's repo/harness tabs (`ALL` = no filter on that dimension). Typed `string`,
+   *  not the narrow literal `ALL` would otherwise infer, since `TabStrip` hands back any of the
+   *  dynamic repo/harness values on a pick. */
+  const [repoFilter, setRepoFilter] = useState<string>(ALL)
+  const [harnessFilter, setHarnessFilter] = useState<string>(ALL)
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState('')
   const [adding, setAdding] = useState(false)
@@ -110,11 +125,25 @@ export function SessionFiling(p: SessionFilingProps) {
    *  from it, which also reads `subtaskId` as `null` via the fallback above. */
   const directOn = filedRow != null && filedRow.subtaskId == null
 
-  const shown = useMemo(() => {
+  // A different delivery is now being looked at — the FILED branch's own search is over ITS
+  // subtasks, and stale text from the last delivery would silently hide every row of the new one.
+  useEffect(() => { setSubtaskQuery('') }, [target?.task.id])
+
+  const allRows = useMemo(() => rows ?? [], [rows])
+
+  /** The delivery-picker's text search, over EVERY delivery — unaffected by the repo/harness tabs,
+   *  so "create X" below can tell "X exists somewhere" from "X exists in the tab I'm looking at". */
+  const searched = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const all = rows ?? []
-    return needle ? all.filter(r => r.task.title.toLowerCase().includes(needle)) : all
-  }, [rows, q])
+    return needle ? allRows.filter(r => r.task.title.toLowerCase().includes(needle)) : allRows
+  }, [allRows, q])
+
+  const repoOptions = useMemo(() => repoFilterOptions(allRows), [allRows])
+  const harnessOptions = useMemo(() => harnessFilterOptions(allRows), [allRows])
+
+  const byHarness = useMemo(() => filterRowsByHarness(searched, harnessFilter), [searched, harnessFilter])
+  /** The delivery-picker's actual list — search, then harness, then repo. */
+  const shown = useMemo(() => filterRowsByRepo(byHarness, repoFilter), [byHarness, repoFilter])
 
   /** `subtaskId` omitted files the session directly on the delivery — see spec §4.1/§4.4. */
   const fileInto = async (taskId: string, subtaskId?: string) => {
@@ -214,7 +243,7 @@ export function SessionFiling(p: SessionFilingProps) {
         disabled={busy || on}
         aria-pressed={on}
         style={{
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0, textAlign: 'left',
           minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
           borderRadius: 7, font: 'inherit', fontSize: 12.5,
           border: `1px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
@@ -261,7 +290,7 @@ export function SessionFiling(p: SessionFilingProps) {
         ? `Faz parte do grupo${groupTitle ? ` "${groupTitle}"` : ''} — sessões vão no grupo, não aqui.`
         : `Part of the group${groupTitle ? ` "${groupTitle}"` : ''} — sessions go to the group, not here.`}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0, textAlign: 'left',
         minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
         borderRadius: 7, fontSize: 12.5, border: '1px solid transparent',
         color: 'var(--text-tertiary)', opacity: 0.6, cursor: 'not-allowed',
@@ -305,7 +334,7 @@ export function SessionFiling(p: SessionFilingProps) {
       disabled={busy || directOn}
       aria-pressed={directOn}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0, textAlign: 'left',
         minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
         borderRadius: 7, font: 'inherit', fontSize: 12.5, fontStyle: 'italic',
         border: `1px solid ${directOn ? 'var(--anthropic-orange)' : 'transparent'}`,
@@ -354,18 +383,52 @@ export function SessionFiling(p: SessionFilingProps) {
           </p>
         )}
 
-        <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
-          {directRow()}
-          {classifyForFiling(detail?.subtasks ?? []).map(filingRow)}
-        </div>
+        {(() => {
+          const filingRows = classifyForFiling(detail?.subtasks ?? [])
+          // Below `FILING_SEARCH_MIN` subtasks, a search box is a control with nothing worth
+          // typing into — the same threshold the settings dropdown's own type-to-filter box uses.
+          const showSearch = filingRows.length > FILING_SEARCH_MIN
+          const filteredRows = showSearch ? filterFilingRows(filingRows, subtaskQuery) : filingRows
+          return (
+            <>
+              {showSearch && (
+                <div style={{ position: 'relative' }}>
+                  <Search size={13} style={{ position: 'absolute', left: 10, top: isMobile ? 15 : 9, color: 'var(--text-tertiary)' }} />
+                  <input
+                    style={{ ...field(isMobile), paddingLeft: 30 }}
+                    value={subtaskQuery}
+                    placeholder={pt ? 'Buscar subtarefa…' : 'Search subtasks…'}
+                    onChange={e => setSubtaskQuery(e.target.value)}
+                  />
+                </div>
+              )}
 
-        {(detail?.subtasks.length ?? 0) === 0 && !adding && (
-          <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
-            {pt
-              ? 'Esta entrega ainda não tem subtarefas. Filie aqui direto, ou quebre a entrega em subtarefas abaixo.'
-              : 'This delivery has no subtasks yet. File it here directly, or break the delivery into subtasks below.'}
-          </p>
-        )}
+              {/* `minWidth: 0` at both this level and the row's own — a grid item defaults to
+                  `min-width: auto`, which stops it shrinking below its content's intrinsic width
+                  unless an ancestor overrides it (the same bug class fixed for a flex-wrap row in
+                  PR #580). Without it, a long title never reaches its own ellipsis and the LIST
+                  scrolls sideways instead. */}
+              <div style={{ display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto', minWidth: 0 }}>
+                {directRow()}
+                {filteredRows.map(filingRow)}
+              </div>
+
+              {showSearch && subtaskQuery.trim() && filteredRows.length === 0 && (
+                <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
+                  {pt ? 'Nada corresponde a essa busca.' : 'Nothing matches this search.'}
+                </p>
+              )}
+
+              {filingRows.length === 0 && !adding && (
+                <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
+                  {pt
+                    ? 'Esta entrega ainda não tem subtarefas. Filie aqui direto, ou quebre a entrega em subtarefas abaixo.'
+                    : 'This delivery has no subtasks yet. File it here directly, or break the delivery into subtasks below.'}
+                </p>
+              )}
+            </>
+          )
+        })()}
 
         {adding
           ? (
@@ -430,21 +493,51 @@ export function SessionFiling(p: SessionFilingProps) {
             value={q}
             placeholder={copy.searchOrCreate}
             onChange={e => setQ(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && q.trim() && shown.length === 0) void newDelivery() }}
+            onKeyDown={e => { if (e.key === 'Enter' && q.trim() && searched.length === 0) void newDelivery() }}
           />
         </div>
-        {q.trim() && !shown.some(r => r.task.title === q.trim()) && (
+        {/* Repo/harness tabs — the two dimensions `TaskListRow` can actually answer (see the scope
+            note in `deliveryPickerFilter.ts`: there is no PROJECT field to fake a third one from).
+            Either row is absent when its own dimension has at most one value, since a tab that
+            filters nothing is not a filter. The "create" check below and the Enter-to-create
+            shortcut both test against `searched` (text search only), never `shown` (also narrowed
+            by these tabs) — a delivery that exists somewhere but sits outside the current tab must
+            never be offered as a new one to create. */}
+        {repoOptions.length > 1 && (
+          <TabStrip
+            tabs={[ALL, ...repoOptions]}
+            value={repoFilter}
+            onPick={setRepoFilter}
+            label={id => repoTabLabel(id, pt)}
+            count={id => filterRowsByRepo(byHarness, id).length}
+          />
+        )}
+        {harnessOptions.length > 1 && (
+          <TabStrip
+            tabs={[ALL, ...harnessOptions]}
+            value={harnessFilter}
+            onPick={setHarnessFilter}
+            label={id => harnessTabLabel(id, pt, h => HARNESS_LABELS[h as HarnessId] ?? h)}
+            count={id => filterRowsByHarness(filterRowsByRepo(searched, repoFilter), id).length}
+          />
+        )}
+        {q.trim() && !searched.some(r => r.task.title === q.trim()) && (
           <button style={{ ...button(isMobile), justifyContent: 'flex-start' }} disabled={busy} onClick={() => void newDelivery()}>
             <Plus size={13} /> {pt ? `Criar “${q.trim()}”` : `Create “${q.trim()}”`}
           </button>
         )}
-        <div style={{ display: 'grid', gap: 2, maxHeight: 320, overflowY: 'auto' }}>
+        {shown.length === 0 && (repoFilter !== ALL || harnessFilter !== ALL) && (
+          <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
+            {pt ? 'Nada corresponde a esse filtro.' : 'Nothing matches this filter.'}
+          </p>
+        )}
+        <div style={{ display: 'grid', gap: 2, maxHeight: 320, overflowY: 'auto', minWidth: 0 }}>
           {shown.map(r => (
             <button
               key={r.task.id}
               onClick={() => { setChosen(r); setQ('') }}
               style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0, textAlign: 'left',
                 minHeight: isMobile ? 44 : 32, padding: isMobile ? '8px 10px' : '6px 9px',
                 borderRadius: 7, border: '1px solid transparent', background: 'transparent',
                 color: 'var(--text-secondary)', font: 'inherit', fontSize: 12.5, cursor: 'pointer',

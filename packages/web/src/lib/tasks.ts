@@ -112,6 +112,21 @@ export interface AttemptView {
   rollup: AttemptRollup
 }
 
+/**
+ * One day of board-wide activity. A day nobody touched is ABSENT from `BoardOverview.daily` rather
+ * than present at zero — see the server's `task-overview.ts` for the full rule. Mirror of the
+ * server's `BoardDailyPoint`.
+ */
+export interface BoardDailyPoint {
+  date: string
+  /** Sessions whose OWN start day falls here. */
+  sessionsStarted: number
+  /** Tasks marked `done` on this day. */
+  delivered: number
+  /** Tasks opened on this day. */
+  created: number
+}
+
 export interface BoardOverview {
   statusCounts: Record<string, number>
   tasks: number
@@ -123,6 +138,8 @@ export interface BoardOverview {
   avgCostPerDelivered: number | null
   /** How many tasks carry no cost at all — the averages above name their own gap. */
   tasksWithoutCost: number
+  /** Of the DELIVERED tasks specifically, how many carry no cost. See the server's `task-overview.ts`. */
+  deliveredWithoutCost: number
   avgRoundsPerTask: number | null
   avgSessionsPerTask: number | null
   avgDeliveryMs: number | null
@@ -130,6 +147,8 @@ export interface BoardOverview {
   totalTokens: number | null
   topModels: Bucket[]
   topHarnesses: Bucket[]
+  /** The board's activity over time, ascending. See `BoardDailyPoint`. */
+  daily: BoardDailyPoint[]
 }
 
 export interface TaskListRow {

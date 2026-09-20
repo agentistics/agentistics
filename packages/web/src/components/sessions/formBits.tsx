@@ -44,6 +44,15 @@ export function Muted({ text }: { text: string }) {
  *
  * The COUNT is dimmed and never coloured — it is a size, not a state — and it is what makes an
  * empty tab read as "nothing of this kind matched" rather than as a broken filter.
+ *
+ * **The root is `minWidth: 0`, and so is the label span** — both were missing until
+ * `SessionFiling.tsx`'s repo/harness tabs fed this component real, unbounded-length values (a git
+ * remote, not a two-word fixed tab like "Active"/"All"), which is exactly what exposed it: the ROOT,
+ * as a grid item of whatever caller lays it out, defaulted to `min-width: auto` and reported its full
+ * unshrunk content width upward, so the whole strip overflowed its dialog even though each button was
+ * already `minWidth: 0` and each label already `overflow: hidden`. The button-level fix alone was not
+ * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
+ * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
 export function TabStrip<T extends string>({ tabs, value, onPick, label, count }: {
   tabs: readonly T[]
@@ -54,7 +63,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, count }
 }) {
   return (
     <div role="tablist" style={{
-      display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
+      display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9, minWidth: 0,
       background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
     }}>
       {tabs.map(id => {
@@ -67,14 +76,13 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, count }
             onClick={() => onPick(id)}
             style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: 5, minHeight: 30, borderRadius: 7, border: 'none', cursor: 'pointer',
+              gap: 5, minHeight: 30, minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
               background: on ? 'var(--bg-surface)' : 'transparent',
               color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,
-              minWidth: 0,
             }}
           >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {label(id)}
             </span>
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{count(id)}</span>

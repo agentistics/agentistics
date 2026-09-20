@@ -17,9 +17,16 @@
  * the same dialog `SessionTasksTab`'s own "New task for this session" composer opens, so there is no
  * second creation flow, only a new entry point into the existing one.
  *
- * Linked: a filled orange clipboard. Clicking it opens this session's own aside on the Deliveries
- * tab (`openArtifacts('tasks')`) — the pattern `chatNote.ts`'s `systemRef` navigation already uses
- * for "open this tab of the aside," rather than navigating away from the conversation.
+ * Linked: an orange PILL/BADGE (border + tinted background, `var(--anthropic-orange)` /
+ * `var(--anthropic-orange-dim)` — the exact pair `SessionFiling.tsx`'s own "selected" rows already
+ * use) behind an OUTLINED clipboard. It used to be a bare solid-filled glyph at 13px, which at that
+ * size loses the clip-and-lines detail entirely and reads as an undifferentiated colored blob —
+ * reported verbatim as "looks like a full battery." A colored container the eye can register as a
+ * SHAPE, with the icon inside it kept legible by NOT also being filled, is what `board.ts`'s own
+ * `pill()` already does for every status chip on the board; this is the same idea applied to an icon
+ * button instead of text. Clicking it opens this session's own aside on the Deliveries tab
+ * (`openArtifacts('tasks')`) — the pattern `chatNote.ts`'s `systemRef` navigation already uses for
+ * "open this tab of the aside," rather than navigating away from the conversation.
  */
 
 import { useState } from 'react'
@@ -72,17 +79,22 @@ export function SessionTitleFlag({ session, lang, onLinked, size = 22 }: Session
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: size, height: size, flexShrink: 0, padding: 0,
-          border: 'none', borderRadius: 6, background: 'transparent', cursor: 'pointer',
+          borderRadius: 6, cursor: 'pointer',
+          // Linked reads as a small orange PILL/BADGE (border + tinted fill) rather than a bare
+          // solid-filled glyph, which at 13px lost the clipboard's clip-and-lines detail and read as
+          // an undifferentiated colored blob ("looks like a full battery"). Unlinked keeps its plain
+          // transparent button — only the LINKED state was the reported problem.
+          border: linked ? '1px solid var(--anthropic-orange)' : 'none',
+          background: linked ? 'var(--anthropic-orange-dim)' : 'transparent',
           color: linked ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
         }}
       >
         <ClipboardList
           size={13}
-          {...(linked
-            ? { fill: 'currentColor' }
-            // Unlinked reads as an outline the reader can fill in, never a solid mark that looks
-            // like a fact already recorded.
-            : { strokeDasharray: '2,1.6' })}
+          // Never solid-filled, linked or not — a filled glyph in a colored badge is redundant color
+          // on color, and it is precisely what made the linked state unreadable in the first place.
+          // Unlinked keeps its dashed outline, reading as one the person can still fill in.
+          {...(linked ? {} : { strokeDasharray: '2,1.6' })}
         />
       </button>
 

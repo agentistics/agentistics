@@ -72,6 +72,50 @@ export function statusAfterAttach(current: TaskStatus): TaskStatus | null {
 }
 
 /**
+ * Does a SUBTASK's (or group member's) new status count as "real work has begun on this piece",
+ * for the purpose of nudging the parent task forward?
+ *
+ * `in_progress` is the obvious one. `done` is included too, and deliberately: `patchSubtask`'s
+ * `done_needs_session` gate already requires a session to be filed before an ORDINARY subtask can
+ * reach `done` (a group member is the one exemption, and it still requires the member to have been
+ * worked on to get there in practice), so a subtask that skips straight from `backlog`/`todo` to
+ * `done` in one patch is at least as strong evidence of progress as merely starting it — refusing
+ * to advance the parent in that case would mean LESS progress (a bare start) moves the task forward
+ * while MORE progress (a piece actually finished) does not, which nobody would defend.
+ *
+ * `blocked` / `in_review` / `abandoned` do NOT count. Reported feedback and this rule's own spec
+ * only ever asked for the `in_progress` case (plus its `done` extension reasoned above); those three
+ * are each ambiguous evidence that "somebody started" — a subtask can be triaged straight into
+ * `blocked` before anybody has touched it — and are left for a person, or a future explicit rule, to
+ * decide about.
+ */
+export function subtaskSignalsProgress(status: TaskStatus): boolean {
+  return status === 'in_progress' || status === 'done'
+}
+
+/**
+ * The status a task should move to because one of ITS SUBTASKS (or a group member — §F.1, the two
+ * share the same `status` column) just started real work, or `null` when this subtask's status
+ * change should leave the parent task's own status untouched.
+ *
+ * Deliberately reuses `statusAfterAttach`'s exact forward-only decision (`backlog`/`todo` →
+ * `in_progress`, everything else untouched) rather than restating it: a subtask starting is the
+ * same KIND of evidence a session being filed under the task directly already is — "something
+ * concrete began" — so the question of which task statuses may be nudged forward, and to where, is
+ * answered in exactly one place. See `statusAfterAttach`'s own note for why `blocked`, `in_review`,
+ * `done` and `abandoned` are never overwritten, and why this is one-directional: a subtask later
+ * moving AWAY from `in_progress`/`done` must never revert the task automatically — only a person, or
+ * another explicit rule, moves work backward.
+ */
+export function statusAfterSubtaskProgress(
+  taskStatus: TaskStatus,
+  subtaskStatus: TaskStatus,
+): TaskStatus | null {
+  if (!subtaskSignalsProgress(subtaskStatus)) return null
+  return statusAfterAttach(taskStatus)
+}
+
+/**
  * `abandoned` is first-class on purpose. An attempt that was given up on is the most informative
  * row in a comparison; treating it as merely "still open" quietly inflates every average.
  */

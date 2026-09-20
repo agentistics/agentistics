@@ -18,9 +18,10 @@
  * sub-list. A GROUP is the only thing in its branch that may hold a session; a MEMBER never carries
  * one (refused server-side, `subtask_in_group`) and therefore has no rollup bucket of its own at all
  * — `subtaskRollupOf` returns `undefined` for it by construction, which already renders as the fully
- * empty cost/tokens cells below, the same convention every untracked subtask uses. `SubtaskGroupMenu`
- * draws the create/join/leave/dissolve gestures; `subtaskGroups.ts` holds the pure reads
- * (`isGroupSubtask`/`isGroupMember`/`groupOf`/candidate lists) this file and `TaskTable.tsx` share.
+ * empty cost/tokens cells below, the same convention every untracked subtask uses. The
+ * create/join/leave/dissolve gestures live in `SubtaskActionsMenu`'s leading gear now (see its own
+ * doc comment); `subtaskGroups.ts` holds the pure reads (`isGroupSubtask`/`isGroupMember`/`groupOf`/
+ * candidate lists) that component and `TaskTable.tsx` share.
  *
  * The Cost/Tokens columns below read `p.subtaskRollups` through `subtaskRollupOf`, which resolves by
  * the subtask's OWN id, always (`rollupKeyOf` — the legacy `groupId`-based union §B once used is
@@ -39,7 +40,7 @@
  */
 
 import { useState } from 'react'
-import { Plus, Rocket, SquarePen, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import type { StagedSessionDraft } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { COLUMN_ORDER, STATUS, fmtTokens, microLabel, numeric, pill, surface, type BoardStatus } from './board'
@@ -48,8 +49,7 @@ import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { DatePicker } from '../DatePicker'
 import { TaskProgressBar } from './TaskProgressBar'
 import { subtaskSessions } from './SubtaskSessions'
-import { SubtaskBlockedBy } from './SubtaskBlockedBy'
-import { SubtaskGroupMenu } from './SubtaskGroupMenu'
+import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import { groupOf, isGroupMember, isGroupSubtask } from './subtaskGroups'
 import { SessionRef } from './SessionRef'
 import { StagedSessionCompose } from './StagedSessionCompose'
@@ -232,7 +232,9 @@ export function SubtaskTable(p: SubtaskTableProps) {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
         <thead>
           <tr>
-            {[copy.subtasks, 'Status', copy.owner, copy.start, copy.due, copy.sessions, copy.cost, copy.tokens, ''].map((h, i) => (
+            {/* The leading '' is the gear-menu column (`SubtaskActionsMenu`) — no header text, same
+                convention the old trailing actions column used. */}
+            {['', copy.subtasks, 'Status', copy.owner, copy.start, copy.due, copy.sessions, copy.cost, copy.tokens].map((h, i) => (
               <th
                 key={i}
                 style={{
@@ -268,6 +270,26 @@ export function SubtaskTable(p: SubtaskTableProps) {
             const parentGroup = isMember ? groupOf(t, p.subtasks) : undefined
             return (
             <tr key={t.id}>
+              {/* ONE gear, leading the row — every action that used to be a scattered icon-only
+                  button (blocked-by, group forming, staged-session compose/edit/fire, remove) lives
+                  in this single labeled popover now. See `SubtaskActionsMenu`'s own doc comment. */}
+              <td style={{ ...cell, width: 1 }}>
+                <SubtaskActionsMenu
+                  subtask={t}
+                  siblings={p.subtasks}
+                  lang={p.lang}
+                  onPatch={p.onPatch}
+                  onCreateGroup={p.onCreateGroup}
+                  onRemove={p.onRemove}
+                  staged={{
+                    hasDraft: Boolean(t.stagedSession),
+                    preparing: p.preparingStagedSessionId === t.id,
+                    onCompose: () => setComposing(t),
+                    onEdit: () => setComposing(t),
+                    onFire: () => p.onFireStagedSession(t),
+                  }}
+                />
+              </td>
               <td style={{ ...cell, minWidth: 180 }}>
                 <input
                   defaultValue={t.title}
@@ -285,7 +307,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                 {isGroup && view?.groupProgress && (
                   <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} height={3} />
                 )}
-                {/* A MEMBER names which group it belongs to right on the row — the popover below
+                {/* A MEMBER names which group it belongs to right on the row — the menu above
                     repeats it, but this is the fact a reader should not have to open anything to
                     see. */}
                 {isMember && (
@@ -296,38 +318,20 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     </span>
                   </div>
                 )}
+                {/* The one status badge that stays glanceable at a glance, per the product
+                    feedback — the fire/edit actions BEHIND it moved into the gear menu above,
+                    but "is this one ready to go" is a fact worth seeing without opening anything. */}
+                {!isMember && t.stagedSession && (
+                  <div style={{ marginTop: 3 }}>
+                    <span style={{ ...pill('var(--anthropic-orange)'), fontSize: 9.5 }}>{staged.ready}</span>
+                  </div>
+                )}
               </td>
-              {/* `minWidth` + `nowrap`: the status chip and the blocked-by/group badges are small
-                  controls meant to sit on ONE line — without a floor here `table-layout: auto`
-                  could squeeze this column below their combined width and wrap a badge onto
-                  its own row, which reads as a broken layout rather than several controls. */}
-              <td style={{ ...cell, minWidth: 130, whiteSpace: 'nowrap' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' }}>
-                  <StatusPick
-                    value={t.status} lang={p.lang}
-                    onPick={s => void pickStatus(t, s)}
-                  />
-                  {/* Blockers are SIBLINGS of this same delivery — `p.subtasks` already IS that
-                      pool, so no second fetch is needed. A group or a member keeps its own
-                      `blockedBy` exactly like a loose subtask (§F.1: it still has its own status). */}
-                  <SubtaskBlockedBy
-                    subtaskId={t.id}
-                    blockedBy={t.blockedBy ?? []}
-                    siblings={p.subtasks}
-                    lang={p.lang}
-                    onChange={ids => void p.onPatch(t.id, { blockedBy: ids })}
-                  />
-                  {/* The group-forming gestures (§F.1) — create/join for a loose subtask, dissolve
-                      for a group, leave for a member. Same siblings pool as `SubtaskBlockedBy`. */}
-                  <SubtaskGroupMenu
-                    subtask={t}
-                    siblings={p.subtasks}
-                    lang={p.lang}
-                    onPatch={p.onPatch}
-                    onCreateGroup={p.onCreateGroup}
-                    onRemove={p.onRemove}
-                  />
-                </span>
+              <td style={{ ...cell, minWidth: 90, whiteSpace: 'nowrap' }}>
+                <StatusPick
+                  value={t.status} lang={p.lang}
+                  onPick={s => void pickStatus(t, s)}
+                />
               </td>
               <td style={cell}>
                 <input
@@ -381,42 +385,6 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, textAlign: 'right' }}>
                 <TokensCellView tok={tok} />
               </td>
-              <td style={{ ...cell, textAlign: 'right' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {/* A group MEMBER can never hold a session of its own (`task-attach.ts`'s
-                      `subtask_in_group`), so a draft that could never be fired there is never
-                      offered here either — the control is ABSENT, not disabled-and-refusing. */}
-                  {!t.parentGroupId && (
-                    t.stagedSession ? (
-                      <>
-                        <span style={{ ...pill('var(--anthropic-orange)'), fontSize: 9.5 }}>{staged.ready}</span>
-                        <button
-                          onClick={() => p.onFireStagedSession(t)} title={staged.fire}
-                          disabled={p.preparingStagedSessionId === t.id}
-                          style={{
-                            background: 'none', border: 'none', color: 'var(--anthropic-orange)',
-                            cursor: p.preparingStagedSessionId === t.id ? 'wait' : 'pointer',
-                            display: 'inline-flex', opacity: p.preparingStagedSessionId === t.id ? 0.5 : 1,
-                          }}
-                        ><Rocket size={13} /></button>
-                        <button
-                          onClick={() => setComposing(t)} title={staged.edit}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'inline-flex' }}
-                        ><SquarePen size={12} /></button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => setComposing(t)} title={staged.compose}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'inline-flex' }}
-                      ><Rocket size={12} /></button>
-                    )
-                  )}
-                  <button
-                    onClick={() => void p.onRemove(t.id)} title={copy.remove}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'inline-flex' }}
-                  ><Trash2 size={12} /></button>
-                </span>
-              </td>
             </tr>
             )
           })}
@@ -428,6 +396,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
             // §4.4. It disappears entirely when there is nothing filed directly (the server only
             // emits this bucket when `direct.length > 0` — see `subtaskViews()`).
             <tr>
+              {/* No gear here — this bucket is not a subtask, it has nothing a menu could act on. */}
+              <td style={cell} />
               <td style={{ ...cell, minWidth: 180, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
                 {copy.directSessions}
               </td>
@@ -456,7 +426,6 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, textAlign: 'right' }}>
                 <TokensCellView tok={directTok} />
               </td>
-              <td style={cell} />
             </tr>
           )}
           <tr>
