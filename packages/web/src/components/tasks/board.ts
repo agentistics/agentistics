@@ -287,6 +287,27 @@ export function fmtStamp(iso: string | undefined, lang: 'pt' | 'en'): string {
 }
 
 /**
+ * The DATE half of `fmtStamp`, compact and locale-aware — PT `DD/MM/AAAA`, EN `MM/DD/YYYY`.
+ *
+ * `startedAt`/`deliveredAt` used to render through `fmtStamp` alone ("25 de set. de 2026, 16:31"),
+ * which wraps onto three lines in a table cell that has room for one. The full moment is not
+ * thrown away — every call site keeps it as the cell's `title` tooltip (`fmtStamp`, same language)
+ * — this is only what is PAINTED. Manual digits rather than `toLocaleDateString`'s own default:
+ * `en-US` prints the month with no leading zero ("9/25/2026"), and the brief's own EN example
+ * ("09/25/2026") needs one. Invalid or absent input renders the board's existing N/A convention,
+ * never "Invalid Date" — the same guard `fmtStamp` already applies to the same two fields.
+ */
+export function fmtDateOnly(iso: string | undefined, lang: 'pt' | 'en'): string {
+  if (!iso) return NA
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return NA
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return lang === 'pt' ? `${dd}/${mm}/${yyyy}` : `${mm}/${dd}/${yyyy}`
+}
+
+/**
  * Cap a list for display, truthfully: `shown` is what fits, `extra` is what does not — never
  * silently dropped. A row filed under many harnesses (or any other unbounded per-row list) grows
  * without limit otherwise, one badge at a time, and a table column stops being a column.
