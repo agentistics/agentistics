@@ -456,7 +456,10 @@ export function createClaudeReplay(opts: ClaudeReplayOptions = {}): HarnessRepla
     sweep(nowMs)
 
     const st = await fsStat(path).catch(() => null)
-    const final = st !== null && nowMs - st.mtimeMs >= settledMs
+    // Compared at WHOLE-millisecond resolution: `Date.now()` is truncated to the millisecond while
+    // `mtimeMs` carries a fraction, so a file read in the same millisecond it was written gave a
+    // NEGATIVE age and read as still being written (seen on a fast CI runner, never on the WSL box).
+    const final = st !== null && nowMs - Math.floor(st.mtimeMs) >= settledMs
     finishClaudeReplay(walk.mainState, { final }, emit)
 
     if (final) await runSubagentPass(walk, mainCtx, path, conversationId, recordedAt, emit)

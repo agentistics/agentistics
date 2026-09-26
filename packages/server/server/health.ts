@@ -131,7 +131,12 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
       })
       // Only bail out early if Claude is the sole harness; other harnesses may
       // still have data worth reporting.
-      if (enabledIds.size === 1) return issues
+      // The journal is not Claude data: a machine with no ~/.claude/projects (a fresh install, CI)
+      // can still have an unwritable journal, and bailing out before it would hide exactly that.
+      if (enabledIds.size === 1) {
+        analyzeJournalStatus(readJournalStatus(), issues)
+        return issues
+      }
     } else {
       // 1b. Check for any JSONL sessions and sample one for format checks
       const projectDirs = await safeReadDir(PROJECTS_DIR)
