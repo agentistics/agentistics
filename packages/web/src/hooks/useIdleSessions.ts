@@ -43,6 +43,14 @@ export function useIdleSessions(args: {
   }), [inputs, prefs, args.underPressure, args.openSessionId, args.enabled])
 
   useEffect(() => {
+    // Disabled (a central, an unsupported poll, or still loading) must touch NEITHER half of this
+    // effect. `candidates` is already `[]` while disabled, and running the arithmetic anyway would
+    // fold that emptiness into `notifiedIds` — wiping the memory of what was already announced — so
+    // the moment the page re-enables (the poll comes back, the load finishes) every idle session
+    // that never actually changed reads as newly joined and is announced again. "No re-notify on
+    // load" is a statement about this effect never running at all while disabled, not about it
+    // running and happening to compute nothing.
+    if (!args.enabled) return
     const step = idleNotifyStep(notifiedIds, candidates)
     notifiedIds = step.next
     if (!step.notify) return
@@ -61,13 +69,16 @@ export function useIdleSessions(args: {
         ...(freed === null ? {} : { freed: fmtGB(freed) }),
       },
     })
-  }, [candidates, args.rows])
+  }, [candidates, args.rows, args.enabled])
 
-  // Keep marks for sessions that no longer exist are dropped.
+  // Keep marks for sessions that no longer exist are dropped — skipped while disabled for the same
+  // reason the notify effect is: `args.rows` on a disabled page (a central's own, unrelayed fleet;
+  // an empty poll before the first successful load) names nothing this feature is tracking, and
+  // pruning against it would erase every "keep" mark before the page ever gets to read them back.
   useEffect(() => {
-    if (args.rows.length === 0) return
+    if (!args.enabled || args.rows.length === 0) return
     pruneKept(new Set(args.rows.map(r => sessionIdentityKey(r))))
-  }, [args.rows])
+  }, [args.rows, args.enabled])
 
   return { candidates }
 }

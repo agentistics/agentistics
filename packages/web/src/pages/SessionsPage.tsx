@@ -76,6 +76,11 @@ import { useLeftAsideEdge } from '../lib/leftAsideEdge'
 import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
+import { useIdleSessions } from '../hooks/useIdleSessions'
+import { bannerVisible } from '../lib/idleExecution'
+import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
+import { IdleSessionsBanner } from '../components/sessions/IdleSessionsBanner'
+import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
 import type { SessionDrilldownProps } from '../components/SessionDrilldown'
 import type { Artifact } from '../lib/sessionArtifacts'
 import { liveEvents, type LiveTurn } from '../lib/artifactTabs'
@@ -309,6 +314,43 @@ export default function SessionsPage() {
   // including the machine's own named refusal.
   const unsupported = pollUnsupported
   const rowIndex = useFleetIndex(fleet.sessions)
+
+  /**
+   * IDLE SESSIONS (Task 6) — the review modal, its banner, and the state that owns them.
+   *
+   * `useHardwarePressureWatch` is called HERE, ahead of the rail's own use of `hardwareCritical`
+   * further down this file, so `ramUnderPressure` — the SAME 5s hardware poll the rail's red icon
+   * already reads, never a second interval (see that hook's own header and `useIdleSessions.ts`'s) —
+   * is available before `useIdleSessions` needs it. The hook itself is unchanged; only where its one
+   * call sits in this component moved, which is safe precisely because nothing between here and its
+   * old position is a conditional hook call.
+   */
+  const { critical: hardwareCritical, ramUnderPressure } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  const { candidates: idleCandidates } = useIdleSessions({
+    rows: fleet.rows,
+    finishedTasks: fleet.finishedTasks,
+    openSessionId: sessionId ?? null,
+    underPressure: ramUnderPressure,
+    // Never on a central (it relays another machine's fleet; the feature is local-only), never while
+    // the poll itself cannot be trusted, and never before the first answer has arrived — the same
+    // three facts `unsupported`/`loading` already state elsewhere on this page.
+    enabled: !isCentral && !pollUnsupported && !loading,
+  })
+  const [idleOpen, setIdleOpen] = useState(false)
+  const [idleSnoozedUntil, setIdleSnoozedUntil] = useState<number | null>(() => {
+    try {
+      const v = Number(sessionStorage.getItem('agentistics-idle-snooze'))
+      return Number.isFinite(v) && v > 0 ? v : null
+    } catch { return null }
+  })
+  useEffect(() => {
+    const open = () => setIdleOpen(true)
+    window.addEventListener('agentistics:open-idle-sessions', open)
+    // A request made before this mount existed at all — see `lib/idleReviewRequest.ts`'s own header
+    // for the race this closes (the bell's `navigate('/sessions')` only schedules the route change).
+    if (takeIdleReviewRequest()) setIdleOpen(true)
+    return () => window.removeEventListener('agentistics:open-idle-sessions', open)
+  }, [])
 
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
@@ -1174,11 +1216,11 @@ export default function SessionsPage() {
    *  section; read back here through the SAME store rather than recomputed, so the rail can never
    *  disagree with what that card is currently saying about this exact session. */
   const railActivity = railActivityFromHint(useArtifactLive(selected?.id))
-  /** THE HARDWARE ICON'S OWN RED (addendum item 6) — see `useHardwarePressureWatch`'s own header
-   *  for why this reuses `useHardwareSnapshot` rather than a second reader of the machine. Runs
-   *  whenever this workspace is mounted, not only while the rail itself is on screen — a reader on
-   *  a phone still gets the notification even though there is no rail icon here for them to see. */
-  const { critical: hardwareCritical } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  // THE HARDWARE ICON'S OWN RED (addendum item 6) — `hardwareCritical` is read from the single
+  // `useHardwarePressureWatch` call this page makes, moved up beside the idle-sessions hook (see
+  // that block's own comment) so `ramUnderPressure` is available before it is needed. Runs whenever
+  // this workspace is mounted, not only while the rail itself is on screen — a reader on a phone
+  // still gets the notification even though there is no rail icon here for them to see.
   const rightActivePanel: PanelId | null = slotLayout.right
   // The 44px mobile touch target is PROJECTED by the `.ag-tap-icon` class already on both buttons
   // below (`index.css`'s invisible-hitbox rule), never painted here — a literal `width/height:
@@ -2424,6 +2466,21 @@ export default function SessionsPage() {
    */
   const railDesktop = !isMobile && selected !== undefined
   return (
+    <>
+    {/* IDLE SESSIONS (Task 6) — a real sibling ABOVE the workspace body, not `position: fixed`, so
+        it occupies space and pushes the rest down rather than covering whichever branch's own
+        top-of-screen header happens to be showing (the mobile list/panel headers already claim
+        y=0). This is the ONE known gap: the mobile DEDICATED TERMINAL (`if (isMobile) return
+        dedicated` above) returns before this point and never shows the banner or the modal — a
+        deliberate, documented limitation rather than a restructuring of that early return. */}
+    {bannerVisible({ candidates: idleCandidates.length, modalOpen: idleOpen, snoozedUntil: idleSnoozedUntil, now: Date.now() }) && (
+      <IdleSessionsBanner
+        lang={pt ? 'pt' : 'en'}
+        count={idleCandidates.length}
+        onReview={() => setIdleOpen(true)}
+        onSnooze={until => setIdleSnoozedUntil(until)}
+      />
+    )}
     <div
       ref={splitRef}
       // `position: relative` ON EVERY BRANCH (fix, narrow-overlay pass, 2026-09-22) — it is the one
@@ -2625,5 +2682,17 @@ export default function SessionsPage() {
           pane holds the question asked before the pane is dropped — see `leaveGuard`. */}
       {leaveGuard}
     </div>
+    {idleOpen && idleCandidates.length > 0 && (
+      <IdleSessionsModal
+        lang={pt ? 'pt' : 'en'}
+        candidates={idleCandidates}
+        rows={fleet.rows}
+        underPressure={ramUnderPressure}
+        onClose={() => setIdleOpen(false)}
+        act={act}
+        refresh={refresh}
+      />
+    )}
+    </>
   )
 }
