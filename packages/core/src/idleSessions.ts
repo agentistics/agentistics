@@ -82,13 +82,14 @@ export function suggestGroup(
   const taskId = c.row.taskId
   if (taskId) {
     const taskKeys = new Set(rows.filter(r => r.taskId === taskId).map(r => sessionIdentityKey(r)))
-    let best: { id: string; name: string; n: number; i: number } | null = null
-    groups.forEach((g, i) => {
+    let best: { id: string; name: string; n: number } | null = null
+    // Ties go to the later group (groups are stored in creation order): a forward scan that
+    // overwrites on `>=` naturally keeps the last one seen, with no index to track.
+    for (const g of groups) {
       const n = g.sessionKeys.filter(k => taskKeys.has(k)).length
-      // Ties go to the later group (groups are stored in creation order).
-      if (n > 0 && (!best || n > best.n || (n === best.n && i > best.i))) best = { id: g.id, name: g.name, n, i }
-    })
-    if (best) return { kind: 'existing', groupId: (best as { id: string }).id, name: (best as { name: string }).name }
+      if (n > 0 && (!best || n >= best.n)) best = { id: g.id, name: g.name, n }
+    }
+    if (best) return { kind: 'existing', groupId: best.id, name: best.name }
     if (taskName && taskName.trim()) return { kind: 'new', name: taskName.trim() }
   }
   const dated = `Idle · ${today}`
