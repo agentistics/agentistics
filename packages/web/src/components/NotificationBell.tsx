@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Bell, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { requestIdleReview } from '../lib/idleReviewRequest'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -127,12 +128,19 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // Idle sessions isn't a route either — it's a modal over the sessions workspace (Task
               // 6 listens for this event), so getting there means navigating to /sessions first and
               // THEN asking the modal to open, exactly as the update modal's own handoff works.
+              //
+              // `navigate()` only SCHEDULES the route change, so a bare `dispatchEvent` here could
+              // fire before `SessionsPage` has mounted and attached its own listener — the modal
+              // would never open, with nothing on screen saying why. `requestIdleReview()` (see
+              // `lib/idleReviewRequest.ts`) arms a flag before dispatching, and `SessionsPage` also
+              // checks it once on mount, so a request made from anywhere else in the app survives
+              // the race.
               const isIdle = n.code === 'sessions.idle'
               const clickable = link !== null || isUpdate || isIdle
               const go = () => {
                 setOpen(false)
                 if (isUpdate) { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); return }
-                if (isIdle) { navigate('/sessions'); window.dispatchEvent(new CustomEvent('agentistics:open-idle-sessions')); return }
+                if (isIdle) { navigate('/sessions'); requestIdleReview(); return }
                 if (link) navigate(link)
               }
               return (
