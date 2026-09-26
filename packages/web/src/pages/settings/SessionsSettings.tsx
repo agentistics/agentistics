@@ -5,6 +5,7 @@ import type { AppContext } from '../../lib/app-context'
 import type { ArchiveMode } from '../../components/ArchiveConsentModal'
 import { Divider, PrefRow, SectionHeader, Toggle } from './primitives'
 import SessionPresetsSection from './SessionPresetsSection'
+import { useIdlePrefs, setIdlePrefs } from '../../lib/idleSessionsPrefs'
 
 const ARCHIVE_DOCS_URL = 'https://code.claude.com/docs/en/settings'
 
@@ -62,6 +63,28 @@ export default function SessionsSettings() {
   // control that claimed it was already off. Same pattern as `ChatSettings.tsx`.
   const [editorAutosave, setEditorAutosave] = useState<boolean | null>(null)
   const [autosaveSaving, setAutosaveSaving] = useState(false)
+
+  // Idle-session suggestions — server-side through `idleSessionsPrefs.ts` (a fact about the work,
+  // not the screen it was set on), so this section reads/writes the shared store directly rather
+  // than its own local `/api/preferences` round trip.
+  const idlePrefs = useIdlePrefs()
+  const [thresholdDraft, setThresholdDraft] = useState(String(idlePrefs.thresholdMin))
+  const [pressureDraft, setPressureDraft] = useState(String(idlePrefs.pressureThresholdMin))
+  // Keep the drafts in sync with the shared value whenever it changes from elsewhere (another
+  // device, or the initial load landing after this component already rendered its own guess).
+  useEffect(() => { setThresholdDraft(String(idlePrefs.thresholdMin)) }, [idlePrefs.thresholdMin])
+  useEffect(() => { setPressureDraft(String(idlePrefs.pressureThresholdMin)) }, [idlePrefs.pressureThresholdMin])
+
+  const commitThreshold = () => {
+    const n = Math.round(Number(thresholdDraft))
+    if (Number.isFinite(n) && n >= 1) setIdlePrefs({ thresholdMin: n })
+    else setThresholdDraft(String(idlePrefs.thresholdMin))  // invalid — put the field back
+  }
+  const commitPressureThreshold = () => {
+    const n = Math.round(Number(pressureDraft))
+    if (Number.isFinite(n) && n >= 1) setIdlePrefs({ pressureThresholdMin: n })
+    else setPressureDraft(String(idlePrefs.pressureThresholdMin))
+  }
 
   useEffect(() => {
     fetch('/api/preferences')
@@ -196,6 +219,66 @@ export default function SessionsSettings() {
           page — a saved template to fire from the Sessions workspace — while the rest below is
           switches and a one-time preservation choice. */}
       <SessionPresetsSection />
+
+      <Divider />
+
+      {/* IDLE SESSIONS. A suggestion, never an action on its own — nothing here ends a session
+          without a person confirming it; see `packages/core/src/idleSessions.ts` for the pure rule
+          this preference feeds. Absent reads as ENABLED (`DEFAULT_IDLE_PREFS`), same shape as the
+          shell/Studio switches below: the feature only ever suggests, so there is no host power to
+          gate behind an opt-in. */}
+      <SectionHeader label={pt ? 'Sessões ociosas' : 'Idle sessions'} />
+
+      <PrefRow
+        label={pt ? 'Sugerir encerrar sessões sem mensagem sua há um tempo' : 'Suggest ending sessions you have not messaged in a while'}
+      >
+        <Toggle
+          on={idlePrefs.enabled}
+          onToggle={() => setIdlePrefs({ enabled: !idlePrefs.enabled })}
+        />
+      </PrefRow>
+
+      <PrefRow label={pt ? 'Depois de (minutos)' : 'After (minutes)'}>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={thresholdDraft}
+          disabled={!idlePrefs.enabled}
+          onChange={e => setThresholdDraft(e.target.value)}
+          onBlur={commitThreshold}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitThreshold() } }}
+          style={{
+            width: 90, boxSizing: 'border-box', padding: '7px 10px',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
+            fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
+            ...(!idlePrefs.enabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+          }}
+        />
+      </PrefRow>
+
+      <PrefRow label={pt ? 'Com a memória apertada (minutos)' : 'Under memory pressure (minutes)'}>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={pressureDraft}
+          disabled={!idlePrefs.enabled}
+          onChange={e => setPressureDraft(e.target.value)}
+          onBlur={commitPressureThreshold}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitPressureThreshold() } }}
+          style={{
+            width: 90, boxSizing: 'border-box', padding: '7px 10px',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
+            fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
+            ...(!idlePrefs.enabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+          }}
+        />
+      </PrefRow>
+
+      <Divider />
 
       {/* THE SHELL SWITCH. A raw PTY on the host is strictly more powerful than the chat — which
           `chat-gate.ts` already calls the most powerful thing this server does, and the chat at
