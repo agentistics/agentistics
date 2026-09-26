@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, HarnessId, WorkflowRun } from '@agentistics/core'
-import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal } from '@agentistics/core'
+import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
 import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
@@ -95,12 +95,7 @@ export async function loadSessionMetas(roots: string[] = [SESSION_META_DIR]): Pr
           if (map.has(sessionId)) return
 
           // Normalise languages: may arrive as Record<string,number> or string[]
-          let languages: string[] = []
-          if (Array.isArray(data.languages)) {
-            languages = data.languages as string[]
-          } else if (data.languages && typeof data.languages === 'object') {
-            languages = Object.keys(data.languages as object)
-          }
+          const languages = coerceLanguages(data.languages)
 
           const meta: SessionMeta = {
             session_id: sessionId,

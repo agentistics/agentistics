@@ -1,5 +1,5 @@
 import type { SessionMeta, SharedTask, StatsCache, WorkflowRun } from '@agentistics/core'
-import { tagUser, redactSessionText } from '@agentistics/core'
+import { tagUser, redactSessionText, coerceSessionLists } from '@agentistics/core'
 import { toBsonDate, fromBsonDate, toBsonDates, fromBsonDates, type StoredDate } from './mongo-dates'
 
 /**
@@ -72,7 +72,9 @@ export function toTeamDoc(session: SessionMeta, org: string, memberId: string, u
   // central cannot assume its members run current code — and in a mixed-version fleet the one
   // machine still on an old build is exactly the one that leaks. Redacting here means a
   // credential never reaches the collection regardless of what the client sent.
-  const tagged = tagUser(redactSessionText(session), user)
+  // Lists that are not lists are made lists HERE, so a malformed record never reaches the collection
+  // (one `languages: {}` took down every dashboard on a central — see sessionShape.ts).
+  const tagged = tagUser(redactSessionText(coerceSessionLists(session)), user)
   const { start_time, end_time, user_message_timestamps, ...rest } = tagged
   return {
     ...rest,
@@ -107,8 +109,10 @@ export function fromTeamDoc(
 ): SessionMeta {
   const { _id, org, memberId, start_time, end_time, user_message_timestamps, ...rest } = doc
   void _id; void org; void memberId
+  // A document already stored malformed (written before the ingest guard, or by an older central)
+  // is repaired on the way OUT, so no operator has to find and fix it by hand.
   return {
-    ...rest,
+    ...coerceSessionLists(rest),
     start_time: fromBsonDate(start_time),
     ...(end_time !== undefined && end_time !== null ? { end_time: fromBsonDate(end_time) } : {}),
     user_message_timestamps: fromBsonDates(user_message_timestamps),

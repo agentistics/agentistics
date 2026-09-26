@@ -77,6 +77,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having
   // been added at all, never by having remembered a second table.
   ['/api/tasks', 'localShell'],
+  // User session groups: the routes behind the MCP tools that file a session under a group. They
+  // resolve a session reference against THIS machine's fleet, so they read host state the same way
+  // `/api/fleet` does, and they are refused on a central for the same reason.
+  ['/api/session-groups', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],

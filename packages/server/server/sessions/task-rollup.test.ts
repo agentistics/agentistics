@@ -114,3 +114,26 @@ describe('rollupAttempt', () => {
     expect(r.activeMinutes).toBe(10)
   })
 })
+
+describe('rollupAttempt — costByHarness', () => {
+  it('splits the cost by the harness that spent it, summing to costUSD', () => {
+    const r = rollupAttempt({ sessions: [
+      link({ rowId: 'r1', costUSD: 2 }),
+      link({ rowId: 'r2', meta: meta({ session_id: 's2', harness: 'antigravity' }), costUSD: 3 }),
+      link({ rowId: 'r3', meta: meta({ session_id: 's3' }), costUSD: 4 }),
+    ] })
+    expect(r.costByHarness).toEqual({ claude: 6, antigravity: 3 })
+    expect(r.costUSD).toBe(9)
+  })
+
+  it('keys a cost with no meta under the empty harness, which no plan covers', () => {
+    const r = rollupAttempt({ sessions: [link({ meta: null, costUSD: 1 })] })
+    expect(r.costByHarness).toEqual({ '': 1 })
+  })
+
+  it('is null exactly when costUSD is — absent is not an empty split', () => {
+    const r = rollupAttempt({ sessions: [link({ costUSD: null })] })
+    expect(r.costUSD).toBe(null)
+    expect(r.costByHarness).toBe(null)
+  })
+})

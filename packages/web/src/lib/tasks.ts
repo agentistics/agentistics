@@ -33,6 +33,8 @@ export interface AttemptRollup {
   activeMinutes: number | null
   tokens: number | null
   costUSD: number | null
+  /** `costUSD` by harness — see the server's `AttemptRollup`. Optional: an older server omits it. */
+  costByHarness?: Record<string, number> | null
   costMeasuredSessions: number
   costEstimatedSessions: number
   credits: { nanoAiu: number; premiumRequests: number } | null
@@ -148,6 +150,10 @@ export interface BoardOverview {
   delivered: number
   abandoned: number
   totalCostUSD: number | null
+  /** `totalCostUSD` (and so `avgCostPerTask`) split by harness; `null` when it is. */
+  costByHarness?: Record<string, number> | null
+  /** `avgCostPerDelivered`'s sessions split by harness; `null` when nothing delivered carries a cost. */
+  deliveredCostByHarness?: Record<string, number> | null
   avgCostPerTask: number | null
   avgCostPerDelivered: number | null
   /** How many tasks carry no cost at all — the averages above name their own gap. */

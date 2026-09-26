@@ -19,6 +19,8 @@ const richRow = {
   resume: { sessionId: 'conv-1', title: 'Refactor the parser' },
   pid: 4242,
   projectRoot: '/home/me/agentistics',
+  lastUserMessageAt: 1234567890,
+  taskId: 'task-1',
 }
 
 describe('reduceMachineFleetRow', () => {
@@ -73,6 +75,16 @@ describe('reduceMachineFleetRow', () => {
       expect(MACHINE_FLEET_ROW_KEYS as readonly string[]).toContain(key)
     }
     expect(out.somethingAddedLater).toBeUndefined()
+  })
+
+  it('never carries the last-user-message time or the task id — not on the allowlist', () => {
+    // `lastUserMessageAt` and `taskId` (idle-sessions) are read off the row exactly like any other
+    // field this test guards; an allowlist is only a guarantee if every new field is checked here.
+    const out = reduceMachineFleetRow(richRow) as unknown as Record<string, unknown>
+    expect(out.lastUserMessageAt).toBeUndefined()
+    expect(out.taskId).toBeUndefined()
+    expect(Object.keys(out)).not.toContain('lastUserMessageAt')
+    expect(Object.keys(out)).not.toContain('taskId')
   })
 
   it('carries the identity, state and placement the account needs to recognise a session', () => {

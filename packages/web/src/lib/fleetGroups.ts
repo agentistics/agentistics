@@ -23,6 +23,7 @@ import {
   DEFAULT_ORDER, dimensionWordBook, groupSessions, sessionRank, sortSessions,
   type ControlSession, type DimensionWordBook, type SessionGroup, type SessionState,
 } from '@agentistics/tui/control/session-fleet'
+import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import type { AsideGroupBy } from './sessionsAsidePrefs'
 
 type Lang = 'pt' | 'en'
@@ -87,7 +88,7 @@ const STATUS_GROUP_WORDS: Record<SessionState, { en: string; pt: string }> = {
  * Ordered the same way `groupSessions` orders every other dimension: by each group's most urgent
  * member, ties broken by label.
  */
-function statusGroups(rows: readonly ControlSession[], lang: Lang): SessionGroup[] {
+function statusGroups(rows: readonly ControlSession[], lang: Lang, sortOrder: SessionOrder): SessionGroup[] {
   const groups = new Map<SessionState, SessionGroup>()
   for (const s of rows) {
     const found = groups.get(s.state)
@@ -95,7 +96,7 @@ function statusGroups(rows: readonly ControlSession[], lang: Lang): SessionGroup
     else groups.set(s.state, { key: s.state, label: STATUS_GROUP_WORDS[s.state][lang], sessions: [s] })
   }
   return [...groups.values()]
-    .map(g => ({ ...g, sessions: sortSessions(g.sessions, DEFAULT_ORDER) }))
+    .map(g => ({ ...g, sessions: sortSessions(g.sessions, sortOrder) }))
     .sort((a, b) => {
       const byRank = sessionRank(a.sessions[0]!) - sessionRank(b.sessions[0]!)
       return byRank !== 0 ? byRank : a.label.localeCompare(b.label)
@@ -134,11 +135,15 @@ export function asideGroups(
   by: AsideGroupBy,
   lang: Lang,
   order: readonly string[] = [],
+  /** How the rows INSIDE each group are ordered. The groups themselves stay most-urgent-first (or
+   *  the person's manual order), so choosing "by name" never hides a session that is waiting on you
+   *  behind a group whose name sorts late. */
+  sortOrder: SessionOrder = DEFAULT_ORDER,
 ): SessionGroup[] {
   if (rows.length === 0) return []
   const raw = by === 'status'
-    ? statusGroups(rows, lang)
-    : groupSessions(rows, by, wordBook(lang), [], DEFAULT_ORDER)
+    ? statusGroups(rows, lang, sortOrder)
+    : groupSessions(rows, by, wordBook(lang), [], sortOrder)
   return applyManualOrder(raw, order)
 }
 

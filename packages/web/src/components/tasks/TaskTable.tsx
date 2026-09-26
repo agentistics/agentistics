@@ -243,7 +243,7 @@ function cellFor(
     case 'rounds': return <Num v={r.rounds} />
     case 'cost': return r.mixedCurrency || (r.credits !== null && r.costUSD === null)
       ? <span style={{ ...numeric, fontSize: 12 }}>{r.credits!.premiumRequests} req</span>
-      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD)}</span>
+      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD, r.costByHarness)}</span>
     case 'tokens': return <span style={{ ...numeric, fontSize: 12, color: r.tokens === null ? 'var(--text-tertiary)' : undefined }}>{fmtTokens(r.tokens)}</span>
     case 'harnesses': return <HarnessBadges harnesses={row.harnesses} />
     case 'subtasks': return row.counts.subtasks === 0

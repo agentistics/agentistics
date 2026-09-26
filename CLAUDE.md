@@ -194,6 +194,16 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          EXCLUDING (no `lastSeenMs` = not in the group, ever): a session wrongly
   │                          left out costs one keypress on its own Reopen verb, one wrongly let in
   │                          is invisible and makes the whole group untrustworthy.
+  │                          **USER SESSION GROUPS are organised by assistants too**, through
+  │                          `session-groups-web.ts` (`/api/session-groups`, the door behind the MCP tools
+  │                          `agentistics_session_groups` / `_group_create` / `_group_edit`). It holds NO rule:
+  │                          `planGroupOp` (`@agentistics/core`, `sessionGroups.ts`) is the one place they combine
+  │                          — exclusive membership, unpin on file — and the web's `sessionUserGroups.ts`
+  │                          re-exports the same planners. The route only resolves text (a title, an id prefix,
+  │                          a group NAME) to an identity key against the SAME fleet rows the aside draws, and
+  │                          REFUSES a reference that matches nothing or two things — a member no row can ever
+  │                          resolve would be a group nobody can empty. Writes go through `updatePreferences`
+  │                          (inside the write chain), never read-then-write: the browser writes the same key.
   │                          **What a session CALLS ITSELF** is `harness-session-file.ts` (pure) +
   │                          `harness-sessions.ts`: Claude Code writes `~/.claude/sessions/<pid>.json`
   │                          holding the name `/rename` set, the conversation id, the pid, and — for
@@ -925,6 +935,17 @@ rate was verified by hand comes out at the expected figure, so a page redesign y
 falls back, instead of yielding numbers that look right and are half wrong. Read cells positionally,
 never by counting dollar signs — OpenAI writes "-" for no cache-write charge, and counting amounts
 then reads output out of the wrong column.
+
+**A scraped row must AGREE before it wins** (`pricing-consensus.ts`, pure). Anthropic's page is
+read by its `<th>` labels, never by position, and anchored on `claude-sonnet-5` like the others;
+on top of that EVERY official row must pass the row invariants (all four positive, cache read <=
+input, cache write >= cache read) and, where built-in or community already price the model, sit
+within `MAX_OFFICIAL_DRIFT` (3x) of that figure on every field. A refused row keeps the prior price
+and is logged. This exists because on 2026-09-25 Anthropic moved Output from the last column to the
+second, the positional reader priced every cache read at the 1h cache-WRITE rate (20x), and the
+official layer overrode two sources that still held the right figure: every cost surface read ~16x
+(R$ 2M against a real ~US$ 25k). A model no other layer knows is adopted on the invariants alone —
+pricing a model the day it launches is what the scrape is for.
 
 Each model carries its origin (`official` / `community` / `builtin`), surfaced per row in
 **Settings → Pricing**, which lists **only models this machine has actually used** — a new one joins
@@ -2551,6 +2572,26 @@ interchangeable.
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
 
+### Idle sessions — the Sessions workspace's bell, banner and review modal
+
+The idle RULE is pure and lives in `packages/core/src/idleSessions.ts` (`idleCandidates` /
+`suggestGroup` / `idleNotifyStep` / `freedBytes`) — a session is a candidate only when it is
+`waiting` AND the user's own last message is older than `preferences.idleSessions.thresholdMin`
+(a lower `pressureThresholdMin` under RAM pressure). `lastUserMessageAt` reaches a fleet row from
+the EXACT conversation link only (`session-view.ts`'s `metricsOf`, reading the consolidate store's
+`user_message_timestamps`) — never the harness-and-directory guess `claimResume` falls back to —
+so a row with no exact link is never a candidate rather than one judged on a stranger's clock.
+**The machine→central relay row gains nothing here**: `reduceMachineFleetRow`'s allowlist carries
+neither `lastUserMessageAt` nor `taskId` (pinned by `machineFleet.test.ts`), because the feature is
+local-only and a central has no business suggesting to end another machine's session on a clock it
+did not measure. **The watch is off on a central** — `useIdleSessions`'s `enabled` is
+`!isCentral && !pollUnsupported && !loading`, the same three facts the page already states
+elsewhere, so a central never computes candidates for its relayed fleet. The `sessions.idle`
+notification's `meta` is deliberately LANGUAGE-NEUTRAL (`count`, `names`, a plain `more` count and a
+pre-formatted `freed` amount, never composed English/Portuguese) so a notification raised in one
+language still reads correctly after the language toggle flips; `idleMoreSuffix` /
+`idleFreedSentence` compose the two wording placeholders at render time.
+
 ## Accessibility magnifiers (`packages/web/src/components/a11y/`)
 
 Lenses a low-vision user places over the dashboard. Full write-up in
@@ -2967,6 +3008,20 @@ harness must not break.
 - **Per-harness pages live at `/h/:harness`** via the generic `HarnessPage` — never create one page per harness. Harness data-source info is shown via the page's "Data & sources" tab (powered by `HarnessInfoPanel` + `HARNESS_INFO` in `lib/harness.ts`); do not add per-harness info icons or modals elsewhere.
 - **A harness appears in the selector and Compare page** only when `AppData.harnesses` includes it (i.e., it contributes at least one real session). Gemini bootstrap-only stub files do not count.
 - **PWA**: `vite-plugin-pwa` is configured in `packages/web/vite.config.ts` with `devOptions: { enabled: true }`. Icons are in `packages/web/public/icons/`. The Install tab in PreferencesModal handles both web PWA install and desktop app download.
+- **An image whose URL stays put must be REVALIDATED, and REFERENCED BY ITS CONTENT HASH.** The server
+  kept every embedded file that was not the shell for a YEAR (`max-age=31536000`), including the icons,
+  favicons and logos — files under stable, unhashed URLs. A browser (and an installed PWA, which reads its
+  manifest icons once and keeps them) holds whichever version it fetched first, so a rebranded logo went
+  on showing the old one, and an icon that had already been corrected went on showing the thick version
+  it had cached: reported as "nothing changed, even with ctrl+shift+r", then "still thick when I install
+  the PWA". `static-cache.ts` (pure) is the policy: the shell never, `/assets/*` and `/fonts/*` for a year
+  (their URL changes with their content), everything else `no-cache` with an ETag (a 304, not a
+  download). Changing the header alone does NOT help a browser that already stored the file as fresh for a
+  year, so the reference itself changes too: `vite.config.ts` hashes every image in `public/` (and
+  `public/icons/`), tags the manifest icons and the two `index.html` icon links `?v=<hash>`, and injects the
+  map as `__BRAND_TAGS__` for `versionedAsset()` / `brandAsset()` (`src/lib/brand.ts`). **Any new reference
+  to a brand image goes through one of those**, never a bare `/logo.png`. The server matches on the PATH,
+  so the query is invisible to it, and `central-branding.ts` swaps on the path and carries the query along.
 - **A central installs as its own app** — same bundle, so the identity has to be applied when the
   files are SERVED, not at build time (`TEAM_CENTRAL` is a runtime mode). `serveStatic` runs
   `centralManifest()` / `centralHtml()` from `central-branding.ts` (pure, total — bad input is

@@ -114,3 +114,58 @@ test('the lock names the data directory and carries no port', async () => {
   // A port in the name is what let two servers past it.
   expect(/\d{4,5}/.test(basename(file))).toBe(false)
 })
+
+// A PID IS NOT AN IDENTITY. `kill(pid, 0)` answers "is SOME process using this number", and after a
+// reboot, a `wsl --shutdown` or a container restart the answer is routinely yes — for a process
+// that never touched this lock. Measured on a real machine: the systemd unit refused to start for
+// seven hours after a boot because the lock named pid 2826, which by then belonged to something
+// else, and the unit restarted every 5s into the same refusal (9 116 times over the journal). In a
+// container it is worse: the server is PID 1 in its own namespace every time, the lock lives on a
+// persistent volume, and a central refused ITSELF after its first restart — forever.
+//
+// The rule: whoever wrote the lock was alive at the moment it wrote it, so a process holding that
+// pid which STARTED AFTER the lock was written cannot be the writer.
+test('a lock naming a pid that was REUSED after it was written is debris', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  // The lock is older than this (live) process — a previous holder of the number wrote it.
+  const beforeWeStarted = new Date(Date.now() - 24 * 60 * 60_000)
+  await utimes(file, beforeWeStarted, beforeWeStarted)
+
+  const claim = await claimInstanceLock(file, 7777)
+  expect(claim.ok).toBe(true)
+  expect((await readFile(file, 'utf-8')).trim()).toBe('7777')
+})
+
+test('a container restart does not refuse ITSELF — same pid, lock from the previous run', async () => {
+  const file = await lockPath()
+  // PID 1 then, PID 1 now: the old run wrote its own number and was stopped without releasing.
+  await writeFile(file, String(process.pid))
+  const previousRun = new Date(Date.now() - 60 * 60_000)
+  await utimes(file, previousRun, previousRun)
+
+  const claim = await claimInstanceLock(file, process.pid)
+  expect(claim.ok).toBe(true)
+})
+
+test('a genuine live holder is still obeyed when the start time cannot be read', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const old = new Date(Date.now() - 60 * 60_000)
+  await utimes(file, old, old)
+
+  // Off Linux there is no /proc: "cannot tell" must keep the old, conservative answer.
+  const claim = await claimInstanceLock(file, 8888, { processStartMs: () => undefined })
+  expect(claim.ok).toBe(false)
+})
+
+test('the release completes before the process exits', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file, process.pid)
+  expect(first.ok).toBe(true)
+  // The SIGTERM handler calls this and then `process.exit` on the next line. An async release
+  // never got past its first `await`, so every clean stop left the lock behind.
+  if (first.ok) first.releaseSync()
+  const next = await claimInstanceLock(file, 2222)
+  expect(next.ok).toBe(true)
+})

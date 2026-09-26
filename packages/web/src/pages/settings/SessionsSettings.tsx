@@ -5,12 +5,53 @@ import type { AppContext } from '../../lib/app-context'
 import type { ArchiveMode } from '../../components/ArchiveConsentModal'
 import { Divider, PrefRow, SectionHeader, Toggle } from './primitives'
 import SessionPresetsSection from './SessionPresetsSection'
+import { useIdlePrefs, setIdlePrefs } from '../../lib/idleSessionsPrefs'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 const ARCHIVE_DOCS_URL = 'https://code.claude.com/docs/en/settings'
+
+// The two idle-session minute fields (`After` / `Under memory pressure`) share one commit rule
+// (round, accept only >= 1, revert the draft on anything else) and one style — collapsed here so
+// the touch-target sizing and the parsing rule live in exactly one place each.
+function commitMinutesDraft(draft: string, fallback: number, setDraft: (v: string) => void, apply: (n: number) => void) {
+  const n = Math.round(Number(draft))
+  if (Number.isFinite(n) && n >= 1) apply(n)
+  else setDraft(String(fallback))  // invalid — put the field back
+}
+
+function MinutesInput({ value, disabled, isMobile, onChange, onCommit }: {
+  value: string
+  disabled: boolean
+  isMobile: boolean
+  onChange: (v: string) => void
+  onCommit: () => void
+}) {
+  return (
+    <input
+      type="number"
+      min={1}
+      step={1}
+      inputMode="numeric"
+      value={value}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      onBlur={onCommit}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onCommit() } }}
+      style={{
+        width: isMobile ? '100%' : 90, boxSizing: 'border-box', padding: '7px 10px',
+        minHeight: isMobile ? 44 : undefined,
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
+        fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
+        ...(disabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+      }}
+    />
+  )
+}
 
 export default function SessionsSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
+  const isMobile = useIsMobile()
   const [mode, setMode] = useState<ArchiveMode | null>(null)
   const [saving, setSaving] = useState<ArchiveMode | null>(null)
   const [savedAt, setSavedAt] = useState<number>(0)
@@ -62,6 +103,22 @@ export default function SessionsSettings() {
   // control that claimed it was already off. Same pattern as `ChatSettings.tsx`.
   const [editorAutosave, setEditorAutosave] = useState<boolean | null>(null)
   const [autosaveSaving, setAutosaveSaving] = useState(false)
+
+  // Idle-session suggestions — server-side through `idleSessionsPrefs.ts` (a fact about the work,
+  // not the screen it was set on), so this section reads/writes the shared store directly rather
+  // than its own local `/api/preferences` round trip.
+  const idlePrefs = useIdlePrefs()
+  const [thresholdDraft, setThresholdDraft] = useState(String(idlePrefs.thresholdMin))
+  const [pressureDraft, setPressureDraft] = useState(String(idlePrefs.pressureThresholdMin))
+  // Keep the drafts in sync with the shared value whenever it changes from elsewhere (another
+  // device, or the initial load landing after this component already rendered its own guess).
+  useEffect(() => { setThresholdDraft(String(idlePrefs.thresholdMin)) }, [idlePrefs.thresholdMin])
+  useEffect(() => { setPressureDraft(String(idlePrefs.pressureThresholdMin)) }, [idlePrefs.pressureThresholdMin])
+
+  const commitThreshold = () =>
+    commitMinutesDraft(thresholdDraft, idlePrefs.thresholdMin, setThresholdDraft, n => setIdlePrefs({ thresholdMin: n }))
+  const commitPressureThreshold = () =>
+    commitMinutesDraft(pressureDraft, idlePrefs.pressureThresholdMin, setPressureDraft, n => setIdlePrefs({ pressureThresholdMin: n }))
 
   useEffect(() => {
     fetch('/api/preferences')
@@ -196,6 +253,46 @@ export default function SessionsSettings() {
           page — a saved template to fire from the Sessions workspace — while the rest below is
           switches and a one-time preservation choice. */}
       <SessionPresetsSection />
+
+      <Divider />
+
+      {/* IDLE SESSIONS. A suggestion, never an action on its own — nothing here ends a session
+          without a person confirming it; see `packages/core/src/idleSessions.ts` for the pure rule
+          this preference feeds. Absent reads as ENABLED (`DEFAULT_IDLE_PREFS`), same shape as the
+          shell/Studio switches below: the feature only ever suggests, so there is no host power to
+          gate behind an opt-in. */}
+      <SectionHeader label={pt ? 'Sessões ociosas' : 'Idle sessions'} />
+
+      <PrefRow
+        label={pt ? 'Sugerir encerrar sessões sem mensagem sua há um tempo' : 'Suggest ending sessions you have not messaged in a while'}
+      >
+        <Toggle
+          on={idlePrefs.enabled}
+          onToggle={() => setIdlePrefs({ enabled: !idlePrefs.enabled })}
+        />
+      </PrefRow>
+
+      <PrefRow label={pt ? 'Depois de (minutos)' : 'After (minutes)'}>
+        <MinutesInput
+          value={thresholdDraft}
+          disabled={!idlePrefs.enabled}
+          isMobile={isMobile}
+          onChange={setThresholdDraft}
+          onCommit={commitThreshold}
+        />
+      </PrefRow>
+
+      <PrefRow label={pt ? 'Com a memória apertada (minutos)' : 'Under memory pressure (minutes)'}>
+        <MinutesInput
+          value={pressureDraft}
+          disabled={!idlePrefs.enabled}
+          isMobile={isMobile}
+          onChange={setPressureDraft}
+          onCommit={commitPressureThreshold}
+        />
+      </PrefRow>
+
+      <Divider />
 
       {/* THE SHELL SWITCH. A raw PTY on the host is strictly more powerful than the chat — which
           `chat-gate.ts` already calls the most powerful thing this server does, and the chat at

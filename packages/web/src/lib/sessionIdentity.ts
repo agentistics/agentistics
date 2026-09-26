@@ -22,6 +22,4 @@ export interface SessionIdentitySource {
   conversationId?: string
 }
 
-export function sessionIdentityKey(row: SessionIdentitySource): string {
-  return row.conversationId ?? row.id
-}
+export { sessionIdentityKey } from '@agentistics/core'

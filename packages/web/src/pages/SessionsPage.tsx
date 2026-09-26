@@ -24,7 +24,7 @@ import {
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon,
+  X as XIcon, ArrowRight,
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
 import { ResizeGrip } from '../components/ResizeGrip'
@@ -55,7 +55,10 @@ import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
+import { NotificationBell } from '../components/NotificationBell'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
+import { RelayedAsideNote } from '../components/sessions/RelayedAsideNote'
+import { relayedTabAvailable } from '../lib/relayedAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelTileDropdown } from '../components/sessions/bandControls'
@@ -73,6 +76,11 @@ import { useLeftAsideEdge } from '../lib/leftAsideEdge'
 import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
+import { useIdleSessions } from '../hooks/useIdleSessions'
+import { bannerVisible } from '../lib/idleExecution'
+import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
+import { IdleSessionsBanner } from '../components/sessions/IdleSessionsBanner'
+import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
 import type { SessionDrilldownProps } from '../components/SessionDrilldown'
 import type { Artifact } from '../lib/sessionArtifacts'
 import { liveEvents, type LiveTurn } from '../lib/artifactTabs'
@@ -306,6 +314,43 @@ export default function SessionsPage() {
   // including the machine's own named refusal.
   const unsupported = pollUnsupported
   const rowIndex = useFleetIndex(fleet.sessions)
+
+  /**
+   * IDLE SESSIONS (Task 6) — the review modal, its banner, and the state that owns them.
+   *
+   * `useHardwarePressureWatch` is called HERE, ahead of the rail's own use of `hardwareCritical`
+   * further down this file, so `ramUnderPressure` — the SAME 5s hardware poll the rail's red icon
+   * already reads, never a second interval (see that hook's own header and `useIdleSessions.ts`'s) —
+   * is available before `useIdleSessions` needs it. The hook itself is unchanged; only where its one
+   * call sits in this component moved, which is safe precisely because nothing between here and its
+   * old position is a conditional hook call.
+   */
+  const { critical: hardwareCritical, ramUnderPressure } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  const { candidates: idleCandidates } = useIdleSessions({
+    rows: fleet.rows,
+    finishedTasks: fleet.finishedTasks,
+    openSessionId: sessionId ?? null,
+    underPressure: ramUnderPressure,
+    // Never on a central (it relays another machine's fleet; the feature is local-only), never while
+    // the poll itself cannot be trusted, and never before the first answer has arrived — the same
+    // three facts `unsupported`/`loading` already state elsewhere on this page.
+    enabled: !isCentral && !pollUnsupported && !loading,
+  })
+  const [idleOpen, setIdleOpen] = useState(false)
+  const [idleSnoozedUntil, setIdleSnoozedUntil] = useState<number | null>(() => {
+    try {
+      const v = Number(sessionStorage.getItem('agentistics-idle-snooze'))
+      return Number.isFinite(v) && v > 0 ? v : null
+    } catch { return null }
+  })
+  useEffect(() => {
+    const open = () => setIdleOpen(true)
+    window.addEventListener('agentistics:open-idle-sessions', open)
+    // A request made before this mount existed at all — see `lib/idleReviewRequest.ts`'s own header
+    // for the race this closes (the bell's `navigate('/sessions')` only schedules the route change).
+    if (takeIdleReviewRequest()) setIdleOpen(true)
+    return () => window.removeEventListener('agentistics:open-idle-sessions', open)
+  }, [])
 
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
@@ -556,7 +601,9 @@ export default function SessionsPage() {
    * live feed both link to paths, and a link whose only outcome is a refusal is worse than no link.
    */
   useEffect(() => {
-    if (!selected) { setOnDisk(new Map()); setOutsideNote(undefined); return }
+    // A relayed session's files are on ANOTHER machine; `/api/fleet/artifacts` is refused on a
+    // central, and polling it every 15s only produced 403s. See `lib/relayedAside.ts`.
+    if (!selected || relayed) { setOnDisk(new Map()); setOutsideNote(undefined); return }
     let alive = true
     // The sentence holds a count about ONE session, so it is cleared the moment the session changes
     // — unlike `onDisk`, which is deliberately kept so the list is never empty for the length of a
@@ -579,7 +626,7 @@ export default function SessionsPage() {
     // conversation does, and this one stats every recorded path.
     const t = setInterval(read, 15000)
     return () => { alive = false; clearInterval(t) }
-  }, [selected?.id, pt])
+  }, [selected?.id, pt, relayed])
 
   /**
    * The panel's width, dragged and remembered — the right aside was fixed while the left one has
@@ -887,6 +934,9 @@ export default function SessionsPage() {
     ran: pt ? 'rodando' : 'running',
     thought: pt ? 'pensando' : 'thinking',
     delegated: pt ? 'delegando' : 'delegating',
+    // An MCP or any other tool no rule above recognises. Without it the verb was blank and the label
+    // read `undefined · <tool>`; the references list already says "usando" for the same kind.
+    used: pt ? 'usando' : 'using',
   }
   const edgeMarker = hint === null || selected === undefined ? null : (
     <button
@@ -898,7 +948,9 @@ export default function SessionsPage() {
       // with no step behind it (reasoning carries its own text), and then this opens the feed
       // exactly as it did before.
       onClick={() => openArtifacts('live', hint.ref)}
-      title={`${HINT_VERB[hint.kind]} · ${hint.text}`}
+      className="ag-edge-hint"
+      title={`${HINT_VERB[hint.kind]} · ${hint.text} — ${pt ? 'acompanhar' : 'follow'}`}
+      aria-label={`${HINT_VERB[hint.kind]} ${hint.text}. ${pt ? 'Abrir o acompanhamento ao vivo' : 'Open the live view'}`}
       style={{
         // THIRD PLACE, and the first two were both wrong for the same reason: it FLOATED.
         // Hanging off the middle of the right edge it covered the conversation's text; sitting
@@ -926,14 +978,25 @@ export default function SessionsPage() {
       <span style={{ fontWeight: 700, color: 'var(--anthropic-orange)', flexShrink: 0 }}>
         {HINT_VERB[hint.kind]}
       </span>
-      {/* The THING, not a count: a path or a command says whether this is worth watching. */}
-      <span style={{
-        minWidth: 0, flex: 1, color: 'var(--text-tertiary)', fontSize: 11,
+      {/* The THING, not a count: a path or a command says whether this is worth watching. It takes
+          the room its text needs and no more, so the arrow can sit right after it instead of a
+          screen away at the far end. */}
+      <span className="ag-edge-hint-text" style={{
+        minWidth: 0, flex: '0 1 auto', color: 'var(--text-tertiary)', fontSize: 11,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl',
       }}>{hint.text}</span>
-      <span style={{ flexShrink: 0, color: 'var(--anthropic-orange)', fontSize: 11 }}>
-        {pt ? 'acompanhar →' : 'follow →'}
-      </span>
+      {/* THE AFFORDANCE. The whole strip is the control, and a line of text with a dot in front of
+          it does not say so. The arrow is what says "this goes somewhere", it nudges on hover, and
+          the text underlines with it — the pair that says "clickable" on any link. The words
+          "acompanhar →" that used to close the bar are gone: they said it a screen away from the
+          thing they were about. */}
+      <ArrowRight
+        aria-hidden
+        className="ag-edge-hint-arrow"
+        size={13}
+        style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }}
+      />
+      <span style={{ flex: 1 }} />
     </button>
   )
 
@@ -1021,7 +1084,19 @@ export default function SessionsPage() {
    */
   const tabPane = (
     id: TabPanelId, opts?: { hideCloseButton?: boolean; headerControls?: ReactNode },
-  ): ReactNode => selected === undefined ? null : (
+  ): ReactNode => selected === undefined ? null : relayed && !relayedTabAvailable(id) ? (
+    // ANOTHER MACHINE's session, on a central: this tab reads that machine's own disk or
+    // conversation, which the central cannot reach — say so instead of mounting a panel whose
+    // first request is refused. See `lib/relayedAside.ts`.
+    <RelayedAsideNote
+      key={selected.id}
+      id={id}
+      lang={pt ? 'pt' : 'en'}
+      onClose={() => closeSlotPanel(id)}
+      {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
+      {...(opts?.headerControls ? { headerControls: opts.headerControls } : {})}
+    />
+  ) : (
     <ArtifactsAside
       key={selected.id}
       {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
@@ -1141,11 +1216,11 @@ export default function SessionsPage() {
    *  section; read back here through the SAME store rather than recomputed, so the rail can never
    *  disagree with what that card is currently saying about this exact session. */
   const railActivity = railActivityFromHint(useArtifactLive(selected?.id))
-  /** THE HARDWARE ICON'S OWN RED (addendum item 6) — see `useHardwarePressureWatch`'s own header
-   *  for why this reuses `useHardwareSnapshot` rather than a second reader of the machine. Runs
-   *  whenever this workspace is mounted, not only while the rail itself is on screen — a reader on
-   *  a phone still gets the notification even though there is no rail icon here for them to see. */
-  const { critical: hardwareCritical } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  // THE HARDWARE ICON'S OWN RED (addendum item 6) — `hardwareCritical` is read from the single
+  // `useHardwarePressureWatch` call this page makes, moved up beside the idle-sessions hook (see
+  // that block's own comment) so `ramUnderPressure` is available before it is needed. Runs whenever
+  // this workspace is mounted, not only while the rail itself is on screen — a reader on a phone
+  // still gets the notification even though there is no rail icon here for them to see.
   const rightActivePanel: PanelId | null = slotLayout.right
   // The 44px mobile touch target is PROJECTED by the `.ag-tap-icon` class already on both buttons
   // below (`index.css`'s invisible-hitbox rule), never painted here — a literal `width/height:
@@ -1545,6 +1620,17 @@ export default function SessionsPage() {
             because a pinned lens takes no pointer events of its own. It renders nothing until
             there is a lens to hide. */}
         <HideLensesButton ctx={ctx} />
+        {/* The bell, same reasoning: this workspace draws no <header>, so without a slot here it
+            has no way onto a phone at all. Painted at the same 32×32 its neighbours use, with the
+            44px mobile touch target coming from the invisible `.ag-tap-icon` hit zone (index.css)
+            rather than a grown painted control — `NotificationBell.buttonClassName` exists for
+            exactly this. */}
+        <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32, borderRadius: 8,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
+        }} />
       </>
     )
     : null
@@ -2380,6 +2466,21 @@ export default function SessionsPage() {
    */
   const railDesktop = !isMobile && selected !== undefined
   return (
+    <>
+    {/* IDLE SESSIONS (Task 6) — a real sibling ABOVE the workspace body, not `position: fixed`, so
+        it occupies space and pushes the rest down rather than covering whichever branch's own
+        top-of-screen header happens to be showing (the mobile list/panel headers already claim
+        y=0). This is the ONE known gap: the mobile DEDICATED TERMINAL (`if (isMobile) return
+        dedicated` above) returns before this point and never shows the banner or the modal — a
+        deliberate, documented limitation rather than a restructuring of that early return. */}
+    {bannerVisible({ candidates: idleCandidates.length, modalOpen: idleOpen, snoozedUntil: idleSnoozedUntil, now: Date.now() }) && (
+      <IdleSessionsBanner
+        lang={pt ? 'pt' : 'en'}
+        count={idleCandidates.length}
+        onReview={() => setIdleOpen(true)}
+        onSnooze={until => setIdleSnoozedUntil(until)}
+      />
+    )}
     <div
       ref={splitRef}
       // `position: relative` ON EVERY BRANCH (fix, narrow-overlay pass, 2026-09-22) — it is the one
@@ -2581,5 +2682,17 @@ export default function SessionsPage() {
           pane holds the question asked before the pane is dropped — see `leaveGuard`. */}
       {leaveGuard}
     </div>
+    {idleOpen && (
+      <IdleSessionsModal
+        lang={pt ? 'pt' : 'en'}
+        candidates={idleCandidates}
+        rows={fleet.rows}
+        underPressure={ramUnderPressure}
+        onClose={() => setIdleOpen(false)}
+        act={act}
+        refresh={refresh}
+      />
+    )}
+    </>
   )
 }

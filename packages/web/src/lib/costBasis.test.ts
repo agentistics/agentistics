@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'bun:test'
-import { costBasisLabel, costBasisMarker, formatMultiple, sessionPlanFactor, planCostSubtitle, planScopeHarnesses, planScopeNote, viewCost } from './costBasis'
+import { costBasisLabel, costBasisMarker, formatMultiple, sessionPlanFactor, splitPlanFactor, planCostSubtitle, planScopeHarnesses, planScopeNote, viewCost } from './costBasis'
 
 describe('viewCost', () => {
   test('api basis is an identity', () => {
@@ -211,3 +211,44 @@ describe('sessionPlanFactor — a session allocates against ITS OWN harness', ()
   })
 })
 
+
+describe('splitPlanFactor — a board row prices each harness slice at its OWN factor', () => {
+  // Claude covered at 24x (a subscription worth far more than its API figure), antigravity not.
+  const basis = {
+    planCostUSD: 2400, apiCostUSD: 100, multiple: 0.04, effectiveCostPerMTokens: null,
+    coverage: { computable: true } as never,
+    perHarness: {
+      claude: { planCostUSD: 2400, apiCostUSD: 100, coverage: { computable: true } },
+      antigravity: { planCostUSD: 0, apiCostUSD: 50, coverage: { computable: false } },
+    },
+    uncoveredHarnesses: ['antigravity'],
+  } as never as import('@agentistics/core').AggregatePlanBasis
+
+  it('refuses a row whose only harness no plan covers — the Antigravity-only delivery stays in API', () => {
+    expect(splitPlanFactor(basis, { antigravity: 5.17 })).toBe(null)
+    const v = viewCost(5.17, { basis: 'plan', factor: splitPlanFactor(basis, { antigravity: 5.17 }) })
+    expect(v.usd).toBe(5.17)
+    expect(v.unavailable).toBe(true)
+  })
+
+  it('is exactly that harness factor for a single covered harness', () => {
+    expect(splitPlanFactor(basis, { claude: 10 })).toBeCloseTo(24, 6)
+  })
+
+  it('rescales only the covered slice of a mixed row; the rest keeps its API figure', () => {
+    // 10 * 24 + 5 * 1 = 245 over an API sum of 15
+    expect(splitPlanFactor(basis, { claude: 10, antigravity: 5 })! * 15).toBeCloseTo(245, 6)
+  })
+
+  it('treats an unattributed slice (`\'\'`) as uncovered', () => {
+    expect(splitPlanFactor(basis, { '': 3 })).toBe(null)
+  })
+
+  it('is null with no basis, no split, or nothing to weight', () => {
+    expect(splitPlanFactor(null, { claude: 1 })).toBe(null)
+    expect(splitPlanFactor(basis, null)).toBe(null)
+    expect(splitPlanFactor(basis, undefined)).toBe(null)
+    expect(splitPlanFactor(basis, {})).toBe(null)
+    expect(splitPlanFactor(basis, { claude: 0 })).toBe(null)
+  })
+})

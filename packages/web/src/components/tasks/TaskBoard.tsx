@@ -33,7 +33,7 @@ function Facts({ row }: { row: TaskListRow }) {
   const r = row.rollup
   const money = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD)
+    : fmt(r.costUSD, r.costByHarness)
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
       <span style={{ minWidth: 0 }}>

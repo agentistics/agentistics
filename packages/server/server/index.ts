@@ -176,9 +176,11 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
     )
     process.exit(1)
   }
-  // Best-effort release. A lock left behind by a hard kill is reclaimed as stale by the next
-  // start, so an unreleased lock costs nothing.
-  const release = () => { void lock.release() }
+  // SYNCHRONOUS release: both signal handlers call `process.exit` on the next line, and an async
+  // release never got past its first `await`, so every clean stop left the lock on disk. A lock left
+  // behind by a hard kill (or a reboot) is still reclaimed as stale by the next start —
+  // `claimInstanceLock` checks that the holder is the process that WROTE it, not merely a live pid.
+  const release = () => { lock.releaseSync() }
   process.on('exit', release)
   process.on('SIGINT', () => { release(); process.exit(130) })
   process.on('SIGTERM', () => { release(); process.exit(143) })
@@ -1594,6 +1596,45 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           ? { repos: (u.searchParams.get('repos') ?? '').split(',') }
           : {}),
       }
+    }
+
+    // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
+    // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
+    if (url.pathname === '/api/session-groups' && req.method === 'GET') {
+      const { listGroups } = await import('./sessions/session-groups-web')
+      return json(await listGroups())
+    }
+    if (url.pathname === '/api/session-groups' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { name?: string; sessions?: unknown }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({
+        op: 'create', name: String(body.name ?? ''),
+        ...(Array.isArray(body.sessions) ? { sessions: body.sessions.map(String) } : {}),
+      })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname === '/api/session-groups/ungroup' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { session?: string }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'remove', session: String(body.session ?? '') })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
+      const rest = url.pathname.slice('/api/session-groups/'.length).split('/')
+      const group = decodeURIComponent(rest[0] ?? '')
+      const body = await req.json().catch(() => ({})) as { name?: string; session?: string }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      // `/:group/sessions` files a session into the group; `/:group` renames it.
+      const out = rest[1] === 'sessions'
+        ? await groupOp({ op: 'add', group, session: String(body.session ?? '') })
+        : await groupOp({ op: 'rename', group, name: String(body.name ?? '') })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname.startsWith('/api/session-groups/') && req.method === 'DELETE') {
+      const group = decodeURIComponent(url.pathname.slice('/api/session-groups/'.length))
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'delete', group })
+      return json(out, groupStatus(out))
     }
 
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
@@ -4049,7 +4090,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     // Serve embedded frontend assets (binary mode only)
     if (!url.pathname.startsWith('/api')) {
-      const asset = serveStatic(url.pathname)
+      const asset = serveStatic(url.pathname, req.headers.get('if-none-match'))
       if (asset) return asset
       // SPA fallback — any unknown path gets index.html
       const fallback = serveStatic('/index.html')

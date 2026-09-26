@@ -109,6 +109,16 @@ export function togglePinnedSession(id: string): PinToggleResult {
 }
 
 /**
+ * Unconditionally take `id` OUT of the pinned set — a no-op if it was not pinned. Unlike
+ * `togglePinnedSession`, this never PINS: it exists for "drop a pinned session into a group",
+ * which downgrades the stronger "always in sight" promise to the group's "filed" one, and a
+ * toggle would have re-pinned a session that happened not to be pinned yet.
+ */
+export function unpinSession(id: string): void {
+  store.set(store.get().filter(x => x !== id))
+}
+
+/**
  * Reorder by dragging `dragKey` onto `dropKey` (or, for the up/down chevrons, `dragKey`'s own key
  * and the key of the VISIBLE neighbor it is stepping past) and persist. Subscribers are notified
  * exactly as `togglePinnedSession` notifies them. Takes session KEYS, never a position — see

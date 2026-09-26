@@ -53,6 +53,9 @@ export * from './stagedSession'
 // same rule as a courtesy, before the text ever leaves the browser. One implementation, or the two
 // could disagree about what "sanitized" means.
 export * from './pasteSanitize'
+export * from './sessionShape'
+export * from './sessionGroups'
+export * from './idleSessions'
 // B1 — the provider-neutral, PURE provider contract (usage mapping, error taxonomy, retry plan,
 // stop reason, edit policy). One block on purpose: this barrel is also edited by A1's subtasks.
 export * from './provider/usage'

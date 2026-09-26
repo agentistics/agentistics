@@ -34,6 +34,13 @@
  * `/api/preferences` ONCE and dispatches. Six stores fetching independently on every refocus is six
  * requests to answer one question. Writes stay per store — `writePreferences` is a shallow merge
  * across preference keys, so two stores writing different keys cannot clobber each other.
+ *
+ * LATE REGISTRATION. A store created by a lazily-loaded chunk (e.g. a page that only mounts once
+ * navigated to) can come into existence AFTER `loadSharedPrefs()` has already run once — today that
+ * only happens again on a `visibilitychange` to visible, so the late store sat on its `fallback`
+ * until then. `lastLoaded` keeps the most recent document `loadSharedPrefs()` read, and
+ * `createSharedPref` adopts from it immediately on registration, so a store's first answer is never
+ * stale just because it was born late.
  */
 
 export interface SharedPrefStore<T> {
@@ -56,9 +63,14 @@ const registry: Registered[] = []
 /** False until `/api/preferences` has answered once. See rule 2. */
 let armed = false
 
+/** The last document `loadSharedPrefs()` read, so a store registered afterwards can adopt it
+ *  immediately instead of waiting for the next load. `null` until the first successful load. */
+let lastLoaded: Record<string, unknown> | null = null
+
 /** Test seam: the module state is process-wide, so a test that loads must be able to reset it. */
 export function resetSharedPrefs(): void {
   armed = false
+  lastLoaded = null
   registry.length = 0
 }
 
@@ -102,7 +114,7 @@ export function createSharedPref<T>(opts: {
     try { localStorage.setItem(key, JSON.stringify(current)) } catch { /* private mode */ }
   }
 
-  registry.push({
+  const registered: Registered = {
     prefKey,
     adopt: (raw: unknown) => {
       const shared = raw === undefined ? fallback : parse(raw)
@@ -111,7 +123,13 @@ export function createSharedPref<T>(opts: {
       writeLocal()
       notify()
     },
-  })
+  }
+  registry.push(registered)
+
+  // A load may already have landed before this store existed (a lazily-loaded chunk registering
+  // after the app's first `/api/preferences` GET) — adopt it now rather than waiting for the next
+  // `loadSharedPrefs()` call, which today only happens again on a `visibilitychange` to visible.
+  if (lastLoaded !== null) registered.adopt(lastLoaded[prefKey])
 
   return {
     get: () => current,
@@ -149,6 +167,7 @@ export async function loadSharedPrefs(): Promise<void> {
     if (!res.ok) return
     const prefs = await res.json() as Record<string, unknown>
     armed = true
+    lastLoaded = prefs
     for (const store of registry) store.adopt(prefs[store.prefKey])
   } catch {
     /* offline, or a central that has not signed us in yet — stay unarmed and local */
