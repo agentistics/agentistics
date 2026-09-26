@@ -170,6 +170,40 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Hardware sob pressão', message: '{detail}.' },
     en: { title: 'Hardware under pressure', message: '{detail}.' },
   },
+  // The idle-sessions watch (`useIdleSessions.ts`), fired once per newly-idle batch. `meta` is
+  // deliberately LANGUAGE-NEUTRAL — `count` (number), `names` (the first 3 titles joined by ", "),
+  // `more` (how many were left out, 0 when none) and `freed` (a pre-formatted amount like "2.1 GB",
+  // or absent when unknown) — so a notification fired in one language still reads correctly after
+  // the language toggle flips. `{more}` and `{freed}` cannot be plain placeholders: "and N more" and
+  // an optional "Frees ~X. " sentence are WORDING, not a bare value, so `resolveNotification` fills
+  // them through `idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
+  'sessions.idle': {
+    pt: { title: 'Sessões ociosas', message: '{count} sessão(ões) sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
+    en: { title: 'Idle sessions', message: '{count} session(s) you have not messaged in a while: {names}{more}. {freed}Click to review.' },
+  },
+}
+
+/**
+ * `sessions.idle`'s `{more}` — "and N more"/"e mais N", never rendered for `more <= 0`.
+ *
+ * Exported (not inlined into `resolveNotification`) so the wording is one function both this
+ * module's placeholder fill and its own test can check — a hand-duplicated "and N more" in two
+ * places is exactly how `member.rules_proposed`'s `{count}` drifted before the generic pass existed.
+ */
+export function idleMoreSuffix(more: number, lang: 'pt' | 'en'): string {
+  if (!Number.isFinite(more) || more <= 0) return ''
+  return lang === 'pt' ? ` e mais ${more}` : ` and ${more} more`
+}
+
+/**
+ * `sessions.idle`'s `{freed}` — the optional "this frees ~X" sentence. `null`/absent means the hook
+ * could not measure any candidate's memory (`freedBytes` in `@agentistics/core` returns `null` on an
+ * empty sample rather than a confident `0`), and the sentence disappears entirely rather than
+ * printing "Frees ~. ".
+ */
+export function idleFreedSentence(freed: string | null | undefined, lang: 'pt' | 'en'): string {
+  if (!freed) return ''
+  return lang === 'pt' ? `Libera ~${freed}. ` : `Frees ~${freed}. `
 }
 
 /** Resolve a notification to display strings in the CURRENT language. Localizes by
@@ -233,6 +267,14 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   // Append the HTTP status to the auth-rejected message when the central provided one.
   if (n.code === 'member.auth_rejected' && n.meta?.status && message) {
     message = `${message} (HTTP ${n.meta.status})`
+  }
+  // sessions.idle's {more}/{freed}: WORDING, not a bare value, so they are composed here rather than
+  // left to the generic pass below — see idleMoreSuffix/idleFreedSentence for why.
+  if (message && n.code === 'sessions.idle') {
+    const more = typeof n.meta?.more === 'number' ? n.meta.more : 0
+    message = message.replace('{more}', idleMoreSuffix(more, lang))
+    const freed = typeof n.meta?.freed === 'string' ? n.meta.freed : null
+    message = message.replace('{freed}', idleFreedSentence(freed, lang))
   }
 
   // EVERY remaining {placeholder}, from `meta` under the same name.

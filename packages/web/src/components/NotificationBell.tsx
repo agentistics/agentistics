@@ -124,10 +124,15 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // The update notification isn't a route — it opens the (opt-in only, see App.tsx)
               // UpdateModal via the same custom-event handoff TtyChat uses for its own open trigger.
               const isUpdate = n.code === 'app.update_available'
-              const clickable = link !== null || isUpdate
+              // Idle sessions isn't a route either — it's a modal over the sessions workspace (Task
+              // 6 listens for this event), so getting there means navigating to /sessions first and
+              // THEN asking the modal to open, exactly as the update modal's own handoff works.
+              const isIdle = n.code === 'sessions.idle'
+              const clickable = link !== null || isUpdate || isIdle
               const go = () => {
                 setOpen(false)
                 if (isUpdate) { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); return }
+                if (isIdle) { navigate('/sessions'); window.dispatchEvent(new CustomEvent('agentistics:open-idle-sessions')); return }
                 if (link) navigate(link)
               }
               return (
