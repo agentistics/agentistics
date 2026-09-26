@@ -60,13 +60,13 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import {
-  fmtStamp, fmtTokens, liveStatusMap, liveStatusOrder, microLabel, numeric, pill, statusStyle,
-  surface, type BoardStatus,
+  fmtDateOnly, fmtStamp, fmtTokens, liveStatusMap, liveStatusOrder, microLabel, numeric, pill,
+  statusStyle, surface, type BoardStatus,
 } from './board'
 import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
-import { subtaskSessions } from './SubtaskSessions'
+import { SubtaskSessions } from './SubtaskSessions'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
@@ -467,35 +467,43 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   `Subtask.startedAt`'s own note. Read-only: no picker, no owner column, nothing to
                   type. */}
               <td style={{ ...cell, ...tint }}>
-                <span style={{
-                  fontSize: 12,
-                  color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                }}>{fmtStamp(t.startedAt, p.lang)}</span>
+                <span
+                  title={t.startedAt ? fmtStamp(t.startedAt, p.lang) : undefined}
+                  style={{
+                    fontSize: 12,
+                    color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                  }}
+                >{fmtDateOnly(t.startedAt, p.lang)}</span>
               </td>
               <td style={{ ...cell, ...tint }}>
-                <span style={{
-                  fontSize: 12,
-                  color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                }}>{fmtStamp(t.deliveredAt, p.lang)}</span>
+                <span
+                  title={t.deliveredAt ? fmtStamp(t.deliveredAt, p.lang) : undefined}
+                  style={{
+                    fontSize: 12,
+                    color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                  }}
+                >{fmtDateOnly(t.deliveredAt, p.lang)}</span>
               </td>
               <td style={{ ...cell, minWidth: 190, ...tint }}>
                 {/* A MEMBER can never hold a session (`subtask_in_group`, refused server-side) —
                     so it gets no filing control at all, not a control that always refuses. Its
                     own chips are moot for the same reason: it has none, and never a UNION of its
                     group's — that was §B's shared-bucket model, superseded by §F.1. */}
-                {!isMember && subtaskSessions({
-                  subtaskId: t.id,
-                  // A GROUP's own chips are its own direct sessions — never a union of its
-                  // members', who can never carry one. See
-                  // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §F.3.
-                  subtaskIds: [t.id],
-                  sessions: p.sessions,
-                  lang: p.lang,
-                  mobile: isMobile,
-                  onLink: setLinking,
-                  onUnfile: sid => void p.onUnfile(sid),
-                  onOpen: p.onOpenSession,
-                })}
+                {!isMember && (
+                  <SubtaskSessions
+                    subtaskId={t.id}
+                    // A GROUP's own chips are its own direct sessions — never a union of its
+                    // members', who can never carry one. See
+                    // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §F.3.
+                    subtaskIds={[t.id]}
+                    sessions={p.sessions}
+                    lang={p.lang}
+                    mobile={isMobile}
+                    onLink={setLinking}
+                    onUnfile={sid => void p.onUnfile(sid)}
+                    onOpen={p.onOpenSession}
+                  />
+                )}
               </td>
               {/* `r` absent (no bucket at all — always true for a MEMBER) or `sessionsUsed: 0` (a
                   bucket, but nobody has filed a session here yet) both render as a fully EMPTY
@@ -584,7 +592,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
           lang={p.lang}
           onCancel={() => setDoneRefusal(null)}
           onFile={() => {
-            // The SAME shortcut `SubtaskSessions`' own "filiar" button opens — this row's
+            // The SAME shortcut `SubtaskSessions`' own `⋯` menu opens — this row's
             // `SessionPicker`, not a second implementation of it.
             const id = doneRefusal.id
             setDoneRefusal(null)

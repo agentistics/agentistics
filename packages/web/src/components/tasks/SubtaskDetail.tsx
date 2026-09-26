@@ -16,9 +16,9 @@
  * What it reuses UNMODIFIED (exported from `DeliveryDetail.tsx` for exactly this): `Rollup` and
  * `Stat` (the same building blocks the rail draws the whole task's numbers with), and `CommentsTab`
  * — comments carry no `subtaskId` today and stay TASK-WIDE by design (the spec's own §C.5
- * reasoning), so every comment shows here, never a filtered set. `subtaskSessions` draws the chip
- * list of sessions filed under this subtask (or its group, see below) exactly as `SubtaskTable.tsx`
- * already does on the board.
+ * reasoning), so every comment shows here, never a filtered set. `SubtaskSessions` draws the
+ * sessions filed under this subtask (or its group, see below) exactly as `SubtaskTable.tsx` already
+ * does on the board.
  *
  * What it deliberately DROPS relative to the full page: attempts, the subtasks table (a subtask has
  * no subtasks of its own), the files tab and the activity log — task-level administrivia a person
@@ -35,12 +35,12 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { sessionPath } from '../../lib/sessionRoute'
-import { NA, fmtInt, fmtStamp, microLabel, surface } from './board'
+import { NA, fmtDateOnly, fmtInt, fmtStamp, microLabel, surface } from './board'
 import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
 import { StatusChip } from './StatusChip'
 import { TaskProgressBar } from './TaskProgressBar'
-import { subtaskSessions } from './SubtaskSessions'
+import { SubtaskSessions } from './SubtaskSessions'
 import { SessionPicker } from './SessionPicker'
 import { CommentsTab, Rollup, Stat } from './DeliveryDetail'
 import { subtaskRollupOf, subtaskStatsOf } from './subtaskRollup'
@@ -118,17 +118,23 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.started}</span>
-            <span style={{
-              fontSize: 12,
-              color: p.subtask.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(p.subtask.startedAt, p.lang)}</span>
+            <span
+              title={p.subtask.startedAt ? fmtStamp(p.subtask.startedAt, p.lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: p.subtask.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(p.subtask.startedAt, p.lang)}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
-            <span style={{
-              fontSize: 12,
-              color: p.subtask.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(p.subtask.deliveredAt, p.lang)}</span>
+            <span
+              title={p.subtask.deliveredAt ? fmtStamp(p.subtask.deliveredAt, p.lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: p.subtask.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(p.subtask.deliveredAt, p.lang)}</span>
           </span>
         </div>
       </div>
@@ -171,16 +177,16 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
       </RailSection>
 
       <RailSection id="subtask-sessions" title={copy.sessions} defaultOpen>
-        {subtaskSessions({
-          subtaskId: p.subtask.id,
-          subtaskIds: groupIds,
-          sessions: p.detail.sessions,
-          lang: p.lang,
-          mobile: isMobile,
-          onLink: () => setLinking(true),
-          onUnfile: sid => void run(() => detachSession(p.taskId, sid)),
-          onOpen: sid => navigate(sessionPath(sid)),
-        })}
+        <SubtaskSessions
+          subtaskId={p.subtask.id}
+          subtaskIds={groupIds}
+          sessions={p.detail.sessions}
+          lang={p.lang}
+          mobile={isMobile}
+          onLink={() => setLinking(true)}
+          onUnfile={sid => void run(() => detachSession(p.taskId, sid))}
+          onOpen={sid => navigate(sessionPath(sid))}
+        />
       </RailSection>
 
       <CommentsTab id={p.taskId} detail={p.detail} onChanged={p.reload} />

@@ -29,12 +29,12 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  NA, PRIORITY, button, claimLeft, field, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
+  NA, PRIORITY, button, claimLeft, field, fmtDateOnly, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus, type ColumnId,
 } from './board'
 import { useMoney, type Money } from './money'
 import {
-  cycleSort, DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
+  DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
   type SortKey, type SortSpec, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
   type TaskStatusDef,
 } from '@agentistics/core'
@@ -45,12 +45,13 @@ import {
   toggleMode, toggleRow, type Selection,
 } from './selection'
 import { orderedSubtasks } from './subtaskSortView'
+import { effectiveSubtaskSort, pickSubtaskSort } from './subtaskSortInherit'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { SessionPicker } from './SessionPicker'
 import { ChipSelect, statusOptions } from './ChipSelect'
 import { StatusChip } from './StatusChip'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { subtaskSessions } from './SubtaskSessions'
+import { SubtaskSessions } from './SubtaskSessions'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
@@ -456,30 +457,38 @@ function SubtaskRows({
               `Subtask.startedAt`'s own note. Read-only: no picker, no owner column, mirroring
               `SubtaskTable`'s own inline row exactly. */}
           <td style={{ padding: cellPad, ...tint }}>
-            <span style={{
-              fontSize: 12,
-              color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(t.startedAt, lang)}</span>
+            <span
+              title={t.startedAt ? fmtStamp(t.startedAt, lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(t.startedAt, lang)}</span>
           </td>
           <td style={{ padding: cellPad, ...tint }}>
-            <span style={{
-              fontSize: 12,
-              color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(t.deliveredAt, lang)}</span>
+            <span
+              title={t.deliveredAt ? fmtStamp(t.deliveredAt, lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(t.deliveredAt, lang)}</span>
           </td>
           <td style={{ padding: cellPad, ...tint }}>
             {/* A MEMBER can never hold a session (§F.1, refused server-side) — no filing control,
                 and never a chip list unioned from its group's sessions (superseded §B.4). */}
-            {!isMember && subtaskSessions({
-              subtaskId: t.id,
-              subtaskIds: [t.id],
-              sessions,
-              lang,
-              mobile: isMobile,
-              onLink: onLinkSession,
-              onUnfile,
-              onOpen: onOpenSession,
-            })}
+            {!isMember && (
+              <SubtaskSessions
+                subtaskId={t.id}
+                subtaskIds={[t.id]}
+                sessions={sessions}
+                lang={lang}
+                mobile={isMobile}
+                onLink={onLinkSession}
+                onUnfile={onUnfile}
+                onOpen={onOpenSession}
+              />
+            )}
           </td>
           {filler > 0 && <td colSpan={filler} style={tint} />}
         </tr>
@@ -583,8 +592,12 @@ export function TaskTable(p: TaskTableProps) {
   // SELECT MODE (selection.ts): the checkboxes are behind it, it starts off, and leaving it clears
   // the ticks — a batch verb must never act on rows nobody can see are armed.
   const [sel, setSel] = useState<Selection>(NO_SELECTION)
-  /** Each expanded task's subitem grid is ordered on its own — clicking one grid's header must not
-   *  reshuffle another open grid the reader is not looking at. `null` = creation order. */
+  /**
+   * Per-task OVERRIDES only — `null` means "no override, follow the main table's own sort"
+   * (`subtaskSortInherit.ts`'s `effectiveSubtaskSort`/`pickSubtaskSort`), not "creation order"
+   * outright as it used to. Clicking one grid's header must not reshuffle another open grid the
+   * reader is not looking at, so the override is keyed per task and never touches the others.
+   */
   const [subSort, setSubSort] = useState<Record<string, SubtaskSortSpec | null>>({})
   const [adding, setAdding] = useState<TaskStatus | null>(null)
   const [draft, setDraft] = useState('')
@@ -929,14 +942,21 @@ export function TaskTable(p: TaskTableProps) {
                               <tr style={{ background: 'var(--bg-surface)' }}>
                                 <td style={{ padding: '5px 10px' }} />
                                 {subtaskColumns(p.lang ?? 'en').map((h, i) => (
-                                  // Sortable like every other header. The grid orders itself (`subSort`)
-                                  // without touching the list it was given: creation order is what
-                                  // "no sort" means, and clusters survive because the renderer rebuilds
-                                  // them from the sorted list (`subtaskSortView.ts`).
+                                  // Sortable like every other header. The grid orders itself by the
+                                  // EFFECTIVE sort (`subtaskSortInherit.ts`): an explicit click on
+                                  // THIS grid's own header (`subSort`) if there is one, otherwise
+                                  // whatever the main table's own sort translates to — so sorting
+                                  // the board by "Cost" re-sorts every open subtask grid by cost too,
+                                  // until a reader clicks one of these headers directly. Clusters
+                                  // survive either way because the renderer rebuilds them from the
+                                  // sorted list (`subtaskSortView.ts`).
                                   <SortTh
                                     key={h.key} label={h.label} sortKey={h.key}
-                                    current={subSort[row.task.id] ?? null} mobile={isMobile}
-                                    onSort={k => setSubSort(m => ({ ...m, [row.task.id]: cycleSort(m[row.task.id] ?? null, k) }))}
+                                    current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}
+                                    mobile={isMobile}
+                                    onSort={k => setSubSort(m => (
+                                      { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
+                                    ))}
                                     title={L.sortByColumn.replace('{column}', h.label)}
                                     style={{ ...microLabel, fontWeight: 600, textAlign: 'left', padding: '5px 10px', paddingLeft: i === 0 ? 34 : 10 }}
                                   />
@@ -944,11 +964,14 @@ export function TaskTable(p: TaskTableProps) {
                                 {cols.length > 4 && <td colSpan={cols.length - 4} />}
                               </tr>
                               <SubtaskRows
-                                subtasks={orderedSubtasks(subs, subSort[row.task.id] ?? null, {
-                                  views: detail?.subtaskRollups ?? [],
-                                  sessions: detail?.sessions ?? [],
-                                  statusOrder: liveStatusOrder(p.statuses),
-                                })}
+                                subtasks={orderedSubtasks(
+                                  subs, effectiveSubtaskSort(sort, subSort[row.task.id] ?? null),
+                                  {
+                                    views: detail?.subtaskRollups ?? [],
+                                    sessions: detail?.sessions ?? [],
+                                    statusOrder: liveStatusOrder(p.statuses),
+                                  },
+                                )}
                                 subtaskRollups={detail?.subtaskRollups ?? []}
                                 indent={34} cols={cols.length}
                                 sessions={detail?.sessions ?? []}
