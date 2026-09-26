@@ -83,6 +83,11 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       restoreWith: 'claude login',
       why: 'Claude Code OAuth credentials — a live session token.',
     },
+    {
+      pattern: '.claude/agentistics-preferences.json', match: 'prefix', reason: 'secret',
+      restoreWith: 'agentop member connect <url> <token>',
+      why: 'A copy of the agentistics preferences that sits under the Claude directory and holds `team.token`, the member token for a central. The redacted `.agentistics/preferences.json` travels instead (see ALWAYS); this copy is not staged, so it would carry the token verbatim.',
+    },
   ],
   codex: [
     {
@@ -118,6 +123,11 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       pattern: '.copilot/mcp-oauth-config', match: 'prefix', reason: 'secret',
       restoreWith: 're-authorise each MCP server from inside copilot',
       why: 'Per-MCP-server OAuth tokens. The `.copilot/token` rule does not reach `mcp-oauth-config/<x>.tokens.json`.',
+    },
+    {
+      pattern: '.copilot/config.json', match: 'prefix', reason: 'secret',
+      restoreWith: 'copilot  (sign in on first run)',
+      why: 'Holds `copilotTokens` (a credential) alongside ordinary settings. The whole file is excluded: over-excluding costs the user their Copilot settings, which are recoverable, while under-excluding costs them a token, which is not. Neither `.copilot/token` nor `.copilot/mcp-oauth-config` reaches it.',
     },
   ],
   antigravity: [
