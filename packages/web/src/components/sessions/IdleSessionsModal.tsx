@@ -24,7 +24,10 @@ import {
   type GroupSuggestion, type IdleCandidate, type IdleReason,
 } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import { runIdlePlan, type IdleAction, type IdleEffects, type IdleOutcome, type IdlePlanItem } from '../../lib/idleExecution'
+import {
+  idleSummaryText, resolveGroupSuggestion, runIdlePlan,
+  type IdleAction, type IdleEffects, type IdleOutcome, type IdlePlanItem,
+} from '../../lib/idleExecution'
 import { fmtGB } from '../../hooks/useIdleSessions'
 import { lastPromptOf } from '../../lib/idleRows'
 import { createSessionGroup, getSessionGroups, moveSessionToGroup } from '../../lib/sessionUserGroups'
@@ -178,16 +181,25 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     }
   }
 
-  function ensureGroup(g: GroupSuggestion): string | null {
-    if (g.kind === 'existing') {
-      const stillThere = getSessionGroups().groups.some(gr => gr.id === g.groupId)
-      return stillThere ? g.groupId : createSessionGroup(g.name)
-    }
-    return createSessionGroup(g.name)
+  /**
+   * `createdThisRun` is this ONE apply's own dedupe memory (name -> id already created during
+   * this run) — `getSessionGroups().groups` is read fresh on every call but only reflects a
+   * creation once it has landed in the store, and a group created a moment ago by an earlier item
+   * of this very run may not have round-tripped yet. Without it, two items whose suggestion is the
+   * same not-yet-existing name (two "Idle · <date>" rows, or two sessions of the same task) each
+   * minted their own group. See `resolveGroupSuggestion`'s own header for the full decision.
+   */
+  function ensureGroup(g: GroupSuggestion, createdThisRun: Map<string, string>): string | null {
+    const resolution = resolveGroupSuggestion(g, getSessionGroups().groups, createdThisRun)
+    if (resolution.action === 'reuse') return resolution.groupId
+    const id = createSessionGroup(resolution.name)
+    if (id) createdThisRun.set(resolution.name, id)
+    return id
   }
 
   async function onApply(): Promise<void> {
     setBusy(true)
+    const createdThisRun = new Map<string, string>()
     const items: IdlePlanItem[] = frozen.map(c => {
       const row = rows.find(r => r.id === c.row.id)
       const plan = plans.get(c.key)
@@ -200,7 +212,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     const freshRows = await fetchFreshFleet()
     const fx: IdleEffects = {
       stillIdle: makeStillIdle(freshRows),
-      ensureGroup,
+      ensureGroup: g => ensureGroup(g, createdThisRun),
       fileInto: (groupId, key) => { moveSessionToGroup(groupId, key) },
       end: async id => {
         const r = await act({ id, action: 'kill' })
@@ -232,11 +244,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     nothingIdle: pt ? 'Nenhuma sessão ociosa agora.' : 'Nothing idle right now.',
   }
 
-  const summary = freed !== null
-    ? (pt
-      ? `${frozen.length} sessão(ões) · libera ~${fmtGB(freed)}`
-      : `${frozen.length} session(s) · frees ~${fmtGB(freed)}`)
-    : (pt ? `${frozen.length} sessão(ões)` : `${frozen.length} session(s)`)
+  const summary = idleSummaryText(frozen.length, freed !== null ? fmtGB(freed) : null, lang)
 
   return (
     <div
@@ -376,7 +384,10 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                     <select
                       value={plan?.action ?? 'file-end'}
                       onChange={e => updatePlan(c.key, { action: e.target.value as IdleAction })}
-                      style={{ ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto', width: isMobile ? '100%' : 190 }}
+                      style={{
+                        ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto',
+                        width: isMobile ? '100%' : 190, minHeight: isMobile ? 44 : undefined,
+                      }}
                     >
                       <option value="file-end">{t.actionFileEnd}</option>
                       <option value="end">{t.actionEnd}</option>
@@ -388,7 +399,10 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                         <select
                           value={plan.groupSel}
                           onChange={e => updatePlan(c.key, { groupSel: e.target.value })}
-                          style={{ ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto', width: isMobile ? '100%' : 190 }}
+                          style={{
+                            ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto',
+                            width: isMobile ? '100%' : 190, minHeight: isMobile ? 44 : undefined,
+                          }}
                         >
                           {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                           <option value={NEW_GROUP}>{t.newGroup}</option>
@@ -401,6 +415,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                             style={{
                               ...inputStyle, padding: '7px 10px 7px 10px',
                               flex: isMobile ? '1 1 100%' : '1 1 160px',
+                              minHeight: isMobile ? 44 : undefined,
                             }}
                           />
                         )}
