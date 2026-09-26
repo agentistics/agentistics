@@ -13,7 +13,7 @@
  */
 
 import { calcCost, totalTokens } from '@agentistics/core'
-import { countUsage } from './usage-dedupe'
+import { resolveUsage, type UsageContribution } from './usage-dedupe'
 import type { AgentInvocation, SessionAgentMetrics } from '@agentistics/core'
 
 /** What one MODEL cost inside a subagent. Per model, because a subagent may run a cheaper one. */
@@ -81,6 +81,13 @@ interface UsageRecord {
   cache_creation_input_tokens?: number
 }
 
+/** One counted id's last-applied contribution, plus the MODEL it was billed under — a repeat
+ *  naming a different model (unusual, but not impossible) must retract from the OLD model's bucket,
+ *  never the new one, or the superseded tokens leak into whichever bucket happens to be read next. */
+interface SubagentUsageContribution extends UsageContribution {
+  model: string
+}
+
 /**
  * Which bucket a tool name falls in.
  *
@@ -95,8 +102,8 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 /** Sum one subagent transcript. Total: malformed input yields an empty summary, never a throw. */
 export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSummary {
   const byModel = new Map<string, SubagentUsage>()
-  /** Message ids whose usage is already counted — see `usage-dedupe.ts`. */
-  const countedUsageIds = new Set<string>()
+  /** Every counted message id's last-applied contribution — see `usage-dedupe.ts`'s `resolveUsage`. */
+  const countedUsage = new Map<string, SubagentUsageContribution>()
   let firstMs: number | null = null
   let lastMs: number | null = null
   let toolUseCount = 0
@@ -161,25 +168,56 @@ export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSu
 
     const usage = msg?.usage as UsageRecord | undefined
     if (!usage) continue
-    // ONE BILLED RESPONSE, COUNTED ONCE — the same rule the parent transcript needs, for the same
-    // reason: an assistant turn with several content blocks is several lines carrying the identical
-    // `message.usage`. Measured on three real subagent transcripts: 31 lines over 17 ids, 64 over
-    // 36, 55 over 31 — 77-83 % over. See `usage-dedupe.ts`.
-    if (!countUsage((msg as Record<string, unknown> | undefined)?.id, countedUsageIds)) continue
-
     const model = typeof msg?.model === 'string' ? msg.model : ''
-    let entry = byModel.get(model)
-    if (!entry) {
-      entry = { model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-      byModel.set(model, entry)
+
+    const bucketOf = (m: string): SubagentUsage => {
+      let entry = byModel.get(m)
+      if (!entry) {
+        entry = { model: m, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+        byModel.set(m, entry)
+      }
+      return entry
     }
+
+    // ONE BILLED RESPONSE, COUNTED ONCE, and the LAST record for an id wins — the same rule the
+    // parent transcript needs, for the same reason: an assistant turn with several content blocks is
+    // several lines carrying the SAME `message.usage`. Measured on three real subagent transcripts:
+    // 31 lines over 17 ids, 64 over 36, 55 over 31 — 77-83 % over BEFORE dedup existed at all, and
+    // measured again after it shipped first-wins: the first line for an id can carry a PARTIAL usage
+    // (`output_tokens: 5`) with the FINAL, complete one arriving later on the same id — first-wins
+    // kept the 5. A repeat therefore RETRACTS its predecessor's contribution from the OLD model's
+    // bucket before this record's own numbers are added to the (possibly different) current one. See
+    // `usage-dedupe.ts`.
+    const next: SubagentUsageContribution = {
+      input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      model,
+    }
+    const decision = resolveUsage((msg as Record<string, unknown> | undefined)?.id, countedUsage, next)
+    if (decision.replace) {
+      const prev = decision.previous
+      const old = bucketOf(prev.model)
+      old.inputTokens -= num(prev.input_tokens)
+      old.outputTokens -= num(prev.output_tokens)
+      old.cacheReadTokens -= num(prev.cache_read_input_tokens)
+      old.cacheWriteTokens -= num(prev.cache_creation_input_tokens)
+    }
+
+    const entry = bucketOf(model)
     entry.inputTokens += num(usage.input_tokens)
     entry.outputTokens += num(usage.output_tokens)
     entry.cacheReadTokens += num(usage.cache_read_input_tokens)
     entry.cacheWriteTokens += num(usage.cache_creation_input_tokens)
   }
 
-  return { usage: [...byModel.values()], firstMs, lastMs, toolUseCount, toolStats, childAgentIds }
+  // A model bucket that a retraction emptied back to all-zero was never actually used — its only
+  // line was superseded by a later record naming a DIFFERENT model — so it is dropped rather than
+  // reported as a zero-token entry for a model this invocation never really ran.
+  const usage = [...byModel.values()].filter(u =>
+    u.inputTokens !== 0 || u.outputTokens !== 0 || u.cacheReadTokens !== 0 || u.cacheWriteTokens !== 0)
+
+  return { usage, firstMs, lastMs, toolUseCount, toolStats, childAgentIds }
 }
 
 /**

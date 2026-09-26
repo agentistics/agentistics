@@ -983,6 +983,19 @@ reading the code, which looked right in all three places. Each is now a named ru
   It survived because it under-reported money — the reassuring direction — and because the token
   over-count above pushed the other way, so the product of two defects looked plausible.
 
+**2026-09-26 — four more, proven by the P1 parity differential**
+(`docs/superpowers/research/2026-09-25-p1-parity-differential.md`: legacy `SessionMeta` against an
+independent replay of the same bytes, compared with `===`). Owner decision: fix all four. After them
+the differential reads EQUAL on every row of these classes (476 sessions, 0 explained, 0 bug).
+
+- **`countUsage` was FIRST-wins, against its own doc.** A repeat was skipped rather than replacing
+  its predecessor, and a subagent's first line for an id can carry a PARTIAL usage (output 5, then
+  276). 460 invocation rows / 41 sessions. `resolveUsage` now reports a repeat with its predecessor,
+  and the resumable fold RETRACTS that contribution from every sink (the four counters, the TTL
+  split, the day bucket) before adding the new one. A response stays on the day of its FIRST
+  record: it is stamped with the first record's time and the last record's usage, as the replay
+  does, so a response straddling UTC midnight does not move days.
+
 **The store must be REBUILT for a correction to reach a screen**: `~/.agentistics/sessions/**` holds
 the computed `SessionMeta`, so a parser fix changes nothing until the next `buildApiResponse` writes
 it back.
