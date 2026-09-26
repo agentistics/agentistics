@@ -345,6 +345,36 @@ The Nay chat detects the `pdf:` protocol and renders it as an orange download bu
 
 ---
 
+### Session groups — `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit`
+
+The Sessions sidebar lets a person keep their fleet in named groups ("Saved to later", "Pelvie"…).
+These three tools let an assistant do the same, so the sessions it starts are filed where the person
+will look for them. They work on a **machine**; a central has no local sessions and refuses them.
+
+The flow an assistant follows:
+
+1. `agentistics_session_groups` — what groups exist, and which sessions are in each. Reuse a group when
+   one fits rather than making a near-duplicate.
+2. Start the session (for example `agentop session start …`, which prints its id).
+3. `agentistics_session_group_create` with `name` and `sessions: [<id>]`, or, for an existing group,
+   `agentistics_session_group_edit` with `action: "add"`, `group`, `session`.
+
+A **session reference** is a managed id (`agentop-…`), a conversation id, an exact title, or a unique
+id prefix. A **group reference** is an id or an exact name (case-insensitive). Anything that matches
+nothing answers `404`, anything that could mean two things answers `409` with the candidates — a
+reference is never guessed, and a call that names a bad session in a batch changes nothing.
+
+Filing a session **moves** it out of any other group (a session belongs to at most one) and **unpins**
+it if it was pinned, exactly as dropping it on a group in the sidebar does. Deleting a group never
+deletes its sessions; they only leave it.
+
+The tools are thin over `GET|POST /api/session-groups`, `POST /api/session-groups/:group`,
+`POST /api/session-groups/:group/sessions`, `POST /api/session-groups/ungroup` and
+`DELETE /api/session-groups/:group`. The rules live in `@agentistics/core` (`sessionGroups.ts`) and
+are the same ones the web sidebar applies; the writes go through the preferences write chain, so a
+browser and an assistant changing groups at the same moment cannot undo each other. The browser picks
+up the change when its tab regains focus.
+
 ## Using the MCP from Claude Code
 
 Once registered, you can invoke agentistics tools directly from any Claude Code session:

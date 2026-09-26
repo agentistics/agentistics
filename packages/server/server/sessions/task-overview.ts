@@ -60,6 +60,10 @@ export interface BoardOverview {
 
   /** Sum over every task that could be priced at all. */
   totalCostUSD: number | null
+  /** `totalCostUSD` (and so `avgCostPerTask`) split by harness; `null` when it is. */
+  costByHarness: Record<string, number> | null
+  /** `avgCostPerDelivered`'s sessions split by harness; `null` when nothing delivered carries a cost. */
+  deliveredCostByHarness: Record<string, number> | null
   /** Mean over the tasks that HAVE a cost. Null when none does. */
   avgCostPerTask: number | null
   /** Mean over DELIVERED tasks that have a cost — the figure people actually want. */
@@ -112,6 +116,10 @@ function bumpDay(m: Map<string, DayCounts>, day: string, field: keyof DayCounts)
   m.set(day, cur)
 }
 
+function addInto(into: Record<string, number>, from: Readonly<Record<string, number>>): void {
+  for (const [k, v] of Object.entries(from)) into[k] = (into[k] ?? 0) + v
+}
+
 export function buildBoardOverview(o: {
   tasks: readonly Task[]
   rows: readonly ManagedSession[]
@@ -137,6 +145,10 @@ export function buildBoardOverview(o: {
 
   const costs: number[] = []
   const deliveredCosts: number[] = []
+  // The same totals split by harness, so the browser can price each slice at ITS OWN plan factor —
+  // see `AttemptRollup.costByHarness`.
+  const costByHarness: Record<string, number> = {}
+  const deliveredCostByHarness: Record<string, number> = {}
   const roundsPer: number[] = []
   const sessionsPer: number[] = []
   const deliveryMs: number[] = []
@@ -167,6 +179,7 @@ export function buildBoardOverview(o: {
     sessionsPer.push(mine.length)
 
     let taskCost: number | null = null
+    const taskByHarness: Record<string, number> = {}
     let taskRounds: number | null = null
 
     for (const r of mine) {
@@ -176,7 +189,10 @@ export function buildBoardOverview(o: {
       const sessionDay = dayOf(meta.start_time)
       if (sessionDay) bumpDay(days, sessionDay, 'sessionsStarted')
 
-      taskCost = (taskCost ?? 0) + o.costOf(meta)
+      const cost = o.costOf(meta)
+      taskCost = (taskCost ?? 0) + cost
+      const h = meta.harness ?? 'claude'
+      taskByHarness[h] = (taskByHarness[h] ?? 0) + cost
       if (typeof meta.user_message_count === 'number') {
         taskRounds = (taskRounds ?? 0) + meta.user_message_count
       }
@@ -206,7 +222,11 @@ export function buildBoardOverview(o: {
       if (task.status === 'done') deliveredWithoutCost += 1
     } else {
       costs.push(taskCost)
-      if (task.status === 'done') deliveredCosts.push(taskCost)
+      addInto(costByHarness, taskByHarness)
+      if (task.status === 'done') {
+        deliveredCosts.push(taskCost)
+        addInto(deliveredCostByHarness, taskByHarness)
+      }
     }
     if (taskRounds !== null) roundsPer.push(taskRounds)
 
@@ -231,6 +251,8 @@ export function buildBoardOverview(o: {
     delivered: statusCounts.done ?? 0,
     abandoned: statusCounts.abandoned ?? 0,
     totalCostUSD: costs.length === 0 ? null : costs.reduce((a, b) => a + b, 0),
+    costByHarness: costs.length === 0 ? null : costByHarness,
+    deliveredCostByHarness: deliveredCosts.length === 0 ? null : deliveredCostByHarness,
     avgCostPerTask: mean(costs),
     avgCostPerDelivered: mean(deliveredCosts),
     tasksWithoutCost,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
   type SessionUserGroupsValue,
-  groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planRemoveFromGroup,
-  planReorderInGroup, planRenameGroup, resolveGroupRows,
+  groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planMoveToGroup, planRemoveFromGroup,
+  planReorderGroups, planReorderInGroup, planRenameGroup, planStepGroup, resolveGroupRows,
 } from './sessionUserGroups'
 
 const empty: SessionUserGroupsValue = { groups: [] }
@@ -126,6 +126,93 @@ describe('planReorderInGroup', () => {
     }
     const next = planReorderInGroup(two, 'g1', 'a', 'b')
     expect(next.groups.find(g => g.id === 'g2')!.sessionKeys).toEqual(['c', 'd'])
+  })
+})
+
+describe('planReorderGroups', () => {
+  const three: SessionUserGroupsValue = {
+    groups: [
+      { id: 'g1', name: 'One', sessionKeys: ['a'] },
+      { id: 'g2', name: 'Two', sessionKeys: ['b'] },
+      { id: 'g3', name: 'Three', sessionKeys: ['c'] },
+    ],
+  }
+
+  it('drags a group by id onto another, by id — never by index', () => {
+    const next = planReorderGroups(three, 'g3', 'g1')
+    expect(next.groups.map(g => g.id)).toEqual(['g3', 'g1', 'g2'])
+  })
+
+  it('never touches a group\'s own sessionKeys', () => {
+    const next = planReorderGroups(three, 'g3', 'g1')
+    expect(next.groups.find(g => g.id === 'g3')!.sessionKeys).toEqual(['c'])
+  })
+
+  it('dropping onto itself is a no-op', () => {
+    expect(planReorderGroups(three, 'g2', 'g2').groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('an unknown dropId is refused unchanged', () => {
+    expect(planReorderGroups(three, 'g1', 'ghost').groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('an unknown dragId is refused unchanged', () => {
+    expect(planReorderGroups(three, 'ghost', 'g1').groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+})
+
+describe('planStepGroup', () => {
+  const three: SessionUserGroupsValue = {
+    groups: [
+      { id: 'g1', name: 'One', sessionKeys: [] },
+      { id: 'g2', name: 'Two', sessionKeys: [] },
+      { id: 'g3', name: 'Three', sessionKeys: [] },
+    ],
+  }
+
+  it('moves a group one place later', () => {
+    expect(planStepGroup(three, 'g1', 1).groups.map(g => g.id)).toEqual(['g2', 'g1', 'g3'])
+  })
+
+  it('moves a group one place earlier', () => {
+    expect(planStepGroup(three, 'g3', -1).groups.map(g => g.id)).toEqual(['g1', 'g3', 'g2'])
+  })
+
+  it('stepping the first group up (past the start) is a no-op', () => {
+    expect(planStepGroup(three, 'g1', -1).groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('stepping the last group down (past the end) is a no-op', () => {
+    expect(planStepGroup(three, 'g3', 1).groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+})
+
+describe('planMoveToGroup', () => {
+  it('a PINNED session dropped into a group is added to it AND unpinned', () => {
+    const { pins, groups } = planMoveToGroup(['a', 'z'], withOne, 'a', 'g1')
+    expect(pins).toEqual(['z'])
+    expect(groups.groups[0]!.sessionKeys).toEqual(['a', 'b'])
+  })
+
+  it('a NON-pinned session dropped into a group is added to it, pins untouched', () => {
+    const { pins, groups } = planMoveToGroup(['z'], withOne, 'c', 'g1')
+    expect(pins).toEqual(['z'])
+    expect(groups.groups[0]!.sessionKeys).toEqual(['a', 'b', 'c'])
+  })
+
+  it('moving a session already in another group leaves pins unchanged and the membership exclusive', () => {
+    const two: SessionUserGroupsValue = {
+      groups: [...withOne.groups, { id: 'g2', name: 'Other', sessionKeys: ['c'] }],
+    }
+    const { pins, groups } = planMoveToGroup([], two, 'c', 'g1')
+    expect(pins).toEqual([])
+    expect(groups.groups.find(g => g.id === 'g1')!.sessionKeys).toEqual(['a', 'b', 'c'])
+    expect(groups.groups.find(g => g.id === 'g2')!.sessionKeys).toEqual([])
+  })
+
+  it('a key not pinned at all is a no-op on the pinned list, order preserved', () => {
+    const { pins } = planMoveToGroup(['x', 'y'], withOne, 'c', 'g1')
+    expect(pins).toEqual(['x', 'y'])
   })
 })
 

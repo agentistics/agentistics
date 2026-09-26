@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { AlertCircle, LogIn, ShieldCheck } from 'lucide-react'
+import { AlertCircle, ShieldCheck } from 'lucide-react'
+import { brandAsset, isCentralShell } from '../lib/brand'
 import { Revealable, REVEAL_PAD } from './PasswordReveal'
 import { RecoverPassword } from './RecoverPassword'
 
@@ -44,8 +45,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: 16 }}>
       <form onSubmit={submit} style={{ width: '100%', maxWidth: 360, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 28, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <span style={{ display: 'inline-flex', padding: 9, borderRadius: 10, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}><LogIn size={18} /></span>
-          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>agentistics</span>
+          {/* The product's own mark — teal on a central — instead of a generic sign-in glyph. */}
+          <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true" style={{ width: 36, height: 36, objectFit: 'contain', display: 'block' }} />
+          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>{isCentralShell() ? 'agentistics central' : 'agentistics'}</span>
         </div>
         <Field label="Email" type="email" value={email} onChange={setEmail} inputRef={ref} disabled={submitting} />
         <Field label="Password" type="password" value={password} onChange={setPassword} disabled={submitting} />

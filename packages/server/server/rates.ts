@@ -2,6 +2,7 @@ import { MODEL_PRICING } from '@agentistics/core'
 import type { PriceEntry, RatesCache } from '@agentistics/core'
 import { fetchCommunityPricing, mergePricingLayers, type PriceOrigin } from './pricing-community'
 import { fetchOpenAiPricing, fetchGooglePricing } from './pricing-official'
+import { vetOfficialPricing } from './pricing-consensus'
 
 // Use MODEL_PRICING from src/lib/types.ts as the canonical fallback
 const FALLBACK_PRICING: Record<string, PriceEntry> = MODEL_PRICING
@@ -11,8 +12,10 @@ const PRICING_PAGE_MODEL_MAP: Record<string, string> = {
   // Newer rows first — the map is what lets the live scrape reach a model at all. Missing entries
   // are silent: `opus 4.8` and `opus 5` were absent, so the scrape never returned them and both
   // fell through to the shared fallback (Sonnet's $3/$15) instead of Opus's $5/$25.
+  'fable 5.1':  'claude-fable-5-1',
   'fable 5':    'claude-fable-5',
   'mythos 5':   'claude-mythos-5',
+  'opus 5.5':   'claude-opus-5-5',
   'opus 5':     'claude-opus-5',
   'opus 4.8':   'claude-opus-4-8',
   'opus 4.7':   'claude-opus-4-7',
@@ -29,56 +32,79 @@ const PRICING_PAGE_MODEL_MAP: Record<string, string> = {
   'haiku 3':    'claude-3-haiku-20240307',
 }
 
+/** Verified by hand against platform.claude.com on 2026-09-25 (and equal to MODEL_PRICING). A
+ *  parse must reproduce ALL FOUR of these or the whole page is refused — the same anchoring
+ *  `pricing-official.ts` applies to OpenAI and Google. Without it the page reordered its columns
+ *  (Output moved from last to second) and the positional reader priced every cache READ at the 1h
+ *  cache-WRITE rate, 20x too high: cache reads are ~96 % of the volume, so every cost surface
+ *  jumped ~16x overnight while looking perfectly well-formed. */
+const ANTHROPIC_ANCHOR = { model: 'claude-sonnet-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
+
+type PriceColumn = 'input' | 'output' | 'cacheWrite' | 'cacheRead'
+
+/** Which price each header cell names. `1h` writes are deliberately unmapped: the table prices the
+ *  5-minute TTL, and `calcCost` splits the 1h share itself from the transcript's own counters. */
+function columnOf(label: string): PriceColumn | null {
+  const l = label.toLowerCase()
+  if (/\b1h\b|1 ?hour/.test(l)) return null
+  if (/\b5m\b|5 ?min/.test(l)) return 'cacheWrite'
+  if (/hit|cache read/.test(l)) return 'cacheRead'
+  if (/output|saída|saida/.test(l)) return 'output'
+  if (/input|entrada/.test(l)) return 'input'
+  return null
+}
+
+const cellText = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim()
+
+/** A page key names a model only when it is not the prefix of a longer version: "opus 5" must not
+ *  claim the "Opus 5.5" row, which is a different model at a different price. */
+const namesModel = (cell: string, key: string) => {
+  const at = cell.indexOf(key)
+  return at >= 0 && !/^[.\d]/.test(cell.slice(at + key.length))
+}
+
 export function parseAnthropicPricing(html: string): Record<string, PriceEntry> | null {
   const pricing: Record<string, PriceEntry> = {}
+  // Longer keys first so "opus 4.6" matches before "opus 4"
+  const keys = Object.keys(PRICING_PAGE_MODEL_MAP).sort((a, b) => b.length - a.length)
 
-  // The pricing table has rows like:
-  // <tr><td>Claude Opus 4.6</td><td>$5 / MTok</td><td>$6.25 / MTok</td><td>$10 / MTok</td><td>$0.50 / MTok</td><td>$25 / MTok</td></tr>
-  // Columns: Model | Base Input | 5m Cache Write | 1h Cache Write | Cache Read | Output
-  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
-  let rowMatch: RegExpExecArray | null
-
-  while ((rowMatch = rowRe.exec(html)) !== null) {
-    const row = rowMatch[1]!
-    const cells: string[] = []
-    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi
-    let cellMatch: RegExpExecArray | null
-    while ((cellMatch = cellRe.exec(row)) !== null) {
-      cells.push(cellMatch[1]!.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
-    }
-    if (cells.length < 5) continue
-
-    const nameCell = cells[0]!.toLowerCase()
-    if (!nameCell.includes('claude')) continue
-
-    let modelId: string | null = null
-    // Longer keys first so "opus 4.6" matches before "opus 4"
-    const keys = Object.keys(PRICING_PAGE_MODEL_MAP).sort((a, b) => b.length - a.length)
-    for (const key of keys) {
-      if (nameCell.includes(key)) {
-        modelId = PRICING_PAGE_MODEL_MAP[key] ?? null
-        break
+  // Columns are read by their HEADER, never by position — the page has already reordered them once.
+  for (const table of html.match(/<table[\s\S]*?<\/table>/gi) ?? []) {
+    let columns: Map<PriceColumn, number> | null = null
+    for (const rowMatch of table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const row = rowMatch[1]!
+      const headers = [...row.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map(m => cellText(m[1]!))
+      if (headers.length > 0) {
+        const found = new Map<PriceColumn, number>()
+        headers.forEach((h, i) => { const c = columnOf(h); if (c && !found.has(c)) found.set(c, i) })
+        // The last header row that names all four is the one the data rows line up with.
+        if (found.size === 4) columns = found
+        continue
       }
-    }
-    if (!modelId) continue
+      if (!columns) continue
+      const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m => cellText(m[1]!))
+      const nameCell = (cells[0] ?? '').toLowerCase()
+      if (!nameCell.includes('claude')) continue
+      const key = keys.find(k => namesModel(nameCell, k))
+      const modelId = key ? PRICING_PAGE_MODEL_MAP[key] : undefined
+      if (!modelId) continue
 
-    const price = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ''))
-    const input      = price(cells[1]!) // Base Input
-    const cacheWrite = price(cells[2]!) // 5m Cache Write
-    // cells[3] = 1h Cache Write (skip)
-    const cacheRead  = price(cells[4]!) // Cache Read
-    const output     = price(cells[5] ?? '') // Output (may be cells[4] if table only has 5 cols)
-
-    if (!isNaN(input) && input > 0) {
-      pricing[modelId] = {
-        input,
-        output:     isNaN(output)     ? input * 5  : output,
-        cacheRead:  isNaN(cacheRead)  ? input * 0.1  : cacheRead,
-        cacheWrite: isNaN(cacheWrite) ? input * 1.25 : cacheWrite,
+      const amount = (c: PriceColumn) => {
+        const m = /\$\s?([\d,]+(?:\.\d+)?)/.exec(cells[columns!.get(c)!] ?? '')
+        return m ? Number(m[1]!.replace(/,/g, '')) : NaN
       }
+      const entry = { input: amount('input'), output: amount('output'), cacheRead: amount('cacheRead'), cacheWrite: amount('cacheWrite') }
+      if (Object.values(entry).some(v => !(v > 0))) continue
+      pricing[modelId] = entry
     }
   }
 
+  const a = pricing[ANTHROPIC_ANCHOR.model]
+  const close = (x: number, y: number) => Math.abs(x - y) < 0.001
+  if (!a || !close(a.input, ANTHROPIC_ANCHOR.input) || !close(a.output, ANTHROPIC_ANCHOR.output)
+    || !close(a.cacheRead, ANTHROPIC_ANCHOR.cacheRead) || !close(a.cacheWrite, ANTHROPIC_ANCHOR.cacheWrite)) {
+    return null
+  }
   return Object.keys(pricing).length >= 3 ? pricing : null
 }
 
@@ -154,9 +180,21 @@ export async function getRates(): Promise<RatesCache> {
 
   // Each vendor page is independent: one failing its anchor drops only that vendor to the
   // community figures, never the others.
-  const official = (anthropic.source === 'live' || openai || google)
+  const scraped = (anthropic.source === 'live' || openai || google)
     ? { ...(anthropic.source === 'live' ? anthropic.pricing : {}), ...(openai ?? {}), ...(google ?? {}) }
     : null
+
+  // A scraped row must AGREE with the layers below it before it wins (pricing-consensus.ts). The
+  // prior is built-in + community, so a scrape bug falls back to a price that was already right.
+  let official: Record<string, PriceEntry> | null = null
+  if (scraped) {
+    const { accepted, rejected } = vetOfficialPricing(scraped, { ...FALLBACK_PRICING, ...(community ?? {}) })
+    if (rejected.length > 0) {
+      console.warn(`[rates] refused ${rejected.length} official price row(s) that disagree with the other sources: `
+        + rejected.map(r => r.reason === 'drift' ? `${r.id} (${r.field})` : `${r.id} (invalid row)`).join(', '))
+    }
+    official = Object.keys(accepted).length > 0 ? accepted : null
+  }
 
   // Trust order, lowest first. The built-in table is the floor and is always present, so a source
   // that fails or returns junk costs us freshness, never the ability to price anything.

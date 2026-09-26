@@ -13,6 +13,8 @@
  * arrangement is worse than one that opens on the defaults.
  */
 
+import { DEFAULT_ORDER, SESSION_SORTS, type SessionOrder } from '@agentistics/tui/control/session-order'
+
 const KEY = 'agentistics-sessions-aside-v1'
 
 /** The sub-grouping inside each Active/Inactive band. */
@@ -42,10 +44,27 @@ export interface AsideGroupPrefs {
    *  Membership itself lives on the SERVER (`sessionUserGroups.ts`); only "is it folded right now
    *  on THIS screen" lives here. */
   collapsedUserGroups: string[]
+  /** What the sessions INSIDE each group are ordered by (the cockpit's own `SessionOrder`, so the two
+   *  surfaces answer "sort by recent" the same way). The default is the one that puts what is
+   *  blocked on you first — the reason the list exists. Per-viewer, like the rest of the arrangement. */
+  sort: SessionOrder
+  /** User groups whose NAME is hidden (a grey block instead of text). Per-viewer: it is about what is
+   *  on THIS screen — a shared one, a recording — not a fact about the work. */
+  hiddenUserGroups: string[]
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
+  sort: DEFAULT_ORDER, hiddenUserGroups: [],
+}
+
+/** Total: anything that is not a known key and direction reads as the default. */
+export function readSessionSort(v: unknown): SessionOrder {
+  if (!v || typeof v !== 'object') return DEFAULT_ORDER
+  const o = v as Record<string, unknown>
+  const by = (SESSION_SORTS as readonly string[]).includes(o.by as string) ? (o.by as SessionOrder['by']) : DEFAULT_ORDER.by
+  const dir = o.dir === 'asc' || o.dir === 'desc' ? o.dir : DEFAULT_ORDER.dir
+  return { by, dir }
 }
 
 /** The stable key one group's collapsed state is stored under. */
@@ -83,6 +102,10 @@ export function readAsideGroupPrefs(): AsideGroupPrefs {
       cardColor: isCardColor(p.cardColor) ? p.cardColor : DEFAULT_ASIDE_GROUP_PREFS.cardColor,
       collapsedUserGroups: Array.isArray(p.collapsedUserGroups)
         ? p.collapsedUserGroups.filter((x): x is string => typeof x === 'string')
+        : [],
+      sort: readSessionSort(p.sort),
+      hiddenUserGroups: Array.isArray(p.hiddenUserGroups)
+        ? p.hiddenUserGroups.filter((x): x is string => typeof x === 'string')
         : [],
     }
   } catch { return DEFAULT_ASIDE_GROUP_PREFS }

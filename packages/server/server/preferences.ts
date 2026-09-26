@@ -119,12 +119,14 @@ export interface Preferences {
    * the rules (create/rename/delete, exclusive membership, survives any session state). SERVER-SIDE
    * for the same reason `pinnedSessions` is: a group is a fact about the WORK, not the screen it
    * was made on, so it must read the same on a phone and the desktop. This server never reads or
-   * writes it — it is opaque, merged like every other preference key by `writePreferencesTo`'s
-   * shallow merge.
+   * writes it directly — the web writes it through `/api/preferences` (a shallow merge like every
+   * other key) and the MCP tools through `/api/session-groups`, which goes via `updatePreferences`.
    */
   sessionGroups?: {
     groups: { id: string; name: string; sessionKeys: string[] }[]
   }
+  /** Idle-session suggestions — see `web/src/lib/idleSessionsPrefs.ts`. Written only by the web. */
+  idleSessions?: { enabled?: boolean; thresholdMin?: number; pressureThresholdMin?: number; kept?: Record<string, number> }
   /** Health warnings this person waved away. Shared for the same reason: the warnings are about
    *  THIS machine, which is the same machine from every device. */
   dismissedHealth?: string[]
@@ -892,6 +894,38 @@ export async function updateTeamConfigAt(primary: string, legacy: string | null,
 
 export async function updateTeamConfig(mutate: TeamConfigMutator): Promise<TeamConfig> {
   return updateTeamConfigAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE, mutate)
+}
+
+/**
+ * Atomically read-modify-write the preferences OUTSIDE the team config, running `mutate` inside the
+ * single write chain — for state two writers can both change (the browser and an MCP tool filing
+ * a session under a group). A plain `readPreferences()` then `writePreferences()` reads outside the
+ * chain and writes a value computed from a stale read.
+ *
+ * `mutate` receives the current preferences and returns the keys to change (a shallow patch, like
+ * `writePreferences`) or `undefined` for "nothing to do" — no write happens then. `team` is never
+ * touched through this door; use `updateTeamConfig`.
+ */
+export type PreferencesMutator = (current: Preferences) => Partial<Omit<Preferences, 'team'>> | undefined
+
+export async function updatePreferencesAt(primary: string, legacy: string | null, mutate: PreferencesMutator): Promise<Preferences> {
+  return enqueueWrite(async () => {
+    const release = await acquireFileLock(primary)
+    try {
+      const { prefs: current } = await readEffective(primary, legacy)
+      const patch = mutate(current)
+      if (patch === undefined) return current
+      const merged = { ...current, ...patch }
+      await writeFileAtomic(primary, JSON.stringify(merged, null, 2))
+      return merged
+    } finally {
+      await release()
+    }
+  })
+}
+
+export async function updatePreferences(mutate: PreferencesMutator): Promise<Preferences> {
+  return updatePreferencesAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE, mutate)
 }
 
 /**

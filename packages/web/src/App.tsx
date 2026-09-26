@@ -78,6 +78,7 @@ import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
 import { SessionsAside } from './components/nav/SessionsAside'
 import { SessionsRail } from './components/nav/SessionsRail'
+import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs } from './lib/sharedPref'
 import {
@@ -115,6 +116,7 @@ import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionStatsMenu } from './components/sessions/SessionStatsMenu'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { brandAsset } from './lib/brand'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -226,23 +228,13 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
           from{opacity:0;transform:translateY(10px)}
           to{opacity:1;transform:translateY(0)}
         }
-        @keyframes loadIconGlow {
-          0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,0),0 0 10px 2px rgba(217,119,6,0.2)}
-          50%{box-shadow:0 0 0 6px rgba(217,119,6,0),0 0 20px 5px rgba(217,119,6,0.35)}
-        }
       `}</style>
 
       {/* Icon */}
       <div style={{ animation: 'loadFadeUp 0.35s ease-out both' }}>
-        <div style={{
-          width: 48, height: 48,
-          background: 'var(--anthropic-orange-dim)',
-          borderRadius: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          animation: 'loadIconGlow 2.2s ease-in-out infinite',
-        }}>
-          <BarChart2 size={22} color="var(--anthropic-orange)" />
-        </div>
+        {/* The product's own mark (teal on a central), not a generic chart icon. */}
+        <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true"
+          style={{ width: 48, height: 48, objectFit: 'contain', display: 'block' }} />
       </div>
 
       {/* Title + subtitle */}
@@ -1021,12 +1013,14 @@ function MobileBottomNav({
 }
 
 /**
- * The fixed strip holding the mark, search and the sidebar toggle. The aside starts beneath it, so
- * those three controls never move when the sidebar changes width, changes body, or is collapsed.
+ * The fixed strip along the top of the page, to the right of the aside. The aside runs the full
+ * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
  */
 const TOPBAR_H = 44
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
+/** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
+const FILTROS_ASIDE_GAP = 12
 
 const FILTROS_PANEL_ID = 'sessions-filtros-panel'
 
@@ -1167,10 +1161,10 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
   }
   return (
     <aside style={{
-      position: 'fixed', top: 'var(--ag-topbar-h)', left: 0, bottom: 0,
+      position: 'fixed', top: 0, left: 0, bottom: 0,
       width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
       background: 'var(--bg-surface)', borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column', padding: collapsed ? '12px 8px' : '14px 12px', boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column', padding: collapsed ? '0 8px 12px' : '0 12px 14px', boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
       // it. Visible overflow, because that handle straddles the border by design and clipping it
       // would leave half the hit area.
@@ -1179,6 +1173,8 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
       // a transition on it makes the edge lag behind the cursor and then catch up.
       transition: dragging ? 'none' : 'width 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
+      {/* The aside is the full height of the window, so it carries its own mark and fold control. */}
+      <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
       {/* The workspace switch, PINNED above the scrolling body. */}
       <div style={{ padding: '0 2px 10px' }}>
         <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
@@ -1192,7 +1188,7 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
           the one thing this workspace certainly is not. */}
       {mode === 'sessions' ? (
         collapsed ? (
-          <SessionsRail rows={railRows} {...(sessionId ? { selectedId: sessionId } : {})} />
+          <SessionsRail rows={railRows} lang={pt ? 'pt' : 'en'} {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})} />
         ) : (
         <>
         {/* On a central the workspace is ABOUT a machine, so the choice sits above the list it
@@ -1560,7 +1556,20 @@ export default function AppLayout() {
       body: JSON.stringify({ theme: t }),
     }).catch(() => { /* the local copy still holds for this browser */ })
   }, [])
-  const setCurrency = useCallback((c: 'USD' | 'BRL') => setCurrencyState(c), [])
+  /**
+   * Set the currency AND remember it — the same defect `setTheme` above had. It only set state, so
+   * Home's USD/BRL button (and the language switch, which flips currency with it) held for as long
+   * as the tab lived: a reload, a PWA reopen or opening `/tasks` directly came back in whatever
+   * `preferences.json` said, and the board read as "the currency does not switch". Reported.
+   */
+  const setCurrency = useCallback((c: 'USD' | 'BRL') => {
+    setCurrencyState(c)
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currency: c }),
+    }).catch(() => { /* this tab still holds it */ })
+  }, [])
 
   // How this machine is actually billed. Local only — it never travels to a central.
   const [billing, setBilling] = useState<BillingSettings>({ profiles: {} })
@@ -2078,7 +2087,12 @@ export default function AppLayout() {
   // `sessionsFiltersPanel.ts`.
   const filtrosBounds = filtrosPanelBoundsRight(
     { left: 0, right: (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + PAGE_INSET },
-    rightAsideEdge === null ? null : { left: rightAsideEdge, right: viewportW },
+    // A small gap, not flush: the tabs read as part of the aside they touched, and the "Filtros"
+    // pill sat on its edge. The clamp takes the gap out of the WIDTH as well, so the panel never
+    // grows into the space the gap opened, and the metrics tab (derived from these bounds) moves
+    // with it. With the aside closed there is no edge to keep off: `VIEWPORT_EDGE_MARGIN` is
+    // already the breathing room from the window.
+    rightAsideEdge === null ? null : { left: rightAsideEdge - FILTROS_ASIDE_GAP, right: viewportW },
     viewportW,
   )
   /**
@@ -3404,6 +3418,12 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
+        <NotificationBell lang={lang} buttonStyle={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32, borderRadius: 8,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
+        }} />
       </div>
 
       {/* THE `Conversa | Terminal` TOGGLE IS GONE FROM THE HEADER, and its absence is the design.
@@ -4059,11 +4079,8 @@ export default function AppLayout() {
       {/* The fixed strip above the aside — desktop only. */}
       {!isMobile && (
         <TopBar
-          lang={lang === 'pt' ? 'pt' : 'en'}
           height={TOPBAR_H}
           asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
-          collapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
           {...(stripTrailing ? { trailing: stripTrailing, trailingFlush: true } : {})}
         />
       )}
@@ -4126,7 +4143,8 @@ export default function AppLayout() {
             maxWidth: 1400, margin: '0 auto', padding: '0 16px', height: 48,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <img src='/minimalistLogo.png' alt="agentistics" style={{ height: 44, width: 'auto' }} />
+            {/* 60% of the 48px band, the same proportion the desktop strip uses. */}
+            <img src={brandAsset('/minimalistLogo.png')} alt="agentistics" style={{ height: 28, width: 'auto' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <MagnifierButton ctx={appCtx} />
               <HideLensesButton ctx={appCtx} />
@@ -4535,8 +4553,8 @@ export default function AppLayout() {
             <div style={{ flexShrink: 0 }}>
               {/* Two plates, one visible: the theme is an attribute on <html>, so CSS picks the one
                   that suits the surface (index.css `.ag-logo-*`). */}
-              <img className="ag-logo-dark" src='/logo.png' alt="agentistics" style={{ height: 88, width: 'auto' }} />
-              <img className="ag-logo-light" src='/logo-light.png' alt="agentistics" style={{ height: 88, width: 'auto' }} />
+              <img className="ag-logo-dark" src={brandAsset('/logo.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
+              <img className="ag-logo-light" src={brandAsset('/logo-light.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
             </div>
 
             {/* Description + stats + version — middle */}

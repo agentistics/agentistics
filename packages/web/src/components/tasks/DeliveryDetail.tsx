@@ -319,7 +319,7 @@ export function Rollup({ r, lang }: { r: AttemptRollup; lang: Lang }) {
   const copy = boardCopy(lang)
   const money = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD)
+    : fmt(r.costUSD, r.costByHarness)
   return (
     <>
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -573,7 +573,7 @@ function SessionsTab({ detail }: { detail: TaskDetail }) {
                 </td>
                 <td style={{ padding: '8px 10px', ...numeric }}>{fmtInt(row.rounds)}</td>
                 <td style={{ padding: '8px 10px', ...numeric }}>{fmtTokens(row.tokens)}</td>
-                <td style={{ padding: '8px 10px', ...numeric }}>{money(row.costUSD)}</td>
+                <td style={{ padding: '8px 10px', ...numeric }}>{money(row.costUSD, row.costUSD === null ? null : { [row.harness]: row.costUSD })}</td>
                 <td style={{ padding: '8px 10px' }}>
                   {/* A historical conversation has no session to open — its id names nothing the
                       Sessions workspace holds, so it gets no link rather than one that 404s. */}

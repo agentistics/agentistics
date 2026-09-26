@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { SESSION_SORTS, type SessionOrder, type SessionSort } from '@agentistics/tui/control/session-order'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronUp, GripVertical, SlidersHorizontal } from 'lucide-react'
 import { reorderByDrag, stepOrder } from '../../lib/dragReorder'
@@ -46,6 +47,22 @@ export interface SessionsGroupMenuProps {
   onReorder: (next: string[]) => void
   cardColor: AsideCardColor
   onCardColor: (v: AsideCardColor) => void
+  /** Stretch the trigger to share a row equally with its siblings instead of a fixed square. */
+  fill?: boolean
+  /** What the sessions inside each group are ordered by, and how to change it. */
+  sort: SessionOrder
+  onSort: (next: SessionOrder) => void
+}
+
+/** The words for each ordering. `state` is first and the default: it puts what is waiting on you on
+ *  top, which is what the list is for; every other key answers one question. */
+const SORT_LABEL: Record<SessionSort, { pt: string; en: string }> = {
+  state: { pt: 'Precisa de você primeiro', en: 'Needs you first' },
+  recent: { pt: 'Atividade mais recente', en: 'Most recent activity' },
+  started: { pt: 'Data de início', en: 'Start date' },
+  name: { pt: 'Nome (A–Z)', en: 'Name (A–Z)' },
+  project: { pt: 'Projeto', en: 'Project' },
+  usage: { pt: 'Maior uso', en: 'Heaviest use' },
 }
 
 export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
@@ -112,8 +129,9 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
         aria-label={pt ? 'Organizar lista' : 'Arrange list'}
         title={pt ? 'Organizar lista' : 'Arrange list'}
         style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          width: tap ?? 34, padding: 0, borderRadius: 9, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          ...(p.fill ? { flex: 1, minWidth: 0, minHeight: tap ?? 36 } : { flexShrink: 0, width: tap ?? 34 }),
+          padding: 0, borderRadius: 9, cursor: 'pointer',
           border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
           color: open ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontFamily: 'inherit',
         }}
@@ -136,6 +154,23 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
                 {GROUP_BY_LABEL[v][p.lang]}
               </button>
             ))}
+
+            {/* HOW THE SESSIONS INSIDE EACH GROUP ARE ORDERED. The groups stay most-urgent-first (or in
+                the person's own order) whatever this says, so "by name" can never bury a session
+                that is waiting on you behind a group whose name sorts late. */}
+            <div style={sectionLabel}>{pt ? 'Ordenar sessões por' : 'Sort sessions by'}</div>
+            {SESSION_SORTS.map(v => (
+              <button key={v} onClick={() => p.onSort({ by: v, dir: p.sort.dir })} style={rowStyle(p.sort.by === v)}>
+                {SORT_LABEL[v][p.lang]}
+              </button>
+            ))}
+            <button
+              onClick={() => p.onSort({ by: p.sort.by, dir: p.sort.dir === 'desc' ? 'asc' : 'desc' })}
+              aria-pressed={p.sort.dir === 'asc'}
+              style={rowStyle(p.sort.dir === 'asc')}
+            >
+              {pt ? 'Inverter a ordem' : 'Reverse the order'}
+            </button>
 
             {p.groups.length > 1 && (
               <>

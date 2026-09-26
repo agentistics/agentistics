@@ -40,6 +40,7 @@ import {
 } from '../../lib/panelBar'
 import type { TerminalTarget } from '../../lib/terminalTarget'
 import { RelayedScreen } from './RelayedScreen'
+import { RelayedComposer } from './RelayedComposer'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { TerminalRegion } from '../RecentSessions'
@@ -402,7 +403,11 @@ export function SessionPanel({
              central and not relayed — so `TerminalRegion` would connect to nothing and say so,
              which is honest and useless. What the machine sends is its last captured frame, and
              `RelayedScreen` draws that while saying it is a snapshot. */
-          <RelayedScreen {...(session.lastLines ? { lines: session.lastLines } : {})} lang={lang} />
+          <>
+            <RelayedScreen {...(session.lastLines ? { lines: session.lastLines } : {})} lang={lang} />
+            {/* The field that screen's own header points at — see `RelayedComposer`. */}
+            <RelayedComposer row={row} act={act} lang={lang} {...(authorName ? { authorName } : {})} />
+          </>
         ) : (
           <div style={{ flex: 1, minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column' }}>
             {/* The very component the sessions list uses. Assembling a second one from the stream

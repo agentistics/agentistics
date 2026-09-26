@@ -431,6 +431,40 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
   },
   {
+    name: "agentistics_session_groups",
+    description:
+      "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_session_group_create",
+    description:
+      "Create a session group, optionally filing sessions into it in the same call. Use it to keep the assistants you start organised: start a session (for example `agentop session start …`, which prints its id), then create or reuse a group and file it. `sessions` takes session REFERENCES — a managed id (the `agentop-…` id `agentistics_session_groups` and `agentop session ls` print), a conversation id, an exact title, or a unique id prefix; any reference that matches nothing or more than one refuses the WHOLE call (404 / 409) and creates nothing, so a group is never half-filled. Filing moves a session out of any other group and unpins it if it was pinned. Duplicate group names are allowed, but they make later calls ambiguous — check `agentistics_session_groups` first and reuse a group when one fits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The group's name. Must not be blank." },
+        sessions: { type: "array", items: { type: "string" }, description: "Session references to file into the new group." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "agentistics_session_group_edit",
+    description:
+      "Change a session group. `action` is one of: `add` — file `session` under `group` (moves it out of any other group, unpins it if pinned); `remove` — take `session` out of whichever group holds it (the session itself is untouched); `rename` — give `group` a new `name`; `delete` — delete `group` (its sessions are NOT deleted, they only leave it). `group` is a group id OR its exact name (case-insensitive); a name shared by two groups answers 409 with the ids, so use the id. `session` is a managed id, a conversation id, an exact title or a unique id prefix. Refusals name what was wrong: 404 for a group or session that matches nothing, 409 for an ambiguous one, 400 for a blank name or a missing argument.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["add", "remove", "rename", "delete"] },
+        group: { type: "string", description: "A group id or name. Required for add, rename and delete." },
+        session: { type: "string", description: "A session reference. Required for add and remove." },
+        name: { type: "string", description: "The new name. Required for rename." },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "agentistics_summary",
     description:
       "Get an overview of AI coding usage metrics (across all tracked harnesses — Claude Code, Codex, Gemini, Copilot, Antigravity — or scoped to one): total tokens, estimated cost, sessions, streak, most used model, and top project. Good starting point for any metrics question.",
@@ -832,6 +866,40 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "agentistics_task_delete": {
         const ref = String((args as any)?.ref ?? "");
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_groups": {
+        const body = await apiGet("/api/session-groups");
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_group_create": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-groups", {
+          name: a?.name,
+          ...(Array.isArray(a?.sessions) ? { sessions: a.sessions } : {}),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_group_edit": {
+        const a = args as any;
+        const group = encodeURIComponent(String(a?.group ?? ""));
+        let body: unknown;
+        switch (a?.action) {
+          case "add":
+            body = await apiSend("POST", `/api/session-groups/${group}/sessions`, { session: a?.session });
+            break;
+          case "remove":
+            body = await apiSend("POST", "/api/session-groups/ungroup", { session: a?.session });
+            break;
+          case "rename":
+            body = await apiSend("POST", `/api/session-groups/${group}`, { name: a?.name });
+            break;
+          case "delete":
+            body = await apiSend("DELETE", `/api/session-groups/${group}`);
+            break;
+          default:
+            throw new Error("agentistics_session_group_edit: `action` must be add, remove, rename or delete");
+        }
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_summary": {

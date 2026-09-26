@@ -25,103 +25,38 @@
  * this feature depends on uniqueness — groups are addressed by id everywhere, never by name.
  */
 
-import { reorderByDrag } from './dragReorder'
+import { reorderByDrag, stepOrder } from './dragReorder'
+import { unpinSession } from './pinnedSessions'
 import { createSharedPref } from './sharedPref'
 
 const KEY = 'agentistics-session-groups'
 
-export interface SessionUserGroup {
-  id: string
-  name: string
-  /** Member session identity keys, in this group's own display order. */
-  sessionKeys: string[]
-}
+import {
+  EMPTY_SESSION_GROUPS,
+  planCreateGroup,
+  planRenameGroup,
+  planDeleteGroup,
+  groupOfSession,
+  planAddToGroup,
+  planRemoveFromGroup,
+  planMoveToGroup,
+  type SessionUserGroup,
+  type SessionUserGroupsValue,
+} from '@agentistics/core'
 
-export interface SessionUserGroupsValue {
-  /** Display order of the groups themselves — creation order; there is no reorder-the-groups
-   *  gesture (only reordering the SESSIONS within one), so this is simply append-only. */
-  groups: SessionUserGroup[]
+// The pure rules live in `@agentistics/core` (`sessionGroups.ts`) so the server routes behind the MCP
+// tools use the SAME ones; they are re-exported here so every existing import keeps working.
+export {
+  EMPTY_SESSION_GROUPS,
+  planCreateGroup,
+  planRenameGroup,
+  planDeleteGroup,
+  groupOfSession,
+  planAddToGroup,
+  planRemoveFromGroup,
+  planMoveToGroup,
 }
-
-export const EMPTY_SESSION_GROUPS: SessionUserGroupsValue = { groups: [] }
-
-/** `crypto.randomUUID` is available in every browser this app targets; the fallback only guards a
- *  non-secure context (plain http, not https/localhost) where it is undefined. */
-function makeGroupId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  return `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-}
-
-/**
- * PURE: create a new, empty group named `name`, appended last.
- *
- * A blank (after trim) name is refused — an unnamed group is a button with nothing to click — and
- * the value comes back unchanged with `id: null` so the caller knows nothing happened.
- */
-export function planCreateGroup(
-  current: SessionUserGroupsValue,
-  name: string,
-): { next: SessionUserGroupsValue; id: string | null } {
-  const trimmed = name.trim()
-  if (trimmed === '') return { next: current, id: null }
-  const id = makeGroupId()
-  return { next: { groups: [...current.groups, { id, name: trimmed, sessionKeys: [] }] }, id }
-}
-
-/** PURE: rename a group. A blank name is refused (unchanged); a missing id is a no-op. */
-export function planRenameGroup(
-  current: SessionUserGroupsValue,
-  id: string,
-  name: string,
-): SessionUserGroupsValue {
-  const trimmed = name.trim()
-  if (trimmed === '') return current
-  return { groups: current.groups.map(g => (g.id === id ? { ...g, name: trimmed } : g)) }
-}
-
-/**
- * PURE: delete a group. NEVER touches a session — the group stops existing, its sessions are
- * untouched and simply fall back into the automatic sections, exactly the guarantee the owner
- * asked for ("as sessões não são apagadas, só saem do grupo").
- */
-export function planDeleteGroup(current: SessionUserGroupsValue, id: string): SessionUserGroupsValue {
-  return { groups: current.groups.filter(g => g.id !== id) }
-}
-
-/** PURE: which group (if any) currently holds this session key. */
-export function groupOfSession(
-  current: SessionUserGroupsValue,
-  key: string,
-): SessionUserGroup | undefined {
-  return current.groups.find(g => g.sessionKeys.includes(key))
-}
-
-/**
- * PURE: put `key` into group `id`, at the end of its list — removing it from every OTHER group
- * first, so membership stays exclusive. Dropping a key already in `id` is a no-op that leaves its
- * position unchanged (see `planReorderInGroup` to actually reposition it). An unknown `id` is a
- * no-op: there is nothing to add it to.
- */
-export function planAddToGroup(
-  current: SessionUserGroupsValue,
-  id: string,
-  key: string,
-): SessionUserGroupsValue {
-  if (!current.groups.some(g => g.id === id)) return current
-  return {
-    groups: current.groups.map(g => {
-      if (g.id === id) return g.sessionKeys.includes(key) ? g : { ...g, sessionKeys: [...g.sessionKeys, key] }
-      return g.sessionKeys.includes(key) ? { ...g, sessionKeys: g.sessionKeys.filter(k => k !== key) } : g
-    }),
-  }
-}
-
-/** PURE: take `key` out of whichever group holds it. A no-op when it is in none. */
-export function planRemoveFromGroup(current: SessionUserGroupsValue, key: string): SessionUserGroupsValue {
-  return { groups: current.groups.map(g => (g.sessionKeys.includes(key)
-    ? { ...g, sessionKeys: g.sessionKeys.filter(k => k !== key) }
-    : g)) }
-}
+export type { SessionUserGroup, SessionUserGroupsValue }
 
 /** PURE: reorder the sessions WITHIN one group — by key, never index (see `dragReorder.ts`'s own
  *  header for why an index into a list that can hold unresolvable entries is unsafe). */
@@ -136,6 +71,40 @@ export function planReorderInGroup(
       ? { ...g, sessionKeys: reorderByDrag(g.sessionKeys, dragKey, dropKey) }
       : g)),
   }
+}
+
+/** Rebuilds `groups` in the order `ids` names, dropping nothing (every id in `ids` is assumed to
+ *  already be one of `current.groups`' own — both `reorderByDrag` and `stepOrder` only ever
+ *  reorder their input, never add or remove a key, so this never actually loses one; the filter
+ *  exists only so the function stays TOTAL rather than trusting that invariant blindly). */
+function groupsInOrder(current: SessionUserGroupsValue, ids: readonly string[]): SessionUserGroupsValue {
+  const byId = new Map(current.groups.map(g => [g.id, g] as const))
+  return { groups: ids.map(id => byId.get(id)).filter((g): g is SessionUserGroup => g !== undefined) }
+}
+
+/**
+ * PURE: reorder the GROUPS themselves — by id, never index (§F.1, same reasoning as every other
+ * reorder in this file and in `pinnedSessions.ts`'s `planPinMoveTo`: a picker only ever holds a
+ * key, not a raw array position). Dropping a group onto itself, or a `dropId` this value does not
+ * hold, is a no-op via `reorderByDrag`'s own rule.
+ */
+export function planReorderGroups(
+  current: SessionUserGroupsValue,
+  dragId: string,
+  dropId: string,
+): SessionUserGroupsValue {
+  return groupsInOrder(current, reorderByDrag(current.groups.map(g => g.id), dragId, dropId))
+}
+
+/** PURE: step one group one place earlier/later — the "Mover para cima"/"Mover para baixo" menu
+ *  entries, for a phone or a keyboard, which cannot drag a header onto another header. A step past
+ *  either end is a no-op, exactly like `stepOrder` itself. */
+export function planStepGroup(
+  current: SessionUserGroupsValue,
+  id: string,
+  by: 1 | -1,
+): SessionUserGroupsValue {
+  return groupsInOrder(current, stepOrder(current.groups.map(g => g.id), id, by))
 }
 
 /**
@@ -206,10 +175,38 @@ export function addSessionToGroup(id: string, key: string): void {
   store.set(planAddToGroup(store.get(), id, key))
 }
 
+/**
+ * Move a session into a group, unpinning it if it was pinned — pinning and grouping are two
+ * independent stores, and this is the one place both are written for a single gesture.
+ *
+ * The GROUP write lands first and the PIN write second. If the tab dies (or a write throws)
+ * between them, the session is left PINNED — visible, exactly where it was — and already carries
+ * its group membership, so the very next time it is unpinned (through the ordinary pin toggle,
+ * whenever that happens) it surfaces in the group with no further action: the same "unpinning
+ * brings it back here on its own" guarantee `groupRowsResolved` already gives a session that is
+ * both pinned and grouped. The reverse order has no such recovery: an unpin that lands without a
+ * matching group write drops the session into the plain Active/Inactive bands with no trace it
+ * was ever meant for a group, and nothing left to retry.
+ */
+export function moveSessionToGroup(id: string, key: string): void {
+  store.set(planAddToGroup(store.get(), id, key))
+  unpinSession(key)
+}
+
 export function removeSessionFromGroup(key: string): void {
   store.set(planRemoveFromGroup(store.get(), key))
 }
 
 export function reorderSessionInGroup(id: string, dragKey: string, dropKey: string): void {
   store.set(planReorderInGroup(store.get(), id, dragKey, dropKey))
+}
+
+/** Reorder the groups themselves (drag one group's header onto another's). */
+export function reorderSessionGroups(dragId: string, dropId: string): void {
+  store.set(planReorderGroups(store.get(), dragId, dropId))
+}
+
+/** Step one group up/down — the menu's "Mover para cima"/"Mover para baixo". */
+export function stepSessionGroup(id: string, by: 1 | -1): void {
+  store.set(planStepGroup(store.get(), id, by))
 }

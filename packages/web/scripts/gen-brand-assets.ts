@@ -19,7 +19,7 @@
  * the vector, not a hue-rotate of pixels, so it is exact at every size.
  */
 import { chromium } from 'playwright'
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dir, '..', '..', '..')
@@ -42,6 +42,13 @@ const teal = (svg: string) => svg.split(AMBER).join(TEAL)
 const DARK = read('logo-dark.svg')
 const LIGHT = read('logo-light.svg')
 const GLYPH = read('logo-no-background.svg')
+/** The owner's own export of the light logo, when present. It is the final art (the SVG renders
+ *  a hairline seam on the left wing and a harder shadow), so where it exists it is used as-is and
+ *  only scaled. The teal central variant still comes from the SVG: a raster cannot be recoloured
+ *  without touching pixels. */
+const LIGHT_PNG = existsSync(join(SRC, 'logo-light.png'))
+  ? `data:image/png;base64,${readFileSync(join(SRC, 'logo-light.png')).toString('base64')}`
+  : null
 const VSC = read('logo-no-background-vscode.svg')
 
 /** The glyph without its plate, in the plate's 85-unit space (filters/defs dropped). */
@@ -55,6 +62,17 @@ const wrap = (viewBox: string, body: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="${viewBox}" width="100%" height="100%">${body}</svg>`
 
 /** The rounded plate as designed (transparent corners) — the "any" purpose icon. */
+/** The plate EXACTLY as designed: the whole 85-unit canvas, its own margin, border and shadow
+ *  intact. Used wherever the logo is shown as a picture (footer, PDF, README, exports). The
+ *  cropped `plate` below trims that margin for app icons, which must fill their square, and in
+ *  doing so clips the border and the shadow — fine for an icon, wrong for the logo itself. */
+const plateFull = (svg: string) => svg.replace(/<svg[^>]*>/, m => m.replace(/width="\d+" height="\d+"/, 'width="100%" height="100%"'))
+
+/** The supplied PNG as a picture, or the SVG rendering when there is none. */
+const lightLogo = () => LIGHT_PNG
+  ? `<img src="${LIGHT_PNG}" style="display:block;width:100%;height:100%" alt="">`
+  : plateFull(LIGHT)
+
 const plate = (svg: string) => svg.replace(/<svg[^>]*>/, m => m.replace(/width="\d+" height="\d+" viewBox="[^"]*"/, 'viewBox="1.5 1.5 82 82" width="100%" height="100%"'))
 
 /** Full-bleed square (no rounded corners, no transparency): the OS applies its own mask. */
@@ -72,15 +90,16 @@ const circle = (svg: string) =>
 
 const bare = (svg: string) => svg.replace(/<svg[^>]*>/, '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="1 1 54 54" width="100%" height="100%">')
 
-// The Windows taskbar draws an icon at ~26 px on a dark bar: a dark plate vanishes into it and
-// the thin strokes blur. So the icons Windows shows there are the BARE glyph, big and heavy
-// (chosen in the icon lab: no plate, 145% size, 190% stroke). Everything else keeps the plate.
+// THE LOGO'S GEOMETRY IS NEVER TOUCHED. The SVGs are the design: stroke widths, shapes and
+// proportions between the parts are the owner's, and a script may only change SCALE (how big the
+// drawing sits in its canvas) and COLOUR (the teal central set). Thickening a stroke "for
+// legibility" was tried once and rejected outright: it is a different drawing.
+//
+// The Windows taskbar draws an icon at ~26 px on a dark bar, where a dark plate vanishes into it.
+// So the icons Windows shows there are the BARE glyph (no plate), scaled up to fill the canvas.
+// Everything else keeps the plate.
 const BOLD_SCALE = 1.45
-const BOLD_WEIGHT = 1.9
-const BOLD85 = GLYPH85
-  .replace(/stroke-width="([\d.]+)"/g, (_, n) => `stroke-width="${+n * BOLD_WEIGHT}"`)
-  .replace(/(fill="#FD8924")\/>/g, `$1 stroke="#FD8924" stroke-width="${(BOLD_WEIGHT - 1) * 1.6}"/>`)
-const boldGlyph = () => floating(BOLD85, BOLD_SCALE).replace('fill="none"', 'fill="none" stroke-linejoin="round" stroke-linecap="round"')
+const boldGlyph = () => floating(GLYPH85, BOLD_SCALE)
 
 const MASKABLE_SCALE = 0.85 // glyph radius must stay inside the 80% safe circle
 const BLEED_SCALE = 1.0
@@ -169,14 +188,21 @@ put(join(PUBLIC, 'markMask.png'), await png(bare(GLYPH), 512))
 // ---- Logos that follow the place they are drawn in -------------------------------------------
 // The plate carries its own background, so it reads on any surface; the light one exists for the
 // places that are themselves light (light theme, PDF on white paper, README on GitHub light).
-put(join(PUBLIC, 'logo.png'), await png(plate(DARK), 512))
-put(join(PUBLIC, 'logo-light.png'), await png(plate(LIGHT), 512))
+put(join(PUBLIC, 'logo.png'), await png(plateFull(DARK), 512))
+put(join(PUBLIC, 'logo-light.png'), await png(lightLogo(), 512))
+// The central's in-app marks: the same drawings in teal, picked at runtime by `brandAsset()`
+// (web/src/lib/brand.ts) — a central and a machine serve one bundle, so the choice cannot be made
+// at build time. Without these the central's sidebar, footer and login kept the amber mark while
+// its favicon and installed icon were already teal.
+put(join(PUBLIC, 'minimalistLogo-central.png'), await png(teal(bare(GLYPH)), 512))
+put(join(PUBLIC, 'logo-central.png'), await png(teal(plateFull(DARK)), 512))
+put(join(PUBLIC, 'logo-light-central.png'), await png(teal(plateFull(LIGHT)), 512))
 put(join(ROOT, 'packages/desktop/ui/logo.png'), await png(bare(GLYPH), 256)) // dark window, bare glyph
 
 // ---- Exports for docs / README / store listings ----------------------------------------------
 for (const s of [1024, 512, 256]) {
-  put(join(EXPORTS, `logo-dark-${s}.png`), await png(plate(DARK), s))
-  put(join(EXPORTS, `logo-light-${s}.png`), await png(plate(LIGHT), s))
+  put(join(EXPORTS, `logo-dark-${s}.png`), await png(plateFull(DARK), s))
+  put(join(EXPORTS, `logo-light-${s}.png`), await png(lightLogo(), s))
   put(join(EXPORTS, `logo-mark-${s}.png`), await png(bare(GLYPH), s))
   put(join(EXPORTS, `logo-mark-teal-${s}.png`), await png(teal(bare(GLYPH)), s))
 }

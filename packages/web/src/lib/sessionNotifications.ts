@@ -2,6 +2,7 @@
  * sessionNotifications.ts — Web Notifications & Sound Effects for Live Sessions
  */
 
+import { versionedAsset } from './brand'
 import type { SessionMeta } from '@agentistics/core'
 import { sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
@@ -351,8 +352,8 @@ export function triggerSessionNotification(options: {
     body: options.body,
     // The app's own icon, at the size a notification actually renders. `/favicon.ico` was a 16px
     // image blown up to 48 on a phone.
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192-maskable.png',
+    icon: versionedAsset('/icons/icon-192.png'),
+    badge: versionedAsset('/icons/icon-192-maskable.png'),
     ...(options.tag ? { tag: options.tag } : {}),
   }
 

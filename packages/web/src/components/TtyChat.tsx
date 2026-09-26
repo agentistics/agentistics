@@ -1,3 +1,4 @@
+import { versionedAsset } from '../lib/brand'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { findChatSound } from '../lib/chatSounds'
 import { useNavigate } from 'react-router-dom'
@@ -602,7 +603,7 @@ function Message({
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden', marginTop: 2,
       }}>
-        <img src="/minimalistLogo.png" alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
+        <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
       </div>
 
       {/* Content column */}
@@ -651,7 +652,7 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
       animation: 'ttyChatFadeIn 0.2s ease-out',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <img src="/minimalistLogo.png" alt="Nay" style={{ width: 32, height: 32, borderRadius: 9, objectFit: 'cover' }} />
+        <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 32, height: 32, borderRadius: 9, objectFit: 'cover' }} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
             {pt ? 'Olá! Sou Nay 👋' : 'Hi! I\'m Nay 👋'}
@@ -685,7 +686,7 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 overflow: 'hidden',
               }}>
-                <img src="/minimalistLogo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', opacity: active ? 1 : 0.5 }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 22, height: 22, objectFit: 'contain', opacity: active ? 1 : 0.5 }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
@@ -1650,7 +1651,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
@@ -1860,7 +1861,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 alignItems: 'center', justifyContent: 'center',
                 gap: 10, color: 'var(--text-tertiary)', textAlign: 'center', padding: '0 20px',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
                   {pt ? 'Olá! Sou a Nay' : 'Hi! I\'m Nay'}
                 </div>
@@ -2184,7 +2185,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden', pointerEvents: 'none',
           }}>
-            <img src="/minimalistLogo.png" alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
+            <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
           </div>
           <span style={{ fontSize: 9, color: 'var(--text-tertiary)', lineHeight: 1, pointerEvents: 'none' }}>Nay</span>
         </div>
@@ -2227,7 +2228,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
@@ -2435,7 +2436,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 alignItems: 'center', justifyContent: 'center',
                 gap: 10, color: 'var(--text-tertiary)', textAlign: 'center', padding: '0 20px',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
                   {pt ? 'Olá! Sou a Nay' : 'Hi! I\'m Nay'}
                 </div>

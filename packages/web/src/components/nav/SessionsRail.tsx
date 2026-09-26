@@ -22,6 +22,8 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HarnessMark } from '../sessions/HarnessMark'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { sessionPath } from '../../lib/sessionRoute'
+import { NewSessionModal } from '../sessions/NewSessionModal'
+import { Plus } from 'lucide-react'
 
 /**
  * The dot a state earns, or null for one that earns none.
@@ -39,11 +41,18 @@ function stateDot(state: string): string | null {
 /** How many marks the rail draws before it says how many more there are. */
 const RAIL_MAX = 12
 
-export function SessionsRail({ rows, selectedId }: {
+export function SessionsRail({ rows, selectedId, lang, hideNew }: {
   rows: readonly ControlSession[]
   selectedId?: string
+  lang: 'pt' | 'en'
+  /** Withholds "New session" where this surface cannot start one (a central). */
+  hideNew?: boolean
 }) {
   const navigate = useNavigate()
+  const pt = lang === 'pt'
+  // The wizard lives HERE too: the expanded aside owns its own copy, and it is unmounted while the
+  // rail is showing, so a rail button that only set a flag would open nothing.
+  const [creating, setCreating] = useState(false)
   const [tip, setTip] = useState<{ top: number; left: number; session: ControlSession } | null>(null)
   const shown = rows.slice(0, RAIL_MAX)
   const more = rows.length - shown.length
@@ -53,6 +62,24 @@ export function SessionsRail({ rows, selectedId }: {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4,
     }}>
+      {/* The one solid accent control, as in the open aside: it is the only one that CREATES. It
+          leads the rail, above the first session, so starting work is where it always is. */}
+      {!hideNew && (
+        <button
+          onClick={() => setCreating(true)}
+          aria-label={pt ? 'Nova sessão' : 'New session'}
+          title={pt ? 'Nova sessão' : 'New session'}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            width: 40, height: 40, borderRadius: 10, cursor: 'pointer', marginBottom: 4,
+            border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#141414',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.1)' }}
+          onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
+        >
+          <Plus size={18} />
+        </button>
+      )}
       {shown.map(s => (
         <button
           key={s.id}
@@ -100,6 +127,19 @@ export function SessionsRail({ rows, selectedId }: {
       ))}
       {more > 0 && (
         <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', paddingTop: 2 }}>+{more}</span>
+      )}
+      {creating && (
+        <NewSessionModal
+          lang={lang}
+          onClose={() => setCreating(false)}
+          onStarted={(id, started) => {
+            setCreating(false)
+            // Same hand-off as the open aside: the row is not in this browser's fleet yet, so the
+            // router state says "this id is on its way" instead of letting the page fall back to
+            // the overview for a poll.
+            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+          }}
+        />
       )}
       {tip && createPortal(
         <div role="tooltip" style={{

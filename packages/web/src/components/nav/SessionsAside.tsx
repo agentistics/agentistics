@@ -31,6 +31,9 @@ import {
 } from '../../lib/sessionsAsidePrefs'
 import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
 import { SessionsGroupMenu } from './SessionsGroupMenu'
+import type { SessionOrder } from '@agentistics/tui/control/session-order'
+import { displayName, toggleHidden } from '../../lib/groupNameMask'
+import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
@@ -52,12 +55,19 @@ import { endDispatch, tryBeginDispatch } from '../../lib/dispatchGuard'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import {
   type SessionUserGroup,
-  addSessionToGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, removeSessionFromGroup,
-  renameSessionGroup, reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot,
-  subscribeSessionGroups,
+  createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup, removeSessionFromGroup,
+  renameSessionGroup, reorderSessionGroups, reorderSessionInGroup, resolveGroupRows,
+  sessionGroupsServerSnapshot, stepSessionGroup, subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
-import { hasDragPayload, readDragPayload, setDragPayload } from '../../lib/dragReorder'
+import {
+  hasDragPayload, hasGroupDragPayload, readDragPayload, readGroupDragPayload, setDragPayload,
+  setGroupDragPayload,
+} from '../../lib/dragReorder'
 import { ConfirmModal } from '../../pages/settings/primitives'
+// The SAME visual language the subtask board already uses for a group and its members reading as
+// one unit (continuous left accent bar + shared tint, header down through the last row) — reused
+// rather than invented a second time for user session groups.
+import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -186,6 +196,9 @@ export function SessionsAside({
   const storedGroupPrefs = useMemo(readAsideGroupPrefs, [])
   const [groupBy, setGroupByState] = useState<AsideGroupBy>(storedGroupPrefs.groupBy)
   const setGroupBy = (v: AsideGroupBy) => { setGroupByState(v); writeAsideGroupPrefs({ groupBy: v }) }
+  // How the sessions INSIDE each group are ordered. Per-viewer, like the rest of the arrangement.
+  const [sortOrder, setSortOrderState] = useState<SessionOrder>(storedGroupPrefs.sort)
+  const setSortOrder = (v: SessionOrder) => { setSortOrderState(v); writeAsideGroupPrefs({ sort: v }) }
   const [groupOrder, setGroupOrderState] =
     useState<Partial<Record<AsideGroupBy, string[]>>>(storedGroupPrefs.order)
   const setGroupOrder = (by: AsideGroupBy, keys: string[]) => {
@@ -194,6 +207,13 @@ export function SessionsAside({
     writeAsideGroupPrefs({ order: next })
   }
   const [foldedGroups, setFoldedGroupsState] = useState<Set<string>>(new Set(storedGroupPrefs.collapsed))
+  // Sessions whose "waiting on you" dot the reader dismissed on a folded group. Deliberately MEMORY
+  // ONLY: a restart or a reload starts fresh, which is the point — it answers "I saw this", not
+  // "stop telling me". And it is pruned per session the moment that session stops waiting, so the
+  // next time it asks, the dot is back.
+  const [dismissedAttn, setDismissedAttn] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => { setDismissedAttn(prev => pruneDismissed(prev, rows)) }, [rows])
+  const dismissAttn = (ids: readonly string[]) => setDismissedAttn(prev => new Set([...prev, ...ids]))
   const toggleGroupFold = (key: string) => {
     const next = new Set(foldedGroups)
     next.has(key) ? next.delete(key) : next.add(key)
@@ -326,6 +346,18 @@ export function SessionsAside({
   const [deletingGroup, setDeletingGroup] = useState<SessionUserGroup | null>(null)
   /** The "⋮" menu on a group's own heading (rename/delete) — reuses `SessionRowMenu`. */
   const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Groups whose name is hidden on THIS screen — see `lib/groupNameMask.ts`.
+  const [hiddenGroups, setHiddenGroups] = useState<ReadonlySet<string>>(new Set(storedGroupPrefs.hiddenUserGroups))
+  const toggleGroupNameHidden = (id: string) => {
+    const next = toggleHidden(hiddenGroups, id)
+    setHiddenGroups(next)
+    writeAsideGroupPrefs({ hiddenUserGroups: [...next] })
+  }
+  // What the open group menu could silence: only a FOLDED group signals, so only a folded one offers it.
+  const menuGroupAttnIds = groupMenu && foldedUserGroups.has(groupMenu.id)
+    ? attentionIds(groupRowsResolved.find(g => g.group.id === groupMenu.id)?.rows ?? [], dismissedAttn)
+    : []
+  const menuGroupAttn = menuGroupAttnIds.length
   /** The "Mover para grupo…" picker opened from a session row's own context menu — also
    *  `SessionRowMenu`, listing the existing groups plus "Novo grupo…". */
   const [groupPicker, setGroupPicker] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -335,6 +367,10 @@ export function SessionsAside({
    *  group's row: three different subtrees that share no React state of their own. */
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null)
   const [groupRowDragOver, setGroupRowDragOver] = useState<string | null>(null)
+  /** Which group heading is a live drop target for REORDERING THE GROUPS THEMSELVES — a distinct
+   *  payload (`GROUP_DRAG_KEY_TYPE`, see `dragReorder.ts`'s own header) from a session being
+   *  dropped into a group, so the two never get read as one another. */
+  const [groupReorderOver, setGroupReorderOver] = useState<string | null>(null)
   /** Which pinned row is being dragged, and which one it is hovering over — by the row's own pin
    *  KEY, never its position in this (filtered) list. See `pinnedSessions.ts`'s `planPinMoveTo` for
    *  why a filtered-list index was the actual §6 bug: `pinnedRows` is the RESOLVED, filtered view,
@@ -462,17 +498,17 @@ export function SessionsAside({
       {
         id: 'active',
         label: pt ? 'Ativas' : 'Active',
-        groups: asideGroups(rest.filter(r => active.has(r.state)), groupBy, lang, order),
+        groups: asideGroups(rest.filter(r => active.has(r.state)), groupBy, lang, order, sortOrder),
       },
       // Never computed while activeOnly is on — those rows are the ones the switch is withholding,
       // not a second list to render beside it.
       {
         id: 'inactive',
         label: pt ? 'Inativas' : 'Inactive',
-        groups: activeOnly ? [] : asideGroups(rest.filter(r => !active.has(r.state)), groupBy, lang, order),
+        groups: activeOnly ? [] : asideGroups(rest.filter(r => !active.has(r.state)), groupBy, lang, order, sortOrder),
       },
     ]
-  }, [matched, pinned, groupedKeys, active, activeOnly, pt, lang, groupBy, groupOrder])
+  }, [matched, pinned, groupedKeys, active, activeOnly, pt, lang, groupBy, groupOrder, sortOrder])
 
   /** The current dimension's groups, across both bands, deduped by key, in their effective
    *  order — what the popover's reorder list edits. */
@@ -492,7 +528,7 @@ export function SessionsAside({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/*
-        * ONE ROW: the search, and the two standing verbs as icons beside it.
+        * THE SEARCH, on its own row.
         *
         * Search is what the column is used for on every visit; starting a session and writing to
         * several are things somebody does occasionally. Two full-width dashed buttons stacked above
@@ -540,21 +576,32 @@ export function SessionsAside({
             </button>
           )}
         </div>
+      </div>
+
+      {/*
+        * THE THREE STANDING VERBS, one row under the search: start a session, write to several, and
+        * arrange the list. They share the column's width equally with a small gap, so three icons
+        * are big targets and read as one control rather than three stray squares. "New session"
+        * is the solid accent because it is the only one that CREATES something. A verb this
+        * surface cannot perform is ABSENT (a central has no New session, a machine with nothing to
+        * broadcast to has no send) and the ones left simply share the width.
+        */}
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 2px' }}>
         {!hideNew && (
           <button
             onClick={() => setCreating(true)}
             aria-label={pt ? 'Nova sessão' : 'New session'}
             title={pt ? 'Nova sessão' : 'New session'}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              width: tap ?? 34, padding: 0, borderRadius: 9, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9, cursor: 'pointer',
               border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)',
               color: '#141414', fontFamily: 'inherit',
             }}
             onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.1)' }}
             onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
           >
-            <Plus size={17} />
+            <Plus size={18} />
           </button>
         )}
         {showSend && (
@@ -563,8 +610,8 @@ export function SessionsAside({
             aria-label={pt ? 'Enviar prompt em massa' : 'Send a prompt to several'}
             title={pt ? 'Enviar prompt em massa' : 'Send a prompt to several'}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              width: tap ?? 34, padding: 0, borderRadius: 9, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 0, minHeight: tap ?? 36,
+              padding: 0, borderRadius: 9, cursor: 'pointer',
               border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
               color: 'var(--text-tertiary)', fontFamily: 'inherit',
             }}
@@ -581,9 +628,12 @@ export function SessionsAside({
           </button>
         )}
         <SessionsGroupMenu
+          fill
           lang={lang}
           groupBy={groupBy}
           onGroupBy={setGroupBy}
+          sort={sortOrder}
+          onSort={setSortOrder}
           groups={groupOrderCandidates}
           onReorder={keys => setGroupOrder(groupBy, keys)}
           cardColor={cardColor}
@@ -841,29 +891,82 @@ export function SessionsAside({
           {groupRowsResolved.map(({ group, rows: gRows }) => {
             const folded = foldedUserGroups.has(group.id)
             const isDropTarget = dragOverGroupId === group.id
+            const isReorderTarget = groupReorderOver === group.id
+            // A folded group hides its rows: its own left edge says when one of them is waiting.
+            const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
             return (
-              <div key={group.id} style={{ marginBottom: 8 }}>
+              <div
+                key={group.id}
+                // Not while a drag is over it: those states draw their own edge with the same shadow.
+                {...(attn > 0 && !isDropTarget && !isReorderTarget ? { className: ATTN_BAR_CLASS } : {})}
+                // The drop target is the WHOLE group container now, not only the header line — an
+                // empty group's own "drag sessions here" hint sits below the header, and a hint
+                // that cannot itself be dropped on is not really a drop target. A member row's own
+                // onDragOver/onDrop (below) still `stopPropagation`, so hovering a specific row for
+                // reordering does not also light up this outer highlight.
+                //
+                // TWO DISTINCT PAYLOADS can land here: a SESSION key (add it to this group) and a
+                // GROUP id (reorder — drag another group's header onto this one). They are checked
+                // in that order (`hasGroupDragPayload` first) because the two are DIFFERENT MIME
+                // types on the same native event (see `dragReorder.ts`'s header) — never confusable,
+                // but a drop handler still has to ask "which one is this" before acting.
+                onDragOver={e => {
+                  if (hasGroupDragPayload(e)) {
+                    e.preventDefault()
+                    if (groupReorderOver !== group.id) setGroupReorderOver(group.id)
+                    return
+                  }
+                  if (!hasDragPayload(e)) return
+                  e.preventDefault()
+                  if (dragOverGroupId !== group.id) setDragOverGroupId(group.id)
+                }}
+                onDragLeave={() => {
+                  setDragOverGroupId(cur => (cur === group.id ? null : cur))
+                  setGroupReorderOver(cur => (cur === group.id ? null : cur))
+                }}
+                onDrop={e => {
+                  e.preventDefault()
+                  // Stops here, or the automatic-bands wrapper below would ALSO see this drop
+                  // bubble past it and read it as "un-group me" the instant it is filed.
+                  e.stopPropagation()
+                  if (hasGroupDragPayload(e)) {
+                    const dragId = readGroupDragPayload(e)
+                    if (dragId) reorderSessionGroups(dragId, group.id)
+                    setGroupReorderOver(null)
+                    return
+                  }
+                  const key = readDragPayload(e)
+                  // A pinned row is a valid drop source here too — the drop UNPINS it into the
+                  // group in one gesture (see `moveSessionToGroup`'s own header for the write
+                  // order and why).
+                  if (key) moveSessionToGroup(group.id, key)
+                  setDragOverGroupId(null)
+                }}
+                style={{
+                  marginBottom: 8, borderRadius: 8, paddingBottom: 4,
+                  // A group and its members read as ONE container, header down through the last
+                  // row — the same continuous left bar + shared tint the subtask board's own
+                  // clustered groups use (`CLUSTER_ACCENT`/`CLUSTER_TINT`), so an EMPTY group still
+                  // reads as a container (its quiet hint below) rather than as a heading floating
+                  // with nothing under it. Dragging a SESSION over it swaps both for the orange
+                  // "this is about to receive it" state; dragging ANOTHER GROUP over it instead
+                  // draws a top edge (the same edge indicator the pinned band's own drag uses) —
+                  // a different gesture landing in the same place gets a visibly different answer.
+                  background: isDropTarget ? 'color-mix(in srgb, var(--anthropic-orange) 10%, transparent)' : CLUSTER_TINT,
+                  boxShadow: isDropTarget
+                    ? `inset 3px 0 0 0 var(--anthropic-orange), inset 0 0 0 1px var(--anthropic-orange)`
+                    : isReorderTarget
+                      ? `inset 3px 0 0 0 ${CLUSTER_ACCENT}, inset 0 2px 0 0 var(--anthropic-orange)`
+                      : `inset 3px 0 0 0 ${CLUSTER_ACCENT}`,
+                }}
+              >
                 <div
-                  onDragOver={e => {
-                    if (!hasDragPayload(e)) return
-                    e.preventDefault()
-                    if (dragOverGroupId !== group.id) setDragOverGroupId(group.id)
-                  }}
-                  onDragLeave={() => setDragOverGroupId(cur => (cur === group.id ? null : cur))}
-                  onDrop={e => {
-                    e.preventDefault()
-                    // Stops here, or the automatic-bands wrapper below would ALSO see this drop
-                    // bubble past it and read it as "un-group me" the instant it is filed.
-                    e.stopPropagation()
-                    const key = readDragPayload(e)
-                    if (key) addSessionToGroup(group.id, key)
-                    setDragOverGroupId(null)
-                  }}
+                  draggable
+                  onDragStart={e => setGroupDragPayload(e, group.id)}
+                  onDragEnd={() => setGroupReorderOver(null)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6, borderRadius: 7,
-                    padding: '4px 4px 4px 9px', minHeight: tap,
-                    background: isDropTarget ? 'color-mix(in srgb, var(--anthropic-orange) 10%, transparent)' : undefined,
-                    boxShadow: isDropTarget ? 'inset 0 0 0 1px var(--anthropic-orange)' : undefined,
+                    padding: '4px 4px 4px 9px', minHeight: tap, cursor: 'grab',
                   }}
                 >
                   <button
@@ -872,14 +975,30 @@ export function SessionsAside({
                       display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
                       background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                       padding: 0, textAlign: 'left', minHeight: tap,
+                      // A `<button>` with no `color` of its own falls back to the UA `buttontext`
+                      // default, which `index.html`'s `color-scheme: dark` pins to WHITE regardless
+                      // of this app's own light/dark toggle — so the chevron (bare `currentColor`,
+                      // no style of its own) and the count span below (same) rendered invisible on
+                      // the light theme's white background. Same tertiary tone the automatic
+                      // section sub-headings use (`SessionBand`'s own folding button, a few hundred
+                      // lines below) so a user group's heading reads like every other one.
+                      color: 'var(--text-tertiary)',
                     }}
                   >
                     {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
-                    <span style={{
-                      fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                      minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
+                    {/* Hidden: the name stays in the layout (so the block is exactly as long as it) and
+                        a grey block is painted over it. `role="img"` makes a reader announce the
+                        label instead of reading the text out. */}
+                    <span
+                      {...(hiddenGroups.has(group.id)
+                        ? { className: 'ag-name-mask', role: 'img', 'aria-label': pt ? 'Nome oculto' : 'Name hidden' }
+                        : {})}
+                      style={{
+                        fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
+                        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
                       {group.name}
                     </span>
                     <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{gRows.length}</span>
@@ -902,13 +1021,15 @@ export function SessionsAside({
                 </div>
                 {!folded && (
                   gRows.length === 0 ? (
-                    <p style={{ margin: '2px 9px 2px 26px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
+                    <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                       {pt
                         ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                         : 'Drag a session here, or use "Move to group" on its menu.'}
                     </p>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    // Indented under the header — a MEMBER, not another top-level row — the same
+                    // modest offset the empty-group hint above already lines up with.
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
                       {gRows.map(s => {
                         const key = pinKeyOf(s)
                         return (
@@ -929,7 +1050,7 @@ export function SessionsAside({
                               const dragKey = readDragPayload(e)
                               if (dragKey && dragKey !== key) {
                                 if (groupOfKey.get(dragKey) === group.id) reorderSessionInGroup(group.id, dragKey, key)
-                                else addSessionToGroup(group.id, dragKey)
+                                else moveSessionToGroup(group.id, dragKey)
                               }
                               setGroupRowDragOver(null)
                             }}
@@ -995,6 +1116,8 @@ export function SessionsAside({
                 lang={lang}
                 foldedGroups={foldedGroups}
                 onToggleGroupFold={toggleGroupFold}
+                dismissedAttn={dismissedAttn}
+                onDismissAttn={dismissAttn}
                 cardColor={cardColor}
               />
             ))}
@@ -1041,7 +1164,8 @@ export function SessionsAside({
         <SessionRowMenu
           x={groupPicker.x} y={groupPicker.y}
           entries={[
-            ...groupsValue.groups.map(g => ({ action: g.id, label: g.name, enabled: true })),
+            // A hidden group stays hidden here too: this menu prints the name as text.
+            ...groupsValue.groups.map(g => ({ action: g.id, label: displayName(g.name, hiddenGroups.has(g.id)), enabled: true })),
             { action: '__new_group__', label: pt ? 'Novo grupo…' : 'New group…', enabled: true },
           ]}
           onPick={action => {
@@ -1052,7 +1176,9 @@ export function SessionsAside({
                 setNewGroupName('')
                 setCreatingGroup({ forKey: key })
               } else {
-                addSessionToGroup(action, key)
+                // The menu path (mandatory on a phone, which cannot drag): "Move to group…" on a
+                // pinned row must also unpin it — same gesture as the drag, without a mouse.
+                moveSessionToGroup(action, key)
               }
             }
             setGroupPicker(null)
@@ -1061,13 +1187,34 @@ export function SessionsAside({
         />
       )}
 
-      {/* A group's own "⋮" — rename / delete. Reuses `SessionRowMenu`, anchored under the button
-          rather than at a pointer position (there is no right-click gesture on a heading). */}
+      {/* A group's own "⋮" — rename / delete / reorder. Reuses `SessionRowMenu`, anchored under the
+          button rather than at a pointer position (there is no right-click gesture on a heading).
+          "Mover para cima"/"Mover para baixo" are the non-drag path for a phone or a keyboard,
+          which cannot drag one header onto another — disabled at either end, same as the pinned
+          band's own up/down chevrons refuse past their ends. */}
       {groupMenu && (
         <SessionRowMenu
           x={groupMenu.x} y={groupMenu.y}
           entries={[
             { action: 'rename', label: pt ? 'Renomear' : 'Rename', enabled: true },
+            {
+              action: 'toggle-hide-name',
+              label: hiddenGroups.has(groupMenu.id) ? (pt ? 'Mostrar nome' : 'Show name') : (pt ? 'Ocultar nome' : 'Hide name'),
+              enabled: true,
+            },
+            {
+              action: 'move-up', label: pt ? 'Mover para cima' : 'Move up',
+              enabled: groupsValue.groups.findIndex(g => g.id === groupMenu.id) > 0,
+            },
+            {
+              action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
+              enabled: groupsValue.groups.findIndex(g => g.id === groupMenu.id) < groupsValue.groups.length - 1,
+            },
+            ...(menuGroupAttn > 0
+              // Only offered while the group is actually signalling: a verb with nothing to act on
+              // is the dead control this product refuses everywhere.
+              ? [{ action: 'dismiss-attn', label: pt ? 'Marcar como visto (silenciar aviso)' : 'Mark as seen (silence alert)', enabled: true }]
+              : []),
             { action: 'delete', label: pt ? 'Excluir grupo…' : 'Delete group…', enabled: true },
           ]}
           onPick={action => {
@@ -1076,7 +1223,11 @@ export function SessionsAside({
               setRenameGroupDraft(g?.name ?? '')
               setRenamingGroup({ id: groupMenu.id })
             }
+            if (action === 'toggle-hide-name') toggleGroupNameHidden(groupMenu.id)
+            if (action === 'move-up') stepSessionGroup(groupMenu.id, -1)
+            if (action === 'move-down') stepSessionGroup(groupMenu.id, 1)
             if (action === 'delete' && g) setDeletingGroup(g)
+            if (action === 'dismiss-attn') dismissAttn(menuGroupAttnIds)
             setGroupMenu(null)
           }}
           onClose={() => setGroupMenu(null)}
@@ -1172,7 +1323,7 @@ export function SessionsAside({
             onSubmit={e => {
               e.preventDefault()
               const id = createSessionGroup(newGroupName)
-              if (id && creatingGroup.forKey) addSessionToGroup(id, creatingGroup.forKey)
+              if (id && creatingGroup.forKey) moveSessionToGroup(id, creatingGroup.forKey)
               setNewGroupName('')
               setCreatingGroup(null)
             }}
@@ -1306,8 +1457,8 @@ export function SessionsAside({
         open={deletingGroup !== null}
         title={pt ? 'Excluir grupo' : 'Delete group'}
         message={pt
-          ? `Excluir o grupo "${deletingGroup?.name ?? ''}"? As sessões não são apagadas, só saem do grupo.`
-          : `Delete the group "${deletingGroup?.name ?? ''}"? Sessions are not deleted, they only leave the group.`}
+          ? `Excluir o grupo "${deletingGroup ? displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)) : ''}"? As sessões não são apagadas, só saem do grupo.`
+          : `Delete the group "${deletingGroup ? displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)) : ''}"? Sessions are not deleted, they only leave the group.`}
         confirmLabel={pt ? 'Excluir' : 'Delete'}
         cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={() => {
@@ -1324,7 +1475,7 @@ export function SessionsAside({
  *  band with a heading and no rows under it is a label pretending to be information. */
 function SessionBand({
   bandId, label, groups, groupBy, pinned, sessionId, tap, onPin, onOpen, rowsById, onOpenMenu,
-  onFile, lang, foldedGroups, onToggleGroupFold, cardColor,
+  onFile, lang, foldedGroups, onToggleGroupFold, dismissedAttn, onDismissAttn, cardColor,
 }: {
   bandId: AsideBandId
   label: string
@@ -1345,6 +1496,9 @@ function SessionBand({
   /** Collapse keys already toggled shut — see `collapseKey` in `sessionsAsidePrefs.ts`. */
   foldedGroups: ReadonlySet<string>
   onToggleGroupFold: (key: string) => void
+  /** Session ids whose waiting dot was dismissed, and how to dismiss more. */
+  dismissedAttn: ReadonlySet<string>
+  onDismissAttn: (ids: readonly string[]) => void
   cardColor: AsideCardColor
 }) {
   const count = groups.reduce((n, g) => n + g.sessions.length, 0)
@@ -1376,7 +1530,12 @@ function SessionBand({
               // the two headings read as a hierarchy rather than as two lists. Clicking it folds
               // this group, per your instruction — the click target is the heading itself.
               <button
-                onClick={() => onToggleGroupFold(ck)}
+                // A folded band with a session waiting on you breathes its count; opening it is how
+                // it is marked seen (it has no ⋮ menu of its own, unlike a user group).
+                onClick={() => {
+                  if (folded) onDismissAttn(attentionIds(g.sessions, dismissedAttn))
+                  onToggleGroupFold(ck)
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
                   background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -1393,7 +1552,10 @@ function SessionBand({
                 <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {g.label}
                 </span>
-                <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{g.sessions.length}</span>
+                <span
+                  {...(folded && attentionCount(g.sessions, dismissedAttn) > 0 ? { className: ATTN_COUNT_CLASS } : {})}
+                  style={{ marginLeft: 'auto', opacity: 0.7 }}
+                >{g.sessions.length}</span>
               </button>
             )}
             {(!headings || !folded) && g.sessions.map(s => (
@@ -1507,7 +1669,9 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       onClick={onOpen}
       style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-        padding: '9px 9px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
+        // Left padding is deliberately wider than the right: a live row carries a state edge on its left
+        // and the text needs air beside it (the row's own dot used to provide it).
+        padding: '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -1557,16 +1721,6 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
-      {/* The dot marks a row that WANTS somebody. It never carries the message alone — the state
-          word is beside it — because a fact said only in colour is a fact some readers never get. */}
-      <span
-        aria-hidden
-        style={{
-          width: 6, height: 6, borderRadius: 3, flexShrink: 0,
-          background: wants ? 'var(--anthropic-orange)' : color,
-          opacity: wants ? 1 : 0.55,
-        }}
-      />
       <SessionFacts
         session={session}
         selected={selected}

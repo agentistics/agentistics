@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
-  DEFAULT_ASIDE_GROUP_PREFS, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs,
+  DEFAULT_ASIDE_GROUP_PREFS, collapseKey, readAsideGroupPrefs, readSessionSort, writeAsideGroupPrefs,
 } from './sessionsAsidePrefs'
 
 /** A minimal localStorage, so the module runs outside a browser — same pattern
@@ -73,6 +73,8 @@ describe('writeAsideGroupPrefs', () => {
       collapsed: ['active:status:working'],
       cardColor: 'neutral',
       collapsedUserGroups: ['g1'],
+      sort: { by: 'recent', dir: 'asc' },
+      hiddenUserGroups: ['g2'],
     })
     expect(readAsideGroupPrefs()).toEqual({
       groupBy: 'status',
@@ -80,6 +82,8 @@ describe('writeAsideGroupPrefs', () => {
       collapsed: ['active:status:working'],
       cardColor: 'neutral',
       collapsedUserGroups: ['g1'],
+      sort: { by: 'recent', dir: 'asc' },
+      hiddenUserGroups: ['g2'],
     })
   })
 
@@ -101,4 +105,26 @@ describe('collapseKey', () => {
   test('is stable and readable', () => {
     expect(collapseKey('active', 'status', 'working')).toBe('active:status:working')
   })
+})
+
+describe('the sort preference', () => {
+  test('a stored preference from before sorting existed reads as the default order', () => {
+    localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ groupBy: 'task' }))
+    expect(readAsideGroupPrefs().sort).toEqual({ by: 'state', dir: 'desc' })
+  })
+
+  test('readSessionSort is total: an unknown key or direction falls back to the default field by field', () => {
+    expect(readSessionSort({ by: 'name', dir: 'asc' })).toEqual({ by: 'name', dir: 'asc' })
+    expect(readSessionSort({ by: 'nonsense', dir: 'asc' })).toEqual({ by: 'state', dir: 'asc' })
+    expect(readSessionSort({ by: 'usage', dir: 'sideways' })).toEqual({ by: 'usage', dir: 'desc' })
+    expect(readSessionSort(null)).toEqual({ by: 'state', dir: 'desc' })
+    expect(readSessionSort('recent')).toEqual({ by: 'state', dir: 'desc' })
+  })
+})
+
+test('hiddenUserGroups: absent reads as none hidden, and junk entries are dropped', () => {
+  localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ groupBy: 'task' }))
+  expect(readAsideGroupPrefs().hiddenUserGroups).toEqual([])
+  localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ hiddenUserGroups: ['a', 3, null, 'b'] }))
+  expect(readAsideGroupPrefs().hiddenUserGroups).toEqual(['a', 'b'])
 })
