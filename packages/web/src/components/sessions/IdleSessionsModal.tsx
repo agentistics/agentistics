@@ -140,30 +140,42 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     })
   }
 
-  async function stillIdle(id: string): Promise<boolean> {
-    let freshRows: ControlSession[] | null = null
+  /**
+   * ONE fresh read per apply run, not one per plan item — `runIdlePlan` used to call `stillIdle`
+   * per session, and each call re-fetched the whole fleet, so filing five sessions cost five
+   * `GET /api/fleet` round trips for a single click. `fetchFreshFleet` takes that one snapshot;
+   * `stillIdle` (still the exact `IdleEffects.stillIdle(id)` shape `runIdlePlan` expects) closes
+   * over it and judges every session against the SAME read, which is also more correct than the
+   * old per-item behaviour — a session ended earlier in the loop could otherwise change what a
+   * later re-fetch reported for an unrelated row.
+   */
+  async function fetchFreshFleet(): Promise<ControlSession[] | null> {
     try {
       const maybe = refresh()
       if (maybe && typeof (maybe as Promise<ControlSession[]>).then === 'function') {
         const awaited = await maybe
-        if (Array.isArray(awaited)) freshRows = awaited
+        if (Array.isArray(awaited)) return awaited
       }
     } catch { /* fall through to the direct read below */ }
-    if (freshRows === null) {
-      try {
-        const res = await fetch(`/api/fleet?lang=${lang}`)
-        if (!res.ok) return false
-        const json = await res.json() as { rows?: ControlSession[] }
-        freshRows = Array.isArray(json.rows) ? json.rows : []
-      } catch {
-        // An unverifiable state is never ended — see this module's own header.
-        return false
-      }
+    try {
+      const res = await fetch(`/api/fleet?lang=${lang}`)
+      if (!res.ok) return null
+      const json = await res.json() as { rows?: ControlSession[] }
+      return Array.isArray(json.rows) ? json.rows : []
+    } catch {
+      return null
     }
-    const row = freshRows.find(r => r.id === id)
-    if (!row || row.state !== 'waiting') return false
-    const original = frozen.find(c => c.row.id === id)?.row.lastUserMessageAt
-    return row.lastUserMessageAt === original
+  }
+
+  function makeStillIdle(freshRows: ControlSession[] | null): (id: string) => Promise<boolean> {
+    return async id => {
+      // An unverifiable state is never ended — see this module's own header.
+      if (freshRows === null) return false
+      const row = freshRows.find(r => r.id === id)
+      if (!row || row.state !== 'waiting') return false
+      const original = frozen.find(c => c.row.id === id)?.row.lastUserMessageAt
+      return row.lastUserMessageAt === original
+    }
   }
 
   function ensureGroup(g: GroupSuggestion): string | null {
@@ -185,8 +197,9 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
         : { kind: 'new', name: (plan?.newName ?? '').trim() || (pt ? 'Ocioso' : 'Idle') }
       return { id: c.row.id, key: c.key, title: row?.title ?? c.row.id, action, group }
     })
+    const freshRows = await fetchFreshFleet()
     const fx: IdleEffects = {
-      stillIdle,
+      stillIdle: makeStillIdle(freshRows),
       ensureGroup,
       fileInto: (groupId, key) => { moveSessionToGroup(groupId, key) },
       end: async id => {
@@ -216,6 +229,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     newGroup: pt ? 'Novo grupo…' : 'New group…',
     newGroupPlaceholder: pt ? 'Nome do grupo' : 'Group name',
     memory: pt ? 'Memória' : 'Memory',
+    nothingIdle: pt ? 'Nenhuma sessão ociosa agora.' : 'Nothing idle right now.',
   }
 
   const summary = freed !== null
@@ -284,7 +298,16 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
         </header>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 20px' }}>
-          {outcomes !== null ? (
+          {frozen.length === 0 ? (
+            // Opened with nothing frozen — e.g. the notification was clicked after every idle
+            // session had already been ended or resumed elsewhere. A blank body under a "0
+            // session(s)" summary reads as broken; say so instead.
+            <div style={{
+              padding: '20px 4px', textAlign: 'center', fontSize: 12.5, color: 'var(--text-tertiary)',
+            }}>
+              {t.nothingIdle}
+            </div>
+          ) : outcomes !== null ? (
             outcomes.map(o => (
               <div key={o.id} style={{
                 display: 'flex', flexDirection: 'column', gap: 2,
@@ -378,7 +401,6 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                             style={{
                               ...inputStyle, padding: '7px 10px 7px 10px',
                               flex: isMobile ? '1 1 100%' : '1 1 160px',
-                              ...(isMobile ? { fontSize: 16 } : {}),
                             }}
                           />
                         )}
@@ -395,7 +417,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
           display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--border)',
           justifyContent: 'flex-end', flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
-          {outcomes !== null ? (
+          {frozen.length === 0 || outcomes !== null ? (
             <button
               type="button"
               onClick={onClose}

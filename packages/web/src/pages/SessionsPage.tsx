@@ -2682,7 +2682,7 @@ export default function SessionsPage() {
           pane holds the question asked before the pane is dropped — see `leaveGuard`. */}
       {leaveGuard}
     </div>
-    {idleOpen && idleCandidates.length > 0 && (
+    {idleOpen && (
       <IdleSessionsModal
         lang={pt ? 'pt' : 'en'}
         candidates={idleCandidates}
