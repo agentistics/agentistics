@@ -175,18 +175,29 @@ export function mapMessages(messages: ProviderMessage[]): ModelMessage[] {
   const out: ModelMessage[] = []
 
   for (const message of messages) {
+    const start = out.length
+    mapOne(message)
+    // A breakpoint goes on the LAST message this one became (a tool result splits into two).
+    if (message.cache && out.length > start) {
+      const last = out[out.length - 1]!
+      last.providerOptions = { ...last.providerOptions, anthropic: { cacheControl: message.cache } }
+    }
+  }
+  return out
+
+  function mapOne(message: ProviderMessage): void {
     if (typeof message.content === 'string') {
       out.push(
         message.role === 'assistant'
           ? { role: 'assistant', content: message.content }
           : { role: 'user', content: message.content },
       )
-      continue
+      return
     }
 
     if (message.role === 'assistant') {
       out.push({ role: 'assistant', content: message.content.map(p => mapAssistantPart(p, names)) })
-      continue
+      return
     }
 
     const toolResults = message.content.filter((p): p is ToolResultLike => p.type === 'tool_result')
@@ -210,7 +221,6 @@ export function mapMessages(messages: ProviderMessage[]): ModelMessage[] {
     }
   }
 
-  return out
 }
 
 /** `ProviderToolDecl[]` -> the AI SDK's `ToolSet`. Declarations only, no `execute` — B1 executes no
@@ -275,6 +285,17 @@ function credentialRefusalError(): ProviderError {
   }
 }
 
+/** `system` as a plain string, or — when a cache breakpoint is asked for — as the one system message
+ *  the AI SDK lets carry `providerOptions`. Without `system` there is nothing to mark. */
+export function mapSystem(req: Pick<ProviderRequest, 'system' | 'systemCache'>) {
+  if (req.system === undefined || !req.systemCache) return req.system
+  return {
+    role: 'system' as const,
+    content: req.system,
+    providerOptions: { anthropic: { cacheControl: req.systemCache } },
+  }
+}
+
 type GenerateTextResultLike = Awaited<ReturnType<typeof generateText>>
 
 async function callGenerateText(
@@ -293,7 +314,7 @@ async function callGenerateText(
     })
     const result = await generateText({
       model: anthropicProvider(req.model),
-      system: req.system,
+      system: mapSystem(req),
       messages: mapMessages(req.messages),
       tools: mapTools(req.tools),
       maxOutputTokens: req.maxTokens,

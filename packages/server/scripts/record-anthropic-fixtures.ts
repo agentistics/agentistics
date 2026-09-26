@@ -18,9 +18,9 @@
  * THE KEY IS NEVER IN THIS FILE'S HANDS. The call goes through the real `invokeOnce`, whose default
  * resolver reads the key through `credentials.ts` and unwraps it inside `anthropic/client.ts` — the
  * one file allowed to. This script never names a header, never calls the unwrap, never reads the
- * environment. The cache scenarios need a `cache_control` marker `ProviderRequest` cannot express
- * yet; instead of touching the client (B1.4's), the script hands `invokeOnce` a `fetchImpl` that
- * edits the outgoing JSON BODY only (`init.body`) and forwards `init` otherwise untouched.
+ * environment. The cache scenarios ask for their `cache_control` breakpoint through
+ * `ProviderRequest.systemCache` — the client's own contract — so nothing here patches a request
+ * body behind the client's back.
  *
  * WHAT IS WRITTEN goes through the same allowlist the runtime uses: the exchange is read back from
  * the content-addressed capture `invokeOnce` already wrote (headers allowlisted by `raw.ts` at the
@@ -99,26 +99,9 @@ function buildRequest(scenario: Scenario, model: string): ProviderRequest {
     ...base,
     maxTokens: 16,
     system: paddedSystem(),
+    systemCache: { type: 'ephemeral' },
     messages: [{ role: 'user', content: 'Reply with the single word: Noted.' }],
   }
-}
-
-/**
- * Marks the last `system` block `cache_control: {type: 'ephemeral'}` by editing `init.body` only.
- * Throws BEFORE calling `inner` when the body is not the shape expected, so a surprise costs no
- * request. `input` and every other `init` field (headers included) are forwarded as received.
- */
-export function withCacheControl(inner: typeof fetch): typeof fetch {
-  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    if (typeof init?.body !== 'string') throw new Error('recorder: request body is not a JSON string; refusing to send')
-    const body = JSON.parse(init.body) as { system?: unknown }
-    if (!Array.isArray(body.system) || body.system.length === 0) {
-      throw new Error('recorder: request has no system blocks to mark; refusing to send')
-    }
-    const last = body.system[body.system.length - 1] as Record<string, unknown>
-    last.cache_control = { type: 'ephemeral' }
-    return inner(input, { ...init, body: JSON.stringify(body) })
-  }) as typeof fetch
 }
 
 function parseArgs(argv: string[]): { scenario: Scenario; model: string; force: boolean } {
@@ -150,10 +133,8 @@ export async function record(argv: string[]): Promise<void> {
 
   const captureDir = await mkdtemp(join(tmpdir(), 'agentistics-fixture-capture-'))
   try {
-    const usesCache = scenario !== 'plain'
     const result = await invokeOnce(buildRequest(scenario, model), 1, {
       captureDir,
-      ...(usesCache ? { fetchImpl: withCacheControl(fetch) } : {}),
     })
 
     if (result.status === 'failed') {

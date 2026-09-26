@@ -80,7 +80,16 @@ export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
 )
 // What the WRITING process reports about itself (counters since boot), for `agentop journal status`
 // to read from a different process. It sits beside the journal, whichever directory that is.
-export const JOURNAL_STATUS_PATH = `${JOURNAL_PATH}.status.json`
+// Both side-files below are written as literal `join`s, like `JOURNAL_PATH`, so
+// `backup-coverage.lint.test.ts` can SEE the names and hold each to a decision in `backup-plan.ts`.
+export const JOURNAL_STATUS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.status.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.status.json')
+// The shadow writer's accepted-stamps memory (`journal/shadow.ts`, default `<journal path>.stamps.json`),
+// which lets a run skip sources it has already folded in. Same directory rule as the journal itself.
+export const JOURNAL_STAMPS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.stamps.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.stamps.json')
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json

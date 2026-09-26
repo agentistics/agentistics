@@ -50,9 +50,22 @@ export type ProviderMessagePart =
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
 
+/** Marks a prompt prefix as cacheable. The cache breakpoint sits at the END of what it is set on;
+ *  Anthropic caches everything up to and including that block. `ttl` absent = the provider's
+ *  default (5 minutes). Never journaled — it shapes the request, and the resulting cache activity
+ *  comes back on `usage` (cacheRead / cacheWrite / cacheWriteByTtl). */
+// A type alias, not an interface: the AI SDK's `providerOptions` is a JSON-object type, and only an
+// alias is assignable to its index signature.
+export type ProviderCacheControl = {
+  type: 'ephemeral'
+  ttl?: '5m' | '1h'
+}
+
 export interface ProviderMessage {
   role: 'user' | 'assistant'
   content: string | ProviderMessagePart[]
+  /** Optional: put a cache breakpoint after this message. */
+  cache?: ProviderCacheControl
 }
 
 /** A tool DECLARATION only: B1 executes no tool (B3). */
@@ -67,6 +80,8 @@ export interface ProviderRequest {
   /** the REQUESTED id; the served one comes back on the result */
   model: string
   system?: string
+  /** Optional: put a cache breakpoint after the system prompt. No effect without `system`. */
+  systemCache?: ProviderCacheControl
   messages: ProviderMessage[]
   tools?: ProviderToolDecl[]
   /** required: Anthropic requires it and a default is a guess */

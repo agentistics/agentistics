@@ -240,6 +240,7 @@ async function printStatusFor(provider: KeyedProviderId, d: ProviderCliDeps): Pr
   if (res.mode !== undefined) d.stdout(`  mode: ${res.mode}`)
   if (res.storedAt !== undefined) d.stdout(`  stored: ${res.storedAt}`)
   if (res.fingerprint !== undefined) d.stdout(`  fingerprint: ${res.fingerprint}`)
+  if (res.last4) d.stdout(`  ends with: …${res.last4}`)
 }
 
 async function runStatus(rest: string[], d: ProviderCliDeps): Promise<number> {
@@ -297,7 +298,7 @@ Usage: agentop provider key <set|status|remove> [options]
   agentop provider key set anthropic            Hidden prompt (default) — nothing is echoed
   agentop provider key set anthropic --stdin    Read ONE line from a pipe; no prompt
   agentop provider key set anthropic --replace  With --stdin, allow overwriting a stored key
-  agentop provider key status [anthropic]       Presence + fingerprint — never the key itself
+  agentop provider key status [anthropic]       Presence + fingerprint + last 4 characters
   agentop provider key remove anthropic         Delete the stored key (does not revoke it)
 
 The key is NEVER accepted on the command line, in ANY position — not as an argument, not in a
@@ -316,10 +317,10 @@ Nobody should ever paste a key into a chat message, a GitHub issue, a task comme
 including a prompt to an assistant implementing or reviewing this feature. If a key was ever
 pasted somewhere it can be read back, revoke it in the Anthropic console and mint a new one.
 
-\`agentop provider key status\` never prints the value, a substring of it, its length, or the raw
-stored file — only whether a key is present, its path, its file mode, when it was stored and a
-one-way \`sha256:xxxxxxxx\` fingerprint, so a rotation is visible as \`old → new\` without ever
-showing either key.
+\`agentop provider key status\` never prints the value, more than its last 4 characters, its length,
+or the raw stored file — only whether a key is present, its path, its file mode, when it was
+stored, a one-way \`sha256:xxxxxxxx\` fingerprint (a rotation is visible as \`old → new\`) and the
+key's last 4 characters, which is what the Anthropic console shows beside each key.
 `.trim()
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,8 @@ import { inspect } from 'node:util'
 import {
   createCredentialHandle,
   fingerprintOf,
+  lastFourOf,
+  KEY_TAIL_LENGTH,
   formatMode,
   isModeTooOpen,
   keyShapeSentence,
@@ -76,6 +78,16 @@ describe('fingerprintOf', () => {
     const fp = fingerprintOf(FAKE_KEY)
     expect(FAKE_KEY.includes(fp)).toBe(false)
     expect(fp.includes(FAKE_KEY)).toBe(false)
+  })
+
+  test('lastFourOf shows the last 4 characters and never more (C-3)', () => {
+    const key = 'sk-ant-' + 'abcdefghijklmnopqrst' + 'WXYZ'
+    expect(lastFourOf(key)).toBe('WXYZ')
+    expect(lastFourOf(key)).toHaveLength(KEY_TAIL_LENGTH)
+    expect(KEY_TAIL_LENGTH).toBe(4)
+    // A value too short to be a key yields nothing, never the whole thing.
+    expect(lastFourOf('abcd')).toBe('')
+    expect(lastFourOf('sk-ant-abc')).toBe('')
   })
 
   test('a rotated key fingerprints differently, so a rotation is visible as old -> new', () => {
