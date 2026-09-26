@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "cache-read",
+    "source": "docs/superpowers/research/12-provider-apis.md §1.1, §1.5 (cache_read_input_tokens; total_input_tokens = read + creation + input). Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "request-id": "req_documented_cache_read_0001",
+    "content-type": "application/json",
+    "date": "Thu, 25 Sep 2026 12:00:00 GMT",
+    "anthropic-ratelimit-requests-limit": "4000",
+    "anthropic-ratelimit-requests-remaining": "3999",
+    "anthropic-ratelimit-tokens-limit": "400000",
+    "anthropic-ratelimit-tokens-remaining": "399000"
+  },
+  "body": "{\"id\":\"msg_documented_cache_read_0001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"Yes.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":15,\"output_tokens\":4,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":1500}}"
+}

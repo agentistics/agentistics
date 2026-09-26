@@ -174,6 +174,19 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'configuration file holding a key and living where the backups live is exactly what this '
       + 'table exists to keep out of an archive.',
   },
+  {
+    pattern: '.agentistics/provider-keys', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop provider key set anthropic',
+    why: 'Provider API keys entered for the native runtime (credentials.ts, 0600, never logged).',
+  },
+  {
+    pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
+    restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
+    why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '
+      + 'attempt by provider/capture.ts, 0600. Raw model output can echo anything the model read — a '
+      + 'token printed by a tool included — so it is excluded by default like a credential, not '
+      + 'carried and hoped clean.',
+  },
   // `.claude/sessions/<pid>.<hash>.key` (141 files on the reference machine) and
   // `.claude/daemon/control.key` are local control-socket tokens for the session manager and the
   // daemon dispatch socket. Both the `secret` and `runtime` reasons apply — they are credential-

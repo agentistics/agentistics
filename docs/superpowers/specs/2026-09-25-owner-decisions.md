@@ -140,6 +140,22 @@ delivery-breakdown §2.
 the evidence (a red → green test, `tsc`, the handback). A PR into `dev` stays the owner's, approved
 in one batch once a day. Applied to delivery-breakdown §5 rule 4.
 
+**D20 · The measured fields of a model call join the canonical contract.** Taken on 2026-09-25 by
+the specification session under the owner's delegation ("toma as decisões de acordo com sua
+recomendação"); the owner may veto. `ModelInvocation` and `model.completed` gain, all OPTIONAL and
+additive: `stopReason` (the provider's verbatim value plus B1.1's normalised `StopReason`, not a
+second enum), `modelRequested` + `modelServed` (they differ under aliases and routing, and only the
+served one prices the call), `attemptId` + `attempt` (1-based — the runtime owns the retry, so each
+retry is its own attempt; the billed response is still ONE event keyed on the provider's response
+id, and the attempts link to it), `iterations` (master §22.1.1 condition #2 — losing them loses
+tokens) and `agentId?` (optional on `ModelInvocation`, O-6: a bare call has no agent). Optional and
+additive because nothing A1/A2 already built may break, the session-meta projection ignores them,
+and a source that cannot produce a field leaves it ABSENT — never zero (the `HARNESS_CAPABILITIES`
+rule). Applied by B1.6 to `canonical/event.ts` / `entities.ts` (a type test proves A1.1's events
+still compile unchanged) and to master §13/§14. *Rejected:* (a) a separate B1-only event type — two
+shapes for one billed call is the duplication the journal exists to end; (b) an untyped `extra` bag
+— unqueryable, and a field nobody types is a field nobody validates.
+
 ## Also decided on 2026-09-25
 
 - **The native context manager** — every decision is in `2026-09-25-runtime-context-manager-design.md`.

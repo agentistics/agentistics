@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { CANONICAL_EVENT_SCHEMA, EVENT_TYPES, type AgentisticsEvent } from '@agentistics/core'
+import { createClaudeReplay } from '../integrations/claude'
 import {
-  REJECTION_ORDER, isIsoInstant, planAppend, rejectionOf, rowToEvent, toRow,
+  REJECTION_ORDER, decodeData, decodeRow, encodeData, encodeEventId, encodeInstant, encodeRow,
+  isIsoInstant, joinSourceRef, planAppend, rejectionOf, rowToEvent, splitSourceRef, toRow,
+  type Intern, type Lookup,
 } from './journal-plan'
 import type { RejectionReason } from './types'
 
@@ -263,6 +268,56 @@ describe('toRow', () => {
     const row = toRow(validEvent({ data: { a: 1 } as never }))
     expect(row.data).toBe('{"a":1}')
   })
+
+  // The canonical-UTC fast path skips `new Date(x).toISOString()` for a string already in that
+  // shape. It is only sound if the two always agree — so every shape is checked against Date itself.
+  test.each([
+    '2026-09-25T10:00:00.000Z',
+    '2024-02-29T23:59:59.999Z',
+    '0001-01-01T00:00:00.000Z',
+    '2026-09-25T10:00:00Z',
+    '2026-09-25T10:00Z',
+    '2026-09-25T10:00:00.1Z',
+    '2026-09-25T10:00:00.123456Z',
+    '2026-09-25T10:00:00.000+00:00',
+    '2026-09-25T23:30:00.000-03:00',
+  ])('the stored timestamp is exactly new Date(%p).toISOString()', (at) => {
+    const row = toRow(validEvent({ occurredAt: at, recordedAt: at }))
+    expect(row.occurred_at).toBe(new Date(at).toISOString())
+    expect(row.recorded_at).toBe(new Date(at).toISOString())
+  })
+})
+
+describe('planAppend serializes data once', () => {
+  test('the row carries exactly JSON.stringify(data), the same text toRow alone produces', () => {
+    const data = { usage: { input: 3, output: 50 }, tags: ['a', 'b'], note: 'é "quoted"' }
+    const e = validEvent({ data: data as never })
+    const plan = planAppend([e])
+    expect(plan.rejected).toEqual([])
+    expect(plan.rows[0]!.row.data).toBe(JSON.stringify(data))
+    expect(plan.rows[0]!.row).toEqual(toRow(e))
+  })
+
+  test('JSON.stringify runs once per accepted event, not twice', () => {
+    const e = validEvent({ data: { a: 1 } as never })
+    let calls = 0
+    const orig = JSON.stringify
+    JSON.stringify = ((...args: Parameters<typeof orig>) => { calls++; return orig(...args) }) as typeof orig
+    try {
+      planAppend([e, e, e])
+    } finally {
+      JSON.stringify = orig
+    }
+    expect(calls).toBe(3)
+  })
+
+  test('a data value JSON cannot hold is still bad-data, through the single serialization', () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(planAppend([validEvent({ data: cyclic as never })]).rejected).toEqual([{ index: 0, reason: 'bad-data', eventId: validEvent().eventId }])
+    expect(planAppend([validEvent({ data: (() => 1) as never })]).rejected[0]!.reason).toBe('bad-data')
+    expect(planAppend([validEvent({ data: 10n as never })]).rejected[0]!.reason).toBe('bad-data')
+  })
 })
 
 describe('round-trip', () => {
@@ -295,6 +350,130 @@ describe('round-trip', () => {
     expect('version' in back.source).toBe(false)
     expect('sourceRef' in back.provenance).toBe(false)
   })
+})
+
+// ── storage encoding (schema v2) ────────────────────────────────────────────────────────────────
+
+/** An in-memory `event_strings`: the same contract journal.ts keeps against the table. */
+function dictionary(): { intern: Intern; lookup: Lookup; size: () => number } {
+  const ids = new Map<string, number>()
+  const strs: string[] = []
+  return {
+    intern: s => { let id = ids.get(s); if (id === undefined) { id = strs.push(s); ids.set(s, id) } return id },
+    lookup: id => { const s = strs[id - 1]; if (s === undefined) throw new Error(`unknown ${id}`); return s },
+    size: () => strs.length,
+  }
+}
+
+/** `e` through every layer the journal stores it with, and back. */
+function throughStorage(e: AgentisticsEvent, d = dictionary()): AgentisticsEvent {
+  return rowToEvent(decodeRow(encodeRow(toRow(e), d.intern), d.lookup))
+}
+
+describe('storage encoding — lossless by construction', () => {
+  test('a 32-char lowercase hex id is 16 raw bytes; any other id stays the text it is', () => {
+    const hex = '0123456789abcdef0123456789abcdef'
+    expect(encodeEventId(hex)).toBeInstanceOf(Uint8Array)
+    expect((encodeEventId(hex) as Uint8Array).length).toBe(16)
+    for (const id of ['evt-1', hex.toUpperCase(), `${hex}0`, hex.slice(1)]) expect(encodeEventId(id)).toBe(id)
+  })
+
+  test('an instant is epoch ms, and anything but the normalised form refuses instead of drifting', () => {
+    expect(encodeInstant('2026-09-25T10:00:00.123Z')).toBe(Date.UTC(2026, 8, 25, 10, 0, 0, 123))
+    expect(() => encodeInstant('2026-09-25T10:00:00Z')).toThrow()
+    expect(() => encodeInstant('2026-09-25T07:00:00.000-03:00')).toThrow()
+  })
+
+  test('source_ref splits only at a trailing canonical decimal, and always joins back', () => {
+    for (const ref of [
+      'claude:0a1b:12', 'claude:0a1b/subagents/a9:3', 'x:0', 'x:01', 'x:', ':7', 'plain', '',
+      'a::5', 'x:1234567890123456', 'multi\nline:4', 'claude:c:9007199254740991',
+    ]) {
+      const { base, line } = splitSourceRef(ref)
+      expect(joinSourceRef(base, line)).toBe(ref)
+    }
+    expect(splitSourceRef('claude:abc:12')).toEqual({ base: 'claude:abc', line: 12 })
+    expect(splitSourceRef('x:01')).toEqual({ base: 'x:01', line: null })
+    expect(splitSourceRef('x:1234567890123456')).toEqual({ base: 'x:1234567890123456', line: null })
+  })
+
+  test('data comes back as the SAME JSON text, byte for byte', () => {
+    const d = dictionary()
+    const values: unknown[] = [
+      {}, [], 'text', 7, null, true, [1, { a: 2 }],
+      { a: 1 }, { a: {} }, { a: [] }, { a: null, b: false, c: 'x' },
+      { provider: 'anthropic', usage: { input: 3, output: 9, cacheRead: 0, cacheWrite: 1 }, cacheWriteByTtl: { ephemeral_5m: 0, ephemeral_1h: 1 } },
+      { deep: { er: { est: { v: 1 } }, sib: 2 }, tail: 'z' },
+      { '2': 'b', '1': 'a', x: 'c' }, // index-like keys: the engine's own order, both ways
+      JSON.parse('{"__proto__":{"polluted":1},"k":1}'),
+      { 'quo"te': 'ü ✓ \u0000', n: -0, big: 1e21, small: 5e-7, neg: -12.5 },
+      { filesTouched: ['/a b/c.ts'], linesAdded: 3 },
+    ]
+    for (const v of values) {
+      const json = JSON.stringify(v)
+      const enc = encodeData(json, d.intern)
+      expect(decodeData(enc.shape === null ? null : d.lookup(enc.shape), enc.values)).toBe(json)
+    }
+    // Nothing leaked onto Object.prototype while rebuilding `__proto__`.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  test('one payload shape is one dictionary entry however many rows carry it', () => {
+    const d = dictionary()
+    const a = encodeData(JSON.stringify({ model: 'm1', usage: { input: 1 } }), d.intern)
+    const b = encodeData(JSON.stringify({ model: 'm2', usage: { input: 99 } }), d.intern)
+    expect(a.shape).toBe(b.shape)
+    expect(a.values).toBe('["m1",1]')
+    expect(d.size()).toBe(1)
+  })
+
+  test('a values array that does not fit its shape is refused, never silently misread', () => {
+    const d = dictionary()
+    const { shape } = encodeData('{"a":1,"b":2}', d.intern)
+    expect(() => decodeData(d.lookup(shape!), '[1]')).toThrow()
+    expect(() => decodeData(d.lookup(shape!), '[1,2,3]')).toThrow()
+  })
+
+  test('every optional field present and absent survives the storage layer exactly', () => {
+    const full: AgentisticsEvent = {
+      eventId: '0123456789abcdef0123456789abcdef',
+      schema: CANONICAL_EVENT_SCHEMA,
+      type: 'session.ended',
+      occurredAt: '2026-09-25T10:00:00.000Z',
+      recordedAt: '2026-09-25T10:00:01.000Z',
+      sessionId: 'sess-1', runId: 'run-1', agentId: 'agent-1', taskId: 'task-1',
+      source: { kind: 'harness', id: 'claude', version: '2.1.263' },
+      provenance: { mode: 'observed', confidence: 'exact', adapterVersion: '1.0.0', sourceRef: 'claude:c:42' },
+      data: {},
+    }
+    expect(throughStorage(full)).toEqual(full)
+    const minimal = validEvent()
+    const back = throughStorage(minimal)
+    expect(back).toEqual(minimal)
+    for (const k of ['sessionId', 'runId', 'agentId', 'taskId']) expect(k in back).toBe(false)
+    expect('version' in back.source).toBe(false)
+    expect('sourceRef' in back.provenance).toBe(false)
+  })
+})
+
+describe('storage encoding over the replay fixtures (A2.2\'s redacted real transcripts)', () => {
+  const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+  for (const name of readdirSync(FIXTURES).filter(n => n.startsWith('claude-replay'))) {
+    test(`${name}: rowToEvent(decodeRow(encodeRow(toRow(e)))) deep-equals e for EVERY event`, async () => {
+      const replay = createClaudeReplay({ projectsDir: join(FIXTURES, name), now: () => Date.UTC(2100, 0, 1) })
+      const d = dictionary()
+      let n = 0
+      for (const src of await replay.discover()) {
+        const { events } = await replay.replay(src, null)
+        for (const e of events) {
+          expect(rowToEvent(toRow(e))).toEqual(e)
+          expect(throughStorage(e, d)).toEqual(e)
+          n++
+        }
+      }
+      expect(n).toBeGreaterThan(0)
+    })
+  }
 })
 
 // ── planAppend ──────────────────────────────────────────────────────────────────────────────────

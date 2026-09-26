@@ -58,7 +58,7 @@ import type { FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
 import { PROJECTS_DIR } from '../../config'
-import { createTranscriptPathMemo, resolveMemoizedPath } from '../../sessions/transcript-path-memo'
+import { createTranscriptPathMemo, resolveMemoizedPath, type TranscriptPathMemo } from '../../sessions/transcript-path-memo'
 import {
   anchorHex, consumedEnd, cursorFrom, evictTranscriptStates, planTranscriptRead,
   type TranscriptCursor, type TranscriptStat,
@@ -357,10 +357,25 @@ async function runSubagentPass(
 
 // ── The scan `discover()` performs, and the one `resolveMemoizedPath` falls back to ────────────
 
-async function discoverSources(projectsDir: string): Promise<ReplaySource[]> {
+/**
+ * Every conversation under `projectsDir` — and, as it goes, the path each one was FOUND at, handed to
+ * the path memo. Without that, `replay` asked `findTranscriptPath` to find again what this scan had
+ * just found: one `stat` per project directory per conversation (~140 on average across 307 projects
+ * here), ~68k `fs/promises` round trips for a first ingest of 491 conversations. Profiled on this
+ * machine's store (A1.7), that search was 17 % of the replay's CPU — the single largest cost that was
+ * not reading or parsing a transcript.
+ *
+ * It resolves to the SAME path the search would have: the search walks the same `readdir` in the same
+ * order and stops at the first project holding `<id>.jsonl`, so only the FIRST sighting of an id in
+ * this scan is remembered. And it never overrides a path the memo already holds — that one is checked
+ * with `exists` on the next resolve exactly as before, so a moved transcript is re-found by the same
+ * rule it always was (`resolveMemoizedPath`).
+ */
+async function discoverSources(projectsDir: string, memo?: TranscriptPathMemo): Promise<ReplaySource[]> {
   let projects: string[]
   try { projects = await readdir(projectsDir) } catch { return [] }
   const sources: ReplaySource[] = []
+  const seen = new Set<string>()
   for (const project of projects) {
     const dir = join(projectsDir, project)
     let files: string[]
@@ -369,6 +384,10 @@ async function discoverSources(projectsDir: string): Promise<ReplaySource[]> {
       if (!file.endsWith('.jsonl')) continue
       const conversationId = file.slice(0, -'.jsonl'.length)
       sources.push({ sessionId: conversationId, sourceRef: `claude:${conversationId}` })
+      if (memo && !seen.has(conversationId)) {
+        seen.add(conversationId)
+        if (memo.get(conversationId) === undefined) memo.remember(conversationId, join(dir, file))
+      }
     }
   }
   return sources
@@ -409,7 +428,7 @@ export function createClaudeReplay(opts: ClaudeReplayOptions = {}): HarnessRepla
   }
 
   async function discover(): Promise<ReplaySource[]> {
-    return discoverSources(projectsDir)
+    return discoverSources(projectsDir, pathMemo)
   }
 
   async function doReplay(source: ReplaySource, cursor: ReplayCursor): Promise<ReplayBatch> {

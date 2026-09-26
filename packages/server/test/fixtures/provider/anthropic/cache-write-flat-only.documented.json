@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "cache-write-flat-only",
+    "source": "docs/superpowers/research/12-provider-apis.md §1.1: the nested cache_creation object is only present for a both-bucket or 1h write, so a 5m-only write can state the flat counter alone. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "request-id": "req_documented_cache_write_flat_0001",
+    "content-type": "application/json",
+    "date": "Thu, 25 Sep 2026 12:00:00 GMT",
+    "anthropic-ratelimit-requests-limit": "4000",
+    "anthropic-ratelimit-requests-remaining": "3999",
+    "anthropic-ratelimit-tokens-limit": "400000",
+    "anthropic-ratelimit-tokens-remaining": "399000"
+  },
+  "body": "{\"id\":\"msg_documented_cache_write_flat_0001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"Noted.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"cache_creation_input_tokens\":800,\"cache_read_input_tokens\":0}}"
+}

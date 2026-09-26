@@ -36,6 +36,7 @@
 import type { ProviderId } from '../providers'
 import type { TokenBreakdown } from '../tokens'
 import type { HarnessId } from '../types'
+import type { StopReason } from '../provider/stop-reason'
 
 // ── Identity ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -190,10 +191,60 @@ export type CostSource = (typeof COST_SOURCES)[number]
 export const REASONING_BILLINGS = ['included-in-output', 'additive', 'unknown'] as const
 export type ReasoningBilling = (typeof REASONING_BILLINGS)[number]
 
-/** ONE billed response. The unit of cost. */
+/**
+ * Why the model stopped (D20, 2026-09-25) — BOTH the normalised kind and the provider's own value.
+ * The normalised half is B1.1's `StopReason` (`provider/stop-reason.ts`), reused rather than
+ * restated: a second stop vocabulary would be a second answer to one question.
+ */
+export interface ModelStopReason {
+  normalised: StopReason
+  /** The provider's value exactly as sent. Absent when the source did not hand it over — never guessed. */
+  verbatim?: string
+}
+
+/**
+ * One server-side sub-call the provider reported inside a billed response (D20 — Anthropic's
+ * `usage.iterations[]`; master §22.1.1 condition #2). Only what can be named is typed: whether its
+ * tokens are already inside the four counters is UNMEASURED (B1 spec O-3), so none are extracted
+ * here — the raw capture keeps them — and a projection must call the invocation's price PARTIAL.
+ */
+export interface ModelIteration {
+  kind: string
+  model?: string
+}
+
+export interface ModelIterations {
+  /** The only relation to the top-level counters anyone can state today (O-3). */
+  relation: 'unmeasured'
+  items: ModelIteration[]
+}
+
+/**
+ * ONE billed response. The unit of cost.
+ *
+ * D20 (2026-09-25) added `attemptId`/`attempt`, `modelRequested`/`modelServed`, `stopReason` and
+ * `iterations`, and made `agentId` OPTIONAL (B1 spec O-6: a bare provider call has no agent, and
+ * inventing one would put an agent on record that nothing started). Every D20 field is optional
+ * and additive: a source that cannot produce one leaves it ABSENT, never zero.
+ */
 export interface ModelInvocation {
   id: Id
-  agentId: Id
+  /** Absent for an invocation no agent made (a bare runtime call) — O-6. */
+  agentId?: Id
+  /**
+   * The grouping key SHARED by every attempt of one invocation (the caller-minted `inv_…`), with
+   * `attempt` telling them apart. The runtime owns the retry (master §22.1.1), so each retry is its
+   * own attempt; the billed response is still ONE invocation, keyed on the provider's response id.
+   */
+  attemptId?: Id
+  /** 1-based. */
+  attempt?: number
+  /** The id the caller ASKED for. May differ from `modelServed` under aliases and routing. */
+  modelRequested?: string
+  /** The id the provider SAYS answered. Only this one prices the call. */
+  modelServed?: string
+  stopReason?: ModelStopReason
+  iterations?: ModelIterations
   /**
    * The correlation key across layers (§13.3): Anthropic `message.id` / `request-id`, OpenAI's id,
    * … One id = one billing event, last wins — the `usage-dedupe.ts` rule. When the source does not
