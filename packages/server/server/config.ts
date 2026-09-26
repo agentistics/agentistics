@@ -64,6 +64,23 @@ export const ARCHIVE_DIR = process.env.AGENTISTICS_ARCHIVE_DIR ?? join(AGENTISTI
 export const ARCHIVE_PROJECTS_DIR = join(ARCHIVE_DIR, 'projects')
 export const ARCHIVE_SESSION_META_DIR = join(ARCHIVE_DIR, 'usage-data', 'session-meta')
 export const ARCHIVE_STATS_DIR = join(ARCHIVE_DIR, 'stats-cache')
+// The durable event journal (decision D2: SQLite WAL, one per machine): <data dir>/journal.db.
+// `AGENTISTICS_JOURNAL_DIR` MOVES it — the escape hatch for a data dir that sits on a network
+// filesystem, where the journal refuses to open (WAL is not safe there). It never disables that
+// check: the override directory is classified exactly like the default one. Written as two literal
+// `join`s rather than one over a computed dir so `backup-coverage.lint.test.ts` can see the name.
+export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db')
+// The shadow writer's flag (P1 §1 item 5, §11): while `AGENTISTICS_JOURNAL` is on, a build ALSO feeds
+// the journal. **Absent reads as OFF** — a machine must not start writing a database because it was
+// upgraded — and only an explicit affirmative turns it on. Rolling back is unsetting it.
+export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
+  (process.env.AGENTISTICS_JOURNAL ?? '').trim().toLowerCase(),
+)
+// What the WRITING process reports about itself (counters since boot), for `agentop journal status`
+// to read from a different process. It sits beside the journal, whichever directory that is.
+export const JOURNAL_STATUS_PATH = `${JOURNAL_PATH}.status.json`
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json
@@ -288,6 +305,36 @@ export function teamRulesFile(connId: string): string {
 /** { state, ids, runIds, rulesHash, startedAt } — the removal journal. */
 export function teamForgetFile(connId: string): string {
   return join(TEAM_CONN_DIR, `team-forget-${safeConnId(connId)}.json`)
+}
+
+/** The native runtime's feature flag. ABSENT reads as OFF: with it off no provider module is
+ *  loaded, no credential file is read, and every `agentop provider` verb but `status` refuses in a
+ *  sentence. Kept in ONE exported constant so renaming the flag is one line. */
+export const PROVIDER_FLAG_ENV = 'AGENTISTICS_PROVIDER'
+/** Only `'1'` turns it on — the convention every other `AGENTISTICS_*` switch here follows. */
+export function providerFlagOn(env: Record<string, string | undefined> = process.env): boolean {
+  return env[PROVIDER_FLAG_ENV] === '1'
+}
+
+/** Provider API keys the USER entered for the native runtime (`agentop provider key set`). Its own
+ *  directory, 0700, one 0600 file per provider — never preferences.json, which is served (redacted
+ *  by a list that would have to know the field), written at the default mode and carried by every
+ *  backup. Excluded from backups as a `secret` in backup-plan.ts. */
+export const PROVIDER_KEYS_DIR = join(AGENTISTICS_DATA_DIR, 'provider-keys')
+
+/** The providers a key may be STORED for. Closed, and deliberately narrower than core's
+ *  `ProviderId`: B1 enters an Anthropic key and nothing else (owner decision D3). */
+export type KeyedProviderId = 'anthropic'
+export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic']
+
+export function isKeyedProvider(id: unknown): id is KeyedProviderId {
+  return typeof id === 'string' && (KEYED_PROVIDERS as readonly string[]).includes(id)
+}
+
+/** A provider id is interpolated into a path only after this check, the `safeConnId` rule. */
+export function providerKeyFile(provider: KeyedProviderId, dir: string = PROVIDER_KEYS_DIR): string {
+  if (!isKeyedProvider(provider)) throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
+  return join(dir, `${provider}.json`)
 }
 
 /** This machine's sealed-envelope keypair. The PRIVATE half lives here and NOWHERE else — never in

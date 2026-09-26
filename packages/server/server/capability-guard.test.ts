@@ -203,3 +203,11 @@ test('the prefix does not swallow a neighbouring path', () => {
   // guarding a route nobody registered — which reads as security and is an accident.
   expect(routeCapability('/api/shellfish')).toBeNull()
 })
+
+test('a provider route nobody has written yet is guarded by having been ADDED', () => {
+  // No `/api/provider/*` route exists in B1 — the entry is registered ahead of the route it will
+  // guard, so a provider route touches a host secret (the stored API key) from the moment it
+  // exists, never from the moment somebody remembers to add it to this table.
+  expect(routeCapability('/api/provider/anthropic/try')).toBe('localShell')
+  expect(routeCapability('/api/provider')).toBe('localShell')
+})

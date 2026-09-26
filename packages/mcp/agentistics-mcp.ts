@@ -12,21 +12,18 @@ import {
   sessionHarness,
   sessionMessages,
   sessionTokens,
+  statsCacheTotals,
+  harnessParam,
+  HARNESS_IDS,
 } from "./session-tokens.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
 // Multi-harness helpers
-// agentistics tracks several harnesses (Claude Code, Codex CLI, Gemini CLI,
-// Copilot CLI, Antigravity CLI). Sessions carry a `harness` field; legacy/missing defaults to claude.
+// agentistics tracks sessions from every registered harness (Claude Code, Codex CLI, Gemini CLI,
+// Copilot CLI, Antigravity CLI, Kimi Code). Sessions carry a `harness` field; legacy/missing defaults to claude.
 
-const HARNESS_IDS = ["claude", "codex", "gemini", "copilot", "antigravity"] as const;
-const HARNESS_PARAM = {
-  type: "string",
-  enum: ["all", ...HARNESS_IDS],
-  description:
-    "Scope to one harness (claude | codex | gemini | copilot | antigravity), or 'all' (default) for the unified view across every harness.",
-} as const;
+const HARNESS_PARAM = harnessParam();
 
 // Static mirror of src/lib/componentCatalog.tsx — keep in sync when adding components
 const CATALOG = [
@@ -907,7 +904,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const unified = !harness || harness === "all";
         const data = await apiGet("/api/data");
         const sc = data.statsCache ?? {};
-        const totals = sc.allTimeTotals ?? {};
+        // statsCache is Claude-only; its modelUsage is the whole-history fallback (see statsCacheTotals).
+        const totals = statsCacheTotals(sc);
 
         // Aggregate from sessions (the only harness-aware source). statsCache is
         // Claude-only, so it's used as a fallback ONLY for the unified/claude view.
@@ -928,10 +926,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const claudeFallback = unified || harness === "claude";
         const topModel =
           Object.entries(modelTokens).sort(([, a], [, b]) => b - a)[0]?.[0]
-          ?? (claudeFallback
-            ? Object.entries((sc.modelUsage ?? {}) as Record<string, { totalTokens?: number }>)
-                .sort(([, a], [, b]) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))[0]?.[0] ?? "—"
-            : "—");
+          ?? (claudeFallback ? totals.topModel ?? "—" : "—");
         const topProject = Object.entries(projectSessions).sort(([, a], [, b]) => b - a)[0]?.[0] ?? "—";
 
         return {
@@ -939,11 +934,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             type: "text",
             text: JSON.stringify({
               harness: unified ? "all" : harness,
-              totalInputTokens:      totalInput    || (claudeFallback ? totals.inputTokens      ?? 0 : 0),
-              totalOutputTokens:     totalOutput   || (claudeFallback ? totals.outputTokens     ?? 0 : 0),
-              totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheReadTokens  ?? 0 : 0),
-              totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWriteTokens ?? 0 : 0),
-              estimatedCostUSD:      Math.round(totalCostUSD * 100) / 100,
+              totalInputTokens:      totalInput    || (claudeFallback ? totals.input : 0),
+              totalOutputTokens:     totalOutput   || (claudeFallback ? totals.output : 0),
+              totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheRead : 0),
+              totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWrite : 0),
+              estimatedCostUSD:      Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
               totalSessions: allSessions.length,
               topModel,
               topProject,

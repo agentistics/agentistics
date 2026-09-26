@@ -6,21 +6,22 @@
  * The design called for a per-session ConPTY host here. It is not written, and the reason is worth
  * recording so nobody re-derives it:
  *
- *  - **Bun exposes no PTY primitive** (checked against Bun 1.3.14). `Bun.spawn` gives pipes, and a
- *    pipe is not a terminal: every harness this manages is a full-screen TUI that queries the
- *    terminal for its size, drives the alternate screen and expects raw-mode input. Hosted on pipes
- *    they render as garbage, which is a worse failure than not starting at all because it looks
- *    like it worked.
- *  - **The only real option is a native module** (`node-pty` and its kin), and this project compiles
- *    to ONE portable binary via `bun build --compile`. A native addon cannot be embedded in it —
- *    the same distribution constraint that makes `stubs/react-devtools-core` load-bearing.
+ *  - **Bun.Terminal exists** (Bun >= 1.3.5; ConPTY on Windows from 1.3.14) and was measured to
+ *    survive `bun build --compile` — docs/superpowers/research/14-pty-shell-options.md. The earlier
+ *    claim here, that Bun has no PTY primitive, is false.
+ *  - **It still cannot replace tmux, and that is the real limit.** `Bun.Terminal` is in-process and
+ *    exposes no fd a second process can join, so a session hosted on it cannot be attached from
+ *    another process (the cockpit, `agentop session attach`, the VS Code extension) and cannot
+ *    survive an `agentop server` restart. tmux gives both because the pty outlives the process that
+ *    opened it.
  *
  * So the honest state is: Windows needs WSL, and it is told so in those words rather than being
  * handed a generic "tmux is not installed" it cannot act on. A verb that cannot work is absent and
  * its reason is stated — never present and failing.
  *
- * When a PTY primitive lands in Bun, `backend-pty.ts` goes here and NOTHING else in the session
- * manager changes: that is the entire point of `SessionBackend` existing.
+ * A `SessionBackend` on `Bun.Terminal` would fit here without touching the rest of the session
+ * manager, but only as a backend that gives up cross-process attach and restart survival; the
+ * Windows ConPTY path has not been exercised in this project.
  */
 
 import { tmuxBackend } from './backend-tmux'
