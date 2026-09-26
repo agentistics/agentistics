@@ -1163,7 +1163,13 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
     <aside style={{
       position: 'fixed', top: 0, left: 0, bottom: 0,
       width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
-      background: 'var(--bg-surface)', borderRight: '1px solid var(--border)',
+      background: 'var(--bg-surface)',
+      // Owner-approved central-pane inset (2026-09-26): in the sessions workspace the pane 5px to
+      // this aside's right now carries its OWN left-facing border, so the aside's line would
+      // sandwich a gap between two borders instead of reading as one inset card. `AsideResizer`'s
+      // grip pill still marks this edge as draggable either way — only the full-height line goes.
+      // Every OTHER workspace (`mode !== 'sessions'`) keeps the border unchanged.
+      borderRight: mode === 'sessions' ? 'none' : '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', padding: collapsed ? '0 8px 12px' : '0 12px 14px', boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
       // it. Visible overflow, because that handle straddles the border by design and clipping it
@@ -4081,6 +4087,10 @@ export default function AppLayout() {
         <TopBar
           height={TOPBAR_H}
           asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
+          // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
+          // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
+          // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
+          noBottomBorder={inSessionsWorkspace}
           {...(stripTrailing ? { trailing: stripTrailing, trailingFlush: true } : {})}
         />
       )}

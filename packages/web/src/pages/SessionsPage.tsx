@@ -2465,6 +2465,25 @@ export default function SessionsPage() {
    * regardless of what the content box itself currently has to show.
    */
   const railDesktop = !isMobile && selected !== undefined
+
+  /**
+   * OWNER-APPROVED VISUAL, mockup option "C" (2026-09-26): the central pane — the region below
+   * that holds the open session's conversation/terminal, and the fleet overview when nothing is
+   * selected — reads as a card fitted into the surrounding frame. DESKTOP ONLY (`!isMobile`): a
+   * phone's screens already cover the viewport edge to edge, and insetting them would just clip
+   * the composer against the rounded corner for no visual gain.
+   *
+   * Four numbers, held in one place rather than scattered across the wrapper below and the three
+   * frame dividers it replaces (`TopBar.tsx`'s `noBottomBorder`, `SideNav`'s own `borderRight`,
+   * `PanelRail.tsx`'s `borderLeft`):
+   *   - `border` — the existing `--border` token; no new colour.
+   *   - `radius` — all four corners.
+   *   - `gap` — the space cleared on every side, which is what makes those three frame borders
+   *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
+   *     them be dropped rather than sandwiched.
+   */
+  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+
   return (
     <>
     {/* IDLE SESSIONS (Task 6) — a real sibling ABOVE the workspace body, not `position: fixed`, so
@@ -2509,7 +2528,28 @@ export default function SessionsPage() {
           bug three times: `flex: 1` on a child means nothing until its PARENT is a flex container,
           and a block child ignores its parent's height and grows to its content — which is how the
           composer once ended up 40.305px down the page on an iPhone 12. */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0,
+        // Desktop-only inset card (see `CENTRAL_PANE`, above). `margin`, never `padding`: this div
+        // is a flex ITEM inside `splitRef`'s row (or the sole item in its column, in the fleet-
+        // overview case), so the flex algorithm sizes it INCLUDING the margin — the pane simply
+        // ends up 5px smaller on every side within the space it was already given, rather than the
+        // margin being added on top of a size already computed and overflowing the fixed-height
+        // column this workspace is built on (see the file's own note on the sessions workspace
+        // never growing a page-level scrollbar). `overflow: hidden` clips children to the curve —
+        // checked: the narrow-desktop `overlay` aside (`artOuter`) and every `position: fixed`
+        // element in this file (the mention toast, the preset modals, `leaveGuard`) are SIBLINGS of
+        // this div under `splitRef`, never descendants, so neither is clipped by it; the in-panel
+        // popovers that are descendants (the composer's `/` and `@` pickers, the bubble's
+        // right-click menu, the "more" menu) all open within their own nested containers, inset
+        // from this box's edges, and stay inside it under normal use.
+        ...(isMobile ? {} : {
+          margin: CENTRAL_PANE.gap,
+          border: CENTRAL_PANE.border,
+          borderRadius: CENTRAL_PANE.radius,
+          overflow: 'hidden',
+        }),
+      }}>
         {centre}
       </div>
       {/* The handle. Four pixels of hit area over a one-pixel rule — the rule is what you see, the
