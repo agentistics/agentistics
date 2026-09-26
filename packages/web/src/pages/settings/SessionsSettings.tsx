@@ -6,12 +6,52 @@ import type { ArchiveMode } from '../../components/ArchiveConsentModal'
 import { Divider, PrefRow, SectionHeader, Toggle } from './primitives'
 import SessionPresetsSection from './SessionPresetsSection'
 import { useIdlePrefs, setIdlePrefs } from '../../lib/idleSessionsPrefs'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 const ARCHIVE_DOCS_URL = 'https://code.claude.com/docs/en/settings'
+
+// The two idle-session minute fields (`After` / `Under memory pressure`) share one commit rule
+// (round, accept only >= 1, revert the draft on anything else) and one style — collapsed here so
+// the touch-target sizing and the parsing rule live in exactly one place each.
+function commitMinutesDraft(draft: string, fallback: number, setDraft: (v: string) => void, apply: (n: number) => void) {
+  const n = Math.round(Number(draft))
+  if (Number.isFinite(n) && n >= 1) apply(n)
+  else setDraft(String(fallback))  // invalid — put the field back
+}
+
+function MinutesInput({ value, disabled, isMobile, onChange, onCommit }: {
+  value: string
+  disabled: boolean
+  isMobile: boolean
+  onChange: (v: string) => void
+  onCommit: () => void
+}) {
+  return (
+    <input
+      type="number"
+      min={1}
+      step={1}
+      inputMode="numeric"
+      value={value}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      onBlur={onCommit}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onCommit() } }}
+      style={{
+        width: isMobile ? '100%' : 90, boxSizing: 'border-box', padding: '7px 10px',
+        minHeight: isMobile ? 44 : undefined,
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
+        fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
+        ...(disabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+      }}
+    />
+  )
+}
 
 export default function SessionsSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
+  const isMobile = useIsMobile()
   const [mode, setMode] = useState<ArchiveMode | null>(null)
   const [saving, setSaving] = useState<ArchiveMode | null>(null)
   const [savedAt, setSavedAt] = useState<number>(0)
@@ -75,16 +115,10 @@ export default function SessionsSettings() {
   useEffect(() => { setThresholdDraft(String(idlePrefs.thresholdMin)) }, [idlePrefs.thresholdMin])
   useEffect(() => { setPressureDraft(String(idlePrefs.pressureThresholdMin)) }, [idlePrefs.pressureThresholdMin])
 
-  const commitThreshold = () => {
-    const n = Math.round(Number(thresholdDraft))
-    if (Number.isFinite(n) && n >= 1) setIdlePrefs({ thresholdMin: n })
-    else setThresholdDraft(String(idlePrefs.thresholdMin))  // invalid — put the field back
-  }
-  const commitPressureThreshold = () => {
-    const n = Math.round(Number(pressureDraft))
-    if (Number.isFinite(n) && n >= 1) setIdlePrefs({ pressureThresholdMin: n })
-    else setPressureDraft(String(idlePrefs.pressureThresholdMin))
-  }
+  const commitThreshold = () =>
+    commitMinutesDraft(thresholdDraft, idlePrefs.thresholdMin, setThresholdDraft, n => setIdlePrefs({ thresholdMin: n }))
+  const commitPressureThreshold = () =>
+    commitMinutesDraft(pressureDraft, idlePrefs.pressureThresholdMin, setPressureDraft, n => setIdlePrefs({ pressureThresholdMin: n }))
 
   useEffect(() => {
     fetch('/api/preferences')
@@ -239,42 +273,22 @@ export default function SessionsSettings() {
       </PrefRow>
 
       <PrefRow label={pt ? 'Depois de (minutos)' : 'After (minutes)'}>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          inputMode="numeric"
+        <MinutesInput
           value={thresholdDraft}
           disabled={!idlePrefs.enabled}
-          onChange={e => setThresholdDraft(e.target.value)}
-          onBlur={commitThreshold}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitThreshold() } }}
-          style={{
-            width: 90, boxSizing: 'border-box', padding: '7px 10px',
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
-            fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
-            ...(!idlePrefs.enabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
-          }}
+          isMobile={isMobile}
+          onChange={setThresholdDraft}
+          onCommit={commitThreshold}
         />
       </PrefRow>
 
       <PrefRow label={pt ? 'Com a memória apertada (minutos)' : 'Under memory pressure (minutes)'}>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          inputMode="numeric"
+        <MinutesInput
           value={pressureDraft}
           disabled={!idlePrefs.enabled}
-          onChange={e => setPressureDraft(e.target.value)}
-          onBlur={commitPressureThreshold}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitPressureThreshold() } }}
-          style={{
-            width: 90, boxSizing: 'border-box', padding: '7px 10px',
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
-            fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none',
-            ...(!idlePrefs.enabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
-          }}
+          isMobile={isMobile}
+          onChange={setPressureDraft}
+          onCommit={commitPressureThreshold}
         />
       </PrefRow>
 
