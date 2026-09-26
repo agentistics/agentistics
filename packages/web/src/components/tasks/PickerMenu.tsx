@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 import { microLabel, surface } from './board'
 
 export interface PickerItem {
@@ -57,15 +58,23 @@ export function PickerMenu(p: PickerMenuProps) {
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
   const trigger = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
   const width = p.width ?? 250
 
+  // The panel is portaled into `document.body`, so it is never a descendant of the trigger — a
+  // capture-phase scroll listener on `window` fires for the panel's OWN list scrolling too, and
+  // closing on that made every row past the fold unreachable. Only a scroll OUTSIDE the panel
+  // closes it; page/ancestor scroll still does, which is the point of listening at all.
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
-    window.addEventListener('scroll', close, true)
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
     }
   }, [open])
@@ -140,7 +149,7 @@ export function PickerMenu(p: PickerMenuProps) {
       {open && at && createPortal(
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
-          <div style={{
+          <div ref={panel} style={{
             position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
             boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
