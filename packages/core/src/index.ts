@@ -68,3 +68,5 @@ export * from './provider/stop-reason'
 export * from './provider/errors'
 export * from './provider/retry-plan'
 export * from './provider/edit-policy'
+// A1.4: CapabilityState beside HARNESS_CAPABILITIES (derived, nothing reads it yet).
+export * from './canonical/capabilities'

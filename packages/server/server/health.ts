@@ -6,8 +6,102 @@ import type { HealthIssue, SessionMeta, StatsCache } from '@agentistics/core'
 import { PROJECTS_DIR, STATS_CACHE_FILE } from './config'
 import { safeReadDir, safeStat, safeReadJson } from './utils'
 import { getEnabledAdapters } from './adapters/types'
+import type { JournalStatus, JournalDisabledReason } from './journal/types'
 
 const execAsync = promisify(exec)
+
+/**
+ * The journal seam (P1 §10, journal/types.ts's own note on `JournalDisabledReason`): the journal
+ * is opened by a process this module does not own (the shadow writer, per the P1 spec), and
+ * `journal/types.ts` deliberately keeps `JournalDisabledReason` a bare CODE — "a code, rendered
+ * into words by whoever surfaces it (A1.5's health)". So the opener REGISTERS a getter here rather
+ * than health.ts importing the journal directly (which would require a journal to exist merely to
+ * typecheck this file), and this module owns every sentence a person reads about it. `null`
+ * unregisters — used on close/shutdown so a stale getter never answers for a journal that is gone.
+ */
+export type JournalStatusSource = () => JournalStatus | null
+
+let journalStatusSource: JournalStatusSource | null = null
+
+/** Called by whichever process opens the journal; null unregisters. */
+export function setJournalStatusSource(source: JournalStatusSource | null): void {
+  journalStatusSource = source
+}
+
+/** Reads the registered source defensively — a throwing source must never break the other checks. */
+function readJournalStatus(): JournalStatus | null {
+  if (!journalStatusSource) return null
+  try {
+    return journalStatusSource()
+  } catch {
+    return null
+  }
+}
+
+/** One sentence per `JournalDisabledReason` — exhaustive, so a new reason fails the build here
+ *  rather than rendering a blank description. */
+const JOURNAL_DISABLED_DESCRIPTIONS: Record<JournalDisabledReason, string> = {
+  'network-filesystem': 'The journal directory is on a network filesystem, where SQLite\'s WAL mode is not safe.',
+  'no-sqlite': 'bun:sqlite could not be loaded, so the journal could not be opened.',
+  'open-failed': 'The journal file could not be created or opened.',
+  'wal-unavailable': 'SQLite could not enable WAL mode for the journal on this filesystem.',
+  'db-schema-too-new': 'The journal file was written by a newer version of agentop and will not be written to.',
+  'migrate-failed': 'The journal file could not be migrated to the current schema.',
+}
+
+/** The actionable next step per `JournalDisabledReason`. */
+const JOURNAL_DISABLED_GUIDES: Record<JournalDisabledReason, string> = {
+  'network-filesystem': 'Set AGENTISTICS_JOURNAL_DIR to a directory on a local filesystem.',
+  'no-sqlite': 'Run agentop under the compiled binary or Bun, which bundle bun:sqlite.',
+  'open-failed': 'Check permissions and available disk space on the journal\'s directory.',
+  'wal-unavailable': 'Move the journal to a local filesystem with AGENTISTICS_JOURNAL_DIR.',
+  'db-schema-too-new': 'Upgrade agentop to a version that understands this journal file.',
+  'migrate-failed': 'The file may be damaged. Move it aside — the journal will be recreated empty.',
+}
+
+/** PURE. Pushes at most ONE issue with id 'journal-unwritable'. */
+export function analyzeJournalStatus(status: JournalStatus | null, issues: HealthIssue[]): void {
+  // Off (flag off / nothing has opened a journal yet) or a clean shutdown: no issue. A journal
+  // that is off is not a fault, and 'closed' is an orderly exit, not a failure to write.
+  if (!status || status.state === 'closed') return
+
+  if (status.state === 'disabled') {
+    const reason = status.reason
+    const known = reason !== undefined
+    const description = known
+      ? JOURNAL_DISABLED_DESCRIPTIONS[reason]
+      : 'The journal is disabled and no reason was reported.'
+    const fsTypeNote = reason === 'network-filesystem' && status.fsType
+      ? ` (filesystem: ${status.fsType})`
+      : ''
+    issues.push({
+      id: 'journal-unwritable',
+      severity: 'warning',
+      title: 'Event journal is not writable',
+      description: [
+        `The event journal at ${status.path} is disabled.`,
+        `${description}${fsTypeNote}`,
+        'This does not affect the dashboard — the journal is a shadow feature in this build, and every surface keeps working off its existing data.',
+      ].join(' '),
+      guide: known ? JOURNAL_DISABLED_GUIDES[reason] : undefined,
+    })
+    return
+  }
+
+  // status.state === 'open'
+  if (status.counters.failedAppends > 0) {
+    issues.push({
+      id: 'journal-unwritable',
+      severity: 'warning',
+      title: 'Event journal write failures',
+      description: [
+        `${status.counters.failedAppends} batch${status.counters.failedAppends === 1 ? '' : 'es'} failed to write to the event journal at ${status.path} since this process started.`,
+        `${status.counters.dropped} event${status.counters.dropped === 1 ? '' : 's'} dropped since boot.`,
+        'This does not affect the dashboard — the journal is a shadow feature in this build, and every surface keeps working off its existing data.',
+      ].join(' '),
+    })
+  }
+}
 
 export async function runHealthChecks(): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = []
@@ -37,7 +131,12 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
       })
       // Only bail out early if Claude is the sole harness; other harnesses may
       // still have data worth reporting.
-      if (enabledIds.size === 1) return issues
+      // The journal is not Claude data: a machine with no ~/.claude/projects (a fresh install, CI)
+      // can still have an unwritable journal, and bailing out before it would hide exactly that.
+      if (enabledIds.size === 1) {
+        analyzeJournalStatus(readJournalStatus(), issues)
+        return issues
+      }
     } else {
       // 1b. Check for any JSONL sessions and sample one for format checks
       const projectDirs = await safeReadDir(PROJECTS_DIR)
@@ -145,6 +244,11 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
       guide: 'Install git:\n  https://git-scm.com/downloads\n\nOn Debian/Ubuntu:\n  sudo apt install git',
     })
   }
+
+  // 6. Journal status (P1 §10) — the registered source is whichever process opened it; the read
+  // itself is defensive (see readJournalStatus), so a throwing or unregistered source never
+  // breaks the checks above it.
+  analyzeJournalStatus(readJournalStatus(), issues)
 
   return issues
 }
