@@ -2611,9 +2611,13 @@ this: dismissing the card hides the CURRENT batch only, and a session outside th
 sessions forever" from one click. The review MODAL's two native `<select>`s (action, group) are now
 the project's own `Select` (`pages/settings/primitives.tsx`), matching `DeliveryDetail.tsx`'s usage;
 its popover is a `position: fixed; z-index: 1200` DESCENDANT of the modal's own `zIndex: 640`
-overlay, so it paints above the dialog with no structural change (a fixed-position element is
-clipped only by an ancestor with `transform`/`filter`/similar, which neither the modal nor `Select`
-has, and 1200 already outranks everything else inside that one stacking context). The modal also
+overlay. The overlay DOES set `backdropFilter: 'blur(3px)'`, which — like `transform`/`filter` —
+establishes a containing block for a `position: fixed` descendant, so the popover's coordinates
+resolve against the OVERLAY's box rather than the true viewport; it still paints in the right place
+only because the overlay is `inset: 0`, i.e. the full viewport, so the two boxes coincide. Shrinking
+the overlay to less than full-viewport would break the popover's positioning (it measures
+`window.innerHeight`/`innerWidth`), and 1200 already outranks everything else inside that one
+stacking context regardless. The modal also
 now shows a candidate's CURRENT user group inline (`groupOfSession`, `@agentistics/core`), and
 `defaultGroupFor` (same module) prefers that group for the "File & end" suggestion ahead of
 `suggestGroup`'s task/date rules — a session already filed by hand must not be re-suggested

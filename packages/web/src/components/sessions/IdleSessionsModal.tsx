@@ -38,10 +38,13 @@ import { inputStyle } from './formBits'
 import type { FleetState } from '../../lib/fleet'
 // The project's own dropdown, in place of the two native `<select>`s below — see `DeliveryDetail.tsx`
 // for the same usage. Its popover is `position: fixed; z-index: 1200`, painted as a DESCENDANT of
-// this dialog's own `zIndex: 640` overlay — a fixed-position child is not clipped by an ancestor's
-// `overflow: hidden` (none of them have `transform`/`filter`, which is the only thing that would
-// change that), and within this dialog's own stacking context 1200 already outranks everything else
-// in it, so the popover paints above the row it belongs to with no structural change needed here.
+// this dialog's own `zIndex: 640` overlay. The overlay DOES set `backdropFilter: 'blur(3px)'`, which
+// (like `transform`) creates a containing block for a `position: fixed` descendant — so the popover's
+// `left`/`top`/`bottom` in `popoverPosition` resolve against the OVERLAY's box, not the true viewport.
+// It still lands in the right place only because the overlay is `inset: 0` (the full viewport), so
+// that box and the viewport coincide; shrinking the overlay to anything less than full-viewport would
+// break the popover's positioning, since `popoverPosition` measures `window.innerHeight` while the
+// containing block would then be smaller than the window.
 import { Select } from '../../pages/settings/primitives'
 
 const NEW_GROUP = '__new__'
