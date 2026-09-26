@@ -586,7 +586,7 @@ interface ModelCompletedData {
   provider: ProviderId
   model: string
   deployment?: string
-  usage: { input: number; output: number; cacheRead: number; cacheWrite: number }
+  usage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }  // D21: absent = not reported
   cacheWriteByTtl?: Record<string, number>   // Anthropic reports ephemeral_5m / ephemeral_1h
   reasoning?: {                              // NEVER a bare number — see the correction below
     tokens: number
@@ -618,8 +618,18 @@ interface ModelCompletedData {
   is B1.1's `StopReason` (`packages/core/src/provider/stop-reason.ts`), reused rather than restated.
   `iterations` carries kind and model only: their counters stay in the raw capture until a fixture
   pins the key names (B1 O-3), and a projection must call the price PARTIAL while any are present.
-- **All four counters, always.** `tokens.ts`'s rule — `input + output` alone was measured at 0,34 %
-  of real volume on this machine.
+- **All four counters, whenever the source reports them — and an ABSENT one when it does not
+  (D21, 2026-09-26).** `tokens.ts`'s rule — `input + output` alone was measured at 0,34 % of real
+  volume on this machine — still decides what a whole usage is. What D21 changes is the case where
+  the source did NOT report a counter: that counter's key is ABSENT (`ModelUsageCounters =
+  Partial<TokenBreakdown>`), never a 0 and never a 0 with the event's confidence lowered to
+  `inferred` (which is what B1.6 wrote until D21). The absence is the statement, so there is no
+  separate `missing` list to disagree with it; the event's `confidence` speaks for the counters that
+  are present. A reader summing `model.completed` events unions `absentUsageCounters()` over them,
+  and a total that met an absent counter is PARTIAL and says so — the cost priced from it included —
+  never presented as a measured sum. Replay path: the transcript's usage, last-wins per
+  `message.id` (consistent with M-1). An event written before D21 (all four present) type-checks
+  unchanged (`canonical/d21-absent-counters.test.ts`).
 - **CORRECTED 2026-09-20 — reasoning tokens are not one thing.** The first draft of this section
   said they are "billed inside output, never added on top". That is true for OpenAI and OpenRouter,
   **false for Google** — `thoughtsTokenCount` is a separate, additionally-billed top-level counter —

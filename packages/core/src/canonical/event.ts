@@ -52,6 +52,7 @@ import type {
   ModelInvocationStatus,
   ModelIterations,
   ModelStopReason,
+  ModelUsageCounters,
   ReasoningBilling,
   RunHarness,
   RunStatus,
@@ -261,12 +262,15 @@ export interface ModelDeltaData {
  * The whole cost model rests on it.
  *
  * Normalisation rules, applied on the way IN (per provider), never by a reader:
- * - `usage` carries ALL FOUR counters. `input + output` alone measured 0,34 % of real volume.
+ * - `usage` carries every counter the SOURCE reported, of the four (`input + output` alone measured
+ *   0,34 % of real volume, so a source that reports all four is carried whole). D21 (2026-09-26): a
+ *   counter the source did not report is ABSENT — never a 0, never a 0 marked `inferred`. The event's
+ *   `confidence` speaks for the counters that ARE present.
  * - `usage.input` EXCLUDES the cache counters. Anthropic already reports it that way; OpenAI, Google
  *   and OpenRouter include the cached portion in their prompt count and the client subtracts it —
  *   otherwise `input + cacheRead` double-counts on three providers of four.
  * - A SUBSET is never inferred into a total: a source reporting three counters reports three, and
- *   the projection says the figure is partial.
+ *   the projection says the figure is partial (`absentUsageCounters`).
  * - `reasoning` is never a bare number: a reader may add it on top of output only when `billing` is
  *   `additive` (Google's `thoughtsTokenCount`); `included-in-output` is already counted and
  *   `unknown` is never summed.
@@ -279,7 +283,7 @@ export interface ModelCompletedData extends ModelAttemptFacts {
   provider: ProviderId
   model: string
   deployment?: string
-  usage: { input: number; output: number; cacheRead: number; cacheWrite: number }
+  usage: ModelUsageCounters
   /** Anthropic reports cache writes per TTL (`ephemeral_5m` / `ephemeral_1h`). */
   cacheWriteByTtl?: Record<string, number>
   reasoning?: { tokens: number; billing: ReasoningBilling }
@@ -295,6 +299,20 @@ export interface ModelCompletedData extends ModelAttemptFacts {
   stopReason?: ModelStopReason
   /** D20 — server-side sub-calls the provider reported. Present means the price is PARTIAL (O-3). */
   iterations?: ModelIterations
+}
+
+/** The four usage counters by name, in the `TokenBreakdown` order. */
+export const USAGE_COUNTERS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const satisfies readonly (keyof ModelUsageCounters)[]
+
+export type UsageCounter = (typeof USAGE_COUNTERS)[number]
+
+/**
+ * The counters this response's source did NOT report (D21), in `USAGE_COUNTERS` order. Empty means
+ * all four are present and the usage is a whole `TokenBreakdown`. A reader summing responses unions
+ * these: a total that saw any absent counter is PARTIAL, never a measured sum.
+ */
+export function absentUsageCounters(u: ModelUsageCounters): UsageCounter[] {
+  return USAGE_COUNTERS.filter(k => u[k] === undefined)
 }
 
 export interface ModelFailedData extends ModelAttemptFacts {

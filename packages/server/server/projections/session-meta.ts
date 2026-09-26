@@ -9,6 +9,15 @@
  * response's, never a sum), the agent rollup excludes unmeasured invocations from its totals and
  * counts them apart.
  *
+ * D21 (2026-09-26): `model.completed.usage` carries only the counters its source actually reported
+ * (`ModelUsageCounters`, a `Partial<TokenBreakdown>`) — an absent one is never folded in as a 0. The
+ * fold sums only what each event reports and separately remembers, per main-agent counter, whether
+ * ANY event left it out (`AgentAcc.absentCounters`); FINISH turns that into a `caveats` row per
+ * affected token field plus one for `costUSD` (priced from the very same, now-partial, counters) —
+ * so a reader sees the number AND is told it is a partial sum, never a confident wrong one. When no
+ * event ever lacked a counter this adds nothing: no caveat, and the output is byte-identical to the
+ * pre-D21 projection.
+ *
  * ## The fold is order independent and idempotent, by construction
  *
  * A `Projection` is resumable (`projection.ts`), and P1 §8 adds two properties: shuffling the
@@ -38,13 +47,17 @@
  * compacted five times never did.
  */
 import {
+  absentUsageCounters,
   calcCost,
   sessionCostUSD,
   totalTokens,
+  USAGE_COUNTERS,
   type AnyAgentisticsEvent,
   type HarnessId,
+  type ModelUsageCounters,
   type Projection,
   type SessionMeta,
+  type UsageCounter,
 } from '@agentistics/core'
 
 // ── What the projection says about itself ───────────────────────────────────────────────────────
@@ -195,6 +208,13 @@ interface AgentAcc {
   tokens: Tokens
   byModel: Map<string, Tokens>
   daily: Map<string, Tokens>
+  /**
+   * Counters some `model.completed` event of THIS agent did not report (D21, 2026-09-26). `tokens`
+   * already sums only the counters each event DID report — an absent one contributes nothing, never
+   * a 0 folded in — so this is purely the record of what happened, spent at FINISH to say the sum is
+   * partial rather than silently letting it read as measured.
+   */
+  absentCounters: Set<UsageCounter>
   sawTtl: boolean
   ttl1h: number
   ttl5m: number
@@ -213,11 +233,18 @@ interface AgentAcc {
 
 function emptyAcc(): AgentAcc {
   return {
-    tokens: zero(), byModel: new Map(), daily: new Map(), sawTtl: false, ttl1h: 0, ttl5m: 0,
+    tokens: zero(), byModel: new Map(), daily: new Map(), absentCounters: new Set(), sawTtl: false, ttl1h: 0, ttl5m: 0,
     toolNames: new Map(), linesAdded: 0, linesRemoved: 0, files: new Set(),
     compactCount: 0, compactMs: 0, compactDropped: undefined, compactionRecorded: true,
     gauge: undefined, firstModel: undefined,
   }
+}
+
+/** Every counter `u` reports, defaulted to 0 for SUMMING purposes only — an absent counter must
+ * contribute nothing to a total, which is exactly what adding 0 for it does; `absentUsageCounters`
+ * (called by the caller of this) is what remembers that it was never actually reported. */
+function materialize(u: ModelUsageCounters): Tokens {
+  return { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 }
 }
 
 interface StartedRecord {
@@ -331,7 +358,12 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       return
     }
     case 'model.completed': {
-      const u = e.data.usage
+      // D21 (2026-09-26): a counter the source did not report is ABSENT, not a 0 — `materialize`
+      // sums only what was reported (an absent one contributes nothing, which is arithmetically the
+      // same as folding in a 0 for it), and `absentUsageCounters` is what remembers the absence so
+      // FINISH can say the total is partial rather than let it read as a measured sum.
+      for (const c of absentUsageCounters(e.data.usage)) acc.absentCounters.add(c)
+      const u = materialize(e.data.usage)
       add(acc.tokens, u)
       let m = acc.byModel.get(e.data.model)
       if (!m) { m = zero(); acc.byModel.set(e.data.model, m) }
@@ -386,6 +418,12 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
+/** Which legacy `SessionMeta` field each usage counter feeds — the caveat names the field a reader
+ * actually looks at, not the event-side counter name. */
+const TOKEN_FIELD_OF: Record<UsageCounter, 'input_tokens' | 'output_tokens' | 'cache_read_input_tokens' | 'cache_creation_input_tokens'> = {
+  input: 'input_tokens', output: 'output_tokens', cacheRead: 'cache_read_input_tokens', cacheWrite: 'cache_creation_input_tokens',
+}
+
 function tokensOfModel(t: Tokens, ttl?: { h1: number; m5: number }) {
   return {
     inputTokens: t.input, outputTokens: t.output, cacheReadInputTokens: t.cacheRead,
@@ -420,6 +458,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     if (!a) continue
     add(main.tokens, a.tokens)
     for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
+    for (const c of a.absentCounters) main.absentCounters.add(c)
     main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
     for (const [n, c] of a.toolNames) mainToolNames.set(n, (mainToolNames.get(n) ?? 0) + c)
     main.linesAdded += a.linesAdded; main.linesRemoved += a.linesRemoved
@@ -447,6 +486,26 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     lines_added: main.linesAdded,
     lines_removed: main.linesRemoved,
     files_modified: main.files.size,
+  }
+
+  // D21 (2026-09-26): a counter absent from at least one main-agent `model.completed` event means
+  // the corresponding field above is a sum over what was reported, not a measured total — said as a
+  // caveat per counter, in `USAGE_COUNTERS` order, rather than silently letting it read as exact.
+  // The cost is priced from those very counters (`sessionCostUSD` below), so it gets the same caveat.
+  if (main.absentCounters.size > 0) {
+    const absent = USAGE_COUNTERS.filter(c => main.absentCounters.has(c))
+    for (const c of absent) {
+      caveats.push({
+        field: TOKEN_FIELD_OF[c],
+        reason: `at least one main-agent model.completed event did not report ${c}; the figure sums only what was `
+          + 'reported and is a PARTIAL total, never a measured one',
+      })
+    }
+    caveats.push({
+      field: 'costUSD',
+      reason: `priced from a token set missing ${absent.join(', ')} on at least one event; the figure is an `
+        + 'estimate over a partial sum, never a measured cost',
+    })
   }
 
   // Tool errors: a `failed` result is a tool error. A `cancelled` one (the whole call interrupted)
@@ -514,6 +573,9 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   const members = new Map<string, string[]>(roots.map(r => [r, [r]]))
   for (const id of subKind) if (rootOf(id) !== id) members.get(rootOf(id))?.push(id)
 
+  // D21 — a subagent's rollup is a sum too, so an absent counter under it makes THAT invocation's
+  // figures partial. Kept apart from the main agent's set: the session totals are not affected.
+  const partialInvocations = new Map<string, Set<UsageCounter>>()
   const invocations: ProjectedInvocation[] = roots
     .sort((a, b) => {
       const ra = s.started.get(a)!, rb = s.started.get(b)!
@@ -541,6 +603,11 @@ function finish(s: SessionMetaState): SessionMetaProjection {
         const a = s.agents.get(id)
         if (!a) continue
         add(tokens, a.tokens)
+        if (a.absentCounters.size > 0) {
+          const set = partialInvocations.get(root) ?? new Set<UsageCounter>()
+          for (const c of a.absentCounters) set.add(c)
+          partialInvocations.set(root, set)
+        }
         for (const [m, t] of a.byModel) { const cur = byModel.get(m) ?? zero(); add(cur, t); byModel.set(m, cur) }
         for (const [name, c] of a.toolNames) {
           inv.totalToolUseCount += c
@@ -558,6 +625,15 @@ function finish(s: SessionMetaState): SessionMetaProjection {
       for (const [m, t] of byModel) inv.costUSD += calcCost(tokensOfModel(t), m)
       return inv
     })
+
+  for (const [root, set] of partialInvocations) {
+    const absent = USAGE_COUNTERS.filter(c => set.has(c))
+    caveats.push({
+      field: `agentMetrics.invocations[${root}]`,
+      reason: `a model.completed event of this invocation did not report ${absent.join(', ')}; its tokens and `
+        + 'cost sum only what was reported and are PARTIAL, never measured',
+    })
+  }
 
   if (invocations.length > 0) {
     const measured = invocations.filter(i => !i.unmeasured)

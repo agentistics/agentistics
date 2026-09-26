@@ -220,6 +220,22 @@ export interface ModelIterations {
 }
 
 /**
+ * The four billed counters of ONE response, as the SOURCE reported them — decision D21
+ * (2026-09-26). Each is individually OPTIONAL and an absent counter means exactly one thing: the
+ * source did not report it. It is never a 0 in disguise, and there is no separate `missing` list —
+ * the absence IS the statement, so it cannot disagree with the numbers beside it.
+ *
+ * A reader that sums these over several responses and meets an absent counter holds a PARTIAL
+ * total and must say so (`absentUsageCounters` in `event.ts`); presenting it as a measured sum is
+ * the confident zero `HARNESS_CAPABILITIES` exists to refuse, one counter at a time. A response
+ * carrying all four is the same shape as `TokenBreakdown` and assigns to it unchanged.
+ *
+ * Rejected: four required numbers with placeholder zeros and the event's confidence lowered to
+ * `inferred` (B1.6). A zero with a confidence label is still a zero on every surface that sums it.
+ */
+export type ModelUsageCounters = Partial<TokenBreakdown>
+
+/**
  * ONE billed response. The unit of cost.
  *
  * D20 (2026-09-25) added `attemptId`/`attempt`, `modelRequested`/`modelServed`, `stopReason` and
@@ -261,10 +277,11 @@ export interface ModelInvocation {
   completedAt?: string
   latencyMs?: number
   /**
-   * The four counters, ALWAYS all four (`tokens.ts`): `input + output` alone was measured at 0,34 %
-   * of real volume. `input` EXCLUDES the cache counters, normalised per provider on the way in.
+   * The four counters (`tokens.ts`): `input + output` alone was measured at 0,34 % of real volume.
+   * `input` EXCLUDES the cache counters, normalised per provider on the way in. D21 (2026-09-26):
+   * each counter the source did not report is ABSENT, never a 0 — see `ModelUsageCounters`.
    */
-  usage: TokenBreakdown
+  usage: ModelUsageCounters
   /**
    * SPEC CONFLICT, resolved: §13 lists `reasoningTokens?: number`; §14.2's correction forbids a
    * bare number, because one implementer would add it on top of output and another would not, and
