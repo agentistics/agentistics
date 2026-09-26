@@ -12,7 +12,7 @@ import {
   sortSubtasks, type SubtaskMeasure, type SubtaskSortKey, type SubtaskSortSpec,
 } from '@agentistics/core'
 import type { Subtask, SubtaskView, TaskSessionRow } from '../../lib/tasks'
-import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
+import { costCellFor, isUntracked, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
 import { isGroupMember } from './subtaskGroups'
 
 /**
@@ -24,6 +24,10 @@ import { isGroupMember } from './subtaskGroups'
  *    was asked and the answer is none), unlike cost, which is empty until a session exists.
  *  - A Copilot-credits cost has no dollar figure to compare against a dollar one, so it counts as
  *    "no answer" rather than being converted by a guessed rate.
+ *  - `rounds` follows the exact same `isUntracked` rule cost and tokens already do (`null` until a
+ *    session is actually filed, never a stray value the rollup happens to carry from before) — no
+ *    subtask grid draws a "rounds" column of its own today, so this key is reached only through
+ *    `subtaskSortInherit.ts`'s inheritance from the main table's "Your prompts" column.
  */
 export function measureOfSubtask(
   subtask: Subtask,
@@ -36,6 +40,7 @@ export function measureOfSubtask(
   const tok = tokensCellFor(r)
   return {
     sessions: sessions.filter(s => s.subtaskId === subtask.id).length,
+    rounds: isUntracked(r) ? null : r!.rounds,
     costUSD: cost.kind === 'money' ? cost.usd : null,
     tokens: tok.kind === 'tokens' ? tok.n : null,
   }
@@ -63,6 +68,9 @@ export function orderedSubtasks(
   })
 }
 
-/** Columns a subtask list can be ordered by, in the order the grids draw them. */
+/** Columns a subtask list can be ordered by, in the order the grids draw them. `rounds` is
+ *  deliberately absent — no subtask grid draws a "rounds"/"Your prompts" column of its own, so
+ *  there is no header here to click; that key is reached only by inheriting the main table's own
+ *  sort (`subtaskSortInherit.ts`). */
 export const SUBTASK_SORT_KEYS: readonly SubtaskSortKey[] =
   ['title', 'status', 'started', 'completed', 'sessions', 'cost', 'tokens']

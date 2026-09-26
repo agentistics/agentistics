@@ -40,9 +40,9 @@ describe('sortSubtasks', () => {
 
   it('orders by measured cost with the unmeasured LAST in both directions (in list order among themselves) — null is not zero', () => {
     const measures: Record<string, SubtaskMeasure | undefined> = {
-      cheap: { sessions: 1, costUSD: 1, tokens: 10 },
-      dear: { sessions: 3, costUSD: 9, tokens: 5 },
-      unpriced: { sessions: 1, costUSD: null, tokens: null },
+      cheap: { sessions: 1, rounds: 2, costUSD: 1, tokens: 10 },
+      dear: { sessions: 3, rounds: 7, costUSD: 9, tokens: 5 },
+      unpriced: { sessions: 1, rounds: null, costUSD: null, tokens: null },
       // no entry at all: a group member, which can never hold a session
     }
     const list = [sub('member'), sub('unpriced'), sub('dear'), sub('cheap')]
@@ -51,6 +51,10 @@ describe('sortSubtasks', () => {
     expect(ids(sortSubtasks(list, { key: 'cost', dir: 'desc' }, ctx))).toEqual(['dear', 'cheap', 'member', 'unpriced'])
     expect(ids(sortSubtasks(list, { key: 'tokens', dir: 'asc' }, ctx))).toEqual(['dear', 'cheap', 'member', 'unpriced'])
     expect(ids(sortSubtasks(list, { key: 'sessions', dir: 'desc' }, ctx))).toEqual(['dear', 'unpriced', 'cheap', 'member'])
+    // The subtask grids draw no "rounds" column of their own — this key is reached only through
+    // inheritance from the main table's "Your prompts" column (`subtaskSortInherit.ts`) — but the
+    // comparator itself works exactly like cost/tokens: null (unmeasured or a group member) last.
+    expect(ids(sortSubtasks(list, { key: 'rounds', dir: 'asc' }, ctx))).toEqual(['cheap', 'dear', 'member', 'unpriced'])
   })
 
   it('is TOTAL: equal values keep the order the list had, both directions', () => {
