@@ -168,6 +168,11 @@ export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSu
 
     const usage = msg?.usage as UsageRecord | undefined
     if (!usage) continue
+    // AN API-ERROR LINE IS NOT A BILLED RESPONSE — same rule as jsonl.ts's assistant fold. Claude
+    // Code writes a synthetic `isApiErrorMessage: true` line (model `<synthetic>`, all-zero usage)
+    // when a call could not be completed; letting it through here would add a `<synthetic>`-model
+    // usage entry for a response that never happened. See jsonl-api-error.test.ts.
+    if (e.isApiErrorMessage === true) continue
     const model = typeof msg?.model === 'string' ? msg.model : ''
 
     const bucketOf = (m: string): SubagentUsage => {

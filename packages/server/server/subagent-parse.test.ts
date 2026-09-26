@@ -45,6 +45,39 @@ test('junk lines and blank lines are skipped without throwing', () => {
   expect(s.usage).toEqual([{ model: 'm', inputTokens: 0, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 }])
 })
 
+/** The exact structural shape of a Claude Code API-error line — see jsonl-api-error.test.ts. */
+function apiError() {
+  return JSON.stringify({
+    type: 'assistant',
+    timestamp: '2026-09-26T10:00:00.000Z',
+    isApiErrorMessage: true,
+    error: 'model_not_found',
+    message: {
+      model: '<synthetic>',
+      content: [],
+      usage: {
+        input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+        cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+      },
+    },
+  })
+}
+
+test('a subagent API-error line contributes no usage entry — it is not a billed response', () => {
+  const s = summarizeSubagentTranscript([apiError()])
+  expect(s.usage).toEqual([])
+})
+
+test('a subagent API-error line beside a real response: the real one counts, the error adds nothing', () => {
+  const s = summarizeSubagentTranscript([
+    assistant('claude-haiku-4-5-20251001', { input_tokens: 8, output_tokens: 100, cache_read_input_tokens: 90, cache_creation_input_tokens: 2 }),
+    apiError(),
+  ])
+  expect(s.usage).toEqual([
+    { model: 'claude-haiku-4-5-20251001', inputTokens: 8, outputTokens: 100, cacheReadTokens: 90, cacheWriteTokens: 2 },
+  ])
+})
+
 /** A tool_use item inside an assistant turn. */
 function toolUse(name: string) {
   return JSON.stringify({

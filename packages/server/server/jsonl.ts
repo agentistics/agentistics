@@ -756,7 +756,19 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
       // (the four counters below, the TTL split, and the day bucket it landed on) before this
       // record's own numbers are added — the only way a resumable fold that sees the partial line in
       // one poll and the final line in a LATER one still ends up where a single whole-file read would.
-      if (msg?.usage) {
+      //
+      // AN API-ERROR LINE IS NOT A BILLED RESPONSE. Claude Code writes a SYNTHETIC assistant line
+      // when a call could not be completed (`isApiErrorMessage: true`, `message.model:
+      // '<synthetic>'`, and a `message.usage` whose four counters AND nested `cache_creation`
+      // object are all zero). Letting it through here does not move the token totals (its counters
+      // are zero) but it DOES set `sawCacheCreationBreakdown`, so a session whose only usage line is
+      // this record reported an OBSERVED `0`/`0` cache-write TTL split instead of ABSENT — a
+      // confident zero for a split that was never read, the exact defect `HARNESS_CAPABILITIES`
+      // exists to prevent for a whole harness, here at the level of one line. Measured on four real
+      // sessions (2026-09-26) whose only usage-bearing line was exactly this shape. The canonical
+      // replay (`integrations/claude/replay-model.ts`) agrees: it emits no `model.completed` for
+      // this line at all, only a separate `model.failed`.
+      if (msg?.usage && e.isApiErrorMessage !== true) {
         const raw = msg.usage as Record<string, number> & { cache_creation?: Record<string, unknown> }
         const ttl = raw.cache_creation
         const hadTtl = !!(ttl && typeof ttl === 'object')
