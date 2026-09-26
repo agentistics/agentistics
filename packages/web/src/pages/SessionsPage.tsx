@@ -38,6 +38,7 @@ import { panelTitle } from '../lib/panelMeta'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
+import { freedBytes } from '@agentistics/core'
 import { getCentralMachine } from '../lib/centralMachinePick'
 import type { AppContext } from '../lib/app-context'
 import { useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
@@ -77,9 +78,8 @@ import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
-import { bannerVisible } from '../lib/idleExecution'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
-import { IdleSessionsBanner } from '../components/sessions/IdleSessionsBanner'
+import { publishIdleReview } from '../lib/idleReviewStore'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
 import type { SessionDrilldownProps } from '../components/SessionDrilldown'
 import type { Artifact } from '../lib/sessionArtifacts'
@@ -316,7 +316,8 @@ export default function SessionsPage() {
   const rowIndex = useFleetIndex(fleet.sessions)
 
   /**
-   * IDLE SESSIONS (Task 6) — the review modal, its banner, and the state that owns them.
+   * IDLE SESSIONS (Task 6) — the review modal, and the candidates published for the card in
+   * `SessionsAside` (see `lib/idleReviewStore.ts`).
    *
    * `useHardwarePressureWatch` is called HERE, ahead of the rail's own use of `hardwareCritical`
    * further down this file, so `ramUnderPressure` — the SAME 5s hardware poll the rail's red icon
@@ -337,12 +338,6 @@ export default function SessionsPage() {
     enabled: !isCentral && !pollUnsupported && !loading,
   })
   const [idleOpen, setIdleOpen] = useState(false)
-  const [idleSnoozedUntil, setIdleSnoozedUntil] = useState<number | null>(() => {
-    try {
-      const v = Number(sessionStorage.getItem('agentistics-idle-snooze'))
-      return Number.isFinite(v) && v > 0 ? v : null
-    } catch { return null }
-  })
   useEffect(() => {
     const open = () => setIdleOpen(true)
     window.addEventListener('agentistics:open-idle-sessions', open)
@@ -351,6 +346,16 @@ export default function SessionsPage() {
     if (takeIdleReviewRequest()) setIdleOpen(true)
     return () => window.removeEventListener('agentistics:open-idle-sessions', open)
   }, [])
+  // Publish the summary the idle-review CARD reads (`SessionsAside.tsx`, mounted twice — the
+  // desktop sidebar and the mobile list) — see `lib/idleReviewStore.ts`'s own header for why the
+  // card cannot simply take these as props. Snooze and dismiss live in that store too, so this page
+  // no longer owns any idle-review state beyond the modal's own open/closed flag.
+  useEffect(() => {
+    publishIdleReview(
+      { count: idleCandidates.length, freedBytes: freedBytes(idleCandidates), candidateKeys: idleCandidates.map(c => c.key) },
+      idleOpen,
+    )
+  }, [idleCandidates, idleOpen])
 
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
@@ -2467,20 +2472,12 @@ export default function SessionsPage() {
   const railDesktop = !isMobile && selected !== undefined
   return (
     <>
-    {/* IDLE SESSIONS (Task 6) — a real sibling ABOVE the workspace body, not `position: fixed`, so
-        it occupies space and pushes the rest down rather than covering whichever branch's own
-        top-of-screen header happens to be showing (the mobile list/panel headers already claim
-        y=0). This is the ONE known gap: the mobile DEDICATED TERMINAL (`if (isMobile) return
-        dedicated` above) returns before this point and never shows the banner or the modal — a
-        deliberate, documented limitation rather than a restructuring of that early return. */}
-    {bannerVisible({ candidates: idleCandidates.length, modalOpen: idleOpen, snoozedUntil: idleSnoozedUntil, now: Date.now() }) && (
-      <IdleSessionsBanner
-        lang={pt ? 'pt' : 'en'}
-        count={idleCandidates.length}
-        onReview={() => setIdleOpen(true)}
-        onSnooze={until => setIdleSnoozedUntil(until)}
-      />
-    )}
+    {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`
+        (both its desktop and mobile-list instances), never here — see that card's own header. This
+        page still owns the REVIEW MODAL below, and the ONE known gap stated for the old banner still
+        holds for it: the mobile DEDICATED TERMINAL (`if (isMobile) return dedicated` above) returns
+        before this point and never shows it — a deliberate, documented limitation rather than a
+        restructuring of that early return. */}
     <div
       ref={splitRef}
       // `position: relative` ON EVERY BRANCH (fix, narrow-overlay pass, 2026-09-22) — it is the one

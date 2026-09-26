@@ -2572,10 +2572,10 @@ interchangeable.
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
 
-### Idle sessions — the Sessions workspace's bell, banner and review modal
+### Idle sessions — the Sessions workspace's bell, review card and review modal
 
 The idle RULE is pure and lives in `packages/core/src/idleSessions.ts` (`idleCandidates` /
-`suggestGroup` / `idleNotifyStep` / `freedBytes`) — a session is a candidate only when it is
+`suggestGroup` / `defaultGroupFor` / `idleNotifyStep` / `freedBytes`) — a session is a candidate only when it is
 `waiting` AND the user's own last message is older than `preferences.idleSessions.thresholdMin`
 (a lower `pressureThresholdMin` under RAM pressure). `lastUserMessageAt` reaches a fleet row from
 the EXACT conversation link only (`session-view.ts`'s `metricsOf`, reading the consolidate store's
@@ -2591,6 +2591,33 @@ notification's `meta` is deliberately LANGUAGE-NEUTRAL (`count`, `names`, a plai
 pre-formatted `freed` amount, never composed English/Portuguese) so a notification raised in one
 language still reads correctly after the language toggle flips; `idleMoreSuffix` /
 `idleFreedSentence` compose the two wording placeholders at render time.
+
+**The offer is a CARD inside the sessions list, not a full-width banner.** The old
+`IdleSessionsBanner` sat above the whole workspace body, where the header's own hanging tabs
+("Filtros", the metrics percentage tab) covered its right end — the very edge its buttons were on.
+`IdleReviewCard.tsx` renders instead right above the "Groups" section, inside `SessionsAside.tsx` —
+which is mounted in TWO places (the desktop sidebar, from `App.tsx`, and the mobile "Sessions" tab,
+from `SessionsPage.tsx` itself) that are the SAME component, so putting the card there covers both
+surfaces with one change. `useIdleSessions` still runs exactly ONCE, in `SessionsPage`, which is the
+one place that owns the fleet the feature judges; the card reads the small external store
+`lib/idleReviewStore.ts` (a `useSyncExternalStore` module like `lib/notifications.ts`) that
+`SessionsPage` publishes `{count, freedBytes, candidateKeys}` into on every candidates/modal change,
+so the two mounts of `SessionsAside` never disagree despite each holding its own `useFleet()` poll.
+Snooze and dismiss live in that store too, not as `SessionsPage` state — the card's own buttons
+trigger them, and the desktop card is not a descendant of `SessionsPage` in `App.tsx`'s tree.
+`bannerVisible` (`lib/idleExecution.ts`) gained an optional `candidateKeys`/`dismissedKeys` pair for
+this: dismissing the card hides the CURRENT batch only, and a session outside the dismissed set
+(one that was not part of the batch just dismissed) makes it visible again — never "silence idle
+sessions forever" from one click. The review MODAL's two native `<select>`s (action, group) are now
+the project's own `Select` (`pages/settings/primitives.tsx`), matching `DeliveryDetail.tsx`'s usage;
+its popover is a `position: fixed; z-index: 1200` DESCENDANT of the modal's own `zIndex: 640`
+overlay, so it paints above the dialog with no structural change (a fixed-position element is
+clipped only by an ancestor with `transform`/`filter`/similar, which neither the modal nor `Select`
+has, and 1200 already outranks everything else inside that one stacking context). The modal also
+now shows a candidate's CURRENT user group inline (`groupOfSession`, `@agentistics/core`), and
+`defaultGroupFor` (same module) prefers that group for the "File & end" suggestion ahead of
+`suggestGroup`'s task/date rules — a session already filed by hand must not be re-suggested
+somewhere else because its task happens to match a busier group.
 
 ## Accessibility magnifiers (`packages/web/src/components/a11y/`)
 
