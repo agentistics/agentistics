@@ -160,6 +160,8 @@ export function toControlSession(
       : {}),
     ...(v.createdMs !== undefined ? { startedAt: v.createdMs } : {}),
     ...(v.endedMs !== undefined ? { endedAt: v.endedMs } : {}),
+    ...(v.lastUserMessageMs !== undefined ? { lastUserMessageAt: v.lastUserMessageMs } : {}),
+    ...(v.taskId ? { taskId: v.taskId } : {}),
     ...(v.task ? { task: v.task } : {}),
     // Marked BY THE USER — a label, a note or a task. `title` cannot answer this: it always has a
     // value, because the host derives one whenever there is no label. A name typed INSIDE the

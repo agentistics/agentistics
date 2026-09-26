@@ -890,6 +890,10 @@ export interface ControlSession {
   cpuPercent?: number | null
   /** Resident Set Size memory usage in bytes. */
   rssBytes?: number | null
+  /** Epoch ms of the user's last message, from an EXACT conversation link. Absent = unknown. */
+  lastUserMessageAt?: number
+  /** The task id behind `task` (the label). */
+  taskId?: string
 }
 
 /**

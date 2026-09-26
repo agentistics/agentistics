@@ -405,6 +405,33 @@ describe('a row that KNOWS which conversation it drives', () => {
     const [v] = buildSessionViews({ reconciled, activity: new Map(), processes: [] })
     expect(v!.recordedRepo).toEqual(repo)
   })
+
+  it('carries the last user message time from the EXACT conversation link only', () => {
+    const reconciled = [row('a', {
+      managed: managed('a', { conversationId: 'c1', taskId: 't1' }),
+    })]
+    const [v] = buildSessionViews({
+      reconciled,
+      activity: new Map(),
+      processes: [],
+      conversations: [conv('c1', { lastUserMessageMs: 1234 })],
+    })
+    expect(v!.lastUserMessageMs).toBe(1234)
+    expect(v!.taskId).toBe('t1')
+  })
+
+  it('has no last user message time when the row has no exact link', () => {
+    const reconciled = [row('a', { managed: managed('a', { taskId: 't1' }) })]
+    const [v] = buildSessionViews({
+      reconciled,
+      activity: new Map(),
+      processes: [],
+      conversations: [conv('c1', { lastUserMessageMs: 1234 })],
+    })
+    expect(v!.lastUserMessageMs).toBeUndefined()
+    // The task id is not gated on the exact link — it comes straight from the registry.
+    expect(v!.taskId).toBe('t1')
+  })
 })
 
 describe('a session that CHANGED DIRECTORY is still the row hosting it', () => {
