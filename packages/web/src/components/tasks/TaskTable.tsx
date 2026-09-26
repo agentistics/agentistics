@@ -57,7 +57,8 @@ import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
   isGroupSubtask, visibleClusterRows,
 } from './subtaskGroups'
-import { subtaskRollupOf } from './subtaskRollup'
+import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
+import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { PickerMenu } from './PickerMenu'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
@@ -290,7 +291,8 @@ export const subtaskColumns = (lang: Lang): Array<{ label: string; key: SubtaskS
   return [
     { label: c.subtasks, key: 'title' }, { label: 'Status', key: 'status' },
     { label: c.started, key: 'started' }, { label: c.completed, key: 'completed' },
-    { label: c.sessions, key: 'sessions' },
+    { label: c.sessions, key: 'sessions' }, { label: c.cost, key: 'cost' },
+    { label: c.tokens, key: 'tokens' },
   ]
 }
 
@@ -299,9 +301,11 @@ function SubtaskRows({
   onLinkSession, onUnfile, onOpenSession,
 }: {
   subtasks: Subtask[]
-  /** The delivery's own `TaskDetail.subtaskRollups` — read here only for a GROUP's own
-   *  `groupProgress` (§F.1); the rest of this row's numbers stay off this table by design (see the
-   *  file's own doc comment: a subtask has no rollup of its own in the board's inline view). */
+  /** The delivery's own `TaskDetail.subtaskRollups` — a GROUP's own `groupProgress` (§F.1), and now
+   *  also the per-subtask Cost/Tokens cells (owner-approved reversal of this table's earlier "the
+   *  rest of this row's numbers stay off this table by design" — they no longer do, and are drawn
+   *  through `subtaskRollupOf`/`costCellFor`/`tokensCellFor` exactly as `SubtaskTable.tsx` draws
+   *  them, via the shared `CostCellView`/`TokensCellView` in `SubtaskMoneyCells.tsx`). */
   subtaskRollups: readonly SubtaskView[]
   indent: number
   /** How many task columns the group's table has — the filler cell has to close the row exactly. */
@@ -319,6 +323,7 @@ function SubtaskRows({
   onOpenSession?: (sessionId: string) => void
 }) {
   const isMobile = useIsMobile()
+  const money = useMoney()
   const bare: React.CSSProperties = {
     width: '100%', background: 'transparent', border: 'none', outline: 'none',
     color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'inherit',
@@ -345,10 +350,11 @@ function SubtaskRows({
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
     flexShrink: 0, minWidth: 18, minHeight: 18,
   }
-  // 1 (leading) + 5 named cells + filler must equal cols + 2 — the task row above is
-  // [leading][title][cols…], and the leading column is there in BOTH modes (Select only adds the
-  // checkbox INSIDE it), so this arithmetic does not depend on whether rows are being picked.
-  const filler = Math.max(0, cols - 4)
+  // 1 (leading) + 7 named cells (status/started/completed/sessions/cost/tokens, plus the title
+  // cell) + filler must equal cols + 2 — the task row above is [leading][title][cols…], and the
+  // leading column is there in BOTH modes (Select only adds the checkbox INSIDE it), so this
+  // arithmetic does not depend on whether rows are being picked.
+  const filler = Math.max(0, cols - 6)
   // See `SubtaskTable`'s own doc comment for the full §F.1 clustering reasoning — this mirrors it
   // exactly, over the same `subtasks` pool (already scoped to one delivery): a member renders
   // directly under its group regardless of creation order, connected by an inset bar plus a shared
@@ -359,6 +365,13 @@ function SubtaskRows({
         const isMember = isGroupMember(t)
         const isGroup = isGroupSubtask(t)
         const view = subtaskRollups.find(v => v.id === t.id)
+        // A MEMBER has no bucket at all (`subtaskRollupOf` finds nothing for it, by construction —
+        // see `SubtaskTable`'s identical reasoning), which `costCellFor`/`tokensCellFor` already
+        // read as "no field at all" — no `!isMember` guard needed here, unlike the sessions cell
+        // below, which hides its own filing CONTROL rather than a read-only figure.
+        const r = subtaskRollupOf(subtaskRollups, t)
+        const cost = costCellFor(r)
+        const tok = tokensCellFor(r)
         const parentGroup = isMember && !clustered ? groupOf(t, subtasks) : undefined
         const tint = clusterTintStyle(clustered)
         // A non-empty group's own header — see `SubtaskTable`'s identical reasoning.
@@ -489,6 +502,12 @@ function SubtaskRows({
                 onOpen={onOpenSession}
               />
             )}
+          </td>
+          <td style={{ padding: cellPad, textAlign: 'right', ...tint }}>
+            <CostCellView r={r} cost={cost} money={money} />
+          </td>
+          <td style={{ padding: cellPad, textAlign: 'right', ...tint }}>
+            <TokensCellView tok={tok} />
           </td>
           {filler > 0 && <td colSpan={filler} style={tint} />}
         </tr>
@@ -958,10 +977,14 @@ export function TaskTable(p: TaskTableProps) {
                                       { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
                                     ))}
                                     title={L.sortByColumn.replace('{column}', h.label)}
-                                    style={{ ...microLabel, fontWeight: 600, textAlign: 'left', padding: '5px 10px', paddingLeft: i === 0 ? 34 : 10 }}
+                                    style={{
+                                      ...microLabel, fontWeight: 600, padding: '5px 10px',
+                                      paddingLeft: i === 0 ? 34 : 10,
+                                      textAlign: h.key === 'cost' || h.key === 'tokens' ? 'right' : 'left',
+                                    }}
                                   />
                                 ))}
-                                {cols.length > 4 && <td colSpan={cols.length - 4} />}
+                                {cols.length > 6 && <td colSpan={cols.length - 6} />}
                               </tr>
                               <SubtaskRows
                                 subtasks={orderedSubtasks(

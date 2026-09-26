@@ -1,10 +1,11 @@
 /**
  * SubtaskTable — the subtasks, as the SAME grid the table view expands inside a row.
  *
- * One component drawn in two places, deliberately: a subtask that shows five columns on the board
- * and a checkbox on the detail page is two different records as far as the reader is concerned, and
- * the one with fewer columns teaches people the fields do not exist. (`TaskTable.tsx`'s inline
- * subitem rows mirror the base columns, including the group-forming controls below.)
+ * One component drawn in two places, deliberately: a subtask that shows every column on the board
+ * and only some of them on the detail page is two different records as far as the reader is
+ * concerned, and the one with fewer columns teaches people the fields do not exist. (`TaskTable.tsx`'s
+ * inline subitem rows mirror the base columns — Cost and Tokens included — plus the group-forming
+ * controls below.)
  *
  * A subtask carries a SESSION — which piece of work is being done where — and now a ROLLUP of its
  * own: cost, rounds and tokens are still measured per SESSION, never stored on the subtask itself,
@@ -38,12 +39,15 @@
  *
  * The Cost/Tokens columns below read `p.subtaskRollups` through `subtaskRollupOf`, which resolves by
  * the subtask's OWN id, always (`rollupKeyOf` — the legacy `groupId`-based union §B once used is
- * superseded and inert) — and render them with the exact same formatters `TaskTable.tsx`'s own
- * cost/tokens cells use (`useMoney()`, `fmtTokens`). A subtask with no session filed yet still gets a
- * bucket from the server (`sessionsUsed: 0`, every metric `null`), and that renders as an EMPTY cell
- * — no field at all, not even "N/A" — through `costCellFor`/`tokensCellFor`'s `isUntracked` check:
- * metric tracking starts the moment a session is actually linked, not before. "N/A" is reserved for a
- * session that IS linked but whose figure genuinely cannot be produced. See `subtaskRollup.ts`.
+ * superseded and inert) — and render them through `CostCellView`/`TokensCellView`
+ * (`SubtaskMoneyCells.tsx`), the ONE rendering `TaskTable.tsx`'s own inline subitem rows draw too —
+ * a second formatting rule for the same figure is exactly what this codebase forbids (see
+ * `CLAUDE.md`'s "Calculation functions — single source of truth"). A subtask with no session filed
+ * yet still gets a bucket from the server (`sessionsUsed: 0`, every metric `null`), and that renders
+ * as an EMPTY cell — no field at all, not even "N/A" — through `costCellFor`/`tokensCellFor`'s
+ * `isUntracked` check: metric tracking starts the moment a session is actually linked, not before.
+ * "N/A" is reserved for a session that IS linked but whose figure genuinely cannot be produced. See
+ * `subtaskRollup.ts`.
  *
  * The `id: null` direct-branch bucket (sessions filed straight on the delivery, under no subtask —
  * see `task-attach.ts` and docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md §4.1)
@@ -60,7 +64,7 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import {
-  fmtDateOnly, fmtStamp, fmtTokens, liveStatusMap, liveStatusOrder, microLabel, numeric, pill,
+  fmtDateOnly, fmtStamp, liveStatusMap, liveStatusOrder, microLabel, pill,
   statusStyle, surface, type BoardStatus,
 } from './board'
 import { SessionPicker } from './SessionPicker'
@@ -78,10 +82,11 @@ import { orderedSubtasks } from './subtaskSortView'
 import { StagedSessionCompose } from './StagedSessionCompose'
 import { StagedSessionView } from './StagedSessionView'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { useMoney, type Money } from './money'
-import { costCaveat, costCellFor, subtaskRollupOf, tokensCellFor, type CostCell, type TokensCell } from './subtaskRollup'
+import { useMoney } from './money'
+import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
+import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import type {
-  AttemptRollup, StagedSessionWriteResult, StatusWriteResult, Subtask, SubtaskPatch, SubtaskView,
+  StagedSessionWriteResult, StatusWriteResult, Subtask, SubtaskPatch, SubtaskView,
   TaskFile, TaskSessionRow, TaskStatus,
 } from '../../lib/tasks'
 
@@ -141,31 +146,6 @@ const cell: React.CSSProperties = { padding: '7px 9px', borderTop: '1px solid va
 const bare: React.CSSProperties = {
   width: '100%', background: 'transparent', border: 'none', outline: 'none',
   color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'inherit',
-}
-
-/** One rendering for the cost cell — the subtask rows and the direct-sessions footer row draw the
- *  EXACT same figure the exact same way, so this lives once rather than being copy-pasted twice. */
-function CostCellView({ r, cost, money }: { r: AttemptRollup | undefined; cost: CostCell; money: Money }) {
-  if (cost.kind === 'empty') return null
-  if (cost.kind === 'credits') {
-    return <span style={{ ...numeric, fontSize: 12 }}>{cost.premiumRequests} req</span>
-  }
-  return (
-    <span
-      style={{ ...numeric, fontSize: 12, color: cost.usd === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}
-      title={costCaveat(r)}
-    >{money(cost.usd, r?.costByHarness)}</span>
-  )
-}
-
-/** The tokens column's own version of `CostCellView`. */
-function TokensCellView({ tok }: { tok: TokensCell }) {
-  if (tok.kind === 'empty') return null
-  return (
-    <span style={{ ...numeric, fontSize: 12, color: tok.n === null ? 'var(--text-tertiary)' : undefined }}>
-      {fmtTokens(tok.n)}
-    </span>
-  )
 }
 
 export interface SubtaskTableProps {
