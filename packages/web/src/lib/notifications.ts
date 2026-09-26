@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { idleSessionNoun } from './idleExecution'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -174,12 +175,13 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // deliberately LANGUAGE-NEUTRAL — `count` (number), `names` (the first 3 titles joined by ", "),
   // `more` (how many were left out, 0 when none) and `freed` (a pre-formatted amount like "2.1 GB",
   // or absent when unknown) — so a notification fired in one language still reads correctly after
-  // the language toggle flips. `{more}` and `{freed}` cannot be plain placeholders: "and N more" and
-  // an optional "Frees ~X. " sentence are WORDING, not a bare value, so `resolveNotification` fills
-  // them through `idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
+  // the language toggle flips. `{sessionsNoun}`, `{more}` and `{freed}` cannot be plain
+  // placeholders: the singular/plural noun, "and N more" and an optional "Frees ~X. " sentence are
+  // WORDING, not a bare value, so `resolveNotification` fills them through
+  // `idleSessionNoun`/`idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
   'sessions.idle': {
-    pt: { title: 'Sessões ociosas', message: '{count} sessão(ões) sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
-    en: { title: 'Idle sessions', message: '{count} session(s) you have not messaged in a while: {names}{more}. {freed}Click to review.' },
+    pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
+    en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },
   },
 }
 
@@ -268,9 +270,14 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   if (n.code === 'member.auth_rejected' && n.meta?.status && message) {
     message = `${message} (HTTP ${n.meta.status})`
   }
-  // sessions.idle's {more}/{freed}: WORDING, not a bare value, so they are composed here rather than
-  // left to the generic pass below — see idleMoreSuffix/idleFreedSentence for why.
+  // sessions.idle's {sessionsNoun}/{more}/{freed}: WORDING, not a bare value, so they are composed
+  // here rather than left to the generic pass below — see idleSessionNoun/idleMoreSuffix/
+  // idleFreedSentence for why. `{sessionsNoun}` is the proper singular/plural noun for `count`
+  // ("session"/"sessions", "sessão"/"sessões") — the literal "{count} session(s)" this replaced
+  // never read right for a single idle session.
   if (message && n.code === 'sessions.idle') {
+    const count = typeof n.meta?.count === 'number' ? n.meta.count : 0
+    message = message.replace('{sessionsNoun}', idleSessionNoun(count, lang))
     const more = typeof n.meta?.more === 'number' ? n.meta.more : 0
     message = message.replace('{more}', idleMoreSuffix(more, lang))
     const freed = typeof n.meta?.freed === 'string' ? n.meta.freed : null

@@ -9,6 +9,7 @@
  * hide the banner on this render rather than waiting for a poll or a manual re-read of storage.
  */
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { idleBannerText } from '../../lib/idleExecution'
 
 const SNOOZE_KEY = 'agentistics-idle-snooze'
 const SNOOZE_MS = 3_600_000
@@ -41,7 +42,7 @@ export function IdleSessionsBanner({ lang, count, onReview, onSnooze }: IdleSess
       }}
     >
       <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-        {pt ? `${count} sessões ociosas podem ser encerradas` : `${count} idle sessions could be ended`}
+        {idleBannerText(count, lang)}
       </span>
       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
         <button

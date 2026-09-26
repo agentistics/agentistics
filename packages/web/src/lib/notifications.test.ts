@@ -320,8 +320,15 @@ describe('Task 5 — sessions.idle: meta is language-neutral, {more}/{freed} are
     const n = note('a', { code: 'sessions.idle', meta: { count: 3, names: 'Fix bug, Add tests', more: 1, freed: '1.2 GB' } })
     const pt = s.resolveNotification(n, 'pt').message!
     const en = s.resolveNotification(n, 'en').message!
-    expect(pt).toBe('3 sessão(ões) sem mensagem sua há um tempo: Fix bug, Add tests e mais 1. Libera ~1.2 GB. Clique para revisar.')
-    expect(en).toBe('3 session(s) you have not messaged in a while: Fix bug, Add tests and 1 more. Frees ~1.2 GB. Click to review.')
+    expect(pt).toBe('3 sessões sem mensagem sua há um tempo: Fix bug, Add tests e mais 1. Libera ~1.2 GB. Clique para revisar.')
+    expect(en).toBe('3 sessions you have not messaged in a while: Fix bug, Add tests and 1 more. Frees ~1.2 GB. Click to review.')
+  })
+
+  test('a single idle session gets proper singular copy, not "1 session(s)"', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 1, names: 'A', more: 0 } })
+    expect(s.resolveNotification(n, 'en').message).toStartWith('1 session you have not messaged')
+    expect(s.resolveNotification(n, 'pt').message).toStartWith('1 sessão sem mensagem')
   })
 
   test('no placeholder survives in either language, with or without freed/more', async () => {
