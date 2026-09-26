@@ -34,15 +34,31 @@
  *   is not a non-negative safe integer: that is a caller bug, not a runtime condition, and silently
  *   answering it would hand a poller a page from the wrong place.
  * - **Reads are pages, never "everything"** — clamped to `MAX_PAGE` whatever the caller asks for.
+ * - **The WAL checkpoint runs AFTER an append, never inside one** (research A1.7). A checkpoint copies
+ *   the WAL into the main file and then fsyncs both, and on this machine the fsyncs are the cost: a
+ *   PASSIVE checkpoint of ~1000 frames took a median 14 ms with `synchronous = NORMAL` against
+ *   1.2 ms with the syncs switched off. SQLite's default autocheckpoint (1000 pages) ran it INSIDE
+ *   the COMMIT of whichever batch crossed the threshold — 12–20 % of the benchmark's batches, every
+ *   one of them far over the 2 ms budget. So a successful write arms ONE deferred `wal_checkpoint(PASSIVE)`
+ *   (`CHECKPOINT_DELAY_MS` later, on a timer that never keeps the process alive) and the append
+ *   returns. PASSIVE never waits on a reader or a writer and never throws out of here; a busy or
+ *   failed one is retried by the next arm. SQLite's autocheckpoint stays on as a CEILING
+ *   (`WAL_AUTOCHECKPOINT_PAGES`, schema.ts), so a producer that never yields to the event loop — a
+ *   tight loop of appends, in which no timer can fire — still has a bounded WAL, paying the
+ *   checkpoint in an append only once per ceiling's worth of frames. `close()` cancels the timer and
+ *   checkpoints before closing. One cost is NOT moved, on purpose: the first commit after a
+ *   checkpoint restarts the WAL and, under `synchronous = NORMAL`, fsyncs its new header (~1.3 ms
+ *   measured) — that sync is what keeps the WAL consistent across a power loss.
  */
 import { dirname } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
 import type { AgentisticsEvent } from '@agentistics/core'
 import { JOURNAL_PATH } from '../config'
-import { planAppend, rowToEvent, type JournalRow } from './journal-plan'
+import { decodeInstant, decodeRow, encodeRow, planAppend, rowToEvent, type JournalRow, type StoredRow } from './journal-plan'
 import {
   JournalOpenError,
+  STORED_COLUMNS,
   classifyJournalPath,
   defaultPathProbe,
   openDatabase,
@@ -70,21 +86,37 @@ export interface OpenJournalOptions {
   loadSqlite?: () => Promise<typeof import('bun:sqlite')>
   /** Default a real timer. Injected so the recovery retry is testable without waiting. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Default an `unref`'d `setTimeout`. Runs the deferred WAL checkpoint `delayMs` later and returns a
+   * function that cancels it. Injected so a test can decide when (or whether) the timer fires.
+   */
+  scheduleCheckpoint?: (run: () => void, delayMs: number) => () => void
 }
 
-/** The 17 columns, in the order the INSERT binds them. The rowid is the cursor and is never bound. */
-const COLUMNS = [
-  'event_id', 'schema', 'type', 'occurred_at', 'recorded_at',
-  'session_id', 'run_id', 'agent_id', 'task_id',
-  'source_kind', 'source_id', 'source_version',
-  'mode', 'confidence', 'adapter_version', 'source_ref',
-  'data',
-] as const satisfies readonly (keyof JournalRow)[]
+/**
+ * How long after the first write of a quiet period the deferred PASSIVE checkpoint runs. The timer is
+ * armed once and not re-armed by later appends (a THROTTLE, not a debounce), so a producer appending
+ * every few milliseconds still gets a checkpoint every `CHECKPOINT_DELAY_MS`, between its appends —
+ * a debounce would never fire under a steady stream and leave everything to the in-append ceiling.
+ */
+export const CHECKPOINT_DELAY_MS = 250
 
+const realScheduleCheckpoint = (run: () => void, delayMs: number): (() => void) => {
+  const t = setTimeout(run, delayMs)
+  // A pending checkpoint must never keep a one-shot CLI process alive; close() checkpoints anyway.
+  ;(t as { unref?: () => void }).unref?.()
+  return () => clearTimeout(t)
+}
+
+/**
+ * The INSERT binds `STORED_COLUMNS` (schema.ts): the v2 encoding of a `JournalRow` (journal-plan.ts
+ * `encodeRow`), with every repeated string interned into `event_strings` inside the SAME transaction
+ * as the rows that name it. The rowid is the cursor and is never bound.
+ */
 const INSERT_SQL =
-  `INSERT OR IGNORE INTO events (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`
+  `INSERT OR IGNORE INTO events (${STORED_COLUMNS.join(', ')}) VALUES (${STORED_COLUMNS.map(() => '?').join(', ')})`
 const PAGE_SQL =
-  `SELECT rowid AS cursor_rowid, ${COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
+  `SELECT rowid AS cursor_rowid, ${STORED_COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
 
 const RECOVERY_ATTEMPTS = 5
 const RECOVERY_DELAY_MS = 50
@@ -208,16 +240,30 @@ function safePlan(
   }
 }
 
-function bindRow(row: JournalRow): (string | number | null)[] {
-  return COLUMNS.map(c => {
-    const v = row[c] as string | number | null | undefined
-    return v === undefined ? null : v
-  })
+type InsertStmt = { run(...args: (string | number | Uint8Array | null)[]): { changes: number } }
+
+/**
+ * One encoded row through the prepared INSERT, its values passed positionally in `STORED_COLUMNS`
+ * order. Written out rather than `insert.run(...STORED_COLUMNS.map(c => row[c] ?? null))`: that built
+ * a closure and a 19-slot array per row, ~0.1 ms of every 100-event batch (research A1.7). Every
+ * optional column of a `StoredRow` is already `null` when absent (`encodeRow`), so no `undefined` can
+ * be bound here. `journal.test.ts` round-trips every column, so a drift between this order and
+ * `STORED_COLUMNS` fails there.
+ */
+function insertRow(insert: InsertStmt, r: StoredRow): number {
+  return insert.run(
+    r.event_id, r.schema, r.type, r.occurred_at, r.recorded_at,
+    r.session_id, r.run_id, r.agent_id, r.task_id,
+    r.source_kind, r.source_id, r.source_version,
+    r.mode, r.confidence, r.adapter_version, r.source_ref, r.source_ref_line,
+    r.data_shape, r.data,
+  ).changes
 }
 
 export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journal> {
   const path = opts.path ?? JOURNAL_PATH
   const sleep = opts.sleep ?? realSleep
+  const scheduleCheckpoint = opts.scheduleCheckpoint ?? realScheduleCheckpoint
   const where: Where = { path, pathKind: 'unknown' }
 
   try {
@@ -254,25 +300,50 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
       return disabledJournal(where, e instanceof JournalOpenError ? e.reason : 'open-failed')
     }
 
-    let insertTx: { immediate: (rows: JournalRow[]) => { written: number; duplicates: number } }
+    // The interned-string dictionary, as far as this process has seen it COMMITTED. An id is never
+    // reused and a string never rewritten (schema.ts), so a committed pair is valid for the life of
+    // the process whatever other processes write. Ids first met inside a transaction are held apart
+    // (`fresh`) and join the cache only once that transaction commits: a rolled-back batch takes
+    // its new strings with it, and a cached id for a row that no longer exists would name nothing.
+    const idOf = new Map<string, number>()
+    const stringOf = new Map<number, string>()
+    const remember = (fresh: Map<string, number>) => {
+      for (const [s, id] of fresh) { idOf.set(s, id); stringOf.set(id, s) }
+    }
+
+    let insertTx: { immediate: (rows: JournalRow[]) => { written: number; duplicates: number; fresh: Map<string, number> } }
     let pageStmt: ReturnType<Database['query']>
     let statsStmt: ReturnType<Database['query']>
+    let stringStmt: ReturnType<Database['query']>
     try {
-      const insert = db.prepare(INSERT_SQL)
+      const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
+      const findString = db.prepare('SELECT id FROM event_strings WHERE s = ?')
+      const addString = db.prepare('INSERT INTO event_strings (s) VALUES (?)')
       insertTx = db.transaction((rows: JournalRow[]) => {
+        const fresh = new Map<string, number>()
+        // Inside BEGIN IMMEDIATE this connection holds the write lock, so the SELECT sees every
+        // string any other process has committed and nobody can add one between it and the INSERT.
+        const intern = (s: string): number => {
+          const known = idOf.get(s) ?? fresh.get(s)
+          if (known !== undefined) return known
+          const hit = findString.get(s) as { id: number } | null
+          const id = hit ? hit.id : Number(addString.run(s).lastInsertRowid)
+          fresh.set(s, id)
+          return id
+        }
         let written = 0
         let duplicates = 0
         for (const row of rows) {
-          const { changes } = insert.run(...bindRow(row))
-          if (changes === 1) written++
+          if (insertRow(insert, encodeRow(row, intern)) === 1) written++
           else duplicates++
         }
-        return { written, duplicates }
+        return { written, duplicates, fresh }
       }) as unknown as typeof insertTx
       pageStmt = db.query(PAGE_SQL)
       statsStmt = db.query(
         'SELECT COUNT(*) AS n, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at FROM events',
       )
+      stringStmt = db.query('SELECT s FROM event_strings WHERE id = ?')
     } catch {
       // A table that does not have the columns we bind (schema.ts said it migrated, the statement
       // disagrees): the same outcome as a failed migration.
@@ -280,8 +351,45 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
       return disabledJournal(where, 'migrate-failed')
     }
 
+    /** An interned id → its string. An id no row of `event_strings` carries is a corrupt row: throw. */
+    const lookup = (id: number): string => {
+      const known = stringOf.get(id)
+      if (known !== undefined) return known
+      const hit = stringStmt.get(id) as { s: string } | null
+      if (!hit) throw new Error(`journal row names an unknown string id ${id}`)
+      idOf.set(hit.s, id)
+      stringOf.set(id, hit.s)
+      return hit.s
+    }
+
     const counters = emptyCounters()
     let state: 'open' | 'closed' = 'open'
+
+    // ── The deferred checkpoint (see the header) ──
+    let checkpointStmt: ReturnType<Database['query']> | null = null
+    let cancelCheckpoint: (() => void) | null = null
+    /** PASSIVE: copies what it can without waiting on anyone. Never throws out of here. */
+    const checkpointNow = (): void => {
+      try {
+        checkpointStmt ??= db.query('PRAGMA wal_checkpoint(PASSIVE)')
+        checkpointStmt.get()
+      } catch {
+        // BUSY or I/O: nothing is lost — the frames stay in the WAL, the next arm (or the ceiling)
+        // copies them.
+      }
+    }
+    const armCheckpoint = (): void => {
+      if (cancelCheckpoint !== null || state === 'closed') return
+      try {
+        cancelCheckpoint = scheduleCheckpoint(() => {
+          cancelCheckpoint = null
+          if (state === 'open') checkpointNow()
+        }, CHECKPOINT_DELAY_MS)
+      } catch {
+        // A scheduler that throws leaves the ceiling in charge; the append already succeeded.
+        cancelCheckpoint = null
+      }
+    }
 
     const journal: Journal = {
       async append(events): Promise<AppendResult> {
@@ -297,8 +405,11 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         try {
           const res = await withRecoveryRetry(() => insertTx.immediate(rows), recoveryPending, sleep)
           recoveryPending = false
+          remember(res.fresh)
           counters.written += res.written
           counters.duplicates += res.duplicates
+          // Only a write puts frames in the WAL; an all-duplicate batch commits nothing to copy.
+          if (res.written > 0) armCheckpoint()
           return { written: res.written, duplicates: res.duplicates, rejected }
         } catch {
           // The transaction rolled back whole: nothing of this batch is in the table.
@@ -314,11 +425,11 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         const n = clampLimit(limit)
         if (n === 0 || state === 'closed') return { events: [], cursor }
         try {
-          const raw = pageStmt.all(cursor, n) as (JournalRow & { cursor_rowid: number })[]
+          const raw = pageStmt.all(cursor, n) as (StoredRow & { cursor_rowid: number })[]
           if (raw.length === 0) return { events: [], cursor }
           const events = raw.map(r => {
             const { cursor_rowid: _rowid, ...row } = r
-            return rowToEvent(row as JournalRow)
+            return rowToEvent(decodeRow(row as StoredRow, lookup))
           })
           return { events, cursor: Number(raw[raw.length - 1]!.cursor_rowid) }
         } catch {
@@ -332,7 +443,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
 
       async stats(): Promise<JournalStats> {
         if (state === 'closed') return { rows: 0, bytes: 0 }
-        type StatsRow = { n: number; first_at: string | null; last_at: string | null }
+        type StatsRow = { n: number; first_at: number | null; last_at: number | null }
         let r: StatsRow | null
         try {
           r = statsStmt.get() as StatsRow | null
@@ -344,8 +455,8 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
           rows: Number(r?.n ?? 0),
           bytes: fileSize(path) + fileSize(`${path}-wal`),
         }
-        if (r?.first_at) out.firstAt = r.first_at
-        if (r?.last_at) out.lastAt = r.last_at
+        if (typeof r?.first_at === 'number') out.firstAt = decodeInstant(r.first_at)
+        if (typeof r?.last_at === 'number') out.lastAt = decodeInstant(r.last_at)
         return out
       },
 
@@ -355,8 +466,15 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
 
       close(): void {
         if (state === 'closed') return
+        // A pending deferred checkpoint must not run against a closed handle: cancel it, then
+        // checkpoint here, so what it would have copied is copied now. (The last connection to close
+        // also checkpoints and removes the WAL; this covers the case where another is still open.)
+        if (cancelCheckpoint !== null) {
+          try { cancelCheckpoint() } catch { /* a timer that cannot be cleared finds state closed */ }
+          cancelCheckpoint = null
+        }
+        checkpointNow()
         state = 'closed'
-        // The last connection to close checkpoints the WAL into the main file.
         try { db.close() } catch { /* already gone */ }
       },
     }

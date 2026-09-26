@@ -61,6 +61,7 @@ describe('connection pragmas', () => {
       'PRAGMA busy_timeout = 10000',
       'PRAGMA journal_mode = WAL',
       'PRAGMA synchronous = NORMAL',
+      'PRAGMA wal_autocheckpoint = 10000',
     ])
     const bt = CONNECTION_PRAGMAS.findIndex(s => s.includes('busy_timeout'))
     const jm = CONNECTION_PRAGMAS.findIndex(s => s.includes('journal_mode'))
@@ -76,6 +77,7 @@ describe('connection pragmas', () => {
       'exec:PRAGMA busy_timeout = 10000',
       'query:PRAGMA journal_mode = WAL',
       'exec:PRAGMA synchronous = NORMAL',
+      'exec:PRAGMA wal_autocheckpoint = 10000',
     ])
   })
 
@@ -88,6 +90,7 @@ describe('connection pragmas', () => {
     expect(reasonOf(() => configureConnection(conn))).toBe('wal-unavailable')
     // synchronous is never set on a connection that was refused
     expect(conn.calls.some(c => c.includes('synchronous'))).toBe(false)
+    expect(conn.calls.some(c => c.includes('wal_autocheckpoint'))).toBe(false)
   })
 
   test('a real bun:sqlite file ends up with the configured values', () => {
@@ -99,6 +102,7 @@ describe('connection pragmas', () => {
       expect(bt).toBe(10000)
       expect((db.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe('wal')
       expect((db.query('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
+      expect((db.query('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint).toBe(10000)
     } finally {
       db.close()
     }
@@ -120,25 +124,36 @@ function userVersion(db: Database): number {
   return (db.query('PRAGMA user_version').get() as { user_version: number }).user_version
 }
 
+// v2 stores interned ids and epoch-ms instants (journal-plan.ts `encodeRow`); a raw row is written in
+// that form. The ids name no string here — only the append/read paths look them up.
 const insert =
   'INSERT OR IGNORE INTO events (event_id, schema, type, occurred_at, recorded_at, source_kind, ' +
-  "source_id, mode, confidence, adapter_version, data) VALUES (?, 1, 't', 'a', 'b', 'k', 'i', 'm', 'c', 'v', '{}')"
+  "source_id, mode, confidence, adapter_version, data) VALUES (?, 1, 1, 0, 0, 1, 1, 1, 1, 1, '{}')"
 
 describe('migrate', () => {
   test('one DDL step per version', () => {
-    expect(JOURNAL_DB_VERSION).toBe(1)
+    expect(JOURNAL_DB_VERSION).toBe(2)
     expect(EVENTS_DDL.length).toBe(3)
   })
 
-  test('a fresh file gets the table, both indexes, and user_version 1', () => {
+  test('a fresh file gets the table, the dictionary, NO secondary index, and user_version 2', () => {
     const db = openRaw()
     try {
       migrate(db)
       const n = names(db)
       expect(n).toContain('events')
-      expect(n).toContain('events_run')
-      expect(n).toContain('events_type')
-      expect(userVersion(db)).toBe(1)
+      expect(n).toContain('event_strings')
+      // v1 created events_run / events_type; v2 drops them (no reader, measured cost — schema.ts).
+      expect(n).not.toContain('events_run')
+      expect(n).not.toContain('events_type')
+      const indexes = db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events' AND name NOT LIKE 'sqlite_autoindex_%'").all()
+      expect(indexes).toEqual([])
+      expect(n).not.toContain('events_v2')
+      expect(userVersion(db)).toBe(2)
+      // v2's columns, not v1's: the dictionary-encoded source_ref and the data shape exist.
+      const cols = (db.query('PRAGMA table_info(events)').all() as { name: string }[]).map(c => c.name)
+      expect(cols).toContain('source_ref_line')
+      expect(cols).toContain('data_shape')
     } finally {
       db.close()
     }
@@ -152,7 +167,7 @@ describe('migrate', () => {
       const before = names(db)
       migrate(db)
       expect(names(db)).toEqual(before)
-      expect(userVersion(db)).toBe(1)
+      expect(userVersion(db)).toBe(2)
       expect((db.query('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n).toBe(1)
     } finally {
       db.close()
@@ -162,10 +177,10 @@ describe('migrate', () => {
   test('a newer user_version is refused and nothing is created', () => {
     const db = openRaw()
     try {
-      db.exec('PRAGMA user_version = 2')
+      db.exec('PRAGMA user_version = 3')
       expect(reasonOf(() => migrate(db))).toBe('db-schema-too-new')
       expect(names(db)).toEqual([])
-      expect(userVersion(db)).toBe(2)
+      expect(userVersion(db)).toBe(3)
       // and the transaction was rolled back: a new one can start
       db.exec('BEGIN IMMEDIATE')
       db.exec('COMMIT')
@@ -217,7 +232,7 @@ describe('openDatabase', () => {
   test('opens, configures and migrates', () => {
     const db = openDatabase(Database, join(tempDir(), 'j.db'))
     try {
-      expect(userVersion(db)).toBe(1)
+      expect(userVersion(db)).toBe(2)
       expect((db.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe('wal')
     } finally {
       db.close()

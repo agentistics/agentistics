@@ -20,11 +20,13 @@
  * or the folds that use it copies a message body, a thinking block, a tool input or a tool output
  * into an event. A shell command enters only through `commandSummary` plus `redactSecrets`.
  */
+import { createHash } from 'node:crypto'
 import {
   CANONICAL_EVENT_SCHEMA,
-  deriveEventId,
-  sha256Hex,
+  EVENT_ID_LENGTH,
+  eventIdPreimage,
   type AgentisticsEvent,
+  type EventIdInput,
   type Confidence,
   type EventData,
   type EventType,
@@ -38,14 +40,40 @@ import {
  * - 1.0.0 — session/run/agent lifecycle, model invocations, tool executions.
  * - 1.1.0 — adds `context.compacted`. A transcript replayed at 1.0.0 carries no compaction events,
  *   which a projection must read as "not recorded by this version", never as "never compacted".
+ * - 1.2.0 — `model.invoked`'s payload no longer repeats `providerRequestId` (A1.7, journal size): it
+ *   is in the paired `model.completed` from the same line, and no projection reads the invoked
+ *   payload. The event ids are unchanged — the id still keys both events. A 1.1.0 `model.invoked`
+ *   carries the copy, a 1.2.0 one does not; nothing else differs.
  */
-export const CLAUDE_ADAPTER_VERSION = '1.1.0'
+export const CLAUDE_ADAPTER_VERSION = '1.2.0'
 
 /** `source.id` on every event. */
 export const CLAUDE_SOURCE_ID = 'claude'
 
+/**
+ * SHA-256 of the UTF-8 bytes of `text`, hex — the SAME function as `@agentistics/core`'s `sha256Hex`,
+ * computed natively. Core's is dependency-free TypeScript on purpose (it is bundled into the web app,
+ * where `node:crypto` does not exist); this module is server-only, and on the first ingest of a real
+ * store (491 conversations, ~412k events, A1.7) the TypeScript hash was ~13 % of the replay's CPU —
+ * two hashes per event (the event id, plus the tool-execution entity id) and three per file.
+ *
+ * Identity, not an approximation: `replay-core.test.ts` pins it to core's `sha256Hex` and
+ * `deriveEventId` over ASCII, multi-byte text, astral characters and LONE SURROGATES (which both
+ * encode as U+FFFD, `TextEncoder`'s documented behaviour and Node's `'utf8'` encoding alike), and
+ * the whole store was hashed event by event before and after the change. Deterministic and
+ * side-effect free, so the module stays pure in the sense that matters: same input, same output.
+ */
+export function sha256HexNative(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/** `deriveEventId`, over the same preimage, through `sha256HexNative`. */
+export function claudeEventId(input: EventIdInput): string {
+  return sha256HexNative(eventIdPreimage(input)).slice(0, EVENT_ID_LENGTH)
+}
+
 function idOf(prefix: string, ...parts: string[]): Id {
-  return `${prefix}${sha256Hex(JSON.stringify(['agentistics.claude-entity/v1', ...parts])).slice(0, 24)}`
+  return `${prefix}${sha256HexNative(JSON.stringify(['agentistics.claude-entity/v1', ...parts])).slice(0, 24)}`
 }
 
 export const sessionIdOf = (conversationId: string): Id => idOf('ses_', 'session', conversationId)
@@ -124,13 +152,13 @@ export interface EventOptions {
 /** The emit callback every fold writes through. Events are never collected by the fold itself. */
 export type EmitEvent = (event: AgentisticsEvent) => void
 
-/** One envelope. The id comes from `deriveEventId`; nothing here mints one. */
+/** One envelope. The id is `deriveEventId`'s (computed by `claudeEventId`); nothing here mints one. */
 export function makeEvent<T extends EventType>(
   ctx: ClaudeReplayContext, type: T, data: EventData[T], o: EventOptions,
 ): AgentisticsEvent<T> {
   const agentId = o.agentId === undefined ? ctx.agentId : o.agentId
   const event: AgentisticsEvent<T> = {
-    eventId: deriveEventId({
+    eventId: claudeEventId({
       sourceKind: 'harness',
       sourceId: CLAUDE_SOURCE_ID,
       sourceRef: o.sourceRef,
