@@ -205,8 +205,12 @@ export interface SessionMeta {
   start_time: string
   end_time?: string
   /** WALL CLOCK: last event − first event. A session reopened over three weeks reports ~500h here,
-   *  which is true and says nothing about how long it was worked on. Use `active_minutes` for that. */
-  duration_minutes: number
+   *  which is true and says nothing about how long it was worked on. Use `active_minutes` for that.
+   *  `undefined` when no transcript was ever walked for this session (a 0-byte file, or one whose
+   *  every line was blank/unparseable) — there is no first or last event to subtract, so `0` would
+   *  be a measurement this session never produced. Present sessions still write a real `0` when the
+   *  walk found two events a minute or less apart. */
+  duration_minutes?: number
   /** Time the session was actually being worked on: Σ per-turn duration (human prompt → the
    *  harness's last event for that turn), preferring a duration the harness measured itself.
    *  Computed by `computeActiveTime()` in activeTime.ts — one rule for every harness.

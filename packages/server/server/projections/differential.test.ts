@@ -346,9 +346,10 @@ describe('the fixture row (A2.2\'s redacted transcripts)', () => {
       expect(bugs).toEqual([])
     })
   }
-  test('claude-replay: the subagent first-wins difference is reported as explained, not hidden', async () => {
+  test('claude-replay: after M-1 the subagent token total is EQUAL — nothing left to explain', async () => {
     const r = await runDifferential({ projectsDir: join(FIXTURES, 'claude-replay'), settledMs: 0 })
     const f = r.fields.find(x => x.field === 'agentMetrics.totalTokens')!
-    expect(f.counts.explained).toBe(1)
+    expect(f.counts.explained).toBe(0)
+    expect(f.counts.bug).toBe(0)
   })
 })

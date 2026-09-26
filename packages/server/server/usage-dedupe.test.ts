@@ -1,28 +1,37 @@
 import { describe, expect, it } from 'bun:test'
-import { countUsage, dedupeUsage } from './usage-dedupe'
+import { resolveUsage, dedupeUsage } from './usage-dedupe'
 
 const u = (i: number, o: number, cr = 0, cw = 0) => ({
   input_tokens: i, output_tokens: o, cache_read_input_tokens: cr, cache_creation_input_tokens: cw,
 })
 
-describe('countUsage', () => {
-  it('counts one API response once, however many lines carry it', () => {
-    // Measured: 148 usage lines over 79 distinct ids on one real session, every repeat identical.
-    const seen = new Set<string>()
-    expect(countUsage('msg_1', seen)).toBe(true)
-    expect(countUsage('msg_1', seen)).toBe(false)
-    expect(countUsage('msg_1', seen)).toBe(false)
-    expect(countUsage('msg_2', seen)).toBe(true)
+describe('resolveUsage', () => {
+  it('counts the first sighting of an id, nothing to retract', () => {
+    const seen = new Map<string, ReturnType<typeof u>>()
+    expect(resolveUsage('msg_1', seen, u(10, 5))).toEqual({ replace: false })
   })
 
-  it('counts a record with NO id, always', () => {
+  it('a REPEAT of an id says what its earlier contribution was, so the caller can retract it', () => {
+    // Measured: 148 usage lines over 79 distinct ids on one real session. A subagent transcript
+    // additionally proved the repeats are not always identical — a partial usage (output_tokens 5)
+    // written before the final one (276) — which is exactly the case LAST-wins exists for.
+    const seen = new Map<string, ReturnType<typeof u>>()
+    resolveUsage('msg_1', seen, u(100, 5))
+    expect(resolveUsage('msg_1', seen, u(100, 276))).toEqual({ replace: true, previous: u(100, 5) })
+    // The map now holds the NEW contribution — a third sighting retracts the second, not the first.
+    expect(resolveUsage('msg_1', seen, u(100, 300))).toEqual({ replace: true, previous: u(100, 276) })
+    expect(resolveUsage('msg_2', seen, u(1, 1))).toEqual({ replace: false })
+  })
+
+  it('a record with NO id is never a repeat of anything', () => {
     // What cannot be shown to be a duplicate is not one — dropping it would trade an over-count
     // for an under-count, which is the worse direction for a bill.
-    const seen = new Set<string>()
-    expect(countUsage(undefined, seen)).toBe(true)
-    expect(countUsage(undefined, seen)).toBe(true)
-    expect(countUsage('', seen)).toBe(true)
-    expect(countUsage(42, seen)).toBe(true)
+    const seen = new Map<string, ReturnType<typeof u>>()
+    expect(resolveUsage(undefined, seen, u(1, 1))).toEqual({ replace: false })
+    expect(resolveUsage(undefined, seen, u(1, 1))).toEqual({ replace: false })
+    expect(resolveUsage('', seen, u(1, 1))).toEqual({ replace: false })
+    expect(resolveUsage(42, seen, u(1, 1))).toEqual({ replace: false })
+    expect(seen.size).toBe(0)
   })
 })
 

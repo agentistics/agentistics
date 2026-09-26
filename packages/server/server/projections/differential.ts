@@ -36,7 +36,7 @@ import {
   type SessionMeta,
 } from '@agentistics/core'
 import { parseSessionJsonl } from '../jsonl'
-import { countUsage, dedupeUsage } from '../usage-dedupe'
+import { dedupeUsage } from '../usage-dedupe'
 import { agentNumbers, summarizeSubagentTranscript, type SubagentSummary } from '../subagent-parse'
 import { isNestedAgent, parseAgentMeta, type AgentEntry } from '../subagent-join'
 import { createClaudeReplay } from '../integrations/claude'
@@ -167,6 +167,20 @@ const zeroToolStats4 = (): ToolStats4 =>
   ({ readCount: 0, searchCount: 0, bashCount: 0, editFileCount: 0, otherToolCount: 0 })
 
 /**
+ * The rule legacy applied BEFORE M-1 (2026-09-26): the FIRST usage record per `message.id` wins, a
+ * record with no id always counts. It was removed from `usage-dedupe.ts` because it was a defect
+ * there (the file's own doc says LAST wins); it is kept HERE, named for what it was, because the
+ * differential's job is to explain a difference — and a consolidate store written by a build older
+ * than the fix still carries numbers counted this way until it is rebuilt.
+ */
+export function legacyFirstWinsGate(messageId: unknown, seen: Set<string>): boolean {
+  if (typeof messageId !== 'string' || !messageId) return true
+  if (seen.has(messageId)) return false
+  seen.add(messageId)
+  return true
+}
+
+/**
  * PURE. Both counting rules over one transcript's lines. Assistant lines with a `message.usage` only —
  * the population `countUsage` is applied to in `jsonl.ts` and `subagent-parse.ts`.
  */
@@ -186,7 +200,7 @@ export function recountUsage(lines: Iterable<string>): UsageEvidence['main'] {
     const cc = e.message.usage.cache_creation
     if (e.isApiErrorMessage === true && cc && typeof cc === 'object'
       && Object.values(cc).every(v => v === 0)) apiErrorZeroTtlLines++
-    if (countUsage(e.message.id, seen)) {
+    if (legacyFirstWinsGate(e.message.id, seen)) {
       const u = t4(e.message.usage)
       first.input += u.input; first.output += u.output; first.cacheRead += u.cacheRead; first.cacheWrite += u.cacheWrite
     }

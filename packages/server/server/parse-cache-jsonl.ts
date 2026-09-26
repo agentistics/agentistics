@@ -85,7 +85,10 @@ export async function cachedParseSession(
 // for this session" rather than "read, and it compacted/invoked nothing". A closed conversation's
 // transcript never changes again, so without this bump every session already in this cache would
 // have stayed excluded from the baseline forever.
-const SESSION_SHAPE = 'v5'
+// v6: `agentMetrics` re-means — one billed response counts ONCE per session (`claimSessionUsage`),
+// last-wins inside a subagent file, and a background fork is nested by its own `meta.parentAgentId`.
+// Same bytes, different numbers: exactly the case this stamp exists for.
+const SESSION_SHAPE = 'v6'
 
 /** Everything `scanProjectDir` needs from a transcript whose session already exists in
  *  Claude's own session-meta — which carries none of it. */
@@ -108,6 +111,17 @@ export interface EnrichResult {
   compact: CompactStats
   /** Skill invocations by name; `{}` is a real answer once the transcript has been read. */
   skillUses: Record<string, number>
+  /**
+   * The message ids whose usage THIS transcript counted, or null when the session invoked no agent.
+   *
+   * Carried in the row because the subagent enrichment runs OUTSIDE this memo (see
+   * `withSubagentNumbers`) and needs them: a forked subagent opens with the main transcript's
+   * launching response under its original id, and one billed response is counted ONCE per session.
+   * Re-reading the parent to recover them on a hit is exactly what this memo exists to avoid. They
+   * cannot go stale: the row is keyed on the parent's stamp, and the parent's id set only changes
+   * when the parent does. Measured: 3.818 ids in the largest transcript on this machine (~120 KB).
+   */
+  mainUsageIds: string[] | null
 }
 
 /**
@@ -133,7 +147,12 @@ export interface EnrichResult {
  * cached under `v3` would go on answering with neither field forever, the same "silently blank"
  * failure this comment already warns about for every other field here.
  */
-const ENRICH_SHAPE = 'v4'
+//
+// v5: `mainUsageIds` was added, and what `agentMetrics` becomes once enriched changed — one billed
+// response counts ONCE per session, across the main transcript and every subagent file
+// (`claimSessionUsage`). A v4 row carries no ids, so the enrichment it feeds would double-count every
+// fork's replayed launch forever on a finished session.
+const ENRICH_SHAPE = 'v5'
 
 /**
  * The whole enrichment of one transcript, cached as a unit.
@@ -183,6 +202,7 @@ export async function cachedEnrich(
     compact: finishCompacts(state.compact),
     // Copied, not shared — the walk goes on writing to it. See `finishClaudeSession`.
     skillUses: { ...state.skillUses },
+    mainUsageIds: metrics.totalInvocations > 0 ? [...state.countedUsage.keys()] : null,
   }
   cache.set('enrich', stamp, result, variant)
   return withSubagentNumbers(result, filePath)
@@ -205,6 +225,7 @@ export async function cachedEnrich(
 async function withSubagentNumbers(result: EnrichResult, filePath: string): Promise<EnrichResult> {
   if (!result.agentMetrics) return result
   const sessionId = basename(filePath).replace(/\.jsonl$/, '')
-  const agentMetrics = await enrichFromSubagentTranscripts(result.agentMetrics, filePath, sessionId)
+  const agentMetrics = await enrichFromSubagentTranscripts(
+    result.agentMetrics, filePath, sessionId, new Set(result.mainUsageIds ?? []))
   return agentMetrics === result.agentMetrics ? result : { ...result, agentMetrics }
 }

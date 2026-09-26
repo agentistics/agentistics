@@ -15,7 +15,8 @@ import {
   type AgentisticsEvent, type AnyAgentisticsEvent, type EventData, type EventType, type SessionMeta,
 } from '@agentistics/core'
 import { parseSessionJsonl } from '../jsonl'
-import { countUsage, dedupeUsage } from '../usage-dedupe'
+import { dedupeUsage } from '../usage-dedupe'
+import { legacyFirstWinsGate } from './differential'
 import { createClaudeReplay } from '../integrations/claude'
 import { CLAUDE_ADAPTER_VERSION, mainAgentIdOf, subagentIdOf } from '../integrations/claude/replay-core'
 import {
@@ -148,7 +149,8 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
   })
 
   /**
-   * EXPLAINED DIFFERENCE (P1 §8, the §40 vocabulary) — subagent tokens.
+   * FORMERLY an EXPLAINED DIFFERENCE (P1 §8, the §40 vocabulary) — subagent tokens. Fixed by M-1
+   * (2026-09-26); the history below is why the fixture is shaped this way.
    *
    * Claude Code streams a response as several lines that share one `message.id`, and in a SUBAGENT
    * transcript the first line carries a PARTIAL usage (measured in this fixture: output 5, then 276).
@@ -159,7 +161,7 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
    * documented rule, and so does this projection. The reference below is computed independently
    * from the raw files with `dedupeUsage`, which really is last-wins.
    */
-  test('EXPLAINED: subagent tokens follow last-wins; legacy counts the first (partial) line', () => {
+  test('FIXED (M-1): legacy now counts the LAST line like the projection, and the fixture still tells the rules apart', () => {
     const dir = join(FIXTURES, 'claude-replay/proj', CONV, 'subagents')
     let lastWins = 0
     let firstWins = 0
@@ -171,7 +173,7 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
         const e = JSON.parse(line) as { type?: string; message?: { id?: string; usage?: Record<string, number> } }
         if (e.type !== 'assistant' || !e.message?.usage) continue
         entries.push({ id: e.message.id, usage: e.message.usage })
-        if (countUsage(e.message.id, firstSeen)) {
+        if (legacyFirstWinsGate(e.message.id, firstSeen)) {
           const u = e.message.usage
           firstWins += (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
         }
@@ -181,9 +183,11 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
     }
     const rows = PROJ.meta.agentMetrics!
     expect(rows.totalTokens).toBe(lastWins)
-    expect(LEGACY.agentMetrics!.totalTokens).toBe(firstWins)
-    expect(lastWins).toBeGreaterThan(firstWins) // the partial first line under-reports, never over
-    expect(rows.totalTokens - LEGACY.agentMetrics!.totalTokens).toBe(lastWins - firstWins)
+    // M-1 (2026-09-26): legacy counts the LAST record per id too, so the two now agree exactly.
+    expect(LEGACY.agentMetrics!.totalTokens).toBe(lastWins)
+    // …and the agreement is not an accident of the fixture: it still carries a partial first line,
+    // under which the pre-M-1 rule would have reported less.
+    expect(lastWins).toBeGreaterThan(firstWins)
   })
 
   test('an invocation whose usage never streamed differently costs exactly what legacy says', () => {

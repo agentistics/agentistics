@@ -983,6 +983,35 @@ reading the code, which looked right in all three places. Each is now a named ru
   It survived because it under-reported money — the reassuring direction — and because the token
   over-count above pushed the other way, so the product of two defects looked plausible.
 
+**2026-09-26 — four more, proven by the P1 parity differential**
+(`docs/superpowers/research/2026-09-25-p1-parity-differential.md`: legacy `SessionMeta` against an
+independent replay of the same bytes, compared with `===`). Owner decision: fix all four. After them
+the differential reads EQUAL on every row of these classes (476 sessions, 0 explained, 0 bug).
+
+- **`countUsage` was FIRST-wins, against its own doc.** A repeat was skipped rather than replacing
+  its predecessor, and a subagent's first line for an id can carry a PARTIAL usage (output 5, then
+  276). 460 invocation rows / 41 sessions. `resolveUsage` now reports a repeat with its predecessor,
+  and the resumable fold RETRACTS that contribution from every sink (the four counters, the TTL
+  split, the day bucket) before adding the new one. A response stays on the day of its FIRST
+  record: it is stamped with the first record's time and the last record's usage, as the replay
+  does, so a response straddling UTC midnight does not move days.
+- **A synthetic `isApiErrorMessage` line is not a billed response.** Its usage is all zeros, but
+  counting it marked the cache-write TTL split as OBSERVED, so a session whose only usage line was
+  one reported `0`/`0` instead of absent (4 sessions). Both walks skip it.
+- **An empty transcript is not a measured zero.** A 0-byte file (or one with no parseable line)
+  wrote `duration_minutes: 0` and `compact_count/compact_ms: 0` (1 session). Those fields are now
+  absent unless a line was walked (`ClaudeParseState.sawAnyEntry`); `duration_minutes` is optional.
+- **Once per SESSION, not once per file.** A fork (`meta.isFork`) opens with the parent's launching
+  response under its original `message.id`, and forks replay each other's ids, so one response was
+  counted in the main transcript and again in the invocation (18 rows / 10 sessions; one root
+  156.120.428 tokens against 106.446.703). `claimSessionUsage` (`subagent-parse.ts`): an id the
+  main transcript carries belongs to no invocation, and otherwise the SHALLOWEST file carrying it
+  owns it, with ties going to the smaller `agentId`. That makes it a function of the files, never of
+  `readdir` order. Nested files are also found through their own `meta.parentAgentId`
+  (`planSubtrees`), which is how an unnamed background fork stops being missed. The main
+  transcript's ids reach the pass from the walk's own `countedUsage`, and on a `cachedEnrich` memo
+  hit through `EnrichResult.mainUsageIds`.
+
 **The store must be REBUILT for a correction to reach a screen**: `~/.agentistics/sessions/**` holds
 the computed `SessionMeta`, so a parser fix changes nothing until the next `buildApiResponse` writes
 it back.
@@ -1617,7 +1646,13 @@ The numbers moved to `~/.claude/projects/<project>/<session-id>/subagents/agent-
   cheap agent as an expensive one — which is exactly what the old reader did with the parent's model.
 - **A nested subagent counts inside the invocation that spawned it.** Only a top-level `Agent`
   `tool_use` becomes an `AgentInvocation`, so a subtree left out is left out of the session's totals
-  entirely. Cycle-safe by a visited set.
+  entirely. Cycle-safe by a visited set. **A child is found by EITHER route** (`planSubtrees`,
+  `subagent-join.ts`): a `toolUseResult.agentId` in the parent's content, or the child's own
+  `meta.parentAgentId` — a background fork no parent's content names is reachable only by the
+  second, and was missed until 2026-09-26. A transcript belongs to at most ONE root (the first in the
+  parent's invocation order that reaches it); before, each root walked with its own visited set.
+- **One billed response counts once per SESSION, across files** — see the 2026-09-26 addendum under
+  "One billed response is counted ONCE" (`claimSessionUsage`).
 - **The DURATION is the root's own span** — a nested agent runs inside its parent, and adding the two
   counts the same wall time twice.
 - **THE LIST OF INVOCATIONS IS THE DIRECTORY'S, NOT THE PARENT'S.** Keying on `Agent` tool_use +
