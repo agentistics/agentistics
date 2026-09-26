@@ -55,6 +55,7 @@ import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
+import { NotificationBell } from '../components/NotificationBell'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { RelayedAsideNote } from '../components/sessions/RelayedAsideNote'
 import { relayedTabAvailable } from '../lib/relayedAside'
@@ -1577,6 +1578,16 @@ export default function SessionsPage() {
             because a pinned lens takes no pointer events of its own. It renders nothing until
             there is a lens to hide. */}
         <HideLensesButton ctx={ctx} />
+        {/* The bell, same reasoning: this workspace draws no <header>, so without a slot here it
+            has no way onto a phone at all. Sized at the 44px mobile touch target directly, since
+            `NotificationBell` takes an explicit `buttonStyle` rather than a className it could
+            grow via `.ag-tap-icon`. */}
+        <NotificationBell lang={pt ? 'pt' : 'en'} buttonStyle={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 44, height: 44, borderRadius: 8,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
+        }} />
       </>
     )
     : null
