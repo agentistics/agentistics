@@ -91,6 +91,8 @@ test('every harness has at least one credential rule, and each names how to re-e
     ['.gemini/antigravity-cli/antigravity-oauth-token', 'antigravity'],
     ['.copilot/token', 'copilot'],
     ['.copilot/mcp-oauth-config/github.tokens.json', 'copilot'],
+    ['.copilot/config.json', 'copilot'],
+    ['.claude/agentistics-preferences.json', 'claude'],
     ['.kimi-code/config.toml', 'kimi'],
   ] as [string, string][]) {
     const rule = excludeFor(rel)
@@ -203,4 +205,21 @@ test('the control center\'s BACKUP_LAYER_ORDER matches BACKUP_LAYERS, in order',
   expect(decl).toBeDefined()
   const members = [...decl!.matchAll(/'([a-z]+)'/g)].map(m => m[1]!)
   expect(members).toEqual(BACKUP_LAYERS)
+})
+
+// Found by probing KEY NAMES (never values) under each harness's data dir: `~/.copilot/config.json`
+// carries `copilotTokens`, and `~/.claude/agentistics-preferences.json` carries `team.token`. Neither
+// was excluded, so both rode out in the raw layer of a published backup. The fixtures below hold key
+// names and empty placeholders only.
+test('config files holding credential keys are excluded from the raw layer', () => {
+  const fixtures: [string, string][] = [
+    ['.copilot/config.json', 'copilotTokens'],
+    ['.claude/agentistics-preferences.json', 'team.token'],
+  ]
+  for (const [rel, key] of fixtures) {
+    const rule = excludeFor(rel)
+    expect(rule?.reason, `${rel} (${key}) must be a secret`).toBe('secret')
+    expect(rule?.restoreWith ?? '', `${rel} needs a restore command`).not.toBe('')
+    expect(rule?.why ?? '', `${rel} must say which key it holds`).toContain(key)
+  }
 })
