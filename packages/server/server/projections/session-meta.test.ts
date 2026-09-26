@@ -96,6 +96,18 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
     expect(PROJ.meta.tool_error_categories).toEqual(LEGACY.tool_error_categories)
   })
 
+  test('the human turns equal legacy: count, rounds, interruptions and timestamps', async () => {
+    expect(LEGACY.user_message_count).toBeGreaterThan(0)
+    expect(PROJ.meta.user_message_count).toBe(LEGACY.user_message_count)
+    expect(PROJ.meta.rounds).toBe(LEGACY.user_message_count)
+    expect(PROJ.meta.user_interruptions).toBe(LEGACY.user_interruptions)
+    expect(PROJ.meta.user_message_timestamps).toEqual(LEGACY.user_message_timestamps)
+    const compact = project(sessionMetaProjection, await replayOf('claude-replay-compact', CONV2))
+    const compactLegacy = await legacyOf('claude-replay-compact', CONV2)
+    expect(compact.meta.user_message_count).toBe(compactLegacy.user_message_count)
+    expect(compact.meta.user_message_timestamps).toEqual(compactLegacy.user_message_timestamps)
+  })
+
   test('start, end and duration equal legacy', () => {
     expect(PROJ.meta.start_time).toBe(LEGACY.start_time)
     expect(PROJ.meta.end_time).toBe(LEGACY.end_time)
@@ -248,11 +260,22 @@ describe('what is NOT projected is said, and is absent', () => {
     for (const k of Object.keys(PROJ.meta)) expect(declared.has(k)).toBe(false)
   })
 
-  test('the human-turn fields are absent, each with the human-turn reason', () => {
-    for (const f of ['user_message_count', 'user_response_times', 'message_hours', 'active_minutes', 'rounds']) {
+  test('what turn.started cannot reach stays absent, each reason naming the fact no event carries', () => {
+    const facts: Record<string, string> = {
+      user_response_times: 'LAST assistant transcript line',
+      message_hours: 'EVERY timestamped transcript line',
+      active_minutes: 'turn_duration',
+      daily: 'every user- and assistant-role LINE',
+    }
+    for (const [f, fact] of Object.entries(facts)) {
       expect(f in PROJ.meta).toBe(false)
-      const n = NOT_PROJECTABLE.find(x => x.field === f)
-      expect(n?.reason).toContain('human-turn')
+      expect(NOT_PROJECTABLE.find(x => x.field === f)?.reason).toContain(fact)
+    }
+  })
+
+  test('the turn counters are no longer declared absent', () => {
+    for (const f of ['rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps']) {
+      expect(NOT_PROJECTABLE.some(x => x.field === f)).toBe(false)
     }
   })
 
@@ -432,6 +455,60 @@ describe('rules the fixture does not reach', () => {
     expect(p.meta.end_time).toBeUndefined()
     expect(p.meta.duration_minutes).toBeUndefined()
     expect(p.caveats.some(c => c.field === 'end_time')).toBe(true)
+  })
+
+  test('human turns: counted, ordered by source line, interruptions = count - 1, rounds = count', () => {
+    const at = (n: number) => `2026-01-01T00:0${n}:00.000Z`
+    const t = (n: number, line: number) => anyEv(ev('turn.started', { by: 'user' }, { at: at(n), ref: `claude:c:${line}`, adapter: '1.3.0' }))
+    const base = syntheticSession().map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.3.0' } })) as AnyAgentisticsEvent[]
+    const turns = [t(1, 5), t(4, 30), t(2, 12)]
+    for (const order of [turns, [...turns].reverse(), [turns[1]!, turns[0]!, turns[2]!]]) {
+      const p = project(sessionMetaProjection, [...base, ...order, ...order])
+      expect(p.meta.user_message_count).toBe(3)
+      expect(p.meta.rounds).toBe(3)
+      expect(p.meta.user_interruptions).toBe(2)
+      expect(p.meta.user_message_timestamps).toEqual([at(1), at(2), at(4)])
+    }
+  })
+
+  test('an unstamped human line is a turn but not a timestamp (the emitter marks it estimated)', () => {
+    const base = syntheticSession().map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.3.0' } })) as AnyAgentisticsEvent[]
+    const stamped = anyEv(ev('turn.started', { by: 'user' }, { at: '2026-01-01T00:01:00.000Z', ref: 'claude:c:3', adapter: '1.3.0' }))
+    const unstamped = ev('turn.started', { by: 'user' }, { at: '2026-09-25T00:00:00.000Z', ref: 'claude:c:9', adapter: '1.3.0' })
+    unstamped.provenance.confidence = 'estimated'
+    const p = project(sessionMetaProjection, [...base, stamped, anyEv(unstamped)])
+    expect(p.meta.user_message_count).toBe(2)
+    expect(p.meta.user_message_timestamps).toEqual(['2026-01-01T00:01:00.000Z'])
+  })
+
+  test('a subagent\'s turn is not the session\'s', () => {
+    const sub = subagentIdOf('c', 'abc')
+    const base = syntheticSession().map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.3.0' } })) as AnyAgentisticsEvent[]
+    const p = project(sessionMetaProjection, [
+      ...base,
+      anyEv(ev('agent.started', { kind: 'subagent', parentAgentId: mainAgentIdOf('c') }, { agentId: sub, ref: 'r:meta', adapter: '1.3.0' })),
+      anyEv(ev('turn.started', { by: 'user' }, { agentId: sub, adapter: '1.3.0' })),
+    ])
+    expect(p.meta.user_message_count).toBe(0)
+    expect(p.meta.user_interruptions).toBe(0)
+    expect(p.meta.user_message_timestamps).toEqual([])
+  })
+
+  test('a walk that could see turns and saw none says 0 (a measurement), not absent', () => {
+    const base = syntheticSession().map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.3.0' } })) as AnyAgentisticsEvent[]
+    const p = project(sessionMetaProjection, base)
+    expect(p.meta.user_message_count).toBe(0)
+    expect(p.meta.user_interruptions).toBe(0)
+  })
+
+  test('events replayed before turn.started (adapter < 1.3.0): turn fields ABSENT with a caveat, never 0', () => {
+    const base = syntheticSession().map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.2.0' } })) as AnyAgentisticsEvent[]
+    const p = project(sessionMetaProjection, base)
+    for (const f of ['user_message_count', 'rounds', 'user_interruptions', 'user_message_timestamps']) expect(f in p.meta).toBe(false)
+    expect(p.caveats.some(c => c.field === 'user_message_count')).toBe(true)
+    // one old event among new ones is enough: the walk cannot vouch that it saw every turn
+    const mixed = [...base.slice(0, 2), ...syntheticSession().slice(2).map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.3.0' } })) as AnyAgentisticsEvent[]]
+    expect('user_message_count' in project(sessionMetaProjection, mixed).meta).toBe(false)
   })
 
   test('an empty walk projects zeros for counters and nothing else', () => {

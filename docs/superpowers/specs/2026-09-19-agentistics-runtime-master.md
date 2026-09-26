@@ -442,6 +442,16 @@ are the ones agentop *hosted* and could never link — a tmux row for gemini, an
 process — and those contribute no metrics today either. No existing row is lost by this model; the
 new entity only adds rows that previously had nowhere to be.
 
+**A person's turn is part of what the projection must reproduce, so it is an event (D22, 2026-09-26).**
+`rounds`, `user_message_count`, `user_interruptions` and `user_message_timestamps` are counted from
+one predicate — `isHumanUserEntry` in `jsonl.ts`, which refuses the `isMeta` and `isCompactSummary`
+entries the harness writes under the user's role — and that same predicate opens the turns
+`active_minutes` is measured over. Without an event carrying that fact the projection could
+reproduce the token counters and none of these. So each entry that predicate accepts becomes one `turn.started
+{ by: 'user' }` (§14.1), emitted from the SAME predicate so the event count and the legacy count
+cannot diverge by construction. The turn itself is a fact about the conversation, not a new entity:
+it needs no id beyond its `eventId`.
+
 ### 13.3 Identity and correlation
 
 ```
@@ -571,7 +581,31 @@ browser.click  browser.input  browser.scroll  browser.screenshot  browser.downlo
 context.compacted    context.window.observed
 policy.requested     policy.approved    policy.denied
 alm.task.created     alm.task.updated   alm.task.completed   alm.evidence.attached
+turn.started                                                   (human turns — D22)
 ```
+
+**`turn.started` — a HUMAN TURN is an event (D22, decided 2026-09-26 by the specification session
+under the owner's delegation; the owner may veto).** An adapter emits one per entry the legacy
+parser counts as a person's turn, from the SAME predicate (`isHumanUserEntry`, `jsonl.ts`: `isMeta`
+and `isCompactSummary` refused), keyed by `deriveEventId` on the source line. Its data is
+`{ by: 'user' }` and nothing else: WHEN is the envelope's `occurredAt`, WHICH LINE is
+`provenance.sourceRef`, and there is **no text and no text size** (D5). `by` is a field rather than
+implied so a turn opened by something other than a person is a later additive widening, not a new
+type. It is optional, not required — a source that cannot tell a person's entry from the harness's
+own emits none, and the projection then reads the turn-derived fields as unmeasured, never as zero.
+With it, `rounds`, `user_message_count`, `user_interruptions` and `user_message_timestamps` are
+projected and EQUAL to legacy on every fixture and on a real store (A2.7: 479 sessions, 0 bug rows).
+Three fields it does NOT make projectable, measured rather than assumed, and each stays declared in
+`NOT_PROJECTABLE` with its reason: `active_minutes` (legacy closes a turn with Claude's own
+`system/turn_duration`, which no event carries, or else at the last line of ANY kind before the next
+prompt), `message_hours` (legacy takes the hour of EVERY timestamped line, not of turns) and
+`user_response_times` (legacy measures from the LAST assistant line before the prompt; a
+`model.completed` carries the first line of a multi-line response, and a line with no usage emits
+nothing). Closing the first and third needs an additive field or event (a `turn.ended` carrying the
+measured duration; the last assistant line's time on `turn.started`) — a vocabulary widening beyond
+D22, and therefore a decision, not an implementation detail. *Rejected:* deriving turns in the projection from gaps between `model.invoked` events —
+that is the idle-gap inference `docs/harness-contract.md` § 1 forbids, and a turn inferred from a
+pause would count a long tool run as the person speaking.
 
 Harness-specific facts do **not** get their own event types. They travel as typed `data` on the
 event that carries them, so the vocabulary stays closed and a new harness cannot widen it silently.

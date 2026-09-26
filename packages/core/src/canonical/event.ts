@@ -160,6 +160,8 @@ export const EVENT_TYPES = [
   'alm.task.created', 'alm.task.updated', 'alm.task.completed', 'alm.evidence.attached',
   // side processes (§13.4)
   'process.started', 'process.ended',
+  // human turns (D22)
+  'turn.started',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -460,6 +462,20 @@ export interface ProcessEndedData {
 }
 
 /**
+ * A PERSON took a turn (decision D22, 2026-09-26). Emitted from the SAME predicate legacy counts
+ * with — `isHumanUserEntry` in `jsonl.ts`, which excludes `isMeta` and `isCompactSummary` — so a
+ * projection counting these events agrees with `user_message_count` by construction.
+ *
+ * It carries WHO and nothing else: WHEN is the envelope's timestamp and WHICH LINE is its
+ * `sourceRef`. There is no text and no text size (D5). `by` is a closed union of one member today;
+ * it is a field rather than implied so a later turn opened by something other than a person is an
+ * additive widening, not a new event type.
+ */
+export interface TurnStartedData {
+  by: 'user'
+}
+
+/**
  * One data shape per event type. Its keys are checked against `EVENT_TYPES` in BOTH directions
  * below, so a type added without a shape — or a shape for a type that does not exist — fails the
  * build rather than reaching the journal with a payload nobody specified.
@@ -505,6 +521,7 @@ export interface EventData {
   'alm.evidence.attached': AlmEvidenceAttachedData
   'process.started': ProcessStartedData
   'process.ended': ProcessEndedData
+  'turn.started': TurnStartedData
 }
 
 // Compile-time totality. Each alias fails to type-check (`true` is not assignable to `never`) if the

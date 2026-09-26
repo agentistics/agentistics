@@ -44,8 +44,11 @@ import {
  *   is in the paired `model.completed` from the same line, and no projection reads the invoked
  *   payload. The event ids are unchanged — the id still keys both events. A 1.1.0 `model.invoked`
  *   carries the copy, a 1.2.0 one does not; nothing else differs.
+ * - 1.3.0 — adds `turn.started` (A2.7, D22): one per person's turn on the main transcript, the same
+ *   predicate `jsonl.ts`'s `user_message_count` counts with. Events replayed at an older version
+ *   carry no turns, which a projection must read as NOT RECORDED, never as zero turns.
  */
-export const CLAUDE_ADAPTER_VERSION = '1.2.0'
+export const CLAUDE_ADAPTER_VERSION = '1.3.0'
 
 /** `source.id` on every event. */
 export const CLAUDE_SOURCE_ID = 'claude'

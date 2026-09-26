@@ -156,6 +156,27 @@ still compile unchanged) and to master §13/§14. *Rejected:* (a) a separate B1-
 shapes for one billed call is the duplication the journal exists to end; (b) an untyped `extra` bag
 — unqueryable, and a field nobody types is a field nobody validates.
 
+## Added on 2026-09-26 (specification session, under the owner's delegation)
+
+**D22 · A human turn is an event.** Taken on 2026-09-26 by the specification session under the
+owner's delegation; the owner may veto. Implemented by A2.7. The canonical vocabulary gains
+`turn.started` with data `{ by: 'user' }` — OPTIONAL and additive, not in the required set. An
+adapter emits one per entry the legacy parser counts as a person's turn, from the SAME predicate
+(`isHumanUserEntry` in `jsonl.ts`, which refuses `isMeta` and `isCompactSummary`), keyed by
+`deriveEventId` on the source line. It carries WHO and nothing else: when is the envelope's
+timestamp, which line is its `sourceRef`, and there is no text and no text size (D5). *Reason:*
+`rounds` and `user_message_count` are counted from that predicate today, and it opens the turns
+`active_minutes` is measured over, so without the event the projection cannot reproduce them and P1
+§12.3 cannot close; emitting from the same predicate makes the two counts agree by construction.
+*Outcome, measured by A2.7:* `rounds`, `user_message_count`, `user_interruptions` and
+`user_message_timestamps` project EQUAL to legacy (479 real sessions, 0 bug rows). The decision's
+expectation that `message_hours` and `active_minutes` would follow did NOT hold: legacy reads the
+hour of every line and Claude's own `turn_duration`, neither of which a turn event carries, so they
+stay not-projectable with that reason, and P1 §12.3 stays open for `active_minutes`. Applied to
+`canonical/event.ts` (a type test proves the shape is closed and A1.1's events still compile) and to
+master §13.2/§14.1 and P1 §12.3. *Rejected:* deriving turns in the projection from gaps between
+`model.invoked` events — that is the idle-gap inference `docs/harness-contract.md` § 1 forbids.
+
 ## Also decided on 2026-09-25
 
 - **The native context manager** — every decision is in `2026-09-25-runtime-context-manager-design.md`.
