@@ -242,6 +242,92 @@ bound, but a 1 M run cannot tell GC timing from a slow leak. A longer run would 
 A side figure, which is not the size budget: the synthetic 1 M-event database was 430 MB on disk,
 about 430 B per event. It sizes the fixture and says nothing about KB/session/day.
 
+### 9.2 What A1.7 found and changed (2026-09-26)
+
+The owner's rule for this pass: find the cause, fix it, re-measure with the same method, and propose
+a new target only with a measured number and a reason. All measurements below come from ONE session
+on the same machine (WSL2 ext4, Bun 1.3.14, load average 3.5–4.6 at 1 minute). The base (`1bb97ae6`)
+and the change ran back to back, each in an isolated `AGENTISTICS_DIR` and journal directory. The
+store-based ones (ingest, size, parity) ran over the same FROZEN copy of `~/.claude/projects`
+(487 transcripts, 2.4 GB), so both sides read the same bytes.
+
+| Budget | Before | After | Status |
+|---|---|---|---|
+| append ≤ 2 ms p95 / 100 events | p95 **14.4 / 13.2 / 14.8 ms** | p95 **1.85 / 1.95 / 1.67 ms** | **MET**, with a small margin (see below) |
+| shadow ingest, steady state | 42 ms, 1.2 % | 53 ms, 1.3 % | **MET** |
+| shadow ingest, first ingest into an empty journal | 34.9 / 35.7 s | **18.6 / 18.1 s** | **re-baseline proposed** |
+| no unbounded accumulation (1 M events) | +17 MiB heap | +16.7 MiB heap, +25.6 MiB RSS | **MET** |
+| size ≤ 2 KB / session / day | **419.5 KB**, 650 B/event | **113.5 KB**, 176 B/event | **re-baseline proposed** |
+
+Parity: the A2.5/A2.6 differential over the same snapshot gives 487 sessions and 0 with a bug row,
+before and after. The rendered report is byte-identical. Every one of the 410 105 journal rows reads
+back through `readFrom` equal to the event first appended under its id (0 mismatched).
+
+**Append — cause and fix.**
+- **Cause 1: WAL autocheckpoint.** It ran inside the append's COMMIT, and its cost is fsync: a PASSIVE
+  checkpoint took a median of 14.2 ms at `synchronous=NORMAL` against 1.15 ms at `OFF`. With random
+  sha256 event ids, the UNIQUE index dirties ~100 leaf pages per batch, so the default 1000-page WAL
+  filled every ~7 batches.
+- **Why research 15 did not see it:** its ids were prefix-clustered and its table held 2 000 rows, so
+  the WAL never reached the threshold.
+- **Fix 1: checkpoint moved off the append path.** A write arms one deferred PASSIVE checkpoint 250 ms
+  later. It is a throttle, not a debounce, and its timer is `unref`'d. `wal_autocheckpoint = 10000`
+  stays as a ceiling for a producer that never yields, and `close()` checkpoints.
+- **Cause 2: two secondary indexes.** `events_run` and `events_type` were read by nothing: the only
+  queries are the rowid cursor and `stats()`.
+- **Fix 2: indexes dropped in v2.** An interleaved A/B measured them at ~0.3–0.7 ms of p95 and ~45 ms
+  of p99, plus 16 MB of file after encoding. They are dropped in v2, and the projection that first
+  needs an index adds it in its own migration.
+- **Fix 3: planning cost.** `data` is stringified once, a timestamp already in canonical form skips
+  the Date round trip, and the insert binds positionally. Together these took planning from ~0.37 to
+  ~0.11 ms per batch.
+- **Margin.** The row encoding below adds ~0.3 ms per batch back. The pass has little margin: at load
+  5–6, earlier runs gave p95 2.2–2.9 ms with the indexes and 1.8–2.3 ms without them. The p95 floor
+  that remains is the fsync of the WAL header on the first commit after a checkpoint, plus the
+  random-key index writes. Both are inherent to power-loss safety and to hashed ids.
+
+**First ingest — cause, fix, and the proposed target.**
+- **Cause.** Before: ~40 s of replay work (a serial profile found 17 % in re-searching every
+  transcript's path that `discover()` had just found, 13 % in the pure-TypeScript SHA-256, and ~41 %
+  in reading and parsing) plus ~29 s of appends dominated by checkpoint fsync.
+- **Fix.** `discover()` seeds the path memo. Server-side ids hash through `node:crypto`: the same
+  function, pinned by a test, and 401 471 replayed events were compared byte-identical before and
+  after. Discovery also runs beside the stamp scan. The append fix above applies too.
+- **After.** 18.1–18.6 s, of which appends are 6.3 s. The rest is decoding and parsing the transcripts.
+- **Why the target cannot be met.** The 10 % target cannot be met for this case on this machine. A
+  first ingest must read and parse 2.4 GB and insert ~410 k rows. That floor, ~5 s of parsing plus
+  ~6 s of inserts, already exceeds 10 % of the COLD build (31–35 s, 3.1–3.5 s) and is far beyond 10 %
+  of the WARM build (3.4–4.5 s, since the parse cache means a normal build no longer reads
+  transcripts).
+- **PROPOSED:** keep ≤ 10 % for the steady state, where it is met. Budget the one-time backfill
+  separately at **≤ 1× a cold full build, never awaited**. Measured: 0.58–0.60×.
+
+**Size — cause, fix, and the proposed target.**
+- **Cause.** The envelope repeated ~200 B of identical text on every row: ids, the source path, and
+  the harness/mode/version words. JSON keys took ~150 of `model.completed`'s 270 data bytes. Ids and
+  timestamps were stored as text, and the two unused indexes cost 51 MB of 267 MB.
+- **Fix, schema v2 (lossless).** Repeated strings are interned into `event_strings`, written in the
+  batch's own transaction. `source_ref` is split into a base and a line number. Timestamps are epoch
+  ms, a hex event id is 16 raw bytes, and `data` is stored as an interned key shape plus a value array
+  that decodes to the same JSON text. A v1 file migrates in place, keeping every rowid and the
+  AUTOINCREMENT mark.
+- **Payload trim.** One field was trimmed: `model.invoked.providerRequestId`. No projection reads it,
+  the paired `model.completed` carries the same id, and it still keys the event id.
+  `CLAUDE_ADAPTER_VERSION` moved 1.1.0 → 1.2.0 with a changelog line.
+- **After.** 113.5 KB per session-day, 176 B/event. A median session-day of ~282 events is ~50 KB.
+- **Why encoding alone cannot reach 2 KB.** 2 KB per session-day allows ~3 B per event at today's
+  granularity, and per-response usage figures alone are ~5 KB per session-day.
+- **Measured levers that are NOT implemented** (granularity and retention are D6, not this task's):
+
+  | lever | saves | reads lost |
+  |---|---|---|
+  | drop replayed `model.invoked` | ~20 % | none today |
+  | drop `tool.completed` rows that carry only their id, or merge them into `tool.requested` | ~18 % | none today |
+  | a retention tier that rolls per-call events into per-session-day totals | reaches 2 KB | per-call order, source pointers, provider ids, command summaries, and re-projecting old days after Claude deletes the transcript |
+
+- **PROPOSED:** re-baseline the raw per-call journal to **≤ 120 KB per session-day** (measured 113.5).
+  Keep 2 KB as the target of the rolled-up tier that D6's retention decides.
+
 ## 10. Observability
 
 `agentop journal status` prints: rows, bytes, first/last event, events written/deduped/rejected by
