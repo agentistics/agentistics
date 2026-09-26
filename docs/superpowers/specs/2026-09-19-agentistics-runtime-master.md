@@ -1078,6 +1078,32 @@ Therefore, as hard rules for the native harness:
 4. `billing-detect.ts`'s existing guard (a test greps the module for forbidden field names) extends
    to the provider layer: a module that may name a token must be unable to name it.
 
+### 22.4 Three engines — and the only honest way to use a subscription
+
+*Added 2026-09-25, from the owner's question "can I use another vendor's subscription through OUR
+harness?".* The answer depends on the vendor, and there are two very different meanings of "use":
+
+**(1) Delegating to the vendor's official CLI — always allowed, any vendor.** The native harness is
+the master and hands a task to Claude Code, Codex, Gemini CLI or Copilot CLI (§24.7). The model call
+is made by the official harness, logged in with the person's own subscription; we never touch the
+credential, so rule 1 above is intact. The cost: inside a delegated task, that harness — not ours —
+decides context and tools. We still measure it, through the adapters.
+
+**(2) Logging the subscription into OUR loop — per vendor, verified 2026-09-25:**
+
+| Vendor | Subscription inside our harness? | Basis |
+|---|---|---|
+| Anthropic (Pro/Max) | **Prohibited** | the terms quoted in §22.3; reported billing enforcement since April 2026 |
+| Google (AI Pro/Ultra) | **Prohibited, with account suspension** | "Directly accessing the services powering Gemini CLI … using third-party software … may be grounds for suspension or termination of your account" — geminicli.com/docs/resources/tos-privacy |
+| OpenAI (ChatGPT Plus/Pro) | **Appears open** — Cline and OpenClaw ship "Sign in with ChatGPT" | **no OpenAI text read yet**; must be confirmed from OpenAI's own terms before anything is built |
+| GitHub Copilot | **By partnership only** — OpenCode has a "formal partnership" (github.blog changelog, 2026-01-16) | we would need our own |
+
+**So the native harness has three engines, and the master picks per task:** an **API key** (any
+provider; full control; paid per token), a **direct subscription** where the vendor permits it (full
+control; flat cost), and **delegation to an official CLI** (any subscription; partial control; flat
+cost). Where a vendor prohibits (2), delegation is the only door — and the consequence of ignoring
+that is the person's account being suspended, not a theoretical risk.
+
 ## 23. Team mode and the central
 
 The journal is **per machine**. What a member pushes stays what it pushes today — computed metrics,
@@ -1098,7 +1124,7 @@ Nine contracts, each a module boundary with one purpose:
 |---|---|---|
 | `SessionRuntime` | session/run lifecycle, resume, shared access | `session.*`, `run.*` |
 | `AgentRuntime` | the agent loop, subagent delegation | `agent.*` |
-| `ContextRuntime` | what is sent to the model, compaction, retrieval | `context.*` |
+| `ContextRuntime` | what is sent to the model, eviction, recall — designed in `2026-09-25-runtime-context-manager-design.md` | `context.*` |
 | `ProviderRuntime` | provider clients, routing, retries, usage | `model.*` |
 | `ToolRuntime` | tool registry, execution, results, MCP | `tool.*`, `mcp.*` |
 | `BrowserRuntime` | browser sessions/tabs/actions | `browser.*` |
@@ -1161,7 +1187,7 @@ adopts.
 
 | Tier | What it holds | Key | Lifetime |
 |---|---|---|---|
-| short | the conversation's own working context | — | **the harness's, not ours** (compaction, snapshots) |
+| short | the conversation's own working context | — | **the harness's** for external harnesses; **ours** for native runs — `2026-09-25-runtime-context-manager-design.md` |
 | medium | repository knowledge: decisions taken, conventions, what was tried and failed | `normalizeGitRemote()` | until retracted or superseded |
 | long | how THIS person works: preferences, recurring corrections | account id | until deleted by them |
 
@@ -1205,6 +1231,25 @@ built-in).
 nothing to derive from.
 
 **Open decisions** are D13-D15 in §50.
+
+### 24.7 Other harnesses as tools of the native loop — the master
+
+*Added 2026-09-25, owner's direction.* The native harness is the **master**: besides its own tools and
+subagents, it can hand a task to another harness — Claude Code, Codex, Gemini CLI, Copilot CLI, Kimi,
+Antigravity — as a tool (`delegate:<harness>`). Three consequences:
+
+- **One mechanism for everything the master commands.** A delegation is an execution like any other:
+  it gets an index line, and its "raw content" is the delegate's own transcript, which the existing
+  adapters already read (context manager spec §3). Its cost and tokens are measured through those
+  adapters with the delegate's own `provenance`.
+- **Economics.** A delegation runs on the person's subscription for that vendor, while the native
+  loop's own calls are API-billed (§22.4). Routing heavy work to an already-paid harness is a lever
+  the master may use, and the routing decision is recorded on the event, with its reason.
+- **Self-sufficiency.** Delegation is a capability of the master, never a dependency of the core: the
+  native runtime must work end to end with no other harness installed.
+
+Transport: ACP where the harness speaks it, otherwise the spawn specs and screen reading the session
+manager already uses (§18.4). It belongs to B3 (the tool) and B6 (delegation).
 
 ## 25. Browser runtime
 
@@ -1641,6 +1686,7 @@ thing, the event contract from A1.
    A3  the other five adapters + import     B2  streaming (deltas, tool calls)
    A4  projections + parity matrix + query  B3  tool loop + policy (the ToolRuntime)
    A5  live ingestion (hooks, OTLP)         B4  session + resume + persistence
+                                            B4-CTX  the context manager (own spec, 2026-09-25)
                                             B5  the other providers
                                             B6  subagents · browser · MCP · ALM dispatch
                                             B7  the optional gateway
@@ -1757,9 +1803,13 @@ spawn-only and lossy for Gemini's usage today) · (c) file-tail only, made incre
 stays post-hoc). Note that (a) and (c) compose: (c) is the floor under (a).
 
 **D5 · What may the journal store of conversation text?** Metadata only / summaries / full text under
-consent. Recommendation: **metadata + tool summaries by default; full text only for native runs and
-only under the existing archive consent**, because for external harnesses the harness already stores
-it and duplicating it doubles the sensitive surface.
+consent. Recommendation: **metadata + tool summaries by default for external harnesses**, because the
+harness already stores it and duplicating it doubles the sensitive surface. **Amended 2026-09-25 by
+the context-manager design:** the full raw content of NATIVE executions is stored locally in the
+content store, because recall does not work without it — under that design's §8 rules (never to a
+central, not in a backup by default, never into memory without consent, redacted only where it leaves
+scope, `sensitive` executions excluded from every exit). What stays optional is where it may go, not
+whether it exists.
 
 **D6 · Retention default.** Keep events forever (recommended — it is the durability promise) with a
 size budget and a stated compaction rule, or a default window with an opt-out.
