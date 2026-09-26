@@ -84,7 +84,8 @@ Commands:
   journal       Read-only look at the durable event journal ('journal status')
   provider      Manage a provider API key for the native runtime (BETA, off by default —
                 set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
-                --stdin, never on the command line ('provider key set|status|remove')
+                --stdin, never on the command line ('provider key set|status|remove';
+                'provider try anthropic' makes one real, billed call)
   ci-push       One-shot push of a CI runner's metrics to a central
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)
