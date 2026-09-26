@@ -59,12 +59,12 @@ sandbox**; bubblewrap / Landlock via `bun:ffi` / Seatbelt later; native Windows 
 states one of four states in plain words — no sandbox · filesystem only · full container · requested
 but unavailable. *Reason:* of five surveyed harnesses only Codex sandboxes by default, and its own
 sandbox fails intermittently under WSL; a mandatory sandbox here would be an agent that sometimes
-refuses to run. *Accepted by the owner, consciously:* with no sandbox the agent reads anything the
+refuses to run. *Rejected:* a mandatory sandbox from day one — on WSL the sandbox of Codex itself intermittently refuses to run (their issue #1039). *Accepted by the owner, consciously:* with no sandbox the agent reads anything the
 account can read and reaches the network; every write and shell still goes through the policy (D-T3).
 
-**D-T6 · git.** Read verbs as tools in v1 (cheap, and they feed metrics); write verbs as tools in v2.
+**D-T6 · git.** Read verbs as tools in v1 (cheap, and they feed metrics); write verbs as tools in v2. *Rejected:* `git` through the shell only — no attributable git events.
 
-**D-T7 · Browser.** A gated runtime, reached through delegation — not an ordinary tool.
+**D-T7 · Browser.** A gated runtime, reached through delegation — not an ordinary tool. *Rejected:* the browser as an ordinary tool — reach without a gate.
 
 ## Data and privacy
 
@@ -113,12 +113,32 @@ reconciliation against a bill written down. **First step, before anything is fli
 spec says the code already reports `true` while CLAUDE.md says the flags were deliberately left off —
 read the code and record which is true. *Rejected:* turning the figures off until a bill is reconciled.
 
-**D9 · Plugin sandboxing.** Define the contract now; ship the loader when there is demand.
+**D9 · Plugin sandboxing.** Define the contract now; ship the loader when there is demand. *Rejected:* in-process plugins now (trusted only, no isolation) and a child-process loader now (a cost paid before any demand).
 
-**D11 · Provider gateway.** Spec it, build it last — the direct path already produces every number.
+**D11 · Provider gateway.** Spec it, build it last — the direct path already produces every number. *Rejected:* building the gateway early — it duplicates what the direct path already measures.
 
-**D12 · Browser implementation.** Playwright as the default; the contract stays implementation-
-agnostic.
+**D12 · Browser implementation.** Playwright as the default; the contract stays implementation-agnostic. *Rejected:* a browser extension or a remote browser service as the default — the extension ties the runtime to one browser and to the user's profile; the remote service sends pages off the machine.
+
+## Added later on 2026-09-25 (owner, via the specification session)
+
+**D17 · One confidence vocabulary.** **`exact | estimated | inferred`, everywhere; `derived` is
+removed.** A value derived from exact inputs by a deterministic rule is `exact`; it becomes
+`estimated` when the rule introduces an estimate (a price table, a token approximation). The
+confidence of a number is the weakest of its inputs (P3 §2 already says so). Applied to master §14
+and §16 and to P2. *Rejected:* keeping `derived` as a fourth level — it mixes how a value was
+computed with how certain it is.
+
+**D18 · Model policy for this week (2026-09-25).** Opus 5.5 costs less than Opus 5, and its cache
+read costs the same as Sonnet 5's (US$0,20/MTok; source platform.claude.com/docs/en/about-claude/
+pricing, read 2026-09-25). So: integrating sessions run on `claude-opus-5-5`; an item that writes a
+file runs on Sonnet 5 or Opus 5.5; Haiku only on a read-only item (two Haiku subagents of the A1.0
+session itself reported edits that were not on disk); the per-item approval for Opus now applies to
+Opus 5.5 — the model and the reason are still recorded per item. Applied as a dated note in
+delivery-breakdown §2.
+
+**D19 · Commit approval.** The coordinator may release a commit on a feature branch after checking
+the evidence (a red → green test, `tsc`, the handback). A PR into `dev` stays the owner's, approved
+in one batch once a day. Applied to delivery-breakdown §5 rule 4.
 
 ## Also decided on 2026-09-25
 

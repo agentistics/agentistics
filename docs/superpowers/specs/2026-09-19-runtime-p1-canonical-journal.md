@@ -205,10 +205,13 @@ product knows the file exists; no data that any surface reads was written or cha
 7. The five not-yet-implemented integrations are declared absences, and the build fails if one is
    removed from the registry.
 
-## 13. Open questions that P1 must not decide alone
+## 13. Decisions P1 encodes, and the ones it defers
 
-- **D1** (Session/Run vocabulary) and **D2** (storage) from the master spec's §50 must be answered
-  before the types and the DDL are written: they are the two decisions P1 encodes.
+- **D1** (Session/Run vocabulary) and **D2** (storage) from the master spec's §50 were **DECIDED
+  2026-09-25 by the owner** (`2026-09-25-owner-decisions.md`): a Session is the runtime's unit of work
+  and a harness conversation is a Run inside it, with legacy data projecting 1 Session → 1 Run; the
+  journal is SQLite WAL, one per machine. They are the two decisions P1 encodes — the types and the
+  DDL are written against them.
 - **D5/D6** (what text is stored, retention) can be deferred: P1 writes **no** conversation text —
   only counters, ids, names and summaries — which is the strictest reading and can only be widened
   later, deliberately.

@@ -31,6 +31,14 @@ Every dispatched session records `model`, `modelSelectionReason`, and — for Op
 `approvalRequired`, `approvedBy`, `approvalAt`. **Opus is never the default**, and "it is better" is
 not a reason.
 
+> **Note, 2026-09-25 (D18, `2026-09-25-owner-decisions.md`) — supersedes the table above where they
+> conflict.** Opus 5.5 costs less than Opus 5 and its cache read costs the same as Sonnet 5's
+> (US$0,20/MTok; source platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25). So:
+> integrating sessions run on `claude-opus-5-5`; an item that **writes a file** runs on Sonnet 5 or
+> Opus 5.5; **Haiku only on a read-only item** — two Haiku subagents of the A1.0 session reported
+> edits that were not on disk; the per-item approval for Opus now applies to Opus 5.5, and the model
+> and the reason are still recorded per item.
+
 ## 3. What a session carries BEFORE dispatch
 
 Non-negotiable, because a session that has to rediscover its own brief is a session that will drift:
@@ -87,7 +95,9 @@ expected result (what "done" looks like, concretely)
    be running at once.
 2. **Stage explicit paths.** Never `git add -A` — the diff is not only yours.
 3. **A red test may not be yours.** Check before assuming, and say so in the handback.
-4. **No commit and no PR without approval** — the standing rule in this repo.
+4. **Commit and PR approval (D19, 2026-09-25).** The coordinator may release a commit on a feature
+   branch after checking the evidence (a red → green test, `tsc`, the handback). A PR into `dev`
+   stays the owner's, approved in one batch once a day.
 5. **The handback states what was NOT done**, what was assumed, and what it could not verify. A
    report that only lists successes is a report that hides the next defect.
 6. **Evidence closes a criterion**: tests, a benchmark, a screenshot, a parity row — attached to the
@@ -99,6 +109,7 @@ expected result (what "done" looks like, concretely)
   first, attached second, prompt living outside the board — or make the ALM's own upgrade
   (prepared sessions, dispatch, acceptance criteria) the first Task, so that every later subtask is
   tracked the way this document describes.
-- The §50 decisions that gate A1 (D1 vocabulary, D2 storage) and B1 (D3 base, D4 ingestion).
-- The B3 catalogue's own three (sandbox timing, git as a tool, browser placement) — B3 is not filed
-  until the research wave lands.
+- ~~The §50 decisions that gate A1 (D1 vocabulary, D2 storage) and B1 (D3 base, D4 ingestion).~~
+  **DECIDED 2026-09-25 by the owner** — see `2026-09-25-owner-decisions.md`; they no longer gate filing.
+- ~~The B3 catalogue's own three (sandbox timing, git as a tool, browser placement).~~ **DECIDED
+  2026-09-25 by the owner** (D-T5/6/7). B3 is still not filed until the research wave lands.

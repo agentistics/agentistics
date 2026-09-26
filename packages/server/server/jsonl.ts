@@ -571,6 +571,21 @@ export function cloneClaudeParseState(state: ClaudeParseState): ClaudeParseState
 }
 
 /**
+ * A caller that wants the entries this walk already parsed, without paying for a second
+ * `JSON.parse` of the same file — the canonical-events replay fold is exactly this caller (see
+ * `integrations/claude/replay.ts`). It is called once per successfully parsed line, with the SAME
+ * 1-based `lineNo` this walk counts every raw line by (blanks included), so a record this sink
+ * names by line number and a record `lineRef()` names by the same number are the same line.
+ *
+ * It observes; it must never influence what is parsed. A blank line and a line that fails to parse
+ * are never delivered — there is no entry to hand it — and a sink that THROWS is caught and
+ * ignored, silently and per line, because a bug in an optional observer must not be the reason a
+ * session's own metrics stop being computed. It receives the walk's own parsed object and must not
+ * MUTATE it: the folds below read the same object after it.
+ */
+export type ClaudeParseSink = (entry: Record<string, unknown>, lineNo: number) => void
+
+/**
  * Advance `state` over `lines`, in transcript order. Mutates `state`; returns nothing.
  *
  * The body is `parseSessionJsonl`'s own loop, unchanged except that its locals now live on
@@ -582,7 +597,8 @@ export function cloneClaudeParseState(state: ClaudeParseState): ClaudeParseState
  * marks the event it arrived on), so the events of one chunk cannot be folded until the chunk is
  * done. Its length is the length of THIS chunk, never of the file.
  */
-export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>): void {
+
+export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>, sink?: ClaudeParseSink): void {
   const turnEvents: TurnEvent[] = []
   for (const raw of lines) {
     state.lineNo++
@@ -590,6 +606,8 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
     if (!line) continue
     let e: Record<string, unknown>
     try { e = JSON.parse(line) } catch { continue }
+
+    if (sink) { try { sink(e, state.lineNo) } catch { /* an observer's bug must not break parsing */ } }
 
     // The passes this walk replaces. Each used to re-read the whole file and re-`JSON.parse` every
     // line of it to answer one question; each now folds off the entry already in hand. They are

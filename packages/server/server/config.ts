@@ -64,6 +64,23 @@ export const ARCHIVE_DIR = process.env.AGENTISTICS_ARCHIVE_DIR ?? join(AGENTISTI
 export const ARCHIVE_PROJECTS_DIR = join(ARCHIVE_DIR, 'projects')
 export const ARCHIVE_SESSION_META_DIR = join(ARCHIVE_DIR, 'usage-data', 'session-meta')
 export const ARCHIVE_STATS_DIR = join(ARCHIVE_DIR, 'stats-cache')
+// The durable event journal (decision D2: SQLite WAL, one per machine): <data dir>/journal.db.
+// `AGENTISTICS_JOURNAL_DIR` MOVES it — the escape hatch for a data dir that sits on a network
+// filesystem, where the journal refuses to open (WAL is not safe there). It never disables that
+// check: the override directory is classified exactly like the default one. Written as two literal
+// `join`s rather than one over a computed dir so `backup-coverage.lint.test.ts` can see the name.
+export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db')
+// The shadow writer's flag (P1 §1 item 5, §11): while `AGENTISTICS_JOURNAL` is on, a build ALSO feeds
+// the journal. **Absent reads as OFF** — a machine must not start writing a database because it was
+// upgraded — and only an explicit affirmative turns it on. Rolling back is unsetting it.
+export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
+  (process.env.AGENTISTICS_JOURNAL ?? '').trim().toLowerCase(),
+)
+// What the WRITING process reports about itself (counters since boot), for `agentop journal status`
+// to read from a different process. It sits beside the journal, whichever directory that is.
+export const JOURNAL_STATUS_PATH = `${JOURNAL_PATH}.status.json`
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json

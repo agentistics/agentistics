@@ -84,8 +84,8 @@ In scope for this specification:
 - **No implementation.** No file outside `docs/` changes as a result of this document.
 - **No schema migration** is performed here; §46 specifies how one would be staged.
 - **No harness is removed or deprecated.** Six adapters keep working unchanged through every phase.
-- **No decision is taken on the items in §50.** They are presented with trade-offs and a
-  recommendation, and belong to the product owner.
+- **All decisions are recorded in `2026-09-25-owner-decisions.md`.** On 2026-09-25 the owner reviewed
+  the recommendations for every open question and decided according to the recommendation (D1–D16).
 - **No pricing, window or capability figure is invented.** Where a number cannot be cited it is
   absent, exactly as `MODEL_PRICING` and `contextWindows.ts` already require.
 - **Gemini's token/cost flip is out of scope** (CLAUDE.md records it as a deliberate, unreconciled
@@ -527,6 +527,11 @@ Four rules, each of which exists because its absence was a real defect in this r
 3. **`provenance.confidence` is separate from `provenance.mode`.** An `observed` event can be exact
    (a token counter read out of a file) and an `instrumented` one can be estimated (a cost priced
    from a table). Collapsing them is how "the harness said so" comes to mean "it is exact".
+   **One confidence vocabulary everywhere — `exact | estimated | inferred` (D17, DECIDED 2026-09-25
+   by the owner); `derived` is gone.** A value derived from exact inputs by a deterministic rule is
+   `exact`; it becomes `estimated` when the rule introduces an estimate (a price table, a token
+   approximation). The confidence of a number is the weakest of its inputs (P3 §2). *Rejected:* keeping
+   `derived` as a fourth level — it mixes how a value was computed with how certain it is.
 4. **`data` is typed per `type`.** A union with a loose payload is how a field named `action`
    appears; `events-frontier.test.ts` already guards the notification channel this way and the same
    shape of test guards this one.
@@ -668,13 +673,15 @@ down twice, and the fix is already written.
 
 ```ts
 type CapabilityState =
-  | { state: 'supported'; exactness: 'exact' | 'estimated' | 'derived' }
-  | { state: 'partial'; exactness: 'exact' | 'estimated' | 'derived'; limit: string }
+  | { state: 'supported'; exactness: 'exact' | 'estimated' | 'inferred' }
+  | { state: 'partial'; exactness: 'exact' | 'estimated' | 'inferred'; limit: string }
   | { state: 'not_supported'; reason: string }     // a SENTENCE, rendered in the UI
   | { state: 'not_applicable'; reason: string }
   | { state: 'unknown'; reason: string }           // nobody has measured it yet
 ```
 
+- **`exactness` is the SAME three-value vocabulary as `provenance.confidence` (§14) — D17, decided
+  2026-09-25.** There is no `derived`: see the rule in §14.3.
 - **`boolean` migrates mechanically**: `true → {supported, exact}`, `false → {not_supported, reason}`
   with the reason taken from the existing comments, which already exist for every false in the table.
 - **`partial` is the entry the current table cannot express** and that the code needs today:
@@ -726,8 +733,10 @@ the rule is stated once, in the reconciliation module, not per metric.
 turned on. The current `types.ts` sets `gemini: { tokens: true, cost: true }`, and
 `gemini-parse.ts`'s rich-JSON path does read `msg.tokens` — while its JSONL/bootstrap path hardcodes
 zero. So the capability is really `partial`, the prose is stale, and money is already being computed
-from one of the two shapes. This is exactly the case `partial` exists for; it is listed in §50 as a
-decision, not fixed here.
+from one of the two shapes. This is exactly the case `partial` exists for. **DECIDED 2026-09-25 by the
+owner (D8, §50):** declare the capability `partial` and keep the money, with the reconciliation
+against a bill written down; the first step, before anything is flipped, is to read the code and
+record which of the two statements is true. Not fixed by this document.
 
 ## 18. Live ingestion
 
@@ -813,9 +822,9 @@ directory watch is instrumentation.
 append-only · idempotent by `eventId` · ordered per run · cursor-readable · replayable · bounded in
 memory · survives the deletion of the source artifacts · versioned · auditable.
 
-### 19.2 Storage — recommendation and alternatives
+### 19.2 Storage — the decision and the alternatives weighed
 
-**Recommended: SQLite (WAL) per machine**, at `~/.agentistics/journal.db`.
+**DECIDED 2026-09-25 by the owner (D2): SQLite (WAL), one journal per machine**, at `~/.agentistics/journal.db`.
 
 ```sql
 CREATE TABLE events (
@@ -1230,7 +1239,8 @@ built-in).
 **Placement in the roadmap: B6**, after sessions persist (B4). Memory before durable sessions has
 nothing to derive from.
 
-**Open decisions** are D13-D15 in §50.
+**All decisions are recorded in `2026-09-25-owner-decisions.md`** (D1–D16): memory consent switches
+(D13), repository memory to centrals (D14), and semantic retrieval in v1 (D15).
 
 ### 24.7 Other harnesses as tools of the native loop — the master
 
@@ -1254,7 +1264,8 @@ manager already uses (§18.4). It belongs to B3 (the tool) and B6 (delegation).
 ## 25. Browser runtime
 
 `BrowserSession / BrowserTab / BrowserAction` (§13) is the contract; the implementation is pluggable
-(`playwright` | `extension` | `remote`). Playwright is the recommended default implementation —
+(`playwright` | `extension` | `remote`). Playwright is the default implementation (D12, decided
+2026-09-25; the contract stays implementation-agnostic) —
 Apache-2.0, already a devDependency here (used only by a GIF-recording script today), and it exposes
 the events the model needs including an explicit `download`. The native harness and any external
 harness that can report browser activity emit the *same* events; nothing about the model assumes
@@ -1367,12 +1378,14 @@ unauthenticated routes go through `readJsonLimited`.
 Stable, versioned extension points: **harness integration**, **provider client**, **tool**,
 **browser implementation**, **policy**, **storage backend**, **telemetry sink**. Everything else is
 internal. A plugin declares the schema version it was built against; the runtime refuses one it
-cannot satisfy rather than running it degraded. Sandboxing is an open question (§50).
+cannot satisfy rather than running it degraded. **Sandboxing is optional in v1** (D-T5): `setrlimit`
++ a capability probe + Docker as the opt-in sandbox; bubblewrap/Landlock via FFI later; native
+Windows last. See `2026-09-25-owner-decisions.md`.
 
 ## 30. Security and retention
 
 - Journal events may carry prompts, tool output and file content. **What is stored is a decision per
-  category** (§50), and the default is: metadata and counters always; text bodies only for the
+  category** (D5, decided 2026-09-25 — §50), and the default is: metadata and counters always; text bodies only for the
   native harness's own runs and only with the archive-style consent the product already has.
 - `redactSecrets` runs at both ends of anything that leaves the machine, unchanged.
 - Credentials never enter the journal, the audit log or any API response.
@@ -1761,12 +1774,23 @@ talks from an agent that ships — see §24 and the tool catalogue that feeds it
 
 # PART IV — DECISIONS, ROADMAP, ACCEPTANCE
 
-## 50. Open questions — human decisions, with trade-offs
+## 50. Decisions — the owner's answers of 2026-09-25, with the trade-offs that were weighed
 
-None of these is decided by this document. Each states a recommendation and what it costs.
+Every entry below was decided by the owner on 2026-09-25; the record is
+`2026-09-25-owner-decisions.md`. The question and its trade-offs are kept as the history of the
+decision, not as a pending item.
 
 **D1 · Canonical vocabulary: what is a "Session"?**
-*(a) RECOMMENDED — a Session is the runtime's work container and a harness conversation becomes a
+**DECIDED 2026-09-25 by the owner:** a Session is the runtime's unit of work; a harness conversation is
+a **Run** inside it. Legacy data projects 1 Session → 1 Run, so nothing on screen changes until somebody
+groups two runs. *Reason:* it is the only option that delivers the brief's objective C — one session
+continued across Web, CLI and TUI. *Cost accepted:* "session" means slightly more inside the canonical
+model than on today's screens; the docs say so in one place. **Rejected:** (b) Session stays the
+conversation with a new entity above it — inverts the brief's Session → Run hierarchy, and every later
+document would have to re-explain it; (c) Task as the only grouping — gives up the shared
+multi-surface session outright.
+
+*(a) a Session is the runtime's work container and a harness conversation becomes a
 Run* (§13). Legacy projects 1 Session → 1 Run, so nothing on screen changes until somebody groups
 two harnesses under one Session. Cost: "session" means something slightly different inside the
 canonical model than in the UI, and the docs must say so in one place.
@@ -1775,10 +1799,32 @@ own hierarchy (Session → Run) is inverted and every future document has to re-
 *(c) Task is the only grouping* — no multi-harness session at all. Simplest; gives up "CLI and Web
 in one shared session" as a first-class idea.
 
-**D2 · Journal storage.** (a) RECOMMENDED SQLite WAL per machine · (b) JSONL segments + index ·
-(c) Mongo everywhere. Trade-offs in §19.2.
+**D2 · Journal storage.**
+**DECIDED 2026-09-25 by the owner:** **SQLite WAL, one journal per machine.** *Reason:* measured on
+this machine (`docs/superpowers/research/15-sqlite-journal-measurement.md`): 1/2/4/8 concurrent writer
+processes, zero loss, zero duplication, zero surfaced `SQLITE_BUSY`, 29k → 60k rows/s; idempotency is
+structural (`UNIQUE(event_id)`). **Rejected:** (b) JSONL segments + index — idempotency would become
+code instead of a constraint; (c) Mongo everywhere — forces a database on every solo install of a
+local-first product.
+The options were: (a) SQLite WAL per machine · (b) JSONL segments + index · (c) Mongo everywhere.
+Trade-offs in §19.2.
 
-**D3 · Native harness base.** (a) RECOMMENDED — our own runtime with the provider layer built on the
+**D3 · Native harness base.**
+**DECIDED 2026-09-25 by the owner:** **our own runtime**, with the provider layer built on the Vercel AI
+SDK (Apache-2.0) **behind our own interface**, under the four conditions of §22.1.1 (capture raw per
+step, read Anthropic's `iterations`, usage per step, own the retry with `maxRetries: 0`). OpenCode (MIT)
+is read as architectural reference only; **no code derived from the leaked Claude Code source, under
+any option** (§54). *Reason:* the architecture — session, loop, tools, policy, journal, context
+manager — is ours; the SDK is only the narrowest layer, the HTTP dialect of each provider, and it is
+swappable. **Rejected:** (b) fork OpenCode — inherits their session and event model, which collides with
+the canonical journal, and a fast-moving dependency; (c) everything from scratch including provider
+clients — five clients to maintain for no telemetry gain.
+*Also decided 2026-09-25 (API cost and the first provider):* B1 starts with **Anthropic only, on the
+owner's own API key, with a spend limit set in the provider console**. Other providers arrive in B5,
+once the usage model has been reconciled against one real bill. *Reason:* a subscription cannot be used
+by our own loop for Anthropic (§22.3/§22.4); B1's own delivery is recording the exact cost of each
+call, so the first thing it proves is that number.
+The options were: (a) our own runtime with the provider layer built on the
 Vercel AI SDK (Apache-2.0) behind our own interface; OpenCode (MIT) read as architectural reference
 only · (b) embed/fork OpenCode — fastest first run, inherits their session/event model and a fast-
 moving dependency · (c) everything from scratch including provider clients — maximum control of
@@ -1797,12 +1843,24 @@ which this product already parses. That study is commissioned as its own piece o
 B3's tool catalogue. What is lost by not reading the source is *their* implementation under *their*
 constraints; what is kept is what actually matters — what the agent must be able to do.
 
-**D4 · Live ingestion priority.** (a) RECOMMENDED — hooks + a local OTLP receiver (covers Claude,
+**D4 · Live ingestion priority.**
+**DECIDED 2026-09-25 by the owner:** **hooks + a local OTLP receiver, with file-tail as the floor.**
+**Rejected:** (b) ACP first — spawn-only, and lossy for Gemini's usage today; (c) file-tail only — stays
+post-hoc. *Note:* installing a hook into a harness's settings remains an explicit act of the user
+(CLAUDE.md, "Anything agentop writes OUTSIDE its own directories").
+The options were: (a) hooks + a local OTLP receiver (covers Claude,
 Gemini, Codex, Copilot; Claude's `api_request` gives per-call tokens) · (b) ACP first (uniform, but
 spawn-only and lossy for Gemini's usage today) · (c) file-tail only, made incremental (zero config,
 stays post-hoc). Note that (a) and (c) compose: (c) is the floor under (a).
 
-**D5 · What may the journal store of conversation text?** Metadata only / summaries / full text under
+**D5 · What may the journal store of conversation text?**
+**DECIDED 2026-09-25 by the owner:** metadata + tool summaries by default for external harnesses. For
+NATIVE executions the full raw content is stored locally in the content store, under the
+context-manager design's §8 rules (never to a central, not in a backup by default, never into memory
+without consent, redacted only where it leaves scope, `sensitive` executions excluded from every exit).
+**Rejected:** full text for external harnesses — the harness already stores it, and a copy doubles the
+sensitive surface.
+The options were: Metadata only / summaries / full text under
 consent. Recommendation: **metadata + tool summaries by default for external harnesses**, because the
 harness already stores it and duplicating it doubles the sensitive surface. **Amended 2026-09-25 by
 the context-manager design:** the full raw content of NATIVE executions is stored locally in the
@@ -1811,44 +1869,83 @@ central, not in a backup by default, never into memory without consent, redacted
 scope, `sensitive` executions excluded from every exit). What stays optional is where it may go, not
 whether it exists.
 
-**D6 · Retention default.** Keep events forever (recommended — it is the durability promise) with a
+**D6 · Retention default.**
+**DECIDED 2026-09-25 by the owner:** **events are kept forever**, with a size budget and a stated
+compaction rule. Raw native content follows the context manager's retention (lives while the session
+can be resumed, then expires by age or disk budget; an expired part says so). **Rejected:** a default
+window with opt-out — it would delete history nobody asked to delete.
+The options were: Keep events forever (it is the durability promise) with a
 size budget and a stated compaction rule, or a default window with an opt-out.
 
-**D7 · Does the central receive events?** Recommendation: **not in the first phases.** Members keep
+**D7 · Does the central receive events?**
+**DECIDED 2026-09-25 by the owner:** **not in the first phases.** Members keep pushing computed metrics;
+an event delta push is phase 4+, behind its own flag, under the same sharing rules. **Rejected:** an
+early event push — every privacy rule would need a second implementation.
+The recommendation was: **not in the first phases.** Members keep
 pushing computed metrics; an event delta push is phase 4+ behind its own flag, under the same
 sharing rules. Widening the wire early makes every privacy rule a second implementation.
 
-**D8 · Gemini tokens/cost.** The code says `true`, the docs say "not yet", and the parser fills them
-only for one of two file shapes (§17.4). Decide: declare `partial` and keep the money (recommended,
-with the reconciliation written down), or turn it off until a bill has been reconciled.
+**D8 · Gemini tokens/cost.**
+**DECIDED 2026-09-25 by the owner:** declare the capability **`partial`** and keep the money, with the
+reconciliation against a bill written down. **First step, before anything is flipped:** the master spec
+says the code already reports `true` while CLAUDE.md says the flags were deliberately left off — read
+the code and record which is true. **Rejected:** turning the figures off until a bill is reconciled.
+The question was: The code says `true`, the docs say "not yet", and the parser fills them
+only for one of two file shapes (§17.4). Decide: declare `partial` and keep the money (with the
+reconciliation written down), or turn it off until a bill has been reconciled.
 
-**D9 · Plugin sandboxing.** In-process (fast, trusted-only) vs child process (isolated, slower) vs
-none until there is demand (recommended: define the contract now, ship the loader later).
+**D9 · Plugin sandboxing.**
+**DECIDED 2026-09-25 by the owner:** define the contract now; ship the loader when there is demand.
+**Rejected:** in-process plugins now (trusted only, no isolation) and a child-process loader now (a cost paid before any demand).
+The options were: In-process (fast, trusted-only) vs child process (isolated, slower) vs
+none until there is demand.
 
-**D10 · Where does a shared Session live in team mode?** Local-only (recommended) vs relayed through
+**D10 · Where does a shared Session live in team mode?**
+**DECIDED 2026-09-25 by the owner:** **local-only.** **Rejected:** relayed through a central — a
+central-hosted session is a security model this product has never had.
+The options were: Local-only vs relayed through
 a central. A central-hosted session is a different security model from anything this product has.
 
-**D11 · Provider gateway: ship it at all?** It is optional by design (§22.2). Recommendation: **spec
+**D11 · Provider gateway: ship it at all?**
+**DECIDED 2026-09-25 by the owner:** spec it, build it last — the direct path already produces every
+number. **Rejected:** building the gateway early — it duplicates what the direct path already measures.
+The question was: It is optional by design (§22.2). Recommendation: **spec
 it, build it last** — the direct path already produces every number, and a gateway is most valuable
 for non-native harnesses that would have to be pointed at it deliberately.
 
-**D12 · Browser implementation.** Playwright (recommended default), a browser extension, or a remote
+**D12 · Browser implementation.**
+**DECIDED 2026-09-25 by the owner:** Playwright as the default; the contract stays
+implementation-agnostic. **Rejected:** a browser extension or a remote browser service as the default — the extension ties the runtime to one browser and to the user's profile; the remote service sends pages off the machine.
+The options were: Playwright, a browser extension, or a remote
 browser service. The contract is implementation-agnostic either way.
 
-**D13 · Where the memory-write consent switch lives.** (a) RECOMMENDED — its own
+**D13 · Where the memory-write consent switch lives.**
+**DECIDED 2026-09-25 by the owner:** its **own** `preferences.memoryEnabled`, absent reads as off for
+inferred writes. **Rejected:** a fourth `archiveMode` value — retaining raw chat and deriving a durable
+fact are different questions and deserve different switches.
+The options were: (a) its own
 `preferences.memoryEnabled`, absent reads as off for inferred writes; retaining raw chat and
 deriving a durable fact are different questions and deserve different switches · (b) a fourth value
 of `archiveMode`, reusing one mental model the user already has.
 
-**D14 · May repository memory reach a central?** (a) RECOMMENDED for now — no; memory stays on the
+**D14 · May repository memory reach a central?**
+**DECIDED 2026-09-25 by the owner:** **no, for now** — memory stays on the machine until a need is
+stated. **Rejected:** opt-in per repository — memory facts are freer text than task metadata, and
+inheriting `Task.shared`'s rule without its own redaction decision is the lenient default by another
+door.
+The options were: (a) no, for now; memory stays on the
 machine until there is a stated need · (b) opt-in per repository, with its own redaction decision —
 memory facts are freer text than task metadata, so inheriting `Task.shared`'s rule without thinking
 would be the lenient default by another door.
 
-**D16 · How does a central see a machine's fleet in real time?** Found by issue triage (2026-09-20,
+**D16 · How does a central see a machine's fleet in real time?**
+**DECIDED 2026-09-25 by the owner (issue #215):** **keep the existing relay and add a push of state
+transitions only** — a small, bounded widening, under the same consent switches and sharing rules.
+**Rejected:** (b) waiting for D7's event push; (c) leaving it unanswered.
+The question was: Found by issue triage (2026-09-20,
 issue #215): the spec closes both doors it could have used — the notification channel is
 deliberately not widened (§8), and pushing canonical events to a central is D7, deferred. So the
-question has no answer today, and it is a real product request. Options: (a) RECOMMENDED — keep the
+question has no answer today, and it is a real product request. Options: (a) keep the
 existing relay (the member answers a fleet query over its reverse channel, under the same sharing
 rules and consent switches) and give it a push for **state transitions only**, which is a small,
 bounded widening rather than an event firehose · (b) resolve it as part of D7, which means the
@@ -1856,7 +1953,11 @@ central waits for the journal to travel · (c) leave it unanswered and say so on
 is chosen, the machine still decides: consent and the sharing rules bind the relay exactly as they
 bind everything else (§23).
 
-**D15 · Does semantic retrieval belong in v1?** (a) RECOMMENDED — no: ship structured facts, measure
+**D15 · Does semantic retrieval belong in v1?**
+**DECIDED 2026-09-25 by the owner:** **no.** Ship structured facts, measure what they answer, add
+retrieval deliberately with the reconciliation written down. **Rejected:** retrieval from the start
+behind `archiveMode: 'full'`.
+The options were: (a) no: ship structured facts, measure
 what they actually answer, and add retrieval deliberately, with the reconciliation written down —
 the rule this product already applies to Gemini's token flags · (b) yes, gated behind
 `archiveMode: 'full'` from the start.

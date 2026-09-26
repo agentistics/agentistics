@@ -385,6 +385,16 @@ const ALWAYS: string[] = [
   // `[Image #N]` back to a chip on the restored machine, which is the defect the record
   // exists to fix. Kilobytes: one line per file.
   '.agentistics/attachment-sends.jsonl',
+  // The durable event journal (P1 §6, decision D2). `metrics`, included: its whole point is
+  // surviving the harness's own 30-day cleanup, so once a transcript is gone the journal is the
+  // ONLY copy of those events — nothing regenerates it. STATED LIMITS, both for a follow-up rather
+  // than A1.3: (1) `walkSources` copies a file source as exactly that file, so events committed to
+  // `journal.db-wal` and not yet checkpointed into the main file (SQLite checkpoints every ~1000
+  // pages) are NOT in the archive; (2) it is a file copy of a live WAL database, not an SQLite
+  // online backup, so a copy racing a checkpoint can be torn. A consistent snapshot (`VACUUM INTO`
+  // staged like `preferences.json`) answers both. A journal moved by `AGENTISTICS_JOURNAL_DIR`
+  // outside the data dir is not under this path and does not travel.
+  '.agentistics/journal.db',
   // Claude's deep aggregate. It is the only surviving source of pre-30-day totals once Claude
   // Code's own cleanup has run, and it is 24 KB.
   '.claude/stats-cache.json',

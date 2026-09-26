@@ -56,3 +56,13 @@ export * from './pasteSanitize'
 export * from './sessionShape'
 export * from './sessionGroups'
 export * from './idleSessions'
+// The canonical runtime model (A1.1): entities, the event envelope and the projection contract.
+// A contract with no consumer yet. `Confidence` (D17's one vocabulary) is defined once, in event.ts.
+export * from './canonical/entities'
+export * from './canonical/event'
+export * from './canonical/projection'
+// The canonical event identity (A1.2): deriveEventId, keyed on the provider's own response id for a
+// model.* event (O-8) and on the source record for everything else.
+export * from './canonical/event-id'
+// A1.4: CapabilityState beside HARNESS_CAPABILITIES (derived, nothing reads it yet).
+export * from './canonical/capabilities'
