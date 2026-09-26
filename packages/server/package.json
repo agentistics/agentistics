@@ -12,6 +12,8 @@
   "dependencies": {
     "@agentistics/core": "workspace:*",
     "@agentistics/tui": "workspace:*",
+    "@ai-sdk/anthropic": "4.0.58",
+    "ai": "7.0.107",
     "jose": "^6.2.3",
     "mongodb": "^6.12.0"
   }

@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "cache-write",
+    "source": "docs/superpowers/research/12-provider-apis.md §1.1, §1.5 (flat cache_creation_input_tokens is the SUM of the two per-TTL buckets of the nested cache_creation object). Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "request-id": "req_documented_cache_write_0001",
+    "content-type": "application/json",
+    "date": "Thu, 25 Sep 2026 12:00:00 GMT",
+    "anthropic-ratelimit-requests-limit": "4000",
+    "anthropic-ratelimit-requests-remaining": "3999",
+    "anthropic-ratelimit-tokens-limit": "400000",
+    "anthropic-ratelimit-tokens-remaining": "399000"
+  },
+  "body": "{\"id\":\"msg_documented_cache_write_0001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"Noted.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"cache_creation_input_tokens\":1500,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1000,\"ephemeral_1h_input_tokens\":500}}}"
+}

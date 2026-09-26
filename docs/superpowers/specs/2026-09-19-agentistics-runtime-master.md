@@ -955,6 +955,8 @@ When a run has both live events and source artifacts, `reconcile(runId)` compare
 
 ## 22. Provider architecture
 
+> **Phase spec:** B1 (ProviderClient + Anthropic, no streaming) is specified in `2026-09-25-runtime-b1-provider.md`.
+
 ```
 Provider            a billing entity            anthropic | openai | google | openrouter | litellm | ollama | custom
 ProviderAccount     a credential's owner

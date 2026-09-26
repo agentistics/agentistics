@@ -307,6 +307,36 @@ export function teamForgetFile(connId: string): string {
   return join(TEAM_CONN_DIR, `team-forget-${safeConnId(connId)}.json`)
 }
 
+/** The native runtime's feature flag. ABSENT reads as OFF: with it off no provider module is
+ *  loaded, no credential file is read, and every `agentop provider` verb but `status` refuses in a
+ *  sentence. Kept in ONE exported constant so renaming the flag is one line. */
+export const PROVIDER_FLAG_ENV = 'AGENTISTICS_PROVIDER'
+/** Only `'1'` turns it on — the convention every other `AGENTISTICS_*` switch here follows. */
+export function providerFlagOn(env: Record<string, string | undefined> = process.env): boolean {
+  return env[PROVIDER_FLAG_ENV] === '1'
+}
+
+/** Provider API keys the USER entered for the native runtime (`agentop provider key set`). Its own
+ *  directory, 0700, one 0600 file per provider — never preferences.json, which is served (redacted
+ *  by a list that would have to know the field), written at the default mode and carried by every
+ *  backup. Excluded from backups as a `secret` in backup-plan.ts. */
+export const PROVIDER_KEYS_DIR = join(AGENTISTICS_DATA_DIR, 'provider-keys')
+
+/** The providers a key may be STORED for. Closed, and deliberately narrower than core's
+ *  `ProviderId`: B1 enters an Anthropic key and nothing else (owner decision D3). */
+export type KeyedProviderId = 'anthropic'
+export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic']
+
+export function isKeyedProvider(id: unknown): id is KeyedProviderId {
+  return typeof id === 'string' && (KEYED_PROVIDERS as readonly string[]).includes(id)
+}
+
+/** A provider id is interpolated into a path only after this check, the `safeConnId` rule. */
+export function providerKeyFile(provider: KeyedProviderId, dir: string = PROVIDER_KEYS_DIR): string {
+  if (!isKeyedProvider(provider)) throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
+  return join(dir, `${provider}.json`)
+}
+
 /** This machine's sealed-envelope keypair. The PRIVATE half lives here and NOWHERE else — never in
  *  preferences.json (which is served, redacted, over `GET /api/preferences`), never in an audit
  *  event, never in a log line. Written 0600. Machine-wide, not per connection: the same machine

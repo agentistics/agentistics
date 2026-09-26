@@ -61,6 +61,7 @@ test('every credential path is excluded, and names how to re-establish it', () =
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
     '.agentistics/connections/some-central.json',
+    '.agentistics/provider-keys/anthropic.json',
   ]) {
     const rule = excludeFor(rel)
     expect(rule?.reason).toBe('secret')
@@ -163,7 +164,7 @@ test('the repos layer contributes no $HOME source — its content is made, not f
 // billing-detect.test.ts, which greps its own module rather than trusting a reviewer.
 test('no credential filename can pass the filter — asserted over the source itself', () => {
   const src = readFileSync(join(import.meta.dir, 'backup-plan.ts'), 'utf8')
-  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'connections']) {
+  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'connections', 'provider-keys']) {
     expect(src).toContain(needle)
   }
   for (const probe of [
@@ -171,6 +172,7 @@ test('no credential filename can pass the filter — asserted over the source it
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
     '.agentistics/connections/x',
+    '.agentistics/provider-keys/anthropic.json',
   ]) {
     expect(excludeFor(probe)).not.toBeNull()
   }
