@@ -315,5 +315,16 @@ export async function extractAgentMetricsFromFile(filePath: string): Promise<Ses
   // The session id is the file's own name — which is exactly what names the `subagents/` directory
   // holding each subagent's transcript.
   const sessionId = basename(filePath).replace(/\.jsonl$/, '')
-  return enrichFromSubagentTranscripts(extractAgentMetrics(lines, modelId), filePath, sessionId)
+  // The main transcript's own response ids: a forked subagent replays some of them, and they are
+  // already counted here — see `claimSessionUsage`.
+  const mainUsageIds = new Set<string>()
+  for (const raw of lines) {
+    if (!raw.includes('"usage"')) continue
+    try {
+      const e = JSON.parse(raw) as Record<string, unknown>
+      const msg = e.message as Record<string, unknown> | undefined
+      if (e.type === 'assistant' && msg?.usage && typeof msg.id === 'string' && msg.id) mainUsageIds.add(msg.id)
+    } catch { continue }
+  }
+  return enrichFromSubagentTranscripts(extractAgentMetrics(lines, modelId), filePath, sessionId, mainUsageIds)
 }

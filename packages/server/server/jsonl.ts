@@ -1010,9 +1010,11 @@ export async function finishClaudeSession(
   // The parse alone can no longer produce the NUMBERS: since Claude Code made the Agent tool
   // asynchronous the parent transcript names the subagent and nothing else, so the invocations come
   // back marked `unmeasured` and are filled in from each subagent's own transcript, which sits
-  // beside this file. See `subagent-metrics.ts`.
+  // beside this file. See `subagent-metrics.ts`. The main transcript's own message ids go with
+  // them: a forked subagent replays responses this transcript already counted, and one billed
+  // response is counted ONCE per session (`claimSessionUsage`).
   const agentMetrics = (state.toolCounts['Agent'] || state.sawAgentLaunch)
-    ? await enrichFromSubagentTranscripts(finishAgentMetrics(state.agents, state.modelId), filePath, sessionId)
+    ? await enrichFromSubagentTranscripts(finishAgentMetrics(state.agents, state.modelId), filePath, sessionId, new Set(state.countedUsage.keys()))
     : undefined
 
   const compaction = finishCompacts(state.compact)

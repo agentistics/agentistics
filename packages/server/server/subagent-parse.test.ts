@@ -141,7 +141,7 @@ import { calcCost } from '@agentistics/core'
 
 const emptyStats = { readCount: 0, searchCount: 0, bashCount: 0, editFileCount: 0, linesAdded: 0, linesRemoved: 0, otherToolCount: 0 }
 function summary(over: Partial<Parameters<typeof agentNumbers>[0]> = {}) {
-  return { usage: [], firstMs: null, lastMs: null, toolUseCount: 0, toolStats: { ...emptyStats }, childAgentIds: [], ...over }
+  return { usage: [], firstMs: null, lastMs: null, toolUseCount: 0, toolStats: { ...emptyStats }, childAgentIds: [], responses: [], anonymous: [], ...over }
 }
 
 test('cost prices each model at ITS OWN rate — a haiku child under an opus parent is not opus money', () => {

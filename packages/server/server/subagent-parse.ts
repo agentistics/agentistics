@@ -13,7 +13,6 @@
  */
 
 import { calcCost, totalTokens } from '@agentistics/core'
-import { resolveUsage, type UsageContribution } from './usage-dedupe'
 import type { AgentInvocation, SessionAgentMetrics } from '@agentistics/core'
 
 /** What one MODEL cost inside a subagent. Per model, because a subagent may run a cheaper one. */
@@ -72,6 +71,19 @@ export interface SubagentSummary {
    * to its own transcript in the same `subagents/` directory.
    */
   childAgentIds: string[]
+  /**
+   * Every billed response this file carries, one per `message.id` with its LAST record's usage, in
+   * first-seen order. `usage` above is this file's own answer; these are what a SESSION-wide dedupe
+   * needs, because the same response can be written in several files — see `claimSessionUsage`.
+   */
+  responses: SubagentResponse[]
+  /** Usage records with no `message.id`, per model. Always counted: nothing can pair them. */
+  anonymous: SubagentUsage[]
+}
+
+/** One billed response, as the file that carries it last wrote it. */
+export interface SubagentResponse extends SubagentUsage {
+  id: string
 }
 
 interface UsageRecord {
@@ -79,13 +91,6 @@ interface UsageRecord {
   output_tokens?: number
   cache_read_input_tokens?: number
   cache_creation_input_tokens?: number
-}
-
-/** One counted id's last-applied contribution, plus the MODEL it was billed under — a repeat
- *  naming a different model (unusual, but not impossible) must retract from the OLD model's bucket,
- *  never the new one, or the superseded tokens leak into whichever bucket happens to be read next. */
-interface SubagentUsageContribution extends UsageContribution {
-  model: string
 }
 
 /**
@@ -101,9 +106,9 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 
 /** Sum one subagent transcript. Total: malformed input yields an empty summary, never a throw. */
 export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSummary {
-  const byModel = new Map<string, SubagentUsage>()
-  /** Every counted message id's last-applied contribution — see `usage-dedupe.ts`'s `resolveUsage`. */
-  const countedUsage = new Map<string, SubagentUsageContribution>()
+  /** Per `message.id`, the LAST record wins — see `usage-dedupe.ts`. Insertion order is first-seen. */
+  const byId = new Map<string, SubagentResponse>()
+  const anonymousByModel = new Map<string, SubagentUsage>()
   let firstMs: number | null = null
   let lastMs: number | null = null
   let toolUseCount = 0
@@ -173,56 +178,102 @@ export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSu
     // when a call could not be completed; letting it through here would add a `<synthetic>`-model
     // usage entry for a response that never happened. See jsonl-api-error.test.ts.
     if (e.isApiErrorMessage === true) continue
+    // ONE BILLED RESPONSE, COUNTED ONCE — the same rule the parent transcript needs, for the same
+    // reason: an assistant turn with several content blocks is several lines carrying the identical
+    // `message.usage`. Measured on three real subagent transcripts: 31 lines over 17 ids, 64 over
+    // 36, 55 over 31 — 77-83 % over. See `usage-dedupe.ts`. LAST wins: a streamed response is
+    // written partial first (measured: 460 subagent rows kept a partial first line under first-wins).
     const model = typeof msg?.model === 'string' ? msg.model : ''
-
-    const bucketOf = (m: string): SubagentUsage => {
-      let entry = byModel.get(m)
-      if (!entry) {
-        entry = { model: m, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-        byModel.set(m, entry)
-      }
-      return entry
-    }
-
-    // ONE BILLED RESPONSE, COUNTED ONCE, and the LAST record for an id wins — the same rule the
-    // parent transcript needs, for the same reason: an assistant turn with several content blocks is
-    // several lines carrying the SAME `message.usage`. Measured on three real subagent transcripts:
-    // 31 lines over 17 ids, 64 over 36, 55 over 31 — 77-83 % over BEFORE dedup existed at all, and
-    // measured again after it shipped first-wins: the first line for an id can carry a PARTIAL usage
-    // (`output_tokens: 5`) with the FINAL, complete one arriving later on the same id — first-wins
-    // kept the 5. A repeat therefore RETRACTS its predecessor's contribution from the OLD model's
-    // bucket before this record's own numbers are added to the (possibly different) current one. See
-    // `usage-dedupe.ts`.
-    const next: SubagentUsageContribution = {
-      input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
-      cache_read_input_tokens: usage.cache_read_input_tokens,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+    const record: SubagentUsage = {
       model,
+      inputTokens: num(usage.input_tokens),
+      outputTokens: num(usage.output_tokens),
+      cacheReadTokens: num(usage.cache_read_input_tokens),
+      cacheWriteTokens: num(usage.cache_creation_input_tokens),
     }
-    const decision = resolveUsage((msg as Record<string, unknown> | undefined)?.id, countedUsage, next)
-    if (decision.replace) {
-      const prev = decision.previous
-      const old = bucketOf(prev.model)
-      old.inputTokens -= num(prev.input_tokens)
-      old.outputTokens -= num(prev.output_tokens)
-      old.cacheReadTokens -= num(prev.cache_read_input_tokens)
-      old.cacheWriteTokens -= num(prev.cache_creation_input_tokens)
+    const id = (msg as Record<string, unknown> | undefined)?.id
+    if (typeof id === 'string' && id) {
+      byId.set(id, { id, ...record })
+    } else {
+      addUsage(anonymousByModel, record)
     }
-
-    const entry = bucketOf(model)
-    entry.inputTokens += num(usage.input_tokens)
-    entry.outputTokens += num(usage.output_tokens)
-    entry.cacheReadTokens += num(usage.cache_read_input_tokens)
-    entry.cacheWriteTokens += num(usage.cache_creation_input_tokens)
   }
 
-  // A model bucket that a retraction emptied back to all-zero was never actually used — its only
-  // line was superseded by a later record naming a DIFFERENT model — so it is dropped rather than
-  // reported as a zero-token entry for a model this invocation never really ran.
-  const usage = [...byModel.values()].filter(u =>
-    u.inputTokens !== 0 || u.outputTokens !== 0 || u.cacheReadTokens !== 0 || u.cacheWriteTokens !== 0)
+  const responses = [...byId.values()]
+  const anonymous = [...anonymousByModel.values()]
+  return { usage: perModel(responses, anonymous), firstMs, lastMs, toolUseCount, toolStats, childAgentIds, responses, anonymous }
+}
 
-  return { usage, firstMs, lastMs, toolUseCount, toolStats, childAgentIds }
+/** Add one usage record into a per-model accumulator. */
+function addUsage(byModel: Map<string, SubagentUsage>, u: SubagentUsage): void {
+  let entry = byModel.get(u.model)
+  if (!entry) {
+    entry = { model: u.model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    byModel.set(u.model, entry)
+  }
+  entry.inputTokens += u.inputTokens
+  entry.outputTokens += u.outputTokens
+  entry.cacheReadTokens += u.cacheReadTokens
+  entry.cacheWriteTokens += u.cacheWriteTokens
+}
+
+/** Responses plus id-less records, per model, in first-seen order of the responses. */
+function perModel(responses: readonly SubagentUsage[], anonymous: readonly SubagentUsage[]): SubagentUsage[] {
+  const byModel = new Map<string, SubagentUsage>()
+  for (const r of responses) addUsage(byModel, r)
+  for (const a of anonymous) addUsage(byModel, a)
+  return [...byModel.values()]
+}
+
+/** One subagent file inside a session's subtree plan — `depth` 0 is an invocation's own root. */
+export interface SessionMember {
+  agentId: string
+  depth: number
+  summary: SubagentSummary
+}
+
+/**
+ * ONE BILLED RESPONSE COUNTS ONCE PER SESSION — which file's usage each response is counted in.
+ *
+ * Per file was not enough (measured 2026-09-25/26, docs/superpowers/research/
+ * 2026-09-25-p1-parity-differential.md §3.4/§7): a conversation fork (`meta.isFork`) opens with the
+ * parent's LAUNCHING response under its original `message.id`, and forks replay parent ids, so one
+ * response was counted in the main transcript AND in an invocation, and across sibling/nested
+ * files — one root read 156,120,428 tokens against a true 106,446,703 (166 shared ids).
+ *
+ * The rules, each order-independent:
+ *
+ * - **An id the MAIN transcript carries contributes nothing here.** The main transcript's own
+ *   totals already count it, with its own (final) copy — even where the fork's copy is an EARLIER
+ *   partial snapshot (813e0cce: five forks carry 78,678 of a response main settles at 83,409).
+ * - **Otherwise the OWNER counts it: the shallowest file that carries it** — a fork's replayed ids
+ *   were produced by its ancestor, which sits above it. Between files at the SAME depth nothing
+ *   says which produced it, so the smaller `agentId` owns it: arbitrary, but a fixed function of the
+ *   files and never of the order a directory happened to list them in. The owner's OWN copy (its
+ *   last record) is the one counted — a descendant's copy is a replay, and the one measured replay
+ *   that differed was a partial snapshot.
+ * - **Id-less records always count, in the file that carries them** — nothing can pair them.
+ *
+ * Returns each member's OWNED usage, per model. A member that owns nothing maps to `[]`.
+ */
+export function claimSessionUsage(
+  mainIds: { has(id: string): boolean },
+  members: readonly SessionMember[],
+): Map<string, SubagentUsage[]> {
+  const owner = new Map<string, SessionMember>()
+  for (const m of members) {
+    for (const r of m.summary.responses) {
+      if (mainIds.has(r.id)) continue
+      const held = owner.get(r.id)
+      if (!held || m.depth < held.depth || (m.depth === held.depth && m.agentId < held.agentId)) owner.set(r.id, m)
+    }
+  }
+  const out = new Map<string, SubagentUsage[]>()
+  for (const m of members) {
+    const owned = m.summary.responses.filter(r => owner.get(r.id) === m)
+    out.set(m.agentId, perModel(owned.map(({ id: _id, ...u }) => u), m.summary.anonymous))
+  }
+  return out
 }
 
 /**
@@ -249,23 +300,16 @@ export function agentNumbers(root: SubagentSummary, descendants: readonly Subage
   let totalToolUseCount = 0
   let costUSD = 0
 
+  // Tokens are summed per MODEL across the whole subtree first and each model priced ONCE — the
+  // same arithmetic the canonical projection runs, so the two cannot drift apart by rounding.
+  const byModel = new Map<string, SubagentUsage>()
   for (const s of [root, ...descendants]) {
     for (const u of s.usage) {
       inputTokens += u.inputTokens
       outputTokens += u.outputTokens
       cacheReadTokens += u.cacheReadTokens
       cacheWriteTokens += u.cacheWriteTokens
-      costUSD += calcCost(
-        {
-          inputTokens: u.inputTokens,
-          outputTokens: u.outputTokens,
-          cacheReadInputTokens: u.cacheReadTokens,
-          cacheCreationInputTokens: u.cacheWriteTokens,
-          webSearchRequests: 0,
-          costUSD: 0,
-        },
-        u.model,
-      )
+      addUsage(byModel, u)
     }
     totalToolUseCount += s.toolUseCount
     toolStats.readCount += s.toolStats.readCount
@@ -275,6 +319,20 @@ export function agentNumbers(root: SubagentSummary, descendants: readonly Subage
     toolStats.linesAdded += s.toolStats.linesAdded
     toolStats.linesRemoved += s.toolStats.linesRemoved
     toolStats.otherToolCount += s.toolStats.otherToolCount
+  }
+
+  for (const u of byModel.values()) {
+    costUSD += calcCost(
+      {
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        cacheReadInputTokens: u.cacheReadTokens,
+        cacheCreationInputTokens: u.cacheWriteTokens,
+        webSearchRequests: 0,
+        costUSD: 0,
+      },
+      u.model,
+    )
   }
 
   return {
