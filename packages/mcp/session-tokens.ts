@@ -1,4 +1,7 @@
-import { calcCost, sessionCostUSD } from "@agentistics/core";
+import {
+  calcCost, sessionCostUSD, sumTokens, totalTokens, usageTokens, usageTokenTotal, type ModelUsage,
+  HARNESS_ORDER,
+} from "@agentistics/core";
 
 export type AnySession = Record<string, any>;
 
@@ -46,4 +49,40 @@ export function sessionTokens(s: AnySession) {
 
 export function sessionMessages(s: AnySession): number {
   return (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0);
+}
+
+/**
+ * All-time Claude totals read off `statsCache.modelUsage` — the fallback for a scope with no
+ * sessions on disk (Claude deletes transcripts after 30 days; the cache keeps the totals).
+ * statsCache is Claude-only: callers must not use this for any other harness.
+ * All four counters go through `@agentistics/core`'s tokens helpers; cost is `calcCost` per model.
+ */
+export function statsCacheTotals(sc: { modelUsage?: Record<string, Partial<ModelUsage>> } | undefined) {
+  const entries = Object.entries(sc?.modelUsage ?? {});
+  const b = sumTokens(entries.map(([, u]) => usageTokens(u)));
+  let cost = 0;
+  let top: { model: string; n: number } | null = null;
+  for (const [model, u] of entries) {
+    cost += calcCost({
+      inputTokens: u.inputTokens ?? 0,
+      outputTokens: u.outputTokens ?? 0,
+      cacheReadInputTokens: u.cacheReadInputTokens ?? 0,
+      cacheCreationInputTokens: u.cacheCreationInputTokens ?? 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+    }, model);
+    const n = usageTokenTotal(u);
+    if (!top || n > top.n) top = { model, n };
+  }
+  return { ...b, tokens: totalTokens(b), cost, topModel: top?.model ?? null };
+}
+
+export const HARNESS_IDS = HARNESS_ORDER;
+
+export function harnessParam() {
+  return {
+    type: "string",
+    enum: ["all", ...HARNESS_ORDER],
+    description: `Scope to one harness (${HARNESS_ORDER.join(" | ")}), or 'all' (default) for the unified view across every harness.`,
+  } as const;
 }
