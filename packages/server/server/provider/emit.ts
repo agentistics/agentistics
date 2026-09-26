@@ -26,10 +26,14 @@
  * - A failed attempt carries NO usage — `ModelFailedData` has no field for one, and nothing here
  *   invents it. A zeroed failure would be a confident 0 for a call that may have been billed
  *   (master §22.1.1).
- * - A completed attempt whose provider did not state every counter (`ProviderUsage.missing`) still
- *   writes the four numbers the event shape requires, but the placeholder zeros are GUESSWORK, so
- *   the event's confidence drops from `exact` to `inferred` (D17). The canonical shape has no
- *   `missing` field yet — recorded as an open item in the B1.6 handback, not decided here.
+ * - A completed attempt whose provider did not state every counter (`ProviderUsage.missing`) emits
+ *   `data.usage` with ONLY the counters the source actually reported (D21, 2026-09-26) — a missing
+ *   counter's key is absent from the object, never written as a placeholder 0. The counters that
+ *   ARE present are exact statements about what the provider said, so the event's `confidence`
+ *   stays `exact` regardless of what is missing; there is no `inferred` path for a missing counter
+ *   any more (superseding B1.6's placeholder-zero-plus-`inferred` rule). `contextTokens` and
+ *   `cacheWriteByTtl` inherit this for free — `usage.ts` already withholds both whenever the
+ *   counters they depend on are missing, so nothing here has to re-check `missing` for them.
  * - Nothing is priced: Anthropic returns no money, so `costUSD` is absent and a projection prices
  *   through `calcCost` with `modelServed`, saying the figure is the table's.
  *
@@ -55,6 +59,7 @@ import {
   type ModelInvokedData,
   type ModelIterations,
   type ModelStopReason,
+  type ModelUsageCounters,
   type ProviderError,
   type ProviderId,
   type ProviderUsage,
@@ -193,12 +198,20 @@ export function completedEvent(
   o: AttemptCompleted, scope: EmitScope, ctx: EmitContext, observedAt: string,
 ): AgentisticsEvent<'model.completed'> {
   const u = o.usage
+  const missing = new Set(u.missing ?? [])
+  // Only the counters the source actually reported (D21) — a missing one's key is omitted
+  // entirely, never written as a placeholder 0.
+  const usage: ModelUsageCounters = {}
+  if (!missing.has('input')) usage.input = u.input
+  if (!missing.has('output')) usage.output = u.output
+  if (!missing.has('cacheRead')) usage.cacheRead = u.cacheRead
+  if (!missing.has('cacheWrite')) usage.cacheWrite = u.cacheWrite
   const data: ModelCompletedData = {
     provider: o.provider,
     // The event is ABOUT what answered; that is also the only id that prices the call.
     model: o.servedModel,
     deployment: DEPLOYMENT,
-    usage: { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite },
+    usage,
     latencyMs: o.latencyMs,
     status: 'completed',
     attemptId: o.invocationId,
@@ -218,7 +231,9 @@ export function completedEvent(
   if (iterations) data.iterations = iterations
 
   const ref = hasId ? `${o.provider}:msg:${o.messageId}` : attemptRef(o.provider, o.invocationId, o.attempt)
-  const confidence: Confidence = u.missing && u.missing.length > 0 ? 'inferred' : 'exact'
+  // D21: every counter that made it into `usage` is an exact statement from the source — a missing
+  // counter is omitted above, not guessed at, so there is nothing left here for `inferred` to mean.
+  const confidence: Confidence = 'exact'
   return {
     ...envelopeOf('model.completed', o.provider, ref, hasId ? o.messageId : undefined, observedAt, confidence, scope, ctx),
     data,

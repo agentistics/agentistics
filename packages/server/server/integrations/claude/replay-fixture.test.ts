@@ -98,10 +98,21 @@ describe('Claude replay over a redacted real transcript', () => {
     foldClaudeParse(legacy, LINES)
     const completed = WHOLE.filter((e): e is AgentisticsEvent<'model.completed'> => e.type === 'model.completed')
     const sum = completed.reduce(
-      (a, e) => ({
-        input: a.input + e.data.usage.input, output: a.output + e.data.usage.output,
-        cacheRead: a.cacheRead + e.data.usage.cacheRead, cacheWrite: a.cacheWrite + e.data.usage.cacheWrite,
-      }),
+      (a, e) => {
+        // D21 (2026-09-26): a counter is now individually optional on the event. This fixture's own
+        // replay always reports all four, so asserting that here — rather than defaulting a missing
+        // one to 0 — keeps the parity check honest: a counter that silently went absent would fail
+        // this assertion instead of quietly summing to a smaller, wrong total.
+        const { input, output, cacheRead, cacheWrite } = e.data.usage
+        expect(input).toBeDefined()
+        expect(output).toBeDefined()
+        expect(cacheRead).toBeDefined()
+        expect(cacheWrite).toBeDefined()
+        return {
+          input: a.input + input!, output: a.output + output!,
+          cacheRead: a.cacheRead + cacheRead!, cacheWrite: a.cacheWrite + cacheWrite!,
+        }
+      },
       { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     )
     expect(sum).toEqual({

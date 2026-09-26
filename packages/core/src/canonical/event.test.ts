@@ -163,9 +163,10 @@ describe('narrowing on AnyAgentisticsEvent.type', () => {
    * It also proves that inside the `model.completed` case, `e.data.usage.cacheRead` compiles,
    * i.e. `e.data` is narrowed to `ModelCompletedData` and not the union of every data shape.
    */
-  function narrows(e: AnyAgentisticsEvent): number {
+  function narrows(e: AnyAgentisticsEvent): number | undefined {
     switch (e.type) {
       case 'model.completed':
+        // D21: a counter is optional — absent when the source did not report it.
         return e.data.usage.cacheRead
       case 'model.failed':
         return e.data.latencyMs ?? 0

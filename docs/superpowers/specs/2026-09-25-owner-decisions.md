@@ -158,6 +158,25 @@ shapes for one billed call is the duplication the journal exists to end; (b) an 
 
 ## Added on 2026-09-26 (specification session, under the owner's delegation)
 
+**D21 · A `model.completed` carries the REAL counters; a counter that could not be produced is
+ABSENT (2026-09-26).** Taken by the specification session under the owner's delegation (task
+t-e1dea7cd6f, comment "DECISIONS 2026-09-26"); the owner may veto. Native path: the provider
+response's usage through B1.1's mapping (all four counters plus the reasoning `billing`
+discriminator). Replay path: the transcript's usage, last-wins per `message.id` (consistent with
+M-1). Each of the four counters on `ModelCompletedData.usage` — and on `ModelInvocation.usage`,
+which mirrors it — becomes individually OPTIONAL (`ModelUsageCounters = Partial<TokenBreakdown>`),
+and an absent counter means exactly "the source did not report it". No `missing` array is added:
+the absence IS the statement, and a second list could disagree with the numbers beside it.
+`provider/emit.ts` writes only the counters the provider reported and marks the event `exact` for
+what is present. Every reader of that usage treats an absent counter as absent: a total over events
+that met one is partial (`absentUsageCounters()`), the cost priced from it too, never a measured
+sum. Additive for every reader that already handled absence; `canonical/d21-absent-counters.test.ts`
+proves an event in the pre-D21 shape still compiles. Applied by B1.7a to `canonical/event.ts` /
+`entities.ts`, `provider/emit.ts`, the session-meta projection and master §14.2. Unblocks B1.7.
+*Rejected:* keeping B1.6's placeholders (four required numbers, the missing ones zero, the event
+lowered to `inferred`) until B5 — a zero with a confidence label is still a confident zero on every
+surface that sums it, which is the `HARNESS_CAPABILITIES` rule applied to one counter.
+
 **D22 · A human turn is an event.** Taken on 2026-09-26 by the specification session under the
 owner's delegation; the owner may veto. Implemented by A2.7. The canonical vocabulary gains
 `turn.started` with data `{ by: 'user' }` — OPTIONAL and additive, not in the required set. An

@@ -519,3 +519,97 @@ describe('rules the fixture does not reach', () => {
     expect(p.costUSD).toBeNull()
   })
 })
+
+// ---- D21 (2026-09-26): an absent counter is never a 0, and a sum over one is never presented as
+// measured. `completed()` above always fills the four counters (its own callers do not care about
+// this rule), so these use `ev('model.completed', …)` directly to state usage exactly as a source
+// would: only the counters it actually reported.
+describe('D21 — an absent usage counter is never folded in as a 0, and a sum over one is PARTIAL', () => {
+  const main = mainAgentIdOf('c')
+
+  test('every event carrying all four counters projects exactly as before: no caveat at all', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      completed(main, 'claude-opus-4-7', { input: 100, output: 50, cacheRead: 10, cacheWrite: 5 }),
+    ])
+    expect(p.meta.input_tokens).toBe(100)
+    expect(p.meta.output_tokens).toBe(50)
+    expect(p.meta.cache_read_input_tokens).toBe(10)
+    expect(p.meta.cache_creation_input_tokens).toBe(5)
+    // no D21 caveat anywhere (the session-still-open `end_time` caveat is unrelated — this
+    // synthetic fixture never emits session.ended — and is left alone here)
+    expect(p.caveats.filter(c => c.field !== 'end_time')).toEqual([])
+  })
+
+  test('a cacheWrite the source never reported: the other three sum exactly, cacheWrite sums to 0 '
+    + 'from what WAS reported (never a folded-in 0 for the missing one), and both it and the cost '
+    + 'are named as partial', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      anyEv(ev('model.completed', {
+        provider: 'anthropic', model: 'claude-opus-4-7', status: 'completed',
+        usage: { input: 100, output: 50, cacheRead: 10 }, // cacheWrite: absent, not 0
+      }, { agentId: main })),
+    ])
+    expect(p.meta.input_tokens).toBe(100)
+    expect(p.meta.output_tokens).toBe(50)
+    expect(p.meta.cache_read_input_tokens).toBe(10)
+    expect(p.meta.cache_creation_input_tokens).toBe(0)
+    const tokenCaveat = p.caveats.find(c => c.field === 'cache_creation_input_tokens')
+    expect(tokenCaveat).toBeDefined()
+    expect(tokenCaveat!.reason).toContain('cacheWrite')
+    expect(tokenCaveat!.reason).toContain('PARTIAL')
+    // only the affected field gets its own caveat — the three fully-reported counters do not
+    expect(p.caveats.some(c => c.field === 'input_tokens')).toBe(false)
+    expect(p.caveats.some(c => c.field === 'output_tokens')).toBe(false)
+    expect(p.caveats.some(c => c.field === 'cache_read_input_tokens')).toBe(false)
+    // the cost was priced from that same partial token set, and is flagged rather than presented as measured
+    const costCaveat = p.caveats.find(c => c.field === 'costUSD')
+    expect(costCaveat).toBeDefined()
+    expect(costCaveat!.reason).toContain('cacheWrite')
+    expect(costCaveat!.reason.toLowerCase()).toContain('estimate')
+    expect(p.costUSD).not.toBeNull() // still the best estimate over what WAS reported — just flagged
+  })
+
+  test('usage {} — nothing was reported: the event contributes nothing, and all four are named absent', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      anyEv(ev('model.completed', {
+        provider: 'anthropic', model: 'claude-opus-4-7', status: 'completed', usage: {},
+      }, { agentId: main })),
+    ])
+    expect(p.meta.input_tokens).toBe(0)
+    expect(p.meta.output_tokens).toBe(0)
+    expect(p.meta.cache_read_input_tokens).toBe(0)
+    expect(p.meta.cache_creation_input_tokens).toBe(0)
+    const fields = p.caveats.map(c => c.field)
+    expect(fields).toContain('input_tokens')
+    expect(fields).toContain('output_tokens')
+    expect(fields).toContain('cache_read_input_tokens')
+    expect(fields).toContain('cache_creation_input_tokens')
+    expect(fields).toContain('costUSD')
+  })
+
+  test('an absent counter under a SUBAGENT marks that invocation partial, and leaves the session totals alone', () => {
+    const sub = subagentIdOf('c', 'p')
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      completed(main, 'claude-opus-4-7', { input: 100, output: 50, cacheRead: 10, cacheWrite: 5 }),
+      anyEv(ev('agent.started', { kind: 'subagent', parentAgentId: main }, { agentId: sub, ref: 'r:meta' })),
+      anyEv(ev('model.completed', {
+        provider: 'anthropic', model: 'claude-haiku-4-5', status: 'completed',
+        usage: { input: 7, output: 3 }, // cacheRead and cacheWrite: absent
+      }, { agentId: sub })),
+      anyEv(ev('agent.ended', { status: 'completed' }, { agentId: sub })),
+    ])
+    const inv = p.meta.agentMetrics!.invocations[0]!
+    expect(inv.inputTokens).toBe(7)
+    expect(inv.outputTokens).toBe(3)
+    const c = p.caveats.find(x => x.field === `agentMetrics.invocations[${sub}]`)
+    expect(c).toBeDefined()
+    expect(c!.reason).toContain('cacheRead, cacheWrite')
+    expect(c!.reason).toContain('PARTIAL')
+    // the main agent reported all four: no session-level token or cost caveat
+    expect(p.caveats.some(x => x.field === 'costUSD' || x.field.endsWith('_tokens'))).toBe(false)
+  })
+})
