@@ -173,6 +173,9 @@ that met one is partial (`absentUsageCounters()`), the cost priced from it too, 
 sum. Additive for every reader that already handled absence; `canonical/d21-absent-counters.test.ts`
 proves an event in the pre-D21 shape still compiles. Applied by B1.7a to `canonical/event.ts` /
 `entities.ts`, `provider/emit.ts`, the session-meta projection and master §14.2. Unblocks B1.7.
+The replay path was applied by A2.7 (Claude adapter 1.4.0): `integrations/claude/replay-model.ts`
+read each transcript counter through `num()`, which turned a missing one into 0 — now it is absent,
+and the context gauge is omitted unless all three input-side counters were reported.
 *Rejected:* keeping B1.6's placeholders (four required numbers, the missing ones zero, the event
 lowered to `inferred`) until B5 — a zero with a confidence label is still a confident zero on every
 surface that sums it, which is the `HARNESS_CAPABILITIES` rule applied to one counter.
