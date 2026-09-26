@@ -240,9 +240,21 @@ not covered.
 8. The catalogue's v1 set is complete enough to make a real delivery in this repository —
    demonstrated by having the harness do one, end to end, with evidence attached to a task.
 
-## 7. Open decisions
+## 7. Decisions — the owner's answers of 2026-09-25
 
-- **D-T5 · Sandbox on day one, or after v1? — MEASURED 2026-09-20, and now answerable.**
+All three are recorded in `2026-09-25-owner-decisions.md`; the measurements and trade-offs that were
+weighed stay below as history.
+
+- **D-T5 · Sandbox.** **DECIDED 2026-09-25 by the owner:** optional in v1 — `setrlimit` + a capability
+  probe + **Docker as the opt-in sandbox**; bubblewrap / Landlock via `bun:ffi` / Seatbelt later;
+  native Windows last. The screen states one of four states in plain words — no sandbox · filesystem
+  only · full container · requested but unavailable. *Accepted by the owner, consciously:* with no
+  sandbox the agent reads anything the account can read and reaches the network; every write and
+  shell still goes through the policy (D-T3). **Rejected:** a mandatory sandbox from day
+  one — on WSL the sandbox of Codex itself intermittently refuses to run (their issue #1039), so a
+  mandatory one here would be an agent that sometimes refuses to run.
+
+  *The question was: sandbox on day one, or after v1? — MEASURED 2026-09-20.*
   Of the five harnesses, **only Codex sandboxes by default** (Landlock + seccomp, bwrap fallback,
   Seatbelt on macOS, restricted tokens on Windows); Gemini and Copilot are opt-in; **OpenCode ships
   none at all** and tells the user to run it in a container themselves. Codex's own combination is
@@ -257,7 +269,7 @@ not covered.
   Landlock, seccomp and namespaces still apply there, but uid- and permission-based containment is
   weaker because those bits are synthesised over NTFS ACLs.
 
-  **Recommendation (v1):** `setrlimit` + a capability probe + **Docker as the opt-in sandbox** —
+  **The shape decided (v1):** `setrlimit` + a capability probe + **Docker as the opt-in sandbox** —
   all of it subprocess composition, zero native-module cost, compatible with the single binary.
   **Later:** bubblewrap, Landlock through `bun:ffi` (reachable for the same reason the PTY is —
   §D-T2), and a Seatbelt profile. **Last:** native Windows sandboxing, which has no FFI-friendly
@@ -268,9 +280,11 @@ not covered.
   plain words: with no sandbox, the agent reads anything this account can read, reaches the network
   and runs arbitrary code — one under-caught approval is enough, and no malice is required. A green
   shield that is not backed by a mechanism is the confident zero of security.
-- **D-T6 · Is `git` a tool or the shell?** Every surveyed harness says shell, and this product wants
-  attributable git events. Recommendation: read verbs as tools in v1 (cheap, and they feed metrics),
-  write verbs as tools in v2.
-- **D-T7 · Does the browser belong to the harness or stay a gated runtime?** §25 says its own
-  runtime; Gemini's precedent is a bounded, off-by-default browser subagent. Recommendation: keep
-  it a gated runtime and expose it through delegation, not as an ordinary tool.
+- **D-T6 · git.** **DECIDED 2026-09-25 by the owner:** read verbs as tools in v1 (cheap, and they
+  feed metrics); write verbs as tools in v2. **Rejected:** `git` through the shell only — no attributable git events.
+  *The question was: is `git` a tool or the shell?* Every surveyed harness says shell, and this
+  product wants attributable git events.
+- **D-T7 · Browser.** **DECIDED 2026-09-25 by the owner:** a gated runtime, reached through
+  delegation — not an ordinary tool. **Rejected:** the browser as an ordinary tool — reach without a gate. *The
+  question was: does the browser belong to the harness or stay a gated runtime?* §25 says its own
+  runtime; Gemini's precedent is a bounded, off-by-default browser subagent.

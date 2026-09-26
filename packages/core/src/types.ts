@@ -845,10 +845,14 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'claude-fable-5':             { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   'claude-mythos-5':            { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   'claude-opus-5':              { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
+  // Opus 5.5 is cheaper than Opus 5: verified against platform.claude.com/docs/en/about-claude/pricing,
+  // read 2026-09-25 (cacheWrite is the 5-minute TTL). Without this row the prefix fallback matches
+  // `claude-opus-5` and bills it at double.
+  'claude-opus-5-5':            { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5     },
   'claude-opus-4-8':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-opus-4-7':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
-  // Sonnet 5 is on introductory pricing ($2/$10) through 2026-08-31, then $3/$15. The introductory
-  // rate is what applies today; revisit on that date.
+  // Sonnet 5: the introductory $2/$10 became the standard price. The increase to $3/$15 announced for
+  // 2026-09-01 was cancelled (platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25).
   'claude-sonnet-5':            { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50  },
   'claude-opus-4-6':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-sonnet-4-6':          { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75  },

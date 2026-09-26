@@ -2607,6 +2607,26 @@ interchangeable.
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
 
+### Idle sessions — the Sessions workspace's bell, banner and review modal
+
+The idle RULE is pure and lives in `packages/core/src/idleSessions.ts` (`idleCandidates` /
+`suggestGroup` / `idleNotifyStep` / `freedBytes`) — a session is a candidate only when it is
+`waiting` AND the user's own last message is older than `preferences.idleSessions.thresholdMin`
+(a lower `pressureThresholdMin` under RAM pressure). `lastUserMessageAt` reaches a fleet row from
+the EXACT conversation link only (`session-view.ts`'s `metricsOf`, reading the consolidate store's
+`user_message_timestamps`) — never the harness-and-directory guess `claimResume` falls back to —
+so a row with no exact link is never a candidate rather than one judged on a stranger's clock.
+**The machine→central relay row gains nothing here**: `reduceMachineFleetRow`'s allowlist carries
+neither `lastUserMessageAt` nor `taskId` (pinned by `machineFleet.test.ts`), because the feature is
+local-only and a central has no business suggesting to end another machine's session on a clock it
+did not measure. **The watch is off on a central** — `useIdleSessions`'s `enabled` is
+`!isCentral && !pollUnsupported && !loading`, the same three facts the page already states
+elsewhere, so a central never computes candidates for its relayed fleet. The `sessions.idle`
+notification's `meta` is deliberately LANGUAGE-NEUTRAL (`count`, `names`, a plain `more` count and a
+pre-formatted `freed` amount, never composed English/Portuguese) so a notification raised in one
+language still reads correctly after the language toggle flips; `idleMoreSuffix` /
+`idleFreedSentence` compose the two wording placeholders at render time.
+
 ## Accessibility magnifiers (`packages/web/src/components/a11y/`)
 
 Lenses a low-vision user places over the dashboard. Full write-up in

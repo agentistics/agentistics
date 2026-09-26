@@ -319,7 +319,6 @@ card. So it travels under a second, narrower gate than everything else:
 What is NOT guaranteed here is everything §8 already lists — in particular, **a delivery already
 pushed is disclosed by its removal**, exactly as a repository is. Turning sharing off stops future
 pushes; withdrawing what a central already holds is the observable delete described above.
->>>>>>> origin/feat/alm-central-sync
 
 ### 8.1 Rules are per machine, and how a machine finds out
 

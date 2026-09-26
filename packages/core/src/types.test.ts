@@ -121,6 +121,13 @@ function usage(overrides: Partial<ModelUsage> = {}): ModelUsage {
 // getModelPrice
 
 describe('getModelPrice', () => {
+  test('claude-opus-5-5 has its own row, not the claude-opus-5 prefix fallback', () => {
+    // platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25. Without the row the
+    // prefix match priced Opus 5.5 at Opus 5's $5/$25 — double.
+    const p = getModelPrice('claude-opus-5-5')
+    expect([p.input, p.output, p.cacheRead, p.cacheWrite]).toEqual([4, 20, 0.20, 5])
+  })
+
   test('retorna preço exato para modelo conhecido', () => {
     expect(getModelPrice('claude-sonnet-4-6')).toEqual({
       input: 3,

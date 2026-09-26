@@ -165,6 +165,20 @@ describe('which conversation a row continues from', () => {
   })
 })
 
+describe('the last user message time and the task id', () => {
+  it('maps lastUserMessageMs and taskId onto the row', () => {
+    const c = toControlSession(view({ lastUserMessageMs: 99, taskId: 't1' }), S, LIVE)
+    expect(c.lastUserMessageAt).toBe(99)
+    expect(c.taskId).toBe('t1')
+  })
+
+  it('leaves both absent when the view carries neither', () => {
+    const c = toControlSession(view(), S, LIVE)
+    expect(c.lastUserMessageAt).toBeUndefined()
+    expect(c.taskId).toBeUndefined()
+  })
+})
+
 describe('a dialog agentop can SEE and cannot READ', () => {
   /*
    * THE REPORTED BUG, 2026-09-07.

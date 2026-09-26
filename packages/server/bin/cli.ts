@@ -81,6 +81,10 @@ Commands:
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
+  journal       Read-only look at the durable event journal ('journal status')
+  provider      Manage a provider API key for the native runtime (BETA, off by default —
+                set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
+                --stdin, never on the command line ('provider key set|status|remove')
   ci-push       One-shot push of a CI runner's metrics to a central
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)
@@ -458,6 +462,8 @@ if (command === 'events') {
   process.exit(code)
 }
 
+if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
+
 if (command === 'backup') {
   const { runBackupCli } = await import('../server/cli-backup.ts')
   const code = await runBackupCli(args)
@@ -468,6 +474,11 @@ if (command === 'restore') {
   const { runRestoreCli } = await import('../server/cli-backup.ts')
   const code = await runRestoreCli(args)
   process.exit(code)
+}
+
+if (command === 'provider') {
+  const { runProvider } = await import('../server/cli-provider.ts')
+  process.exit(await runProvider(args))
 }
 
 if (command === 'member') {

@@ -28,7 +28,7 @@ failure mode that a generic implementation would walk into:
 
 | Harness | Events it can emit | The trap |
 |---|---|---|
-| **codex** | run, agent(main), model.completed, tool.* | usage is **cumulative, last-wins**; an event per `token_count` line would sum a running total. Emit **one** `model.completed` per turn with the *delta*, and mark `confidence: 'derived'` — the harness does not state per-call usage. |
+| **codex** | run, agent(main), model.completed, tool.* | usage is **cumulative, last-wins**; an event per `token_count` line would sum a running total. Emit **one** `model.completed` per turn with the *delta*, and mark `confidence: 'exact'` — a deterministic difference of exact cumulative counters (D17: no `derived`; it would be `estimated` only if the rule introduced an estimate). The harness does not state per-call usage, so the delta is per turn. |
 | **gemini** | run, agent(main), model.completed (rich-JSON only), tool.* | **two file shapes**; the append-journal one carries no tokens at all. Tokens are `partial` and the shape is recorded per run, or a session silently reports zero. Its id stays the synthetic path id. |
 | **copilot** | run, agent(main), model.completed (at shutdown), tool.*, mcp.* | tokens/lines exist **only at `session.shutdown`**. A crashed session emits `run.ended` with `status: 'failed'` and **no** invocation — never a zero-token invocation. |
 | **kimi** | run, agent(main + one per agent id), model.completed, tool.* | the same usage appears twice (`usage.record` and the nested `step.end`); only the first family is read. Per-agent events are now possible where the legacy `SessionMeta` had none — that is an **improvement**, so the differential must expect it. |
@@ -54,8 +54,10 @@ agentop journal import [--harness <id>…] [--from <date>] [--dry-run]
 ```
 
 - Reads the harness's artifacts first and the consolidate store second: the store holds *computed*
-  sessions, so it can only produce a coarse `run`+totals event set, marked
-  `confidence: 'derived'`, for conversations whose artifacts are already gone. That is the honest
+  sessions, so it can only produce a coarse `run`+totals event set for conversations whose artifacts
+  are already gone — `confidence: 'exact'` for the counters the store holds (a deterministic
+  derivation of exact inputs) and `'estimated'` for anything priced from a table (D17: there is no
+  `derived`). That is the honest
   floor and it is what makes months of history survive in the journal at all.
 - **Resumable**: a cursor per source file; interrupting and re-running changes nothing
   (`UNIQUE(event_id)` plus the same derivation).

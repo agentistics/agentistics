@@ -56,6 +56,8 @@ export interface Conversation {
    */
   contextTokens?: number
   contextWindow?: number
+  /** Epoch ms of the person's last message (`user_message_timestamps`); absent when unknown. */
+  lastUserMessageMs?: number
 }
 
 const CACHE_TTL_MS = 30_000
@@ -106,6 +108,10 @@ export function toConversation(s: SessionMeta): Conversation {
     // source of truth, and a second arithmetic here would disagree with the dashboard the first
     // time a price changed.
     ...(costUSD !== null ? { costUSD } : {}),
+    ...(() => {
+      const t = Date.parse(s.user_message_timestamps?.at(-1) ?? '')
+      return Number.isFinite(t) ? { lastUserMessageMs: t } : {}
+    })(),
   }
 }
 
