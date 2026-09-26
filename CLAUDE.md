@@ -998,6 +998,9 @@ the differential reads EQUAL on every row of these classes (476 sessions, 0 expl
 - **A synthetic `isApiErrorMessage` line is not a billed response.** Its usage is all zeros, but
   counting it marked the cache-write TTL split as OBSERVED, so a session whose only usage line was
   one reported `0`/`0` instead of absent (4 sessions). Both walks skip it.
+- **An empty transcript is not a measured zero.** A 0-byte file (or one with no parseable line)
+  wrote `duration_minutes: 0` and `compact_count/compact_ms: 0` (1 session). Those fields are now
+  absent unless a line was walked (`ClaudeParseState.sawAnyEntry`); `duration_minutes` is optional.
 
 **The store must be REBUILT for a correction to reach a screen**: `~/.agentistics/sessions/**` holds
 the computed `SessionMeta`, so a parser fix changes nothing until the next `buildApiResponse` writes

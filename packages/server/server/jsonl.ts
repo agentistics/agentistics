@@ -241,7 +241,9 @@ export function makeEmptySession(
     session_id: sessionId,
     project_path: projectPath,
     start_time: startTime,
-    duration_minutes: 0,
+    // Absent, not 0 — this session's file could not even be OPENED (see the `readFile` catch in
+    // `parseSessionJsonl`), which is the same "nothing was walked" class of bug DEFECT M-3 fixed in
+    // `finishClaudeSession`: there is no first-and-last event here at all.
     user_message_count: 0,
     assistant_message_count: 0,
     tool_counts: {},
@@ -410,6 +412,18 @@ interface ClaudeUsageContribution extends UsageContribution {
 export interface ClaudeParseState {
   /** How many lines have been folded. Only `modelFirst200` reads it — see its note. */
   lineNo: number
+  /**
+   * Did any line ever parse into a JSON entry? — see the note on `finishClaudeSession`'s
+   * measured-zero fields (`duration_minutes`, `compact_count`/`compact_ms`, `skill_uses`).
+   *
+   * `lineNo` alone cannot answer this: it counts every raw line, including a blank one or one
+   * that failed `JSON.parse` (DEFECT M-3 — a 0-byte transcript, or one whose every line is blank
+   * or unparseable, is a walk that saw no ENTRY, and reported `duration_minutes: 0` /
+   * `compact_count: 0` regardless). This is set the moment ONE line parses, whatever it turns out
+   * to say — the same "was anything read at all" question `cachedEnrich` answers with `null`
+   * rather than a zeroed `EnrichResult` for the identical case.
+   */
+  sawAnyEntry: boolean
   cwd: string
   lastCwd: string
   startTime: string
@@ -524,6 +538,7 @@ function dayOf(daily: Map<string, SessionDayUsage>, iso: string | undefined): Se
 export function emptyClaudeParse(): ClaudeParseState {
   return {
     lineNo: 0,
+    sawAnyEntry: false,
     cwd: '', lastCwd: '', startTime: '', lastTime: '', firstPrompt: '', modelId: '', sessionTitle: '',
     userChars: 0, userCharMsgs: 0, assistantChars: 0, assistantCharMsgs: 0,
     userMsgs: 0, assistantMsgs: 0, inputTokens: 0, outputTokens: 0,
@@ -620,6 +635,7 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
     if (!line) continue
     let e: Record<string, unknown>
     try { e = JSON.parse(line) } catch { continue }
+    state.sawAnyEntry = true
 
     // The passes this walk replaces. Each used to re-read the whole file and re-`JSON.parse` every
     // line of it to answer one question; each now folds off the entry already in hand. They are
@@ -964,9 +980,14 @@ export async function finishClaudeSession(
   fallbackPath: string,
   source: 'jsonl' | 'subdir',
 ): Promise<SessionMeta> {
+  // DEFECT M-3: absent, never a confident 0, when there is no first-and-last event to subtract —
+  // which is exactly the case for a walk that saw no entry at all (a 0-byte transcript, or one
+  // whose every line was blank/unparseable; proven on real session f455dc9a). The canonical
+  // replay (`projections/session-meta.ts`) agrees: `duration_minutes` is absent unless a
+  // `session.started`/`session.ended` pair was actually seen.
   const durationMinutes = (state.startTime && state.lastTime)
     ? Math.max(0, Math.round((new Date(state.lastTime).getTime() - new Date(state.startTime).getTime()) / 60000))
-    : 0
+    : undefined
 
   const projectPath = state.cwd || fallbackPath
   /**
@@ -1026,7 +1047,13 @@ export async function finishClaudeSession(
     // and a subagent runs its own context and compacts on its own (5 of this machine's 255 subagent
     // transcripts carry a `compact_boundary`). Stamping its count on the session would be a
     // confident wrong number where the honest answer is that the evidence is gone.
-    ...(source === 'jsonl'
+    //
+    // DEFECT M-3: `source === 'jsonl'` alone is not "this session's own transcript was read" — a
+    // 0-byte file (or one whose every line is blank/unparseable) is `source === 'jsonl'` too, and
+    // `state.sawAnyEntry` is what actually answers "did the walk fold anything". Without it a
+    // transcript nobody could read was reported as one that compacted zero times and invoked no
+    // skill, which is a claim about a session this walk never saw.
+    ...(source === 'jsonl' && state.sawAnyEntry
       ? {
           compact_count: compaction.count,
           compact_ms: compaction.ms,
