@@ -81,6 +81,7 @@ import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs } from './lib/sharedPref'
+import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
 } from '@agentistics/tui/control/session-fleet'
@@ -4346,7 +4347,8 @@ export default function AppLayout() {
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
           : {
-              maxWidth: 1400,
+              // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
+              maxWidth: pageMaxWidth(location.pathname),
               margin: '0 auto',
               width: '100%',
               boxSizing: 'border-box',
@@ -4544,7 +4546,7 @@ export default function AppLayout() {
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-surface)',
       }}>
-        <div style={{ maxWidth: 1400, margin: '0 auto', padding: '56px 32px 36px' }}>
+        <div style={{ maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', padding: '56px 32px 36px' }}>
 
           {/* Main row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 80, flexWrap: 'wrap', marginBottom: 48 }}>
