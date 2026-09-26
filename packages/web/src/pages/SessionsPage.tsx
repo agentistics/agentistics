@@ -1579,12 +1579,13 @@ export default function SessionsPage() {
             there is a lens to hide. */}
         <HideLensesButton ctx={ctx} />
         {/* The bell, same reasoning: this workspace draws no <header>, so without a slot here it
-            has no way onto a phone at all. Sized at the 44px mobile touch target directly, since
-            `NotificationBell` takes an explicit `buttonStyle` rather than a className it could
-            grow via `.ag-tap-icon`. */}
-        <NotificationBell lang={pt ? 'pt' : 'en'} buttonStyle={{
+            has no way onto a phone at all. Painted at the same 32×32 its neighbours use, with the
+            44px mobile touch target coming from the invisible `.ag-tap-icon` hit zone (index.css)
+            rather than a grown painted control — `NotificationBell.buttonClassName` exists for
+            exactly this. */}
+        <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 44, height: 44, borderRadius: 8,
+          width: 32, height: 32, borderRadius: 8,
           border: '1px solid var(--border)', background: 'transparent',
           color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
         }} />

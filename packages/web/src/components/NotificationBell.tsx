@@ -25,10 +25,16 @@ interface Props {
   lang: 'pt' | 'en'
   /** Optional style overrides for the trigger button (to match the header's action row). */
   buttonStyle?: React.CSSProperties
+  /**
+   * Optional className for the trigger button — this is what lets a caller apply `.ag-tap-icon`
+   * (the invisible 44px mobile touch target, see index.css) instead of growing the painted control
+   * itself. Existing call sites that only pass `buttonStyle` are unaffected.
+   */
+  buttonClassName?: string
 }
 
 /** Bell icon with an unread badge and a dropdown of the notification history. */
-export function NotificationBell({ lang, buttonStyle }: Props) {
+export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) {
   const pt = lang === 'pt'
   const notes = useNotifications()
   const isMobile = useIsMobile()
@@ -52,6 +58,7 @@ export function NotificationBell({ lang, buttonStyle }: Props) {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
+        className={buttonClassName}
         onClick={toggle}
         title={pt ? 'Notificações' : 'Notifications'}
         style={buttonStyle ?? {
