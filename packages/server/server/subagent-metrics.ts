@@ -19,8 +19,8 @@
 import { readFile, readdir, stat } from 'fs/promises'
 import { dirname, join } from 'path'
 import type { AgentInvocation, SessionAgentMetrics } from '@agentistics/core'
-import { agentNumbers, summarizeSubagentTranscript, totalsOf, type SubagentSummary } from './subagent-parse'
-import { describedFrom, parseAgentMeta, planAgentJoin, type AgentEntry } from './subagent-join'
+import { agentNumbers, claimSessionUsage, summarizeSubagentTranscript, totalsOf, type SubagentSummary } from './subagent-parse'
+import { describedFrom, parseAgentMeta, planAgentJoin, planSubtrees, type AgentEntry } from './subagent-join'
 
 /**
  * Parsed subagent transcripts, keyed by path + mtime + size.
@@ -49,26 +49,6 @@ async function summaryFor(file: string): Promise<SubagentSummary | null> {
   const summary = summarizeSubagentTranscript(content.split('\n'))
   CACHE.set(key, summary)
   return summary
-}
-
-/** Every summary under one agent, the agent itself excluded. Cycle-safe by construction. */
-async function descendantsOf(
-  dir: string,
-  root: SubagentSummary,
-  seen: Set<string>,
-): Promise<SubagentSummary[]> {
-  const out: SubagentSummary[] = []
-  const queue = [...root.childAgentIds]
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (seen.has(id)) continue
-    seen.add(id)
-    const summary = await summaryFor(join(dir, `agent-${id}.jsonl`))
-    if (!summary) continue
-    out.push(summary)
-    queue.push(...summary.childAgentIds)
-  }
-  return out
 }
 
 /**
@@ -105,11 +85,17 @@ async function entriesIn(dir: string): Promise<AgentEntry[]> {
  * disk can serve comes back exactly as it went in — `unmeasured`, which a surface renders N/A,
  * never a zero. A transcript the join leaves UNCLAIMED adds no row: the invocation list is the
  * parent's, and a conversation fork is not an agent this conversation dispatched (issue #384).
+ *
+ * `mainUsageIds` are the message ids the MAIN transcript already counted. A forked subagent opens
+ * with the parent's launching response under its original id, so without them one billed response
+ * is counted twice — once in the session, once in the invocation. See `claimSessionUsage`. A caller
+ * that has none passes nothing and gets the file-to-file dedupe alone.
  */
 export async function enrichFromSubagentTranscripts(
   metrics: SessionAgentMetrics,
   transcriptPath: string,
   sessionId: string,
+  mainUsageIds: { has(id: string): boolean } = new Set<string>(),
 ): Promise<SessionAgentMetrics> {
   if (!metrics.invocations.some(i => i.unmeasured)) return metrics
 
@@ -119,16 +105,42 @@ export async function enrichFromSubagentTranscripts(
 
   const plan = planAgentJoin(metrics.invocations, entries)
   const metaOf = new Map(entries.map(e => [e.agentId, e.meta]))
+
+  // Every transcript of the directory is read — through the per-file memo, so each costs one parse
+  // per version of that file. The walk needs each file's own `childAgentIds` before it can know
+  // which files hang under which root, and the ownership below needs every file that counts.
+  const summaries = new Map<string, SubagentSummary>()
+  for (const e of entries) {
+    const summary = await summaryFor(join(dir, `agent-${e.agentId}.jsonl`))
+    if (summary) summaries.set(e.agentId, summary)
+  }
+  const named = new Map([...summaries].map(([id, s]) => [id, s.childAgentIds]))
+
+  // Only the invocations this pass will MEASURE are roots: an invocation that already has numbers
+  // (the pre-async `toolUseResult`) keeps them, and its transcript takes no part here.
+  const roots: string[] = []
+  for (const { invocation, agentId } of plan.reads) {
+    if (invocation.unmeasured && agentId && summaries.has(agentId)) roots.push(agentId)
+  }
+  const subtrees = planSubtrees(roots, entries.filter(e => summaries.has(e.agentId)), named)
+
+  // ONE dedupe across the session: the main transcript's ids first, then one owner per id across
+  // every file of every subtree. Recomputed on every call and never memoized — it depends on the
+  // main transcript's id set, which grows on a live session, and on files that change on their own.
+  const members = [...subtrees.values()].flatMap(list =>
+    list.map(m => ({ agentId: m.agentId, depth: m.depth, summary: summaries.get(m.agentId)! })))
+  const owned = claimSessionUsage(mainUsageIds, members)
+  const counted = (id: string): SubagentSummary => ({ ...summaries.get(id)!, usage: owned.get(id) ?? [] })
+
   const invocations: AgentInvocation[] = []
   let changed = false
 
   for (const { invocation, agentId } of plan.reads) {
-    if (!invocation.unmeasured || !agentId) { invocations.push(invocation); continue }
+    const tree = agentId ? subtrees.get(agentId) : undefined
+    if (!invocation.unmeasured || !agentId || !tree) { invocations.push(invocation); continue }
 
-    const root = await summaryFor(join(dir, `agent-${agentId}.jsonl`))
-    if (!root) { invocations.push(invocation); continue }
-
-    const descendants = await descendantsOf(dir, root, new Set([agentId]))
+    const root = counted(agentId)
+    const descendants = tree.slice(1).map(m => counted(m.agentId))
     const { unmeasured: _dropped, ...rest } = describedFrom(invocation, metaOf.get(agentId) ?? null)
     invocations.push({ ...rest, agentId, ...agentNumbers(root, descendants) })
     changed = true
