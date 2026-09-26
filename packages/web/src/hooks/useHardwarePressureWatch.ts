@@ -22,13 +22,25 @@
  * `computePlanBasisView` already uses for a hook this package cannot otherwise test.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useHardwareSnapshot } from '../components/HardwareModal'
 import {
   anyCritical, pressureRecommendation, pressureTransition, resourcesPressure,
   type HardwarePressureInput,
 } from '../lib/hardwarePressure'
 import { pushNotification, type NotificationType } from '../lib/notifications'
+
+/**
+ * PURE: is RAM specifically at `warn` or `critical` right now? Exported so `useIdleSessions.ts`
+ * (which must never poll hardware itself — see that hook's own header) can derive its
+ * `underPressure` flag from the SAME reading this hook already polls, rather than opening a second
+ * `/api/hardware-resources` interval. `false` when there is no reading at all (`hardware === null`)
+ * or RAM specifically could not be measured — never a guess in either direction.
+ */
+export function ramUnderPressure(hardware: HardwarePressureInput | null): boolean {
+  if (!hardware) return false
+  return resourcesPressure(hardware).some(p => p.resource === 'ram' && p.level !== 'ok')
+}
 
 /** The exact shape `pushNotification` (`lib/notifications.ts`) takes — that module exports no
  *  named type for it, so this mirrors its inline parameter type rather than widening it. */
@@ -86,7 +98,7 @@ export function pressureWatchStep(
   return { prevCritical: next, critical: next, notify }
 }
 
-export function useHardwarePressureWatch(lang: 'pt' | 'en'): { critical: boolean } {
+export function useHardwarePressureWatch(lang: 'pt' | 'en'): { critical: boolean; ramUnderPressure: boolean } {
   const { hardware } = useHardwareSnapshot(lang)
   // `null` = no reading exists yet. `pressureTransition`'s own rule refuses to fire off that gap —
   // see that function's own header for why treating it as `false` would be wrong.
@@ -100,5 +112,9 @@ export function useHardwarePressureWatch(lang: 'pt' | 'en'): { critical: boolean
     if (step.notify) pushNotification(step.notify)
   }, [hardware, lang])
 
-  return { critical }
+  // Read off the SAME poll `useHardwareSnapshot` above already runs — `useIdleSessions.ts` takes
+  // this rather than opening its own hardware interval.
+  const ram = useMemo(() => ramUnderPressure(hardware), [hardware])
+
+  return { critical, ramUnderPressure: ram }
 }
