@@ -177,6 +177,71 @@ There is deliberately **no change** to the consolidate store, the wire, the API 
 **If the shadow build exceeds its budget, P1 does not ship** — a journal that makes the dashboard
 slower is a journal nobody will leave on.
 
+### 9.1 What A1 measured (2026-09-25, A1.6)
+
+Two of the four budgets can be measured before anything emits events; two cannot. Both benchmarks
+are gated behind `AGENTISTICS_BUDGETS=1` so the pre-commit suite does not time a loaded machine;
+with the variable unset they report as skipped.
+
+| Budget | Status in A1 | Result |
+|---|---|---|
+| journal append ≤ 2 ms p95 / 100 events | **measured — MISSED** | p95 **14.0–20.8 ms** over 4 runs; p50 1.4–1.7 ms |
+| shadow ingestion ≤ 10 % of `buildApiResponse` | **not measurable in A1** | the shadow writer does not exist until A2.3; there is nothing to add to a build |
+| no unbounded accumulation (1 M events) | **measured — met, for the journal's append only** | +17 MiB JS heap, +27 MiB RSS over baseline; ceilings 64 / 128 MiB |
+| journal size ≤ 2 KB/session/day | **not measurable in A1** | nothing writes events for real sessions until A2.2; a synthetic size would be a number about the fixture, not about a session |
+
+**Append** (`journal/journal-budget-append.test.ts`). 1000 batches of 100 unique events on a fresh
+journal, so the table and its indexes grow to 100 000 rows during the run. The events are a
+Claude-like mix: about 60 % `model.completed` with full usage, the rest tool lifecycle plus rarer
+session, run and context events. Every batch is built before timing, and each one must return
+`written === 100` or the run fails: a journal that silently disabled itself would otherwise time a
+no-op. Only `await append()` is timed. p95 is nearest-rank over **all** 1000 batches, **including the
+first** after open, because every process pays that cost once. The first batch alone costs
+1.6–2.1 ms, and removing it leaves p95 unchanged. Held constant: the journal's own pragmas
+(WAL, `synchronous=NORMAL`, default autocheckpoint, none changed), a warm OS page cache, one
+process, no concurrent reader or writer, no recovery path, a batch of exactly 100, the same ext4
+filesystem as the real `JOURNAL_PATH`, WSL2 on this machine at a load average of about 6
+(ten other sessions were running), and Bun 1.3.14.
+
+*Why it misses:* a diagnostic tagged each batch by whether its commit triggered the WAL
+autocheckpoint, read from the `-wal` header's checkpoint sequence. The diagnostic is kept outside
+the repo because it only diagnoses and does not measure a budget. In the run it tagged:
+- 121 of the 1000 batches (12 %) triggered a checkpoint, with a median of **14.2 ms**.
+- All 121 were slow (> 5 ms). Because they exceed 5 % of the batches, p95 lands inside them.
+- Excluding the checkpointing batches, p95 is **3.1 ms**, which **also** misses the budget, on this
+  loaded machine.
+
+So the budget fails for two reasons. The checkpoint cost sits in the append path at a frequency
+above 5 %, and even without it the tail is over 2 ms here. Nothing was tuned. Moving checkpoints
+off the append path, changing the batch size, and revising the budget are all decisions for the
+owner of §9.
+
+**Heap** (`journal/journal-budget-heap.test.ts`). A generator streams 1 000 000 events through
+`append` in 10 000 batches of 100 and keeps no batch. The test asserts
+`written = counters.written = stats().rows = 1 000 000` with nothing dropped. Memory is sampled every
+100 batches **without** forcing GC, against a baseline taken after 100 warm-up batches. The
+un-collected heap includes garbage, so the ceiling is conservative.
+
+The assertion is the **ceiling**: growth of at most 64 MiB of JS heap and at most 128 MiB of RSS,
+plus a trend check that the last 10 % of samples sit no more than 32 MiB above the first 10 %.
+Duration is reported and never asserted. A control test shows the ceiling can fail: a retained
+event costs about 428 B, so a producer that collected the stream into one array would hold about
+408 MiB, above the 64 MiB ceiling.
+
+Measured over 3 runs: heap +17.0–17.3 MiB, RSS +26.4–27.7 MiB, trend +14.9–15.3 MiB, 13–17 s.
+
+*Finding:* on Bun 1.3.14, `process.memoryUsage().heapUsed` did not move while 20 000 objects were
+allocated and retained, so a ceiling on it would always pass. The ceiling therefore reads
+`bun:jsc` `heapStats().heapSize`, and the test refuses to run if that is unavailable. `heapUsed`
+is printed and not asserted.
+
+**Scope:** this covers the JOURNAL's append path only. Whether the A2.3 shadow writer batches and
+flushes instead of collecting is A2.3's to prove. The trend figure of about 15 MiB is inside its
+bound, but a 1 M run cannot tell GC timing from a slow leak. A longer run would settle it.
+
+A side figure, which is not the size budget: the synthetic 1 M-event database was 430 MB on disk,
+about 430 B per event. It sizes the fixture and says nothing about KB/session/day.
+
 ## 10. Observability
 
 `agentop journal status` prints: rows, bytes, first/last event, events written/deduped/rejected by
