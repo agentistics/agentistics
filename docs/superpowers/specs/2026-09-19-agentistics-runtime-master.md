@@ -342,7 +342,19 @@ interface Agent {                   // the run's main agent, and every subagent,
 
 interface ModelInvocation {         // ONE billed response. The unit of cost.
   id: Id
-  agentId: Id
+  agentId?: Id                      // OPTIONAL since D20 (O-6): a bare runtime call has no agent
+  attemptId?: Id                    // D20 — the inv_… grouping key SHARED by every attempt
+  attempt?: number                  // D20 — 1-based; (attemptId, attempt) names one attempt
+  modelRequested?: string           // D20 — what the caller asked for
+  modelServed?: string              // D20 — what answered; the only id that prices the call
+  stopReason?: {                    // D20 — B1.1's StopReason, plus the provider's own value
+    normalised: StopReason
+    verbatim?: string
+  }
+  iterations?: {                    // D20 — server-side sub-calls (§22.1.1 condition #2)
+    relation: 'unmeasured'          //   O-3: relation to the four counters is not yet measured
+    items: Array<{ kind: string; model?: string }>
+  }
   providerRequestId?: string        // Anthropic message.id / request-id header, OpenAI id, …
   provider: ProviderId
   model: string
@@ -586,9 +598,26 @@ interface ModelCompletedData {
   costSource?: 'provider' | 'harness'
   latencyMs?: number
   status: 'completed' | 'failed'
+  // ── D20 (2026-09-25): all OPTIONAL and additive ─────────────────────────────
+  attemptId?: Id                             // also on model.invoked / model.failed
+  attempt?: number                           // also on model.invoked / model.failed
+  modelRequested?: string                    // also on model.invoked / model.failed
+  modelServed?: string
+  stopReason?: { normalised: StopReason; verbatim?: string }
+  iterations?: { relation: 'unmeasured'; items: Array<{ kind: string; model?: string }> }
 }
 ```
 
+- **D20 — the fields B1 measures, added OPTIONAL and ADDITIVE** (owner-decisions D20). A source
+  that cannot produce one leaves it ABSENT, never zero; an event written before D20 still
+  type-checks (`canonical/d20-additive.test.ts`). `attemptId`/`attempt` link a retry's attempts:
+  the runtime owns the retry (§22.1.1), so each attempt is its own `model.invoked` and its own
+  terminal event, while the billed response is still ONE `model.completed`, keyed on the
+  provider's response id (§14.3, O-8). `model` stays what the event is about — the SERVED model on
+  `model.completed`, the requested one on `model.invoked` / `model.failed`. `stopReason.normalised`
+  is B1.1's `StopReason` (`packages/core/src/provider/stop-reason.ts`), reused rather than restated.
+  `iterations` carries kind and model only: their counters stay in the raw capture until a fixture
+  pins the key names (B1 O-3), and a projection must call the price PARTIAL while any are present.
 - **All four counters, always.** `tokens.ts`'s rule — `input + output` alone was measured at 0,34 %
   of real volume on this machine.
 - **CORRECTED 2026-09-20 — reasoning tokens are not one thing.** The first draft of this section

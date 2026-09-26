@@ -50,6 +50,8 @@ import type {
   ConversationLink,
   Id,
   ModelInvocationStatus,
+  ModelIterations,
+  ModelStopReason,
   ReasoningBilling,
   RunHarness,
   RunStatus,
@@ -221,7 +223,21 @@ export interface AgentEndedData {
   status: Exclude<AgentStatus, 'running'>
 }
 
-export interface ModelInvokedData {
+/**
+ * The attempt facts D20 (2026-09-25) added to every `model.*` event that has a terminal outcome or
+ * opens one. ALL OPTIONAL and additive: an A1.1 event without them still type-checks, and a source
+ * that cannot state one leaves it ABSENT — never zero. See `ModelInvocation` for each field's rule.
+ */
+export interface ModelAttemptFacts {
+  /** The grouping key shared by every attempt of one invocation (`inv_…`); `attempt` tells them apart. */
+  attemptId?: Id
+  /** 1-based. */
+  attempt?: number
+  /** What the caller asked for. `model` on the event stays what the event is ABOUT. */
+  modelRequested?: string
+}
+
+export interface ModelInvokedData extends ModelAttemptFacts {
   /** The correlation key across layers; absent where the source does not expose one. */
   providerRequestId?: string
   provider: ProviderId
@@ -241,7 +257,8 @@ export interface ModelDeltaData {
 }
 
 /**
- * One billed response, completed — master spec §14.2, EXACTLY. The whole cost model rests on it.
+ * One billed response, completed — master spec §14.2, plus the optional D20 fields (2026-09-25).
+ * The whole cost model rests on it.
  *
  * Normalisation rules, applied on the way IN (per provider), never by a reader:
  * - `usage` carries ALL FOUR counters. `input + output` alone measured 0,34 % of real volume.
@@ -257,7 +274,7 @@ export interface ModelDeltaData {
  * - `contextWindow` and `costUSD` appear only when the SOURCE states them. Otherwise the projection
  *   prices through `calcCost` and marks the result as the table's.
  */
-export interface ModelCompletedData {
+export interface ModelCompletedData extends ModelAttemptFacts {
   providerRequestId?: string
   provider: ProviderId
   model: string
@@ -272,9 +289,15 @@ export interface ModelCompletedData {
   costSource?: 'provider' | 'harness'
   latencyMs?: number
   status: 'completed' | 'failed'
+  /** D20 — the id the provider says answered; the one that prices the call. */
+  modelServed?: string
+  /** D20 — normalised (B1.1's `StopReason`) plus the provider's verbatim value. */
+  stopReason?: ModelStopReason
+  /** D20 — server-side sub-calls the provider reported. Present means the price is PARTIAL (O-3). */
+  iterations?: ModelIterations
 }
 
-export interface ModelFailedData {
+export interface ModelFailedData extends ModelAttemptFacts {
   providerRequestId?: string
   provider: ProviderId
   model: string

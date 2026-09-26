@@ -89,6 +89,7 @@
 
 import type { ModelUsage } from '../types'
 import type { TokenBreakdown } from '../tokens'
+import type { ReasoningBilling } from '../canonical/entities'
 
 /** The TTL split of a cache write — mirrors `ModelUsage.cacheCreation1hInputTokens`/`5mInputTokens`. */
 export interface CacheWriteByTtl {
@@ -107,7 +108,8 @@ export interface CacheWriteByTtl {
  */
 export interface ReasoningUsage {
   tokens: number
-  billing: 'included-in-output' | 'additive' | 'unknown'
+  /** The canonical vocabulary (`canonical/entities.ts`), defined once — never restated as a literal here. */
+  billing: ReasoningBilling
 }
 
 /**
