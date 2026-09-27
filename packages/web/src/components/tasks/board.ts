@@ -287,24 +287,43 @@ export function fmtStamp(iso: string | undefined, lang: 'pt' | 'en'): string {
 }
 
 /**
- * The DATE half of `fmtStamp`, compact and locale-aware — PT `DD/MM/AAAA`, EN `MM/DD/YYYY`.
+ * The compact half of `fmtStamp` — DATE and TIME, one line, locale-aware: PT `DD/MM HH:mm` (24h),
+ * EN `MM/DD h:mm AM/PM`. The YEAR is shown only when `iso` falls in a DIFFERENT calendar year from
+ * `nowMs` (owner refinement, 2026-09-27: "nothing huge and nothing that breaks lines" — a board read
+ * day to day names the year on almost no row, so carrying it always was pure width for no
+ * information) — PT `DD/MM/AAAA HH:mm`, EN `MM/DD/YYYY h:mm AM/PM`.
  *
  * `startedAt`/`deliveredAt` used to render through `fmtStamp` alone ("25 de set. de 2026, 16:31"),
- * which wraps onto three lines in a table cell that has room for one. The full moment is not
- * thrown away — every call site keeps it as the cell's `title` tooltip (`fmtStamp`, same language)
- * — this is only what is PAINTED. Manual digits rather than `toLocaleDateString`'s own default:
+ * which wraps onto three lines in a table cell that has room for one, then through a date-only
+ * `fmtDateOnly` that dropped the TIME half the owner asked to see back. The full moment is never
+ * thrown away either way — every call site keeps it as the cell's `title` tooltip (`fmtStamp`, same
+ * language) — this is only what is PAINTED, and the caller is responsible for `white-space: nowrap`
+ * on whatever it paints it into. Manual digits rather than `toLocaleDateString`'s own default:
  * `en-US` prints the month with no leading zero ("9/25/2026"), and the brief's own EN example
- * ("09/25/2026") needs one. Invalid or absent input renders the board's existing N/A convention,
- * never "Invalid Date" — the same guard `fmtStamp` already applies to the same two fields.
+ * ("09/25/2026") needs one. `nowMs` is a parameter rather than a read of the clock so the "same
+ * year" test is deterministic under a fixed value. Invalid or absent input renders the board's
+ * existing N/A convention, never "Invalid Date" — the same guard `fmtStamp` already applies to the
+ * same two fields.
  */
-export function fmtDateOnly(iso: string | undefined, lang: 'pt' | 'en'): string {
+export function fmtDateTime(iso: string | undefined, lang: 'pt' | 'en', nowMs: number): string {
   if (!iso) return NA
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return NA
   const dd = String(d.getDate()).padStart(2, '0')
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const yyyy = d.getFullYear()
-  return lang === 'pt' ? `${dd}/${mm}/${yyyy}` : `${mm}/${dd}/${yyyy}`
+  const showYear = yyyy !== new Date(nowMs).getFullYear()
+  const hh24 = d.getHours()
+  const min = String(d.getMinutes()).padStart(2, '0')
+  if (lang === 'pt') {
+    const hh = String(hh24).padStart(2, '0')
+    return showYear ? `${dd}/${mm}/${yyyy} ${hh}:${min}` : `${dd}/${mm} ${hh}:${min}`
+  }
+  const h12 = hh24 % 12 === 0 ? 12 : hh24 % 12
+  const ampm = hh24 < 12 ? 'AM' : 'PM'
+  return showYear
+    ? `${mm}/${dd}/${yyyy} ${h12}:${min} ${ampm}`
+    : `${mm}/${dd} ${h12}:${min} ${ampm}`
 }
 
 /**

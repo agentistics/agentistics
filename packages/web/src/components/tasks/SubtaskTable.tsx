@@ -64,9 +64,10 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import {
-  fmtDateOnly, fmtStamp, liveStatusMap, liveStatusOrder, microLabel, pill,
+  fmtDateTime, fmtStamp, liveStatusMap, liveStatusOrder, microLabel, pill,
   statusStyle, surface, type BoardStatus,
 } from './board'
+import { DurationCellView } from './SubtaskDurationCell'
 import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
@@ -198,6 +199,9 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(p.lang)
   const money = useMoney()
+  // Only feeds `fmtDateTime`'s "is this the same calendar year" check — that answer does not need
+  // to tick, unlike the lease countdown `TaskTable`'s own `nowMs` state exists for.
+  const nowMs = Date.now()
   const [draft, setDraft] = useState('')
   const [linking, setLinking] = useState<string | null>(null)
   /** Set when a status write refused `done` for having no session filed yet — see
@@ -285,7 +289,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
             <th style={{ ...microLabel, padding: '6px 9px', fontWeight: 600 }} />
             {([
               [copy.subtasks, 'title'], ['Status', 'status'],
-              [copy.started, 'started'], [copy.completed, 'completed'], [copy.sessions, 'sessions'],
+              [copy.started, 'started'], [copy.completed, 'completed'], [copy.duration, 'duration'],
+              [copy.sessions, 'sessions'],
               [copy.cost, 'cost'], [copy.tokens, 'tokens'],
             ] as Array<[string, SubtaskSortKey]>).map(([h, key]) => (
               <SortTh
@@ -296,10 +301,10 @@ export function SubtaskTable(p: SubtaskTableProps) {
                 mobile={isMobile}
                 onSort={k => setSort(cycleSort(sort, k))}
                 title={L.sortByColumn.replace('{column}', h)}
-                align={key === 'cost' || key === 'tokens' ? 'right' : 'left'}
+                align={key === 'cost' || key === 'tokens' || key === 'duration' ? 'right' : 'left'}
                 style={{
-                  ...microLabel, padding: '6px 9px', fontWeight: 600,
-                  textAlign: key === 'cost' || key === 'tokens' ? 'right' : 'left',
+                  ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
+                  textAlign: key === 'cost' || key === 'tokens' || key === 'duration' ? 'right' : 'left',
                 }}
               />
             ))}
@@ -308,7 +313,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
         <tbody>
           {p.subtasks.length === 0 && (
             <tr>
-              <td colSpan={8} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
+              <td colSpan={9} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
                 {copy.nothingBrokenOut}
               </td>
             </tr>
@@ -446,23 +451,26 @@ export function SubtaskTable(p: SubtaskTableProps) {
               {/* `startedAt`/`deliveredAt` are SYSTEM facts, never a date somebody typed — see
                   `Subtask.startedAt`'s own note. Read-only: no picker, no owner column, nothing to
                   type. */}
-              <td style={{ ...cell, ...tint }}>
+              <td style={{ ...cell, whiteSpace: 'nowrap', ...tint }}>
                 <span
                   title={t.startedAt ? fmtStamp(t.startedAt, p.lang) : undefined}
                   style={{
-                    fontSize: 12,
+                    fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                     color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                   }}
-                >{fmtDateOnly(t.startedAt, p.lang)}</span>
+                >{fmtDateTime(t.startedAt, p.lang, nowMs)}</span>
               </td>
-              <td style={{ ...cell, ...tint }}>
+              <td style={{ ...cell, whiteSpace: 'nowrap', ...tint }}>
                 <span
                   title={t.deliveredAt ? fmtStamp(t.deliveredAt, p.lang) : undefined}
                   style={{
-                    fontSize: 12,
+                    fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                     color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                   }}
-                >{fmtDateOnly(t.deliveredAt, p.lang)}</span>
+                >{fmtDateTime(t.deliveredAt, p.lang, nowMs)}</span>
+              </td>
+              <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap', ...tint }}>
+                <DurationCellView startedAt={t.startedAt} deliveredAt={t.deliveredAt} lang={p.lang} />
               </td>
               <td style={{ ...cell, minWidth: 190, ...tint }}>
                 {/* A MEMBER can never hold a session (`subtask_in_group`, refused server-side) —
@@ -514,6 +522,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={cell} />
               <td style={cell} />
               <td style={cell} />
+              <td style={cell} />
               <td style={{ ...cell, minWidth: 190 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
                   {directSessions.map(s => (
@@ -539,7 +548,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
             </tr>
           )}
           <tr>
-            <td colSpan={8} style={{ ...cell }}>
+            <td colSpan={9} style={{ ...cell }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%' }}>
                 <Plus size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <input

@@ -528,6 +528,12 @@ export function SessionsAside({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
+      {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
+          tabs (desktop) and the Sessions/Metrics tabs (mobile). Owner decision 2026-09-27: it sat
+          above Groups, halfway down a list that scrolls, and read as one more row. At the top it
+          is a notice about the list rather than an item in it. See `IdleReviewCard.tsx` for why
+          mounting it in this component covers the desktop aside and the mobile list at once. */}
+      <IdleReviewCard lang={lang} tap={tap} />
       {/*
         * THE SEARCH, on its own row.
         *
@@ -851,12 +857,6 @@ export function SessionsAside({
             </div>
           </div>
         )}
-
-        {/* THE IDLE-REVIEW CARD — right above Groups (where "File & end" would put a session), so
-            the offer sits beside the thing it acts on. See `IdleReviewCard.tsx`'s own header for
-            why mounting it HERE, rather than in `SessionsPage.tsx`, is what covers the desktop
-            aside and the mobile list with the one change: this component is both. */}
-        <IdleReviewCard lang={lang} tap={tap} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above
