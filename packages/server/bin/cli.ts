@@ -81,7 +81,8 @@ Commands:
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
-  journal       Read-only look at the durable event journal ('journal status')
+  journal       The durable event journal: a read-only look ('journal status') and the
+                historical import of this machine's history into it ('journal import')
   provider      Manage a provider API key for the native runtime (BETA, off by default —
                 set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
                 --stdin, never on the command line ('provider key set|status|remove';

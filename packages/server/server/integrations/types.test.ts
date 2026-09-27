@@ -3,7 +3,6 @@ import { CAPABILITY_STATES, HARNESS_ORDER, type HarnessId } from '@agentistics/c
 import { INTEGRATIONS, hasReplay, integrationsInOrder } from './types'
 import { CLAUDE_ADAPTER_VERSION } from './claude/replay-core'
 
-const ABSENT: HarnessId[] = ['codex', 'gemini', 'copilot', 'antigravity', 'kimi']
 
 describe('INTEGRATIONS', () => {
   test('has exactly one entry per harness — the registry cannot drift from HARNESS_ORDER', () => {
@@ -19,15 +18,12 @@ describe('INTEGRATIONS', () => {
     }
   })
 
-  test('the five not-yet-implemented harnesses are declared absences: no replay, no live, one sentence why', () => {
-    for (const id of ABSENT) {
+  test('since A3 every harness replays, with a version other than the placeholder', () => {
+    for (const id of HARNESS_ORDER) {
       const entry = INTEGRATIONS[id]
-      expect(entry.replay).toBeUndefined()
-      expect(entry.live).toBeUndefined()
-      expect(hasReplay(entry)).toBe(false)
-      expect(entry.replayAbsent?.trim().length ?? 0).toBeGreaterThan(0)
-      expect(entry.replayAbsent!.trim().endsWith('.')).toBe(true)
-      expect(entry.replayAbsent).not.toContain('\n')
+      expect(hasReplay(entry)).toBe(true)
+      expect(entry.replayAbsent).toBeUndefined()
+      expect(entry.version).not.toBe('0.0.0')
     }
   })
 

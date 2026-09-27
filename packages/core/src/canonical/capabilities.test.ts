@@ -3,12 +3,15 @@ import { HARNESS_CAPABILITIES, HARNESS_ORDER, type HarnessId } from '../types'
 import { CONFIDENCES } from './event'
 import {
   CAPABILITY_METRICS,
+  CAPABILITY_REFINEMENTS,
   CAPABILITY_STATES,
+  LEGACY_CAPABILITY_STATES,
   LEGACY_FALSE_NOTES,
   NO_RECORDED_REASON,
   SUPPORTED_EXACTNESS,
   capabilityReason,
   capabilitySupported,
+  applyCapabilityRefinements,
   fromLegacyCapabilities,
   type CapabilityMetric,
   type CapabilityState,
@@ -56,12 +59,12 @@ describe('CAPABILITY_STATES — coverage', () => {
 })
 
 // ── 1. EQUALITY table: for every harness x metric, capabilitySupported(new) === legacy boolean ──
-describe('CAPABILITY_STATES vs HARNESS_CAPABILITIES — migration changes no behaviour', () => {
+describe('LEGACY_CAPABILITY_STATES vs HARNESS_CAPABILITIES — migration changes no behaviour', () => {
   for (const harness of HARNESS_ORDER) {
     for (const metric of Object.keys(HARNESS_CAPABILITIES[harness]) as CapabilityMetric[]) {
       test(`${harness}.${metric}`, () => {
         const legacy = HARNESS_CAPABILITIES[harness][metric]
-        const state = CAPABILITY_STATES[harness][metric]
+        const state = LEGACY_CAPABILITY_STATES[harness][metric]
         expect(capabilitySupported(state)).toBe(legacy)
       })
     }
@@ -69,22 +72,22 @@ describe('CAPABILITY_STATES vs HARNESS_CAPABILITIES — migration changes no beh
 })
 
 // ── 3. No cell is 'partial' — a boolean cannot express it ──────────────────────────────────────
-describe('CAPABILITY_STATES — no cell is partial (booleans cannot express a partial capability)', () => {
+describe('LEGACY_CAPABILITY_STATES — no cell is partial (booleans cannot express a partial capability)', () => {
   for (const harness of HARNESS_ORDER) {
     for (const metric of CAPABILITY_METRICS) {
       test(`${harness}.${metric} is not partial`, () => {
-        expect(CAPABILITY_STATES[harness][metric].state).not.toBe('partial')
+        expect(LEGACY_CAPABILITY_STATES[harness][metric].state).not.toBe('partial')
       })
     }
   }
 })
 
 // ── 4. Reason/source honesty per state ──────────────────────────────────────────────────────────
-describe('CAPABILITY_STATES — reason/source honesty', () => {
+describe('LEGACY_CAPABILITY_STATES — reason/source honesty', () => {
   for (const harness of HARNESS_ORDER) {
     for (const metric of CAPABILITY_METRICS) {
       test(`${harness}.${metric} carries the fields its state requires`, () => {
-        const state = CAPABILITY_STATES[harness][metric]
+        const state = LEGACY_CAPABILITY_STATES[harness][metric]
 
         if (state.state === 'supported') return // no reason to check
 
@@ -145,7 +148,7 @@ describe('supported exactness', () => {
   for (const harness of HARNESS_ORDER) {
     for (const metric of CAPABILITY_METRICS) {
       test(`${harness}.${metric} exactness matches SUPPORTED_EXACTNESS[metric] ?? 'exact' when supported`, () => {
-        const state = CAPABILITY_STATES[harness][metric]
+        const state = LEGACY_CAPABILITY_STATES[harness][metric]
         if (state.state !== 'supported') return
         const expected = SUPPORTED_EXACTNESS[metric] ?? 'exact'
         expect(state.exactness).toBe(expected)
@@ -156,7 +159,7 @@ describe('supported exactness', () => {
   test('every supported cost cell is estimated', () => {
     let sawSupportedCost = false
     for (const harness of HARNESS_ORDER) {
-      const state = CAPABILITY_STATES[harness].cost
+      const state = LEGACY_CAPABILITY_STATES[harness].cost
       if (state.state === 'supported') {
         sawSupportedCost = true
         expect(state.exactness).toBe('estimated')
@@ -180,7 +183,7 @@ describe('supported exactness', () => {
   test('every exactness on a supported cell is a real Confidence', () => {
     for (const harness of HARNESS_ORDER) {
       for (const metric of CAPABILITY_METRICS) {
-        const state = CAPABILITY_STATES[harness][metric]
+        const state = LEGACY_CAPABILITY_STATES[harness][metric]
         if (state.state === 'supported') {
           expect(CONFIDENCES as readonly string[]).toContain(state.exactness)
         }
@@ -321,7 +324,7 @@ describe('capabilitySupported', () => {
 
 // ── 9. Regression sentinel — measured, never hardcoded ──────────────────────────────────────────
 describe('regression sentinel', () => {
-  test('the count of non-supported CAPABILITY_STATES cells equals the count of false HARNESS_CAPABILITIES cells', () => {
+  test('the count of non-supported LEGACY_CAPABILITY_STATES cells equals the count of false HARNESS_CAPABILITIES cells', () => {
     let falseCount = 0
     for (const harness of HARNESS_ORDER) {
       for (const metric of CAPABILITY_METRICS) {
@@ -332,7 +335,7 @@ describe('regression sentinel', () => {
     let nonSupportedCount = 0
     for (const harness of HARNESS_ORDER) {
       for (const metric of CAPABILITY_METRICS) {
-        if (!capabilitySupported(CAPABILITY_STATES[harness][metric])) nonSupportedCount++
+        if (!capabilitySupported(LEGACY_CAPABILITY_STATES[harness][metric])) nonSupportedCount++
       }
     }
 
@@ -359,13 +362,22 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     'antigravity.compaction': 'not_supported', 'antigravity.skills': 'unknown', 'antigravity.mcpServers': 'not_supported',
     'kimi.agents': 'not_supported', 'kimi.gitLines': 'not_supported', 'kimi.dynamicWorkflows': 'unknown',
     'kimi.compaction': 'not_supported', 'kimi.skills': 'unknown',
+    // opencode has no legacy adapter at all, so every metric is a legacy false; the four checked
+    // and found absent from the real store are `not_supported`, and the rest — including the ones
+    // CAPABILITY_REFINEMENTS.opencode later upgrades to `partial` in the CANONICAL table — are
+    // `unknown` here because THIS table is the boolean migration alone, before any refinement.
+    'opencode.agents': 'not_supported', 'opencode.gitLines': 'not_supported',
+    'opencode.dynamicWorkflows': 'not_supported', 'opencode.mcpServers': 'not_supported',
+    'opencode.tokens': 'unknown', 'opencode.cost': 'unknown', 'opencode.model': 'unknown',
+    'opencode.tools': 'unknown', 'opencode.activeTime': 'unknown', 'opencode.compaction': 'unknown',
+    'opencode.skills': 'unknown', 'opencode.contextWindow': 'unknown',
   }
 
   test('every false cell is classified exactly as recorded, and nothing else is', () => {
     const actual: Record<string, CapabilityState['state']> = {}
     for (const h of HARNESS_ORDER) {
       for (const m of CAPABILITY_METRICS) {
-        const s = CAPABILITY_STATES[h][m]
+        const s = LEGACY_CAPABILITY_STATES[h][m]
         if (!capabilitySupported(s)) actual[`${h}.${m}`] = s.state
       }
     }
@@ -376,7 +388,75 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     for (const [cell, state] of Object.entries(EXPECTED)) {
       if (state !== 'unknown') continue
       const [h, m] = cell.split('.') as [HarnessId, CapabilityMetric]
-      expect(CAPABILITY_STATES[h][m]).toEqual({ state: 'unknown', reason: NO_RECORDED_REASON, source: null })
+      expect(LEGACY_CAPABILITY_STATES[h][m]).toEqual({ state: 'unknown', reason: NO_RECORDED_REASON, source: null })
     }
+  })
+})
+
+// ── P2 refinements (A3): the canonical table = the migration + CAPABILITY_REFINEMENTS ─────────────
+describe('CAPABILITY_REFINEMENTS — what P2 may change, and nothing else', () => {
+  /** The ONLY legacy `false` cells the canonical model upgrades — each an improvement proven by its
+   *  replay integration (P2 §2). Adding one here is a decision, not a drive-by. */
+  // antigravity.gitLines: the legacy false's reason ("removals are not written") is contradicted by agy's own
+  // TargetContent payloads (A3.5 fixture); the replay emits request-time edit deltas, as P2 §3 says.
+  const UPGRADED_FALSES = [
+    'antigravity.agents', 'antigravity.gitLines', 'kimi.agents',
+    'opencode.tokens', 'opencode.cost', 'opencode.model', 'opencode.tools', 'opencode.activeTime',
+  ]
+
+  test('every cell not refined is exactly the boolean migration', () => {
+    for (const h of HARNESS_ORDER) {
+      for (const m of CAPABILITY_METRICS) {
+        if (CAPABILITY_REFINEMENTS[h]?.[m]) continue
+        expect(CAPABILITY_STATES[h][m]).toEqual(LEGACY_CAPABILITY_STATES[h][m])
+      }
+    }
+  })
+
+  test('a refinement is always partial, names a source, and carries a one-line limit', () => {
+    for (const h of HARNESS_ORDER) {
+      for (const [m, r] of Object.entries(CAPABILITY_REFINEMENTS[h] ?? {})) {
+        expect(r!.state.state).toBe('partial')
+        expect(r!.source.trim().length).toBeGreaterThan(0)
+        expect(r!.state.limit.trim().length).toBeGreaterThan(0)
+        expect(r!.state.limit).not.toContain('\n')
+        expect(CAPABILITY_STATES[h][m as CapabilityMetric]).toEqual(r!.state)
+      }
+    }
+  })
+
+  test('a refined legacy TRUE only narrows; a refined legacy FALSE is one of the pinned upgrades', () => {
+    const upgraded: string[] = []
+    for (const h of HARNESS_ORDER) {
+      for (const m of Object.keys(CAPABILITY_REFINEMENTS[h] ?? {}) as CapabilityMetric[]) {
+        if (HARNESS_CAPABILITIES[h][m] === false) upgraded.push(`${h}.${m}`)
+      }
+    }
+    expect(upgraded.sort()).toEqual([...UPGRADED_FALSES].sort())
+  })
+
+  test('every legacy false is still accounted for: non-supported, or a pinned upgrade to partial', () => {
+    for (const h of HARNESS_ORDER) {
+      for (const m of CAPABILITY_METRICS) {
+        if (HARNESS_CAPABILITIES[h][m] !== false) continue
+        const s = CAPABILITY_STATES[h][m]
+        if (UPGRADED_FALSES.includes(`${h}.${m}`)) expect(s.state).toBe('partial')
+        else expect(capabilitySupported(s)).toBe(false)
+      }
+    }
+  })
+
+  test('no refined cell is plain supported, and claude is never refined', () => {
+    expect(CAPABILITY_REFINEMENTS.claude).toBeUndefined()
+    for (const h of HARNESS_ORDER) for (const m of CAPABILITY_METRICS) {
+      if (HARNESS_CAPABILITIES[h][m] === false) expect(CAPABILITY_STATES[h][m].state).not.toBe('supported')
+    }
+  })
+
+  test('applyCapabilityRefinements does not mutate its base', () => {
+    const base = fromLegacyCapabilities(HARNESS_CAPABILITIES)
+    const snap = JSON.stringify(base)
+    applyCapabilityRefinements(base)
+    expect(JSON.stringify(base)).toBe(snap)
   })
 })

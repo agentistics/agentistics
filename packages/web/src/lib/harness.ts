@@ -12,6 +12,7 @@ export const HARNESS_LABELS: Record<HarnessId, string> = {
   copilot: 'Copilot CLI',
   antigravity: 'Antigravity',
   kimi: 'Kimi Code',
+  opencode: 'opencode',
 }
 
 export const HARNESS_COLORS: Record<HarnessId, string> = {
@@ -24,6 +25,10 @@ export const HARNESS_COLORS: Record<HarnessId, string> = {
   antigravity: '#8b5cf6',
   // Rose — the last hue left that stays legible on both surfaces without colliding with the others.
   kimi: '#e11d48',
+  // Cyan — distinct from every hue above and legible on both surfaces. opencode has no adapter and
+  // never contributes a real session (see HARNESS_INFO.opencode below), so this colour has no chart
+  // to appear in today; it exists because the Record requires an entry.
+  opencode: '#06b6d4',
 }
 
 /** Provider name shown in pricing links. */
@@ -34,6 +39,11 @@ export const HARNESS_PROVIDERS: Record<HarnessId, string> = {
   copilot: 'GitHub Copilot',
   antigravity: 'Google',
   kimi: 'Moonshot AI',
+  // opencode is a per-model ROUTER, not a vendor: the real store measured for this integration
+  // carried models under providerID `opencode` (its own free tier) and `ollama` (a local install),
+  // and it can equally run Anthropic/OpenAI/Google models depending on the user's own config. There
+  // is no single pricing page to point at, so this names the shape rather than inventing a vendor.
+  opencode: 'Multiple providers (opencode routes per model)',
 }
 
 export function capable(harness: HarnessId, metric: keyof HarnessCapabilities): boolean {
@@ -353,5 +363,36 @@ export const HARNESS_INFO: Record<HarnessId, HarnessInfo> = {
       pt: 'O Antigravity compartilha a pasta ~/.gemini com o Gemini CLI, mas é um harness separado: fica em ~/.gemini/antigravity-cli, enquanto o adaptador do Gemini CLI lê apenas ~/.gemini/tmp — os dois nunca se sobrepõem nem contam em dobro. Os bancos por conversa são abertos somente leitura e um banco ausente, travado ou corrompido resulta em zero tokens em vez de erro. Os tokens de saída já incluem os de thinking, então nunca são somados de novo. Passos CONVERSATION_HISTORY reproduzidos são ignorados para que uma conversa retomada não seja contada duas vezes, e comandos de barra (/model, /usage …) não são tratados como prompts. Os filhos de invoke_subagent são detectados pela transcrição do pai (nunca pelo history.jsonl, que rotaciona) e são CONSOLIDADOS na sessão pai: um filho guarda as próprias gerações no seu próprio conversations/<filho>.db, então os tokens, o custo, as ferramentas, os arquivos e os erros dele são somados ao pai — exatamente como uma chamada da ferramenta Agent pertence à sessão do Claude Code que a disparou — e o filho não aparece como sessão separada. Cada linha de gen_metadata em disco é contada exatamente uma vez. Como pai e sub-agentes muitas vezes rodam modelos diferentes (um pai Opus despachando sub-agentes Gemini Flash), a sessão consolidada mantém um detalhamento de tokens por modelo e é precificada por modelo; o rótulo único de modelo exibido é o modelo dominante do próprio pai.',
     },
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+  },
+  opencode: {
+    blurb: {
+      en: 'No local adapter yet — opencode sessions never appear in this dashboard. Its own SQLite store carries real tokens, cost, model and tool data; a replay integration reads it for the canonical event journal, but nothing today projects it into a session you can see here.',
+      pt: 'Ainda sem adaptador local — sessões do opencode nunca aparecem neste painel. O banco SQLite próprio do opencode guarda tokens, custo, modelo e ferramentas reais; uma integração de replay já os lê para o diário canônico de eventos, mas nada hoje projeta isso em uma sessão visível aqui.',
+    },
+    format: {
+      en: 'A single SQLite database (~/.local/share/opencode/opencode.db): a session row per conversation with pre-summed totals, one message row per turn, one part row per tool call or usage step.',
+      pt: 'Um único banco SQLite (~/.local/share/opencode/opencode.db): uma linha de sessão por conversa com totais já somados, uma linha de mensagem por turno, uma linha de "part" por chamada de ferramenta ou etapa de uso.',
+    },
+    retention: {
+      en: 'Unknown — no cleanup behavior has been observed or documented for this store.',
+      pt: 'Desconhecido — nenhum comportamento de limpeza foi observado ou documentado para esse banco.',
+    },
+    source: [
+      '~/.local/share/opencode/opencode.db (session/message/part tables)',
+    ],
+    contains: [],
+    missing: [
+      {
+        item: { en: 'Everything — no adapter', pt: 'Tudo — sem adaptador' },
+        why: {
+          en: 'There is no adapters/opencode.ts / opencode-parse.ts. opencode never contributes a SessionMeta, so it never appears in AppData.harnesses, the harness selector, the Compare page, or any dashboard total — deliberately, until a legacy adapter is built (see CLAUDE.md "Adding a harness" step 4).',
+          pt: 'Não existe adapters/opencode.ts / opencode-parse.ts. O opencode nunca gera um SessionMeta, então nunca aparece em AppData.harnesses, no seletor de harness, na página Compare ou em nenhum total do painel — deliberadamente, até que um adaptador legado seja construído (ver CLAUDE.md, passo 4 de "Adding a harness").',
+        },
+      },
+    ],
+    note: {
+      en: 'A separate opencode-local.db file exists on some machines (a per-project store from an earlier opencode version); this integration reads only the current global opencode.db and does not merge the two.',
+      pt: 'Em algumas máquinas existe também um opencode-local.db separado (um banco por projeto de uma versão anterior do opencode); esta integração lê apenas o opencode.db global atual e não mescla os dois.',
+    },
   },
 }

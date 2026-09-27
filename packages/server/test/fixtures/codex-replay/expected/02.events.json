@@ -1,0 +1,91 @@
+[
+ {
+  "id": "0ff6b2635a62f03bf688093a77308468",
+  "type": "session.started",
+  "at": "2026-09-08T14:06:03.405Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000002:1",
+  "confidence": "exact",
+  "data": {
+   "origin": "adapter",
+   "projectPath": "/redacted/project"
+  }
+ },
+ {
+  "id": "e680c8124e1da31d889de25cc25dde75",
+  "type": "run.started",
+  "at": "2026-09-08T14:06:03.405Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000002:1",
+  "confidence": "exact",
+  "data": {
+   "harness": "codex",
+   "harnessVersion": "0.153.4",
+   "conversationId": "00000000-0000-4000-8000-000000000002",
+   "conversationLink": "observed",
+   "cwd": "/redacted/project"
+  }
+ },
+ {
+  "id": "e76b8adbaa571dd57e65b22ac25c354f",
+  "type": "agent.started",
+  "at": "2026-09-08T14:06:03.405Z",
+  "agent": "agt_689f619fa43515c9e865797b",
+  "ref": "codex:00000000-0000-4000-8000-000000000002:1",
+  "confidence": "exact",
+  "data": {
+   "kind": "main"
+  }
+ },
+ {
+  "id": "41c16c35b0c0a87c016f896076037952",
+  "type": "model.completed",
+  "at": "2026-09-08T14:06:08.282Z",
+  "agent": "agt_689f619fa43515c9e865797b",
+  "ref": "codex:00000000-0000-4000-8000-000000000002:12",
+  "confidence": "exact",
+  "data": {
+   "provider": "openai",
+   "model": "gpt-5.6-luna",
+   "usage": {
+    "input": 6277,
+    "output": 5,
+    "cacheRead": 8960
+   },
+   "status": "completed",
+   "contextTokens": 15237,
+   "contextWindow": 258400
+  }
+ },
+ {
+  "id": "56f3922e2c7a5d4c14558cf14de56d25",
+  "type": "agent.ended",
+  "at": "2026-09-08T14:06:08.298Z",
+  "agent": "agt_689f619fa43515c9e865797b",
+  "ref": "codex:00000000-0000-4000-8000-000000000002:13",
+  "confidence": "exact",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "id": "729eeddc81ed96bdd338bdca3bc2b4c4",
+  "type": "run.ended",
+  "at": "2026-09-08T14:06:08.298Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000002:13",
+  "confidence": "exact",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "id": "42abfa68afddbb5ffa514277bc4ae258",
+  "type": "session.ended",
+  "at": "2026-09-08T14:06:08.298Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000002:13",
+  "confidence": "exact",
+  "data": {}
+ }
+]

@@ -29,14 +29,14 @@ describe('parseSkillFrontmatter', () => {
 
 describe('HARNESS_SKILLS', () => {
   it('names every harness, so adding one breaks the build here', () => {
-    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi']) {
+    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode']) {
       expect(h in HARNESS_SKILLS).toBe(true)
     }
   })
   it('is wired for claude and antigravity', () => {
     expect(HARNESS_SKILLS.claude).not.toBeNull()
     expect(HARNESS_SKILLS.antigravity).not.toBeNull()
-    for (const h of ['codex', 'gemini', 'copilot', 'kimi'] as const) {
+    for (const h of ['codex', 'gemini', 'copilot', 'kimi', 'opencode'] as const) {
       expect(HARNESS_SKILLS[h]).toBeNull()
     }
   })
