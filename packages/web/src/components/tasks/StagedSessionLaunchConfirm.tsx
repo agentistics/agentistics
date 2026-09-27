@@ -21,12 +21,20 @@ export interface StagedSessionLaunchConfirmProps {
   attachmentNames: string[]
   busy: boolean
   error: string | null
+  /**
+   * True exactly when `error` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`), never for an ordinary spawn error — the only case a second, deliberate
+   * "start anyway" button is offered at all.
+   */
+  forceable?: boolean
   onCancel: () => void
   onConfirm: () => void
+  /** Re-sends the same request with `force: true`. Only ever called from the "start anyway" button. */
+  onForce?: () => void
 }
 
 export function StagedSessionLaunchConfirm({
-  lang, subtaskTitle, draft, attachmentNames, busy, error, onCancel, onConfirm,
+  lang, subtaskTitle, draft, attachmentNames, busy, error, forceable, onCancel, onConfirm, onForce,
 }: StagedSessionLaunchConfirmProps) {
   const pt = lang === 'pt'
   const copy = boardCopy(lang).staged
@@ -100,7 +108,8 @@ export function StagedSessionLaunchConfirm({
 
         <div style={{
           display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--border)',
-          justifyContent: 'flex-end', flexDirection: isMobile ? 'column-reverse' : 'row',
+          justifyContent: 'flex-end', flexWrap: 'wrap',
+          flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
           <button
             type="button" onClick={onCancel} disabled={busy}
@@ -113,6 +122,24 @@ export function StagedSessionLaunchConfirm({
               fontFamily: 'inherit',
             }}
           >{copy.cancel}</button>
+          {/* "Start anyway" — a DELIBERATE second click, offered only while `forceable` is true (a
+           *  prior response was the machine's own memory-budget refusal). Never automatic, never
+           *  remembered across attempts: the caller clears it the moment the draft changes or this
+           *  dialog closes. Same secondary (bordered) shape as Cancel, so the filled "Fire" button
+           *  stays the one that reads as the ordinary, unconditional action. */}
+          {forceable && onForce && (
+            <button
+              type="button" onClick={onForce} disabled={busy}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                padding: isMobile ? '0 14px' : '8px 14px', minHeight: isMobile ? 44 : undefined,
+                width: isMobile ? '100%' : undefined,
+                borderRadius: 8, border: '1px solid var(--accent-red)', background: 'transparent',
+                color: 'var(--accent-red)', fontSize: 13, fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >{busy ? copy.launching : copy.startAnyway}</button>
+          )}
           <button
             type="button" onClick={onConfirm} disabled={busy}
             style={{

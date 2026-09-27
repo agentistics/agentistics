@@ -109,6 +109,14 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
   /** Why the last attempt did not start. Shown in the wizard, which stays put so nothing is lost. */
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  /**
+   * The last refusal was the MEMORY BUDGET, specifically — so the "how" step can offer a THIRD row
+   * ("start anyway") rather than the ordinary two. Any other refusal (a usage error, a dead backend)
+   * clears this: overriding is only ever offered for the ONE reason it actually answers.
+   */
+  const [admissionBlocked, setAdmissionBlocked] = useState(false)
+  /** Which mode the blocked attempt asked for, so "start anyway" retries the SAME choice with force. */
+  const [lastAttach, setLastAttach] = useState(false)
 
   useEffect(() => {
     const read = host.startableHarnesses
@@ -142,31 +150,43 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
    *
    * So: a missing answer sends you BACK to the step that takes it, a refusal is shown HERE and the
    * draft stands, and only success unmounts.
+   *
+   * `force` retries the SAME request with consent to override the memory budget — see
+   * `spawn-admission.ts`. It is never the FIRST attempt: the "start anyway" row only exists once a
+   * plain attempt has already come back refused for exactly that reason (`admissionBlocked`).
    */
-  const submit = useCallback((attach: boolean) => {
+  const submit = useCallback((attach: boolean, force = false) => {
     const spawn = host.spawnSession
     const plan = planSubmit({ draft, hasSpawn: Boolean(spawn), attach })
     if (!plan.ok) {
       setError(plan.reason === 'no-host' ? s.wizNoSpawn
         : plan.reason === 'no-harness' ? s.wizNeedHarness
         : s.wizNeedCwd)
+      setAdmissionBlocked(false)
       if (plan.step) setStep(plan.step)
       return
     }
-    const req = plan.req as unknown as SpawnSessionRequest
+    const req = { ...plan.req, ...(force ? { force: true } : {}) } as unknown as SpawnSessionRequest
     setError('')
+    setAdmissionBlocked(false)
+    setLastAttach(attach)
     setBusy(true)
     void spawn!.call(host, req)
       .then(r => {
         setBusy(false)
         if (r.ok) return onDone(r)
         setError(r.message)
+        // ONLY a memory-budget refusal earns the "start anyway" row — every other refusal (a usage
+        // error, a dead backend) has no override that would fix it, and offering one would be a
+        // button whose only outcome is the same failure again.
+        setAdmissionBlocked(Boolean(r.admission))
       })
       // A REJECTED promise used to leave the screen exactly as it was, forever: no session, no
       // message, and an `enter` that had visibly done something and then nothing.
       .catch((e: unknown) => {
         setBusy(false)
         setError(e instanceof Error ? e.message : String(e))
+        setAdmissionBlocked(false)
       })
   }, [host, draft, onDone, s])
 
@@ -334,6 +354,10 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
         options={[
           { key: 'bg', label: s.wizBackground },
           { key: 'fg', label: s.wizAttached },
+          // A THIRD row, offered ONLY once a plain attempt came back refused by the memory budget —
+          // in words, as a normal menu row, rather than a key nobody was told about. It retries the
+          // SAME attach choice the blocked attempt asked for.
+          ...(admissionBlocked ? [{ key: 'force', label: s.wizStartAnyway }] : []),
         ]}
         empty=""
         width={width}
@@ -341,7 +365,7 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
         // given is composited over the ones under it by Ink rather than clipped.
         height={Math.max(1, height - 2)}
         isActive={isActive && !busy}
-        onPick={key => submit(key === 'fg')}
+        onPick={key => key === 'force' ? submit(lastAttach, true) : submit(key === 'fg')}
       />
       {/* The outcome, HERE. It used to go to the status line — one transient row — while this
           screen unmounted and took the prompt with it. */}
