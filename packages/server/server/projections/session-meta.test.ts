@@ -14,11 +14,12 @@ import {
   project,
   type AgentisticsEvent, type AnyAgentisticsEvent, type EventData, type EventType, type SessionMeta,
 } from '@agentistics/core'
-import { parseSessionJsonl } from '../jsonl'
+import { emptyClaudeParse, finishClaudeSession, foldClaudeParse, parseSessionJsonl } from '../jsonl'
+import { emptyClaudeReplay, finishClaudeReplay, foldClaudeReplay } from '../integrations/claude/replay'
 import { dedupeUsage } from '../usage-dedupe'
 import { legacyFirstWinsGate } from './differential'
 import { createClaudeReplay } from '../integrations/claude'
-import { CLAUDE_ADAPTER_VERSION, mainAgentIdOf, subagentIdOf } from '../integrations/claude/replay-core'
+import { CLAUDE_ADAPTER_VERSION, mainAgentIdOf, mainContext, subagentIdOf } from '../integrations/claude/replay-core'
 import {
   NOT_PROJECTABLE, PARTIAL_FIELDS, sessionMetaProjection, type SessionMetaProjection,
 } from './session-meta'
@@ -106,6 +107,17 @@ describe('parity with the legacy SessionMeta over a real transcript structure', 
     const compactLegacy = await legacyOf('claude-replay-compact', CONV2)
     expect(compact.meta.user_message_count).toBe(compactLegacy.user_message_count)
     expect(compact.meta.user_message_timestamps).toEqual(compactLegacy.user_message_timestamps)
+  })
+
+  test('the turn time equals legacy: active_minutes and user_response_times (D25)', async () => {
+    expect(LEGACY.user_response_times.length).toBeGreaterThan(0)
+    expect(PROJ.meta.active_minutes).toBe(LEGACY.active_minutes)
+    expect(PROJ.meta.user_response_times).toEqual(LEGACY.user_response_times)
+    const compact = project(sessionMetaProjection, await replayOf('claude-replay-compact', CONV2))
+    const compactLegacy = await legacyOf('claude-replay-compact', CONV2)
+    expect(compactLegacy.active_minutes).toBeGreaterThan(0)
+    expect(compact.meta.active_minutes).toBe(compactLegacy.active_minutes)
+    expect(compact.meta.user_response_times).toEqual(compactLegacy.user_response_times)
   })
 
   test('start, end and duration equal legacy', () => {
@@ -260,16 +272,22 @@ describe('what is NOT projected is said, and is absent', () => {
     for (const k of Object.keys(PROJ.meta)) expect(declared.has(k)).toBe(false)
   })
 
-  test('what turn.started cannot reach stays absent, each reason naming the fact no event carries', () => {
+  test('what the turn events cannot reach stays absent, each reason naming the fact or the decision', () => {
     const facts: Record<string, string> = {
-      user_response_times: 'LAST assistant transcript line',
-      message_hours: 'EVERY timestamped transcript line',
-      active_minutes: 'turn_duration',
+      message_hours: 'decision D25',
       daily: 'every user- and assistant-role LINE',
     }
     for (const [f, fact] of Object.entries(facts)) {
       expect(f in PROJ.meta).toBe(false)
       expect(NOT_PROJECTABLE.find(x => x.field === f)?.reason).toContain(fact)
+    }
+    expect(NOT_PROJECTABLE.find(x => x.field === 'message_hours')!.reason).toContain('EVERY timestamped transcript line')
+  })
+
+  test('the turn-time pair (D25) is no longer declared absent', () => {
+    for (const f of ['active_minutes', 'user_response_times']) {
+      expect(NOT_PROJECTABLE.some(x => x.field === f)).toBe(false)
+      expect(f in PROJ.meta).toBe(true)
     }
   })
 
@@ -611,5 +629,165 @@ describe('D21 — an absent usage counter is never folded in as a 0, and a sum o
     expect(c!.reason).toContain('PARTIAL')
     // the main agent reported all four: no session-level token or cost caveat
     expect(p.caveats.some(x => x.field === 'costUSD' || x.field.endsWith('_tokens'))).toBe(false)
+  })
+})
+
+// ---- D25 (A2.8): turn closes. `active_minutes` through activeMinutesOf, `user_response_times` through
+// legacy's own arithmetic — first over synthetic events (the rules), then over tiny transcripts replayed
+// AND parsed by legacy side by side (the equivalence, including the edges the fixtures do not carry).
+describe('turn time (D25) — active_minutes and user_response_times', () => {
+  const T0 = Date.parse('2026-01-01T00:00:00.000Z')
+  const iso = (min: number, sec = 0) => new Date(T0 + min * 60_000 + sec * 1000).toISOString()
+  const start = (line: number, at: string, o: { prev?: string; estimated?: boolean; adapter?: string } = {}) => {
+    const e = ev('turn.started', { by: 'user', ...(o.prev ? { previousAssistantAt: o.prev } : {}) },
+      { at, ref: `claude:c:${line}`, ...(o.adapter ? { adapter: o.adapter } : {}) })
+    if (o.estimated) e.provenance.confidence = 'estimated'
+    return anyEv(e)
+  }
+  const lastLine = (line: number, at: string) =>
+    anyEv(ev('turn.ended', { close: 'last-line' }, { at, ref: `claude:c:${line}` }))
+  const measured = (line: number, at: string, durationMs: number) =>
+    anyEv(ev('turn.ended', { close: 'measured', durationMs }, { at, ref: `claude:c:${line}` }))
+
+  test('a measured close wins over the reconstruction', () => {
+    const p = project(sessionMetaProjection, [...syntheticSession(), start(2, iso(0)), measured(5, iso(3), 10 * 60_000)])
+    expect(p.meta.active_minutes).toBe(10)
+  })
+
+  test('several closes for one turn (a resumed transcript): the LAST one wins, whatever the arrival order', () => {
+    const evs = [
+      start(2, iso(0)), lastLine(4, iso(2)), lastLine(8, iso(7)),
+      start(10, iso(20)), lastLine(12, iso(25)),
+    ]
+    for (const order of [evs, [...evs].reverse(), shuffled(evs, 3)]) {
+      const p = project(sessionMetaProjection, [...syntheticSession(), ...order, ...order])
+      expect(p.meta.active_minutes).toBe(7 + 5)
+    }
+    // A later measurement replaces an earlier finish-time close of the same turn.
+    const p = project(sessionMetaProjection, [...syntheticSession(), start(2, iso(0)), lastLine(3, iso(2)), measured(6, iso(4), 5 * 60_000)])
+    expect(p.meta.active_minutes).toBe(5)
+  })
+
+  test('an estimated turn.started neither opens nor closes a turn, and gives no response time', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      start(2, iso(0)),
+      start(5, '2026-09-25T00:00:00.000Z', { estimated: true, prev: iso(1) }),
+      lastLine(7, iso(4)),
+    ])
+    expect(p.meta.active_minutes).toBe(4)
+    expect(p.meta.user_response_times).toEqual([])
+  })
+
+  test('a close on the prompt\'s OWN line belongs to that prompt (the final close of a prompt that was the last timed line)', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      start(2, iso(0)), lastLine(2, iso(0)), // the next prompt closed turn 1 at its own (only) timed line
+      start(5, iso(3)), lastLine(5, iso(3)), // the final finish closed turn 2 at ITS own line
+    ])
+    expect(p.meta.active_minutes).toBe(0)
+    expect(p.caveats.some(c => c.field === 'active_minutes')).toBe(false)
+  })
+
+  test('no prompt: 0 when the walk saw a timed line (legacy sawTime), absent when it saw none', () => {
+    const timed = project(sessionMetaProjection, syntheticSession())
+    expect(timed.meta.active_minutes).toBe(0)
+    expect(timed.meta.user_response_times).toEqual([])
+    const untimed = project(sessionMetaProjection, [completed(mainAgentIdOf('c'), 'claude-sonnet-4-6', { input: 1 })])
+    expect('active_minutes' in untimed.meta).toBe(false)
+    expect(untimed.caveats.some(c => c.field === 'active_minutes')).toBe(false)
+  })
+
+  test('an open last turn (no turn.ended yet): active_minutes ABSENT with a caveat, never a partial sum', () => {
+    const p = project(sessionMetaProjection, [...syntheticSession(), start(2, iso(0)), lastLine(4, iso(3)), start(6, iso(10), { prev: iso(9) })])
+    expect('active_minutes' in p.meta).toBe(false)
+    expect(p.caveats.find(c => c.field === 'active_minutes')!.reason).toContain('turn.ended')
+    expect(p.meta.user_response_times).toEqual([60])
+  })
+
+  test('response times: legacy arithmetic, source order, [0, 3600) after rounding the delta, negatives dropped', () => {
+    const p = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      start(40, iso(100), { prev: iso(100, -10) }), // 10
+      start(10, iso(0)), // no assistant line before it: nothing
+      start(20, iso(70), { prev: iso(10) }), // exactly 3600: dropped
+      start(30, iso(90, 0), { prev: iso(30, 0.4) }), // 3599.6 < 3600: kept, rounds to 3600
+      start(35, iso(95), { prev: iso(96) }), // negative: dropped
+      lastLine(41, iso(101)),
+    ].map(e => ({ ...e })) as AnyAgentisticsEvent[])
+    expect(p.meta.user_response_times).toEqual([3600, 10])
+  })
+
+  test('events replayed before turn.ended (adapter 1.4.0): both ABSENT with a caveat each, never 0 or []', () => {
+    const old = [...syntheticSession(), start(2, iso(0), { prev: iso(0, -5) })]
+      .map(e => ({ ...e, provenance: { ...e.provenance, adapterVersion: '1.4.0' } })) as AnyAgentisticsEvent[]
+    const p = project(sessionMetaProjection, old)
+    for (const f of ['active_minutes', 'user_response_times']) {
+      expect(f in p.meta).toBe(false)
+      expect(p.caveats.find(c => c.field === f)!.reason).toContain('not recorded')
+    }
+    expect(p.meta.user_message_count).toBe(1) // the 1.3.0 half is still there
+    const mixed = [old[0]!, ...syntheticSession().slice(1), start(2, iso(0)), lastLine(3, iso(1))]
+    expect('active_minutes' in project(sessionMetaProjection, mixed).meta).toBe(false)
+  })
+
+  // Legacy (`foldClaudeParse` + `finishClaudeSession`) and the replay over the SAME lines.
+  const human = (ts?: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: 'go' }, ...(ts !== undefined ? { timestamp: ts } : {}) })
+  const asst = (ts: string) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'text', text: 'ok' }] }, timestamp: ts })
+  const toolResult = (ts: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] }, timestamp: ts })
+  const dur = (ts: string, ms: number) => JSON.stringify({ type: 'system', subtype: 'turn_duration', durationMs: ms, timestamp: ts })
+  async function both(lines: string[], chunks = 1) {
+    const st = emptyClaudeParse()
+    foldClaudeParse(st, lines)
+    const legacy = await finishClaudeSession(st, '/nonexistent-a28/c.jsonl', 'c', '/nonexistent-a28', 'jsonl')
+    const events: AnyAgentisticsEvent[] = []
+    const r = emptyClaudeReplay(mainContext('c', '2026-09-26T00:00:00.000Z'))
+    const push = (e: unknown) => { events.push(e as AnyAgentisticsEvent) }
+    // `chunks` > 1 replays like a live transcript read in pieces, each piece ending in a final finish.
+    const size = Math.ceil(lines.length / chunks)
+    for (let i = 0; i < lines.length; i += size) {
+      foldClaudeReplay(r, lines.slice(i, i + size), push)
+      finishClaudeReplay(r, { final: true }, push)
+    }
+    return { legacy, p: project(sessionMetaProjection, events) }
+  }
+  const TRANSCRIPTS: Record<string, string[]> = {
+    'measured, reconstructed and a final open turn': [
+      human(iso(0)), asst(iso(1)), dur(iso(1, 30), 95_000),
+      human(iso(10)), asst(iso(12)), toolResult(iso(13)), asst(iso(14)),
+      human(iso(30)), asst(iso(33)),
+    ],
+    'timestamps going BACKWARDS mid-turn': [
+      human(iso(20)), asst(iso(25)), asst(iso(18)), human(iso(40)), asst(iso(38)), asst(iso(50)),
+    ],
+    'an untimed and an unparseable human line inside a turn': [
+      human(iso(0)), asst(iso(2)), human(), asst(iso(5)), human('not-a-date'), asst(iso(9)), human(iso(20)), asst(iso(21)),
+    ],
+    'timed lines but no prompt at all': [asst(iso(0)), toolResult(iso(1)), asst(iso(3))],
+    'a prompt that is the last timed line': [human(iso(0)), asst(iso(4)), human(iso(9))],
+    'response times at the 3600 bound and negative': [
+      asst(iso(0)), human(iso(60)), asst(iso(61, 0.4)), human(iso(121)), asst(iso(200)), human(iso(199)), asst(iso(201)),
+    ],
+    'a stray and a negative measurement': [
+      asst(iso(0)), dur(iso(1), 5000), human(iso(2)), dur(iso(3), -4), asst(iso(6)), human(iso(8)), asst(iso(9)),
+    ],
+  }
+  for (const [name, lines] of Object.entries(TRANSCRIPTS)) {
+    test(`equal to legacy: ${name}`, async () => {
+      for (const chunks of [1, 3, lines.length]) {
+        const { legacy, p } = await both(lines, chunks)
+        expect(p.meta.active_minutes).toBe(legacy.active_minutes)
+        expect(p.meta.user_response_times).toEqual(legacy.user_response_times)
+      }
+    })
+  }
+  test('the edge transcripts are not all zeros (the comparison above can fail)', async () => {
+    const a = await both(TRANSCRIPTS['measured, reconstructed and a final open turn']!)
+    expect(a.legacy.active_minutes).toBeGreaterThan(0)
+    const r = await both(TRANSCRIPTS['response times at the 3600 bound and negative']!)
+    expect(r.legacy.user_response_times.length).toBeGreaterThan(0)
+    const n = await both(TRANSCRIPTS['timed lines but no prompt at all']!)
+    expect(n.legacy.active_minutes).toBe(0)
+    expect(n.p.meta.active_minutes).toBe(0)
   })
 })
