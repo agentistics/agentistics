@@ -78,6 +78,7 @@ import { reorderByDrag } from './dragReorder'
 import { clampRailWidth, RAIL_WIDTH_FLOOR_PX } from './railFit'
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
 import { holdIfUnsaved } from './unsavedBuffers'
+import { getFloating, raisePanel, subscribeFloating, type FloatingSet } from './floatingPanels'
 
 /** The ten panels ArtifactsAside used to render as tabs inside one `contents` container. */
 export type TabPanelId =
@@ -175,6 +176,11 @@ export interface SlotLayout {
    *  it. Persisted in this SAME record (`agentistics-panel-slots`) rather than a separate key,
    *  because it is exactly as much "how this reader's rail looks" as placement/order already are. */
   railWidth: number
+  /** THE PANELS FLOATING AS WINDOWS in the session on screen (`floatingPanels.ts`) — a READ-TIME
+   *  fact, applied by `applyFloating` and NEVER persisted here (floating is per session, this record
+   *  is per browser). A floating panel is out of every list below and occupies no slot: it has left
+   *  its docked place, and drawing it there as well would be the duplicate the owner ruled out. */
+  floating?: readonly PanelId[]
 }
 
 export const EMPTY_SLOT_LAYOUT: SlotLayout = {
@@ -195,19 +201,19 @@ export function allowed(_placement: Placement, _panel: PanelId): boolean {
 
 /** The panels currently placed on the rail, in order. */
 export function railPanels(layout: SlotLayout): PanelId[] {
-  return PANEL_IDS.filter(id => layout.placement[id] === 'rail')
+  return PANEL_IDS.filter(id => layout.placement[id] === 'rail' && !layout.floating?.includes(id))
     .sort((a, b) => layout.order[a] - layout.order[b])
 }
 
 /** The panels currently placed at the bottom, in order. */
 export function bottomPanels(layout: SlotLayout): PanelId[] {
-  return PANEL_IDS.filter(id => layout.placement[id] === 'bottom')
+  return PANEL_IDS.filter(id => layout.placement[id] === 'bottom' && !layout.floating?.includes(id))
     .sort((a, b) => layout.order[a] - layout.order[b])
 }
 
 /** The panels currently hidden — reachable from neither the rail nor the bottom band. */
 export function hiddenPanels(layout: SlotLayout): PanelId[] {
-  return PANEL_IDS.filter(id => layout.placement[id] === 'hidden')
+  return PANEL_IDS.filter(id => layout.placement[id] === 'hidden' && !layout.floating?.includes(id))
     .sort((a, b) => layout.order[a] - layout.order[b])
 }
 
@@ -270,7 +276,26 @@ export function rightSlotShowing(layout: SlotLayout): PanelId | null {
  * occupant of at most one slot" for it. Applied on the READ side only, never written back.
  */
 export function dockedShowsTarget(layout: SlotLayout, target: 'cli' | 'shell'): boolean {
-  return layout.right !== target
+  return layout.right !== target && !layout.floating?.includes(target)
+}
+
+/**
+ * THE LAYOUT WITH `floating` TAKEN OUT OF THEIR DOCKED PLACES — read-time only, like
+ * `resolveForViewport`. Each floating panel stops being the occupant of whichever slot it held (a
+ * bottom band whose occupant floated away collapses, exactly as closing it would), and is dropped
+ * from `railPanels`/`bottomPanels`/`hiddenPanels` through the `floating` field. Placement is
+ * untouched, which is what makes docking back a matter of removing the id: the panel returns to
+ * the slot its placement already names. Same object back when nothing floats.
+ */
+export function applyFloating(layout: SlotLayout, floating: readonly PanelId[]): SlotLayout {
+  if (floating.length === 0) {
+    if (layout.floating === undefined) return layout
+    const { floating: _gone, ...rest } = layout
+    return rest
+  }
+  let next: SlotLayout = { ...layout, floating }
+  for (const id of floating) next = withoutOccupant(next, id)
+  return next
 }
 
 /** Expand or collapse the bottom band without touching which panel occupies it. */
@@ -744,6 +769,9 @@ export function subscribePanelLayout(cb: () => void): () => void {
  * reads `true` on both sides of a move.
  */
 export function showPanel(panel: PanelId): void {
+  // A panel floating as a window has no docked slot to open into — asking for it (a rail pick, a
+  // chat note's "open the Gallery") brings its window to the front instead.
+  if (getFloating()[panel] !== undefined) { raisePanel(panel); return }
   const next = openPanel(state, panel)
   if (next === state) return
   const studioDisplaced = panel !== 'studio'
@@ -858,8 +886,26 @@ export interface PanelSlotsApi {
 
 /** The one hook every panel-aware component reads. Bound actions carry the same names as the pure
  *  functions above — they are methods on the returned object, so there is no export collision. */
+let derivedFrom: { layout: SlotLayout; floating: FloatingSet } | null = null
+let derived: SlotLayout = EMPTY_SLOT_LAYOUT
+/** The stored layout with the current session's floating panels applied (`applyFloating`), as a
+ *  STABLE snapshot: the same object until either store changes, which `useSyncExternalStore`
+ *  requires of a snapshot or it re-renders forever. */
+function getEffectiveLayout(): SlotLayout {
+  const floating = getFloating()
+  if (derivedFrom && derivedFrom.layout === state && derivedFrom.floating === floating) return derived
+  derivedFrom = { layout: state, floating }
+  derived = applyFloating(state, Object.keys(floating) as PanelId[])
+  return derived
+}
+function subscribeEffective(cb: () => void): () => void {
+  const a = subscribePanelLayout(cb)
+  const b = subscribeFloating(cb)
+  return () => { a(); b() }
+}
+
 export function usePanelSlots(): PanelSlotsApi {
-  const layout = useSyncExternalStore(subscribePanelLayout, getPanelLayout, () => EMPTY_SLOT_LAYOUT)
+  const layout = useSyncExternalStore(subscribeEffective, getEffectiveLayout, () => EMPTY_SLOT_LAYOUT)
   return {
     layout,
     openPanel: showPanel,

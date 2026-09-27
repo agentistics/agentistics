@@ -450,8 +450,8 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).not.toContain('Pin Hardware')
-    expect(html).not.toContain('Unpin Hardware')
+    expect(html).not.toContain('Float Hardware as a window')
+    expect(html).not.toContain('Dock Hardware back')
   })
 
   test('present, and sits beside the gear — gear, pin, full screen, minimize, in that order', () => {
@@ -466,7 +466,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
     )
     const fullscreenAt = html.indexOf('Hardware full screen')
     const minimizeAt = html.indexOf('Minimize Hardware')
-    const pinAt = html.indexOf('Pin Hardware')
+    const pinAt = html.indexOf('Float Hardware as a window')
     const gearAt = html.indexOf('Hardware options')
     expect(fullscreenAt).toBeGreaterThan(-1)
     expect(minimizeAt).toBeGreaterThan(-1)
@@ -477,7 +477,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
     expect(fullscreenAt).toBeLessThan(minimizeAt)
   })
 
-  test('unpinned: neutral colour, aria-pressed=false, and the "Pin X" label', () => {
+  test('unpinned: neutral colour, aria-pressed=false, and the "Float X as a window" label', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -485,12 +485,12 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Pin Hardware')
-    expect(html).not.toContain('Unpin Hardware')
+    expect(html).toContain('Float Hardware as a window')
+    expect(html).not.toContain('Dock Hardware back')
     expect(html).toContain('aria-pressed="false"')
   })
 
-  test('pinned: accent orange, aria-pressed=true, and the "Unpin X" label — visible at a glance, not only in the tooltip', () => {
+  test('pinned: accent orange, aria-pressed=true, and the "Dock X back" label — visible at a glance, not only in the tooltip', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -498,7 +498,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Unpin Hardware')
+    expect(html).toContain('Dock Hardware back')
     expect(html).toContain('aria-pressed="true"')
     // The pin glyph itself is FILLED while active (`fill="currentColor"`), not colour alone.
     expect(html).toContain('fill="currentColor"')
@@ -518,7 +518,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
     expect(html).toContain('color:var(--anthropic-orange)')
   })
 
-  test('pt labels: "Fixar X" / "Desafixar X"', () => {
+  test('pt labels: "Soltar X como janela" / "Encaixar X de volta"', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="pt" panelName="Hardware"
@@ -526,7 +526,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Opções Hardware" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Fixar Hardware')
+    expect(html).toContain('Soltar Hardware como janela')
     const pinnedHtml = renderToStaticMarkup(
       <PanelFixedControls
         lang="pt" panelName="Hardware"
@@ -534,7 +534,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Opções Hardware" gearEntries={gearEntries}
       />,
     )
-    expect(pinnedHtml).toContain('Desafixar Hardware')
+    expect(pinnedHtml).toContain('Encaixar Hardware de volta')
   })
 
   test('the panel name appears in the pin’s own label too — same rule as the rest of the trio', () => {
@@ -545,7 +545,7 @@ describe('PanelFixedControls — pin, beside the gear', () => {
         gearLabel="Contents options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Pin Contents')
+    expect(html).toContain('Float Contents as a window')
   })
 })
 
