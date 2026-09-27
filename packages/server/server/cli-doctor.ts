@@ -15,6 +15,8 @@ import * as path from 'node:path'
 import { capabilitiesFor, resolveProfile } from './exposure'
 import { runPreflight, allPassed } from './preflight'
 import { resolveDeploymentConfig } from './deployment-config'
+import { readNativeBind } from './native-bind'
+import { PORT, WEB_PORT } from './config'
 
 const GREEN = '\x1b[92m'
 const RED = '\x1b[91m'
@@ -75,6 +77,11 @@ export async function runDoctor(argv: string[]): Promise<never> {
     }
   }
 
+  // What THIS process's own server actually listens on, independent of BIND_IP/cfg.bindIp — the
+  // `bind-ip` check above only ever reads a Docker-only env var, and `index.ts` binds `0.0.0.0`
+  // unconditionally today regardless of it (security finding S-1; see native-bind.ts's header).
+  const nativeBindResult = readNativeBind([PORT, WEB_PORT])
+
   const checks = runPreflight({
     profile: exposed ? 'public' : profile,
     caps,
@@ -88,6 +95,7 @@ export async function runDoctor(argv: string[]): Promise<never> {
     mongoAuthenticated: cfg.mongoAuthenticated,
     machineTokenCount,
     dbUnavailable: !!dbError,
+    nativeBind: { ports: [PORT, WEB_PORT], result: nativeBindResult },
   })
 
   const readFrom = cfg.source === 'file' ? envPath : 'this process environment'

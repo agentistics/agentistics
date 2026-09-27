@@ -9,7 +9,7 @@ import { harnessParam, HARNESS_IDS } from "./session-tokens.js";
  * that if a new harness is added to @agentistics/core, it's not silently missed.
  */
 test("All HarnessIds from core must be in the MCP HARNESS_IDS", () => {
-  const expectedHarnesses: HarnessId[] = ["claude", "codex", "gemini", "copilot", "antigravity", "kimi"];
+  const expectedHarnesses: HarnessId[] = ["claude", "codex", "gemini", "copilot", "antigravity", "kimi", "opencode"];
 
   // HARNESS_IDS should be the same as HARNESS_ORDER
   expect(HARNESS_IDS).toEqual(HARNESS_ORDER);

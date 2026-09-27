@@ -57,6 +57,24 @@ describe('sortSubtasks', () => {
     expect(ids(sortSubtasks(list, { key: 'rounds', dir: 'asc' }, ctx))).toEqual(['cheap', 'dear', 'member', 'unpriced'])
   })
 
+  it('orders by duration (deliveredAt − startedAt), null LAST in both directions', () => {
+    const list = [
+      sub('none'),
+      sub('noStart', { deliveredAt: '2026-09-02T00:00:00Z' }),
+      sub('noEnd', { startedAt: '2026-09-01T00:00:00Z' }),
+      // Delivered before started: bad data, not a negative duration — reads as null too.
+      sub('backwards', { startedAt: '2026-09-05T00:00:00Z', deliveredAt: '2026-09-01T00:00:00Z' }),
+      sub('long', { startedAt: '2026-09-01T00:00:00Z', deliveredAt: '2026-09-05T00:00:00Z' }),
+      sub('short', { startedAt: '2026-09-01T00:00:00Z', deliveredAt: '2026-09-01T01:00:00Z' }),
+    ]
+    const asc = sortSubtasks(list, { key: 'duration', dir: 'asc' })
+    expect(ids(asc).slice(0, 2)).toEqual(['short', 'long'])
+    expect(new Set(ids(asc).slice(2))).toEqual(new Set(['none', 'noStart', 'noEnd', 'backwards']))
+    const desc = sortSubtasks(list, { key: 'duration', dir: 'desc' })
+    expect(ids(desc).slice(0, 2)).toEqual(['long', 'short'])
+    expect(new Set(ids(desc).slice(2))).toEqual(new Set(['none', 'noStart', 'noEnd', 'backwards']))
+  })
+
   it('is TOTAL: equal values keep the order the list had, both directions', () => {
     const list = [sub('c', { startedAt: 'x' }), sub('a', { startedAt: 'x' }), sub('b', { startedAt: 'x' })]
     expect(ids(sortSubtasks(list, { key: 'started', dir: 'asc' }))).toEqual(['c', 'a', 'b'])

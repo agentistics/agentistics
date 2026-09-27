@@ -77,6 +77,9 @@ export const HARNESS_MODELS: Record<HarnessId, ModelOption[]> = {
   // default_model in config.toml" — the aliases are the USER'S, configured per machine, so there is
   // no published set to label here.
   kimi: [],
+  // No SPAWN_SPECS entry either (CLAUDE.md step 4, skipped by scope) — this table exists to label
+  // SPAWN_SPECS[h].modelSuggestions, and opencode has none of those to label.
+  opencode: [],
 }
 
 /** The ids only, keyed by harness — what `spawn-spec.ts`'s `modelSuggestions` must equal. */

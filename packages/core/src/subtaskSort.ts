@@ -24,10 +24,11 @@
  * shattered by it. `subtaskGroups.test.ts` pins that composition.
  */
 
+import { elapsedMs } from './format'
 import { statusRank, type SortDir } from './taskSort'
 
 export type SubtaskSortKey =
-  | 'title' | 'status' | 'started' | 'completed' | 'sessions' | 'rounds' | 'cost' | 'tokens'
+  | 'title' | 'status' | 'started' | 'completed' | 'duration' | 'sessions' | 'rounds' | 'cost' | 'tokens'
 
 export interface SubtaskSortSpec {
   key: SubtaskSortKey
@@ -74,6 +75,11 @@ function valueOf<T extends SortableSubtask>(
     case 'status': return ctx?.statusOrder ? statusRank(ctx.statusOrder, s.status) : s.status
     case 'started': return s.startedAt || null
     case 'completed': return s.deliveredAt || null
+    // `deliveredAt − startedAt` — the board's Duration column. See `elapsedMs`'s own note: `null`
+    // (never a negative or NaN figure) whenever either timestamp is missing or the pair cannot
+    // produce a non-negative span, so bad data reads as "no answer" here exactly like an unmeasured
+    // cost, never a confident but wrong duration.
+    case 'duration': return elapsedMs(s.startedAt, s.deliveredAt)
     case 'sessions': return ctx?.measureOf?.(s)?.sessions ?? null
     case 'rounds': return ctx?.measureOf?.(s)?.rounds ?? null
     case 'cost': return ctx?.measureOf?.(s)?.costUSD ?? null

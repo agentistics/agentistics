@@ -4,6 +4,7 @@ import AppRouter from './AppRouter'
 import { RootErrorBoundary } from './components/RootErrorBoundary'
 import { installHistoryPopGuard } from './lib/historyPopGuard'
 import './index.css'
+import './styles/cursors.css'
 
 /**
  * IN DEV, EVICT ANY SERVICE WORKER THAT IS STILL CONTROLLING THIS PAGE.

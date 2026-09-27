@@ -1197,33 +1197,42 @@ export function ShellBand({
     )
   }
 
-  // ---- desktop: the last band of the panel, under the composer ---------------------------------
+  // ---- desktop: its own panel, below the conversation ---------------------------------------
   return (
-    <div
-      ref={bandDrop.ref}
-      style={{
-      // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
-      // `resolveBandDrag`'s own header in `shellBand.ts` for the bug that shape was: two
-      // `flex-grow: 1` siblings (this root and the conversation's own `flex: 1` above it) split the
-      // column by CONTENT size rather than handing the whole thing to the one that asked to fill it,
-      // so the band silently rendered at roughly half the column instead of all of it. `renderedHeight`
-      // already resolves to the measured `columnHeight` while THIS panel's own `full` entry is
-      // true, and the content box below spends it via its own `flex: '1 1 auto'` — never both on
-      // the same box. Gated on `prefs.open`: collapsed, this must stay auto-sized to its header
-      // row alone.
-      ...(prefs.open && bandPanelFull(prefs, target) ? { height: renderedHeight, flexShrink: 0 } : { flexShrink: 0 }),
-      display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)',
-      ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
-      background: 'var(--bg-surface)',
-    }}>
-      {/* THE GRIP — ALWAYS THE ROOT'S FIRST CHILD, ABOVE THE TAB ROW — the VS Code geometry, where
-          the panel is always the bottom-most strip, and the ONE POSITION `StudioBand`/
-          `SimpleDockedBand` now match rather than rendering their own copy one row lower, level
-          with their bar (see `BandResizeHandle`'s own header in `bandControls.tsx`). It is
-          `role="separator"` and takes the arrow keys, so the band is resizable without a pointer;
-          `ResizeGrip` (design item 6) marks it. */}
-      {prefs.open && <BandResizeHandle label={t.resize} {...grip} />}
+    <>
+      {/* THE GAP IS THE HANDLE (`sdd/brief.md`) — a SIBLING BEFORE the band's own bordered box,
+          never its first child: this band is its own floating panel now, not docked inside the
+          conversation's card. See `BandResizeHandle`'s own header in `bandControls.tsx` and
+          `StudioBand`'s identical fragment split. `role="separator"`, takes the arrow keys, so the
+          band is resizable without a pointer. Present whenever the panel exists; the drag itself
+          only applies while `prefs.open` (a no-op otherwise, matching the old ABSENT-while-collapsed
+          reading — nothing on screen to resize). */}
+      <BandResizeHandle
+        label={t.resize}
+        {...(prefs.open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}
+      />
+      <div
+        ref={bandDrop.ref}
+        style={{
+        // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
+        // `resolveBandDrag`'s own header in `shellBand.ts` for the bug that shape was: two
+        // `flex-grow: 1` siblings (this root and the conversation's own `flex: 1` above it) split the
+        // column by CONTENT size rather than handing the whole thing to the one that asked to fill it,
+        // so the band silently rendered at roughly half the column instead of all of it. `renderedHeight`
+        // already resolves to the measured `columnHeight` while THIS panel's own `full` entry is
+        // true, and the content box below spends it via its own `flex: '1 1 auto'` — never both on
+        // the same box. Gated on `prefs.open`: collapsed, this must stay auto-sized to its header
+        // row alone.
+        ...(prefs.open && bandPanelFull(prefs, target) ? { height: renderedHeight, flexShrink: 0 } : { flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column',
+        // FLOATING-PANELS DESIGN — its own border+radius+clip. ShellBand's own "full screen" is a
+        // NAVIGATION to the dedicated terminal route (`onOpenFullscreen`), never an inline
+        // `position: fixed` overlay of this box, so unlike `StudioBand`/`SimpleDockedBand` there is
+        // no fullscreen state to skip this for here.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
+        background: 'var(--bg-surface)',
+      }}>
       {/* THE COMPACT BAR (design item 7): panel segment (icon+label, collapsing to icons below
           ~1100px) · spacer · the FIXED trio (full screen, minimize, gear). Everything that used to
           widen this row on its own — the leading terminal icon, the uppercase target name, the
@@ -1280,6 +1289,7 @@ export function ShellBand({
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }

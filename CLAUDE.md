@@ -919,6 +919,133 @@ clean and is then silently missing from half the product.
    particular, do NOT add an idle-gap threshold.
 10. **Docs** — this file, `docs/harness-contract.md`, plus any `docs/` page enumerating harnesses.
 
+### The OTHER `Record<HarnessId, …>` tables — found by the A3.8 ease test, missing above
+
+Steps 1–10 name `HARNESS_CAPABILITIES`, `HARNESS_SORT`, `HARNESS_LABELS`/`HARNESS_COLORS`/
+`HARNESS_PROVIDERS`/`HARNESS_INFO` and the live-sessions tables — but the compiler forces FAR more
+than that the moment a new id joins `HarnessId`, and none of the rest was written down. Measured by
+adding `'opencode'` with no legacy adapter (CLAUDE.md step 4 skipped by scope) and running
+`tsc --noEmit` over the whole repo: **25 compile errors, in 20 files, none of them named above.**
+Every one wants `null` (or `[]`/`false`, its type's own "nothing here" value) for a harness the
+session manager cannot spawn, attach to or read a transcript for — which is every harness with no
+`adapters/<id>.ts`, opencode included:
+
+- `packages/core/src/harnessModels.ts` — `HARNESS_MODELS`
+- `packages/server/server/backup/backup-plan.ts` — `HARNESS_SECRETS`, `RAW_DIR` (a REAL decision,
+  not a `null`-shaped one: a harness whose own directory can carry a credential needs a considered
+  exclusion rule, not a guessed one — see `HARNESS_SECRETS.opencode`'s own comment for a worked
+  example: a SQLite store that mixes conversation history with dormant OAuth-token tables in one
+  file, which this exclusion model cannot split, so the whole file is excluded)
+- `packages/server/server/live-sessions.ts` — `VERSIONED_INSTALL`, `NOT_A_SESSION`
+- `packages/server/server/sessions/approval-spec.ts` — `APPROVAL_SPECS`
+- `packages/server/server/sessions/attention-rules.ts` — `ATTENTION_RULES`
+- `packages/server/server/sessions/harness-defaults.ts` — a `switch (harness)`, not a `Record`; add
+  a `case` (a function-lacks-ending-return-statement error, not a `TS2741`)
+- `packages/server/server/sessions/harness-session-file.ts` — `HARNESS_SESSION_SOURCES`,
+  `HARNESS_PROCESS_LOGS`
+- `packages/server/server/sessions/harness-transcript.ts` — `HARNESS_TRANSCRIPTS` (a `null` here
+  must be refused IN WORDS by its caller, naming the harness — see that file's own rule)
+- `packages/server/server/sessions/limit.ts` — its per-harness rate-limit-banner table
+- `packages/server/server/sessions/mode-spec.ts` — `MODE_SPECS` (or equivalent name)
+- `packages/server/server/sessions/rename-spec.ts` — `RENAME_SPECS`
+- `packages/server/server/sessions/skill-source.ts` — `HARNESS_SKILLS`
+- `packages/server/server/sessions/spawn-spec.ts` — `SPAWN_SPECS`
+- `packages/server/server/sessions/transcript-search.ts` — `TRANSCRIPT_SOURCES`, plus a
+  `switch (harness)` in `conversationIdFrom` (same function-lacks-ending-return shape)
+- `packages/tui/src/theme.ts` — `HARNESS_COLOR`, `HARNESS_LABEL` (mirrors the web ones from step 7)
+- `packages/web/src/lib/mentionSpec.ts` — its per-harness `@`-mention spec table
+- `packages/web/src/lib/sessionTranscript.ts` — `READABLE`
+
+Plus `packages/server/server/journal/import.ts`'s `ENTITY_IDS` (step 19 below).
+
+**A hardcoded array in a TEST defeats its own "adding one breaks the build here" comment.** Several
+tests assert "every harness is covered" against a plain `['claude', 'codex', …]` literal rather than
+`HARNESS_ORDER` — which means adding a harness does NOT break them; they just quietly stop checking
+the new one. Found (and fixed for opencode) in `harnessModels.test.ts`, `transcript-search.test.ts`,
+`harness-skills.test.ts`, `harness-transcript.test.ts` and `packages/mcp/agentistics-mcp.test.ts`.
+Prefer iterating `HARNESS_ORDER` itself in a NEW such test; a literal array is a bug waiting for the
+next harness, and fixing each one by hand (as this pass did) is the tax for having written it that
+way the first six times.
+
+**A hardcoded harness list can hide inside PRODUCTION code too, not only a five-place array
+literal.** `projections/session-meta.ts`'s own `HARNESS_IDS` — the exact thing step 3 warns
+against — was a plain six-item array literal (`['claude', 'codex', 'gemini', 'copilot',
+'antigravity', 'kimi']`) gating whether `meta.harness` gets set at all. It silently excluded
+opencode (and would have excluded any future harness) until this pass replaced it with
+`HARNESS_ORDER`. Grep for `['claude'` / `["claude"` across the repo when adding a harness — `tsc`
+cannot find this class of bug, only a human reading for it can.
+
+### Adding a harness to the replay (P2) — the other half of the checklist
+
+The ten steps above build the legacy `SessionMeta` path. A harness also needs a **replay
+integration** — the same facts, emitted as canonical events — before its parity differential can
+run. This half was learned from wave 1 (A3): six harnesses, one differential each.
+
+11. **The integration** — `packages/server/server/integrations/<id>/`: an IO `index.ts`
+    (`discover`/`replay`), a PURE fold, and a `replay-core.ts` carrying the adapter's own version
+    string plus a dated changelog of what each version added (see `integrations/antigravity/
+    replay-core.ts` for the shape). Register it in `integrations/types.ts`'s `INTEGRATIONS[<id>]`
+    (`version`, `replay`) — `types.test.ts` asserts every harness in `HARNESS_ORDER` replays.
+12. **The event rules** — every id comes from `deriveEventId` (identity, never random); a
+    per-record `sourceRef` must END in a numeric ordinal (`:<line or index>` —
+    `projections/session-meta.ts`'s `keyOf` reads `/:(\d+)$/` for first/last-wins ordering, or it
+    silently degrades to timestamp-only order); `session.started.projectPath` / `run.started.cwd`
+    are emitted UNCONDITIONALLY, even `''`, because legacy `project_path` is always a string; a
+    usage counter the source did not report is ABSENT, never a 0 (D21); no conversation text of any
+    kind travels (D5); `confidence` is exactly `exact | estimated | inferred` (D17 dropped
+    `derived`).
+13. **Turn events** — emit `turn.started`/`turn.ended` per person's turn (D22), then add the
+    harness + its adapter version to `projections/session-meta.ts`'s `TURNS_SINCE` /
+    `TURN_END_SINCE` (and `COMPACTION_SINCE` if it compacts) — absent from those tables, every turn
+    field the replay emits reads as "not recorded by this adapter version" regardless of what the
+    events actually carry.
+14. **`HARNESS_TOOL_RULES`** (`projections/session-meta.ts`, per harness) — `names`/`counts`
+    (raw or canonical), `mcp`/`webSearch`/`webFetch`/`taskAgent` predicates, `errorsBy`
+    (`'tool'|'errorClass'`), `modelFailuresAreErrors`, `toolFailuresAreErrors`. Absent means the
+    Claude-shaped default. Read the legacy parser's own `uses_*` and `tool_errors` derivation
+    BEFORE assuming the default fits it — one harness agreed with it only by coincidence.
+15. **Capability states** — narrow a legacy `true` to `partial` in `packages/core/src/canonical/
+    capabilities.ts`'s `CAPABILITY_REFINEMENTS` wherever the replay is honestly narrower than the
+    metric's name; a legacy `false` may become `partial` only as a deliberately named, pinned
+    upgrade (`UPGRADED_FALSES` in `capabilities.test.ts`), never a silent one. `LEGACY_FALSE_NOTES`
+    must still explain every `false` that is not upgraded. `HARNESS_CAPABILITIES` — what today's
+    surfaces read — is never changed by adding a replay.
+16. **The registry slot** — `integrations/types.ts`'s `INTEGRATIONS[<id>]` (see 11 above). A
+    harness with no replay yet must say `replayAbsent: '<one sentence>'` rather than compile with
+    neither `replay` nor `replayAbsent` — so "not built yet" and "forgotten" cannot look alike.
+17. **The differential** — a new `projections/differential-<id>.ts`, reusing `differential.ts`'s
+    `compareTokens`/`compareTime`/`compareTools`/`compareSession`/`summarize`/`renderReport`
+    wholesale (its `row`/`np` helpers are not exported — do not reach for them). Add only a
+    `reclassify<Id>Rows` pass for the harness's own explained rows plus a
+    `run<Id>Differential({<dataDir>})`. Reclassify a row `not-projectable` only when the projection
+    itself declares the gap (a caveat naming the field, or a static per-harness declaration written
+    down); otherwise it stays a `bug`. The legacy side of the differential must reproduce the
+    ADAPTER's own IO pipeline for an arbitrary root, and be cross-checked against the real adapter
+    at least once. A `daily` field with no legacy equivalent is `explained`, never assumed, only
+    once the projected days are proven to sum exactly to the projected totals.
+    **WITH NO ADAPTER AT ALL** (opencode, A3.8): there is no "legacy side" to read, so both sides are
+    built inside the differential module itself — an independent recount, written from scratch
+    against the raw store, sharing no function with the replay's own fold (never the fold's helper
+    functions, and never the same loop, even if the arithmetic is conceptually the same); see
+    `projections/differential-opencode.ts`'s header. Cross-checking "against the real adapter" has
+    no meaning here; cross-check the recount against the REAL STORE instead, under a lock, and keep
+    the property tests (chunk independence, idempotent ids) on the fold regardless.
+18. **Fixtures** — golden fixtures are redacted by script (structural keys kept; text ->
+    `<redacted>`; paths -> placeholders; UUIDs remapped to fixed ids, consistently across every
+    filename and body). A SQLite-backed harness commits the numeric fields as JSON and builds the
+    DB at test time (see `integrations/antigravity/fixture-db.ts`), never a binary blob, and opens
+    it read-only (`immutable=1`) with a test asserting no `-wal`/`-shm` file appears.
+19. **Historical import** (`agentop journal import`, `journal/import.ts`) — registering the replay in
+    `INTEGRATIONS` is what makes the import replay the harness's artifacts. Two more things decide its
+    CONSOLIDATE-STORE half (the coarse run + totals set for conversations whose artifacts are gone):
+    `replay-core.ts` must export `sessionIdOf` / `runIdOf` / `mainAgentIdOf`, entered in `ENTITY_IDS`
+    (a `Record<HarnessId>`, so the build asks — without it the harness's orphans are skipped as
+    `no-entity-ids`); and `discover().sessionId` must EQUAL the store's `session_id`, or every stored
+    session reads as an orphan and is imported coarsely on top of its own replay. Optionally add a
+    `stat`-only stamp to `IMPORT_STAMPS` so a re-run skips unchanged sources (without one it re-reads
+    and the journal dedupes). A `partial` tokens capability makes the import read a stored `0` as
+    absent (D21), so declare step 15 honestly first.
+
 ### Pricing — three layered sources, and the built-in table is the floor
 
 Costs come from `MODEL_PRICING` (compiled in), the LiteLLM community dataset, and the vendors' own
@@ -1019,7 +1146,7 @@ it back.
 
 ### N/A vs real 0 — `HARNESS_CAPABILITIES`
 
-`HARNESS_CAPABILITIES` in `@agentistics/core` (`packages/core/src/types.ts`) is the single source of truth for which metrics each harness can produce. When a capability flag is `false`, the frontend renders "N/A" via the `NAtag` component + `capable(harness, metric)` helper (re-exported from `lib/harness.ts`), rather than showing a misleading 0. Current limitations: Codex and Gemini do not produce agent metrics or git line counts. **Antigravity produces `tokens`/`cost`/`model`** (decoded from the `gen_metadata` protobuf in `~/.gemini/antigravity-cli/conversations/<id>.db`, cost via the standard pricing table) and `gitLines` (edit deltas computed from the transcript's edit payloads, not `git diff`); it has `agents: false` because an `invoke_subagent` child is its own conversation, not an agent invocation on the parent. `dynamicWorkflows` (runs of the multi-agent orchestration Workflow tool) is `true` only for `claude` — it gates the repo-detail "Dynamic Workflows" tab.
+`HARNESS_CAPABILITIES` in `@agentistics/core` (`packages/core/src/types.ts`) is the single source of truth for which metrics each harness can produce. When a capability flag is `false`, the frontend renders "N/A" via the `NAtag` component + `capable(harness, metric)` helper (re-exported from `lib/harness.ts`), rather than showing a misleading 0. Current limitations: Codex and Gemini do not produce agent metrics or git line counts. **Antigravity produces `tokens`/`cost`/`model`** (decoded from the `gen_metadata` protobuf in `~/.gemini/antigravity-cli/conversations/<id>.db`, cost via the standard pricing table) and `gitLines` (edit deltas computed from the transcript's edit payloads, not `git diff`). Its boolean `agents` is still `false` for today's surfaces — none of them read the canonical model — but that is no longer the honest ceiling: since A3 (P2), `CAPABILITY_REFINEMENTS.antigravity.agents` states the CANONICAL capability as `partial`, because the replay makes an `invoke_subagent` child a child `Agent` under the parent's run (see "Antigravity (agy)" below) with its own tokens, cost and tools, linked to its launch only by `INVOKE_SUBAGENT` content and carrying no duration or agent type. `dynamicWorkflows` (runs of the multi-agent orchestration Workflow tool) is `true` only for `claude` — it gates the repo-detail "Dynamic Workflows" tab.
 
 **Three flags gate the behaviour baseline** (`packages/core/src/session-profile.ts`), and each is
 narrower than it first looks:
@@ -1138,11 +1265,24 @@ context window, `1.19` technical model id, `1.21` display name. Rules:
 **Subagent children are detected intrinsically, never from `history.jsonl`.** `history.jsonl` is a
 CLI prompt history that rotates and can be cleared, so it is only a hint (first prompt + workspace)
 — it must never be the reason a conversation with a real transcript is dropped. A conversation is
-excluded only when it appears in `buildAntigravityChildSet()`, built from (a) the parent's own
-`INVOKE_SUBAGENT` step, whose content lists each child's `conversationId`, and (b)
-`conversation_summaries.db` rows with `parent_conversation_id` / `nesting_depth > 0` when that table
-has rows (it is frequently empty). Children are never rolled up into the parent — each has its own
-DB and would double-count.
+excluded from the top-level session list only when it appears in `buildAntigravityChildSet()`,
+built from (a) the parent's own `INVOKE_SUBAGENT` step, whose content lists each child's
+`conversationId`, and (b) `conversation_summaries.db` rows with `parent_conversation_id` /
+`nesting_depth > 0` when that table has rows (it is frequently empty).
+
+**Legacy DOES roll the child up — this paragraph used to say the opposite.** `mergeAntigravityChild`
+/ `rollUpAntigravitySessions` (`adapters/antigravity-parse.ts`) fold a detected child's tokens, tool
+calls, lines, files and time window into the parent `SessionMeta`; nothing about agy's legacy path
+keeps the child as a separate row. The canonical replay (`integrations/antigravity/`, adapter
+`1.0.0`) makes a different, and better, choice: the child becomes a **child `Agent` under the
+parent's run**, read from its own transcript and its own `gen_metadata` rows exactly once, so
+neither side double-counts (see `replay-core.ts`'s header). Proven per session, not asserted: A3.5's
+differential (`projections/differential-antigravity.ts`, the `childRollup` / `childAgentNew`
+explanations) reproduces legacy's OWN unmerged parse of the parent alone from the replay's main
+agent, and legacy's own parse of the child alone from the replay's child agent — measured on a real
+parent/child pair on this machine (`a92a18d1` -> `02a1ff3a`). This is a genuine capability
+improvement, not a parity gap: see "N/A vs real 0" below, `antigravity.agents` is `partial`, not
+`false`.
 
 **Errors and edits.** Every agy step carries `status: "DONE"` even when it failed, so the dedicated
 `type: "ERROR_MESSAGE"` step (with `error` / `error_code`) is the primary error signal; the
@@ -2598,7 +2738,18 @@ interchangeable.
   the centre holding either the overview (`FleetOverview`) or the open session's chat and terminal.
   On a central it is the same workspace, showing the relayed fleet of the machine its picker has
   chosen. When someone says "a interface de sessões", "a tela de sessões" or "the sessions view",
-  this is it.
+  this is it. **Desktop, it is a VS-Code-style floating-panel workspace** (the "floating panels"
+  design, owner-approved 2026-09-27): the sessions list, the conversation, the bottom band (Claude Code /
+  Shell / Studio / Contents) and the artifacts aside are each their OWN bordered, 10px-radius panel
+  on the frame background — never one nested inside another. The 6px gap between two panels IS the
+  resize handle for that boundary (`lib/panelLayout.ts`'s pure geometry, `PanelGap`/`PanelGapDots`
+  in `components/sessions/PanelGap.tsx`, three dots at rest and an accent line on hover/drag),
+  reusing each axis's EXISTING clamp/persistence exactly (`asideWidth.ts` for the list,
+  `shellBand.ts`'s `resolveBandDrag`/`resolveBandHeight` for the band) — only the hit area and the
+  visual moved into the gap. Where a horizontal gap meets a vertical one (the band's foot meeting
+  the left list or the artifacts aside), a T-junction square hot zone drags both boundaries at once,
+  each on its own axis. `Ctrl/Cmd+B` toggles the left list, `Ctrl/Cmd+Shift+B` the artifacts aside,
+  `Ctrl/Cmd+'`/`` Ctrl/Cmd+` `` the bottom band (`lib/panelShortcuts.ts`) — mobile is untouched.
 - **the cockpit** — the TERMINAL one: `agentop`'s control center (`packages/tui/src/control`), whose
   own `sessions` tab draws the fleet. Never call the web one a cockpit; the ambiguity is the whole
   reason this list exists.
@@ -2631,7 +2782,7 @@ language still reads correctly after the language toggle flips; `idleMoreSuffix`
 **The offer is a CARD inside the sessions list, not a full-width banner.** The old
 `IdleSessionsBanner` sat above the whole workspace body, where the header's own hanging tabs
 ("Filtros", the metrics percentage tab) covered its right end — the very edge its buttons were on.
-`IdleReviewCard.tsx` renders instead right above the "Groups" section, inside `SessionsAside.tsx` —
+`IdleReviewCard.tsx` renders instead as the first element of `SessionsAside.tsx` (right under the aside's tabs) —
 which is mounted in TWO places (the desktop sidebar, from `App.tsx`, and the mobile "Sessions" tab,
 from `SessionsPage.tsx` itself) that are the SAME component, so putting the card there covers both
 surfaces with one change. `useIdleSessions` still runs exactly ONCE, in `SessionsPage`, which is the

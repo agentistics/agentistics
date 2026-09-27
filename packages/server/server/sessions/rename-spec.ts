@@ -92,6 +92,8 @@ export const RENAME_SPECS: Record<HarnessId, RenameSpec | null> = {
   copilot: null,
   kimi: null,
   antigravity: null,
+  // No spawn-spec support (CLAUDE.md step 4, skipped by scope): unprobed.
+  opencode: null,
 }
 
 /** The spec for a harness, or `null` when there is none — including for an unknown harness id. */

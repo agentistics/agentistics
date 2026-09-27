@@ -104,12 +104,12 @@ export interface AntigravityParsed {
 }
 
 /** Tool names that mean "this session searched the web". */
-const WEB_SEARCH_TOOLS = new Set(['search_web', 'web_search'])
+export const WEB_SEARCH_TOOLS = new Set(['search_web', 'web_search'])
 /** Tool names that mean "this session fetched a URL". */
-const WEB_FETCH_TOOLS = new Set(['read_url_content', 'read_url', 'fetch_url', 'browser_navigate'])
+export const WEB_FETCH_TOOLS = new Set(['read_url_content', 'read_url', 'fetch_url', 'browser_navigate'])
 
 /** Tool names that write to a file. Their `TargetFile` arg feeds files_modified / line deltas. */
-const EDIT_TOOLS = new Set([
+export const EDIT_TOOLS = new Set([
   'replace_file_content',
   'multi_replace_file_content',
   'write_to_file',
@@ -119,7 +119,7 @@ const EDIT_TOOLS = new Set([
 
 /** Transcript step types that are replays of earlier turns rather than new activity.
  *  Counting them would double-count every turn of a resumed conversation. */
-const REPLAY_TYPES = new Set(['CONVERSATION_HISTORY'])
+export const REPLAY_TYPES = new Set(['CONVERSATION_HISTORY'])
 
 /** Pure: parse the global history.jsonl into entries. Malformed lines are skipped. */
 export function parseAntigravityHistory(content: string): AntigravityHistoryEntry[] {
@@ -187,7 +187,7 @@ export function extractUserRequest(content: string): string {
 }
 
 /** `/model`, `/usage foo` → true. A path like `/home/padawan is where…` → false. */
-function isSlashCommandPrompt(text: string): boolean {
+export function isSlashCommandPrompt(text: string): boolean {
   const t = text.trim()
   if (t.includes('\n')) return false
   return /^\/[a-zA-Z][\w-]*(\s|$)/.test(t)
@@ -319,13 +319,13 @@ export function fileUriToPath(uri: string): string {
 }
 
 /** Count the lines of a content blob (a trailing newline does not add an empty line). */
-function countLines(text: unknown): number {
+export function countLines(text: unknown): number {
   if (typeof text !== 'string' || text.length === 0) return 0
   return text.replace(/\n+$/, '').split('\n').length
 }
 
 /** The `file://` URIs named by a CODE_ACTION step's prose ("Created file file:///…"). */
-const FILE_URI_RE = /file:\/\/(\/[^\s"'`)\]]+)/g
+export const FILE_URI_RE = /file:\/\/(\/[^\s"'`)\]]+)/g
 
 // ---------------------------------------------------------------------------
 

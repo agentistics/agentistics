@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { SESSION_SORTS, type SessionOrder, type SessionSort } from '@agentistics/tui/control/session-order'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronUp, GripVertical, SlidersHorizontal } from 'lucide-react'
+import { ArrowUpDown, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { reorderByDrag, stepOrder } from '../../lib/dragReorder'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -136,7 +136,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
           color: open ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontFamily: 'inherit',
         }}
       >
-        <SlidersHorizontal size={14} />
+        <ArrowUpDown size={14} />
       </button>
 
       {open && at && createPortal(

@@ -44,7 +44,7 @@ import { RelayedComposer } from './RelayedComposer'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { TerminalRegion } from '../RecentSessions'
-import { SessionChat, type SessionChatProps } from './SessionChat'
+import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from './SessionChat'
 import { SessionActions } from './SessionActions'
 import { ShellBand } from './ShellBand'
 import {
@@ -55,6 +55,7 @@ import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
 } from './bandControls'
+import { PanelGapDots } from './PanelGap'
 
 export type SessionView = 'chat' | 'terminal'
 
@@ -101,6 +102,9 @@ export interface SessionPanelProps {
   onViewChange?: (v: SessionView) => void
   /** Passed straight to `SessionChat` — see its own `onArtifacts`. This panel reads none of it. */
   onArtifacts?: SessionChatProps['onArtifacts']
+  /** Passed straight to `SessionChat` — see `SessionComposerMetrics`'s own header. This panel
+   *  reads none of it either. */
+  metrics?: SessionComposerMetrics
   /**
    * OPEN THE TERMINAL ON ITS OWN SCREEN.
    *
@@ -180,7 +184,7 @@ export interface SessionPanelProps {
 
 export function SessionPanel({
   session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange,
-  onArtifacts, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
+  onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
   onOpenShellFullscreen, onStudioBandRef, hardwareOffered, studioSeen = true,
   studioFullscreen, onStudioFullscreenChange,
   bottomTabPane, bottomTabFullscreen, onBottomTabFullscreenChange,
@@ -379,7 +383,16 @@ export function SessionPanel({
       </header>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        // FLOATING-PANELS DESIGN (`sdd/brief.md`, region 2 — the conversation) — desktop only: this
+        // box is now its OWN panel, separate from the bottom band below it (that one carries its
+        // own border, via the Fragment split in `StudioBand`/`SimpleDockedBand`/`ShellBand`). Mobile
+        // is untouched — a phone's screens run edge to edge, and a rounded inset here would just
+        // clip the composer against the curve for no visual gain, the same reasoning
+        // `SessionsPage.tsx`'s old `CENTRAL_PANE` comment already gave for skipping `isMobile`.
+        ...(isMobile ? {} : { border: '1px solid var(--border)', borderRadius: 10 }),
+      }}>
         {/* KEYED BY THE SESSION, and this is a correctness fix rather than a hint to React.
             Without it the same instance is reused when `session` changes, so every piece of state
             that is READ ONCE AT MOUNT belongs to whichever session was open first: the draft
@@ -394,6 +407,7 @@ export function SessionPanel({
             key={session.id}
             session={session} {...(row ? { row } : {})} lang={lang} act={act}
             {...(onArtifacts ? { onArtifacts } : {})}
+            {...(metrics ? { metrics } : {})}
             /* THE SAME callback the row's menu gets. There are two Reopen buttons on this
                screen — the menu's verb and the composer's — and they must land in one place. */
             {...(onOpened ? { onReopened: onOpened } : {})}
@@ -728,65 +742,81 @@ function StudioBand({
     if (!open && fullscreen) onFullscreenChange(false)
   }, [open, fullscreen, onFullscreenChange])
   return (
-    <div
-      ref={bandDrop.ref}
-      style={{
-      // TRUE FULL SCREEN covers the WHOLE VIEWPORT — the sticky header, the fleet aside, everything
-      // — not merely the centre column `heightPrefs.full` already fills; `PANEL_FULLSCREEN_Z` sits
-      // comfortably below every modal (`ConfirmModal` is 2000) so a "close without saving" dialog
-      // still draws over it.
-      //
-      // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
-      // `resolveBandDrag`'s own header in `shellBand.ts` for the whole story of the bug that shape
-      // was. `renderedHeight` already resolves to the measured `columnHeight` while `heightPrefs.full`
-      // is true, so this is the SAME number the content box below spends via its own `flex: '1 1
-      // auto'` — the root states the total, the content box fills whatever the header/handle above it
-      // leave over, and the two can never add up to more or less than the column. Gated on `open`:
-      // a COLLAPSED band shows only its header row and must stay auto-sized to it, whatever `full`
-      // says — the bar's own click is what set `full`, not what asks to render it this frame.
-      //
-      // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE (`fullscreenInsetRight`) rather than
-      // `inset: 0` — this band is docked at the BOTTOM, so a fixed `right: 0` would paint straight
-      // over whatever the RIGHT slot is independently showing. `top`/`bottom` stay 0; `right`
-      // follows the aside's own live edge, reactively, so minimizing it (its existing control)
-      // frees the width without this band leaving and re-entering full screen. `left` follows the
-      // LEFT sessions list's own live width the same way (owner, 2026-09-21: "a esquerda da
-      // listagem de sessoes deveria continuar visivel" — full screen used to reach straight through
-      // it via a bare `left: 0`) — `leftAsideEdge.ts` is the ONE bridge both this and `ShellBand`'s
-      // own docked full screen read, so the two can never disagree about how much room the list
-      // needs. NEVER collapsed on the reader's behalf: if they want the width, collapsing the list
-      // themselves is the same lever the right side already defers to for the artifacts aside.
-      ...(fullscreen
-        ? {
-          position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,
-          right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
-          zIndex: PANEL_FULLSCREEN_Z,
-        }
-        : open && heightPrefs.full
-          ? { height: renderedHeight, flexShrink: 0 }
-          : { flexShrink: 0 }),
-      display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)',
-      // THE WHOLE BAND IS THE DROP TARGET (owner, 2026-09-21: "quero que eu so precise jogar ate a
-      // barra inferior") — an INSET box-shadow rings the entire band while a drag is over it, never
-      // only the thin top border, so what lights up is exactly what accepts the drop.
-      ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
-      background: 'var(--bg-surface)',
-    }}>
-      {/* THE GRIP — ALWAYS THE ROOT'S FIRST CHILD, ABOVE THE TAB ROW (owner report: "o item de
-          reposicionamento muda de lugar, deveria estar SEMPRE no topo, na borda superior"). See
-          `BandResizeHandle`'s own header in `bandControls.tsx` for why this used to sit AFTER the bar
-          here (one row lower, level with the toolbar) while `ShellBand`'s own handle never did.
-          FREE-RESIZING, no low ceiling, and it SNAPS to fill the centre column within
-          `BAND_SNAP_THRESHOLD_PX` of its top (`resolveBandHeight`) — the height/full record is
-          SHARED with `ShellBand`, so a reader who learned the gesture there gets the identical feel
-          here. ABSENT in true full screen — there is nothing left to negotiate a HEIGHT for once the
-          band covers the whole viewport, and a handle that visually does nothing is worse than none:
-          the way back is the chevron below, the gear menu, or Esc, never this drag. ABSENT while
-          collapsed too — nothing is on screen for it to resize. */}
-      {open && !fullscreen && (
-        <BandResizeHandle label={pt ? 'Redimensionar o Studio' : 'Resize the Studio'} {...grip} />
+    <>
+      {/* THE GAP IS THE HANDLE (`sdd/brief.md`) — a SIBLING BEFORE the band's own bordered box, never
+          its first child: the bottom band is its own floating panel now, not docked inside the
+          conversation's card, so the divider between them is the workspace's ordinary panel gap
+          (`BandResizeHandle`, re-skinned in `bandControls.tsx` to the shared dots grip) rather than a
+          line drawn on the band's own top border. ALWAYS PRESENT while the panel itself exists
+          (`!fullscreen`) — even collapsed, so the two panels never touch — but the DRAG only applies
+          while `open`: nothing is on screen to resize otherwise, so a collapsed band's gap is
+          decorative-only (no-op handlers), exactly as the old handle being ABSENT while collapsed
+          meant "nothing to resize" before this fix. */}
+      {!fullscreen && (
+        <BandResizeHandle
+          label={pt ? 'Redimensionar o Studio' : 'Resize the Studio'}
+          {...(open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}
+        />
       )}
+      <div
+        ref={bandDrop.ref}
+        style={{
+        // TRUE FULL SCREEN covers the WHOLE VIEWPORT — the sticky header, the fleet aside, everything
+        // — not merely the centre column `heightPrefs.full` already fills; `PANEL_FULLSCREEN_Z` sits
+        // comfortably below every modal (`ConfirmModal` is 2000) so a "close without saving" dialog
+        // still draws over it.
+        //
+        // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
+        // `resolveBandDrag`'s own header in `shellBand.ts` for the whole story of the bug that shape
+        // was. `renderedHeight` already resolves to the measured `columnHeight` while `heightPrefs.full`
+        // is true, so this is the SAME number the content box below spends via its own `flex: '1 1
+        // auto'` — the root states the total, the content box fills whatever the header/handle above it
+        // leave over, and the two can never add up to more or less than the column. Gated on `open`:
+        // a COLLAPSED band shows only its header row and must stay auto-sized to it, whatever `full`
+        // says — the bar's own click is what set `full`, not what asks to render it this frame.
+        //
+        // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE (`fullscreenInsetRight`) rather than
+        // `inset: 0` — this band is docked at the BOTTOM, so a fixed `right: 0` would paint straight
+        // over whatever the RIGHT slot is independently showing. `right` follows the aside's own
+        // live edge, reactively, so minimizing it (its existing control) frees the width without
+        // this band leaving and re-entering full screen. `left` follows the LEFT sessions list's own
+        // live width the same way (owner, 2026-09-21: "a esquerda da listagem de sessoes deveria
+        // continuar visivel" — full screen used to reach straight through it via a bare `left: 0`) —
+        // `leftAsideEdge.ts` is the ONE bridge both this and `ShellBand`'s own docked full screen
+        // read, so the two can never disagree about how much room the list needs. NEVER collapsed
+        // on the reader's behalf: if they want the width, collapsing the list themselves is the same
+        // lever the right side already defers to for the artifacts aside.
+        //
+        // TRUE FULL SCREEN IS A PANEL, NOT A SQUARE BLOCK (owner, 2026-09-27: "o componente em tela
+        // cheia ele ta ajustando tbm?" — yes). It used to be `top: 0, bottom: 0`, covering the sticky
+        // header and reaching the window's own bottom edge with no border, radius or gap at all —
+        // the one region on the whole board with none of the floating-panel treatment. `top` now
+        // sits `OUTER_GAP` (6px) below the header (`var(--ag-topbar-h)`, the same CSS var `App.tsx`
+        // sets), and `bottom` is `OUTER_GAP` instead of `0` — the SAME two figures the centre column
+        // and the right aside already use for their own top gap and the whole row's own bottom
+        // padding (`SessionsPage.tsx`'s `OUTER_GAP`/`splitRef`), so full screen occupies exactly the
+        // centre column's own floor plan rather than a viewport-filling square.
+        ...(fullscreen
+          ? {
+            position: 'fixed', top: 'calc(var(--ag-topbar-h) + 6px)', left: leftAsideEdge, bottom: 6,
+            right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
+            zIndex: PANEL_FULLSCREEN_Z,
+          }
+          : open && heightPrefs.full
+            ? { height: renderedHeight, flexShrink: 0 }
+            : { flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column',
+        // FLOATING-PANELS DESIGN: its own border+radius+clip, in EVERY state including true full
+        // screen now — the panel treatment `fullscreen` used to skip on the (wrong) assumption that
+        // filling the viewport made a border pointless; it fills the CENTRE COLUMN instead, which
+        // still has four edges to round.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        // THE WHOLE BAND IS THE DROP TARGET (owner, 2026-09-21: "quero que eu so precise jogar ate a
+        // barra inferior") — an INSET box-shadow rings the entire band while a drag is over it, never
+        // only the thin top border, so what lights up is exactly what accepts the drop.
+        ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
+        background: 'var(--bg-surface)',
+      }}>
       {/* THE COMPACT BAR (design item 7) — the exact same shape `ShellBand`'s desktop bar takes:
           task control · panel segment (collapsing to icons below ~1100px) · spacer · ONE "⋯"
           overflow menu · the collapse chevron as a plain icon button. The leading "STUDIO" icon and
@@ -874,7 +904,8 @@ function StudioBand({
           <div ref={contentRef} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }} />
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -976,32 +1007,36 @@ function SimpleDockedBand({
    */
   if (barEntries.length === 0) return null
   return (
-    <div
-      ref={bandDrop.ref}
-      style={{
-      // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE AND THE LEFT SESSIONS LIST — see `StudioBand`'s
-      // own comment on `fullscreenInsetRight`/`leftAsideEdge`; the same reasoning applies unchanged.
-      ...(fullscreen
-        ? {
-          position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,
-          right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
-          zIndex: PANEL_FULLSCREEN_Z,
-        }
-        : open && heightPrefs.full
-          ? { height: renderedHeight, flexShrink: 0 }
-          : { flexShrink: 0 }),
-      display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)',
-      ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
-      background: 'var(--bg-surface)',
-    }}>
-      {/* THE GRIP — ALWAYS THE ROOT'S FIRST CHILD, ABOVE THE TAB ROW — see `StudioBand`'s own
-          identical comment, and `BandResizeHandle`'s header in `bandControls.tsx`, for why this used
-          to sit AFTER the bar here instead (Contents/Hardware read one row lower than Claude
-          Code/Shell, the bug this fix closes). */}
-      {open && !fullscreen && (
-        <BandResizeHandle label={pt ? `Redimensionar ${panelName}` : `Resize ${panelName}`} {...grip} />
+    <>
+      {/* THE GAP IS THE HANDLE — same fragment split `StudioBand` carries, see its own header. */}
+      {!fullscreen && (
+        <BandResizeHandle
+          label={pt ? `Redimensionar ${panelName}` : `Resize ${panelName}`}
+          {...(open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}
+        />
       )}
+      <div
+        ref={bandDrop.ref}
+        style={{
+        // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE AND THE LEFT SESSIONS LIST, AND IS A PANEL
+        // NOW — see `StudioBand`'s own comment on `fullscreenInsetRight`/`leftAsideEdge` and on the
+        // `top`/`bottom` gap; the same reasoning and the same two figures apply unchanged here.
+        ...(fullscreen
+          ? {
+            position: 'fixed', top: 'calc(var(--ag-topbar-h) + 6px)', left: leftAsideEdge, bottom: 6,
+            right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
+            zIndex: PANEL_FULLSCREEN_Z,
+          }
+          : open && heightPrefs.full
+            ? { height: renderedHeight, flexShrink: 0 }
+            : { flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column',
+        // FLOATING-PANELS DESIGN — its own border+radius+clip, in every state, same as `StudioBand`'s
+        // identical change.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
+        background: 'var(--bg-surface)',
+      }}>
       <div
         ref={barWidthRef}
         style={{
@@ -1039,7 +1074,8 @@ function SimpleDockedBand({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -1092,10 +1128,19 @@ function PanelBarBand({
   // menu's own "Mover para baixo"/"Move to the bottom" verb.
   if (barEntries.length === 0) return null
   return (
-    <div style={{
-      flexShrink: 0, display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)', background: 'var(--bg-surface)',
-    }}>
+    <>
+      {/* THE GAP IS THE HANDLE (`sdd/brief.md`) — even here, where there is nothing to RESIZE (this
+          band never grew a height of its own; it is one fixed-height row). An INERT gap, no
+          `role="separator"`/no drag: a relayed session's band is still its own panel below the
+          conversation, so the two must never touch, but there is no axis to drag between them. */}
+      <div aria-hidden="true" className="ag-panel-gap" style={{ height: 6, flexShrink: 0, cursor: 'default' }}>
+        <PanelGapDots orientation="horizontal" />
+      </div>
+      <div style={{
+        flexShrink: 0, display: 'flex', flexDirection: 'column',
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        background: 'var(--bg-surface)',
+      }}>
       <div
         ref={barWidthRef}
         role="button"
@@ -1134,7 +1179,8 @@ function PanelBarBand({
           {pt ? REASON_TEXT[reason].pt : REASON_TEXT[reason].en}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 

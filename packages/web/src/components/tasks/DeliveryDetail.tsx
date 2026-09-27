@@ -41,7 +41,7 @@ import {
   type CommentAttachment, type CommentPart,
 } from '../../lib/commentBody'
 import {
-  NA, PRIORITY, SESSION_STATE, button, field, fmtDateOnly, fmtInt, fmtStamp, fmtTokens,
+  NA, PRIORITY, SESSION_STATE, button, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens,
   harnessColor, microLabel, numeric, pill, statusStyle, surface,
 } from './board'
 import { useMoney } from './money'
@@ -185,20 +185,20 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
             <span
               title={task.startedAt ? fmtStamp(task.startedAt, lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: task.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(task.startedAt, lang)}</span>
+            >{fmtDateTime(task.startedAt, lang, Date.now())}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
             <span
               title={task.deliveredAt ? fmtStamp(task.deliveredAt, lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: task.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(task.deliveredAt, lang)}</span>
+            >{fmtDateTime(task.deliveredAt, lang, Date.now())}</span>
           </span>
         </div>
       </div>
