@@ -23,6 +23,8 @@ import {
   mapTools,
   resetAnthropicCounters,
 } from './client.ts'
+import { translations } from '@agentistics/core'
+import { PROVIDER_CLIENT_ABSENT } from '../client.ts'
 import type { CredentialHandle, CredentialResolver } from '../credential.ts'
 import type { ProviderRequest } from '../client.ts'
 
@@ -200,6 +202,56 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
       expect(written.body).toContain('msg_test123')
     } finally {
       rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  test('cache_control: systemCache and a message\'s cache reach the outgoing body; absent means absent', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const fetchImpl = stubFetch(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      return jsonResponse(anthropicBody())
+    })
+
+    const marked = await invokeOnce(
+      baseRequest({
+        system: 'be brief',
+        systemCache: { type: 'ephemeral', ttl: '1h' },
+        messages: [{ role: 'user', content: 'hello', cache: { type: 'ephemeral' } }],
+      }),
+      1,
+      { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR },
+    )
+    expect(marked.status).toBe('completed')
+    const sys = bodies[0]!.system as Array<Record<string, unknown>>
+    expect(sys[sys.length - 1]!.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+    const msgs = bodies[0]!.messages as Array<{ content: Array<Record<string, unknown>> }>
+    expect(msgs[0]!.content[msgs[0]!.content.length - 1]!.cache_control).toEqual({ type: 'ephemeral' })
+
+    await invokeOnce(baseRequest({ system: 'be brief' }), 1, { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
+    expect(JSON.stringify(bodies[1])).not.toContain('cache_control')
+  })
+
+  test('mapMessages: a cache mark lands on the LAST message a tool-result turn became', () => {
+    const out = mapMessages([
+      { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'x', input: {} }] },
+      {
+        role: 'user',
+        cache: { type: 'ephemeral' },
+        content: [
+          { type: 'tool_result', toolUseId: 't1', content: 'ok' },
+          { type: 'text', text: 'and continue' },
+        ],
+      },
+    ])
+    expect(out.map(m => m.role)).toEqual(['assistant', 'tool', 'user'])
+    expect(out[1]!.providerOptions).toBeUndefined()
+    expect(out[2]!.providerOptions).toEqual({ anthropic: { cacheControl: { type: 'ephemeral' } } })
+  })
+
+  test('the userCodes this module and the registry emit have sentences in EN and PT', () => {
+    const codes = [...Object.values(PROVIDER_CLIENT_ABSENT), 'provider.no_credential']
+    for (const lang of ['en', 'pt'] as const) {
+      for (const code of codes) expect(translations[lang][code]).toBeDefined()
     }
   })
 

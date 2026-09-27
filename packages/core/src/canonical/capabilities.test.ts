@@ -349,16 +349,16 @@ describe('regression sentinel', () => {
 describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () => {
   const EXPECTED: Record<string, CapabilityState['state']> = {
     'codex.agents': 'not_supported', 'codex.gitLines': 'not_supported', 'codex.dynamicWorkflows': 'unknown',
-    'codex.compaction': 'not_supported', 'codex.skills': 'not_applicable', 'codex.mcpServers': 'not_supported',
+    'codex.compaction': 'not_supported', 'codex.skills': 'unknown', 'codex.mcpServers': 'not_supported',
     'gemini.agents': 'not_supported', 'gemini.gitLines': 'not_supported', 'gemini.dynamicWorkflows': 'unknown',
-    'gemini.contextWindow': 'unknown', 'gemini.compaction': 'not_supported', 'gemini.skills': 'not_applicable',
+    'gemini.contextWindow': 'unknown', 'gemini.compaction': 'not_supported', 'gemini.skills': 'unknown',
     'gemini.mcpServers': 'not_supported',
     'copilot.agents': 'not_supported', 'copilot.dynamicWorkflows': 'unknown', 'copilot.contextWindow': 'not_supported',
-    'copilot.compaction': 'not_supported', 'copilot.skills': 'not_applicable', 'copilot.mcpServers': 'not_supported',
+    'copilot.compaction': 'not_supported', 'copilot.skills': 'unknown', 'copilot.mcpServers': 'not_supported',
     'antigravity.agents': 'not_supported', 'antigravity.gitLines': 'not_supported', 'antigravity.dynamicWorkflows': 'unknown',
     'antigravity.compaction': 'not_supported', 'antigravity.skills': 'unknown', 'antigravity.mcpServers': 'not_supported',
     'kimi.agents': 'not_supported', 'kimi.gitLines': 'not_supported', 'kimi.dynamicWorkflows': 'unknown',
-    'kimi.compaction': 'not_supported', 'kimi.skills': 'not_applicable',
+    'kimi.compaction': 'not_supported', 'kimi.skills': 'unknown',
   }
 
   test('every false cell is classified exactly as recorded, and nothing else is', () => {

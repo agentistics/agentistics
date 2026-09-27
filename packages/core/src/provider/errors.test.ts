@@ -1,4 +1,7 @@
 import { describe, expect, it, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { translations } from '../i18n'
 import {
   classifyProviderError,
   pickClassifierInput,
@@ -373,4 +376,27 @@ describe('no kind carries usage — a type-level guarantee', () => {
       expect('usage' in sample).toBe(false)
     }
   })
+})
+
+
+describe('every provider.* userCode has a sentence in both languages', () => {
+  const src = readFileSync(join(import.meta.dir, 'errors.ts'), 'utf8')
+  const codes = [...new Set([...src.matchAll(/'(provider\.[a-z_]+)'/g)].map(m => m[1]!))]
+
+  it('the scan is not vacuous', () => {
+    expect(codes.length).toBeGreaterThanOrEqual(15)
+    expect(codes).toContain('provider.spend_cap')
+  })
+
+  for (const lang of ['en', 'pt'] as const) {
+    it(`${lang}: no code from errors.ts, nor the server-side ones, renders as a raw key`, () => {
+      const serverSide = ['provider.no_credential', 'provider.not_in_b1', 'provider.not_a_vendor']
+      for (const code of [...codes, ...serverSide]) {
+        // read the table itself: `t()` falls back to pt and would hide a missing en sentence
+        const sentence = translations[lang][code]
+        expect(sentence).toBeDefined()
+        expect(sentence!.length).toBeGreaterThan(10)
+      }
+    })
+  }
 })

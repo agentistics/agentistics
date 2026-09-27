@@ -250,6 +250,9 @@ describe('runProvider — status', () => {
     expect(h.all()).toContain(providerKeyFile('anthropic', h.dir))
     expect(h.all()).toMatch(/sha256:[0-9a-f]{8}/)
     expect(h.all()).not.toContain(FAKE_KEY)
+    // C-3: the last 4 characters are shown — and nothing longer than that tail is.
+    expect(h.all()).toContain(`ends with: …${FAKE_KEY.slice(-4)}`)
+    expect(h.all()).not.toContain(FAKE_KEY.slice(-5))
     await cleanup(h)
   })
 

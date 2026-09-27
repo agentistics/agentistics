@@ -28,6 +28,7 @@ import { providerKeyFile, PROVIDER_KEYS_DIR, type KeyedProviderId } from '../con
 import {
   createCredentialHandle,
   fingerprintOf,
+  lastFourOf,
   formatMode,
   isModeTooOpen,
   parseStoredCredential,
@@ -204,11 +205,14 @@ export interface CredentialStatus {
   mode?: string
   storedAt?: string
   fingerprint?: string
+  /** The last 4 characters of the key — never more (`lastFourOf`). */
+  last4?: string
 }
 
 /**
  * What `agentop provider key status` may print (§6.2.6): presence, path, mode, `storedAt` and a
- * fingerprint — NEVER the value, a substring of it, or the raw file content.
+ * fingerprint and the key's last 4 characters — NEVER the value, more than that tail, or the raw
+ * file content.
  *
  * `opts.readContent: false` is the flag-off path (`AGENTISTICS_PROVIDER` unset): only an `lstat` is
  * done, so `status` can still answer present/absent/too-open without ever opening the file — the
@@ -249,6 +253,7 @@ export async function credentialStatus(
     provider, path, state: 'present', mode,
     storedAt: parsed.storedAt,
     fingerprint: fingerprintOf(parsed.value),
+    last4: lastFourOf(parsed.value),
   }
 }
 
