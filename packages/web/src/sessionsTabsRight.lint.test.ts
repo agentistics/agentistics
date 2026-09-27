@@ -6,9 +6,10 @@
  * da direita abrir eles devem vir mais pra esquerda junto, eles nunca vao ficar por cima dele." The
  * two tabs used to hang off the FLEET aside's own right edge (`left: filtrosBounds.left` /
  * `left: metricsBounds.left`); they now hang off the ARTIFACTS aside's own left edge instead
- * (`right: filtrosBounds.right` / `right: metricsBounds.right`), computed by the right-anchored
- * mirror of the same clamp (`filtrosPanelBoundsRight`/`metricsTabBoundsRight`,
- * `lib/sessionsFiltersPanel.ts`).
+ * (`right: filtrosBounds.right` / `right: metricsBounds.right`, plus a fixed
+ * `SESSIONS_TAB_CORNER_CLEARANCE` added on top since the 2026-09-26 rounded-card follow-up — see
+ * that constant's own comment in `App.tsx`), computed by the right-anchored mirror of the same
+ * clamp (`filtrosPanelBoundsRight`/`metricsTabBoundsRight`, `lib/sessionsFiltersPanel.ts`).
  *
  * Not reachable by rendering — `App.tsx` needs a fleet host and a team-session gate, and
  * `packages/web` has no jsdom. The SHAPE is what changed, so the shape is what is asserted, over
@@ -28,7 +29,11 @@ describe('the Filtros tab is anchored to the artifacts aside, on the right', () 
   })
 
   test('the trigger/panel column is positioned with `right`, never `left`', () => {
-    expect(SRC).toContain('right: filtrosBounds.right,')
+    // `+ SESSIONS_TAB_CORNER_CLEARANCE` (owner-approved visual, 2026-09-26 follow-up: the tabs hang
+    // from the central pane's own rounded top border now, and need the extra clearance to clear its
+    // curve) rides on top of the same right-anchored base this test was written to pin — the base
+    // itself, `filtrosBounds.right`, is untouched.
+    expect(SRC).toContain('right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,')
     expect(SRC).not.toMatch(/left: filtrosBounds\.left/)
   })
 
@@ -39,7 +44,7 @@ describe('the Filtros tab is anchored to the artifacts aside, on the right', () 
   test('the scan still sees the old left-anchored shape reintroduced', () => {
     const planted = SRC
       .replace('const filtrosBounds = filtrosPanelBoundsRight(', 'const filtrosBounds = filtrosPanelBounds(')
-      .replace('right: filtrosBounds.right,', 'left: filtrosBounds.left,')
+      .replace('right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,', 'left: filtrosBounds.left,')
     expect(planted).toMatch(/left: filtrosBounds\.left/)
   })
 })
@@ -50,12 +55,12 @@ describe('the session-metrics tab is anchored the same way, beside Filtros', () 
   })
 
   test('its own wrapper is positioned with `right`, never `left`', () => {
-    expect(SRC).toContain('right: metricsBounds.right,')
+    expect(SRC).toContain('right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,')
     expect(SRC).not.toMatch(/left: metricsBounds\.left/)
   })
 
   test('the scan still sees the old left-anchored shape reintroduced', () => {
-    const planted = SRC.replace('right: metricsBounds.right,', 'left: metricsBounds.left,')
+    const planted = SRC.replace('right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,', 'left: metricsBounds.left,')
     expect(planted).toMatch(/left: metricsBounds\.left/)
   })
 })
