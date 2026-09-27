@@ -7,13 +7,12 @@
  * for the C-1 test (a real key is never used anywhere in this file; every "key" here is an obviously
  * fake `sk-ant-` string built for the test).
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateText, jsonSchema, stepCountIs } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
-import { createCredentialHandle } from '../credential-plan.ts'
 import { resetCaptureCounters } from '../capture.ts'
 import {
   ANTHROPIC_BASE_URL_CONSTANT,
@@ -24,14 +23,23 @@ import {
   mapTools,
   resetAnthropicCounters,
 } from './client.ts'
-import type { CredentialResolver } from '../client.ts'
+import type { CredentialHandle, CredentialResolver } from '../credential.ts'
 import type { ProviderRequest } from '../client.ts'
 
 const FAKE_KEY = 'sk-ant-FAKE00000000000000000000TESTONLY'
 
-function fakeHandle(value = FAKE_KEY) {
-  return createCredentialHandle('anthropic', value)
+/** A minimal stand-in for the host's opaque handle (`server/provider/credential-plan.ts`): the
+ *  runtime consumes only the `CredentialHandle` interface, so a test builds one directly. */
+function fakeHandle(value = FAKE_KEY): CredentialHandle {
+  const label = '[credential anthropic sha256:00000000]'
+  return { provider: 'anthropic', fingerprint: 'sha256:00000000', reveal: () => value, toString: () => label, toJSON: () => label } as CredentialHandle
 }
+
+/** Every call that does not assert on the capture itself writes it HERE — never a real home dir.
+ *  (`captureDir` is required: the runtime has no default capture path, D23.) */
+let CAPTURE_DIR = ''
+beforeAll(() => { CAPTURE_DIR = mkdtempSync(join(tmpdir(), 'agentistics-anthropic-client-')) })
+afterAll(() => { rmSync(CAPTURE_DIR, { recursive: true, force: true }) })
 
 const okResolver: CredentialResolver = {
   resolve: async () => ({ ok: true, handle: fakeHandle() }),
@@ -103,7 +111,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
         return jsonResponse(anthropicBody(), { headers: { 'request-id': 'req_c1' } })
       })
 
-      const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl })
+      const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
       expect(result.status).toBe('completed')
       expect(capturedUrl).toBeDefined()
@@ -135,7 +143,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
       )
     })
 
-    const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl })
+    const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(calls).toBe(1)
     expect(result.status).toBe('failed')
@@ -207,6 +215,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
     const result = await invokeOnce(baseRequest({ signal: controller.signal }), 1, {
       resolver: okResolver,
       fetchImpl,
+      captureDir: CAPTURE_DIR,
     })
 
     expect(result.status).toBe('failed')
@@ -226,7 +235,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
     })
     const resolver: CredentialResolver = { resolve: async () => ({ ok: false, reason: 'absent' }) }
 
-    const result = await invokeOnce(baseRequest(), 1, { resolver, fetchImpl })
+    const result = await invokeOnce(baseRequest(), 1, { resolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(result.status).toBe('failed')
     if (result.status === 'failed') {
@@ -243,7 +252,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
       return jsonResponse(anthropicBody())
     })
 
-    const result = await invokeOnce(baseRequest({ maxTokens: 0 }), 1, { resolver: okResolver, fetchImpl })
+    const result = await invokeOnce(baseRequest({ maxTokens: 0 }), 1, { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(result.status).toBe('failed')
     if (result.status === 'failed') expect(result.error.kind).toBe('invalid-request')
@@ -252,7 +261,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
 
   test('createAnthropicClient wires provider/adapterVersion/capabilities and delegates invokeOnce', async () => {
     const fetchImpl = stubFetch(async () => jsonResponse(anthropicBody()))
-    const client = createAnthropicClient({ resolver: okResolver, fetchImpl })
+    const client = createAnthropicClient({ resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(client.provider).toBe('anthropic')
     expect(client.capabilities.streaming).toBe(false)
@@ -272,7 +281,7 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
     expect(anthropicCounters.sdk_usage_divergence).toBe(0)
 
     const fetchImpl = stubFetch(async () => jsonResponse(anthropicBody())) // no request-id header
-    const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl })
+    const result = await invokeOnce(baseRequest(), 1, { resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(result.status).toBe('completed')
     if (result.status === 'completed') expect(result.requestId).toBeUndefined()
@@ -386,6 +395,7 @@ describe('capture failures never fail the call (spec §7)', () => {
     const result = await invokeOnce(baseRequest(), 1, {
       resolver: okResolver,
       fetchImpl,
+      captureDir: CAPTURE_DIR,
       writeCapture: throwingWriteCapture,
     })
 

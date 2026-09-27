@@ -183,7 +183,7 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
     restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
     why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '
-      + 'attempt by provider/capture.ts, 0600. Raw model output can echo anything the model read — a '
+      + 'attempt by @agentistics/runtime (provider/capture.ts), 0600. Raw model output can echo anything the model read — a '
       + 'token printed by a tool included — so it is excluded by default like a credential, not '
       + 'carried and hoped clean.',
   },

@@ -9,8 +9,12 @@
  * invocation is a confident 0 for a call that may have been billed.
  *
  * This module is a NON-holder of the credential: it names the opaque `CredentialRef` and the
- * `CredentialHandle` TYPE only. The one place a key is unwrapped is `anthropic/client.ts`
- * (`provider-secrets.lint.test.ts`, Guard 1).
+ * `CredentialHandle` TYPE only (declared in `./credential.ts`). The one place a key is unwrapped is
+ * `anthropic/client.ts` (`provider-secrets.lint.test.ts`, Guard 1).
+ *
+ * There is no module-level client registry: a client needs a `CredentialResolver` and a capture
+ * directory, and both belong to the HOST (D23 — the runtime reads no host path and no host store).
+ * `createProviderClients` builds the registry from what the host injects.
  */
 import type {
   EditPolicy,
@@ -20,20 +24,9 @@ import type {
   StopReason,
   UsageAnomaly,
 } from '@agentistics/core'
-import type { CredentialHandle, CredentialResolution } from './credentials.ts'
-import { ANTHROPIC_CLIENT } from './anthropic/client.ts'
+import type { CredentialRef } from './credential.ts'
 
-/** Opaque reference to a stored credential. NEVER the credential itself. */
-export interface CredentialRef {
-  provider: ProviderId
-  id: string
-}
-
-/** Implemented over `credentials.ts`'s `resolveCredential`; injected so tests never touch disk. */
-export interface CredentialResolver {
-  resolve(ref: CredentialRef): Promise<CredentialResolution>
-}
-export type { CredentialHandle }
+export type { CredentialHandle, CredentialRef, CredentialResolution, CredentialResolver } from './credential.ts'
 
 export interface CallCorrelation {
   /** minted by the caller, `inv_` prefix — the grouping key of an invocation's attempts */
@@ -143,22 +136,6 @@ export interface ProviderClient {
   readonly capabilities: { streaming: false; editPolicy: EditPolicy }
   /** never throws */
   invokeOnce(req: ProviderRequest, attempt: number): Promise<InvocationResult>
-}
-
-/**
- * Every provider, a decision. TOTAL over `ProviderId` (P1's `INTEGRATIONS` rule): a provider with
- * no client is a declared `null` with its reason beside it, and removing `anthropic` fails the build.
- */
-export const PROVIDER_CLIENTS: Record<ProviderId, ProviderClient | null> = {
-  anthropic: ANTHROPIC_CLIENT,
-  // B5 — the OpenAI Responses / Chat Completions usage map is not verified yet (spec §5.2).
-  openai: null,
-  // B5 — Gemini `generateContent` usage map not verified yet (spec §5.2).
-  google: null,
-  // B5 — Moonshot/Kimi routing is not a direct provider call B1 makes.
-  moonshot: null,
-  // Not a vendor: the bucket for models no provider claims. Nothing to call.
-  other: null,
 }
 
 /** Why a provider has no client — a sentence code, rendered by the caller. */

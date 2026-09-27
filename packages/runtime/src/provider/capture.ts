@@ -5,19 +5,17 @@
  * fetch forwards a caller's request UNTOUCHED and never reads `init.headers` or the request body,
  * so the key travelling on the request never reaches a variable here.
  *
- * `CONTENT_DIR` writes into exactly the layout the context manager's content store (spec §8.1,
- * `~/.agentistics/content/<sha[0:2]>/<sha256>`) will later own outright — one layout, never two —
- * and is excluded from backup by default (`backup-plan.ts`, spec §7).
+ * The capture directory is the HOST's (D23 — the runtime reads no host path): `writeCapture` takes
+ * it as a required `opts.dir`, and in agentop the host passes `CONTENT_DIR` (`server/config.ts`,
+ * `<AGENTISTICS_DIR>/content`). That is exactly the layout the context manager's content store
+ * (spec §8.1, `~/.agentistics/content/<sha[0:2]>/<sha256>`) will later own outright — one layout,
+ * never two — and is excluded from backup by default (`backup-plan.ts`, spec §7).
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AGENTISTICS_DATA_DIR } from '../config.ts'
 import { allowlistHeaders } from './anthropic/raw.ts'
 import type { CaptureRef, RawExchange } from './client.ts'
-
-/** `~/.agentistics/content` (or `AGENTISTICS_DIR`-relative) — CM §8.1's content-addressed layout. */
-export const CONTENT_DIR = join(AGENTISTICS_DATA_DIR, 'content')
 
 /**
  * Counters this module increments on a swallowed failure — `writeCapture` never throws, so a
@@ -116,9 +114,9 @@ async function fileExists(path: string): Promise<boolean> {
  */
 export async function writeCapture(
   ex: RawExchange,
-  opts?: { dir?: string },
+  opts: { dir: string },
 ): Promise<CaptureRef | undefined> {
-  const dir = opts?.dir ?? CONTENT_DIR
+  const { dir } = opts
   let tmpPath: string | undefined
 
   try {

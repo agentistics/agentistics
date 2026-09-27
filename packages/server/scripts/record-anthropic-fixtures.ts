@@ -5,7 +5,8 @@
  * spec: docs/superpowers/specs/2026-09-25-runtime-b1-provider.md §15 B1.5, §6.3.3 ("Fixtures").
  *
  * Makes ONE real, billed Anthropic call per invocation and writes the raw exchange to
- * `packages/server/test/fixtures/provider/anthropic/<scenario>.recorded.json`. An agent session
+ * `packages/runtime/test/fixtures/provider/anthropic/<scenario>.recorded.json` — the runtime's own
+ * fixtures, read by `@agentistics/runtime`'s `raw.fixtures.test.ts` and `fixtures-redaction.test.ts`. An agent session
  * never runs this (§6.1); the owner does, with the key already stored by `agentop provider key set`.
  *
  * Usage:
@@ -15,9 +16,10 @@
  *   options: --model <id>   (default claude-haiku-4-5-20251001, the cheapest current model)
  *            --force        overwrite an existing <scenario>.recorded.json
  *
- * THE KEY IS NEVER IN THIS FILE'S HANDS. The call goes through the real `invokeOnce`, whose default
- * resolver reads the key through `credentials.ts` and unwraps it inside `anthropic/client.ts` — the
- * one file allowed to. This script never names a header, never calls the unwrap, never reads the
+ * THE KEY IS NEVER IN THIS FILE'S HANDS. The call goes through the real `invokeOnce`
+ * (`@agentistics/runtime`), handed the HOST's resolver (`hostCredentialResolver`, `cli-provider.ts`),
+ * which reads the key through `credentials.ts`; it is unwrapped inside the runtime's
+ * `anthropic/client.ts` — the one file allowed to. This script never names a header, never calls the unwrap, never reads the
  * environment. The cache scenarios need a `cache_control` marker `ProviderRequest` cannot express
  * yet; instead of touching the client (B1.4's), the script hands `invokeOnce` a `fetchImpl` that
  * edits the outgoing JSON BODY only (`init.body`) and forwards `init` otherwise untouched.
@@ -25,7 +27,8 @@
  * WHAT IS WRITTEN goes through the same allowlist the runtime uses: the exchange is read back from
  * the content-addressed capture `invokeOnce` already wrote (headers allowlisted by `raw.ts` at the
  * transport), the headers are passed through `allowlistHeaders` AGAIN, and the whole document is
- * scanned by `assertFixtureClean` before a byte reaches the fixtures directory. A scan hit aborts
+ * scanned by `assertFixtureClean` (the runtime's `test/fixture-gate.ts`, the same gate the redaction test
+ * runs) before a byte reaches the fixtures directory. A scan hit aborts
  * with nothing written.
  *
  * COST: one call each. `plain` is a few tokens. The cache scenarios send a ~8k-token system prompt
@@ -35,47 +38,21 @@ import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { redactSecrets } from '@agentistics/core'
-import { invokeOnce } from '../server/provider/anthropic/client.ts'
-import { allowlistHeaders } from '../server/provider/anthropic/raw.ts'
-import type { ProviderRequest } from '../server/provider/client.ts'
+import { allowlistHeaders, invokeOnce, type ProviderRequest } from '@agentistics/runtime'
+import { assertFixtureClean, FORBIDDEN_NEEDLES } from '../../runtime/test/fixture-gate.ts'
+import { hostCredentialResolver } from '../server/cli-provider.ts'
+
+export { assertFixtureClean, FORBIDDEN_NEEDLES }
 
 export const FIXTURE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../test/fixtures/provider/anthropic',
+  '../../runtime/test/fixtures/provider/anthropic',
 )
 
 export const SCENARIOS = ['plain', 'cache-write', 'cache-read'] as const
 export type Scenario = (typeof SCENARIOS)[number]
 
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001'
-
-/**
- * Substrings that must never appear in a fixture, lower-cased and compared case-insensitively.
- * Spelled out (not derived) so the list a reviewer reads is the list that runs.
- */
-export const FORBIDDEN_NEEDLES: readonly string[] = [
-  'sk-ant-',
-  'x-api-key',
-  'authorization',
-  'anthropic-organization-id',
-  'anthropic-workspace-id',
-  'set-cookie',
-  'cookie',
-  'bearer ',
-]
-
-/**
- * Throws when `text` carries anything a fixture may not: a forbidden needle, or anything
- * `@agentistics/core`'s `redactSecrets` would rewrite (its patterns are the repo's one definition of
- * "secret-shaped"). Returns nothing; the only success is not throwing.
- */
-export function assertFixtureClean(text: string): void {
-  const hay = text.toLowerCase()
-  const hits = FORBIDDEN_NEEDLES.filter(n => hay.includes(n))
-  if (hits.length > 0) throw new Error(`fixture refused: contains ${hits.map(h => JSON.stringify(h)).join(', ')}`)
-  if (redactSecrets(text) !== text) throw new Error('fixture refused: redactSecrets would rewrite part of it')
-}
 
 /** ~8k tokens of deterministic, non-degenerate text — above every model's minimum cacheable prompt. */
 function paddedSystem(): string {
@@ -152,6 +129,7 @@ export async function record(argv: string[]): Promise<void> {
   try {
     const usesCache = scenario !== 'plain'
     const result = await invokeOnce(buildRequest(scenario, model), 1, {
+      resolver: hostCredentialResolver(),
       captureDir,
       ...(usesCache ? { fetchImpl: withCacheControl(fetch) } : {}),
     })

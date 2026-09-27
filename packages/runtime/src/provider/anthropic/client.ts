@@ -3,7 +3,9 @@
  * docs/superpowers/specs/2026-09-25-runtime-b1-provider.md §4.1, §4.4, §4.5, §6.3.2 Guard 1).
  *
  * This module is a HOLDER of the provider key (`provider-secrets.lint.test.ts`): it is the only
- * file allowed to call `CredentialHandle.reveal()` and to name the SDK's key option. The revealed
+ * file allowed to call `CredentialHandle.reveal()` and to name the SDK's key option. It never FINDS
+ * a key: the `CredentialResolver` is injected by the host (`AnthropicClientDeps.resolver`, D23 — the
+ * runtime reads no host store), as is the capture directory (`captureDir`). The revealed
  * string lives inside `invokeOnce`'s closure for exactly the span of one `createAnthropic({...})`
  * call — it is never assigned to a variable that outlives that call, never logged, never returned.
  *
@@ -41,12 +43,10 @@ import {
   type ProviderError,
 } from '@agentistics/core'
 import { createCapturingFetch, writeCapture as defaultWriteCapture } from '../capture.ts'
-import { resolveCredential } from '../credentials.ts'
 import { readAnthropicExchange, readSdkUsageCrossCheck } from './raw.ts'
 import type {
   CaptureRef,
   CredentialHandle,
-  CredentialRef,
   CredentialResolver,
   InvocationResult,
   ProviderClient,
@@ -78,20 +78,14 @@ export function resetAnthropicCounters(): void {
   anthropicCounters.request_id_missing = 0
 }
 
-/** Wraps `resolveCredential` (`../credentials.ts`) for provider `'anthropic'`; refuses any other
- *  provider's ref outright rather than asking the store about a key it could never have stored. */
-const DEFAULT_RESOLVER: CredentialResolver = {
-  async resolve(ref: CredentialRef) {
-    if (ref.provider !== 'anthropic') return { ok: false, reason: 'wrong-provider' }
-    return resolveCredential('anthropic')
-  },
-}
-
 export interface AnthropicClientDeps {
-  resolver?: CredentialResolver
+  /** REQUIRED — injected by the host (in agentop, over `server/provider/credentials.ts`). The runtime
+   *  has no store of its own to fall back on, so there is no default. */
+  resolver: CredentialResolver
+  /** REQUIRED — forwarded to `writeCapture`'s `opts.dir`. The host decides where raw captures live
+   *  (in agentop, `<AGENTISTICS_DIR>/content`); the runtime has no default path. */
+  captureDir: string
   fetchImpl?: typeof fetch
-  /** forwarded to `writeCapture`'s `opts.dir` — absent means capture.ts's own default (CONTENT_DIR). */
-  captureDir?: string
   writeCapture?: typeof defaultWriteCapture
   now?: () => Date
   monotonicNow?: () => number
@@ -100,7 +94,7 @@ export interface AnthropicClientDeps {
 interface ResolvedDeps {
   resolver: CredentialResolver
   fetchImpl: typeof fetch
-  captureDir: string | undefined
+  captureDir: string
   writeCapture: typeof defaultWriteCapture
   now: () => Date
   monotonicNow: () => number
@@ -108,7 +102,7 @@ interface ResolvedDeps {
 
 function resolveDeps(deps: AnthropicClientDeps): ResolvedDeps {
   return {
-    resolver: deps.resolver ?? DEFAULT_RESOLVER,
+    resolver: deps.resolver,
     fetchImpl: deps.fetchImpl ?? fetch,
     captureDir: deps.captureDir,
     writeCapture: deps.writeCapture ?? defaultWriteCapture,
@@ -314,12 +308,12 @@ async function callGenerateText(
 
 /**
  * The client's core (spec §4.1, §4.4, §4.5). Exported directly so tests (and `retry.ts`) can inject
- * `deps` without touching the module-level singleton `ANTHROPIC_CLIENT` below. Never throws.
+ * `deps` without building a client. Never throws.
  */
 export async function invokeOnce(
   req: ProviderRequest,
   attempt: number,
-  deps: AnthropicClientDeps = {},
+  deps: AnthropicClientDeps,
 ): Promise<InvocationResult> {
   const d = resolveDeps(deps)
   const startedAt = d.now().toISOString()
@@ -428,8 +422,8 @@ export async function invokeOnce(
   }
 }
 
-/** Builds a fresh `ProviderClient` over `deps` — the default export uses no overrides at all. */
-export function createAnthropicClient(deps: AnthropicClientDeps = {}): ProviderClient {
+/** Builds a `ProviderClient` over `deps` — the host binds its resolver and capture directory here. */
+export function createAnthropicClient(deps: AnthropicClientDeps): ProviderClient {
   return {
     provider: 'anthropic',
     adapterVersion: ADAPTER_VERSION,
@@ -437,5 +431,3 @@ export function createAnthropicClient(deps: AnthropicClientDeps = {}): ProviderC
     invokeOnce: (req, attempt) => invokeOnce(req, attempt, deps),
   }
 }
-
-export const ANTHROPIC_CLIENT: ProviderClient = createAnthropicClient()

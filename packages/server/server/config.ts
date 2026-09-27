@@ -322,6 +322,12 @@ export function providerFlagOn(env: Record<string, string | undefined> = process
  *  backup. Excluded from backups as a `secret` in backup-plan.ts. */
 export const PROVIDER_KEYS_DIR = join(AGENTISTICS_DATA_DIR, 'provider-keys')
 
+/** The content store (context-manager spec §8.1): `<sha[0:2]>/<sha256>`, content-addressed. The
+ *  native runtime's raw provider captures land here — `@agentistics/runtime` has no path of its own
+ *  (D23), so the host passes this as the client's `captureDir`. Excluded from backups as a `secret`
+ *  in backup-plan.ts. */
+export const CONTENT_DIR = join(AGENTISTICS_DATA_DIR, 'content')
+
 /** The providers a key may be STORED for. Closed, and deliberately narrower than core's
  *  `ProviderId`: B1 enters an Anthropic key and nothing else (owner decision D3). */
 export type KeyedProviderId = 'anthropic'

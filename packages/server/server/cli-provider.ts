@@ -17,6 +17,7 @@
  */
 
 import {
+  CONTENT_DIR,
   isKeyedProvider,
   KEYED_PROVIDERS,
   PROVIDER_FLAG_ENV,
@@ -37,7 +38,7 @@ import {
   resolveCredential,
   storeCredential,
 } from './provider/credentials.ts'
-import type { ProviderClient } from './provider/client.ts'
+import type { AnthropicClientDeps, CredentialResolver, ProviderClient } from '@agentistics/runtime'
 import type { Journal } from './journal/types'
 
 /** Inferred from the function itself rather than a separately named exported type — this module
@@ -80,8 +81,32 @@ export interface ProviderCliDeps {
   /** `try` only: opens the journal the call is recorded in. Default `openJournal()` (the machine's
    *  journal, `AGENTISTICS_DIR`). A failure to open is not a failure of the call. */
   openJournal?: () => Promise<Journal | null>
-  /** `try` only: where the raw capture is written. Default is `capture.ts`'s own directory. */
+  /** `try` only: where the raw capture is written. Default is the machine's content store,
+   *  `CONTENT_DIR` (`config.ts`) — the runtime has no default of its own (D23). */
   captureDir?: string
+}
+
+// ---------------------------------------------------------------------------
+// The host's half of the runtime's injection seams (D23). `@agentistics/runtime` never finds a key
+// or a directory on its own: whoever builds a client hands it a resolver and a capture directory.
+// Everything that builds an Anthropic client in this binary — `runTry` below, and a registry via
+// the runtime's `createProviderClients({ anthropic: hostAnthropicClientDeps() })` — goes through
+// here, so the two seams are bound in exactly one place.
+// ---------------------------------------------------------------------------
+
+/** Resolves a runtime `CredentialRef` against the key store (`credentials.ts`). A ref for any
+ *  provider this store cannot hold is refused outright rather than asked about. */
+export function hostCredentialResolver(dir?: string): CredentialResolver {
+  return {
+    resolve: (ref) => ref.provider === 'anthropic'
+      ? resolveCredential('anthropic', { dir })
+      : Promise.resolve({ ok: false as const, reason: 'wrong-provider' as const }),
+  }
+}
+
+/** The Anthropic client's host-owned dependencies: the key store's resolver and the content store. */
+export function hostAnthropicClientDeps(opts: { dir?: string; captureDir?: string } = {}): AnthropicClientDeps {
+  return { resolver: hostCredentialResolver(opts.dir), captureDir: opts.captureDir ?? CONTENT_DIR }
 }
 
 async function defaultIsCentral(): Promise<boolean> {
@@ -379,16 +404,9 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     return 1
   }
 
-  const [{ createAnthropicClient }, { createProviderEmitter, invokedEvent, terminalEvent }] = await Promise.all([
-    import('./provider/anthropic/client.ts'),
-    import('./provider/emit.ts'),
-  ])
-  const client = d.client ?? createAnthropicClient({
-    resolver: { resolve: (ref) => ref.provider === 'anthropic'
-      ? resolveCredential('anthropic', { dir: d.dir })
-      : Promise.resolve({ ok: false as const, reason: 'wrong-provider' as const }) },
-    ...(d.captureDir === undefined ? {} : { captureDir: d.captureDir }),
-  })
+  // Lazy: `key set|status|remove` never load the AI SDK the runtime carries.
+  const { createAnthropicClient, createProviderEmitter, invokedEvent, terminalEvent } = await import('@agentistics/runtime')
+  const client = d.client ?? createAnthropicClient(hostAnthropicClientDeps({ dir: d.dir, captureDir: d.captureDir }))
 
   let journal: Journal | null = null
   try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
