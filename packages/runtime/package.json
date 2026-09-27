@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/runtime",
-  "version": "2.65.0",
+  "version": "2.66.0",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
