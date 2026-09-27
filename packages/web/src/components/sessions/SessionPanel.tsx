@@ -55,6 +55,7 @@ import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
 } from './bandControls'
+import { PanelGapDots } from './PanelGap'
 
 export type SessionView = 'chat' | 'terminal'
 
@@ -1110,10 +1111,19 @@ function PanelBarBand({
   // menu's own "Mover para baixo"/"Move to the bottom" verb.
   if (barEntries.length === 0) return null
   return (
-    <div style={{
-      flexShrink: 0, display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)', background: 'var(--bg-surface)',
-    }}>
+    <>
+      {/* THE GAP IS THE HANDLE (`sdd/brief.md`) — even here, where there is nothing to RESIZE (this
+          band never grew a height of its own; it is one fixed-height row). An INERT gap, no
+          `role="separator"`/no drag: a relayed session's band is still its own panel below the
+          conversation, so the two must never touch, but there is no axis to drag between them. */}
+      <div aria-hidden="true" className="ag-panel-gap" style={{ height: 6, flexShrink: 0, cursor: 'default' }}>
+        <PanelGapDots orientation="horizontal" />
+      </div>
+      <div style={{
+        flexShrink: 0, display: 'flex', flexDirection: 'column',
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        background: 'var(--bg-surface)',
+      }}>
       <div
         ref={barWidthRef}
         role="button"
@@ -1152,7 +1162,8 @@ function PanelBarBand({
           {pt ? REASON_TEXT[reason].pt : REASON_TEXT[reason].en}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 

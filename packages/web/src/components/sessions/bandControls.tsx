@@ -78,6 +78,12 @@ export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }
       aria-label={label}
       tabIndex={0}
       className="ag-panel-gap"
+      // A stable id — the ONE thing a T-junction (`PanelGap.tsx`'s `armGap`) needs to replay a
+      // synthetic `mousedown` on THIS band's own resize handle, arming its window-level listener
+      // exactly as a genuine press would. Whichever band is docked right now (Studio/Shell/a
+      // SimpleDockedBand tab) renders its own `BandResizeHandle`, so this id always names whichever
+      // one is actually on screen — never a specific band type's own handle.
+      id="ag-gap-band-height"
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onKeyDown={onKeyDown}

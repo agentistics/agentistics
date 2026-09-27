@@ -22,6 +22,11 @@ export const PANEL_GAP_PX = 6
 export interface PanelGapProps {
   orientation: 'vertical' | 'horizontal'
   label: string
+  /** A stable DOM id — used only so a T-junction (`PanelJunction`, below) can find THIS gap's real
+   *  element and replay a synthetic `mousedown` on it at the drag's own start position, arming its
+   *  window-level listener exactly as a genuine press would. Optional: a lone gap with no junction
+   *  beside it never needs one. */
+  id?: string
   /** The size in force right now (width for a vertical gap, height for a horizontal one). */
   value: number
   min: number
@@ -49,7 +54,7 @@ export interface PanelGapProps {
 }
 
 export function PanelGap({
-  orientation, label, value, min, max, sign, onChange, onCommit, step = 16, disabled = false, style,
+  orientation, label, id, value, min, max, sign, onChange, onCommit, step = 16, disabled = false, style,
 }: PanelGapProps) {
   const dragging = useRef(false)
   const start = useRef({ pointer: 0, value })
@@ -126,6 +131,7 @@ export function PanelGap({
       aria-valuemax={max}
       tabIndex={disabled ? -1 : 0}
       className="ag-panel-gap"
+      {...(id ? { id } : {})}
       onMouseDown={onMouseDown}
       onKeyDown={onKeyDown}
       style={{
@@ -165,47 +171,52 @@ export function PanelGapDots({ orientation }: { orientation: 'vertical' | 'horiz
 }
 
 /**
+ * armGap — replays a synthetic `mousedown` on a REAL gap's own DOM element, at the exact pointer
+ * position a genuine press on it would have used, so that gap's own `window`-level `mousemove`/
+ * `mouseup` listeners (`PanelGap`'s own effect, above, and `useBandDrag`'s — `bandControls.tsx`)
+ * arm themselves precisely as they would from a direct press. This is how a T-junction drags TWO
+ * boundaries — the band's height and an aside's width — from ONE pointer gesture, WITHOUT this
+ * module re-implementing either boundary's own clamp, snap-to-full or persistence: the two gaps a
+ * junction sits between keep being the ONLY code that ever resizes them, so a junction drag and an
+ * ordinary drag on either gap alone can never disagree about what is allowed. The subsequent REAL
+ * `mousemove`/`mouseup` events reach both armed listeners the same way any window-level listener
+ * receives them — this function only ever needs to fire once, at the junction's own `mousedown`.
+ */
+export function armGap(id: string, e: { clientX: number; clientY: number }): void {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.dispatchEvent(new MouseEvent('mousedown', {
+    bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+  }))
+}
+
+/**
  * PanelJunction — the T-junction's own square hot zone (brief: "a square hot zone ... `cursor:
  * move` drags BOTH boundaries at once"). Renders NOTHING of its own beyond the cursor and the hit
  * area — the two gaps it overlaps already draw their own dots, and a THIRD mark at the exact point
  * they cross would be visual noise rather than a third piece of information.
  *
- * `onDrag` receives the pointer's OWN raw delta since the gesture began; the caller resolves it
- * through `applyJunctionDrag` (`lib/panelLayout.ts`) against each boundary's own start/sign/limits,
- * so this component holds no clamping of its own.
+ * Positioned with `position: fixed` at the caller's own `left`/`top` (viewport pixels — the
+ * crossing point of the two real gaps it sits between, which the caller measures because it is the
+ * one place that knows where BOTH of them are; see `SessionsPage.tsx`'s `useJunctionPoint`). This
+ * component holds no geometry of its own beyond the square it draws.
+ *
+ * `onDown` fires ONCE, synchronously, at the very start of the press — the caller's one chance to
+ * call `armGap` for each of the two real boundaries this junction crosses (see that function's own
+ * header for why arming, not `applyJunctionDrag`, is what actually moves both boundaries). This
+ * component tracks nothing else: once armed, the two real gaps' own listeners do the rest.
  */
 export function PanelJunction({
-  label, size, onDrag, onCommit,
+  label, size, left, top, onDown,
 }: {
   label: string
   /** The square's own side, in px — see `junctionHitRect` for how the caller sized it. */
   size: number
-  onDrag: (dx: number, dy: number) => void
-  onCommit?: () => void
+  /** The crossing point, in viewport pixels — see `SessionsPage.tsx`'s own measuring effect. */
+  left: number
+  top: number
+  onDown: (e: { clientX: number; clientY: number }) => void
 }) {
-  const dragging = useRef(false)
-  const origin = useRef({ x: 0, y: 0 })
-
-  useEffect(() => {
-    const move = (e: MouseEvent) => {
-      if (!dragging.current) return
-      onDrag(e.clientX - origin.current.x, e.clientY - origin.current.y)
-    }
-    const up = () => {
-      if (!dragging.current) return
-      dragging.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      onCommit?.()
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-    return () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-  }, [onDrag, onCommit])
-
   return (
     <div
       role="separator"
@@ -213,16 +224,18 @@ export function PanelJunction({
       aria-label={label}
       tabIndex={-1}
       className="ag-panel-junction"
-      onMouseDown={e => {
-        e.preventDefault()
-        dragging.current = true
-        origin.current = { x: e.clientX, y: e.clientY }
-        document.body.style.cursor = 'move'
-        document.body.style.userSelect = 'none'
-      }}
+      onMouseDown={e => { e.preventDefault(); onDown(e) }}
       style={{
-        position: 'absolute', width: size, height: size,
-        transform: 'translate(-50%, -50%)', cursor: 'move', zIndex: 5,
+        position: 'fixed', left, top, width: size, height: size,
+        transform: 'translate(-50%, -50%)', cursor: 'move',
+        // Higher than every stacking context this workspace draws, INCLUDING `App.tsx`'s own
+        // `SideNav` (`zIndex: 200`) — the bottom-left junction sits right where that aside's own
+        // gap ends, and `position: fixed` establishes its OWN stacking context whose z-index is
+        // compared against the SideNav's at whatever ancestor level the two are siblings, not
+        // against the gap's own `4` directly. Measured live: at `zIndex: 6` the SideNav's subtree
+        // painted OVER this junction and a press there landed on the plain aside gap underneath —
+        // the aside moved, the band never armed.
+        zIndex: 700,
       }}
     />
   )

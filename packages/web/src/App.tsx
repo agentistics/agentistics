@@ -111,6 +111,7 @@ import {
 } from './lib/sessionsFiltersPanel'
 import { useRightAsideEdge } from './lib/rightAsideEdge'
 import { setLeftAsideEdge } from './lib/leftAsideEdge'
+import { setLeftAsideOpen } from './lib/leftAsideOpen'
 import { CentralSessions } from './components/sessions/CentralSessions'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
@@ -1281,7 +1282,19 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
       // it always had — this is a `mode === 'sessions'` styling branch, nothing else.
       background: mode === 'sessions' ? 'var(--bg-base)' : 'var(--bg-surface)',
       borderRight: mode === 'sessions' ? 'none' : '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column', padding: collapsed ? '0 8px 12px' : '0 12px 14px', boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column',
+      // OUTER FRAME GAPS (`sdd/brief.md`, task 2): the sessions-workspace panel's LEFT edge sits
+      // exactly 6px from the window's left edge and its BOTTOM edge 6px from the window's bottom —
+      // the same figure as every inter-panel gap. The RIGHT side gets NO padding here: the panel's
+      // own right border sits flush with this aside's own right edge (`x = asideWidth`), which is
+      // exactly where the content area's own `paddingLeft` begins — the vertical gap element
+      // (`right: -3` on the panel host, below) straddles that boundary and is the ONLY space
+      // between this panel and the conversation panel next to it. Adding padding here too would
+      // double it. Every other workspace, and the collapsed 64px rail, keep their old figures.
+      padding: mode === 'sessions'
+        ? (collapsed ? '0 8px 12px' : '0 0 6px 6px')
+        : (collapsed ? '0 8px 12px' : '0 12px 14px'),
+      boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
       // it. Visible overflow, because that handle straddles the border by design and clipping it
       // would leave half the hit area.
@@ -1364,6 +1377,10 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
             <PanelGap
               orientation="vertical"
               label={pt ? 'Redimensionar lista de sessões' : 'Resize sessions list'}
+              // A stable id — the bottom-left T-junction (`SessionsPage.tsx`, via `PanelGap.tsx`'s
+              // `armGap`) replays a synthetic `mousedown` on this exact element to arm its own
+              // window-level drag listener, reusing this gap's own clamp/persistence verbatim.
+              id="ag-gap-aside-left"
               value={width} min={ASIDE_MIN} max={ASIDE_MAX} sign={1}
               onChange={w => { setDragging(true); onResize(clampAsideWidth(w, window.innerWidth)) }}
               onCommit={w => { setDragging(false); onCommitWidth(clampAsideWidth(w, window.innerWidth)) }}
@@ -1758,6 +1775,10 @@ export default function AppLayout() {
   // for a full-screen surface to avoid, and mobile panels cover the viewport by design anyway.
   useEffect(() => {
     setLeftAsideEdge(isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth))
+    // Alongside it — see `leftAsideOpen.ts`'s own header for why this needs to be a SEPARATE
+    // boolean rather than a comparison against the edge above (a genuinely narrow expanded list can
+    // coincide with `SIDEBAR_W_COLLAPSED`'s own width).
+    setLeftAsideOpen(!isMobile && !sidebarCollapsed)
   }, [isMobile, sidebarCollapsed, liveAsideWidth])
 
   /**
