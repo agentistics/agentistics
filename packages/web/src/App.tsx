@@ -1307,7 +1307,8 @@ function SideNav({
       // below) straddles that boundary and is the ONLY space between this panel and the conversation
       // panel next to it. Every other workspace, and the collapsed 64px rail, keep their old figures.
       padding: mode === 'sessions'
-        ? (collapsed ? '0 8px 12px' : `0 ${PANEL_GAP}px 6px 6px`)
+        // Collapsed, the rail panel ends at the same 6px floor as every other panel on the board.
+        ? (collapsed ? `0 ${PANEL_GAP}px 6px 6px` : `0 ${PANEL_GAP}px 6px 6px`)
         : (collapsed ? '0 8px 12px' : '0 12px 14px'),
       boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
@@ -1358,7 +1359,8 @@ function SideNav({
             border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
             background: 'var(--bg-surface)',
             // Inner breathing room: the search, buttons and rows no longer touch the panel's edges.
-            padding: collapsed ? 0 : 8,
+            // Collapsed keeps vertical room too, so the footer's last button never sits on the edge.
+            padding: collapsed ? '6px 0' : 8,
           }}>
             {collapsed ? (
               <SessionsRail
