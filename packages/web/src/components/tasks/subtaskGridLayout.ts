@@ -8,13 +8,12 @@
  * shown column (`COLUMNS.filter(shown)`) — and the "Columns" picker has no floor on how few of those
  * a reader may hide.
  *
- * The subtask rows draw a FIXED 8 cells of their own (a leading action-menu cell, the title, then
- * status/started/completed/sessions/cost/tokens — see `SubtaskRows`'s own doc comment) plus a
- * filler cell that closes the row out to `cols.length + 2`. That arithmetic only has a filler to
- * grow when `cols.length >= 6` (`filler = cols.length - 6`, clamped at 0) — hide columns down to
- * five or fewer and the fixed 8 cells alone already overshoot `cols.length + 2`, so the subtask rows
- * end up WIDER than the main rows in the same table and every column in every row below them
- * misaligns.
+ * The subtask rows draw a FIXED 9 cells of their own (a leading action-menu cell, the title, then
+ * status/started/completed/DURATION/sessions/cost/tokens — see `SubtaskRows`'s own doc comment) plus
+ * a filler cell that closes the row out to `cols.length + 2`. That arithmetic only has a filler to
+ * grow when `cols.length >= 7` (`filler = cols.length - 7`, clamped at 0) — hide columns down to six
+ * or fewer and the fixed 9 cells alone already overshoot `cols.length + 2`, so the subtask rows end
+ * up WIDER than the main rows in the same table and every column in every row below them misaligns.
  *
  * `subtaskGridLayout` is the one place that decides which of the table's two layouts a delivery's
  * subtasks get, so the arithmetic behind it is tested independently of the JSX that reads it:
@@ -23,12 +22,12 @@
  *   row and `SubtaskRows` are drawn as rows of the outer table, closed out by `filler` cells.
  * - **`nested`** (fewer): the whole subtask block for that delivery is ONE row of the outer table —
  *   a leading cell plus a single cell spanning the rest, holding its OWN table with the subtask
- *   grid's 7 named columns, scrolling horizontally inside itself rather than ever widening the
+ *   grid's 8 named columns, scrolling horizontally inside itself rather than ever widening the
  *   outer one. That inner table is sized as though the outer table held exactly
  *   `SUBTASK_GRID_MIN_COLS` columns, which is what makes its own filler come out to zero.
  */
 
-export const SUBTASK_GRID_MIN_COLS = 6
+export const SUBTASK_GRID_MIN_COLS = 7
 
 export type SubtaskGridMode = 'inline' | 'nested'
 

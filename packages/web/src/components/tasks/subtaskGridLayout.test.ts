@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { SUBTASK_GRID_MIN_COLS, subtaskGridLayout } from './subtaskGridLayout'
 
 // The main row always carries `cols.length + 2` cells (a leading cell, the title, then one per
-// shown column). The subtask rows draw 8 fixed cells of their own (see the module's doc comment)
+// shown column). The subtask rows draw 9 fixed cells of their own (see the module's doc comment)
 // plus a filler that must close the row out to the same width — this is the invariant the whole
 // bug was about, so it is pinned for every `colsCount` a reader could ever pick, not just a sample.
 describe('subtaskGridLayout', () => {
@@ -10,9 +10,9 @@ describe('subtaskGridLayout', () => {
     for (let colsCount = 0; colsCount <= 20; colsCount++) {
       const layout = subtaskGridLayout(colsCount)
       if (layout.mode !== 'inline') continue
-      // 8 fixed cells (leading + title + status + started + completed + sessions + cost + tokens)
-      // plus the filler must equal the main row's own `colsCount + 2`.
-      const inlineWidth = 8 + layout.filler
+      // 9 fixed cells (leading + title + status + started + completed + duration + sessions + cost
+      // + tokens) plus the filler must equal the main row's own `colsCount + 2`.
+      const inlineWidth = 9 + layout.filler
       expect(inlineWidth).toBe(colsCount + 2)
     }
   })
