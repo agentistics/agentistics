@@ -138,3 +138,19 @@ describe('paste and the word delete the browser allows', () => {
     expect(guardNoticeText('copied', 'pt', 12)).toContain('12')
   })
 })
+
+describe('the phone strip: a second press instead of Shift', async () => {
+  const { stripCtrlGuard, STRIP_EOF_CONFIRM_MS } = await import('./keyStrip')
+  test('ctrl+c is refused on an assistant pane, passes in the shell', () => {
+    expect(stripCtrlGuard('C-c', true, null, 1000)).toBe('blocked-interrupt')
+    expect(stripCtrlGuard('C-c', false, null, 1000)).toBe('send')
+  })
+  test('ctrl+d needs a second press within the window', () => {
+    expect(stripCtrlGuard('C-d', true, null, 1000)).toBe('arm-eof')
+    expect(stripCtrlGuard('C-d', true, 1000, 1000 + STRIP_EOF_CONFIRM_MS)).toBe('confirmed-eof')
+    expect(stripCtrlGuard('C-d', true, 1000, 1001 + STRIP_EOF_CONFIRM_MS)).toBe('arm-eof')
+  })
+  test('every other key is sent as before', () => {
+    for (const k of ['C-a', 'C-e', 'C-u', 'C-w', 'C-k', 'C-l'] as const) expect(stripCtrlGuard(k, true, null, 0)).toBe('send')
+  })
+})

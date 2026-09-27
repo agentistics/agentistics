@@ -68,7 +68,8 @@ import {
 import {
   INITIAL_SHELL_BAND, shellBandReducer, shellResolveWanted, type OpenShell,
 } from '../../lib/shellBandState'
-import { ctrlKeyFor, keyBytes, stripEntries, stripKeyLabel } from '../../lib/keyStrip'
+import { ctrlKeyFor, keyBytes, stripCtrlGuard, stripEntries, stripKeyLabel } from '../../lib/keyStrip'
+import { guardNoticeText, NOTICE_TONE, type NoticeKind } from '../../lib/terminalShortcuts'
 import { clipboardPasteAvailable, pasteFromClipboard } from '../../lib/clipboardPaste'
 import { terminalStatus } from '../../lib/terminalStream'
 import { createPaneResizer } from '../../lib/paneResizeRequest'
@@ -432,6 +433,8 @@ export function ShellBand({
   /** The terminal's last confirmation (a key sent, refused, a copy, a paste) — shown in the band's
    *  own sentence line, the one place every message this terminal gives appears, for 5 seconds. */
   const [keyNotice, setKeyNotice] = useState<TerminalNotice | null>(null)
+  /** When the strip's first `ctrl`+`d` was pressed — the confirming second press must follow soon. */
+  const stripEofAt = useRef<number | null>(null)
   useEffect(() => {
     if (!keyNotice) return
     const t = setTimeout(() => setKeyNotice(n => (n && n.at === keyNotice.at ? null : n)), 5000)
@@ -671,11 +674,19 @@ export function ShellBand({
       const key = ctrlKeyFor(data)
       if (!key) { setCtrlNote(t.ctrlRefused(data)); return }
       setCtrlNote(null)
+      // The phone's session-ending guard — see `stripCtrlGuard`.
+      const now = Date.now()
+      const verdict = stripCtrlGuard(key, target === 'cli', stripEofAt.current, now)
+      const tell = (kind: NoticeKind) => setKeyNotice({ text: guardNoticeText(kind, lang), tone: NOTICE_TONE[kind], at: now })
+      if (verdict === 'blocked-interrupt') { tell('blocked-interrupt-strip'); return }
+      if (verdict === 'arm-eof') { stripEofAt.current = now; tell('eof-arm-strip'); return }
+      stripEofAt.current = null
+      if (verdict === 'confirmed-eof') tell('confirmed-eof')
       write.send(keyBytes(key))
       return
     }
     write.send(data)
-  }, [ctrlArmed, write, t])
+  }, [ctrlArmed, write, t, target, lang])
 
   /** A paste — from the native paste event OR the strip's own `paste` button — is one atomic
    *  message, never a keystroke, and cancels an armed ctrl the same way any other strip press

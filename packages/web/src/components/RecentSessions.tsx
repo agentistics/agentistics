@@ -22,7 +22,8 @@ import { operatorId, recordPromptSend, resolveAuthor } from '../lib/promptAudit'
 import { getTerminalZoom, setTerminalZoom, subscribeTerminalZoom, ZOOM_STEP, ZOOM_MIN, ZOOM_MAX } from '../lib/terminalZoom'
 import { consentMode, keyStripShown, type TerminalPlacement } from '../lib/terminalSurface'
 import { createPaneResizer } from '../lib/paneResizeRequest'
-import { ctrlKeyFor, keyBytes, stripEntries, stripKeyLabel } from '../lib/keyStrip'
+import { ctrlKeyFor, keyBytes, stripCtrlGuard, stripEntries, stripKeyLabel } from '../lib/keyStrip'
+import { guardNoticeText } from '../lib/terminalShortcuts'
 import { clipboardPasteAvailable, pasteFromClipboard } from '../lib/clipboardPaste'
 import { getPinnedIds, isSessionPinned, togglePinnedSession, subscribePinnedSessions, pinnedServerSnapshot, MAX_PINNED } from '../lib/pinnedSessions'
 import { getOpenModalSession, setOpenModalSession, subscribeOpenModalSession } from '../lib/openModalSession'
@@ -1846,6 +1847,7 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
   const resizer = useMemo(() => createPaneResizer({ scope: 'fleet', id }), [id])
   useEffect(() => () => resizer.cancel(), [resizer])
   /** One send path for everything: a strip press and a real keypress are judged by one allowlist. */
+  const stripEofAt = useRef<number | null>(null)
   const sendKeys = (data: string) => {
     if (!ctrlArmed) { write.send(data); return }
     setCtrlArmed(false)
@@ -1856,7 +1858,13 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
         : `ctrl+${data} is not one of the keys this channel sends.`)
       return
     }
-    setStripNote(null)
+    // The phone's session-ending guard — see `stripCtrlGuard`. This is always an assistant's pane.
+    const now = Date.now()
+    const verdict = stripCtrlGuard(key, true, stripEofAt.current, now)
+    if (verdict === 'blocked-interrupt') { setStripNote(guardNoticeText('blocked-interrupt-strip', lang)); return }
+    if (verdict === 'arm-eof') { stripEofAt.current = now; setStripNote(guardNoticeText('eof-arm-strip', lang)); return }
+    stripEofAt.current = null
+    setStripNote(verdict === 'confirmed-eof' ? guardNoticeText('confirmed-eof', lang) : null)
     write.send(keyBytes(key))
   }
   /** A paste never goes through `sendKeys` — it is one atomic message, not a keystroke burst — and

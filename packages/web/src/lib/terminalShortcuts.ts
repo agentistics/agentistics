@@ -116,12 +116,13 @@ export function shortcutDecision(e: ShortcutEvent, hasSelection = false): Shortc
 export type NoticeTone = 'info' | 'warn' | 'danger'
 
 export type NoticeKind =
-  | 'blocked-interrupt' | 'blocked-eof' | 'confirmed-eof'
+  | 'blocked-interrupt' | 'blocked-eof' | 'confirmed-eof' | 'eof-arm-strip' | 'blocked-interrupt-strip'
   | 'copied' | 'copy-empty' | 'pasted' | 'word-delete'
   | 'C-a' | 'C-e' | 'C-u' | 'C-w' | 'C-k' | 'C-l'
 
 export const NOTICE_TONE: Record<NoticeKind, NoticeTone> = {
   'blocked-interrupt': 'warn', 'blocked-eof': 'warn', 'confirmed-eof': 'danger',
+  'eof-arm-strip': 'warn', 'blocked-interrupt-strip': 'warn',
   copied: 'info', 'copy-empty': 'info', pasted: 'info', 'word-delete': 'info',
   'C-a': 'info', 'C-e': 'info', 'C-u': 'info', 'C-w': 'info', 'C-k': 'info', 'C-l': 'info',
 }
@@ -147,6 +148,12 @@ export function guardNoticeText(kind: NoticeKind, lang: 'pt' | 'en', n?: number)
       return pt
         ? 'Ctrl+D enviado (Ctrl+Shift+D) — isso encerra a sessão se a linha estiver vazia.'
         : 'Ctrl+D sent (Ctrl+Shift+D) — this ends the session if the line is empty.'
+    case 'blocked-interrupt-strip':
+      return pt ? 'ctrl+c está bloqueado porque encerra a sessão. Para interromper, toque esc.'
+        : 'ctrl+c is blocked because it ends the session. To interrupt, tap esc.'
+    case 'eof-arm-strip':
+      return pt ? 'ctrl+d encerra a sessão. Toque ctrl e d de novo em 3 segundos para enviar mesmo assim.'
+        : 'ctrl+d ends the session. Tap ctrl and d again within 3 seconds to send it anyway.'
     case 'copied':
       return pt ? `Copiado — ${n ?? 0} caracteres.` : `Copied — ${n ?? 0} characters.`
     case 'copy-empty':
