@@ -1,0 +1,16 @@
+{
+  "_source": "docs/superpowers/research/12-provider-apis.md §2.1 (usage object) + §7 trap 2 (prompt_tokens INCLUDES the cached sub-count, unlike Anthropic). Counters illustrative.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-openai-cached-0001",
+    "model": "gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Cached." } }],
+    "usage": {
+      "prompt_tokens": 140,
+      "completion_tokens": 30,
+      "total_tokens": 170,
+      "prompt_tokens_details": { "cached_tokens": 40, "audio_tokens": 0 },
+      "completion_tokens_details": { "reasoning_tokens": 0 }
+    }
+  }
+}

@@ -62,7 +62,13 @@ export interface CapturingFetch {
  * function does not catch it, because classifying a failure is the caller's job (spec §4.3), not
  * this wrapper's.
  */
-export function createCapturingFetch(inner: typeof fetch = fetch): CapturingFetch {
+export function createCapturingFetch(
+  inner: typeof fetch = fetch,
+  /** Which response headers survive into the exchange — each client passes ITS OWN allowlist
+   *  (`openai-compatible/raw.ts`); the default is Anthropic's, so every existing caller is unchanged.
+   *  Always an allowlist, never a denylist (spec §6.3.3). */
+  keepHeaders: (headers: Headers) => Record<string, string> = allowlistHeaders,
+): CapturingFetch {
   const exchanges: RawExchange[] = []
   let sent = false
   let count = 0
@@ -74,7 +80,7 @@ export function createCapturingFetch(inner: typeof fetch = fetch): CapturingFetc
     const body = await response.clone().text()
     exchanges.push({
       status: response.status,
-      headers: allowlistHeaders(response.headers),
+      headers: keepHeaders(response.headers),
       body,
     })
     return response

@@ -12,9 +12,16 @@
 import type { ProviderId } from '@agentistics/core'
 import type { ProviderClient } from './client.ts'
 import { createAnthropicClient, type AnthropicClientDeps } from './anthropic/client.ts'
+import {
+  createOpenAICompatibleClient,
+  type OpenAICompatibleClientDeps,
+} from './openai-compatible/client.ts'
 
 export interface ProviderClientsDeps {
   anthropic: AnthropicClientDeps
+  /** B5a — ONE configured Chat Completions endpoint. Absent: the slot is a declared `null`
+   *  (`PROVIDER_CLIENT_ABSENT['openai-compatible']`), never a client pointed at a guessed URL. */
+  openaiCompatible?: OpenAICompatibleClientDeps
 }
 
 export function createProviderClients(deps: ProviderClientsDeps): Record<ProviderId, ProviderClient | null> {
@@ -26,6 +33,8 @@ export function createProviderClients(deps: ProviderClientsDeps): Record<Provide
     google: null,
     // B5 — Moonshot/Kimi routing is not a direct provider call B1 makes.
     moonshot: null,
+    // B5a — a client only when the host configured an endpoint; the runtime has no default one.
+    'openai-compatible': deps.openaiCompatible ? createOpenAICompatibleClient(deps.openaiCompatible) : null,
     // Not a vendor: the bucket for models no provider claims. Nothing to call.
     other: null,
   }

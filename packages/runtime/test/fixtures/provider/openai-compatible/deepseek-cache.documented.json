@@ -1,0 +1,16 @@
+{
+  "_source": "task brief's own field names (prompt_cache_hit_tokens / prompt_cache_miss_tokens), corroborated by a tool-summarized fetch of https://api-docs.deepseek.com/api/create-chat-completion on 2026-09-27 (paraphrased, not a byte-for-byte quote — see usage.ts module doc 'DeepSeek's cache split'). Counters illustrative; hit+miss sums to prompt_tokens.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-deepseek-cache-0001",
+    "model": "deepseek-chat",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "OK." } }],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "total_tokens": 150,
+      "prompt_cache_hit_tokens": 64,
+      "prompt_cache_miss_tokens": 36
+    }
+  }
+}

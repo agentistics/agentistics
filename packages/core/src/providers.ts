@@ -18,7 +18,17 @@
  * ungrouped row instead of breaking the page.
  */
 
-export type ProviderId = 'anthropic' | 'openai' | 'google' | 'moonshot' | 'other'
+/**
+ * `'openai-compatible'` is in the union but has NO entry in `PROVIDERS` below, on purpose (B5a, D1).
+ * It is a PROTOCOL — the OpenAI Chat Completions wire shape, spoken by OpenAI itself, OpenRouter,
+ * DeepSeek, LiteLLM, 9router and Ollama — not a company that bills a model id. The native runtime
+ * needs it as a `ProviderId` because a `ProviderClient`, a journaled `model.*` event and a stored
+ * credential all name the protocol their request was made over. Pricing needs the opposite: the
+ * vendor that bills the MODEL, whichever door the request went through. So `resolveProvider` never
+ * returns it (a model id carries no protocol), and a model served over this protocol is grouped by
+ * its own prefix like every other.
+ */
+export type ProviderId = 'anthropic' | 'openai' | 'google' | 'moonshot' | 'openai-compatible' | 'other'
 
 export interface ProviderInfo {
   id: ProviderId

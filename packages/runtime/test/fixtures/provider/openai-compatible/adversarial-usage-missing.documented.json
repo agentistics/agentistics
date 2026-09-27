@@ -1,0 +1,9 @@
+{
+  "_source": "adversarial — the body has no usage object at all.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-nousage-0001",
+    "model": "gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }]
+  }
+}

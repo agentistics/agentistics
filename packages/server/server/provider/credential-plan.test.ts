@@ -50,9 +50,9 @@ describe('validateKeyShape', () => {
 
   test('every refusal reason has a non-empty, distinct sentence', () => {
     const reasons: KeyShapeRefusal[] = [
-      'empty', 'whitespace', 'control', 'bracketed-paste', 'prefix', 'too-short', 'too-long',
+      'empty', 'whitespace', 'control', 'bracketed-paste', 'prefix', 'foreign-prefix', 'too-short', 'too-long',
     ]
-    const sentences = reasons.map(keyShapeSentence)
+    const sentences = reasons.map(r => keyShapeSentence(r))
     for (const s of sentences) expect(s.length).toBeGreaterThan(0)
     expect(new Set(sentences).size).toBe(sentences.length)
   })
@@ -219,5 +219,103 @@ describe('refusalSentence', () => {
     const s = refusalSentence('flag-off')
     expect(s).toContain('AGENTISTICS_PROVIDER')
     expect(s).not.toContain(FAKE_KEY)
+  })
+})
+
+// ── B5a — endpoints: key shape, base URL, the stored record ─────────────────────────────────────
+
+import {
+  baseUrlSentence,
+  parseStoredEndpoint,
+  serializeEndpoint,
+  validateBaseUrl,
+  type BaseUrlRefusal,
+} from './credential-plan.ts'
+
+const FAKE_EP_KEY = 'sk-or-' + 'test' + 'q'.repeat(40)
+
+describe('validateKeyShape — per endpoint, loose', () => {
+  test('no prefix rule for an endpoint (an OpenRouter or operator-minted key passes)', () => {
+    expect(validateKeyShape(FAKE_EP_KEY, 'openrouter')).toEqual({ ok: true })
+    expect(validateKeyShape('sk-1234', 'litellm')).toEqual({ ok: true })
+  })
+
+  test('refuses whitespace, paste residue, absurd lengths and an Anthropic key', () => {
+    expect(validateKeyShape(FAKE_EP_KEY + ' ', 'openrouter')).toEqual({ ok: false, reason: 'whitespace' })
+    expect(validateKeyShape('[200~' + FAKE_EP_KEY, 'openrouter')).toEqual({ ok: false, reason: 'bracketed-paste' })
+    expect(validateKeyShape('x'.repeat(600), 'openai')).toEqual({ ok: false, reason: 'too-long' })
+    expect(validateKeyShape('short', 'openai')).toEqual({ ok: false, reason: 'too-short' })
+    expect(validateKeyShape(FAKE_KEY, 'openrouter')).toEqual({ ok: false, reason: 'foreign-prefix' })
+  })
+
+  test('the endpoint sentences never echo the value and name the endpoint', () => {
+    const s = keyShapeSentence('too-short', 'openrouter')
+    expect(s).toContain('OpenRouter')
+    expect(keyShapeSentence('foreign-prefix', 'openai')).toContain('agentop provider key set anthropic')
+    expect(keyShapeSentence('foreign-prefix', 'openai')).not.toContain(FAKE_KEY)
+  })
+})
+
+describe('validateBaseUrl — contract D6', () => {
+  test('accepts https anywhere and http to loopback, normalising trailing slashes', () => {
+    expect(validateBaseUrl('https://api.openai.com/v1/')).toEqual({ ok: true, baseUrl: 'https://api.openai.com/v1' })
+    expect(validateBaseUrl('https://Proxy.Example.com:8443/v1//')).toEqual({ ok: true, baseUrl: 'https://proxy.example.com:8443/v1' })
+    expect(validateBaseUrl('http://localhost:11434/v1')).toEqual({ ok: true, baseUrl: 'http://localhost:11434/v1' })
+    expect(validateBaseUrl('http://127.0.0.1:20128/v1')).toEqual({ ok: true, baseUrl: 'http://127.0.0.1:20128/v1' })
+    expect(validateBaseUrl('http://[::1]:8080/v1')).toEqual({ ok: true, baseUrl: 'http://[::1]:8080/v1' })
+  })
+
+  const refused: Array<[string, BaseUrlRefusal]> = [
+    ['', 'empty'],
+    ['not a url', 'unparseable'],
+    ['http://api.example.com/v1', 'insecure-remote'],
+    ['http://127.0.0.1.evil.example/v1', 'insecure-remote'],
+    ['http://localhost.evil.example/v1', 'insecure-remote'],
+    ['ftp://api.example.com/v1', 'scheme'],
+    ['https://user:pw@api.example.com/v1', 'userinfo'],
+    ['https://token@api.example.com/v1', 'userinfo'],
+    ['https://api.example.com/v1?key=x', 'query-or-fragment'],
+    ['https://api.example.com/v1#frag', 'query-or-fragment'],
+  ]
+  for (const [raw, reason] of refused) {
+    test(`refuses ${reason}: ${raw === '' ? '(empty)' : raw}`, () => {
+      expect(validateBaseUrl(raw)).toEqual({ ok: false, reason })
+      expect(baseUrlSentence(reason)).not.toContain(raw === '' ? '\u0000' : raw)
+    })
+  }
+})
+
+describe('serializeEndpoint / parseStoredEndpoint', () => {
+  const at = '2026-09-27T00:00:00.000Z'
+  test('round-trips a keyed and a keyless (ollama) record', () => {
+    expect(parseStoredEndpoint(serializeEndpoint('openrouter', 'https://openrouter.ai/api/v1', FAKE_EP_KEY, at), 'openrouter'))
+      .toEqual({ ok: true, baseUrl: 'https://openrouter.ai/api/v1', key: FAKE_EP_KEY, storedAt: at })
+    expect(parseStoredEndpoint(serializeEndpoint('ollama', 'http://localhost:11434/v1', null, at), 'ollama'))
+      .toEqual({ ok: true, baseUrl: 'http://localhost:11434/v1', key: null, storedAt: at })
+  })
+
+  test('a record for another endpoint, or the Anthropic record, is wrong-provider', () => {
+    const text = serializeEndpoint('openrouter', 'https://openrouter.ai/api/v1', FAKE_EP_KEY, at)
+    expect(parseStoredEndpoint(text, 'openai')).toEqual({ ok: false, reason: 'wrong-provider' })
+    expect(parseStoredEndpoint(serializeCredential('anthropic', FAKE_KEY, at), 'openai')).toEqual({ ok: false, reason: 'wrong-provider' })
+  })
+
+  test('a hand-edited record is re-validated: remote http, a null key where one is required, a bad key', () => {
+    expect(parseStoredEndpoint(serializeEndpoint('openai', 'http://evil.example/v1', FAKE_EP_KEY, at), 'openai').ok).toBe(false)
+    expect(parseStoredEndpoint(serializeEndpoint('openai', 'https://api.openai.com/v1', null, at), 'openai').ok).toBe(false)
+    expect(parseStoredEndpoint(serializeEndpoint('openai', 'https://api.openai.com/v1', FAKE_KEY, at), 'openai').ok).toBe(false)
+    expect(parseStoredEndpoint(serializeEndpoint('openai', 'https://api.openai.com/v1/', FAKE_EP_KEY, at), 'openai').ok).toBe(false)
+  })
+})
+
+describe('createCredentialHandle — an endpoint handle names the PROTOCOL, never the vendor', () => {
+  test('provider is openai-compatible; every stringification is the label, never the key', () => {
+    const h = createCredentialHandle('openai', FAKE_EP_KEY)
+    expect(h.provider).toBe('openai-compatible')
+    for (const text of [JSON.stringify(h), String(h), `${h}`, inspect(h)]) {
+      expect(text).toContain('openai-compatible/openai')
+      expect(text).not.toContain(FAKE_EP_KEY)
+    }
+    expect(h.reveal()).toBe(FAKE_EP_KEY)
   })
 })
