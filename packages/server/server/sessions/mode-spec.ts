@@ -79,6 +79,9 @@ export const MODE_SPECS: Record<HarnessId, ModeSpec | null> = {
   copilot: null,
   kimi: null,
   antigravity: null,
+  // No spawn-spec support (CLAUDE.md step 4, skipped by scope): unprobed, and a guessed key is a
+  // keystroke nobody asked for.
+  opencode: null,
 }
 
 /** The spec for a harness, or `undefined` when nobody has driven its modes. */

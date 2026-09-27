@@ -265,6 +265,7 @@ export const HARNESS_SESSION_SOURCES: Record<HarnessId, HarnessSessionSource | n
   copilot: null,
   antigravity: null,
   kimi: null,
+  opencode: null,
 }
 
 /**
@@ -302,4 +303,5 @@ export const HARNESS_PROCESS_LOGS: Record<HarnessId, HarnessProcessLog | null> =
   gemini: null,
   copilot: null,
   kimi: null,
+  opencode: null,
 }

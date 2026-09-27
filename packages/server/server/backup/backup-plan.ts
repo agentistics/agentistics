@@ -144,6 +144,25 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       why: 'Holds `api_key` alongside ordinary settings. The whole file is excluded: over-excluding costs the user their Kimi settings, which are recoverable, while under-excluding costs them a key, which is not.',
     },
   ],
+  // opencode's OWN store (`opencode.db`, under RAW_DIR below) has `account`/`control_account`/
+  // `credential` tables with `access_token`/`refresh_token`/`value` columns — a live OAuth token,
+  // in the SAME file as the conversation history this backup exists to carry. Both real
+  // sessions/tables measured for this integration were 0 rows, so there is nothing to redact on
+  // THIS machine, but the exclusion model here is per-FILE (a path pattern) and a single SQLite
+  // file mixing valuable history with a credential table cannot be split by one — so, following
+  // this module's own stated bias ("a file wrongly kept out of a backup is recoverable, a
+  // credential wrongly let in is not"), the WHOLE file is excluded rather than guessed at, exactly
+  // as the whole of kimi's config.toml is excluded above for the same reason. This costs the
+  // opencode conversation history a backup captures for every other harness — a real product
+  // trade-off, stated here for a human owner to revisit once/if this is worth a finer-grained
+  // (row-level) redaction step.
+  opencode: [
+    {
+      pattern: '.local/share/opencode/opencode.db', match: 'prefix', reason: 'secret',
+      restoreWith: 'opencode auth login (re-authenticate any provider you had connected)',
+      why: 'The whole session-history database, because its account/credential tables carry OAuth tokens and this exclusion model cannot split one file into a safe part and a secret part. Over-excluding costs the user their opencode conversation history, which is recoverable by using opencode again; under-excluding costs them a live token, which is not.',
+    },
+  ],
 }
 
 /** Secrets that are not scoped to one harness. */
@@ -276,6 +295,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'ingested there; absent, it re-reads and the journal dedupes.',
   },
   {
+    pattern: '.agentistics/journal.db.import.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — `agentop journal import` re-derives it by re-reading its sources',
+    why: "`agentop journal import`'s resume state: a cursor per replayed source and the store entries "
+      + 'already imported, bound to the identity of the journal file it describes. Restored beside a '
+      + 'different journal it is ignored; absent, the import re-reads and the journal dedupes.',
+  },
+  {
     pattern: '.agentistics/auto-upgrade.log', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'A log.',
@@ -378,6 +404,10 @@ const RAW_DIR: Record<HarnessId, string> = {
   copilot: '.copilot',
   antigravity: '.gemini/antigravity-cli',
   kimi: '.kimi-code',
+  // Its DATA lives here; the CLI's own binary install (~/.opencode/bin) is a separate directory
+  // this backup has no reason to carry (a binary is reinstallable; the auth.json beside it there is
+  // also outside this dir, so this raw dir does not reach it either).
+  opencode: '.local/share/opencode',
 }
 
 /** Cross-harness data. Always included: a backup without these restores metrics that no filter,
