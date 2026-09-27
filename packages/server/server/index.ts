@@ -1598,6 +1598,28 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE NATIVE RUNTIME'S PROVIDERS (UI.1) — `/api/provider`, `/api/provider/:id`, and its `/test`
+    // and `/models` sub-resources, all matched inside `provider-web.ts` (sub-resources explicitly,
+    // so an id can never be read as `test`). `capability-guard.ts` has already required
+    // `localShell`; the handler refuses a central on its own too. A PUT body carries a key, so an
+    // unexpected failure is rendered NON-verbose regardless of profile — the `/api/backup/github/
+    // setup` rule.
+    if (url.pathname === '/api/provider' || url.pathname.startsWith('/api/provider/')) {
+      try {
+        const { handleProviderRequest } = await import('./provider-web')
+        const out = await handleProviderRequest(req, url.pathname, clientIp, { dev: !SERVE_STATIC })
+        if (out !== null) return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json({
+          code: safe.body.error,
+          sentence: `an unexpected error occurred — see the server log (ref ${safe.body.ref}).`,
+          ref: safe.body.ref,
+        }, 500)
+      }
+    }
+
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

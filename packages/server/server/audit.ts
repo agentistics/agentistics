@@ -47,6 +47,9 @@ export type AuditAction =
   // one widens what the shell routes will answer for the rest of the process, not one channel.
   | 'shell.override.enabled'
   | 'upgrade.started' | 'upgrade.denied'
+  // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
+  // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
+  | 'provider.set' | 'provider.remove'
 
 export interface AuditEvent {
   action: AuditAction

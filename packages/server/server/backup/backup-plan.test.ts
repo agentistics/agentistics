@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { HARNESS_ORDER } from '@agentistics/core'
+import { KEYED_PROVIDERS } from '../config'
 import { BACKUP_LAYERS, EXCLUDE_RULES, HARNESS_SECRETS, excludeFor, omittedSecrets, planSources, withMetrics } from './backup-plan'
 
 test('metrics is always planned, whatever the caller asked for', () => {
@@ -186,6 +187,21 @@ test('no credential filename can pass the filter — asserted over the source it
     '.agentistics/provider-keys/anthropic.json',
   ]) {
     expect(excludeFor(probe)).not.toBeNull()
+  }
+})
+
+// UI.4 N-5: every provider's key file is probed BY NAME, not only anthropic.json — the directory
+// prefix rule covers them today, and this is what notices the day it stops. The list is written out
+// (a probe derived from the same table it checks would pass on an empty table) and then held equal
+// to KEYED_PROVIDERS, so a provider added to config.ts without a probe here fails by name.
+const PROVIDER_KEY_PROBES = ['anthropic', 'openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
+
+test('every provider key file is excluded as a secret, probed by name', () => {
+  expect([...PROVIDER_KEY_PROBES].sort()).toEqual([...KEYED_PROVIDERS].sort())
+  for (const id of PROVIDER_KEY_PROBES) {
+    const rule = excludeFor(`.agentistics/provider-keys/${id}.json`)
+    expect(rule?.reason, `${id}.json`).toBe('secret')
+    expect(rule?.restoreWith ?? '').not.toBe('')
   }
 })
 
