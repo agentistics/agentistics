@@ -1,0 +1,86 @@
+import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { AUTH_PUBLIC } from './index-routes'
+import { routeCapability } from './capability-guard'
+import type { ProjectionReader } from './projections/facts'
+import { handleRuntimeMetricsRequest, projectionsEnabled, RUNTIME_METRICS_PATH } from './runtime-metrics-web'
+import { costFact, fakeReader } from './runtime-metrics-fixtures'
+
+/** A reader that fails the test the moment anything touches it. */
+const untouchable: ProjectionReader = {
+  costFacts() { throw new Error('reader touched') },
+  runFacts() { throw new Error('reader touched') },
+  status() { throw new Error('reader touched') },
+}
+
+const get = (qs = '') => {
+  const url = new URL(`http://x${RUNTIME_METRICS_PATH}${qs}`)
+  return [new Request(url), url] as const
+}
+
+describe('the flag', () => {
+  it('absent reads OFF; only an affirmative turns it on', () => {
+    expect(projectionsEnabled(undefined)).toBe(false)
+    expect(projectionsEnabled('')).toBe(false)
+    expect(projectionsEnabled('0')).toBe(false)
+    expect(projectionsEnabled('false')).toBe(false)
+    for (const v of ['1', 'true', 'on', 'yes', ' ON ']) expect(projectionsEnabled(v)).toBe(true)
+  })
+  it('off → projections_disabled, nothing touched (not even a bad query string is parsed)', async () => {
+    const [req, url] = get('?bogus=1')
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: undefined, central: false, reader: untouchable })
+    expect(out.status).toBe(404)
+    expect((out.body as { error: string }).error).toBe('projections_disabled')
+  })
+})
+
+describe('the route', () => {
+  it('on a central it refuses with a sentence, without touching the reader', async () => {
+    const [req, url] = get()
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: true, reader: untouchable })
+    expect(out.status).toBe(409)
+    expect((out.body as { error: string }).error).toBe('unsupported_on_central')
+  })
+  it('no reader wired → projections_unavailable', async () => {
+    const [req, url] = get()
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: null })
+    expect(out.status).toBe(503)
+  })
+  it('non-GET → 405', async () => {
+    const url = new URL(`http://x${RUNTIME_METRICS_PATH}`)
+    const out = await handleRuntimeMetricsRequest(new Request(url, { method: 'POST' }), url, { flag: '1', central: false, reader: untouchable })
+    expect(out.status).toBe(405)
+  })
+  it('bad input → 400 with the code', async () => {
+    const [req, url] = get('?metrics=vibes')
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: untouchable })
+    expect(out.status).toBe(400)
+    expect((out.body as { code: string }).code).toBe('unknown_metric')
+  })
+  it('answers a query', async () => {
+    const [req, url] = get('?metrics=cost')
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: 'on', central: false, reader: fakeReader([costFact({ costUSD: 2 })], []) })
+    expect(out.status).toBe(200)
+    expect((out.body as { groups: { metrics: { cost: { usd: number } } }[] }).groups[0]!.metrics.cost.usd).toBe(2)
+  })
+})
+
+describe('registration', () => {
+  it('is guarded by localTranscripts before it answers', () => {
+    expect(routeCapability(RUNTIME_METRICS_PATH)).toBe('localTranscripts')
+  })
+  it('is authenticated by default: not in AUTH_PUBLIC', () => {
+    expect(AUTH_PUBLIC.has(RUNTIME_METRICS_PATH)).toBe(false)
+  })
+  it('index.ts routes it through the handler with the per-request deps and safeError', () => {
+    const src = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+    const at = src.indexOf("url.pathname === '/api/runtime/metrics'")
+    expect(at).toBeGreaterThan(-1)
+    const block = src.slice(at, at + 700)
+    expect(block).toContain('liveRuntimeMetricsDeps(TEAM_CENTRAL)')
+    expect(block).toContain('safeError(')
+    // The guard and the auth gate run before every route; the route must come after them.
+    expect(at).toBeGreaterThan(src.indexOf('const needed = routeCapability(url.pathname)'))
+    expect(at).toBeGreaterThan(src.indexOf('!AUTH_PUBLIC.has(url.pathname)'))
+  })
+})
