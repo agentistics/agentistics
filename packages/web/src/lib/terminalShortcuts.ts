@@ -76,6 +76,8 @@ export type ShortcutDecision =
   | 'take'      // the terminal handles it; the browser must not
   | 'leave'     // the browser keeps it
   | 'copy'      // copy the emulator's selection; send nothing
+  | 'paste'     // let the browser's paste event carry the clipboard; xterm must not add \x16
+  | 'word-delete'       // Ctrl+Backspace — the word delete the browser lets a page have (see below)
   | 'blocked-interrupt' // plain Ctrl+C with nothing selected — refused, never sent
   | 'blocked-eof'       // plain Ctrl+D — refused, never sent
   | 'confirmed-eof'     // Ctrl+Shift+D — send C-d on purpose, and say so
@@ -86,22 +88,51 @@ export type ShortcutDecision =
  * Ctrl+C into `\x03` regardless of `preventDefault`). `Ctrl+Shift+C` copies even with nothing
  * selected (it is then a no-op), because in Chrome that combination otherwise opens the element
  * inspector — and the owner named it as THE copy key here.
+ *
+ * `paste`: the clipboard travels through the DOM `paste` event (`SessionTerminal`'s capture
+ * listener), but xterm ALSO turned Ctrl+V into the control byte `\x16`, which the allowlist refuses
+ * — so every paste came with a red "mixes text with a control key" line under it. The caller returns
+ * `false` WITHOUT `preventDefault`: xterm emits nothing, the browser still pastes.
+ *
+ * `word-delete`: `Ctrl+W` is one of the few keys a browser never lets a page intercept (it closes
+ * the tab before any script runs), so it cannot be the way to delete a word here. `Ctrl+Backspace`
+ * is not reserved, and sends the same `C-w`.
  */
 export function shortcutDecision(e: ShortcutEvent, hasSelection = false): ShortcutDecision {
   const key = e.key.toLowerCase()
   if (e.altKey) return 'leave'
   if ((e.ctrlKey || e.metaKey) && key === 'c' && (hasSelection || (e.ctrlKey && e.shiftKey))) return 'copy'
   if (e.metaKey || !e.ctrlKey) return 'leave'
+  if (key === 'v') return 'paste'
+  if (key === 'backspace' && !e.shiftKey) return 'word-delete'
   if (key === 'c' && !e.shiftKey) return 'blocked-interrupt'
   if (key === 'd') return e.shiftKey ? 'confirmed-eof' : 'blocked-eof'
   if (e.shiftKey) return 'leave'
   return CLAIMED.has(key) ? 'take' : 'leave'
 }
 
-/** What the terminal says when it refused (or deliberately sent) a session-ending key. */
-export function guardNoticeText(
-  kind: 'blocked-interrupt' | 'blocked-eof' | 'confirmed-eof', lang: 'pt' | 'en',
-): string {
+/** How a confirmation reads: `info` is a plain confirmation, `warn` a refusal, `danger` a
+ *  session-ending key that WAS sent. */
+export type NoticeTone = 'info' | 'warn' | 'danger'
+
+export type NoticeKind =
+  | 'blocked-interrupt' | 'blocked-eof' | 'confirmed-eof'
+  | 'copied' | 'copy-empty' | 'pasted' | 'word-delete'
+  | 'C-a' | 'C-e' | 'C-u' | 'C-w' | 'C-k' | 'C-l'
+
+export const NOTICE_TONE: Record<NoticeKind, NoticeTone> = {
+  'blocked-interrupt': 'warn', 'blocked-eof': 'warn', 'confirmed-eof': 'danger',
+  copied: 'info', 'copy-empty': 'info', pasted: 'info', 'word-delete': 'info',
+  'C-a': 'info', 'C-e': 'info', 'C-u': 'info', 'C-w': 'info', 'C-k': 'info', 'C-l': 'info',
+}
+
+/**
+ * EVERY COMMAND TYPED INTO THE TERMINAL IS CONFIRMED IN WORDS (owner, 2026-09-27: "todos comandos
+ * executados deveriam ter uma confirmacao via mensagem"). A control key changes what is on the
+ * other side without printing anything recognisable, so without a sentence the reader cannot tell a
+ * key that landed from one that did nothing. `n` is the count a copy or a paste carried.
+ */
+export function guardNoticeText(kind: NoticeKind, lang: 'pt' | 'en', n?: number): string {
   const pt = lang === 'pt'
   switch (kind) {
     case 'blocked-interrupt':
@@ -116,5 +147,21 @@ export function guardNoticeText(
       return pt
         ? 'Ctrl+D enviado (Ctrl+Shift+D) — isso encerra a sessão se a linha estiver vazia.'
         : 'Ctrl+D sent (Ctrl+Shift+D) — this ends the session if the line is empty.'
+    case 'copied':
+      return pt ? `Copiado — ${n ?? 0} caracteres.` : `Copied — ${n ?? 0} characters.`
+    case 'copy-empty':
+      return pt ? 'Nada selecionado para copiar — selecione com o mouse e use Ctrl+Shift+C.'
+        : 'Nothing selected to copy — select with the mouse and use Ctrl+Shift+C.'
+    case 'pasted':
+      return pt ? `Colado — ${n ?? 0} ${n === 1 ? 'linha' : 'linhas'}.` : `Pasted — ${n ?? 0} ${n === 1 ? 'line' : 'lines'}.`
+    case 'word-delete':
+    case 'C-w':
+      return pt ? 'Palavra anterior apagada (Ctrl+Backspace — o navegador reserva Ctrl+W para fechar a aba).'
+        : 'Previous word deleted (Ctrl+Backspace — the browser keeps Ctrl+W for closing the tab).'
+    case 'C-a': return pt ? 'Cursor no início da linha (Ctrl+A).' : 'Cursor to the start of the line (Ctrl+A).'
+    case 'C-e': return pt ? 'Cursor no fim da linha (Ctrl+E).' : 'Cursor to the end of the line (Ctrl+E).'
+    case 'C-u': return pt ? 'Linha apagada (Ctrl+U).' : 'Line cleared (Ctrl+U).'
+    case 'C-k': return pt ? 'Apagado até o fim da linha (Ctrl+K).' : 'Deleted to the end of the line (Ctrl+K).'
+    case 'C-l': return pt ? 'Tela limpa (Ctrl+L).' : 'Screen cleared (Ctrl+L).'
   }
 }

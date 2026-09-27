@@ -42,7 +42,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { xtermTheme, type TerminalFrame } from '../lib/terminalStream'
-import { guardNoticeText, shortcutDecision } from '../lib/terminalShortcuts'
+import { guardNoticeText, NOTICE_TONE, shortcutDecision, type NoticeKind, type NoticeTone } from '../lib/terminalShortcuts'
 import { terminalScrollTop, stillFollowing } from '../lib/terminalScroll'
 import { sanitizePasteText } from '@agentistics/core'
 
@@ -89,7 +89,15 @@ interface Props {
    * on both, since it ends either.
    */
   guardInterrupt?: boolean
+  /**
+   * Where the terminal's confirmations go — one per command typed (a key sent, refused, a copy, a
+   * paste). The caller draws it in the line it already has under the screen, so every message the
+   * terminal gives is in ONE place. Absent, the terminal draws it over itself.
+   */
+  onNotice?: (notice: TerminalNotice) => void
 }
+
+export interface TerminalNotice { text: string; tone: NoticeTone; at: number }
 
 /** Copy text without relying on the async Clipboard API alone — it exists only in a secure
  *  context, and the dashboard is also opened over plain HTTP on a LAN address. */
@@ -164,7 +172,7 @@ function naturalSize(term: Terminal): { w: number; h: number } | null {
   return null
 }
 
-export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onPaste, onGeometry, lang = 'pt', guardInterrupt = true }: Props) {
+export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onPaste, onGeometry, lang = 'pt', guardInterrupt = true, onNotice }: Props) {
   // boxRef is the fixed viewport the parent sizes; scaleRef takes the SCALED footprint so the page
   // lays out correctly; hostRef holds the emulator at its natural cols×rows pixels and is the thing
   // the transform shrinks.
@@ -203,9 +211,17 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
   guardInterruptRef.current = guardInterrupt
   const langRef = useRef(lang)
   langRef.current = lang
-  /** The sentence the guard just said — shown over the terminal for a few seconds. */
-  const [notice, setNotice] = useState<{ text: string; warn: boolean; at: number } | null>(null)
-  const noticeRef = useRef(setNotice)
+  /** The sentence the terminal just said — handed to `onNotice`, or drawn over the terminal. */
+  const [notice, setNotice] = useState<TerminalNotice | null>(null)
+  const onNoticeRef = useRef(onNotice)
+  onNoticeRef.current = onNotice
+  const say = (kind: NoticeKind, n?: number) => {
+    const next: TerminalNotice = { text: guardNoticeText(kind, langRef.current, n), tone: NOTICE_TONE[kind], at: Date.now() }
+    if (onNoticeRef.current) onNoticeRef.current(next)
+    else setNotice(next)
+  }
+  const sayRef = useRef(say)
+  sayRef.current = say
   useEffect(() => {
     if (!notice) return
     const t = setTimeout(() => setNotice(n => (n && n.at === notice.at ? null : n)), 5000)
@@ -483,7 +499,17 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
         if (decision === 'copy') {
           // Ctrl+Shift+C would otherwise open Chrome's element inspector; copy the selection here.
           e.preventDefault()
-          copyText(term.getSelection())
+          const selected = term.getSelection()
+          copyText(selected)
+          sayRef.current(selected ? 'copied' : 'copy-empty', selected.length)
+          return false
+        }
+        // The clipboard comes through the DOM paste event below; xterm must not ALSO emit \x16.
+        if (decision === 'paste') return false
+        if (decision === 'word-delete') {
+          e.preventDefault()
+          onInputRef.current?.('\x17')
+          sayRef.current('word-delete')
           return false
         }
         // SESSION-ENDING KEYS (`terminalShortcuts.ts`): refused with a sentence, or sent on purpose
@@ -491,16 +517,20 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
         if (decision === 'blocked-interrupt' && !guardInterruptRef.current) return true
         if (decision === 'blocked-interrupt' || decision === 'blocked-eof') {
           e.preventDefault()
-          noticeRef.current({ text: guardNoticeText(decision, langRef.current), warn: false, at: Date.now() })
+          sayRef.current(decision)
           return false
         }
         if (decision === 'confirmed-eof') {
           e.preventDefault()
           onInputRef.current?.('\x04')
-          noticeRef.current({ text: guardNoticeText(decision, langRef.current), warn: true, at: Date.now() })
+          sayRef.current(decision)
           return false
         }
-        if (decision === 'take') e.preventDefault()
+        if (decision === 'take') {
+          e.preventDefault()
+          const kind = `C-${e.key.toLowerCase()}` as NoticeKind
+          if (kind in NOTICE_TONE) sayRef.current(kind)
+        }
         return true
       })
 
@@ -541,7 +571,10 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
         e.stopPropagation()
         if (!raw) return
         const text = sanitizePasteText(raw)
-        if (text) onPasteRef.current(text)
+        if (text) {
+          onPasteRef.current(text)
+          sayRef.current('pasted', text.split(/\r\n|\r|\n/).length)
+        }
       }
       pasteTarget = boxRef.current
       pasteTarget?.addEventListener('paste', onPasteEvent, true)
@@ -630,7 +663,7 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
             position: 'absolute', left: 10, right: 10, bottom: 10, zIndex: 2,
             padding: '8px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.45,
             background: 'var(--bg-elevated, var(--bg-surface))', color: 'var(--text-primary)',
-            border: `1px solid ${notice.warn ? 'var(--accent-red)' : 'var(--anthropic-orange)'}`,
+            border: `1px solid ${notice.tone === 'danger' ? 'var(--accent-red)' : notice.tone === 'warn' ? 'var(--anthropic-orange)' : 'var(--border)'}`,
             boxShadow: '0 6px 18px rgba(0, 0, 0, 0.3)', pointerEvents: 'none',
           }}
         >{notice.text}</div>

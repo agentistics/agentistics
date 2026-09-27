@@ -117,3 +117,24 @@ describe('session-ending keys take Shift, and are announced', () => {
     expect(guardNoticeText('confirmed-eof', 'pt')).toContain('encerra')
   })
 })
+
+describe('paste and the word delete the browser allows', () => {
+  test('Ctrl+V (and Ctrl+Shift+V) is a paste — xterm must not also emit \\x16', () => {
+    expect(shortcutDecision(ev({ key: 'v' }))).toBe('paste')
+    expect(shortcutDecision(ev({ key: 'V', shiftKey: true }))).toBe('paste')
+    expect(shortcutDecision(ev({ key: 'v', ctrlKey: false, metaKey: true }))).toBe('leave')
+  })
+
+  test('Ctrl+Backspace deletes the word, since the browser keeps Ctrl+W', () => {
+    expect(shortcutDecision(ev({ key: 'Backspace' }))).toBe('word-delete')
+    expect(shortcutDecision(ev({ key: 'Backspace', shiftKey: true }))).toBe('leave')
+  })
+
+  test('every confirmation has text in both languages', () => {
+    for (const kind of ['copied', 'copy-empty', 'pasted', 'word-delete', 'C-a', 'C-e', 'C-u', 'C-w', 'C-k', 'C-l'] as const) {
+      expect(guardNoticeText(kind, 'pt', 3).length).toBeGreaterThan(5)
+      expect(guardNoticeText(kind, 'en', 3).length).toBeGreaterThan(5)
+    }
+    expect(guardNoticeText('copied', 'pt', 12)).toContain('12')
+  })
+})

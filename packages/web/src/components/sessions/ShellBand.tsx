@@ -81,6 +81,7 @@ import {
 } from './bandControls'
 
 const SessionTerminal = lazy(() => import('../SessionTerminal'))
+import type { TerminalNotice } from '../SessionTerminal'
 
 interface T {
   title: string
@@ -428,6 +429,14 @@ export function ShellBand({
     if (!shellEnabled && target === 'shell' && shell) dispatch({ type: 'ended' })
   }, [shellEnabled, target, shell])
   const [ctrlArmed, setCtrlArmed] = useState(false)
+  /** The terminal's last confirmation (a key sent, refused, a copy, a paste) — shown in the band's
+   *  own sentence line, the one place every message this terminal gives appears, for 5 seconds. */
+  const [keyNotice, setKeyNotice] = useState<TerminalNotice | null>(null)
+  useEffect(() => {
+    if (!keyNotice) return
+    const t = setTimeout(() => setKeyNotice(n => (n && n.at === keyNotice.at ? null : n)), 5000)
+    return () => clearTimeout(t)
+  }, [keyNotice])
   /** The open shells, fetched ONLY when the ceiling refuses — see `shellCeiling.ts`. */
   const [ceiling, setCeiling] = useState<{ rows: CeilingRow[]; cap: number } | null>(null)
   const [ctrlNote, setCtrlNote] = useState<string | null>(null)
@@ -993,6 +1002,7 @@ export function ShellBand({
           lang={lang}
           // Ctrl+C ends an ASSISTANT's session; in the utility shell it only stops a command.
           guardInterrupt={target === 'cli'}
+          onNotice={setKeyNotice}
         />
       </Suspense>
     </div>
@@ -1002,8 +1012,10 @@ export function ShellBand({
    *  EXCLUDED (C3) overrides all of it — the pane is not connecting or idle, it is simply showing
    *  somewhere else, and `status.detail` (built from an `idle`, un-watched stream) would otherwise
    *  say "No session"/"No shell" about a pane that is very much open, just not here. */
+  const keyTone = keyNotice && !excludedFromDocked ? keyNotice.tone : null
   const line = excludedFromDocked
     ? (slotLayout.floating?.includes(target) ? t.floatingElsewhere : t.openOnRight)
+    : keyNotice ? keyNotice.text
     : band.message ?? (write.reason ? write.reason : band.phase === 'opening' ? t.opening : status.detail)
   const lineIsBad = Boolean(band.message || write.reason)
   const busy = band.phase === 'opening'
@@ -1013,7 +1025,12 @@ export function ShellBand({
       role={lineIsBad ? 'status' : undefined}
       style={{
         fontSize: 11, lineHeight: 1.5, flexShrink: 0,
-        color: lineIsBad ? 'var(--accent-red)' : 'var(--text-tertiary)',
+        // A terminal confirmation (`keyNotice`) outranks the band's standing sentence while it lasts,
+        // and reads in its own tone: plain, a refusal in orange, a session-ending key sent in red.
+        color: keyTone === 'danger' ? 'var(--accent-red)'
+          : keyTone === 'warn' ? 'var(--anthropic-orange)'
+          : keyTone === 'info' ? 'var(--text-secondary)'
+          : lineIsBad ? 'var(--accent-red)' : 'var(--text-tertiary)',
       }}
     >
       {ctrlArmed ? t.ctrlHint : ctrlNote ?? line}
