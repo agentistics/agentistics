@@ -68,8 +68,13 @@ export interface FleetPayload {
   unavailable?: string
   /** The tasks that already exist here, so filing a session is a pick rather than a spelling test. */
   tasks: string[]
-  /** The tasks the user marked FINISHED — a statement about the work, not about any session. */
-  finishedTasks?: string[]
+  /**
+   * The tasks the user marked FINISHED — a statement about the work, not about any session.
+   * ALWAYS present, `[]` when there are none: the web client reads it as a list, and a field omitted
+   * when empty took the Sessions page down for everyone who had never finished a task (v2.65.0,
+   * `TypeError: … reading 'includes'`).
+   */
+  finishedTasks: string[]
   /**
    * The fall: how many, and when.
    *
@@ -192,7 +197,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   const totalStart = performance.now()
   try {
     const host = await hostFor(lang)
-    if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [] }
+    if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
     const tasks = host.sessionTasks ? await host.sessionTasks().catch(() => []) : []
     const finishedTasks = fleet.finishedTasks ?? []
@@ -207,7 +212,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
       attention: fleet.attention,
       ...(fleet.unavailable ? { unavailable: fleet.unavailable } : {}),
       tasks,
-      ...(finishedTasks.length > 0 ? { finishedTasks: [...finishedTasks] } : {}),
+      finishedTasks: [...finishedTasks],
       // What FELL together, so a client can offer to reopen the lot — the cockpit's own grouping,
       // which errs toward excluding: a session with no evidence it was ever alive is never in it.
       ...(fleet.fell ? { fell: fleet.fell } : {}),
