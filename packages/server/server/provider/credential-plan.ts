@@ -13,29 +13,31 @@
  */
 import { createHash } from 'node:crypto'
 import { PROVIDER_FLAG_ENV, type KeyedProviderId } from '../config.ts'
+import type { CredentialHandle, CredentialResolution } from '@agentistics/runtime'
 
 /** `sha256:<first 8 hex of sha256(key)>`. Non-reversible for a high-entropy key, stable across
- *  reads (so a rotation shows as `old → new`), and never a substring of the key: a suffix would be
- *  literal key material and would defeat the grep that proves nothing leaked (§6.2.6). */
+ *  reads (so a rotation shows as `old → new`), and itself never a substring of the key. The ONE
+ *  piece of literal key material `status` may show is `lastFourOf` below (owner decision C-3). */
 export function fingerprintOf(value: string): string {
   return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 8)}`
 }
 
-/** The ONLY shape in which a stored key leaves `credentials.ts`. */
-export interface CredentialHandle {
-  readonly provider: KeyedProviderId
-  /** `sha256:xxxxxxxx` — safe to print, log and compare. */
-  readonly fingerprint: string
-  /** The key itself. Callable only by the holders (`anthropic/client.ts` in practice) — the lint
-   *  refuses the spelling everywhere else. Never store what it returns on an object that outlives
-   *  the call that needed it. */
-  reveal(): string
+/** How many trailing characters of a key `status` may show — a ceiling, never more (C-3). Enough to
+ *  tell two keys apart in the console's list, far too few to be the key. */
+export const KEY_TAIL_LENGTH = 4
+
+/** The last `KEY_TAIL_LENGTH` characters, for `agentop provider key status` — what the Anthropic
+ *  console itself shows beside a key, so the person can match the two. A value shorter than the
+ *  tail yields nothing rather than the whole key (a validated key is never that short). */
+export function lastFourOf(value: string): string {
+  return value.length > KEY_TAIL_LENGTH * 4 ? value.slice(-KEY_TAIL_LENGTH) : ''
 }
 
-/** What resolving a stored credential can answer. The refusals are CODES, rendered by the verb. */
-export type CredentialResolution =
-  | { ok: true; handle: CredentialHandle }
-  | { ok: false; reason: 'absent' | 'unreadable' | 'permissions-too-open' | 'wrong-provider' }
+/** The ONLY shape in which a stored key leaves `credentials.ts`. The interface is the RUNTIME's
+ *  (`@agentistics/runtime`, `provider/credential.ts`, D23): the runtime consumes it and the host
+ *  builds it. Only the TYPES cross — `createCredentialHandle` below, the one constructor, stays
+ *  here with the key store, so the runtime never holds a way to mint a handle. */
+export type { CredentialHandle, CredentialResolution }
 
 const INSPECT = Symbol.for('nodejs.util.inspect.custom')
 

@@ -139,6 +139,15 @@ test('the rest of the daemon directory is excluded as runtime state', () => {
   expect(excludeFor('.claude/daemon/attach-journal')?.reason).toBe('runtime')
 })
 
+// The journal's two side-files (config.ts builds both with literal joins so the coverage lint sees
+// them). The journal itself is CARRIED; these are not, and each says why.
+test('the journal side-files are excluded — stamps as regenerable, status as runtime', () => {
+  expect(excludeFor('.agentistics/journal.db.stamps.json')?.reason).toBe('regenerable')
+  expect(excludeFor('.agentistics/journal.db.status.json')?.reason).toBe('runtime')
+  // The journal database itself is not swept up by either rule.
+  expect(excludeFor('.agentistics/journal.db')).toBeNull()
+})
+
 test('ordinary data is not excluded', () => {
   expect(excludeFor('.agentistics/sessions/claude/abc.json')).toBeNull()
   expect(excludeFor('.claude/stats-cache.json')).toBeNull()

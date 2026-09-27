@@ -1,0 +1,14 @@
+{
+  "name": "@agentistics/runtime",
+  "version": "2.61.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@agentistics/core": "workspace:*",
+    "@ai-sdk/anthropic": "4.0.58",
+    "ai": "7.0.107"
+  }
+}

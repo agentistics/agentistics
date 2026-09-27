@@ -1,6 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   classifyProviderError,
@@ -9,9 +8,6 @@ import {
   fromAnthropicUsage,
   type AgentisticsEvent,
 } from '@agentistics/core'
-import { openJournal } from '../journal/journal'
-import type { PathProbe } from '../journal/schema'
-import type { Journal } from '../journal/types'
 import {
   completedEvent,
   createProviderEmitter,
@@ -21,25 +17,34 @@ import {
   type AttemptFailed,
   type AttemptStart,
   type EmitContext,
+  type ProviderJournalSink,
 } from './emit'
 
 // A FAKE key, shaped like a real one so the leak assertions below have something to find. No test
 // in this file makes a network call and none ever sees a real key.
 const TEST_KEY = 'sk-ant-api03-TESTONLY-0000000000000000000000000000'
 
-let root = ''
-let seq = 0
-const freshPath = () => join(root, `j-${++seq}`, 'journal.db')
-beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'agentistics-emit-')) })
-afterAll(() => { rmSync(root, { recursive: true, force: true }) })
-
-const localProbe: PathProbe = {
-  platform: 'linux',
-  realpath: p => p,
-  readMountinfo: () => '58 42 8:32 / / rw,relatime - ext4 /dev/sdc rw',
-  readDarwinMounts: () => null,
+/**
+ * An in-memory `ProviderJournalSink` with the journal's dedupe rule (an `eventId` already taken is a
+ * duplicate, never a second row). The runtime owns no journal (D23); the REAL A1 journal is
+ * exercised against this emitter by the host, in `packages/server/server/provider/emit-journal.test.ts`.
+ */
+function memorySink(): ProviderJournalSink & { events: AgentisticsEvent[] } {
+  const events: AgentisticsEvent[] = []
+  const seen = new Set<string>()
+  return {
+    events,
+    async append(batch) {
+      let written = 0
+      let duplicates = 0
+      for (const e of batch) {
+        if (seen.has(e.eventId)) { duplicates += 1; continue }
+        seen.add(e.eventId); events.push(e); written += 1
+      }
+      return { written, duplicates }
+    },
+  }
 }
-const open = (): Promise<Journal> => openJournal({ path: freshPath(), probe: localProbe })
 
 const ctx: EmitContext = { adapterVersion: 'anthropic@1', sourceVersion: '4.0.58', recordedAt: '2026-09-25T12:00:05.000Z' }
 
@@ -255,63 +260,55 @@ describe('scope — only the ids the caller supplied', () => {
   })
 })
 
-describe('against the real A1 journal (a temp SQLite file)', () => {
+describe('against a sink with the journal\'s dedupe rule', () => {
   test('invoked + completed append once; a replay changes no count and is reported as duplicates', async () => {
-    const j = await open()
+    const j = memorySink()
     const em = createProviderEmitter({ journal: j, adapterVersion: 'anthropic@1', now: () => new Date('2026-09-25T12:00:05.000Z') })
 
     const r1 = await em.invoked(start)
     const r2 = await em.terminal(completed(), {}, '2026-09-25T12:00:01.000Z')
-    expect(r1).toEqual({ written: 1, duplicates: 0, rejected: [] })
-    expect(r2).toEqual({ written: 1, duplicates: 0, rejected: [] })
+    expect(r1).toEqual({ written: 1, duplicates: 0 })
+    expect(r2).toEqual({ written: 1, duplicates: 0 })
 
     // Replay: same attempt, different wall clock.
     const replay = createProviderEmitter({ journal: j, adapterVersion: 'anthropic@1', now: () => new Date('2026-09-27T00:00:00.000Z') })
-    expect(await replay.invoked(start)).toEqual({ written: 0, duplicates: 1, rejected: [] })
-    expect(await replay.terminal(completed())).toEqual({ written: 0, duplicates: 1, rejected: [] })
+    expect(await replay.invoked(start)).toEqual({ written: 0, duplicates: 1 })
+    expect(await replay.terminal(completed())).toEqual({ written: 0, duplicates: 1 })
 
-    expect((await j.stats()).rows).toBe(2)
-    const page = await j.readFrom(0, 10)
-    expect(page.events.map(e => e.type)).toEqual(['model.invoked', 'model.completed'])
-    const back = page.events[1] as AgentisticsEvent<'model.completed'>
+    expect(j.events.map(e => e.type)).toEqual(['model.invoked', 'model.completed'])
+    const back = j.events[1] as AgentisticsEvent<'model.completed'>
     expect(back.data.usage).toEqual({ input: 12, output: 340, cacheRead: 45_000, cacheWrite: 1_500 })
     expect(back.eventId).toBe(completedEvent(completed(), {}, ctx, 'x').eventId)
     expect(em.counters().lost).toEqual({ 'model.invoked': 0, 'model.completed': 0, 'model.failed': 0 })
-    j.close()
   })
 
   test('a retried invocation: failed attempt 1, completed attempt 2 — four rows, one billed response', async () => {
-    const j = await open()
+    const j = memorySink()
     const em = createProviderEmitter({ journal: j, adapterVersion: 'anthropic@1' })
     await em.invoked(start)
     await em.terminal(failed())
     await em.invoked({ ...start, attempt: 2 })
     await em.terminal(completed({ attempt: 2 }))
-    const events = (await j.readFrom(0, 10)).events
-    expect(events.map(e => e.type)).toEqual(['model.invoked', 'model.failed', 'model.invoked', 'model.completed'])
-    expect(events.filter(e => e.type === 'model.completed')).toHaveLength(1)
-    const failedBack = events[1] as AgentisticsEvent<'model.failed'>
+    expect(j.events.map(e => e.type)).toEqual(['model.invoked', 'model.failed', 'model.invoked', 'model.completed'])
+    expect(j.events.filter(e => e.type === 'model.completed')).toHaveLength(1)
+    const failedBack = j.events[1] as AgentisticsEvent<'model.failed'>
     expect('usage' in failedBack.data).toBe(false)
-    j.close()
   })
 
   test('no emitted string matches sk-ant- or equals the test key — even when the input carries one', async () => {
-    const j = await open()
+    const j = memorySink()
     const em = createProviderEmitter({ journal: j, adapterVersion: 'anthropic@1' })
-    // The key smuggled into every field emit.ts has no reason to read, plus the content a real
-    // client result carries (not part of the input type — which is the point).
     const dirty = { ...completed({ requestId: TEST_KEY }), content: [{ type: 'text', text: TEST_KEY }] } as AttemptCompleted
     const dirtyFail = { ...failed({ requestId: TEST_KEY }), message: TEST_KEY } as AttemptFailed
     dirtyFail.error = { ...dirtyFail.error, errorType: TEST_KEY, requestId: TEST_KEY }
     await em.invoked(start)
     await em.terminal(dirty)
     await em.terminal({ ...dirtyFail, attempt: 2 })
-    const stored = JSON.stringify((await j.readFrom(0, 10)).events)
+    const stored = JSON.stringify(j.events)
     expect(stored).not.toContain('sk-ant-')
     expect(stored).not.toContain(TEST_KEY)
     const built = JSON.stringify([completedEvent(dirty, {}, ctx, 't'), failedEvent(dirtyFail, {}, ctx, 't')])
     expect(built).not.toContain('sk-ant-')
-    j.close()
   })
 })
 
@@ -325,17 +322,15 @@ describe('a journal that fails never fails the call', () => {
   })
 
   test('an append that throws resolves null and is counted', async () => {
-    const throwing = { append: async () => { throw new Error('disk gone') } } as unknown as Journal
+    const throwing: ProviderJournalSink = { append: async () => { throw new Error('disk gone') } }
     const em = createProviderEmitter({ journal: throwing, adapterVersion: 'anthropic@1' })
     expect(await em.invoked(start)).toBeNull()
     expect(em.counters().lost['model.invoked']).toBe(1)
   })
 
-  test('a disabled journal (network filesystem) drops the event: counted lost, never thrown', async () => {
-    const nfs: PathProbe = { ...localProbe, readMountinfo: () => '58 42 0:50 / / rw - nfs4 server:/x rw' }
-    const j = await openJournal({ path: freshPath(), probe: nfs })
-    expect(j.status().state).toBe('disabled')
-    const em = createProviderEmitter({ journal: j, adapterVersion: 'anthropic@1' })
+  test('a sink that takes nothing (a disabled journal) drops the event: counted lost, never thrown', async () => {
+    const dropping: ProviderJournalSink = { append: async () => ({ written: 0, duplicates: 0 }) }
+    const em = createProviderEmitter({ journal: dropping, adapterVersion: 'anthropic@1' })
     const r = await em.terminal(completed())
     expect(r?.written).toBe(0)
     expect(em.counters().lost['model.completed']).toBe(1)

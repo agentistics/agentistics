@@ -294,6 +294,12 @@ Two boundaries are load-bearing and are asserted by tests (§38):
   harness or the runtime, and a gateway that reported them would be inventing them.
 - **A harness owns lifecycle telemetry and never the provider's billing truth** unless it states it
   (Claude's `cost-state`, OpenRouter's in-band `usage.cost`).
+- **The native runtime is its own package.** `packages/runtime` (`@agentistics/runtime`) implements
+  the Harness/Runtime/Adapter/ProviderRuntime layers above and is compiled into the single `agentop`
+  binary while staying independently publishable; it may **never** import `packages/server` or
+  `packages/web`, enforced by `packages/runtime/runtime-boundary.lint.test.ts` (D23,
+  `2026-09-25-owner-decisions.md`). The server only **hosts** it — the credential, the capture
+  directory and the journal sink are injected in, never read from a host-owned global.
 
 ## 13. Canonical domain model
 
@@ -1030,6 +1036,17 @@ When a run has both live events and source artifacts, `reconcile(runId)` compare
 
 > **Phase spec:** B1 (ProviderClient + Anthropic, no streaming) is specified in `2026-09-25-runtime-b1-provider.md`.
 
+**Where this code lives (C1, D23):** `ProviderClient` + registry (`provider/client.ts`), the
+Anthropic client and raw transport (`anthropic/{client,raw}.ts`), `retry.ts`, `capture.ts` and
+`emit.ts` all live in `packages/runtime`, not `packages/server` — the reusable core §27's surfaces
+share. The host (`packages/server`) keeps only what must not leave the machine's own process:
+`credentials.ts` / `credential-plan.ts` (the credential itself, 0600 files under the host's data
+dir) and `cli-provider.ts` / `config.ts`. What used to be direct imports (a credential resolved by
+calling into the server, a capture directory read off `config.ts`, a journal write reaching into the
+server's journal module) are now seams the host injects into the runtime: a `CredentialResolver`
+returning an opaque `CredentialHandle`, a capture directory path, and a journal sink typed by an
+interface the runtime itself owns.
+
 ```
 Provider            a billing entity            anthropic | openai | google | openrouter | litellm | ollama | custom
 ProviderAccount     a credential's owner
@@ -1421,7 +1438,9 @@ Rules, so this stays a product feature and not a second orchestrator:
 
 - **Web** becomes a client of the runtime API and the event stream; the Sessions workspace's chat and
   the Nay chat converge on one session object (§10's three mechanisms become one).
-- **CLI/TUI** keep their current shape; `agentop` gains the runtime verbs and loses nothing.
+- **CLI/TUI** keep their current shape; `agentop` gains the runtime verbs and loses nothing. The
+  terminal front door onto a native session is `agentop code` (D24, `2026-09-25-owner-decisions.md`)
+  — `agentop chat` was rejected because it already names the in-web chat feature above.
 - **VS Code** stays a pure client and needs no new rule — it already holds none.
 - **API** is the contract in §28.
 - **MCP** gains read tools over the *query* API instead of mining `/api/data`; the session verbs stay

@@ -14,6 +14,7 @@ WORKDIR /app
 # Copy workspace manifests first for layer-cache efficiency
 COPY package.json bun.lock ./
 COPY packages/core/package.json      ./packages/core/
+COPY packages/runtime/package.json   ./packages/runtime/
 COPY packages/server/package.json    ./packages/server/
 COPY packages/web/package.json       ./packages/web/
 COPY packages/mcp/package.json       ./packages/mcp/
@@ -76,6 +77,7 @@ RUN apt-get update \
 # Copy workspace manifests + lock
 COPY package.json bun.lock ./
 COPY packages/core/package.json      ./packages/core/
+COPY packages/runtime/package.json   ./packages/runtime/
 COPY packages/server/package.json    ./packages/server/
 COPY packages/web/package.json       ./packages/web/
 COPY packages/mcp/package.json       ./packages/mcp/

@@ -10,11 +10,29 @@
  *
  * See docs/superpowers/specs/2026-09-25-runtime-b1-provider.md §6.3.2.
  *
+ * C1.1 moved most of this directory's provider modules into the standalone `@agentistics/runtime`
+ * package (`packages/runtime/src/provider/**`) — `credentials.ts`, `credential-plan.ts` and this
+ * test STAY here (they are the host's own key storage; see `runtime-boundary.lint.test.ts` for the
+ * companion rule that the runtime may never import them back). The walk below now ALSO covers
+ * `packages/runtime/src`, so a moved module stays guarded at its new address rather than quietly
+ * dropping out of this test's coverage the moment it left `packages/server`.
+ *
  * HOLDERS — the only files that may ever hold the key's value in a variable:
- *   - provider/credentials.ts        (reads/writes the file; wraps in a handle)
- *   - provider/credential-plan.ts    (validates a string it is given; not a storage holder, but
- *                                      receives the value, so it is listed as one for the guard)
- *   - provider/anthropic/client.ts   (the SDK needs a string — unwraps the handle once)
+ *   - provider/credentials.ts               (reads/writes the file; wraps in a handle)
+ *   - provider/credential-plan.ts           (validates a string it is given; not a storage holder,
+ *                                             but receives the value, so it is listed as one)
+ *   - runtime src/provider/anthropic/client.ts   (the SDK needs a string — unwraps the handle once;
+ *                                             moved from this directory's own `anthropic/client.ts`)
+ *   - runtime src/provider/credential.ts    (NEW, C1.2: types only — declares the runtime's own
+ *                                             `CredentialHandle` interface, including its
+ *                                             `reveal(): string` method signature. It holds no
+ *                                             runtime VALUE — nothing in it can produce a real key —
+ *                                             but its source text literally spells the Guard 1
+ *                                             needle `reveal(` as that method's name, so a plain
+ *                                             non-holder scan would trip on the type declaration
+ *                                             itself. Listed as a holder for exactly that reason,
+ *                                             the same way `credential-plan.ts` is: it receives/
+ *                                             names the shape of the value without storing one.)
  * `cli-provider.ts` receives the typed value from the prompt and hands it to `credentials.ts`; it
  * is not a HOLDER (Guard 1 does not apply to it — its `PROVIDER_KEYS_DIR` doc mention is fine
  * precisely because Guard 1 never scans it), but it is host-facing provider code, so Guards 2 and
@@ -82,14 +100,27 @@ const PROVIDER_DIR = join(S_ROOT, 'provider')
 const CORE_PROVIDER_DIR = join(S_ROOT, '../../core/src/provider')
 const JOURNAL_DIR = join(S_ROOT, 'journal')
 const CLI_PROVIDER = join(S_ROOT, 'cli-provider.ts')
+// C1.1 moved the bulk of the provider layer here; walked too, so a moved module stays covered.
+const RUNTIME_SRC_DIR = join(S_ROOT, '../../runtime/src')
 
-const WALKED = [...walk(PROVIDER_DIR), ...walk(CORE_PROVIDER_DIR), ...walk(JOURNAL_DIR)]
+const WALKED = [
+  ...walk(PROVIDER_DIR),
+  ...walk(CORE_PROVIDER_DIR),
+  ...walk(JOURNAL_DIR),
+  ...walk(RUNTIME_SRC_DIR),
+]
 
 const HOLDERS = [
   join(S_ROOT, 'provider/credentials.ts'),
   join(S_ROOT, 'provider/credential-plan.ts'),
-  join(S_ROOT, 'provider/anthropic/client.ts'),
+  join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'),
+  // NEW, C1.2 — types-only, but spells `reveal(` as its handle interface's method name. See the
+  // "HOLDERS" doc block above for why it is listed rather than exempted.
+  join(RUNTIME_SRC_DIR, 'provider/credential.ts'),
 ]
+
+// NOT a holder — see "GUARD 1 EXEMPTION" above. Excluded from Guard 1 only; Guards 2/3 still run
+// over it via GUARD_2_3_FILES.
 
 const NON_HOLDERS = WALKED.filter(f => !HOLDERS.includes(f))
 const GUARD_2_3_FILES = [...WALKED, CLI_PROVIDER]
@@ -160,6 +191,16 @@ describe('provider-secrets.lint — a provider API key never leaves its holders'
     expect(WALKED).toContain(join(S_ROOT, 'provider/credentials.ts'))
     expect(WALKED).toContain(join(S_ROOT, 'provider/credential-plan.ts'))
     expect(existsSync(CLI_PROVIDER)).toBe(true)
+  })
+
+  test('non-vacuity: the walk also reaches the moved runtime modules, not only this directory', () => {
+    // Without this, a typo in RUNTIME_SRC_DIR (or the package moving again) would silently turn
+    // Guards 1-3 into checks that scan nothing under packages/runtime while staying green.
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'))
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/emit.ts'))
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/credential.ts'))
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'))
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/credential.ts'))
   })
 
   test('self-test: Guard 1 needles each trip alone, and a clean source trips nothing', () => {

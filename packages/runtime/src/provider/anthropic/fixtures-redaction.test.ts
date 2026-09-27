@@ -1,14 +1,17 @@
 /**
  * fixtures-redaction.test.ts — the grep over every file in the fixtures directory (spec §6.3.3
  * "Fixtures", §15 B1.5). A fixture is recorded by the owner's command, so the only way a key
- * reaches one is a recorder defect; this test is what catches it. The checker is the recorder's own
- * `assertFixtureClean`, so the gate that runs before a write is the gate tested here.
+ * reaches one is a recorder defect; this test is what catches it. The checker is `test/fixture-gate.ts`'s
+ * `assertFixtureClean` — the very function the recorder runs before a write, so the gate that runs
+ * before a write is the gate tested here.
  */
 import { describe, test, expect } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { redactSecrets } from '@agentistics/core'
-import { assertFixtureClean, FIXTURE_DIR, FORBIDDEN_NEEDLES } from '../../../scripts/record-anthropic-fixtures.ts'
+import { assertFixtureClean, FORBIDDEN_NEEDLES } from '../../../test/fixture-gate.ts'
+
+const FIXTURE_DIR = join(import.meta.dir, '../../../test/fixtures/provider/anthropic')
 
 const files = readdirSync(FIXTURE_DIR).map(name => ({ name, text: readFileSync(join(FIXTURE_DIR, name), 'utf8') }))
 
