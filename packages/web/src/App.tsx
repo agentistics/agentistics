@@ -2150,6 +2150,30 @@ export default function AppLayout() {
   const metricsBounds = metricsTabBoundsRight(filtrosBounds, filtrosTabW, METRICS_TAB_GAP)
 
   /**
+   * OWNER-APPROVED VISUAL, follow-up to the central pane's rounded corners (option "A", 2026-09-26):
+   * the Filtros/metrics tabs used to hang from the fixed strip's own bottom edge (`top: '100%'`,
+   * flush against the artifacts aside's edge) — fine while the pane below them was a plain rectangle,
+   * but `SessionsPage.tsx`'s `CENTRAL_PANE` then inset that pane by a 5px gap and gave it a 12px
+   * radius, so the tabs were left floating IN that gap, straddling the card's top-right curve instead
+   * of sitting on it.
+   *
+   * `SESSIONS_TAB_TOP_OFFSET` moves them onto the card's own top border: `CENTRAL_PANE.gap(5) -
+   * CENTRAL_PANE.border(1)` restated as a literal (the same choice `VIEWPORT_EDGE_MARGIN`'s own
+   * comment makes, above) rather than an import of a component file for one number — added to
+   * `top: 100%`, it lands the tab's own top edge exactly 1px INSIDE the card's border, the same
+   * one-pixel-overlap technique this file already uses to make two adjacent borders read as one line
+   * (`TopBar`'s `noBottomBorder`, `PanelRail`'s dropped `borderLeft`), so the tab's own left/right
+   * borders meet the card's top border seamlessly instead of leaving a visible seam either side of it.
+   *
+   * `SESSIONS_TAB_CORNER_CLEARANCE` pulls both tabs further left than the aside-flush anchor alone
+   * would — that anchor was exact when the pane's own edge WAS the aside's edge; now the pane's right
+   * border sits `CENTRAL_PANE.gap` inside it and curves away over the last 12px, and the tabs need to
+   * clear that curve rather than hang over it.
+   */
+  const SESSIONS_TAB_TOP_OFFSET = 4 // CENTRAL_PANE.gap(5) - CENTRAL_PANE.border(1)
+  const SESSIONS_TAB_CORNER_CLEARANCE = 14
+
+  /**
    * The selected session's title/tabs/actions row, lifted UP into this shared header from
    * `SessionPanel` — which used to draw its own second bordered strip directly under this one, the
    * same information said twice in two different boxes. `useFleet` is a SHARED poll (see
@@ -3546,8 +3570,8 @@ export default function AppLayout() {
           above), it is moved back to the trigger rather than left to fall wherever the browser
           resets an `inert`ed focus to. */}
       <div style={{
-        position: 'absolute', top: '100%',
-        right: filtrosBounds.right,
+        position: 'absolute', top: `calc(100% + ${SESSIONS_TAB_TOP_OFFSET}px)`,
+        right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,
         zIndex: 10, pointerEvents: 'none',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
@@ -3659,8 +3683,8 @@ export default function AppLayout() {
           the filter panel is open. */}
       {selectedFleetSession && (
         <div style={{
-          position: 'absolute', top: '100%',
-          right: metricsBounds.right,
+          position: 'absolute', top: `calc(100% + ${SESSIONS_TAB_TOP_OFFSET}px)`,
+          right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,
           zIndex: 10, pointerEvents: 'none',
         }}>
           <div style={{ pointerEvents: 'auto' }}>
