@@ -288,3 +288,56 @@ weighed stay below as history.
   delegation — not an ordinary tool. **Rejected:** the browser as an ordinary tool — reach without a gate. *The
   question was: does the browser belong to the harness or stay a gated runtime?* §25 says its own
   runtime; Gemini's precedent is a bounded, off-by-default browser subagent.
+
+## 8. First cut — what was built and the decisions it had to take (2026-09-27)
+
+Built in `packages/runtime/src/` (D23: it imports nothing from server or web): `tools/` (the
+contract, the gate, the catalogue and the v1 tools), `policy/`, `sandbox/` and `loop/`. Milestone
+M1 is proven OFFLINE by `loop/e2e.test.ts`: the real loop, the real policy and the real catalogue
+acting on a throwaway git repository under a scripted model. A live run through a provider is the
+owner's.
+
+**The policy cannot be walked around, by construction.** A tool is built only by `defineTool`,
+which closes over its body and runs it only with a GRANT — live (a module-private WeakSet), spent on
+use, and bound to exactly the subjects the tool re-derives from its input. Only `tools/gate.ts`
+mints one, and only after an `allow` verdict. `tools-gate.lint.test.ts` fails the build if anything
+else imports `mintGrant` or calls `.execute(`, and `grant.ts` is not exported from the package.
+
+Decisions this spec did not fix, each recorded where it lives:
+
+| Decision | Where |
+|---|---|
+| Catalogue names contain dots, which provider tool-name rules reject: `.` → `__` on the wire, a both-ways table, collisions and >64-char names refused before any model call | `loop/wire.ts` |
+| A call naming no tool is journaled as `unknown-tool`; the model-sent name reaches its tool_result, never an event | `loop/loop.ts` |
+| `maxTurns`: the last allowed turn runs none of its calls (their results could never be read); every tool_use is still answered | `loop/loop.ts` |
+| A policy DENIAL is the call's terminal event (`policy.denied` + `tool.denied`); it carries no content-store ref (a contract gap, below) | `tools/gate.ts` |
+| Deny is absolute; specificity decides only between ask and allow; ask beats allow at equal specificity; earlier layer (machine) wins | `policy/rules.ts` |
+| A write redirect to `/tmp` is outside the workspace and denied by default; a host may ship `{write, pathGlob:'/tmp/**'}` | `policy/policy.ts` |
+| A session approval generalises to `argv0` + sub-command (`git pull`), never to a bare `git`/`rm`/`docker`, never to sudo or inline interpreter code | `policy/policy.ts` |
+| Every construct the parser cannot judge with certainty (`eval`, `source`, `$CMD`, `case`, …) is OPAQUE and asks a person; no rule or approval lifts it | `policy/shell-parse.ts` |
+| `file.patch` rewrites context lines from the DISK, not from the patch, so a loose tier never silently rewrites whitespace; one tier matching twice is `ambiguous` and never relaxes further | `tools/file/` |
+| "Never read" and "changed since read" are both `stale` (the contract has one class); the sentence tells them apart | `tools/file/` |
+| Nothing was vendored from OpenCode/Cline — the three tiers are written here, so no NOTICE entry | `tools/file/match.ts` |
+| Shell commands travel on fd 3, NUL-terminated, so stdin written with `shell.write` can never run as the next command; the end marker carries a per-call 128-bit nonce | `tools/shell/` |
+| A per-call `cwd` does not move the session unless the command itself `cd`s; a yielded command keeps its bash, and the next start opens a fresh one in the last known directory (exports do not carry over) | `tools/shell/` |
+| `tty: true` is a one-shot `bash -c` on its own PTY (`Bun.Terminal` + `detached`, measured on Bun 1.3.14) | `tools/shell/process.ts` |
+| git reads pass `-c core.fsmonitor=false -c diff.external= -c core.hooksPath=/dev/null --no-ext-diff --no-textconv`: a repository's own config can otherwise make a READ run code (tested with a hostile repo) | `tools/git/spawn.ts` |
+| `task.plan` keeps the plan in the run and emits no `alm.*`: the board is `packages/server`'s, reachable only through a host seam that does not exist yet | `tools/interact/plan.ts` |
+| The runtime never reads its own environment: every spawning tool takes `env` from the HOST, default `MINIMAL_TOOL_ENV` (a PATH and a locale, nothing from the host) — so a provider key in the host's environment never reaches a shell the model drives unless the host passes it. Enforced by `provider-secrets.lint.test.ts` Guard 3, which walks this package | `tools/env.ts` |
+| rlimits are not containment: `requested: 'rlimit'` states `none`; `filesystem-only` is reserved (Landlock/bwrap, later); requested-but-unavailable REFUSES unless the host passes `fallbackUnsandboxed`, and then still says so | `sandbox/` |
+
+**Incident while committing (2026-09-27), and the rule it left.** The pre-commit hook runs
+`bun test` from the worktree with `GIT_DIR`/`GIT_INDEX_FILE` exported, and the B3 tests that build
+throwaway repositories inherited them — `cwd` and `-C` do not override `GIT_DIR`. They committed
+onto the branch and the hostile-repository test wrote `core.bare = true`, `core.hooksPath`,
+`core.fsmonitor`, `diff.external` and a `textconv` into the SHARED `.git/config`. Repaired at once
+(branch reset to its base, config restored). Every runtime test that runs `git` itself now takes
+`packages/runtime/test/git-test-env.ts`; verified by running the whole runtime suite with `GIT_DIR`
+pointed at a decoy repository: 17 failures and 23 commits into the decoy without it, 0 and 0 with
+it. The tools were never the leak — they spawn with `MINIMAL_TOOL_ENV` or the host's env.
+
+**Contract gaps named, not closed:** `tool.denied` carries no content-store reference; `PolicyRequest`
+has no `home` (the policy reads `$HOME` unless given one); an `allow` verdict does not say whether it
+was once or for the session. **Not done here:** git write verbs, agents, MCP, web, browser
+(v2/v3 per §3 and §7); `agent.*` depth cap (D-T4) is therefore not exercised; Windows (the shell
+defaults to `/bin/bash`); a real Docker run (the test is gated by `AGENTISTICS_TEST_DOCKER=1`).

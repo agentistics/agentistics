@@ -23,3 +23,23 @@ export * from './provider/openai-compatible/client.ts'
 export * from './provider/openai-compatible/raw.ts'
 export * from './provider/openai-compatible/usage.ts'
 export * from './provider/openai-compatible/models.ts'
+// ── B3: the tool loop, the policy, the tools and the sandbox ────────────────────────────────────
+// `tools/grant.ts` is deliberately NOT exported: minting a grant is the gate's alone
+// (`tools-gate.lint.test.ts`), and a public `mintGrant` would be a door around the policy for any
+// host. `tools/testing.ts` (offline doubles) is not exported either.
+export * from './tools/contract.ts'
+export * from './tools/define.ts'
+export * from './tools/gate.ts'
+export * from './tools/paths.ts'
+export * from './tools/catalogue.ts'
+export * from './tools/file/index.ts'
+export * from './tools/fs/index.ts'
+export * from './tools/shell/index.ts'
+export * from './tools/git/index.ts'
+export * from './tools/interact/plan.ts'
+export * from './tools/interact/ask-user.ts'
+export * from './loop/loop.ts'
+export * from './loop/emit.ts'
+export * from './loop/wire.ts'
+export * from './policy/index.ts'
+export * from './sandbox/index.ts'
