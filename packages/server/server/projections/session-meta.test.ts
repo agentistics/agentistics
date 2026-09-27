@@ -346,7 +346,7 @@ describe('P1 §8 properties', () => {
 
   test('name and version are the contract\'s', () => {
     expect(sessionMetaProjection.name).toBe('session-meta')
-    expect(sessionMetaProjection.version).toBe(1)
+    expect(sessionMetaProjection.version).toBe(2)
   })
 })
 

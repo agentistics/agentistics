@@ -37,7 +37,7 @@ describe('projections/differential-kimi.ts', () => {
     expect(dailyRow?.verdict).toBe('explained')
   })
 
-  test('the subagent fixture: session-level tokens equal legacy on this real-store shape (single-agent sessions), and the multi-agent case is exercised without a bug row', async () => {
+  test('the subagent fixture: session-level counts sum EVERY agent, as legacy does (countScope all-agents), with no bug row', async () => {
     const report = await runKimiDifferential({
       sessionsDir: join(FIXTURES, 'subagent'),
       now: () => 1_800_000_000_000,
@@ -47,11 +47,12 @@ describe('projections/differential-kimi.ts', () => {
     expect(report.sessions).toBe(1)
     const rows = report.diffs![0]!.rows
     const inputRow = rows.find(r => r.field === 'input_tokens')
-    // Legacy sums BOTH agents (50 + 30 = 80); the projection's session-level total is MAIN only (50)
-    // — a real, declared divergence in aggregation scope (this integration's handback explains it),
-    // never forced to `equal` by mislabelling the subagent as `main`.
+    // Legacy folds both agents (50 + 30 = 80). Until sessionMeta v2 the projection summed the main
+    // agent only (50) — a real regression the parity matrix (A4.2) surfaced; `HARNESS_TOOL_RULES.kimi
+    // .countScope` now states legacy's rule rather than the fixture being excluded.
     expect(inputRow?.legacy).toBe(80)
-    expect(inputRow?.projected).toBe(50)
-    expect(inputRow?.verdict).toBe('bug')
+    expect(inputRow?.projected).toBe(80)
+    expect(inputRow?.verdict).toBe('equal')
+    expect(rows.filter(r => r.verdict === 'bug').map(r => r.field)).toEqual([])
   })
 })

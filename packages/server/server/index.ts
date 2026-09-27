@@ -1598,6 +1598,22 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE PROJECTION QUERY (P3 §3, A4.3) — `GET /api/runtime/metrics`. `capability-guard.ts` has
+    // already required `localTranscripts`; the handler reads `AGENTISTICS_PROJECTIONS` PER REQUEST and,
+    // while it is off, answers `projections_disabled` without touching anything. A central is refused
+    // in the handler (its facts carry no machine attribution to scope a viewer by).
+    if (url.pathname === '/api/runtime/metrics') {
+      try {
+        const { handleRuntimeMetricsRequest, liveRuntimeMetricsDeps } = await import('./runtime-metrics-web')
+        const out = await handleRuntimeMetricsRequest(req, url, await liveRuntimeMetricsDeps(TEAM_CENTRAL))
+        return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return json(safe.body, 500)
+      }
+    }
+
     // THE NATIVE RUNTIME'S PROVIDERS (UI.1) — `/api/provider`, `/api/provider/:id`, and its `/test`
     // and `/models` sub-resources, all matched inside `provider-web.ts` (sub-resources explicitly,
     // so an id can never be read as `test`). `capability-guard.ts` has already required

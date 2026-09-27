@@ -106,6 +106,14 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // hold no MCP servers at all (`~/.claude/settings.json` and `<project>/.claude/settings.json`) —
   // a second lister giving a different, wrong answer is the drift this codebase is built against.
   ['/api/mcp', 'mcpAdmin'],
+  // The projection query (`runtime-metrics-web.ts`, P3 §3). It reads THIS machine's projection store,
+  // which is derived from the host's own transcripts: per-session models, repositories, project PATHS,
+  // task ids and tool usage. That is host transcript data one fold removed, so it rides
+  // `localTranscripts` — the gate the transcript readers ride — and is unreachable on an exposed
+  // profile. A PREFIX so a sub-route added later is guarded by having been added at all; scoped to
+  // `/api/runtime/metrics` rather than all of `/api/runtime`, whose other routes (§28) spawn and
+  // drive sessions and need their own, stronger decision.
+  ['/api/runtime/metrics', 'localTranscripts'],
 ]
 
 export function routeCapability(pathname: string): keyof Capabilities | null {

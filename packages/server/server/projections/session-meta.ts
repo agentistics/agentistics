@@ -222,13 +222,13 @@ export interface SessionMetaProjection {
 
 export interface OrderKey { ord: number; at: string; id: string }
 
-function compareKey(a: OrderKey, b: OrderKey): number {
+export function compareKey(a: OrderKey, b: OrderKey): number {
   if (a.ord !== b.ord) return a.ord - b.ord
   if (a.at !== b.at) return a.at < b.at ? -1 : 1
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
-function keyOf(e: AnyAgentisticsEvent): OrderKey {
+export function keyOf(e: AnyAgentisticsEvent): OrderKey {
   const m = /:(\d+)$/.exec(e.provenance.sourceRef ?? '')
   return { ord: m ? Number(m[1]) : -1, at: e.occurredAt, id: e.eventId }
 }
@@ -400,6 +400,22 @@ interface HarnessToolRules {
   modelFailuresAreErrors: boolean
   /** A failed tool call is a legacy tool error. False where legacy never reads a call's outcome. */
   toolFailuresAreErrors: boolean
+  /**
+   * Which agents a session's COUNTS are summed over. `'main'` (default, Claude's rule: a subagent's
+   * spend is its invocation's, reported under `agentMetrics`) or `'all-agents'` (kimi: `kimi-parse.ts`
+   * folds every agent's `wire.jsonl` into one session — tokens, tools, git counts — and only the
+   * context gauge stays the main agent's). Measured on the `kimi-replay/subagent` fixture: legacy
+   * `input_tokens` 80 (main 50 + worker 30) against 50 while this was main-only (A4, 2026-09-27).
+   * The gauge, the model, turns and compactions stay main-only under either scope.
+   */
+  countScope?: 'main' | 'all-agents'
+  /**
+   * Whether a started subagent alone makes `uses_task_agent` true (default, Claude's reading: an agent
+   * ran, so the session delegated). `false` where legacy reads ONLY the tool name — kimi-parse.ts sets it
+   * from `Agent`/`AgentSwarm` tool counts and nothing else (measured on `kimi-replay/subagent`: legacy
+   * false, a worker agent present).
+   */
+  subagentsImplyTaskAgent?: boolean
 }
 
 const DEFAULT_TOOL_RULES: HarnessToolRules = {
@@ -445,7 +461,7 @@ export const HARNESS_TOOL_RULES: Readonly<Record<string, HarnessToolRules>> = {
     toolFailuresAreErrors: false,
   },
   // kimi-parse.ts: uses_task_agent is `Agent` OR `AgentSwarm` (A3.4); the rest are Claude's names.
-  kimi: { ...DEFAULT_TOOL_RULES, taskAgent: n => n === 'Task' || n === 'Agent' || n === 'AgentSwarm' },
+  kimi: { ...DEFAULT_TOOL_RULES, taskAgent: n => n === 'Task' || n === 'Agent' || n === 'AgentSwarm', countScope: 'all-agents', subagentsImplyTaskAgent: false },
 }
 
 // ── Fold ────────────────────────────────────────────────────────────────────────────────────────
@@ -732,6 +748,22 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     if (a.gauge && (!main.gauge || compareKey(a.gauge.key, main.gauge.key) > 0)) main.gauge = a.gauge
     if (a.firstModel && (!main.firstModel || compareKey(a.firstModel.key, main.firstModel.key) < 0)) main.firstModel = a.firstModel
   }
+  // A harness whose legacy session folds EVERY agent's counts (`countScope`) gets its non-main agents'
+  // counts here too — never the gauge, the model, turns or compactions, which stay the main agent's.
+  if (rules.countScope === 'all-agents') {
+    const mainSet = new Set(mains)
+    for (const [id, a] of [...s.agents].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
+      if (id === NO_AGENT || mainSet.has(id)) continue
+      add(main.tokens, a.tokens)
+      for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
+      for (const c of a.absentCounters) main.absentCounters.add(c)
+      main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
+      for (const [n, c] of countedNames(a)) mainToolNames.set(n, (mainToolNames.get(n) ?? 0) + c)
+      for (const n of a.rawToolNames.keys()) mainRawNames.add(n)
+      main.linesAdded += a.linesAdded; main.linesRemoved += a.linesRemoved
+      for (const f of a.files) main.files.add(f)
+    }
+  }
   // Session-level events (no agent) also bear on whether compactions were recorded.
   const recorded = [...mains, NO_AGENT].every(id => s.agents.get(id)?.compactionRecorded ?? true)
   // …and on whether human turns were: a turn carries no agent only if the emitter says so.
@@ -959,7 +991,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
       totalCostUSD: measured.reduce((n, i) => n + i.costUSD, 0),
     }
   }
-  meta.uses_task_agent = ruleNames.some(rules.taskAgent) || subKind.size > 0
+  meta.uses_task_agent = ruleNames.some(rules.taskAgent) || (rules.subagentsImplyTaskAgent !== false && subKind.size > 0)
 
   // Priced exactly as the legacy path prices: `sessionCostUSD` over the projected counters.
   const costUSD = sessionCostUSD({
@@ -977,7 +1009,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
 
 export const sessionMetaProjection: Projection<SessionMetaState, SessionMetaProjection> = {
   name: 'session-meta',
-  version: 1,
+  // v2 (A4, 2026-09-27): `countScope` — kimi sessions sum every agent's counts, as legacy does.
+  version: 2,
   empty: () => ({
     seen: new Set(), agents: new Map(), started: new Map(), ended: new Map(), toolNameById: new Map(),
     failures: [], modelFailures: [], sessionStart: undefined, startAt: undefined, sessionEnd: undefined, run: undefined,
