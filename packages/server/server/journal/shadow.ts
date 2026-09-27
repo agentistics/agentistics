@@ -41,6 +41,14 @@
  * - **Only counters, ids, names and summaries reach the journal** — that is the replay's contract
  *   (P1 §7, D5), not something this file adds or relaxes.
  *
+ * **The live path (A5.3).** With `AGENTISTICS_JOURNAL_LIVE` also on, the shadow runs the file-tail
+ * floor (`integrations/live/file-tail.ts`) beside the build's ingest, and the two SHARE this shadow's
+ * journal, its cursor map and its accepted stamps. ONE cursor per conversation is load-bearing: the
+ * Claude replay trusts a cursor only when it equals the walk it retained, so two independent cursor
+ * stores would each hand back a cursor the other had moved past and force alternating full re-reads.
+ * A stamp the tail reports accepted is recorded with the moment it was accepted, so `canSkip` still
+ * replays a source the tail last saw LIVE once more after it settles — that run emits its `*.ended`.
+ *
  * It also owns the two seams A1.5 left open: it REGISTERS the journal's status with health.ts (so
  * `journal-unwritable` can fire in production) and it writes the SINCE-BOOT counters to a small
  * status file that `agentop journal status`, a different process, can read.
@@ -49,10 +57,11 @@ import { readFileSync, statSync } from 'node:fs'
 import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
-import { JOURNAL_ENABLED, JOURNAL_STATUS_PATH, PROJECTS_DIR } from '../config'
+import { JOURNAL_ENABLED, JOURNAL_LIVE_ENABLED, JOURNAL_STATUS_PATH, PROJECTS_DIR } from '../config'
 import { setJournalStatusSource } from '../health'
 import { INTEGRATIONS } from '../integrations/types'
 import type { HarnessReplay, ReplayCursor } from '../integrations/types'
+import { createFileTail, type FileTail, type TailAppendResult, type TailStats } from '../integrations/live/file-tail'
 import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import type { Journal, JournalCounters, RejectionReason } from './types'
@@ -84,6 +93,8 @@ export interface ShadowStatusFile {
   /** The last completed run — what the ingest cost, so the ≤10 % budget can be read off a live machine. */
   lastRun: ShadowRun | null
   sinceBoot: ShadowSinceBoot
+  /** The file-tail's counters since it started — absent while the live path is off. */
+  live?: TailStats
 }
 
 export interface ShadowRun {
@@ -114,6 +125,9 @@ export type ShadowResult = ({ status: 'ran' } & ShadowRun) | { status: 'off' | '
 export interface ShadowDeps {
   /** Default `JOURNAL_ENABLED`. */
   enabled?: boolean
+  /** Whether `startLive` may run the file-tail. Default `JOURNAL_ENABLED && JOURNAL_LIVE_ENABLED`; it
+   *  is effective only while `enabled` holds too. */
+  liveEnabled?: boolean
   /** Default `openJournal()`. Injected so a test can hand over a failing or in-memory-path journal. */
   open?: () => Promise<Journal>
   /** Default `INTEGRATIONS.claude.replay`. */
@@ -138,8 +152,23 @@ export interface Shadow {
   ingest(sessions: readonly ShadowSession[]): Promise<ShadowResult>
   /** Counters since this shadow was created — what the status file carries. */
   sinceBoot(): ShadowSinceBoot
-  /** Closes the journal (checkpointing the WAL) and unregisters the health source. */
+  /**
+   * Starts the file-tail over THIS shadow's journal, cursors and stamps (A5.3). Idempotent: a second
+   * call returns the running tail. `null` — nothing started — when the live path is off, or when
+   * there is no stamp source to tell a moving transcript from a still one.
+   */
+  startLive(opts?: LiveOptions): FileTail | null
+  stopLive(): void
+  /** Closes the journal (checkpointing the WAL), stops the live tail and unregisters the health source. */
   close(): void
+}
+
+export interface LiveOptions {
+  intervalMs?: number
+  maxSources?: number
+  concurrency?: number
+  /** Default true. `false` builds the tail without its timer — a test then drives `tick()` itself. */
+  autoStart?: boolean
 }
 
 /** What the shadow remembers about one source: enough to say "nothing new here". */
@@ -230,6 +259,7 @@ function isClaude(s: ShadowSession): boolean {
 
 export function createShadow(deps: ShadowDeps = {}): Shadow {
   const enabled = deps.enabled ?? JOURNAL_ENABLED
+  const liveEnabled = deps.liveEnabled ?? (JOURNAL_ENABLED && JOURNAL_LIVE_ENABLED)
   const open = deps.open ?? (() => openJournal())
   const statusPath = deps.statusPath === undefined ? JOURNAL_STATUS_PATH : deps.statusPath
   const readStamps = deps.stamps === undefined ? (deps.replay ? null : () => claudeStamps()) : deps.stamps
@@ -249,6 +279,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
   const rejectedByReason: Partial<Record<RejectionReason, number>> = {}
   const cursors = new Map<string, ReplayCursor>()
   let committed: Map<string, CommittedStamp> | null = null // loaded once the journal is open
+  let tail: FileTail | null = null
 
   function getJournal(): Promise<Journal> {
     if (!journalPromise) {
@@ -280,6 +311,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     const file: ShadowStatusFile = {
       v: 1, pid: process.pid, bootedAt, updatedAt: new Date(now()).toISOString(),
       runs, skippedBusy, lastRun, sinceBoot: sinceBoot(),
+      ...(tail ? { live: tail.stats() } : {}),
     }
     try {
       await mkdir(dirname(statusPath), { recursive: true })
@@ -381,7 +413,57 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     return result
   }
 
+  /** The tail's append: the SAME accepted rule as `run` — the journal's `dropped` counter did not move. */
+  async function liveAppend(events: readonly AgentisticsEvent[]): Promise<TailAppendResult> {
+    const j = await getJournal()
+    const droppedBefore = j.status().counters.dropped
+    const res = await j.append(events)
+    for (const r of res.rejected) rejectedByReason[r.reason] = (rejectedByReason[r.reason] ?? 0) + 1
+    return {
+      written: res.written,
+      duplicates: res.duplicates,
+      rejected: res.rejected.length,
+      accepted: j.status().counters.dropped === droppedBefore,
+    }
+  }
+
+  function startLive(opts: LiveOptions = {}): FileTail | null {
+    if (tail) return tail
+    if (!enabled || !liveEnabled) return null
+    if (!readStamps) {
+      warn('[journal] live tail not started: no stamp source to tell a growing transcript from a still one')
+      return null
+    }
+    const replay = deps.replay ?? INTEGRATIONS.claude.replay
+    if (!replay) return null
+    tail = createFileTail({
+      readStamps,
+      replay,
+      append: liveAppend,
+      getCursor: id => cursors.get(id) ?? null,
+      setCursor: (id, cursor) => { cursors.set(id, cursor) },
+      // Before the first ingest has loaded the persisted stamps there is nothing to record into —
+      // and writing here first would stop that load from happening (`committed ??=`). The ingest then
+      // replays the source once by its cursor, which the tail already advanced: a no-op read.
+      onAccepted: (id, stamp) => { committed?.set(id, { ...stamp, replayedAtMs: now() }) },
+      flushEvents,
+      warn,
+      ...(opts.intervalMs !== undefined ? { intervalMs: opts.intervalMs } : {}),
+      ...(opts.maxSources !== undefined ? { maxSources: opts.maxSources } : {}),
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+    })
+    if (opts.autoStart !== false) tail.start()
+    return tail
+  }
+
+  function stopLive(): void {
+    tail?.stop()
+    tail = null
+  }
+
   return {
+    startLive,
+    stopLive,
     async ingest(sessions) {
       if (!enabled) return { status: 'off' }
       if (running) { skippedBusy++; return { status: 'busy' } }
@@ -397,6 +479,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     },
     sinceBoot,
     close() {
+      stopLive()
       register(null)
       journal?.close()
       journal = null
@@ -415,5 +498,6 @@ let shared: Shadow | null = null
 export function shadowIngest(sessions: readonly ShadowSession[]): Promise<ShadowResult> {
   if (!JOURNAL_ENABLED) return Promise.resolve({ status: 'off' })
   shared ??= createShadow()
+  if (JOURNAL_LIVE_ENABLED) shared.startLive() // idempotent: the first build starts it, the rest find it running
   return shared.ingest(sessions).catch(() => ({ status: 'failed' as const }))
 }

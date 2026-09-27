@@ -78,6 +78,16 @@ export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
 export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
   (process.env.AGENTISTICS_JOURNAL ?? '').trim().toLowerCase(),
 )
+// The file-tail floor (A5.3, `integrations/live/file-tail.ts`): while on, a live transcript's NEW
+// bytes reach the journal within one poll instead of waiting for the next build. Effective ONLY when
+// `AGENTISTICS_JOURNAL` is also on — it feeds that journal and nothing else. **Absent reads as OFF**,
+// same affirmative-only parsing as the journal flag. It is a sibling of `AGENTISTICS_JOURNAL` rather
+// than a member of master §47's `AGENTISTICS_INGEST_CHANNELS` because file-tail opens no endpoint:
+// those flags gate the round-2 collector ROUTES (hooks, OTLP), and this reads files the build
+// already reads, on a timer.
+export const JOURNAL_LIVE_ENABLED = ['1', 'true', 'on', 'yes'].includes(
+  (process.env.AGENTISTICS_JOURNAL_LIVE ?? '').trim().toLowerCase(),
+)
 // What the WRITING process reports about itself (counters since boot), for `agentop journal status`
 // to read from a different process. It sits beside the journal, whichever directory that is.
 // Both side-files below are written as literal `join`s, like `JOURNAL_PATH`, so
