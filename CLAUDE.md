@@ -2608,7 +2608,11 @@ trigger them, and the desktop card is not a descendant of `SessionsPage` in `App
 `bannerVisible` (`lib/idleExecution.ts`) gained an optional `candidateKeys`/`dismissedKeys` pair for
 this: dismissing the card hides the CURRENT batch only, and a session outside the dismissed set
 (one that was not part of the batch just dismissed) makes it visible again — never "silence idle
-sessions forever" from one click. The review MODAL's two native `<select>`s (action, group) are now
+sessions forever" from one click. `dismissedKeys` persists in `sessionStorage` exactly like
+`snoozedUntil` does (try/catch on every read and write; a corrupt or missing value reads as empty),
+so a reload no longer brings the card back for the very batch just dismissed — it is pruned on every
+publish to drop a key that has fallen out of the current candidate set, which keeps storage bounded
+without changing `bannerVisible`'s answer. The review MODAL's two native `<select>`s (action, group) are now
 the project's own `Select` (`pages/settings/primitives.tsx`), matching `DeliveryDetail.tsx`'s usage;
 its popover is a `position: fixed; z-index: 1200` DESCENDANT of the modal's own `zIndex: 640`
 overlay. The overlay DOES set `backdropFilter: 'blur(3px)'`, which — like `transform`/`filter` —

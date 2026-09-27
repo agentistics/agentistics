@@ -11,12 +11,22 @@
  * Snooze and dismiss live HERE rather than as React state on `SessionsPage`, because the card's own
  * buttons are what trigger them, and the card is not always inside a component that holds that
  * state — the desktop aside is a sibling of `SessionsPage` in `App.tsx`'s tree, not a descendant.
+ *
+ * `dismissedKeys` persists in `sessionStorage` exactly like `snoozedUntil` (try/catch on every read
+ * and write; a corrupt or missing value reads as empty) — a page reload used to bring the card back
+ * for the very batch the user had just dismissed, because the Set lived only in this module's
+ * memory. It is pruned on every `publishIdleReview`: a dismissed key that has dropped out of the
+ * CURRENT candidate set is removed from storage, so the set does not grow forever — this never
+ * changes `bannerVisible`'s answer (it only ever tests membership of the CURRENT candidateKeys), it
+ * only keeps what is stored bounded. The "a new candidate outside the dismissed set makes the card
+ * reappear" rule is untouched.
  */
 import { useSyncExternalStore } from 'react'
 import { bannerVisible } from './idleExecution'
 
 const SNOOZE_KEY = 'agentistics-idle-snooze'
 const SNOOZE_MS = 3_600_000
+const DISMISSED_KEY = 'agentistics-idle-dismissed'
 
 export interface IdleReviewSummary {
   count: number
@@ -46,11 +56,39 @@ function readSnooze(): number | null {
   }
 }
 
+/** A corrupt, missing, or non-array-of-strings value reads as empty — never throws, never wedges. */
+function readDismissed(): ReadonlySet<string> {
+  try {
+    const raw = sessionStorage.getItem(DISMISSED_KEY)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((k): k is string => typeof k === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function writeDismissed(keys: ReadonlySet<string>): void {
+  try { sessionStorage.setItem(DISMISSED_KEY, JSON.stringify([...keys])) } catch { /* private tab, quota, disabled */ }
+}
+
+/**
+ * Drops any dismissed key that is no longer among the CURRENT candidates, so the stored set never
+ * grows unbounded with sessions that have long since stopped being idle candidates. Returns the same
+ * reference when nothing changes, which is what lets the caller skip a pointless storage write.
+ */
+function pruneDismissed(dismissedKeys: ReadonlySet<string>, candidateKeys: readonly string[]): ReadonlySet<string> {
+  if (dismissedKeys.size === 0) return dismissedKeys
+  const kept = new Set(candidateKeys.filter(k => dismissedKeys.has(k)))
+  return kept.size === dismissedKeys.size ? dismissedKeys : kept
+}
+
 let state: IdleReviewState = {
   count: 0, freedBytes: null, candidateKeys: [],
   modalOpen: false,
   snoozedUntil: readSnooze(),
-  dismissedKeys: new Set(),
+  dismissedKeys: readDismissed(),
 }
 
 function computeSnapshot(s: IdleReviewState, now: number): IdleReviewSnapshot {
@@ -87,7 +125,9 @@ function commit(next: IdleReviewState): void {
 
 /** `SessionsPage`'s own call, on every candidates/modal change — the only writer of the summary. */
 export function publishIdleReview(summary: IdleReviewSummary, modalOpen: boolean): void {
-  commit({ ...state, ...summary, modalOpen })
+  const dismissedKeys = pruneDismissed(state.dismissedKeys, summary.candidateKeys)
+  if (dismissedKeys !== state.dismissedKeys) writeDismissed(dismissedKeys)
+  commit({ ...state, ...summary, modalOpen, dismissedKeys })
 }
 
 /** The card's "Snooze 1h" button. */
@@ -99,7 +139,9 @@ export function snoozeIdleReview(): void {
 
 /** The card's `×` — dismisses the CURRENT batch only; see `bannerVisible`'s own header. */
 export function dismissIdleReview(): void {
-  commit({ ...state, dismissedKeys: new Set(state.candidateKeys) })
+  const dismissedKeys = new Set(state.candidateKeys)
+  writeDismissed(dismissedKeys)
+  commit({ ...state, dismissedKeys })
 }
 
 /** Non-reactive read, for a caller outside React and for tests. Components use `useIdleReviewCard`. */
