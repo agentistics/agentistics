@@ -285,6 +285,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     'provider.network': "Falha de rede ao falar com o provedor.",
     'provider.no_credential': "Não há chave de API guardada para este provedor. Grave uma com `agentop provider key set anthropic`.",
     'provider.not_in_b1': "Este provedor ainda não tem cliente nativo — por enquanto só a Anthropic é chamada diretamente.",
+    'provider.not_configured': "Nenhum endpoint compatível com OpenAI foi configurado nesta máquina. Configure um com `agentop provider key set <endpoint>`.",
     'provider.not_a_vendor': "“Outro” não é um provedor: é o grupo de modelos que nenhum provedor reivindica, e não há nada para chamar.",
   },
 
@@ -568,6 +569,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     'provider.network': "A network failure while talking to the provider.",
     'provider.no_credential': "No API key is stored for this provider. Set one with `agentop provider key set anthropic`.",
     'provider.not_in_b1': "This provider has no native client yet — for now only Anthropic is called directly.",
+    'provider.not_configured': "No OpenAI-compatible endpoint is configured on this machine. Set one up with `agentop provider key set <endpoint>`.",
     'provider.not_a_vendor': "“Other” is not a provider: it is the bucket for models no provider claims, and there is nothing to call.",
   },
 };

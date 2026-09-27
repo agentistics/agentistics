@@ -1,0 +1,16 @@
+{
+  "_source": "docs/superpowers/research/12-provider-apis.md §2.1 (usage object) + §7 trap 1 (reasoning_tokens is a sub-count of completion_tokens for OpenAI). Counters illustrative.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-openai-reasoning-0001",
+    "model": "o5-reasoning",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Thought about it." } }],
+    "usage": {
+      "prompt_tokens": 60,
+      "completion_tokens": 80,
+      "total_tokens": 140,
+      "prompt_tokens_details": { "cached_tokens": 10 },
+      "completion_tokens_details": { "reasoning_tokens": 30 }
+    }
+  }
+}

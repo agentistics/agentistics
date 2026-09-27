@@ -1,0 +1,10 @@
+{
+  "_source": "adversarial — exercises 'no-verified-price' when a router body states counters but no usage.cost (e.g. a proxy skin that drops the field).",
+  "kind": "router",
+  "body": {
+    "id": "gen-documented-openrouter-nocost-0001",
+    "model": "openai/gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }],
+    "usage": { "prompt_tokens": 50, "completion_tokens": 5, "total_tokens": 55 }
+  }
+}

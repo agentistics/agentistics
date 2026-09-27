@@ -1,0 +1,16 @@
+{
+  "_source": "adversarial — hit + miss does not sum to prompt_tokens, exercising the brief's own 'add a note when it does not match' rule.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-deepseek-mismatch-0001",
+    "model": "deepseek-chat",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "?" } }],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 10,
+      "total_tokens": 110,
+      "prompt_cache_hit_tokens": 10,
+      "prompt_cache_miss_tokens": 50
+    }
+  }
+}

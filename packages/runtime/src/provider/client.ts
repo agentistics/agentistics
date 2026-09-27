@@ -9,8 +9,8 @@
  * invocation is a confident 0 for a call that may have been billed.
  *
  * This module is a NON-holder of the credential: it names the opaque `CredentialRef` and the
- * `CredentialHandle` TYPE only (declared in `./credential.ts`). The one place a key is unwrapped is
- * `anthropic/client.ts` (`provider-secrets.lint.test.ts`, Guard 1).
+ * `CredentialHandle` TYPE only (declared in `./credential.ts`). The places a key is unwrapped are
+ * `anthropic/client.ts` and `openai-compatible/client.ts` (`provider-secrets.lint.test.ts`, Guard 1).
  *
  * There is no module-level client registry: a client needs a `CredentialResolver` and a capture
  * directory, and both belong to the HOST (D23 — the runtime reads no host path and no host store).
@@ -25,6 +25,7 @@ import type {
   UsageAnomaly,
 } from '@agentistics/core'
 import type { CredentialRef } from './credential.ts'
+import type { CostStatement, UsageCertainty } from './openai-compatible/usage.ts'
 
 export type { CredentialHandle, CredentialRef, CredentialResolution, CredentialResolver } from './credential.ts'
 
@@ -99,7 +100,9 @@ export interface CaptureRef {
 
 /**
  * The one HTTP exchange of an attempt, as the capturing fetch saw it. `headers` has ALREADY passed
- * through the allowlist (`anthropic/raw.ts` `allowlistHeaders`) — request headers are never here.
+ * through the calling client's allowlist (`anthropic/raw.ts` `allowlistHeaders` by default,
+ * `openai-compatible/raw.ts` `allowlistOpenAICompatibleHeaders` for that client) — request headers
+ * are never here.
  */
 export interface RawExchange {
   status: number
@@ -136,6 +139,15 @@ export type InvocationResult =
       usageAnomalies: UsageAnomaly[]
       stopReason: StopReason
       content: ProviderContent[]
+      /** B5a — WHO made the statement the counters come from (`openai-compatible/usage.ts`). Absent
+       *  on a client that does not grade it (Anthropic: always the billing vendor's own API). */
+      usageCertainty?: UsageCertainty
+      /** B5a — a cost the ENDPOINT itself stated (a router's own figure), or why there is none.
+       *  Never a table price and never the fallback rate. Absent on a client that does not state it. */
+      cost?: CostStatement
+      /** B5a — runtime-local divergence codes met while reading the usage (e.g.
+       *  `cached-exceeds-prompt`). Absent on a client that does not produce them. */
+      usageNotes?: string[]
     })
   | (InvocationCommon & {
       status: 'failed'
@@ -158,5 +170,8 @@ export const PROVIDER_CLIENT_ABSENT: Record<Exclude<ProviderId, 'anthropic'>, st
   openai: 'provider.not_in_b1',
   google: 'provider.not_in_b1',
   moonshot: 'provider.not_in_b1',
+  // B5a — the client exists, but only when the host configured an endpoint (`createProviderClients`
+  // given `openaiCompatible`). Absent deps = nothing to call, said in words rather than a null.
+  'openai-compatible': 'provider.not_configured',
   other: 'provider.not_a_vendor',
 }

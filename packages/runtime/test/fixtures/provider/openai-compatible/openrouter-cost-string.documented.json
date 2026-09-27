@@ -1,0 +1,10 @@
+{
+  "_source": "adversarial — a router body whose usage.cost is a STRING rather than a number (a documented-shape violation this reader must refuse, not coerce).",
+  "kind": "router",
+  "body": {
+    "id": "gen-documented-openrouter-coststring-0001",
+    "model": "openai/gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }],
+    "usage": { "prompt_tokens": 50, "completion_tokens": 5, "total_tokens": 55, "cost": "0.01" }
+  }
+}
