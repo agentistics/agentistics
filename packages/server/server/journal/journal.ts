@@ -64,6 +64,7 @@ import {
   openDatabase,
   type PathProbe,
 } from './schema'
+import { DEFAULT_STRING_CACHE_BYTES, StringCache } from './string-cache'
 import {
   MAX_PAGE,
   type AppendResult,
@@ -91,6 +92,12 @@ export interface OpenJournalOptions {
    * function that cancels it. Injected so a test can decide when (or whether) the timer fires.
    */
   scheduleCheckpoint?: (run: () => void, delayMs: number) => () => void
+  /**
+   * Default `new StringCache(DEFAULT_STRING_CACHE_BYTES)`. Injected so a test or a measurement
+   * script can supply its own budget (including an unbounded one, for a before/after comparison)
+   * and read `.stats()` off the very instance this journal uses.
+   */
+  stringCache?: StringCache
 }
 
 /**
@@ -300,15 +307,19 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
       return disabledJournal(where, e instanceof JournalOpenError ? e.reason : 'open-failed')
     }
 
-    // The interned-string dictionary, as far as this process has seen it COMMITTED. An id is never
-    // reused and a string never rewritten (schema.ts), so a committed pair is valid for the life of
-    // the process whatever other processes write. Ids first met inside a transaction are held apart
-    // (`fresh`) and join the cache only once that transaction commits: a rolled-back batch takes
-    // its new strings with it, and a cached id for a row that no longer exists would name nothing.
-    const idOf = new Map<string, number>()
-    const stringOf = new Map<number, string>()
+    // The interned-string dictionary, as far as this process has seen it COMMITTED — a BOUNDED,
+    // bidirectional cache (string-cache.ts), never unbounded: a full replay or a wide catch-up walk
+    // would otherwise pin every distinct string the process has ever met for its whole lifetime (the
+    // defect A1.8 replaces this with). A miss here is never wrong, only slower — `intern` / `lookup`
+    // both fall through to `event_strings` on one. An id is never reused and a string never rewritten
+    // (schema.ts), so a committed pair is valid for the life of the process whatever other processes
+    // write, and a cached pair never needs to be told "this changed" — only evicted for space. Ids
+    // first met inside a transaction are held apart (`fresh`) and join the cache only once that
+    // transaction commits: a rolled-back batch takes its new strings with it, and a cached id for a
+    // row that no longer exists would name nothing.
+    const cache = opts.stringCache ?? new StringCache(DEFAULT_STRING_CACHE_BYTES)
     const remember = (fresh: Map<string, number>) => {
-      for (const [s, id] of fresh) { idOf.set(s, id); stringOf.set(id, s) }
+      for (const [s, id] of fresh) cache.put(s, id)
     }
 
     let insertTx: { immediate: (rows: JournalRow[]) => { written: number; duplicates: number; fresh: Map<string, number> } }
@@ -324,7 +335,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         // Inside BEGIN IMMEDIATE this connection holds the write lock, so the SELECT sees every
         // string any other process has committed and nobody can add one between it and the INSERT.
         const intern = (s: string): number => {
-          const known = idOf.get(s) ?? fresh.get(s)
+          const known = cache.getId(s) ?? fresh.get(s)
           if (known !== undefined) return known
           const hit = findString.get(s) as { id: number } | null
           const id = hit ? hit.id : Number(addString.run(s).lastInsertRowid)
@@ -353,12 +364,11 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
 
     /** An interned id → its string. An id no row of `event_strings` carries is a corrupt row: throw. */
     const lookup = (id: number): string => {
-      const known = stringOf.get(id)
+      const known = cache.getString(id)
       if (known !== undefined) return known
       const hit = stringStmt.get(id) as { s: string } | null
       if (!hit) throw new Error(`journal row names an unknown string id ${id}`)
-      idOf.set(hit.s, id)
-      stringOf.set(id, hit.s)
+      cache.put(hit.s, id)
       return hit.s
     }
 
