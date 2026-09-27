@@ -248,8 +248,14 @@ export interface ModelInvokedData extends ModelAttemptFacts {
   deployment?: string
 }
 
-export interface ModelStartedData {
+/**
+ * The provider accepted the attempt and began answering (a streamed response's first event).
+ * B2.1 (2026-09-27) added the D20 attempt facts and `provider`, all optional and additive, so a
+ * `model.started` joins the `model.invoked` and the terminal event of the same attempt.
+ */
+export interface ModelStartedData extends ModelAttemptFacts {
   providerRequestId?: string
+  provider?: ProviderId
   model: string
 }
 

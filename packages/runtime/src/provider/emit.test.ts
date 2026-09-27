@@ -279,7 +279,7 @@ describe('against a sink with the journal\'s dedupe rule', () => {
     const back = j.events[1] as AgentisticsEvent<'model.completed'>
     expect(back.data.usage).toEqual({ input: 12, output: 340, cacheRead: 45_000, cacheWrite: 1_500 })
     expect(back.eventId).toBe(completedEvent(completed(), {}, ctx, 'x').eventId)
-    expect(em.counters().lost).toEqual({ 'model.invoked': 0, 'model.completed': 0, 'model.failed': 0 })
+    expect(em.counters().lost).toEqual({ 'model.invoked': 0, 'model.started': 0, 'model.completed': 0, 'model.failed': 0 })
   })
 
   test('a retried invocation: failed attempt 1, completed attempt 2 — four rows, one billed response', async () => {
@@ -318,7 +318,7 @@ describe('a journal that fails never fails the call', () => {
     expect(await em.invoked(start)).toBeNull()
     expect(await em.terminal(failed())).toBeNull()
     expect(await em.terminal(completed())).toBeNull()
-    expect(em.counters().lost).toEqual({ 'model.invoked': 1, 'model.completed': 1, 'model.failed': 1 })
+    expect(em.counters().lost).toEqual({ 'model.invoked': 1, 'model.started': 0, 'model.completed': 1, 'model.failed': 1 })
   })
 
   test('an append that throws resolves null and is counted', async () => {

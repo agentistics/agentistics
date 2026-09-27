@@ -57,6 +57,9 @@ import type {
   InvocationResult,
   OpenAICompatibleClientDeps,
   ProviderClient,
+  ProviderRequest,
+  ProviderStreamEvent,
+  StreamDelivery,
 } from '@agentistics/runtime'
 import type { Journal } from './journal/types'
 
@@ -103,6 +106,9 @@ export interface ProviderCliDeps {
   /** `try` only: where the raw capture is written. Default is the machine's content store,
    *  `CONTENT_DIR` (`config.ts`) — the runtime has no default of its own (D23). */
   captureDir?: string
+  /** `try --stream` only: writes a chunk to stdout with NO newline added, so text deltas appear as
+   *  they arrive. Default `process.stdout.write`. */
+  write?: (chunk: string) => void
   /**
    * MODELS DISPATCH HOOK (B5a.3). `agentop provider models …` is written in
    * `./cli-provider-models.ts` (`runProviderModels`) by a separate item; the INTEGRATOR wires it here
@@ -480,11 +486,11 @@ export const TRY_DEFAULT_MODEL = 'claude-haiku-4-5-20251001'
 export const TRY_PROMPT = 'Reply with the single word: ok'
 export const TRY_MAX_TOKENS = 16
 
-const TRY_USAGE = 'usage: agentop provider try anthropic [--model <id>]\n'
+const TRY_USAGE = 'usage: agentop provider try anthropic [--model <id>] [--stream]\n'
   + '       agentop provider try <endpoint> --model <id>'
 
 type TryParse =
-  | { kind: 'ok'; provider: string; model: string; modelGiven: boolean }
+  | { kind: 'ok'; provider: string; model: string; modelGiven: boolean; stream: boolean }
   | { kind: 'usage' }
   | { kind: 'unknown-flag' }
 
@@ -492,9 +498,11 @@ function parseTryArgs(rest: string[]): TryParse {
   if (rest.length === 0 || rest[0]!.startsWith('-')) return { kind: 'usage' }
   const provider = rest[0]!
   let model = TRY_DEFAULT_MODEL
+  let stream = false
   let modelGiven = false
   for (let i = 1; i < rest.length; i++) {
     const tok = rest[i]!
+    if (tok === '--stream') { stream = true; continue }
     if (tok === '--model') {
       const v = rest[++i]
       if (v === undefined || v.startsWith('-') || v.length === 0) return { kind: 'usage' }
@@ -512,7 +520,7 @@ function parseTryArgs(rest: string[]): TryParse {
     if (tok.startsWith('-')) return { kind: 'unknown-flag' }
     return { kind: 'usage' }
   }
-  return { kind: 'ok', provider, model, modelGiven }
+  return { kind: 'ok', provider, model, modelGiven, stream }
 }
 
 const COUNTERS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
@@ -520,6 +528,79 @@ const COUNTERS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
 async function defaultOpenJournal(): Promise<Journal | null> {
   const { openJournal } = await import('./journal/journal')
   return openJournal()
+}
+
+/**
+ * `--stream`: the provider stream goes through ONE runtime hub (`providerEventStream`) and this
+ * verb is simply its first reader — the shape every other surface (web, TUI, VS Code) reads the
+ * same stream through. Text deltas are written as they arrive; a gap the hub reports (`lagged`) is
+ * a notice on stderr, never silence; the record events (a tool call, its failure) are one compact
+ * line each. Returns the terminal `end` event's result, or `null` when the stream ended without one
+ * (a client breaking its contract, or a source that failed) — the caller says so in words.
+ */
+async function streamToTerminal(
+  client: ProviderClient,
+  request: ProviderRequest,
+  attempt: number,
+  d: ProviderCliDeps,
+  onStarted: (e: Extract<ProviderStreamEvent, { type: 'started' }>) => Promise<unknown>,
+): Promise<InvocationResult | null> {
+  const { openProviderStream, providerEventStream } = await import('@agentistics/runtime')
+  const opened = openProviderStream(client, request, attempt)
+  if (!opened.ok) return null
+  const write = d.write ?? ((chunk: string) => { process.stdout.write(chunk) })
+  const hub = providerEventStream()
+  const reader = hub.subscribe()
+  // `model.started` is journaled from the SOURCE, before the hub, so it is recorded once however
+  // many readers watch and whether or not any of them keeps up.
+  async function* tapStarted(src: AsyncIterable<ProviderStreamEvent>): AsyncGenerator<ProviderStreamEvent> {
+    for await (const e of src) {
+      if (e.type === 'started') await onStarted(e)
+      yield e
+    }
+  }
+  const pumping = hub.pipe(tapStarted(opened.stream))
+
+  // assigned inside `show`; widened explicitly so control flow does not pin it to `null`
+  let result = null as InvocationResult | null
+  let midLine = false
+  const announced = new Set<number>()
+  const line = (text: string, toErr = false): void => {
+    if (midLine) { write('\n'); midLine = false }
+    ;(toErr ? d.stderr : d.stdout)(text)
+  }
+  const show = (e: ProviderStreamEvent): void => {
+    switch (e.type) {
+      case 'text-delta':
+        if (e.text.length > 0) { write(e.text); midLine = !e.text.endsWith('\n') }
+        return
+      case 'tool-call-delta':
+        if (!announced.has(e.index)) { announced.add(e.index); line(`  → tool call ${e.name} (arguments streaming…)`) }
+        return
+      case 'tool-call':
+        line(`  → tool call ${e.name} ready (${e.id}) — not executed`)
+        return
+      case 'tool-call-failed':
+        line(`  → tool call ${e.failure.name} could not be assembled: ${e.failure.reason} (${e.failure.userCode})`, true)
+        return
+      case 'end':
+        result = e.result
+        return
+      default:
+        return
+    }
+  }
+  const onDelivery = (dv: StreamDelivery<ProviderStreamEvent>): void => {
+    if (dv.kind === 'event') { show(dv.event); return }
+    if (dv.kind === 'lagged') { line(`  (the display fell behind — ${dv.missed} live chunks were not shown; the result below is complete)`, true); return }
+    line(dv.reason === 'source-failed'
+      ? '  (the stream broke off before its end)'
+      : '  (the display was detached for falling too far behind)', true)
+  }
+  for await (const dv of reader) onDelivery(dv)
+  await pumping
+  if (midLine) write('\n')
+  return result
 }
 
 /**
@@ -539,7 +620,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     // No default model for an endpoint: what it serves is the operator's choice, and a guessed id is
     // a billed call to a model nobody asked for.
     if (!parsed.modelGiven) { d.stderr(`${parsed.provider} has no default model — pass --model <id>.`); return 2 }
-    return runTryEndpoint(parsed.provider, parsed.model, d)
+    return runTryEndpoint(parsed.provider, parsed.model, parsed.stream, d)
   }
 
   if (!d.flagOn()) { d.stderr(refusalSentence('flag-off')); return 1 }
@@ -564,6 +645,18 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
   let journal: Journal | null = null
   try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
 
+  // A client that cannot stream is refused BEFORE anything is journaled: a call that is never made
+  // must leave no `model.invoked` behind, and quietly falling back to the non-streamed call would
+  // be a different request than the one asked for.
+  if (parsed.stream) {
+    const { streamingRefusal } = await import('@agentistics/runtime')
+    const refusal = streamingRefusal(client)
+    if (refusal) {
+      d.stderr(`${refusal.provider}: this client cannot stream (${refusal.userCode}) — run without --stream.`)
+      return 1
+    }
+  }
+
   const emitter = createProviderEmitter({ journal, adapterVersion: client.adapterVersion })
   const invocationId = `inv_${crypto.randomUUID().replaceAll('-', '')}`
   const attempt = 1
@@ -573,13 +666,25 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
   d.stdout(`anthropic: one call to ${parsed.model} (max_tokens ${TRY_MAX_TOKENS}) — this is billed to your account.`)
   await emitter.invoked(start)
 
-  const result = await client.invokeOnce({
+  const request: ProviderRequest = {
     model: parsed.model,
     messages: [{ role: 'user', content: TRY_PROMPT }],
     maxTokens: TRY_MAX_TOKENS,
     correlation: { invocationId },
     credential: { provider: 'anthropic', id: 'default' },
-  }, attempt)
+  }
+  const result = parsed.stream
+    ? await streamToTerminal(client, request, attempt, d, (e) => emitter.started({
+        ...start,
+        ...(e.messageId === undefined ? {} : { messageId: e.messageId }),
+        ...(e.servedModel === undefined ? {} : { servedModel: e.servedModel }),
+      }))
+    : await client.invokeOnce(request, attempt)
+  if (result === null) {
+    d.stderr('the stream ended without a result — the outcome of this call is unknown.')
+    d.stderr(`  model.invoked was recorded for ${invocationId} and is left outstanding: check the Anthropic console before retrying.`)
+    return 1
+  }
 
   const outcome = result.status === 'completed'
     ? {
@@ -601,6 +706,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
 
   const lost = emitter.counters().lost
   const journaled = journal !== null && lost['model.invoked'] === 0 && terminalResult !== null && lost[terminal.type] === 0
+    && lost['model.started'] === 0
 
   if (result.status === 'failed') {
     d.stderr(`the call failed: ${result.error.kind} (${result.error.retryable ? 'retryable' : 'not retryable'}).`)
@@ -631,7 +737,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
  * prints what the protocol adds: the usage CERTAINTY (who stated the counters) and the COST as the
  * endpoint itself reported it, or `N/A` with the reason. Never a table price, never the fallback rate.
  */
-async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: string, d: ProviderCliDeps): Promise<number> {
+async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: string, stream: boolean, d: ProviderCliDeps): Promise<number> {
   if (!d.flagOn()) { d.stderr(refusalSentence('flag-off')); return 1 }
   if (await d.isCentral()) { d.stderr(refusalSentence('central')); return 1 }
 
@@ -649,6 +755,18 @@ async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: strin
   const client = d.client ?? createOpenAICompatibleClient(
     hostOpenAICompatibleClientDeps(endpoint, record.baseUrl, { dir: d.dir, captureDir: d.captureDir }),
   )
+
+  // This client has no stream yet (B2 streams Anthropic only). `--stream` is refused BEFORE
+  // anything is journaled, exactly as on the Anthropic path — never a hang, and never quietly
+  // answered with the non-streamed call, which would be a different request than the one asked for.
+  // Refused even if the client someday declares a stream: this verb has no streamed path for an
+  // endpoint, and falling through below would be exactly that silent non-streamed answer.
+  if (stream) {
+    const { streamingRefusal } = await import('@agentistics/runtime')
+    const code = streamingRefusal(client)?.userCode ?? 'provider.streaming_unsupported'
+    d.stderr(`${endpoint}: this client cannot stream (${code}) — run without --stream.`)
+    return 1
+  }
 
   let journal: Journal | null = null
   try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
@@ -732,7 +850,7 @@ export function costLine(cost: CompletedResult['cost']): string {
 
 const HELP = `
 Usage: agentop provider key <set|status|remove> [options]
-       agentop provider try anthropic [--model <id>]
+       agentop provider try anthropic [--model <id>] [--stream]
        agentop provider try <endpoint> --model <id>
        agentop provider models …     (see its own --help)
 
@@ -753,6 +871,8 @@ Endpoints (OpenAI-compatible): openai, openrouter, deepseek, litellm, 9router, o
                                                 (max_tokens 16); records it in the journal and
                                                 prints usage, request-id and the event ids. Set a
                                                 spend limit in the Anthropic console first.
+  agentop provider try anthropic --stream       The same one call, streamed: the answer is printed
+                                                as it arrives, then the same summary.
 
 The key is NEVER accepted on the command line, in ANY position — not as an argument, not in a
 flag. A value on argv lands in shell history and in \`/proc/<pid>/cmdline\`, readable by any

@@ -30,6 +30,14 @@
  * itself must still be a direct, un-wrapped flex item of the root — the freeze this file exists for
  * is about THAT box, never about where the handle happens to sit.
  *
+ * UPDATED AGAIN for the floating-panels redesign (`sdd/brief.md`): the band is now its OWN panel,
+ * rendered as a Fragment whose FIRST child is the workspace's ordinary panel gap (a sibling BEFORE
+ * the band's bordered box, never inside it) and whose gesture is only wired up while `open` — so the
+ * handle's own guard is `{!fullscreen && (`, with the `open` check now living inside the spread
+ * grip/no-op choice rather than in the JSX condition. The ORDERING invariant this test asserts is
+ * unchanged (the handle is textually even further before the content box now, being outside the
+ * bordered box entirely) — only the literal string identifying the handle's guard moved.
+ *
  * Not reachable by rendering: `StudioBand` is not exported (there is no seam to mount it through),
  * and this package has no jsdom regardless. The SHAPE is what went wrong, so the shape is what is
  * asserted, over comment-free source, with the defect planted below to prove the scan still sees it.
@@ -61,7 +69,7 @@ describe('StudioBand — the content box is a direct, un-wrapped flex item of th
     // hide the content in full screen or show a handle with nothing left to negotiate a height for.
     const contentAt = body.indexOf('{open && (')
     expect(contentAt).toBeGreaterThan(-1)
-    const handleAt = body.indexOf('{open && !fullscreen && (')
+    const handleAt = body.indexOf('{!fullscreen && (')
     expect(handleAt).toBeGreaterThan(-1)
     expect(handleAt).toBeLessThan(contentAt)
   })
@@ -173,8 +181,17 @@ describe('the fullscreen overlay respects the artifacts aside (I2)', () => {
   })
 
   test('the scan still sees `inset: 0` reintroduced on a fullscreen branch', () => {
+    // Indentation shifted by the floating-panels fragment split (`sdd/brief.md`) — the fullscreen
+    // branch now sits one level deeper (inside the Fragment's bordered-box `<div>`), so this
+    // planted string matches on CONTENT, via a whitespace-insensitive regex, rather than an exact
+    // literal that would need re-editing on every re-indent.
+    //
+    // `top`/`bottom` changed again for I3 (owner, 2026-09-27: true full screen is a PANEL now — a
+    // 6px gap below the header and above the window's own bottom edge, not `top: 0, bottom: 0`
+    // reaching both) — the planted regression string below is updated to match, and still proves
+    // this test would catch either the ORIGINAL `inset: 0` bug or a regression back to it.
     const planted = SRC.replace(
-      "position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,\n          right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),\n          zIndex: PANEL_FULLSCREEN_Z,",
+      /position: 'fixed', top: 'calc\(var\(--ag-topbar-h\) \+ 6px\)', left: leftAsideEdge, bottom: 6,\s*right: fullscreenInsetRight\(rightAsideEdge, viewportWidth, isMobile \? 0 : railWidth\),\s*zIndex: PANEL_FULLSCREEN_Z,/,
       "position: 'fixed', inset: 0, zIndex: PANEL_FULLSCREEN_Z,",
     )
     expect(planted).toMatch(/position: 'fixed', inset: 0/)

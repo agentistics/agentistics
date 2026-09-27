@@ -17,6 +17,10 @@
  * only as a cross-check (`readSdkUsageCrossCheck`); a divergence is a counter, never a silent
  * correction.
  *
+ * `streamOnce` (B2.1, `ProviderClient.stream`) is the same contract over `streamText`: one HTTP
+ * request, the SDK as transport only, the capturing fetch TEEING the SSE body so deltas reach the
+ * caller as they arrive, and every fact read from the raw events by the pure `./raw-stream.ts`.
+ *
  * **Why the explicit `baseURL` and `apiKey` options matter, verified against the installed
  * `@ai-sdk/anthropic@4.0.58` (`dist/index.js`):**
  * - `createAnthropic`'s `baseURL` resolution is `normalizeBaseURL(loadOptionalSetting({settingValue:
@@ -33,7 +37,7 @@
  *   → ANTHROPIC_API_VERSIONED_URL = "https://api.anthropic.com" + "/v1"` — confirming
  *   `ANTHROPIC_BASE_URL_CONSTANT` below is exactly the SDK's own default form.
  */
-import { generateText, jsonSchema, stepCountIs } from 'ai'
+import { generateText, jsonSchema, stepCountIs, streamText } from 'ai'
 import type { ModelMessage, TextPart, ToolCallPart, ToolResultPart, ToolSet } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import {
@@ -42,8 +46,19 @@ import {
   type ClassifierInput,
   type ProviderError,
 } from '@agentistics/core'
-import { createCapturingFetch, writeCapture as defaultWriteCapture } from '../capture.ts'
+import {
+  createCapturingFetch,
+  createStreamingCapturingFetch,
+  writeCapture as defaultWriteCapture,
+  type ObservedStream,
+} from '../capture.ts'
 import { readAnthropicExchange, readSdkUsageCrossCheck } from './raw.ts'
+import {
+  createAnthropicStreamReader,
+  createSseDecoder,
+  type StreamBodyEnd,
+} from './raw-stream.ts'
+import { createToolCallAssembler as defaultCreateToolCallAssembler, type ToolCallAssembler } from '../tool-call-stream.ts'
 import type {
   CaptureRef,
   CredentialHandle,
@@ -53,6 +68,7 @@ import type {
   ProviderMessage,
   ProviderMessagePart,
   ProviderRequest,
+  ProviderStreamEvent,
   ProviderToolDecl,
   RawExchange,
 } from '../client.ts'
@@ -89,6 +105,8 @@ export interface AnthropicClientDeps {
   writeCapture?: typeof defaultWriteCapture
   now?: () => Date
   monotonicNow?: () => number
+  /** the streamed path's tool-call assembler (`../tool-call-stream.ts`); injected by tests only */
+  createToolCallAssembler?: (tools?: ProviderToolDecl[]) => ToolCallAssembler
 }
 
 interface ResolvedDeps {
@@ -98,6 +116,7 @@ interface ResolvedDeps {
   writeCapture: typeof defaultWriteCapture
   now: () => Date
   monotonicNow: () => number
+  createToolCallAssembler: (tools?: ProviderToolDecl[]) => ToolCallAssembler
 }
 
 function resolveDeps(deps: AnthropicClientDeps): ResolvedDeps {
@@ -108,6 +127,7 @@ function resolveDeps(deps: AnthropicClientDeps): ResolvedDeps {
     writeCapture: deps.writeCapture ?? defaultWriteCapture,
     now: deps.now ?? (() => new Date()),
     monotonicNow: deps.monotonicNow ?? (() => performance.now()),
+    createToolCallAssembler: deps.createToolCallAssembler ?? defaultCreateToolCallAssembler,
   }
 }
 
@@ -443,12 +463,259 @@ export async function invokeOnce(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Streaming (B2.1). One `streamOnce` = one HTTP request = at most one billed response, exactly like
+// `invokeOnce`; the retry stays outside. The AI SDK's `streamText` is the TRANSPORT only (headers,
+// no SDK retries, tool declarations without `execute`); the capturing fetch TEES the SSE body, and
+// the events the caller sees — and every fact on the terminal result — come from OUR branch of the
+// raw bytes through the pure `./raw-stream.ts`, never from the SDK's parts or aggregate (§22.1.1
+// conditions 1 and 3). The SDK's branch is drained in the background so the request completes
+// normally; its per-step usage is read only as the same cross-check `invokeOnce` makes.
+// ---------------------------------------------------------------------------
+
+interface SdkStreamOutcome {
+  /** the SDK's `finish-step` usage, for the cross-check only; absent when it never got that far */
+  sdkUsage?: unknown
+}
+
+/**
+ * Starts `streamText` over the teeing fetch and drains its `fullStream`, never throwing. The
+ * revealed key lives in THIS function only, passed straight into `createAnthropic`'s options object
+ * for this one call (spec §6.3.2 Guard 1; module doc above).
+ *
+ * `onError` is a no-op on purpose: the SDK's default writes the whole error object to
+ * `console.error`, and a failure is classified from the raw exchange anyway. Supplying it without
+ * `streamRetries` keeps the SDK's stream-retry machinery off (it arms only when BOTH are given), so a
+ * mid-stream error can never make the SDK send a second request.
+ */
+function drainSdkStream(
+  req: ProviderRequest,
+  handle: CredentialHandle,
+  streamingFetch: typeof fetch,
+  signal: AbortSignal,
+): Promise<SdkStreamOutcome> {
+  return (async () => {
+    const outcome: SdkStreamOutcome = {}
+    try {
+      const anthropicProvider = createAnthropic({
+        apiKey: handle.reveal(),
+        baseURL: ANTHROPIC_BASE_URL_CONSTANT,
+        fetch: streamingFetch,
+      })
+      const result = streamText({
+        model: anthropicProvider(req.model),
+        system: mapSystem(req),
+        messages: mapMessages(req.messages),
+        tools: mapTools(req.tools),
+        maxOutputTokens: req.maxTokens,
+        maxRetries: 0,
+        abortSignal: signal,
+        stopWhen: stepCountIs(1),
+        onError: () => {},
+      })
+      for await (const part of result.fullStream) {
+        if (part.type === 'finish-step') outcome.sdkUsage = part.usage
+      }
+    } catch {
+      // Classified from the raw exchange (or from the absence of one) by the caller.
+    }
+    return outcome
+  })()
+}
+
+const NO_REQUEST: unique symbol = Symbol('no-request')
+
+/**
+ * The streamed attempt. See `ProviderClient.stream`'s contract: iterating never throws, the last
+ * event is always `end`, exactly once, and `end.result` is what `invokeOnce` would have returned for
+ * the same exchange — `failed` for an HTTP error, an in-band `error` on a 200, a body that ended
+ * before `message_stop`, an abort, or anything unreadable; never a half-completed `completed`.
+ *
+ * Abort: `req.signal` aborting mid-body ends the attempt `failed` / `aborted`, unless the body had
+ * already delivered `message_stop` — then the response was received whole and is `completed`. A
+ * consumer that stops iterating early (breaks out of its `for await`) aborts the HTTP request too,
+ * and receives no `end` (it has left).
+ *
+ * The raw capture is written when OUR branch of the body ends — cleanly or not — so a failed stream
+ * is captured as far as it got, with the allowlisted headers.
+ */
+export async function* streamOnce(
+  req: ProviderRequest,
+  attempt: number,
+  deps: AnthropicClientDeps,
+): AsyncGenerator<ProviderStreamEvent, void, undefined> {
+  const d = resolveDeps(deps)
+  const startedAt = d.now().toISOString()
+  const startMono = d.monotonicNow()
+  const elapsed = () => d.monotonicNow() - startMono
+
+  const commonFields = {
+    invocationId: req.correlation.invocationId,
+    attempt,
+    provider: 'anthropic' as const,
+    requestedModel: req.model,
+    startedAt,
+  }
+  const failed = (
+    error: ProviderError,
+    extra: { requestId?: string; capture?: CaptureRef } = {},
+  ): InvocationResult => ({
+    ...commonFields,
+    latencyMs: elapsed(),
+    status: 'failed',
+    error,
+    ...(extra.requestId !== undefined ? { requestId: extra.requestId } : {}),
+    ...(extra.capture !== undefined ? { capture: extra.capture } : {}),
+  })
+
+  let ended = false
+  const end = (result: InvocationResult): ProviderStreamEvent => {
+    ended = true
+    return { type: 'end', result }
+  }
+
+  // Our own controller, so a consumer that walks away can cancel the request; the caller's signal
+  // is forwarded into it.
+  const internal = new AbortController()
+  const forwardAbort = () => internal.abort()
+  const aborted = () => req.signal?.aborted === true
+
+  try {
+    if (!Number.isInteger(req.maxTokens) || req.maxTokens <= 0) {
+      yield end(failed(invalidMaxTokensError()))
+      return
+    }
+    const resolution = await d.resolver.resolve(req.credential)
+    if (!resolution.ok) {
+      yield end(failed(credentialRefusalError()))
+      return
+    }
+
+    req.signal?.addEventListener('abort', forwardAbort, { once: true })
+    if (aborted()) internal.abort()
+
+    const capturing = createStreamingCapturingFetch(d.fetchImpl)
+    const sdk = drainSdkStream(req, resolution.handle, capturing.fetch, internal.signal)
+
+    const first: ObservedStream | null | typeof NO_REQUEST = await Promise.race([
+      capturing.observed,
+      sdk.then((): typeof NO_REQUEST => NO_REQUEST),
+    ])
+
+    if (first === null || first === NO_REQUEST) {
+      // No response head was ever observed: the call rejected before one (abort, network), or the
+      // SDK failed before sending anything.
+      await sdk
+      const classifier: ClassifierInput = aborted()
+        ? { transport: 'aborted' }
+        : capturing.requestSent()
+          ? { transport: 'network', requestSent: true }
+          : { sdkRejected: true, requestSent: false }
+      yield end(failed(classifyProviderError(classifier)))
+      return
+    }
+
+    const requestId = first.headers['request-id']
+    const isOk = first.status >= 200 && first.status < 300
+    const decoder = new TextDecoder()
+    const sse = createSseDecoder()
+    const reader = createAnthropicStreamReader({
+      ...(requestId !== undefined ? { requestId } : {}),
+      assembler: d.createToolCallAssembler(req.tools),
+    })
+    let raw = ''
+    let bodyEnd: StreamBodyEnd = 'complete'
+
+    if (first.body !== null) {
+      const bodyReader = first.body.getReader()
+      try {
+        for (;;) {
+          const { done, value } = await bodyReader.read()
+          if (done) break
+          const text = decoder.decode(value, { stream: true })
+          raw += text
+          if (!isOk) continue
+          for (const frame of sse.push(text)) {
+            for (const ev of reader.accept(frame)) yield ev
+          }
+        }
+        const tail = decoder.decode()
+        raw += tail
+        if (isOk) {
+          for (const frame of [...sse.push(tail), ...sse.end()]) {
+            for (const ev of reader.accept(frame)) yield ev
+          }
+        }
+      } catch (err) {
+        raw += decoder.decode()
+        bodyEnd = isAbort(err, req.signal) || aborted() ? 'aborted' : 'errored'
+      } finally {
+        try { bodyReader.releaseLock() } catch { /* already released */ }
+      }
+    }
+
+    const sdkOutcome = await sdk
+    const ex: RawExchange = { status: first.status, headers: first.headers, body: raw }
+    const capture = await tryWriteCapture(ex, d)
+    const extra = { requestId, capture }
+
+    if (capturing.requestCount() !== 1) {
+      const classifier: ClassifierInput = { responseUnreadable: true }
+      if (requestId !== undefined) classifier.requestIdHeader = requestId
+      yield end(failed(classifyProviderError(classifier), extra))
+      return
+    }
+
+    if (!isOk) {
+      const read = readAnthropicExchange(ex)
+      const classifier: ClassifierInput = read.ok ? { httpStatus: first.status, responseUnreadable: true } : read.classifier
+      yield end(failed(classifyProviderError(classifier), { requestId: read.ok ? requestId : read.requestId, capture }))
+      return
+    }
+
+    const verdict = reader.finish(bodyEnd)
+    for (const ev of verdict.events) yield ev
+    if (!verdict.ok) {
+      yield end(failed(verdict.error, extra))
+      return
+    }
+
+    if (sdkOutcome.sdkUsage !== undefined && readSdkUsageCrossCheck(sdkOutcome.sdkUsage, verdict.usage).divergent) {
+      anthropicCounters.sdk_usage_divergence += 1
+    }
+    if (requestId === undefined) anthropicCounters.request_id_missing += 1
+
+    yield end({
+      ...commonFields,
+      latencyMs: elapsed(),
+      status: 'completed',
+      messageId: verdict.messageId,
+      servedModel: verdict.servedModel,
+      usage: verdict.usage,
+      usageAnomalies: verdict.usageAnomalies,
+      stopReason: verdict.stopReason,
+      content: verdict.content,
+      toolCallFailures: verdict.toolCallFailures,
+      ...(requestId !== undefined ? { requestId } : {}),
+      ...(capture !== undefined ? { capture } : {}),
+    })
+  } catch {
+    // Nothing above is meant to throw; if something did, the contract still holds: one `end`.
+    if (!ended) yield end(failed(classifyProviderError({ sdkRejected: true })))
+  } finally {
+    req.signal?.removeEventListener('abort', forwardAbort)
+    // A consumer that left before `end` must not leave the request running.
+    if (!ended) internal.abort()
+  }
+}
+
 /** Builds a `ProviderClient` over `deps` — the host binds its resolver and capture directory here. */
 export function createAnthropicClient(deps: AnthropicClientDeps): ProviderClient {
   return {
     provider: 'anthropic',
     adapterVersion: ADAPTER_VERSION,
-    capabilities: { streaming: false, editPolicy: ANTHROPIC_EDIT_POLICY },
+    capabilities: { streaming: true, editPolicy: ANTHROPIC_EDIT_POLICY },
     invokeOnce: (req, attempt) => invokeOnce(req, attempt, deps),
+    stream: (req, attempt) => streamOnce(req, attempt, deps),
   }
 }

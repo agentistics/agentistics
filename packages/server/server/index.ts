@@ -26,6 +26,7 @@ import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
+import { hostGate, currentHostAllowlist, startHostAllowlistRefresh, badRequestTarget } from './host-allow'
 
 /**
  * The LOCAL half of a live snapshot: which assistants are running on THIS host.
@@ -391,6 +392,15 @@ const _wsHandlers = {
  * mutating `res.headers` afterwards is still safe.
  */
 async function handleRequest(req: Request, server: Server<WSData>): Promise<Response | undefined> {
+  // A request with no usable Host has no URL to route by: Bun builds `req.url` from the Host, and
+  // without one it is a bare path that every URL parse below throws on — which used to
+  // answer 500 on every route. Answered 400 with a sentence here, before anything parses it, and
+  // given the same baseline headers as every other response.
+  const unroutable = badRequestTarget(req.url, req.headers.get('host'))
+  if (unroutable) {
+    applyBaselineHeaders(unroutable, { tls: TEAM_TLS, dev: !SERVE_STATIC, isApi: true, embed: false })
+    return unroutable
+  }
   const res = await handleRequestInner(req, server)
   if (!res) return res // WebSocket upgrade handed off
   const isApi = new URL(req.url).pathname.startsWith('/api/')
@@ -546,6 +556,28 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // DNS-rebinding gate (see host-allow.ts). The `localShell` routes are shell access under other
+    // names and the `local` profile answers them with no auth, so a web page whose name resolves to
+    // 127.0.0.1 could otherwise drive them from the person's own browser: to the browser that is a
+    // same-origin request, so neither CORS nor the CSRF check objects. The one thing such a page
+    // cannot change is the Host it sends, so a Host that does not name this machine is refused
+    // (421). Placed here — after the capability guard, before auth and before EVERY route handler —
+    // so it covers the WebSocket handshakes too (`/api/fleet/input`, `/api/shell/input`), which are
+    // upgraded further down. With `localShell` off it returns null and the 403 above already
+    // answered. The allowlist is built at startup and on a timer, never per request.
+    // ---------------------------------------------------------------------------
+    {
+      const misdirected = hostGate(url.pathname, req.headers.get('host'), currentHostAllowlist(), CAPS)
+      if (misdirected) {
+        void writeAudit({ action: 'host.misdirected', ip: clientIp, meta: { path: url.pathname, host: req.headers.get('host')?.slice(0, 256) ?? null } })
+        return new Response(misdirected.body, {
+          status: misdirected.status,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
       }
     }
 
@@ -4147,6 +4179,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 }
 
 try {
+// Build the DNS-rebinding allowlist before the first request can arrive, and keep it fresh (an
+// interface that comes up later — a VPN, a tailnet — joins within a minute). Never per request.
+startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleRequest })
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.

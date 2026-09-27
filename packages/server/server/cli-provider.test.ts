@@ -330,6 +330,120 @@ describe('runProvider — help', () => {
   })
 })
 
+describe('runProvider — try --stream (fake client, no network)', () => {
+  // Imported lazily so the rest of this file never opens a journal.
+  async function setup(client: import('@agentistics/runtime').ProviderClient) {
+    const { openJournal } = await import('./journal/journal')
+    const { storeCredential } = await import('./provider/credentials.ts')
+    const h = await makeHarness()
+    expect((await storeCredential('anthropic', FAKE_KEY, { dir: h.dir })).ok).toBe(true)
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    const written: string[] = []
+    h.deps.client = client
+    h.deps.openJournal = async () => journal
+    h.deps.write = (c) => written.push(c)
+    return { h, journal, written }
+  }
+
+  function completedResult(req: import('@agentistics/runtime').ProviderRequest, attempt: number): import('@agentistics/runtime').InvocationResult {
+    return {
+      invocationId: req.correlation.invocationId, attempt, provider: 'anthropic', requestedModel: req.model,
+      startedAt: new Date().toISOString(), latencyMs: 7, requestId: 'req_stream', status: 'completed',
+      messageId: 'msg_stream', servedModel: req.model, usage: { input: 9, output: 2, cacheRead: 0, cacheWrite: 0 },
+      usageAnomalies: [], stopReason: { kind: 'end-turn' }, content: [{ type: 'text', text: 'ok!' }],
+    }
+  }
+
+  test('prints the deltas in order as they arrive, then the same summary', async () => {
+    let invokeOnceCalled = false
+    const { h, journal, written } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { invokeOnceCalled = true; return completedResult(req, a) },
+      async *stream(req, a) {
+        yield { type: 'started', requestId: 'req_stream', messageId: 'msg_stream' }
+        yield { type: 'text-delta', index: 0, text: 'o' }
+        yield { type: 'text-delta', index: 0, text: 'k' }
+        yield { type: 'usage', outputTokensSoFar: 1 }
+        yield { type: 'text-delta', index: 0, text: '!' }
+        yield { type: 'end', result: completedResult(req, a) }
+      },
+    })
+    const code = await runProvider(['try', 'anthropic', '--stream'], h.deps)
+    expect(code).toBe(0)
+    expect(invokeOnceCalled).toBe(false)
+    expect(written).toEqual(['o', 'k', '!', '\n'])
+    const out = h.out.join('\n')
+    expect(out).toContain('message id: msg_stream')
+    expect(out).toContain('request-id: req_stream')
+    expect(out).toContain('input: 9')
+    expect(out).toContain('journaled: yes')
+    expect(h.err).toEqual([])
+    const types = (await journal.readFrom(0, 100)).events.map(e => e.type)
+    // model.started is journaled from the provider's `started` event; the deltas never are.
+    expect(types).toEqual(['model.invoked', 'model.started', 'model.completed'])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('tool calls are one compact line each; a failed one goes to stderr', async () => {
+    const { h, journal, written } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return completedResult(req, a) },
+      async *stream(req, a) {
+        yield { type: 'text-delta', index: 0, text: 'hi' }
+        yield { type: 'tool-call-delta', index: 1, id: 'tu_1', name: 'lookup', partialJson: '{"q":' }
+        yield { type: 'tool-call-delta', index: 1, id: 'tu_1', name: 'lookup', partialJson: '1}' }
+        yield { type: 'tool-call', index: 1, id: 'tu_1', name: 'lookup', input: { q: 1 } }
+        yield { type: 'tool-call-failed', failure: { index: 2, id: 'tu_2', name: 'bad', reason: 'malformed', userCode: 'provider.tool_call_malformed' } }
+        yield { type: 'end', result: completedResult(req, a) }
+      },
+    })
+    expect(await runProvider(['try', 'anthropic', '--stream'], h.deps)).toBe(0)
+    expect(written).toEqual(['hi', '\n'])
+    expect(h.out.filter(l => l.includes('tool call lookup'))).toEqual([
+      '  → tool call lookup (arguments streaming…)',
+      '  → tool call lookup ready (tu_1) — not executed',
+    ])
+    expect(h.err.join('\n')).toContain('tool call bad could not be assembled: malformed')
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('a non-streaming client is refused in words, exits non-zero, and journals nothing', async () => {
+    let called = false
+    const { h, journal } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: false, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { called = true; return completedResult(req, a) },
+    })
+    const code = await runProvider(['try', 'anthropic', '--stream'], h.deps)
+    expect(code).toBe(1)
+    expect(called).toBe(false)
+    expect(h.err.join('\n')).toContain('cannot stream (provider.streaming_unsupported)')
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('a stream that ends without `end` says the outcome is unknown and exits non-zero', async () => {
+    const { h, journal } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return completedResult(req, a) },
+      async *stream() { yield { type: 'text-delta', index: 0, text: 'o' } },
+    })
+    expect(await runProvider(['try', 'anthropic', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('ended without a result')
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('the usage string names --stream', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['try', '--help'], h.deps)).toBe(0)
+    expect(h.out.join('\n')).toContain('[--stream]')
+    await cleanup(h)
+  })
+})
+
 // ── B5a — OpenAI-compatible endpoints ───────────────────────────────────────────────────────────
 
 // Fakes built at runtime, never a literal key in source.
@@ -454,6 +568,55 @@ describe('runProvider — endpoint key set/status/remove', () => {
     h.deps.runModels = async (a) => { got = a; return 0 }
     expect(await runProvider(['models', 'openrouter', '--json'], h.deps)).toBe(0)
     expect(got).toEqual(['openrouter', '--json'])
+    await cleanup(h)
+  })
+})
+
+describe('runProvider — try <endpoint> --stream (B2 × B5a)', () => {
+  // The openai-compatible client has no stream yet: `--stream` against an endpoint must be refused in
+  // words — never a hang, never quietly answered by the non-streamed call — and journal nothing.
+  async function setup(streaming: boolean) {
+    const { openJournal } = await import('./journal/journal')
+    const h = await makeHarness({ readStdinLine: async () => FAKE_OR_KEY })
+    expect(await runProvider(['key', 'set', 'openrouter', '--stdin'], h.deps)).toBe(0)
+    h.out.length = 0; h.err.length = 0
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    const calls = { invokeOnce: 0, stream: 0 }
+    const client: import('@agentistics/runtime').ProviderClient = {
+      provider: 'openai-compatible', adapterVersion: 'fake-1', capabilities: { streaming, editPolicy: 'none' as never },
+      async invokeOnce() { calls.invokeOnce++; throw new Error('invokeOnce must not be called') },
+      ...(streaming ? { async *stream() { calls.stream++; yield { type: 'text-delta' as const, index: 0, text: 'x' } } } : {}),
+    }
+    h.deps.client = client
+    h.deps.openJournal = async () => journal
+    return { h, journal, calls }
+  }
+
+  test('is refused with the runtime\'s streaming_unsupported code, exits non-zero, calls nothing, journals nothing', async () => {
+    const { h, journal, calls } = await setup(false)
+    expect(await runProvider(['try', 'openrouter', '--model', 'x/y', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('openrouter: this client cannot stream (provider.streaming_unsupported) — run without --stream.')
+    expect(calls).toEqual({ invokeOnce: 0, stream: 0 })
+    expect(h.out).toEqual([])
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('is refused even if the client someday declares a stream — this verb has no streamed endpoint path', async () => {
+    const { h, journal, calls } = await setup(true)
+    expect(await runProvider(['try', 'openrouter', '--model', 'x/y', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('(provider.streaming_unsupported)')
+    expect(calls).toEqual({ invokeOnce: 0, stream: 0 })
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('without --model the missing-model sentence still comes first', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['try', 'openrouter', '--stream'], h.deps)).toBe(2)
+    expect(h.err.join('\n')).toContain('has no default model')
     await cleanup(h)
   })
 })

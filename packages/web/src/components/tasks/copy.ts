@@ -58,7 +58,12 @@ export interface BoardCopy {
   /** System-stamped, read-only facts — see `Subtask.startedAt`/`deliveredAt`'s own note. */
   started: string
   completed: string
+  /** `deliveredAt − startedAt`, shown only when both are stamped — see `fmtElapsed`. */
+  duration: string
   sessions: string
+  /** The main table's Sessions cell qualifier — "N · M priced" when fewer sessions could be priced
+   *  than were used. A short WORD, never a phrase: the cell must stay one line. */
+  sessionsPriced: string
   addSubtask: string
   nothingBrokenOut: string
   remove: string
@@ -274,7 +279,9 @@ const EN: BoardCopy = {
   subtasks: 'Subtasks',
   started: 'Started',
   completed: 'Completed',
+  duration: 'Duration',
   sessions: 'Sessions',
+  sessionsPriced: 'priced',
   addSubtask: 'Add a subtask, then Enter',
   nothingBrokenOut:
     'Nothing broken out yet. A session is filed under a SUBTASK, never under the delivery itself — '
@@ -463,7 +470,9 @@ const PT: BoardCopy = {
   subtasks: 'Subtarefas',
   started: 'Início',
   completed: 'Concluído em',
+  duration: 'Duração',
   sessions: 'Sessões',
+  sessionsPriced: 'com custo',
   addSubtask: 'Adicionar subtarefa e apertar Enter',
   nothingBrokenOut:
     'Nada dividido ainda. Uma sessão se filia a uma SUBTAREFA, nunca à entrega em si — divida o '

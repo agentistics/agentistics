@@ -738,24 +738,24 @@ const FAKE_FLEET: ControlSessions = {
     // (distinct ids co1/co2/co3), which is the proof that identical-LOOKING rows can only come from
     // records that share an id — a de-dup question upstream, not a drawing one here.
     {
-      id: 'closed:co1', title: 'COORDENADOR AIPE-ELETROMIDIA', harness: 'claude',
-      cwd: '/home/dev/aipe-eletromidia', project: 'aipe-eletromidia',
+      id: 'closed:co1', title: 'COORDINATOR ACME-PORTAL', harness: 'claude',
+      cwd: '/home/dev/acme-portal', project: 'acme-portal',
       state: 'closed', stateLabel: 'closed', actionable: false,
-      resume: { sessionId: 'co1', title: 'COORDENADOR AIPE-ELETROMIDIA' },
+      resume: { sessionId: 'co1', title: 'COORDINATOR ACME-PORTAL' },
       startedAt: Date.now() - 9 * 60 * 60_000, endedAt: Date.now() - 8 * 60 * 60_000, attached: false,
     },
     {
-      id: 'closed:co2', title: 'COORDENADOR AIPE-ELETROMIDIA', harness: 'claude',
-      cwd: '/home/dev/aipe-eletromidia', project: 'aipe-eletromidia',
+      id: 'closed:co2', title: 'COORDINATOR ACME-PORTAL', harness: 'claude',
+      cwd: '/home/dev/acme-portal', project: 'acme-portal',
       state: 'closed', stateLabel: 'closed', actionable: false,
-      resume: { sessionId: 'co2', title: 'COORDENADOR AIPE-ELETROMIDIA' },
+      resume: { sessionId: 'co2', title: 'COORDINATOR ACME-PORTAL' },
       startedAt: Date.now() - 5 * 60 * 60_000, endedAt: Date.now() - 4 * 60 * 60_000, attached: false,
     },
     {
-      id: 'closed:co3', title: 'COORDENADOR AIPE-ELETROMIDIA', harness: 'claude',
-      cwd: '/home/dev/aipe-eletromidia', project: 'aipe-eletromidia',
+      id: 'closed:co3', title: 'COORDINATOR ACME-PORTAL', harness: 'claude',
+      cwd: '/home/dev/acme-portal', project: 'acme-portal',
       state: 'closed', stateLabel: 'closed', actionable: false,
-      resume: { sessionId: 'co3', title: 'COORDENADOR AIPE-ELETROMIDIA' },
+      resume: { sessionId: 'co3', title: 'COORDINATOR ACME-PORTAL' },
       startedAt: Date.now() - 1 * 60 * 60_000, endedAt: Date.now() - 30 * 60_000, attached: false,
     },
     {

@@ -319,7 +319,8 @@ export function PanelRail({
         // STATE, not the static frame divider the pane's own border replaced, and the resize
         // handle's grip (`RailResizeHandle`, below) still marks the edge as draggable.
         borderLeft: dragOver === 'bar' ? '1px solid var(--anthropic-orange)' : 'none',
-        background: 'var(--bg-surface)',
+        // FRAME, not a panel (floating-panel board): the rail sits on the same ground as the gaps.
+        background: 'transparent',
       }}
     >
       <RailResizeHandle width={railWidth} onResize={onResizeWidth} lang={lang} />
