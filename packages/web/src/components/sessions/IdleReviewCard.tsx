@@ -2,7 +2,7 @@
  * IdleReviewCard — the compact offer that used to be `IdleSessionsBanner`'s full-width strip above
  * the workspace body. There the header's own hanging tabs ("Filtros", the metrics percentage tab)
  * covered its right end, where its buttons were — reported as the buttons being unreachable. It now
- * lives INSIDE the sessions list, right above the "Groups" section, in `SessionsAside.tsx`.
+ * lives INSIDE the sessions list, as its first element (right under the aside's tabs), in `SessionsAside.tsx`.
  *
  * Mounting it there — rather than in `SessionsPage.tsx`, which is where the candidates are actually
  * computed (`useIdleSessions`) — is what covers BOTH surfaces the brief asks for with one change:

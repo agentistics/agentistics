@@ -2630,7 +2630,7 @@ language still reads correctly after the language toggle flips; `idleMoreSuffix`
 **The offer is a CARD inside the sessions list, not a full-width banner.** The old
 `IdleSessionsBanner` sat above the whole workspace body, where the header's own hanging tabs
 ("Filtros", the metrics percentage tab) covered its right end — the very edge its buttons were on.
-`IdleReviewCard.tsx` renders instead right above the "Groups" section, inside `SessionsAside.tsx` —
+`IdleReviewCard.tsx` renders instead as the first element of `SessionsAside.tsx` (right under the aside's tabs) —
 which is mounted in TWO places (the desktop sidebar, from `App.tsx`, and the mobile "Sessions" tab,
 from `SessionsPage.tsx` itself) that are the SAME component, so putting the card there covers both
 surfaces with one change. `useIdleSessions` still runs exactly ONCE, in `SessionsPage`, which is the
