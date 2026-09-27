@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { candidatePaths, capturePatch, createBundle, gitEnv, listUntracked, probeDir } from './repo-probe'
 
 let root = ''
@@ -14,15 +15,10 @@ let wt = ''
 // repository discovery — so without stripping these, `git init` here would silently operate on the
 // real repository instead of the temp directory being built. Confirmed by reproducing the exact
 // failure: `GIT_DIR=$(git rev-parse --git-dir) bun test repo-probe.test.ts` fails with
-// "remote origin already exists", identically to what husky's hook produced.
-const git = (cwd: string, ...args: string[]) => {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-  delete env.GIT_DIR
-  delete env.GIT_WORK_TREE
-  delete env.GIT_INDEX_FILE
-  delete env.GIT_PREFIX
-  return execFileSync('git', args, { cwd, encoding: 'utf8', env })
-}
+// "remote origin already exists", identically to what husky's hook produced. `gitTestEnv()` is the
+// canonical, repo-wide answer (`@agentistics/core/gitTestEnv`) — see its header for the full,
+// cited variable list; this file used to strip four variables by hand.
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitTestEnv() })
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'agentistics-probe-'))
@@ -232,10 +228,10 @@ test('an already-pushed repo reports "empty", not "failed", under a LONG path', 
   const deep = join(root, 'a-directory-named-at-some-length', 'and-another-one-under-it', 'plus-a-third')
   mkdirSync(deep, { recursive: true })
   const origin = join(deep, 'origin.git')
-  execFileSync('git', ['init', '--bare', '-q', origin], { env: gitEnv() })
+  execFileSync('git', ['init', '--bare', '-q', origin], { env: gitTestEnv() })
   const clone = join(deep, 'a-clone-whose-path-is-also-not-short')
-  execFileSync('git', ['clone', '-q', origin, clone], { env: gitEnv() })
-  const g = (...a: string[]): void => { execFileSync('git', ['-C', clone, ...a], { env: gitEnv() }) }
+  execFileSync('git', ['clone', '-q', origin, clone], { env: gitTestEnv() })
+  const g = (...a: string[]): void => { execFileSync('git', ['-C', clone, ...a], { env: gitTestEnv() }) }
   g('config', 'user.email', 'a@b.c')
   g('config', 'user.name', 'a')
   writeFileSync(join(clone, 'f.txt'), 'x')
