@@ -210,6 +210,9 @@ function disabledJournal(where: Where, reason: JournalDisabledReason): Journal {
     async stats() {
       return { rows: 0, bytes: 0 }
     },
+    async head() {
+      return 0
+    },
     status() {
       return { state: 'disabled', reason, ...copyWhere(where), counters: { ...counters } }
     },
@@ -315,6 +318,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     let pageStmt: ReturnType<Database['query']>
     let statsStmt: ReturnType<Database['query']>
     let stringStmt: ReturnType<Database['query']>
+    let headStmt: ReturnType<Database['query']>
     try {
       const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
       const findString = db.prepare('SELECT id FROM event_strings WHERE s = ?')
@@ -344,6 +348,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         'SELECT COUNT(*) AS n, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at FROM events',
       )
       stringStmt = db.query('SELECT s FROM event_strings WHERE id = ?')
+      headStmt = db.query('SELECT COALESCE(MAX(rowid), 0) AS h FROM events')
     } catch {
       // A table that does not have the columns we bind (schema.ts said it migrated, the statement
       // disagrees): the same outcome as a failed migration.
@@ -458,6 +463,17 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         if (typeof r?.first_at === 'number') out.firstAt = decodeInstant(r.first_at)
         if (typeof r?.last_at === 'number') out.lastAt = decodeInstant(r.last_at)
         return out
+      },
+
+      async head(): Promise<number | null> {
+        if (state === 'closed') return null
+        try {
+          const r = headStmt.get() as { h: number } | null
+          return Number(r?.h ?? 0)
+        } catch {
+          counters.failedReads++
+          return null
+        }
       },
 
       status(): JournalStatus {

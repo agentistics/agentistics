@@ -54,7 +54,7 @@
  */
 import { readFile, stat as fsStat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { project, type AnyAgentisticsEvent, type SessionMeta } from '@agentistics/core'
+import { project, sessionCostUSD, totalTokens, type AnyAgentisticsEvent, type SessionMeta } from '@agentistics/core'
 import {
   accumulateKimiWire, buildKimiSession, emptyKimiTotals, kimiAgentIds, parseKimiState,
 } from '../adapters/kimi-parse'
@@ -146,6 +146,71 @@ function applyKimiClassification(rows: FieldRow[], caveats: readonly { field: st
   }
 }
 
+// ── the subagent family: legacy folds every agent into one session, with no agentMetrics ─────────
+
+export const KIMI_EXPLANATIONS = {
+  lastModel:
+    'legacy names a kimi session after the model of the LAST usage.record it reads (agents are read '
+    + 'main-first), so a subagent\'s model can name the whole session; the projection names it after the '
+    + 'main agent\'s first model — proven per session: legacy\'s model is one a subagent reported',
+  lastModelCost:
+    'legacy prices the whole session at that last-read (subagent) model; the projected counters priced at '
+    + 'legacy\'s model reproduce legacy\'s figure exactly, so the difference is the model choice alone '
+    + '(costByDimension prices every response at its own model)',
+  subagentNew:
+    'a kimi subagent is a child Agent under the run (P2), an improvement over legacy, which has no '
+    + 'agentMetrics for kimi; its tokens are ALREADY in the session totals (legacy\'s all-agents rule), so '
+    + 'a reader must not add them again — proven per session: the totals equal the subagents\' own '
+    + 'model.completed sums',
+} as const
+
+interface SubagentEvidence {
+  /** Agent ids that are not the main agent (the projection's own invocation keys). */
+  subIds: Set<string>
+  /** Models the subagents reported. */
+  subModels: Set<string>
+  /** Tokens (all four counters) the subagents' responses carried. */
+  subTokens: number
+}
+
+function subagentEvidence(events: readonly AnyAgentisticsEvent[], subIds: Set<string>): SubagentEvidence {
+  const subModels = new Set<string>()
+  let subTokens = 0
+  for (const e of events) {
+    if (e.type !== 'model.completed' || !e.agentId || !subIds.has(e.agentId)) continue
+    const d = e.data as { model?: string; usage?: Partial<Record<'input' | 'output' | 'cacheRead' | 'cacheWrite', number>> }
+    if (d.model) subModels.add(d.model)
+    const u = d.usage ?? {}
+    subTokens += totalTokens({ input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 })
+  }
+  return { subIds, subModels, subTokens }
+}
+
+function applyKimiSubagentClassification(
+  rows: FieldRow[], legacy: SessionMeta, projected: SessionMeta, events: readonly AnyAgentisticsEvent[],
+): void {
+  const invocations = projected.agentMetrics?.invocations ?? []
+  const subIds = new Set(invocations.map(i => i.agentId).filter((x): x is string => !!x))
+  if (subIds.size === 0) return
+  const ev = subagentEvidence(events, subIds)
+  const legacyModel = legacy.model
+  for (const r of rows) {
+    if (r.verdict !== 'bug') continue
+    if (r.field === 'model' && typeof legacyModel === 'string' && ev.subModels.has(legacyModel) && r.projected === projected.model) {
+      r.verdict = 'explained'; r.reason = KIMI_EXPLANATIONS.lastModel; continue
+    }
+    if (r.field === 'costUSD' && typeof legacyModel === 'string' && ev.subModels.has(legacyModel)
+      && sessionCostUSD({ ...projected, model: legacyModel }) === r.legacy) {
+      r.verdict = 'explained'; r.reason = KIMI_EXPLANATIONS.lastModelCost; continue
+    }
+    if (r.field.startsWith('agentMetrics.') && legacy.agentMetrics === undefined) {
+      const am = projected.agentMetrics
+      const proven = !!am && am.totalInvocations === subIds.size && am.totalTokens === ev.subTokens
+      if (proven) { r.verdict = 'explained'; r.reason = KIMI_EXPLANATIONS.subagentNew }
+    }
+  }
+}
+
 // ── running it over a real store ────────────────────────────────────────────────────────────────
 
 export interface KimiDifferentialOptions {
@@ -203,6 +268,7 @@ export async function runKimiDifferential(
 
       diff = compareSession({ sessionId: kimiSessionId, legacy, projection })
       applyKimiClassification(diff.rows, projection.caveats)
+      applyKimiSubagentClassification(diff.rows, legacy, projection.meta as SessionMeta, batch.events as AnyAgentisticsEvent[])
     } catch {
       skipped.unreadable++
       continue

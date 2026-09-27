@@ -302,6 +302,14 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'different journal it is ignored; absent, the import re-reads and the journal dedupes.',
   },
   {
+    pattern: '.agentistics/projections.db', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the next catch-up pass rebuilds every projection from the journal',
+    why: 'The materialised projections (P3): fold states, finished rows and cursors DERIVED from '
+      + '`journal.db`, which IS carried. Its cursors are rowids of THIS machine\'s journal, so restored '
+      + 'beside another they would describe events that are not there; absent, a rebuild re-derives it. '
+      + 'The prefix also catches its `-wal` / `-shm`.',
+  },
+  {
     pattern: '.agentistics/auto-upgrade.log', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'A log.',

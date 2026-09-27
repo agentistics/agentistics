@@ -122,6 +122,14 @@ export interface Journal {
   append(events: readonly AgentisticsEvent[]): Promise<AppendResult>
   readFrom(cursor: number, limit: number): Promise<ReadPage>
   stats(): Promise<JournalStats>
+  /**
+   * The largest rowid in the journal (0 when empty) — the HEAD a cursor is compared against. Added for
+   * the materialised projections (A4.1): their status reports how far behind the head they are, and a
+   * store whose cursor is ABOVE the head is folding a different journal. Optional so an older fake
+   * still satisfies the interface; a reader treats its absence as "unknown", never as 0. `null` = the
+   * head could not be read (closed, or the read failed — counted in `failedReads`): also "unknown".
+   */
+  head?(): Promise<number | null>
   status(): JournalStatus
   close(): void
 }

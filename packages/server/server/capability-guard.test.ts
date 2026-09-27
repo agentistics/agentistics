@@ -21,6 +21,16 @@ const localCaps = capabilitiesFor('local', {
 })
 
 describe('routeCapability', () => {
+  it('maps the projection query to localTranscripts, and only that runtime route', () => {
+    // It reads this machine's projection store — derived from host transcripts (models, repo and
+    // project paths, task ids, tools) — so an exposed profile must not reach it.
+    expect(routeCapability('/api/runtime/metrics')).toBe('localTranscripts')
+    expect(routeCapability('/api/runtime/metrics/anything-added-later')).toBe('localTranscripts')
+    expect(routeCapability('/api/runtime/metricsx')).toBeNull()
+    expect(capabilityDenied('localTranscripts', publicCaps)?.status).toBe(403)
+    expect(capabilityDenied('localTranscripts', localCaps)).toBeNull()
+  })
+
   it('maps the shell route', () => {
     expect(routeCapability('/api/exec')).toBe('localShell')
     // It downloads a release binary, EXECUTES it and restarts the service serving the page. If
