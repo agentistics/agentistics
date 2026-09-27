@@ -777,18 +777,28 @@ function StudioBand({
         //
         // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE (`fullscreenInsetRight`) rather than
         // `inset: 0` — this band is docked at the BOTTOM, so a fixed `right: 0` would paint straight
-        // over whatever the RIGHT slot is independently showing. `top`/`bottom` stay 0; `right`
-        // follows the aside's own live edge, reactively, so minimizing it (its existing control)
-        // frees the width without this band leaving and re-entering full screen. `left` follows the
-        // LEFT sessions list's own live width the same way (owner, 2026-09-21: "a esquerda da
-        // listagem de sessoes deveria continuar visivel" — full screen used to reach straight through
-        // it via a bare `left: 0`) — `leftAsideEdge.ts` is the ONE bridge both this and `ShellBand`'s
-        // own docked full screen read, so the two can never disagree about how much room the list
-        // needs. NEVER collapsed on the reader's behalf: if they want the width, collapsing the list
-        // themselves is the same lever the right side already defers to for the artifacts aside.
+        // over whatever the RIGHT slot is independently showing. `right` follows the aside's own
+        // live edge, reactively, so minimizing it (its existing control) frees the width without
+        // this band leaving and re-entering full screen. `left` follows the LEFT sessions list's own
+        // live width the same way (owner, 2026-09-21: "a esquerda da listagem de sessoes deveria
+        // continuar visivel" — full screen used to reach straight through it via a bare `left: 0`) —
+        // `leftAsideEdge.ts` is the ONE bridge both this and `ShellBand`'s own docked full screen
+        // read, so the two can never disagree about how much room the list needs. NEVER collapsed
+        // on the reader's behalf: if they want the width, collapsing the list themselves is the same
+        // lever the right side already defers to for the artifacts aside.
+        //
+        // TRUE FULL SCREEN IS A PANEL, NOT A SQUARE BLOCK (owner, 2026-09-27: "o componente em tela
+        // cheia ele ta ajustando tbm?" — yes). It used to be `top: 0, bottom: 0`, covering the sticky
+        // header and reaching the window's own bottom edge with no border, radius or gap at all —
+        // the one region on the whole board with none of the floating-panel treatment. `top` now
+        // sits `OUTER_GAP` (6px) below the header (`var(--ag-topbar-h)`, the same CSS var `App.tsx`
+        // sets), and `bottom` is `OUTER_GAP` instead of `0` — the SAME two figures the centre column
+        // and the right aside already use for their own top gap and the whole row's own bottom
+        // padding (`SessionsPage.tsx`'s `OUTER_GAP`/`splitRef`), so full screen occupies exactly the
+        // centre column's own floor plan rather than a viewport-filling square.
         ...(fullscreen
           ? {
-            position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,
+            position: 'fixed', top: 'calc(var(--ag-topbar-h) + 6px)', left: leftAsideEdge, bottom: 6,
             right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
             zIndex: PANEL_FULLSCREEN_Z,
           }
@@ -796,10 +806,11 @@ function StudioBand({
             ? { height: renderedHeight, flexShrink: 0 }
             : { flexShrink: 0 }),
         display: 'flex', flexDirection: 'column',
-        // FLOATING-PANELS DESIGN: its own border+radius+clip — this band IS a panel now, not a strip
-        // docked inside another one. Skipped only in true full screen, which already covers the whole
-        // viewport (a rounded border there would just clip its own corners against nothing).
-        ...(fullscreen ? {} : { border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }),
+        // FLOATING-PANELS DESIGN: its own border+radius+clip, in EVERY state including true full
+        // screen now — the panel treatment `fullscreen` used to skip on the (wrong) assumption that
+        // filling the viewport made a border pointless; it fills the CENTRE COLUMN instead, which
+        // still has four edges to round.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
         // THE WHOLE BAND IS THE DROP TARGET (owner, 2026-09-21: "quero que eu so precise jogar ate a
         // barra inferior") — an INSET box-shadow rings the entire band while a drag is over it, never
         // only the thin top border, so what lights up is exactly what accepts the drop.
@@ -1007,11 +1018,12 @@ function SimpleDockedBand({
       <div
         ref={bandDrop.ref}
         style={{
-        // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE AND THE LEFT SESSIONS LIST — see `StudioBand`'s
-        // own comment on `fullscreenInsetRight`/`leftAsideEdge`; the same reasoning applies unchanged.
+        // FULL SCREEN STOPS SHORT OF THE ARTIFACTS ASIDE AND THE LEFT SESSIONS LIST, AND IS A PANEL
+        // NOW — see `StudioBand`'s own comment on `fullscreenInsetRight`/`leftAsideEdge` and on the
+        // `top`/`bottom` gap; the same reasoning and the same two figures apply unchanged here.
         ...(fullscreen
           ? {
-            position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,
+            position: 'fixed', top: 'calc(var(--ag-topbar-h) + 6px)', left: leftAsideEdge, bottom: 6,
             right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),
             zIndex: PANEL_FULLSCREEN_Z,
           }
@@ -1019,8 +1031,9 @@ function SimpleDockedBand({
             ? { height: renderedHeight, flexShrink: 0 }
             : { flexShrink: 0 }),
         display: 'flex', flexDirection: 'column',
-        // FLOATING-PANELS DESIGN — its own border+radius+clip, same as `StudioBand`'s identical change.
-        ...(fullscreen ? {} : { border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }),
+        // FLOATING-PANELS DESIGN — its own border+radius+clip, in every state, same as `StudioBand`'s
+        // identical change.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
         ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
         background: 'var(--bg-surface)',
       }}>

@@ -185,8 +185,13 @@ describe('the fullscreen overlay respects the artifacts aside (I2)', () => {
     // branch now sits one level deeper (inside the Fragment's bordered-box `<div>`), so this
     // planted string matches on CONTENT, via a whitespace-insensitive regex, rather than an exact
     // literal that would need re-editing on every re-indent.
+    //
+    // `top`/`bottom` changed again for I3 (owner, 2026-09-27: true full screen is a PANEL now — a
+    // 6px gap below the header and above the window's own bottom edge, not `top: 0, bottom: 0`
+    // reaching both) — the planted regression string below is updated to match, and still proves
+    // this test would catch either the ORIGINAL `inset: 0` bug or a regression back to it.
     const planted = SRC.replace(
-      /position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,\s*right: fullscreenInsetRight\(rightAsideEdge, viewportWidth, isMobile \? 0 : railWidth\),\s*zIndex: PANEL_FULLSCREEN_Z,/,
+      /position: 'fixed', top: 'calc\(var\(--ag-topbar-h\) \+ 6px\)', left: leftAsideEdge, bottom: 6,\s*right: fullscreenInsetRight\(rightAsideEdge, viewportWidth, isMobile \? 0 : railWidth\),\s*zIndex: PANEL_FULLSCREEN_Z,/,
       "position: 'fixed', inset: 0, zIndex: PANEL_FULLSCREEN_Z,",
     )
     expect(planted).toMatch(/position: 'fixed', inset: 0/)
