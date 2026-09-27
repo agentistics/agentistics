@@ -18,6 +18,8 @@
  * no sentence of its own: a string written inline is a string the other language never gets.
  */
 
+import type { ColumnId } from './board'
+
 export type Lang = 'pt' | 'en'
 
 export interface BoardCopy {
@@ -172,6 +174,14 @@ export interface BoardCopy {
     attachNetworkError: string
   }
   /**
+   * The MAIN table's column headers (`TaskTable.tsx`'s `COLUMNS`) — and the SAME record feeds the
+   * "Columns" picker's option labels, so the picker and the headers can never name a column two
+   * different ways. Reuses the exact words used elsewhere for the same concept (`cost`, `tokens`,
+   * `sessions`, `subtasks`, `files`, `links`, `blockedBy`, `priority` above; `list.keys` for the
+   * sort note) rather than inventing a second translation of the same idea.
+   */
+  columns: Record<ColumnId, string>
+  /**
    * The lists' own controls: Select mode, the open-the-task button, and sorting by a column title.
    * `{column}` / `{key}` are replaced by the caller — a sentence built by concatenating a translated
    * word onto an English frame is the bug this file exists to end.
@@ -182,6 +192,10 @@ export interface BoardCopy {
     selectAllInGroup: string
     selectRow: string
     openTask: string
+    /** The main table's leading, always-present column — the task's own name. Kept as its own key
+     *  (never `columns` above, which only covers the `+`-menu columns) because this one column
+     *  can never be hidden. */
+    taskColumn: string
     showSubtasks: string
     hideSubtasks: string
     sortBy: string
@@ -194,6 +208,11 @@ export interface BoardCopy {
     columnSortTitle: string
     columnReorderOff: string
     columnUseHand: string
+    /** The "sorted by {key} · reset" note drawn above the table when a non-default sort is
+     *  active — `{key}` is one of `keys` below. Used to be two English literals hardcoded around
+     *  it regardless of `lang`, so a Portuguese board read "sorted by custo ↓ · reset". */
+    sortedByPrefix: string
+    resetSort: string
     /** Every key a list can be ordered by, in words. */
     keys: Record<string, string>
   }
@@ -285,6 +304,26 @@ const EN: BoardCopy = {
   blockedBy: 'Blocked by',
   showAllDescription: 'Show all',
   showLessDescription: 'Show less',
+  columns: {
+    status: 'Status',
+    priority: 'Priority',
+    due: 'Due',
+    claim: 'Working on it',
+    progress: 'Progress',
+    attempts: 'Attempts',
+    sessions: 'Sessions',
+    rounds: 'Your prompts',
+    tokens: 'Tokens',
+    cost: 'Cost',
+    harnesses: 'Harnesses',
+    subtasks: 'Subtasks',
+    comments: 'Comments',
+    files: 'Files',
+    links: 'Links',
+    blockedBy: 'Blocked by',
+    created: 'Created',
+    updated: 'Updated',
+  },
   staged: {
     compose: 'Stage a session',
     edit: 'Edit staged session',
@@ -327,6 +366,7 @@ const EN: BoardCopy = {
     selectAllInGroup: 'Select every task in this group',
     selectRow: 'Select this task',
     openTask: 'Open task',
+    taskColumn: 'Task',
     showSubtasks: 'Show the subtasks',
     hideSubtasks: 'Hide the subtasks',
     sortBy: 'Sort by',
@@ -338,6 +378,8 @@ const EN: BoardCopy = {
     columnSortTitle: 'Order the cards in this column',
     columnReorderOff: 'Ordered by {key}. Dragging to reorder is off in this column.',
     columnUseHand: 'Use hand order',
+    sortedByPrefix: 'sorted by',
+    resetSort: 'reset',
     keys: {
       manual: 'Hand order', priority: 'Priority', title: 'Title', status: 'Status',
       created: 'Newest', updated: 'Last touched', due: 'Due date',
@@ -436,6 +478,26 @@ const PT: BoardCopy = {
   blockedBy: 'Bloqueada por',
   showAllDescription: 'Mostrar tudo',
   showLessDescription: 'Mostrar menos',
+  columns: {
+    status: 'Status',
+    priority: 'Prioridade',
+    due: 'Prazo',
+    claim: 'Trabalhando',
+    progress: 'Progresso',
+    attempts: 'Tentativas',
+    sessions: 'Sessões',
+    rounds: 'Seus prompts',
+    tokens: 'Tokens',
+    cost: 'Custo',
+    harnesses: 'Harnesses',
+    subtasks: 'Subtarefas',
+    comments: 'Comentários',
+    files: 'Arquivos',
+    links: 'Links',
+    blockedBy: 'Bloqueada por',
+    created: 'Criada em',
+    updated: 'Atualizada em',
+  },
   staged: {
     compose: 'Preparar sessão',
     edit: 'Editar sessão em espera',
@@ -478,6 +540,7 @@ const PT: BoardCopy = {
     selectAllInGroup: 'Selecionar todas as tarefas deste grupo',
     selectRow: 'Selecionar esta tarefa',
     openTask: 'Abrir tarefa',
+    taskColumn: 'Tarefa',
     showSubtasks: 'Mostrar as subtarefas',
     hideSubtasks: 'Esconder as subtarefas',
     sortBy: 'Ordenar por',
@@ -489,6 +552,8 @@ const PT: BoardCopy = {
     columnSortTitle: 'Ordenar os cards desta coluna',
     columnReorderOff: 'Ordenada por {key}. Arrastar para reordenar está desligado nesta coluna.',
     columnUseHand: 'Usar ordem manual',
+    sortedByPrefix: 'ordenada por',
+    resetSort: 'redefinir',
     keys: {
       manual: 'Ordem manual', priority: 'Prioridade', title: 'Título', status: 'Status',
       created: 'Mais recentes', updated: 'Última alteração', due: 'Prazo',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { boardCopy, statusLabel } from './copy'
-import { COLUMN_ORDER } from './board'
+import { COLUMN_ORDER, type ColumnId } from './board'
 
 describe('boardCopy', () => {
   it('carries the same keys in both languages', () => {
@@ -10,6 +10,21 @@ describe('boardCopy', () => {
     const pt = boardCopy('pt')
     expect(Object.keys(pt).sort()).toEqual(Object.keys(en).sort())
     expect(Object.keys(pt.status).sort()).toEqual(Object.keys(en.status).sort())
+    expect(Object.keys(pt.columns).sort()).toEqual(Object.keys(en.columns).sort())
+  })
+
+  it('names every column the main task table can show', () => {
+    // `TaskTable.tsx`'s `COLUMNS` reads this record for both the header row and the "Columns"
+    // picker's option labels — a column id with no word here renders as `undefined` in both places.
+    const ids: ColumnId[] = [
+      'status', 'priority', 'due', 'claim', 'progress', 'attempts', 'sessions', 'rounds',
+      'tokens', 'cost', 'harnesses', 'subtasks', 'comments', 'files', 'links', 'blockedBy',
+      'created', 'updated',
+    ]
+    for (const id of ids) {
+      expect(boardCopy('en').columns[id]).toBeTruthy()
+      expect(boardCopy('pt').columns[id]).toBeTruthy()
+    }
   })
 
   it('names every status the board can be in', () => {

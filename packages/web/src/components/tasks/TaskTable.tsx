@@ -67,22 +67,12 @@ import type {
   TaskSessionRow, TaskStatus,
 } from '../../lib/tasks'
 
-/** The words the "sorted by" note uses. Kept beside `COLUMNS`, whose labels they mirror. */
-const SORT_LABEL: Record<string, string> = {
-  manual: 'the board order', priority: 'priority', title: 'title', status: 'status',
-  created: 'created', updated: 'updated', due: 'due date', started: 'started', cost: 'cost',
-  tokens: 'tokens', rounds: 'rounds', sessions: 'sessions', attempts: 'attempts',
-  comments: 'comments', subtasks: 'subtasks', progress: 'progress', harnesses: 'harnesses',
-  delivered: 'delivered',
-}
-
 // ---------------------------------------------------------------------------- columns
 
 export type { ColumnId }
 
 export interface ColumnDef {
   id: ColumnId
-  label: string
   /** Right-aligned, tabular. Every measured number is one; a chip column is not. */
   numeric?: boolean
   width: number
@@ -96,29 +86,35 @@ export interface ColumnDef {
 /**
  * The default set answers the three questions the product exists for before anyone configures
  * anything. The rest are one click away in the `+` menu.
+ *
+ * No `label` here — it used to be a hardcoded English literal per column, which is why this table's
+ * headers stayed English on a Portuguese board while the inline subtask headers right below them
+ * (`subtaskColumns`) were already localized through `boardCopy`. The label is now resolved at render
+ * time from `boardCopy(lang).columns`, the SAME record the "Columns" picker reads, so the picker and
+ * the headers can never disagree.
  */
 export const COLUMNS: ColumnDef[] = [
   // No `sort` on Status, deliberately: this table is GROUPED by status, so every row inside a band
   // has the same one and a sort by it would reorder nothing while its arrow lit up — a control that
   // looks like it works and does not. The order of the bands themselves is the Groups picker's.
-  { id: 'status', label: 'Status', width: 116 },
-  { id: 'priority', label: 'Priority', width: 96, sort: 'priority' },
-  { id: 'claim', label: 'Working on it', width: 132 },
-  { id: 'progress', label: 'Progress', width: 132, sort: 'progress' },
-  { id: 'due', label: 'Due', width: 96, sort: 'due' },
-  { id: 'sessions', label: 'Sessions', numeric: true, width: 84, sort: 'sessions' },
-  { id: 'rounds', label: 'Your prompts', numeric: true, width: 108, sort: 'rounds' },
-  { id: 'cost', label: 'Cost', numeric: true, width: 88, sort: 'cost' },
-  { id: 'tokens', label: 'Tokens', numeric: true, width: 84, sort: 'tokens' },
-  { id: 'harnesses', label: 'Harnesses', width: 150, sort: 'harnesses' },
-  { id: 'subtasks', label: 'Subtasks', numeric: true, width: 84, sort: 'subtasks' },
-  { id: 'attempts', label: 'Attempts', numeric: true, width: 84, sort: 'attempts' },
-  { id: 'comments', label: 'Comments', numeric: true, width: 92, sort: 'comments' },
-  { id: 'files', label: 'Files', numeric: true, width: 68 },
-  { id: 'links', label: 'Links', numeric: true, width: 68 },
-  { id: 'blockedBy', label: 'Blocked by', numeric: true, width: 92 },
-  { id: 'created', label: 'Created', width: 104, sort: 'created' },
-  { id: 'updated', label: 'Updated', width: 104, sort: 'updated' },
+  { id: 'status', width: 116 },
+  { id: 'priority', width: 96, sort: 'priority' },
+  { id: 'claim', width: 132 },
+  { id: 'progress', width: 132, sort: 'progress' },
+  { id: 'due', width: 96, sort: 'due' },
+  { id: 'sessions', numeric: true, width: 84, sort: 'sessions' },
+  { id: 'rounds', numeric: true, width: 108, sort: 'rounds' },
+  { id: 'cost', numeric: true, width: 88, sort: 'cost' },
+  { id: 'tokens', numeric: true, width: 84, sort: 'tokens' },
+  { id: 'harnesses', width: 150, sort: 'harnesses' },
+  { id: 'subtasks', numeric: true, width: 84, sort: 'subtasks' },
+  { id: 'attempts', numeric: true, width: 84, sort: 'attempts' },
+  { id: 'comments', numeric: true, width: 92, sort: 'comments' },
+  { id: 'files', numeric: true, width: 68 },
+  { id: 'links', numeric: true, width: 68 },
+  { id: 'blockedBy', numeric: true, width: 92 },
+  { id: 'created', width: 104, sort: 'created' },
+  { id: 'updated', width: 104, sort: 'updated' },
 ]
 
 export const DEFAULT_COLUMNS: ColumnId[] =
@@ -625,7 +621,11 @@ export function TaskTable(p: TaskTableProps) {
   const [linkingSub, setLinkingSub] = useState<{ task: string; sub: string } | null>(null)
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
-  const L = boardCopy(p.lang ?? 'en').list
+  const copy = boardCopy(p.lang ?? 'en')
+  const L = copy.list
+  // The MAIN table's column labels — the one record the header row and the "Columns" picker both
+  // read, so a header can never say something the picker's own row does not.
+  const colLabel = (id: ColumnId): string => copy.columns[id]
 
   const cols = useMemo(
     () => COLUMNS.filter(c => shown.includes(c.id)).sort(
@@ -725,7 +725,7 @@ export function TaskTable(p: TaskTableProps) {
               color: 'var(--anthropic-orange)',
             }}
           >
-            sorted by {SORT_LABEL[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'} · reset
+            {L.sortedByPrefix} {L.keys[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'} · {L.resetSort}
           </button>
         )}
         <span style={{ flex: 1 }} />
@@ -760,7 +760,7 @@ export function TaskTable(p: TaskTableProps) {
           width={270}
           orderable
           triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
-          items={COLUMNS.map(c => ({ value: c.id, label: c.label }))}
+          items={COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) }))}
           value={shown}
           onChange={next => setColumns(next as ColumnId[])}
           note="Drag a ticked column, or use ▲▼, to reorder it — the table follows this order."
@@ -836,7 +836,7 @@ export function TaskTable(p: TaskTableProps) {
                           )}
                         </th>
                         <SortTh
-                          label="Task" sortKey="title" current={sort} mobile={isMobile}
+                          label={L.taskColumn} sortKey="title" current={sort} mobile={isMobile}
                           onSort={k => setSort(nextSort(sort, k))}
                           title={L.sortByColumn.replace('{column}', L.keys.title!)}
                           style={{ ...th, minWidth: 240 }}
@@ -845,9 +845,9 @@ export function TaskTable(p: TaskTableProps) {
                           // A column with no `sort` carries NO affordance — a header that looks
                           // clickable and does nothing is worse than a plain one.
                           <SortTh
-                            key={c.id} label={c.label} sortKey={c.sort} current={sort} mobile={isMobile}
+                            key={c.id} label={colLabel(c.id)} sortKey={c.sort} current={sort} mobile={isMobile}
                             onSort={k => setSort(nextSort(sort, k))}
-                            title={L.sortByColumn.replace('{column}', c.label)}
+                            title={L.sortByColumn.replace('{column}', colLabel(c.id))}
                             style={{ ...th, width: c.width, textAlign: c.numeric ? 'right' : 'left' }}
                           />
                         ))}
