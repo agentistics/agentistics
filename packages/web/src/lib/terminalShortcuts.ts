@@ -19,6 +19,8 @@
  *  - **Never Cmd/Win, never Alt.** On a Mac every application shortcut is Cmd; a terminal that ate
  *    them is a terminal you cannot copy out of, quit, or switch away from.
  *
+ * SESSION-ENDING KEYS take Shift and are announced — see `ShortcutDecision` below.
+ *
  * The caller applies this ONLY while the emulator is focused and the write channel is open. A
  * page-level handler that swallowed `ctrl+w` whenever a terminal existed somewhere on screen would
  * be a browser the person cannot close.
@@ -57,19 +59,62 @@ export interface ShortcutEvent {
 }
 
 /**
- * `take` = the terminal handles it and the browser must not; `leave` = the browser keeps it;
- * `copy` = a copy-with-selection — the caller must return `false` from
- * `attachCustomKeyEventHandler` (not merely skip `preventDefault`) so xterm sends nothing and the
- * browser's native copy fires on the selection.
+ * KEYS THAT CAN END THE SESSION ARE GUARDED BY SHIFT (owner, 2026-09-27: "dei ctrl + c no terminal
+ * e matei a porra da sessao"). `Ctrl+C` interrupts — and a second one exits Claude Code — and
+ * `Ctrl+D` is end-of-input, which exits a harness sitting on an empty prompt. A person reaching for
+ * a copy or a habit must never lose a session to it, so plain `Ctrl+C`/`Ctrl+D` are REFUSED with a
+ * sentence (`guardNoticeText`) and nothing is sent:
  *
- * `shiftKey` is refused before the letter is even looked at for `take`/`leave`, which is also why
- * case cannot decide anything there: a capital arrives WITH shift, and shift already refuses. The
- * `copy` check runs first and does not exclude `shiftKey` — Ctrl+Shift+C must copy too.
+ *  - `Ctrl+C` is never sent from the keyboard at all. `Ctrl+Shift+C` is COPY — the owner's choice —
+ *    so the interrupt has no shifted form; `Esc` interrupts a harness without ending it.
+ *  - `Ctrl+D` is sent only as `Ctrl+Shift+D`, and the terminal SAYS it was sent.
+ *
+ * Every other key the channel carries passes exactly as before. `Ctrl+Z` and `Ctrl+\` never reach
+ * this far: the server's allowlist refuses them outright.
  */
-export function shortcutDecision(e: ShortcutEvent, hasSelection = false): 'take' | 'leave' | 'copy' {
-  if (
-    hasSelection && !e.altKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c'
-  ) return 'copy'
-  if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return 'leave'
-  return CLAIMED.has(e.key.toLowerCase()) ? 'take' : 'leave'
+export type ShortcutDecision =
+  | 'take'      // the terminal handles it; the browser must not
+  | 'leave'     // the browser keeps it
+  | 'copy'      // copy the emulator's selection; send nothing
+  | 'blocked-interrupt' // plain Ctrl+C with nothing selected — refused, never sent
+  | 'blocked-eof'       // plain Ctrl+D — refused, never sent
+  | 'confirmed-eof'     // Ctrl+Shift+D — send C-d on purpose, and say so
+
+/**
+ * `copy` means: the caller copies `term.getSelection()` itself and returns `false` from
+ * `attachCustomKeyEventHandler`, so xterm sends nothing (its own key handling would otherwise turn
+ * Ctrl+C into `\x03` regardless of `preventDefault`). `Ctrl+Shift+C` copies even with nothing
+ * selected (it is then a no-op), because in Chrome that combination otherwise opens the element
+ * inspector — and the owner named it as THE copy key here.
+ */
+export function shortcutDecision(e: ShortcutEvent, hasSelection = false): ShortcutDecision {
+  const key = e.key.toLowerCase()
+  if (e.altKey) return 'leave'
+  if ((e.ctrlKey || e.metaKey) && key === 'c' && (hasSelection || (e.ctrlKey && e.shiftKey))) return 'copy'
+  if (e.metaKey || !e.ctrlKey) return 'leave'
+  if (key === 'c' && !e.shiftKey) return 'blocked-interrupt'
+  if (key === 'd') return e.shiftKey ? 'confirmed-eof' : 'blocked-eof'
+  if (e.shiftKey) return 'leave'
+  return CLAIMED.has(key) ? 'take' : 'leave'
+}
+
+/** What the terminal says when it refused (or deliberately sent) a session-ending key. */
+export function guardNoticeText(
+  kind: 'blocked-interrupt' | 'blocked-eof' | 'confirmed-eof', lang: 'pt' | 'en',
+): string {
+  const pt = lang === 'pt'
+  switch (kind) {
+    case 'blocked-interrupt':
+      return pt
+        ? 'Ctrl+C está bloqueado porque encerra a sessão. Para copiar use Ctrl+Shift+C; para interromper use Esc.'
+        : 'Ctrl+C is blocked because it ends the session. To copy use Ctrl+Shift+C; to interrupt use Esc.'
+    case 'blocked-eof':
+      return pt
+        ? 'Ctrl+D está bloqueado porque encerra a sessão. Se é isso mesmo que você quer, use Ctrl+Shift+D.'
+        : 'Ctrl+D is blocked because it ends the session. If that is really what you want, use Ctrl+Shift+D.'
+    case 'confirmed-eof':
+      return pt
+        ? 'Ctrl+D enviado (Ctrl+Shift+D) — isso encerra a sessão se a linha estiver vazia.'
+        : 'Ctrl+D sent (Ctrl+Shift+D) — this ends the session if the line is empty.'
+  }
 }

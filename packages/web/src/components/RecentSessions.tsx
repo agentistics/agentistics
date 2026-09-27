@@ -1939,7 +1939,7 @@ export function TerminalRegion({ id, theme, lang, fill, onMaximize, row, act, au
       >
         <Suspense fallback={<div style={{ padding: 16, fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{lang === 'pt' ? 'Carregando o emulador…' : 'Loading the emulator…'}</div>}>
           {/* key={id}: a new session gets a brand-new emulator, so no content leaks across. */}
-          <SessionTerminal key={id} frame={state.frame} theme={theme} showCursor={status.showCursor} zoom={zoom} interactive={interactive} onInput={sendKeys} onPaste={sendPasteText} onGeometry={resizer.request} />
+          <SessionTerminal key={id} frame={state.frame} theme={theme} showCursor={status.showCursor} zoom={zoom} interactive={interactive} onInput={sendKeys} onPaste={sendPasteText} onGeometry={resizer.request} lang={lang} />
         </Suspense>
       </div>
       {/* THE KEY STRIP — mobile only, and never in a dashboard card (`keyStripShown`). Without it a

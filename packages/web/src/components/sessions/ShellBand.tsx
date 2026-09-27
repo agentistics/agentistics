@@ -990,6 +990,9 @@ export function ShellBand({
           onInput={send}
           onPaste={sendPasteText}
           onGeometry={streamId ? onGeometry : undefined}
+          lang={lang}
+          // Ctrl+C ends an ASSISTANT's session; in the utility shell it only stops a command.
+          guardInterrupt={target === 'cli'}
         />
       </Suspense>
     </div>
