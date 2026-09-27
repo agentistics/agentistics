@@ -47,6 +47,7 @@ import {
 import { useDocumentVisible } from '../../hooks/useDocumentVisible'
 import { useElementWidth } from '../../hooks/useElementWidth'
 import { keyStripShown } from '../../lib/terminalSurface'
+import { floatPanel } from '../../lib/floatingPanels'
 import { dockedShowsTarget, usePanelSlots, type PanelDropTarget } from '../../lib/panelSlots'
 import {
   followBottomOccupant, resolveDockedTarget, shellTargetUnavailable, targetLabel, targetScope,
@@ -100,6 +101,7 @@ interface T {
   endThis: string
   whichTerminal: string
   openOnRight: string
+  floatingElsewhere: string
   /** The VISIBLE word beside the icon (fix-wave review, owner follow-up #5) — short, unlike the
    *  fuller `fullscreen`/`close`/`collapse`/`expand` sentences above, which stay the tooltip. */
   fullscreenLabel: string
@@ -139,6 +141,7 @@ const TXT: Record<'pt' | 'en', T> = {
     endThis: 'End this terminal',
     whichTerminal: 'Which terminal',
     openOnRight: 'This is open in the panel on the right. Pick it again to bring it back here.',
+    floatingElsewhere: 'This is floating in its own window. Press the pin on that window to dock it back here.',
     fullscreenLabel: 'Full screen',
     closeLabel: 'End shell',
     collapseLabel: 'Collapse',
@@ -171,6 +174,7 @@ const TXT: Record<'pt' | 'en', T> = {
     endThis: 'Encerrar este terminal',
     whichTerminal: 'Qual terminal',
     openOnRight: 'Isto está aberto no painel à direita. Selecione de novo para trazer de volta aqui.',
+    floatingElsewhere: 'Isto está flutuando numa janela. Aperte o pin dela para encaixar de volta aqui.',
     fullscreenLabel: 'Tela cheia',
     closeLabel: 'Encerrar shell',
     collapseLabel: 'Recolher',
@@ -461,6 +465,18 @@ export function ShellBand({
     if (follow) chooseTarget(follow)
   }, [bottomOccupant, target, chooseTarget])
 
+  /**
+   * THE PANE ON SCREEN WAS FLOATED (`lib/floatingPanels.ts`) — it left for its own window, so the
+   * band collapses rather than stand open over an empty screen. Deliberately NOT switched to the
+   * other pane: switching to `shell` would open a shell nobody asked for. Docking back reopens it
+   * here through `bottomOccupant`, like any other open of this slot.
+   */
+  const targetFloats = placement === 'docked' && (slotLayout.floating?.includes(target) ?? false)
+  const setBandRef = useRef<((next: { open: boolean }) => void) | null>(null)
+  useEffect(() => {
+    if (targetFloats) setBandRef.current?.({ open: false })
+  }, [targetFloats])
+
   const setBand = useCallback((next: Partial<{ open: boolean; height: number; full: boolean }>) => {
     setPrefs(p => {
       let merged: BandPrefs = { ...p }
@@ -483,6 +499,7 @@ export function ShellBand({
     // which, unsynced, is a second stale flag exactly like the one this fix already closed at mount.
     if (next.open !== undefined) onOpenChange?.(next.open)
   }, [target, onOpenChange])
+  setBandRef.current = setBand
 
   /**
    * Resolve THIS session's shell: reuse the one already running for it, else open one.
@@ -972,7 +989,7 @@ export function ShellBand({
    *  somewhere else, and `status.detail` (built from an `idle`, un-watched stream) would otherwise
    *  say "No session"/"No shell" about a pane that is very much open, just not here. */
   const line = excludedFromDocked
-    ? t.openOnRight
+    ? (slotLayout.floating?.includes(target) ? t.floatingElsewhere : t.openOnRight)
     : band.message ?? (write.reason ? write.reason : band.phase === 'opening' ? t.opening : status.detail)
   const lineIsBad = Boolean(band.message || write.reason)
   const busy = band.phase === 'opening'
@@ -1267,6 +1284,11 @@ export function ShellBand({
           collapsed={!prefs.open}
           onMinimize={() => setBand({ open: !prefs.open })}
           minimizeLabel={prefs.open ? t.collapse : t.expand}
+          // PIN = FLOAT (`lib/floatingPanels.ts`) — the pane on screen (Claude Code or Shell) becomes
+          // a window; desktop only, since nothing floats on a phone.
+          {...(!isMobile && placement === 'docked' && !targetFloats
+            ? { pinned: { active: false, onToggle: () => floatPanel(target) } }
+            : {})}
           gearLabel={lang === 'pt' ? 'Mais ações' : 'More actions'}
           gearEntries={gearEntries}
         />

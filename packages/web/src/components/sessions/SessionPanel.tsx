@@ -51,6 +51,7 @@ import {
   BAND_MIN_PX, bandPanelFull, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
   writeBandPrefs,
 } from '../../lib/shellBand'
+import { floatPanel } from '../../lib/floatingPanels'
 import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
@@ -1058,6 +1059,8 @@ function SimpleDockedBand({
           onMinimize={onToggleOpen}
           minimizeLabel={open ? (pt ? `Recolher ${panelName}` : `Collapse ${panelName}`)
             : (pt ? `Expandir ${panelName}` : `Expand ${panelName}`)}
+          // PIN = FLOAT (`lib/floatingPanels.ts`) — this band is desktop-only, so always offered.
+          pinned={{ active: false, onToggle: () => floatPanel(panel) }}
           gearLabel={pt ? `Opções — ${panelName}` : `${panelName} options`}
           gearEntries={gearEntries}
         />

@@ -80,7 +80,9 @@ test('tabPane is defined exactly once, and called exactly once per slot', () => 
   expect([...SRC.matchAll(/const tabPane = /g)]).toHaveLength(1)
   expect([...SRC.matchAll(/const rightTabPane = /g)]).toHaveLength(1)
   expect([...SRC.matchAll(/const bottomTabPane = /g)]).toHaveLength(1)
-  expect([...SRC.matchAll(/\btabPane\(/g)]).toHaveLength(2)
+  // Three: the right slot, the bottom band, and the FLOATING window (`floatingBody`) — a floating
+  // panel has left its docked slot (`applyFloating`), so it is still at most one mount per id.
+  expect([...SRC.matchAll(/\btabPane\(/g)]).toHaveLength(3)
 })
 
 test('...and each of the two is rendered into the tree from exactly ONE site', () => {
@@ -184,7 +186,7 @@ test('every Studio entry on this page is gated on that one value', () => {
   expect(has("if (id === 'studio') return editorEnabled === true")).toBe(true)
   expect(has('const gatedMobilePanels = [...railPanels(slotLayout), ...bottomPanels(slotLayout)]')).toBe(true)
   expect(has('    .filter(railGateOpen)')).toBe(true)
-  expect(has("editorEnabled === true && isPanelShown(slotLayout, 'studio'),")).toBe(true)
+  expect(has("editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating),")).toBe(true)
 })
 
 test('the scan still sees the defect it exists to catch', () => {
@@ -267,7 +269,7 @@ test('the scan still sees either of those going dead', () => {
  * its literal (no `key:` field, at any position).
  */
 describe('StudioHost is mounted once, through mountStudioHostPanel (I4)', () => {
-  const CALL_GUARD = "mountStudioHostPanel({\n        shown: editorEnabled === true && isPanelShown(slotLayout, 'studio'),"
+  const CALL_GUARD = "mountStudioHostPanel({\n        shown: editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating),"
   // The literal's own closing tokens: `}` closes the object, `)` closes the call, `}` closes the
   // JSX expression container — `{selected && mountStudioHostPanel({ ... })}`.
   const CALL_CLOSE = '\n      })}'
@@ -293,7 +295,7 @@ describe('StudioHost is mounted once, through mountStudioHostPanel (I4)', () => 
 
   test('the scan still sees the guard move away from the call', () => {
     expect(has(CALL_GUARD)).toBe(true) // sanity: the needle exists in the real file
-    const guardMovedAway = SRC.replace(CALL_GUARD, "editorEnabled === true && isPanelShown(slotLayout, 'studio') && (\n        <div />")
+    const guardMovedAway = SRC.replace(CALL_GUARD, "editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating) && (\n        <div />")
     expect(guardMovedAway.includes(CALL_GUARD)).toBe(false)
   })
 
@@ -310,7 +312,7 @@ describe('StudioHost is mounted once, through mountStudioHostPanel (I4)', () => 
     // above (coincidentally) still catches because it breaks the CALL_GUARD prefix string.
     const first = SRC.replace(
       CALL_GUARD,
-      "mountStudioHostPanel({\n        key: rightIsStudio ? 'right' : 'bottom',\n        shown: editorEnabled === true && isPanelShown(slotLayout, 'studio'),",
+      "mountStudioHostPanel({\n        key: rightIsStudio ? 'right' : 'bottom',\n        shown: editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating),",
     )
     const firstStart = first.indexOf('mountStudioHostPanel({')
     const firstClose = first.indexOf(CALL_CLOSE, firstStart)
@@ -322,8 +324,8 @@ describe('StudioHost is mounted once, through mountStudioHostPanel (I4)', () => 
     // anything and the test passes for the wrong reason (see the failure this exact drift caused
     // when `target: studioTarget,`, then `onMention: onStudioMention,`, then
     // `onToggleFullscreen: …`, then `onMinimizeRight: …`, were each in turn assumed to be last —
-    // PIN (spec §11 item 3) is the current one).
-    const LAST_FIELD = "pinned: rightIsStudio\n          ? { active: rawSlotLayout.pinned.studio, onToggle: () => togglePinned('studio') }\n          : undefined,"
+    // PIN = FLOAT, 2026-09-27, is the current one).
+    const LAST_FIELD = "pinned: isMobile ? undefined\n          : studioFloating\n            ? { active: true, onToggle: () => dockBack('studio') }\n            : { active: false, onToggle: () => floatPanel('studio') },"
     const last = SRC.replace(
       LAST_FIELD + CALL_CLOSE,
       `${LAST_FIELD}\n        key: rightIsStudio ? 'right' : 'bottom',` + CALL_CLOSE,
@@ -474,7 +476,7 @@ describe('the dedicated-terminal branch falls through to centre on desktop (I2)'
  */
 describe('the narrow-overlay click-outside/Esc effect never touches the bottom band (spec §11 item 4)', () => {
   const START = "if (artShell !== 'overlay') return"
-  const END = "}, [artShell, slotLayout.right, rawSlotLayout.pinned, closeSlotPanel, setRightOpen])"
+  const END = "}, [artShell, slotLayout.right, closeSlotPanel, setRightOpen])"
 
   function effectBody(src: string): string {
     const start = src.indexOf(START)
