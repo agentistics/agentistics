@@ -161,8 +161,8 @@ export const EVENT_TYPES = [
   'alm.task.created', 'alm.task.updated', 'alm.task.completed', 'alm.evidence.attached',
   // side processes (§13.4)
   'process.started', 'process.ended',
-  // human turns (D22)
-  'turn.started',
+  // human turns (D22) and their close (D25)
+  'turn.started', 'turn.ended',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -491,6 +491,31 @@ export interface ProcessEndedData {
  */
 export interface TurnStartedData {
   by: 'user'
+  /**
+   * The `timestamp` of the LAST assistant-role transcript line written before this prompt, verbatim
+   * (decision D25, 2026-09-26) — the instant legacy's `user_response_times` measures FROM. Not the
+   * first line of the last response (`model.completed` carries that one) and not reset between
+   * turns: legacy keeps the last assistant time for the life of the walk. ABSENT when no assistant
+   * line with a timestamp preceded the prompt — never an invented instant.
+   */
+  previousAssistantAt?: string
+}
+
+/**
+ * A person's turn CLOSED (decision D25, 2026-09-26), at the point legacy's active-time rule closes
+ * it (`activeTime.ts`, harness contract §1):
+ * - `'measured'` — the harness wrote its own duration for the turn (Claude's `system/turn_duration`
+ *   line). `durationMs` carries it and wins over anything reconstructed; `occurredAt` is that line's.
+ * - `'last-line'` — no measurement arrived before the next prompt (or the end of the transcript);
+ *   the turn closes at the LAST timestamped line of any kind, whose time is `occurredAt`.
+ *
+ * Emitted only for a turn that is OPEN — a stray measurement with no turn to close invents nothing.
+ * Metadata only (D5): no text, no size. `durationMs` is ABSENT unless the harness stated one (D21's
+ * rule) — never a 0 standing in for "not measured".
+ */
+export interface TurnEndedData {
+  close: 'measured' | 'last-line'
+  durationMs?: number
 }
 
 /**
@@ -540,6 +565,7 @@ export interface EventData {
   'process.started': ProcessStartedData
   'process.ended': ProcessEndedData
   'turn.started': TurnStartedData
+  'turn.ended': TurnEndedData
 }
 
 // Compile-time totality. Each alias fails to type-check (`true` is not assignable to `never`) if the
