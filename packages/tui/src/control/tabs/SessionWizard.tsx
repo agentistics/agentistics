@@ -71,6 +71,7 @@ export function wizSourceWord(
 }
 
 import { TextPrompt } from '../Prompt'
+import { wrapText } from '../surface.ts'
 import { TaskChoice } from '../TaskChoice'
 import { truncate } from '../../components/Primitives'
 import { COLORS } from '../../theme'
@@ -347,6 +348,19 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
     )
   }
 
+  // The outcome is WRAPPED, not cut to one row: a memory refusal is a ~250-character sentence
+  // whose back half — the per-session cost and what to do about it — is the part a person acts on,
+  // and one truncated row dropped exactly that half at any real terminal width. It gets every row
+  // the picker can spare (its label, a blank and its options must survive: a refusal nobody can
+  // answer is worse than a short one), and only a frame too small for that cuts the last row.
+  const howOptions = 2 + (admissionBlocked ? 1 : 0)
+  const outcomeRoom = Math.max(1, height - (howOptions + 2) - 1)
+  const wrapped = error && !busy ? wrapText(error, width) : []
+  const errorLines = wrapped.length > outcomeRoom
+    ? [...wrapped.slice(0, outcomeRoom - 1), truncate(wrapped.slice(outcomeRoom - 1).join(' '), width)]
+    : wrapped
+  const outcomeRows = busy ? 1 : errorLines.length > 0 ? errorLines.length + 1 : 0
+
   return (
     <Box flexDirection="column" width={width}>
       <Picker
@@ -361,9 +375,9 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
         ]}
         empty=""
         width={width}
-        // Two rows are spent below on the outcome, and a screen that draws more rows than it was
-        // given is composited over the ones under it by Ink rather than clipped.
-        height={Math.max(1, height - 2)}
+        // The rows spent below on the outcome are taken from here, because a screen that draws more
+        // rows than it was given is composited over the ones under it by Ink rather than clipped.
+        height={Math.max(1, height - Math.max(2, outcomeRows))}
         isActive={isActive && !busy}
         onPick={key => key === 'force' ? submit(lastAttach, true) : submit(key === 'fg')}
       />
@@ -372,7 +386,9 @@ export function SessionWizard({ host, strings: s, width, height, isActive, onCan
       {busy ? <Text dimColor>{truncate(s.wizStarting, width)}</Text> : null}
       {error && !busy ? (
         <>
-          <Text color={COLORS.danger} wrap="truncate">{truncate(error, width)}</Text>
+          {errorLines.map((line, i) => (
+            <Text key={i} color={COLORS.danger} wrap="truncate">{line}</Text>
+          ))}
           <Text dimColor wrap="truncate">{truncate(s.wizKeptDraft, width)}</Text>
         </>
       ) : null}

@@ -109,6 +109,11 @@ interface Options {
   /** Make the fake host REFUSE to spawn, which is the wizard's failure path. */
   failSpawn: boolean
   /**
+   * Make the fake host refuse a start on the MEMORY GATE, with the same data a real refusal carries
+   * (`admission`), unless the start was forced — so the wizard's "start anyway" row can be reached.
+   */
+  refuseMemory: boolean
+  /**
    * Show the "your last sessions were these" offer.
    *
    * Its own flag because the offer renders in FRONT of the list: stocking the fixture with it
@@ -154,7 +159,7 @@ const USAGE = `
 function parseArgs(argv: string[]): Options {
   const opts: Options = {
     cols: 100, rows: 34, lang: 'en', screen: 'services', mode: 'solo', keys: [], task: 'off',
-    pending: false, failSpawn: false, restore: false,
+    pending: false, failSpawn: false, refuseMemory: false, restore: false,
   }
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]
@@ -179,6 +184,7 @@ function parseArgs(argv: string[]): Options {
       case '--cascade': opts.cascade = true; break
       case '--pending': opts.pending = true; break
       case '--fail-spawn': opts.failSpawn = true; break
+      case '--refuse-memory': opts.refuseMemory = true; break
       case '--restore': opts.restore = true; break
       case '--task':
         opts.task = value === 'done' ? 'done' : 'running'
@@ -478,9 +484,20 @@ function fakeHost(opts: Options, apiUrl?: string): ControlHost {
     },
     // `--fail-spawn` drives the wizard's REFUSAL path, which is the one that used to eat the
     // prompt: it closed the wizard and put the reason on a status line one row tall.
-    spawnSession: async () => (opts.failSpawn
-      ? { ok: false, message: 'tmux recusou: sessão duplicada' }
-      : { ok: true, message: 'preview — nothing was performed' }),
+    spawnSession: async (req: { force?: boolean }) => {
+      if (opts.failSpawn) return { ok: false, message: 'tmux recusou: sessão duplicada' }
+      if (opts.refuseMemory && req.force !== true) {
+        const refusal = {
+          reason: 'swap' as const, requested: 1, fits: 0, availableBytes: 1.4e9, swapUsedBytes: 7.2e9,
+          swapTotalBytes: 8e9, costBytes: 345 * 1024 * 1024, costBasis: 'measured' as const, used: 9, max: 9,
+        }
+        const message = 'Not enough memory to start 1 session: none fit. 1.4 GB of RAM available, swap 7.2 GB / 8.0 GB used; each session costs about 345 MB (measured over the 9 running), 9 of 9 in use. Wait for swap to drain, close a session, or start anyway (--force / "start anyway").'
+        return { ok: false, message, admission: { code: 'memory_budget' as const, refusal, message } }
+      }
+      return opts.refuseMemory
+        ? { ok: true, message: 'preview — nothing was performed', overridden: true, note: 'Started anyway, overriding the memory check.' }
+        : { ok: true, message: 'preview — nothing was performed' }
+    },
     // Present so the three verbs that write into a session are reachable here at all. They perform
     // nothing: the questions are what a layout check needs to see, and the preview must never send
     // a keystroke anywhere.
