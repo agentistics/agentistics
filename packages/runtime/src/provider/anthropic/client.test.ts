@@ -316,7 +316,9 @@ describe('anthropic/client.ts — invokeOnce against a stub fetch (no network)',
     const client = createAnthropicClient({ resolver: okResolver, fetchImpl, captureDir: CAPTURE_DIR })
 
     expect(client.provider).toBe('anthropic')
-    expect(client.capabilities.streaming).toBe(false)
+    // B2.1: the Anthropic client streams, and a client declaring `streaming: true` must carry `stream`.
+    expect(client.capabilities.streaming).toBe(true)
+    expect(typeof client.stream).toBe('function')
     expect(client.capabilities.editPolicy.provider).toBe('anthropic')
     expect(typeof client.adapterVersion).toBe('string')
 

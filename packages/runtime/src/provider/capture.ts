@@ -88,6 +88,83 @@ export function createCapturingFetch(inner: typeof fetch = fetch): CapturingFetc
   }
 }
 
+/** The head of a streamed response as the teeing fetch saw it, plus OUR branch of its body. */
+export interface ObservedStream {
+  status: number
+  /** already allowlisted (`anthropic/raw.ts` `allowlistHeaders`) — request headers are never here */
+  headers: Record<string, string>
+  /** this layer's own copy of the body, byte for byte; `null` when the response had none */
+  body: ReadableStream<Uint8Array> | null
+}
+
+export interface StreamingCapturingFetch {
+  fetch: typeof fetch
+  /**
+   * Settles once the FIRST call's response head is known: the observation, or `null` when that
+   * call rejected (an abort or a network failure before any response). Never rejects. It stays
+   * pending if no call is ever made — a caller races it against the SDK finishing.
+   */
+  observed: Promise<ObservedStream | null>
+  /** true once ANY call has been handed to `inner` — never cleared once set */
+  requestSent(): boolean
+  requestCount(): number
+}
+
+/**
+ * The streaming twin of `createCapturingFetch`. That one reads `response.clone().text()` before
+ * returning, which waits for the WHOLE body — right for a JSON response, and exactly wrong for a
+ * stream, where the caller would receive nothing until the answer had finished. This one TEES the
+ * body instead: one branch goes back to the real caller (the AI SDK) inside a new `Response` with
+ * the same status and headers, and the other is handed to this layer through `observed`, readable
+ * chunk by chunk as it arrives. Both branches see every byte; neither waits for the other beyond
+ * the stream's own buffering, and an abort or a dropped connection errors both.
+ *
+ * Writing the capture is the reader's job (it alone knows when the body ended, cleanly or not), via
+ * `writeCapture` — so a failed stream is captured as far as it got.
+ *
+ * Same non-holder discipline as `createCapturingFetch`: `input`/`init` are forwarded untouched and
+ * never inspected. Only the first call is teed; a second call (which one attempt must never make)
+ * is passed through as-is and only counted, so the caller can refuse the attempt on the count.
+ */
+export function createStreamingCapturingFetch(inner: typeof fetch = fetch): StreamingCapturingFetch {
+  let sent = false
+  let count = 0
+  let settle!: (o: ObservedStream | null) => void
+  const observed = new Promise<ObservedStream | null>(resolve => { settle = resolve })
+
+  const wrapped = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    sent = true
+    count += 1
+    if (count > 1) return inner(input, init)
+    let response: Response
+    try {
+      response = await inner(input, init)
+    } catch (err) {
+      settle(null)
+      throw err
+    }
+    const headers = allowlistHeaders(response.headers)
+    if (response.body === null) {
+      settle({ status: response.status, headers, body: null })
+      return response
+    }
+    const [forCaller, forUs] = response.body.tee()
+    settle({ status: response.status, headers, body: forUs })
+    return new Response(forCaller, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    })
+  }) as typeof fetch
+
+  return {
+    fetch: wrapped,
+    observed,
+    requestSent: () => sent,
+    requestCount: () => count,
+  }
+}
+
 async function fileExists(path: string): Promise<boolean> {
   try {
     await stat(path)

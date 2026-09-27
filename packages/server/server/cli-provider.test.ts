@@ -327,3 +327,117 @@ describe('runProvider — help', () => {
     await cleanup(h)
   })
 })
+
+describe('runProvider — try --stream (fake client, no network)', () => {
+  // Imported lazily so the rest of this file never opens a journal.
+  async function setup(client: import('@agentistics/runtime').ProviderClient) {
+    const { openJournal } = await import('./journal/journal')
+    const { storeCredential } = await import('./provider/credentials.ts')
+    const h = await makeHarness()
+    expect((await storeCredential('anthropic', FAKE_KEY, { dir: h.dir })).ok).toBe(true)
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    const written: string[] = []
+    h.deps.client = client
+    h.deps.openJournal = async () => journal
+    h.deps.write = (c) => written.push(c)
+    return { h, journal, written }
+  }
+
+  function completedResult(req: import('@agentistics/runtime').ProviderRequest, attempt: number): import('@agentistics/runtime').InvocationResult {
+    return {
+      invocationId: req.correlation.invocationId, attempt, provider: 'anthropic', requestedModel: req.model,
+      startedAt: new Date().toISOString(), latencyMs: 7, requestId: 'req_stream', status: 'completed',
+      messageId: 'msg_stream', servedModel: req.model, usage: { input: 9, output: 2, cacheRead: 0, cacheWrite: 0 },
+      usageAnomalies: [], stopReason: { kind: 'end-turn' }, content: [{ type: 'text', text: 'ok!' }],
+    }
+  }
+
+  test('prints the deltas in order as they arrive, then the same summary', async () => {
+    let invokeOnceCalled = false
+    const { h, journal, written } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { invokeOnceCalled = true; return completedResult(req, a) },
+      async *stream(req, a) {
+        yield { type: 'started', requestId: 'req_stream', messageId: 'msg_stream' }
+        yield { type: 'text-delta', index: 0, text: 'o' }
+        yield { type: 'text-delta', index: 0, text: 'k' }
+        yield { type: 'usage', outputTokensSoFar: 1 }
+        yield { type: 'text-delta', index: 0, text: '!' }
+        yield { type: 'end', result: completedResult(req, a) }
+      },
+    })
+    const code = await runProvider(['try', 'anthropic', '--stream'], h.deps)
+    expect(code).toBe(0)
+    expect(invokeOnceCalled).toBe(false)
+    expect(written).toEqual(['o', 'k', '!', '\n'])
+    const out = h.out.join('\n')
+    expect(out).toContain('message id: msg_stream')
+    expect(out).toContain('request-id: req_stream')
+    expect(out).toContain('input: 9')
+    expect(out).toContain('journaled: yes')
+    expect(h.err).toEqual([])
+    const types = (await journal.readFrom(0, 100)).events.map(e => e.type)
+    // model.started is journaled from the provider's `started` event; the deltas never are.
+    expect(types).toEqual(['model.invoked', 'model.started', 'model.completed'])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('tool calls are one compact line each; a failed one goes to stderr', async () => {
+    const { h, journal, written } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return completedResult(req, a) },
+      async *stream(req, a) {
+        yield { type: 'text-delta', index: 0, text: 'hi' }
+        yield { type: 'tool-call-delta', index: 1, id: 'tu_1', name: 'lookup', partialJson: '{"q":' }
+        yield { type: 'tool-call-delta', index: 1, id: 'tu_1', name: 'lookup', partialJson: '1}' }
+        yield { type: 'tool-call', index: 1, id: 'tu_1', name: 'lookup', input: { q: 1 } }
+        yield { type: 'tool-call-failed', failure: { index: 2, id: 'tu_2', name: 'bad', reason: 'malformed', userCode: 'provider.tool_call_malformed' } }
+        yield { type: 'end', result: completedResult(req, a) }
+      },
+    })
+    expect(await runProvider(['try', 'anthropic', '--stream'], h.deps)).toBe(0)
+    expect(written).toEqual(['hi', '\n'])
+    expect(h.out.filter(l => l.includes('tool call lookup'))).toEqual([
+      '  → tool call lookup (arguments streaming…)',
+      '  → tool call lookup ready (tu_1) — not executed',
+    ])
+    expect(h.err.join('\n')).toContain('tool call bad could not be assembled: malformed')
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('a non-streaming client is refused in words, exits non-zero, and journals nothing', async () => {
+    let called = false
+    const { h, journal } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: false, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { called = true; return completedResult(req, a) },
+    })
+    const code = await runProvider(['try', 'anthropic', '--stream'], h.deps)
+    expect(code).toBe(1)
+    expect(called).toBe(false)
+    expect(h.err.join('\n')).toContain('cannot stream (provider.streaming_unsupported)')
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('a stream that ends without `end` says the outcome is unknown and exits non-zero', async () => {
+    const { h, journal } = await setup({
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return completedResult(req, a) },
+      async *stream() { yield { type: 'text-delta', index: 0, text: 'o' } },
+    })
+    expect(await runProvider(['try', 'anthropic', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('ended without a result')
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('the usage string names --stream', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['try', '--help'], h.deps)).toBe(0)
+    expect(h.out.join('\n')).toContain('[--stream]')
+    await cleanup(h)
+  })
+})

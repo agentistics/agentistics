@@ -43,6 +43,25 @@
  * The inputs below simply have no field for most of them; the ones that do (`content` on a real
  * client result, `userCode` on an error) are never read.
  *
+ * ## The streamed path (B2.1): `model.started` is journaled, `model.delta` is not
+ *
+ * A streamed attempt writes THREE events: `model.invoked` (before the request leaves), `model.started`
+ * (the provider accepted it — Anthropic's `message_start`), and the same terminal `model.completed` /
+ * `model.failed` a non-streamed attempt writes, built from the stream's `end` result. `model.started`
+ * is keyed on `(invocationId, attempt)` like `model.invoked` — never on the `msg_…` id it carries in
+ * `data.providerRequestId`, because the key must exist for every started attempt and must not collide
+ * with the `model.completed` keyed on that very id.
+ *
+ * **No `model.delta` is ever written.** A long answer is thousands of text deltas; journaling them
+ * would put the size of every answer into the journal as rows that say almost nothing — the canonical
+ * `ModelDeltaData` carries only `providerRequestId` + `outputTokensSoFar`, never the text, so the rows
+ * would be a running token counter whose LAST value the terminal `model.completed` already states
+ * exactly (`usage.output`, read from the final cumulative `message_delta`). A sampled delta ("one every
+ * N") would buy a crash-time progress figure at the price of an arbitrary rate and a size budget that
+ * grows with answer length, and a failed attempt deliberately carries no usage at all — a mid-stream
+ * running count journaled beside it would be exactly the confident partial figure that rule forbids.
+ * Deltas stay EPHEMERAL: they reach live readers through the stream hub (`stream.ts`) and nothing else.
+ *
  * ## A journal that fails never fails the call (P1 §4.2)
  *
  * Every method resolves, never rejects. An event the journal did not take (absent, disabled,
@@ -58,6 +77,7 @@ import {
   type ModelFailedData,
   type ModelInvokedData,
   type ModelIterations,
+  type ModelStartedData,
   type ModelStopReason,
   type ModelUsageCounters,
   type ProviderError,
@@ -65,6 +85,7 @@ import {
   type ProviderUsage,
   type StopReason,
 } from '@agentistics/core'
+import type { ProviderStreamEvent } from './client.ts'
 
 // ── The sink (D23) ──────────────────────────────────────────────────────────────────────────────
 //
@@ -112,6 +133,14 @@ export interface AttemptStart {
   startedAt: string
 }
 
+/** What `model.started` states: the provider accepted the attempt and began answering. */
+export interface AttemptStarted extends AttemptStart {
+  /** Body `id` from `message_start`, when it carried one — carried in the data, never a key. */
+  messageId?: string
+  /** `message_start`'s `model`, when stated. */
+  servedModel?: string
+}
+
 interface AttemptEnd extends AttemptStart {
   /** Monotonic delta, never a wall-clock subtraction. */
   latencyMs: number
@@ -155,7 +184,7 @@ function attemptRef(provider: ProviderId, invocationId: string, attempt: number)
   return `${provider}:inv:${invocationId}:${attempt}`
 }
 
-function envelopeOf<T extends 'model.invoked' | 'model.completed' | 'model.failed'>(
+function envelopeOf<T extends EmittedType>(
   type: T,
   provider: ProviderId,
   sourceRef: string,
@@ -195,6 +224,25 @@ export function invokedEvent(start: AttemptStart, scope: EmitScope, ctx: EmitCon
   }
   const ref = attemptRef(start.provider, start.invocationId, start.attempt)
   return { ...envelopeOf('model.invoked', start.provider, ref, undefined, start.startedAt, 'exact', scope, ctx), data }
+}
+
+/**
+ * `model.started` — keyed on `(invocationId, attempt)` (module doc), so a replayed stream converges.
+ * `model` is what ANSWERED when `message_start` said so, else what was asked for.
+ */
+export function startedEvent(
+  s: AttemptStarted, scope: EmitScope, ctx: EmitContext, observedAt: string,
+): AgentisticsEvent<'model.started'> {
+  const data: ModelStartedData = {
+    provider: s.provider,
+    model: s.servedModel ?? s.requestedModel,
+    attemptId: s.invocationId,
+    attempt: s.attempt,
+    modelRequested: s.requestedModel,
+  }
+  if (s.messageId !== undefined && s.messageId.length > 0) data.providerRequestId = s.messageId
+  const ref = attemptRef(s.provider, s.invocationId, s.attempt)
+  return { ...envelopeOf('model.started', s.provider, ref, undefined, observedAt, 'exact', scope, ctx), data }
 }
 
 function stopReasonOf(o: AttemptCompleted): ModelStopReason {
@@ -287,7 +335,7 @@ export function terminalEvent(
 
 // ── The emitter (the one impure part: it appends) ───────────────────────────────────────────────
 
-export type EmittedType = 'model.invoked' | 'model.completed' | 'model.failed'
+export type EmittedType = 'model.invoked' | 'model.started' | 'model.completed' | 'model.failed'
 
 export interface EmitCounters {
   /** Events the journal did not take, by type (`journal.provider_events_lost`, B1 spec §7). */
@@ -306,6 +354,8 @@ export interface EmitterOptions<R extends ProviderAppendResult = ProviderAppendR
 export interface ProviderEmitter<R extends ProviderAppendResult = ProviderAppendResult> {
   /** Before the request leaves. Resolves to the journal's result, or `null` when nothing was appended. */
   invoked(start: AttemptStart, scope?: EmitScope): Promise<R | null>
+  /** When a streamed attempt's provider began answering. `observedAt` defaults to the clock. */
+  started(start: AttemptStarted, scope?: EmitScope, observedAt?: string): Promise<R | null>
   /** When the outcome is known. `observedAt` defaults to the clock. */
   terminal(outcome: AttemptOutcome, scope?: EmitScope, observedAt?: string): Promise<R | null>
   counters(): EmitCounters
@@ -315,7 +365,7 @@ export function createProviderEmitter<R extends ProviderAppendResult = ProviderA
   opts: EmitterOptions<R>,
 ): ProviderEmitter<R> {
   const now = opts.now ?? (() => new Date())
-  const lost: Record<EmittedType, number> = { 'model.invoked': 0, 'model.completed': 0, 'model.failed': 0 }
+  const lost: Record<EmittedType, number> = { 'model.invoked': 0, 'model.started': 0, 'model.completed': 0, 'model.failed': 0 }
   const ctx = (): EmitContext => ({
     adapterVersion: opts.adapterVersion,
     recordedAt: now().toISOString(),
@@ -338,10 +388,46 @@ export function createProviderEmitter<R extends ProviderAppendResult = ProviderA
 
   return {
     invoked: (start, scope = {}) => append(invokedEvent(start, scope, ctx())),
+    started: (start, scope = {}, observedAt) => {
+      const c = ctx()
+      return append(startedEvent(start, scope, c, observedAt ?? c.recordedAt))
+    },
     terminal: (outcome, scope = {}, observedAt) => {
       const c = ctx()
       return append(terminalEvent(outcome, scope, c, observedAt ?? c.recordedAt))
     },
     counters: () => ({ lost: { ...lost } }),
+  }
+}
+
+// ── The streamed path ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Journals one streamed attempt while passing every event through UNCHANGED, in order: `model.invoked`
+ * before the first event is pulled (and so before the request leaves — a `ProviderStream` from an
+ * async generator sends nothing until it is first iterated), `model.started` on the `started` event,
+ * and the terminal event on `end`. Deltas are passed through and never written (module doc).
+ *
+ * Never throws: the emitter's methods never reject, and the source stream never throws by contract.
+ * `start.startedAt` is the `model.invoked` occurredAt; the terminal event is built from the `end`
+ * result itself, exactly as the retry hooks build it for a non-streamed attempt.
+ */
+export async function* journalProviderStream<R extends ProviderAppendResult>(
+  source: AsyncIterable<ProviderStreamEvent>,
+  emitter: ProviderEmitter<R>,
+  start: AttemptStart,
+  scope: EmitScope = {},
+): AsyncGenerator<ProviderStreamEvent, void, undefined> {
+  await emitter.invoked(start, scope)
+  for await (const ev of source) {
+    if (ev.type === 'started') {
+      const s: AttemptStarted = { ...start }
+      if (ev.messageId !== undefined) s.messageId = ev.messageId
+      if (ev.servedModel !== undefined) s.servedModel = ev.servedModel
+      await emitter.started(s, scope)
+    } else if (ev.type === 'end') {
+      await emitter.terminal(ev.result, scope)
+    }
+    yield ev
   }
 }

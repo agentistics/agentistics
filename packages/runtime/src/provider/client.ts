@@ -136,6 +136,8 @@ export type InvocationResult =
       usageAnomalies: UsageAnomaly[]
       stopReason: StopReason
       content: ProviderContent[]
+      /** streamed tool calls that could not be assembled (B2); absent on a non-streamed call */
+      toolCallFailures?: ToolCallFailure[]
     })
   | (InvocationCommon & {
       status: 'failed'
@@ -143,14 +145,72 @@ export type InvocationResult =
       messageId?: undefined
     })
 
+// ── Streaming (B2) — an OPTIONAL capability ─────────────────────────────────────────────────────
+//
+// A client that cannot stream stays a valid `ProviderClient`: it declares `streaming: false` and has
+// no `stream` method. A caller asking such a client to stream is REFUSED in words
+// (`provider/stream.ts` `openProviderStream`), never left waiting on an iterator that never yields.
+//
+// One call of `stream` is still ONE attempt = one HTTP request = at most one billed response: the
+// retry stays outside, exactly as for `invokeOnce`. The facts on the terminal result (usage,
+// messageId, servedModel, stopReason, requestId) are read from the RAW captured SSE, never from the
+// SDK's aggregate, and a mid-stream failure — an HTTP 200 whose body carries an in-band `error`
+// event, or a body that ends before `message_stop` — ends in `status: 'failed'`, never in a
+// half-completed `completed` (master §22).
+
+/**
+ * One chunk of a live answer, in the order the provider sent it. `index` is the provider's content
+ * block index. Deltas are EPHEMERAL: they exist for readers watching live and are not the record —
+ * the record is the terminal `end` event's `InvocationResult`.
+ */
+export type ProviderStreamEvent =
+  /** the response began: the provider accepted the request (→ `model.started`) */
+  | { type: 'started'; requestId?: string; messageId?: string; servedModel?: string }
+  /** a piece of answer text */
+  | { type: 'text-delta'; index: number; text: string }
+  /** a piece of a tool call's arguments, as the provider sent it — partial JSON TEXT, not an object */
+  | { type: 'tool-call-delta'; index: number; id: string; name: string; partialJson: string }
+  /** a tool call whose arguments have been accumulated, parsed and validated. Never executed here (B3). */
+  | { type: 'tool-call'; index: number; id: string; name: string; input: unknown }
+  /**
+   * a tool call whose arguments could NOT be assembled into a valid call. It is never offered as a
+   * `tool-call`, so nothing can execute it. The attempt itself may still be `completed` — the
+   * response was billed and its usage is real; the failure belongs to the call, not the invocation.
+   */
+  | { type: 'tool-call-failed'; failure: ToolCallFailure }
+  /** a running output-token figure when the provider states one mid-stream. Never summed. */
+  | { type: 'usage'; outputTokensSoFar: number }
+  /** ALWAYS the last event, exactly once. `result` is what `invokeOnce` would have returned. */
+  | { type: 'end'; result: InvocationResult }
+
+/** Why one streamed tool call could not be assembled. A named failure, never a silent drop. */
+export interface ToolCallFailure {
+  index: number
+  id: string
+  name: string
+  /**
+   * `malformed`: the accumulated text is not JSON. `truncated`: the block never closed, or closed
+   * with incomplete JSON because the response hit its token limit. `not-object`: valid JSON that is
+   * not an object (a tool input is always an object). `unknown-tool`: a name no declared tool has.
+   */
+  reason: 'malformed' | 'truncated' | 'not-object' | 'unknown-tool'
+  /** a sentence CODE rendered by i18n; never the raw arguments (they can hold conversation text) */
+  userCode: string
+}
+
+/** A live attempt. Iterating never throws; the final event is always `end`. */
+export type ProviderStream = AsyncIterable<ProviderStreamEvent>
+
 export interface ProviderClient {
   readonly provider: ProviderId
   /** bumped on any mapping change (M §14 rule 1) */
   readonly adapterVersion: string
-  /** B2 flips `streaming` */
-  readonly capabilities: { streaming: false; editPolicy: EditPolicy }
+  /** `streaming: true` promises a `stream` method; `false` promises none */
+  readonly capabilities: { streaming: boolean; editPolicy: EditPolicy }
   /** never throws */
   invokeOnce(req: ProviderRequest, attempt: number): Promise<InvocationResult>
+  /** present only when `capabilities.streaming` is true. Never throws; always ends with `end`. */
+  stream?(req: ProviderRequest, attempt: number): ProviderStream
 }
 
 /** Why a provider has no client — a sentence code, rendered by the caller. */
