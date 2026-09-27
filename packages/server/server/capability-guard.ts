@@ -84,10 +84,11 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],
-  // No provider route exists yet in B1 — this entry is registered ahead of the route it will
-  // guard, so the first one is guarded by having been ADDED, never by having remembered a second
-  // table. A provider route touches a host secret (the native runtime's stored API key,
-  // credentials.ts), which is exactly the class of route this table exists to catch.
+  // The native runtime's provider settings (`provider-web.ts`, UI.1): the list, PUT/DELETE of one
+  // provider's base URL and key, and its `/test` and `/models` sub-resources. Registered as a PREFIX
+  // ahead of the routes, so each one is guarded by having been ADDED, never by having remembered a
+  // second table. They touch a host secret (the stored API key, credentials.ts) and reach out to a
+  // provider on this machine's account — exactly the class of route this table exists to catch.
   ['/api/provider', 'localShell'],
   // The web dashboard's read of the backup engine and its "run now" button. `status` walks the
   // metrics layer and the backup history; `run` spawns `git bundle`/`git diff` across every known

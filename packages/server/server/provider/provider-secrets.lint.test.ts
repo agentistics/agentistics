@@ -116,6 +116,12 @@ const PROVIDER_DIR = join(S_ROOT, 'provider')
 const CORE_PROVIDER_DIR = join(S_ROOT, '../../core/src/provider')
 const JOURNAL_DIR = join(S_ROOT, 'journal')
 const CLI_PROVIDER = join(S_ROOT, 'cli-provider.ts')
+/** UI.1's `/api/provider` routes. The same RECEIVER role as `cli-provider.ts`: a key arrives in a
+ *  PUT body, is handed to `credential-plan.ts` / `credentials.ts`, and is dropped. It imports runtime
+ *  bindings from `credentials.ts` (so it cannot be a Guard 1 non-holder) and is held to Guards 2 and
+ *  3 exactly as the CLI verb is. It never reveals a handle — keeping a stored key on a base-URL-only
+ *  PUT is `rebaseEndpointCredential`, inside the holder. */
+const PROVIDER_WEB = join(S_ROOT, 'provider-web.ts')
 // C1.1 moved the bulk of the provider layer here; walked too, so a moved module stays covered.
 const RUNTIME_SRC_DIR = join(S_ROOT, '../../runtime/src')
 
@@ -140,13 +146,17 @@ const HOLDERS = [
   // NEW, C1.2 — types-only, but spells `reveal(` as its handle interface's method name. See the
   // "HOLDERS" doc block above for why it is listed rather than exempted.
   join(RUNTIME_SRC_DIR, 'provider/credential.ts'),
+  // UI.1: Anthropic's model list (GET /v1/models, not billed) for the web's "test connection". The
+  // runtime's lister is OpenAI-shaped (bearer auth) and `@agentistics/runtime` was not this item's to
+  // change, so the ONE request that reveals the Anthropic handle lives here, inline in its header.
+  join(S_ROOT, 'provider/anthropic-models.ts'),
 ]
 
 // NOT a holder — see "GUARD 1 EXEMPTION" above. Excluded from Guard 1 only; Guards 2/3 still run
 // over it via GUARD_2_3_FILES.
 
 const NON_HOLDERS = WALKED.filter(f => !HOLDERS.includes(f))
-const GUARD_2_3_FILES = [...WALKED, CLI_PROVIDER]
+const GUARD_2_3_FILES = [...WALKED, CLI_PROVIDER, PROVIDER_WEB]
 
 // ── the DEFINERS (B1.8 sweep, LOW c) ────────────────────────────────────────────────────────────
 //
@@ -276,6 +286,18 @@ describe('provider-secrets.lint — a provider API key never leaves its holders'
     expect(WALKED).toContain(join(S_ROOT, 'provider/credentials.ts'))
     expect(WALKED).toContain(join(S_ROOT, 'provider/credential-plan.ts'))
     expect(existsSync(CLI_PROVIDER)).toBe(true)
+    expect(existsSync(PROVIDER_WEB)).toBe(true)
+  })
+
+  test('provider-web.ts never reveals a handle and never holds a key past its handler', () => {
+    const src = readFileSync(PROVIDER_WEB, 'utf8')
+    // It receives a key in a request body but must never unwrap a STORED one: keeping a key on a
+    // base-URL-only PUT is the holder's job (`rebaseEndpointCredential`).
+    expect(violations(src, ['reveal' + '('])).toEqual([])
+    // No header that would carry a key is built here — every request goes through a holder.
+    expect(violationsCI(src, ['x-' + 'api' + '-key', 'author' + 'ization', 'bear' + 'er'])).toEqual([])
+    // No console output at all: nothing in this module may log a request body.
+    expect(/console\.(log|error|warn|info|debug)/.test(src)).toBe(false)
   })
 
   test('non-vacuity: the B5a client is walked AND listed as a holder', () => {

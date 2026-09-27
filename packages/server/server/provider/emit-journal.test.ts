@@ -115,7 +115,7 @@ describe('against the real A1 journal (a temp SQLite file)', () => {
     const back = page.events[1] as AgentisticsEvent<'model.completed'>
     expect(back.data.usage).toEqual({ input: 12, output: 340, cacheRead: 45_000, cacheWrite: 1_500 })
     expect(back.eventId).toBe(completedEvent(completed(), {}, ctx, 'x').eventId)
-    expect(em.counters().lost).toEqual({ 'model.invoked': 0, 'model.completed': 0, 'model.failed': 0 })
+    expect(em.counters().lost).toEqual({ 'model.invoked': 0, 'model.started': 0, 'model.completed': 0, 'model.failed': 0 })
     j.close()
   })
 
