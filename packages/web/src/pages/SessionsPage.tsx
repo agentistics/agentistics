@@ -996,7 +996,11 @@ export default function SessionsPage() {
         // eye goes when something changes, which is the whole reason it exists.
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
         width: '100%', padding: '7px 14px', textAlign: 'left', cursor: 'pointer',
-        border: 'none', borderBottom: '1px solid var(--border-subtle)',
+        // On the desktop board the strip is its OWN small panel — border, 10px corners and the
+        // 6px gap below it — instead of a square band laid across the top of the conversation.
+        ...(isMobile
+          ? { border: 'none', borderBottom: '1px solid var(--border-subtle)' }
+          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: 6, boxSizing: 'border-box' as const }),
         background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
         fontFamily: 'inherit', fontSize: 11.5,
       }}

@@ -1292,7 +1292,7 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
       // between this panel and the conversation panel next to it. Adding padding here too would
       // double it. Every other workspace, and the collapsed 64px rail, keep their old figures.
       padding: mode === 'sessions'
-        ? (collapsed ? '0 8px 12px' : '0 0 6px 6px')
+        ? (collapsed ? '0 8px 12px' : '0 6px 6px 6px')
         : (collapsed ? '0 8px 12px' : '0 12px 14px'),
       boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
@@ -1342,6 +1342,8 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
             flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
             border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
             background: 'var(--bg-surface)',
+            // Inner breathing room: the search, buttons and rows no longer touch the panel's edges.
+            padding: collapsed ? 0 : '8px 8px 0',
           }}>
             {collapsed ? (
               <SessionsRail rows={railRows} lang={pt ? 'pt' : 'en'} {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})} />
@@ -1384,7 +1386,7 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
               value={width} min={ASIDE_MIN} max={ASIDE_MAX} sign={1}
               onChange={w => { setDragging(true); onResize(clampAsideWidth(w, window.innerWidth)) }}
               onCommit={w => { setDragging(false); onCommitWidth(clampAsideWidth(w, window.innerWidth)) }}
-              style={{ position: 'absolute', top: 0, bottom: 0, right: -3 }}
+              style={{ position: 'absolute', top: 0, bottom: 0, right: -6 }}
             />
           )}
         </div>
