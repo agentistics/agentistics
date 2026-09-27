@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { sessionTime } from '../../lib/sessionTime'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { Activity, BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, PanelRight, X } from 'lucide-react'
@@ -24,6 +25,7 @@ import { sessionStats, statReason } from '../../lib/sessionStats'
 import { costBasisLabel, viewCost } from '../../lib/costBasis'
 import { sessionReferences, type SessionReference } from '../../lib/sessionReferences'
 import { useArtifactLive } from '../../lib/artifactsStore'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
@@ -36,6 +38,44 @@ import { useArtifactLive } from '../../lib/artifactsStore'
  */
 function contextTone(fraction: number): string {
   return fraction >= 0.85 ? 'var(--accent-red)' : fraction >= 0.6 ? 'var(--anthropic-orange)' : 'var(--text-secondary)'
+}
+
+/**
+ * The composer's ring gauge's own colour — the SAME two thresholds `contextTone` uses (0.6, 0.85),
+ * so the ring and the badge never disagree about what counts as "getting full". The LOW tier
+ * differs on purpose: `contextTone` reads neutral there because it sits beside other icon-sized
+ * text in a busy header row, where a green digit at 12% usage would be one more colour competing
+ * for attention. The ring is a DEDICATED gauge with nothing else on it, so green earns its keep —
+ * it is what says "plenty of room left" at a glance, the same reading a fuel gauge gives.
+ */
+function contextRingTone(fraction: number): string {
+  return fraction >= 0.85 ? 'var(--accent-red)' : fraction >= 0.6 ? 'var(--anthropic-orange)' : 'var(--accent-green)'
+}
+
+/**
+ * ContextRing — the composer's own circular gauge (design item 3): an SVG ring that fills
+ * CLOCKWISE with the session's context-window usage, the percentage centred inside it. Clockwise
+ * from 12 o'clock is `rotate(-90deg)` on the progress stroke plus a DECREASING `strokeDashoffset`
+ * (a full circumference offset is empty, `0` is full) — the standard SVG technique, chosen over a
+ * conic-gradient so the same markup renders identically in every browser this app already supports
+ * without a vendor-prefixed fallback.
+ */
+function ContextRing({ fraction, size = 26, stroke = 3 }: { fraction: number; size?: number; stroke?: number }) {
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const filled = Math.min(1, Math.max(0, fraction))
+  const color = contextRingTone(fraction)
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--border)" strokeWidth={stroke} />
+      <circle
+        cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={circumference} strokeDashoffset={circumference * (1 - filled)}
+        strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: 'stroke-dashoffset 0.3s, stroke 0.3s' }}
+      />
+    </svg>
+  )
 }
 
 export interface SessionStatsMenuProps {
@@ -66,19 +106,23 @@ export interface SessionStatsMenuProps {
    */
   touch?: boolean
   /**
-   * `'button'` (default) is the header's own bordered pill, unchanged. `'tab'` is the SAME visual
-   * language as the workspace strip's own "Filtros" tab (design item 4, screenshot 7) — a small
-   * pill hanging BELOW the strip rather than sitting IN it, reached from `App.tsx`'s
-   * `sessionMetricsBounds` wrapper. Only the TRIGGER changes shape; the dropdown card below it is
-   * untouched — same position, same content, same open/close behaviour — because the brief asks for
-   * the button to move, not for the card it opens to be rebuilt.
+   * `'button'` (default) is the header's own bordered pill. `'tab'` was the workspace strip's old
+   * hanging "Filtros"-style pill — RETIRED (design item 4/3, owner 2026-09-27: the header tab moved
+   * into the composer) and kept only so a stray caller does not silently fall back to `'button'`;
+   * nothing in this product renders it any more. `'gauge'` is the CURRENT desktop composer control:
+   * a small circular ring (`ContextRing`, above) rather than a bordered pill, opening its card
+   * UPWARD from the composer through a PORTAL (`createPortal` to `document.body`, `position:
+   * fixed`) rather than `position: absolute` inside this component's own box — the composer sits at
+   * the bottom of the conversation panel's `overflow` clip, and an absolutely-positioned dropdown
+   * would be cut off by it exactly where a reader needs to see it. The dropdown CARD is untouched
+   * across every variant — same content, same open/close behaviour — only the trigger's shape and
+   * the card's anchor change.
    */
-  variant?: 'button' | 'tab'
+  variant?: 'button' | 'tab' | 'gauge'
   /**
    * The dropdown's own ceiling in `'tab'` mode — `metricsTabBounds(...).panelMaxWidth`
-   * (`lib/sessionsFiltersPanel.ts`), the room clear of BOTH asides. Ignored in `'button'` mode,
-   * where the card has always opened leftward from the header's own right edge with no neighbour
-   * to clear. Defaults to the card's ordinary 300px when not given.
+   * (`lib/sessionsFiltersPanel.ts`), the room clear of BOTH asides. Ignored in `'button'`/`'gauge'`
+   * mode. Defaults to the card's ordinary 300px when not given.
    */
   panelMaxWidth?: number
   /**
@@ -188,11 +232,22 @@ export function SessionStatsMenu({
   useEffect(() => { if (open) setBasisHere(costBasis) }, [open, costBasis])
 
   const boxRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * THE CARD'S OWN ELEMENT — needed by the outside-click check below for exactly one variant.
+   * `'gauge'` PORTALS its card to `document.body` (see `panel`'s own header), so it is never a DOM
+   * descendant of `boxRef` — the trigger's wrapper — and the plain `boxRef.contains(target)` test
+   * every other variant relies on always reads a click INSIDE the portaled card as outside, closing
+   * it before whatever was pressed (a Block's toggle, the cost-basis switch, a reference row) ever
+   * runs. Attached on every variant for one shared check rather than a `'gauge'`-only branch.
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!open) return
     const away = (e: MouseEvent) => {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
     }
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', away)
@@ -219,7 +274,7 @@ export function SessionStatsMenu({
    */
   const [maxPanelHeight, setMaxPanelHeight] = useState<number | null>(null)
   useEffect(() => {
-    if (!open) return
+    if (!open || variant === 'gauge') return
     const measure = () => {
       const triggerTop = boxRef.current?.getBoundingClientRect().top ?? 0
       const panelTop = triggerTop + (touch ? 48 : 36)
@@ -228,7 +283,51 @@ export function SessionStatsMenu({
     measure()
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
-  }, [open, touch])
+  }, [open, touch, variant])
+
+  /**
+   * THE GAUGE'S OWN DROP-UP ANCHOR — `'gauge'` is the one variant whose card must ESCAPE its
+   * trigger's own ancestry: the composer sits at the bottom of the conversation panel's `overflow`
+   * clip, so a card positioned `absolute` inside this component's box (as every other variant's
+   * is) would be cut off by that clip rather than floating above the composer where a reader needs
+   * to see it. `position: fixed` measured off the trigger's OWN `getBoundingClientRect()` — the
+   * same "measure the real box, never guess" rule `maxPanelHeight` and the sibling Filtros panel
+   * both already follow — with `bottom` (not `top`) because this card opens UPWARD.
+   */
+  const [gaugeAnchor, setGaugeAnchor] = useState<{ left: number; bottom: number; maxHeight: number } | null>(null)
+  useEffect(() => {
+    if (!open || variant !== 'gauge') return
+    const measure = () => {
+      const r = boxRef.current?.getBoundingClientRect()
+      if (!r) return
+      const width = 300
+      setGaugeAnchor({
+        // Clamped to the viewport on both sides — the trigger sits near the composer's own edge,
+        // and an unclamped left would hang the card's far edge off the screen on a narrow window.
+        left: Math.min(Math.max(8, r.left), window.innerWidth - width - 8),
+        bottom: window.innerHeight - r.top + 8,
+        maxHeight: Math.max(160, r.top - 16),
+      })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [open, variant])
+
+  /**
+   * A PORTALED PANEL NEEDS ITS OWN SCROLL RULE (`popoverScroll.ts`'s own header) — a capture-phase
+   * `window` scroll listener is the usual way to close a popover the page scrolled away from, but
+   * capture phase means it also fires when the CARD's own content scrolls (the "In the repository"
+   * block, on a long reading past the fold), and closing on that beats the very click a reader was
+   * scrolling toward. `scrollIsOutside` is the same test `PickerMenu`/`BoardArrange`/`ChipSelect`
+   * already share for their own portaled panels. Scoped to `'gauge'`, the one variant that portals.
+   */
+  useEffect(() => {
+    if (!open || variant !== 'gauge') return
+    const onScroll = (e: Event) => { if (scrollIsOutside(panelRef.current, e.target)) setOpen(false) }
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [open, variant])
 
   const h = harness as HarnessId
   const s = sessionStats(h, sessionId, meta)
@@ -302,22 +401,40 @@ export function SessionStatsMenu({
   // measured clear of both asides on that side. Same anchor as `'button'`, different reason: that
   // one has nowhere else to go from the header's own right edge; this one now shares the same
   // right-hand neighbourhood as the button used to.
-  const panel = open && (
-      <div style={{
-          position: 'absolute', top: touch ? 48 : 36, zIndex: 60, right: 0,
-          // On a phone it is measured from the VIEWPORT, not given a fixed width: this control sits
-          // near the right edge of a 390px bar, so a 300px panel anchored to it would hang a piece
-          // of itself off the screen.
-          ...(touch
-            ? { width: 'min(300px, calc(100vw - 24px))' }
-            : { width: variant === 'tab' ? (panelMaxWidth ?? 300) : 300 }),
-          padding: 12, borderRadius: 12,
-          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-          boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
-          // See `maxPanelHeight`'s own comment: a card that does not fit between its trigger and
-          // the bottom of the viewport scrolls internally instead of silently clipping.
-          ...(maxPanelHeight !== null ? { maxHeight: maxPanelHeight, overflowY: 'auto' as const } : {}),
-        }}>
+  /**
+   * ONE STYLE OBJECT, branched by variant — `'gauge'` is `position: fixed` off the measured
+   * `gaugeAnchor` (dropping UPWARD, escaping the composer's own overflow clip via the portal
+   * below); every other variant keeps the original `position: absolute` anchored to this
+   * component's own box. The CARD's own visual chrome (padding, radius, border, shadow) is shared
+   * across all three — only the anchor and the ceiling differ.
+   */
+  const panelStyle: React.CSSProperties = variant === 'gauge'
+    ? {
+        position: 'fixed', zIndex: 1200,
+        left: gaugeAnchor?.left ?? -9999, bottom: gaugeAnchor?.bottom ?? -9999,
+        width: 'min(300px, calc(100vw - 16px))',
+        padding: 12, borderRadius: 12,
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        boxShadow: '0 -12px 32px rgba(0,0,0,0.4)',
+        ...(gaugeAnchor ? { maxHeight: gaugeAnchor.maxHeight, overflowY: 'auto' as const } : {}),
+      }
+    : {
+        position: 'absolute', top: touch ? 48 : 36, zIndex: 60, right: 0,
+        // On a phone it is measured from the VIEWPORT, not given a fixed width: this control sits
+        // near the right edge of a 390px bar, so a 300px panel anchored to it would hang a piece
+        // of itself off the screen.
+        ...(touch
+          ? { width: 'min(300px, calc(100vw - 24px))' }
+          : { width: variant === 'tab' ? (panelMaxWidth ?? 300) : 300 }),
+        padding: 12, borderRadius: 12,
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
+        // See `maxPanelHeight`'s own comment: a card that does not fit between its trigger and
+        // the bottom of the viewport scrolls internally instead of silently clipping.
+        ...(maxPanelHeight !== null ? { maxHeight: maxPanelHeight, overflowY: 'auto' as const } : {}),
+      }
+  const panelCard = open && (
+      <div ref={panelRef} style={panelStyle}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
             <span style={{
               fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
@@ -506,6 +623,55 @@ export function SessionStatsMenu({
           )}
         </div>
   )
+  // The GAUGE's card is a PORTAL to `document.body` — it must escape the composer's own overflow
+  // clip, which an absolutely-positioned descendant never could. Every other variant stays exactly
+  // where it always rendered, as a child of this component's own box.
+  const panel = variant === 'gauge' ? (panelCard && createPortal(panelCard, document.body)) : panelCard
+
+  if (variant === 'gauge') {
+    // THE COMPOSER'S CONTEXT GAUGE (design item 3) — a ring, not a pill, because this trigger sits
+    // among icon buttons (attach, dictate) rather than in a text-heavy strip. ABSENT ENTIRELY, not
+    // a bare icon, when the session has no measurable context: a control with nothing to show is
+    // the confident-zero shape this product refuses everywhere else, and `s.context` is the one
+    // fact that decides whether the ring has anything to draw at all.
+    if (!s.context) return null
+    const pct = Math.floor(s.context.fraction * 100)
+    // OWNER FEEDBACK (2026-09-27): the first pass read too small to make out at a glance — a control
+    // read constantly, unlike the dropdown it opens. 30px (up from 26) with the SAME stroke keeps
+    // the ring itself a fine line rather than a fat one, and the number goes up to 11px/700 at the
+    // circle's own new size — the two together are what makes it legible rather than merely present.
+    // The "%" sign is dropped from the FACE (three digits plus a percent sign no longer fit at this
+    // size without shrinking the digits back down) and kept in the accessible name instead — a
+    // sighted reader already knows a context gauge reads in percent, the same reason a battery icon
+    // needs no unit beside its number.
+    const GAUGE_SIZE = 30
+    return (
+      <div ref={boxRef} style={{ position: 'relative', flexShrink: 0, display: 'flex' }}>
+        <button
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          aria-label={pt ? `Métricas desta sessão — contexto em ${pct}%` : `This session’s metrics — context at ${pct}%`}
+          title={pt ? `Métricas desta sessão — contexto em ${pct}%` : `This session’s metrics — context at ${pct}%`}
+          style={{
+            position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: GAUGE_SIZE, height: GAUGE_SIZE, padding: 0, borderRadius: '50%', flexShrink: 0,
+            border: open ? '1px solid var(--anthropic-orange)' : '1px solid transparent',
+            background: 'transparent', cursor: 'pointer',
+          }}
+        >
+          <ContextRing fraction={s.context.fraction} size={GAUGE_SIZE} stroke={3} />
+          <span style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, fontWeight: 700, color: 'var(--text-primary)',
+            fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.03em',
+          }}>
+            {pct}
+          </span>
+        </button>
+        {panel}
+      </div>
+    )
+  }
 
   if (variant === 'tab') {
     // THE SAME PILL THE "FILTROS" TAB WEARS (design item 4, screenshot 7) — hanging BELOW the

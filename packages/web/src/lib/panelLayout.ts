@@ -12,6 +12,24 @@
  * combination of panels, and the hit-zone rectangles a gap or a junction claims.
  */
 
+/**
+ * THE ONE INNER GAP — the visible seam and drag handle BETWEEN two panels (left list ↔ centre,
+ * centre ↔ right aside, conversation ↔ bottom band, the live-activity strip ↔ conversation).
+ * Owner-requested bump from 6px to 10px (2026-09-27): at 6px the gap's own three-dot grip
+ * (`PanelGapDots`) sat pressed right against both neighbouring panels' borders, with no room to read
+ * as its own control. Every place that drew this figure — `App.tsx`'s SideNav padding and its aside
+ * gap's `right` offset, `SessionsPage.tsx`'s right-aside gap and its live-activity strip's bottom
+ * margin, `bandControls.tsx`'s `BandResizeHandle` — now reads this ONE constant, so a future change
+ * moves every seam together instead of drifting one at a time the way six independent literal `6`s
+ * eventually would.
+ *
+ * THE OUTER edges (a panel's own border to the window's left/right/bottom, and the frame's top gap
+ * below the header) are a DIFFERENT figure and STAY 6px — they were never part of this complaint (the
+ * grip lives only on an INNER seam between two panels, never on a window edge with nothing to grip
+ * against) and changing them was never asked for. Do not fold them into this constant.
+ */
+export const PANEL_GAP = 10
+
 export interface PanelOpenState {
   leftOpen: boolean
   rightOpen: boolean

@@ -80,7 +80,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 
-import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
+import { SessionStatsMenu } from './SessionStatsMenu'
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -97,6 +98,36 @@ interface ChatPayload {
   attachmentSends?: AttachmentSend[]
   /** What each delivered message CARRIED, for this conversation — see `AttachmentMessage`. */
   attachmentMessages?: AttachmentMessage[]
+}
+
+/**
+ * WHAT THE COMPOSER'S CONTEXT GAUGE NEEDS to open the SAME card the desktop header's old metrics
+ * tab opened (design item 3, owner 2026-09-27: "círculo de métricas no composer, que abre pra
+ * cima"). `session` (a `ControlSession`) already carries `task`/`model`/`effort`/`conversationId`/
+ * `id`/`harness` directly, so this bundle only holds what it does NOT — the store's own record for
+ * the conversation and the money settings, neither of which lives on the fleet row.
+ *
+ * Deliberately a bundle and not five loose props: it is the exact same reading `SessionStatsMenu`
+ * has always taken (`sessions/SessionsPage.tsx`'s own mobile header call is the template this
+ * mirrors), so a caller with no data source for it simply omits the prop and the gauge does not
+ * render — never a control open on numbers nobody supplied.
+ */
+export interface SessionComposerMetrics {
+  /** The store's record for this conversation, or `undefined` when it has none yet. */
+  meta: SessionMeta | undefined
+  currency: 'USD' | 'BRL'
+  brlRate: number
+  costBasis: CostBasis
+  /** `C/A` for this session's OWN harness — `null` when no plan covers it, which removes the
+   *  basis toggle inside the card rather than offering one whose only outcome is "no plan". */
+  planFactor: number | null
+  /** Open the delivery this session is filed under — absent where there is nowhere to go. */
+  onOpenTask?: (ref: string) => void
+  /** Open the aside's Live tab, on the step running right now when there is one. */
+  onOpenLive?: (ref?: string) => void
+  /** Open the full reading — the aside's own Metrics tab. Absent when the store has no record of
+   *  this conversation, the same fact that decides whether that tab exists at all. */
+  onOpenFull?: () => void
 }
 
 export interface SessionChatProps {
@@ -144,6 +175,11 @@ export interface SessionChatProps {
     /** The turns themselves, for the panel's LIVE tab. Handed over rather than re-fetched. */
     turns: readonly LiveTurn[]
   }) => void
+  /** The composer's context gauge (design item 3) — see `SessionComposerMetrics`'s own header.
+   *  Absent means the caller has no data source for it and the gauge does not render. Desktop
+   *  only: mobile keeps its existing header metrics button (`SessionsPage.tsx`'s own `touch`
+   *  variant), so this is never a second, redundant control on a phone. */
+  metrics?: SessionComposerMetrics
 }
 
 // How often the conversation is re-read — and for how long it keeps being read after you leave —
@@ -168,7 +204,7 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, metrics }: SessionChatProps) {
   const pt = lang === 'pt'
   /** Touch targets grow on a phone and nowhere else — 44px on a desktop is a row of buttons. */
   const isMobile = useIsMobile()
@@ -2491,6 +2527,36 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
                       <Mic size={15} />
                     </span>
                   </button>
+                )}
+
+                {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
+                    microphone, the header's old "66%" tab moved down into the composer it was
+                    always about. DESKTOP ONLY: mobile already has its own header metrics button
+                    (`SessionsPage.tsx`'s `touch`-variant `SessionStatsMenu`), and this would be a
+                    second, redundant control on a phone. `metrics` is absent on any surface with
+                    no data source for it (never expected on a real page, but keeps a caller that
+                    forgot to wire it up silent rather than crashing), and the component itself
+                    renders NOTHING when the session's context cannot be measured — see its own
+                    `variant === 'gauge'` branch. */}
+                {!isMobile && metrics && (
+                  <SessionStatsMenu
+                    variant="gauge"
+                    harness={session.harness}
+                    sessionId={session.conversationId ?? session.id}
+                    meta={metrics.meta}
+                    lang={lang}
+                    currency={metrics.currency}
+                    brlRate={metrics.brlRate}
+                    costBasis={metrics.costBasis}
+                    planFactor={metrics.planFactor}
+                    {...(session.task ? { task: session.task } : {})}
+                    {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
+                    {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
+                    {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
+                    rowId={session.id}
+                    {...(session.model ? { startedModel: session.model } : {})}
+                    {...(session.effort ? { startedEffort: session.effort } : {})}
+                  />
                 )}
 
                 {/* Mode · Stop · Recall · Send · More, held together at the far end, in that

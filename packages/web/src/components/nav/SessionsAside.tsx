@@ -16,8 +16,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ChevronDown, ChevronRight, Clock, Folder, FolderPlus, MoreVertical, Pin, PinOff, Plus, RotateCcw,
-  Search, Send, X,
+  ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, MoreVertical, Pin, PinOff, Plus,
+  RotateCcw, Search, Send, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -141,6 +141,22 @@ export interface SessionsAsideProps {
     /** Narrows a GROUP verb (`reopenFell`, `broadcast`). Absent = the whole group. */
     ids?: readonly string[]
   }) => Promise<{ ok: boolean; message: string; id?: string }>
+  /**
+   * THE FILTROS TRIGGER (design item 4) — "Filtros na linha de botões da lista, visível também
+   * com ela minimizada". `App.tsx` owns the open/close state and the panel itself; this aside only
+   * carries the BUTTON, the same read-only relationship it already has with `filters`/`activeOnly`
+   * above. `filtersButtonRef` is how the caller measures where to anchor the panel.
+   *
+   * ALL FOUR ABSENT on the MOBILE mount (`SessionsPage.tsx`'s own "Sessions" tab) — a phone already
+   * has its own complete Filtros mechanism there (`filterButton` + `filtersSheet`, a full-screen
+   * sheet over the SAME `filters`/`activeOnly` state), so a second trigger in this row would be a
+   * second, disagreeing way to open filtering on one screen. The button below renders only when
+   * `onToggleFilters` is given, which is exactly the desktop mount.
+   */
+  filtersOpen?: boolean
+  filtersCount?: number
+  onToggleFilters?: () => void
+  filtersButtonRef?: (el: HTMLButtonElement | null) => void
 }
 
 /**
@@ -178,7 +194,7 @@ function groupMenuExtras(
 
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
-  onOpenRow, hideNew, rowsById, act,
+  onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
@@ -633,6 +649,44 @@ export function SessionsAside({
           >
             <Send size={14} />
           </button>
+        )}
+        {/* FILTROS (design item 4) — "Filtros na linha de botões da lista, visível também com ela
+            minimizada". `App.tsx` owns the open/close state and the panel that actually opens; this
+            button only toggles it and reports its own position through `filtersButtonRef`, so the
+            caller can anchor the panel beside it (a popover, not a control this component draws
+            itself — see `App.tsx`'s own `sessionsFiltersAnchor`). Absent on mobile — see the prop's
+            own header. */}
+        {onToggleFilters && (
+        <button
+          ref={filtersButtonRef}
+          onClick={onToggleFilters}
+          aria-expanded={filtersOpen}
+          aria-label={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
+          title={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
+          style={{
+            position: 'relative',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9, cursor: 'pointer',
+            border: `1px solid ${filtersOpen ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+            background: filtersOpen ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
+            color: filtersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontFamily: 'inherit',
+          }}
+          onMouseEnter={e => { if (!filtersOpen) { e.currentTarget.style.borderColor = 'var(--anthropic-orange)'; e.currentTarget.style.color = 'var(--anthropic-orange)' } }}
+          onMouseLeave={e => { if (!filtersOpen) { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-tertiary)' } }}
+        >
+          <Filter size={14} />
+          {!!filtersCount && filtersCount > 0 && (
+            <span style={{
+              position: 'absolute', top: 3, right: 3,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 13, height: 13, padding: '0 3px', borderRadius: 7,
+              background: 'var(--anthropic-orange)', color: '#fff',
+              fontSize: 8.5, fontWeight: 700, lineHeight: 1,
+            }}>
+              {filtersCount}
+            </span>
+          )}
+        </button>
         )}
         <SessionsGroupMenu
           fill

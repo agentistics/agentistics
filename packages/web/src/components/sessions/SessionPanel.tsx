@@ -44,7 +44,7 @@ import { RelayedComposer } from './RelayedComposer'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { TerminalRegion } from '../RecentSessions'
-import { SessionChat, type SessionChatProps } from './SessionChat'
+import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from './SessionChat'
 import { SessionActions } from './SessionActions'
 import { ShellBand } from './ShellBand'
 import {
@@ -102,6 +102,9 @@ export interface SessionPanelProps {
   onViewChange?: (v: SessionView) => void
   /** Passed straight to `SessionChat` — see its own `onArtifacts`. This panel reads none of it. */
   onArtifacts?: SessionChatProps['onArtifacts']
+  /** Passed straight to `SessionChat` — see `SessionComposerMetrics`'s own header. This panel
+   *  reads none of it either. */
+  metrics?: SessionComposerMetrics
   /**
    * OPEN THE TERMINAL ON ITS OWN SCREEN.
    *
@@ -181,7 +184,7 @@ export interface SessionPanelProps {
 
 export function SessionPanel({
   session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange,
-  onArtifacts, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
+  onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
   onOpenShellFullscreen, onStudioBandRef, hardwareOffered, studioSeen = true,
   studioFullscreen, onStudioFullscreenChange,
   bottomTabPane, bottomTabFullscreen, onBottomTabFullscreenChange,
@@ -404,6 +407,7 @@ export function SessionPanel({
             key={session.id}
             session={session} {...(row ? { row } : {})} lang={lang} act={act}
             {...(onArtifacts ? { onArtifacts } : {})}
+            {...(metrics ? { metrics } : {})}
             /* THE SAME callback the row's menu gets. There are two Reopen buttons on this
                screen — the menu's verb and the composer's — and they must land in one place. */
             {...(onOpened ? { onReopened: onOpened } : {})}

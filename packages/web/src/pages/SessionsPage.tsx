@@ -55,6 +55,7 @@ import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 // while creating was the only thing that could announce a session; a reopen announces one too, and
 // two constants for one budget is two answers.
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
+import type { SessionComposerMetrics } from '../components/sessions/SessionChat'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
@@ -478,6 +479,26 @@ export default function SessionsPage() {
         brlRate,
         lang: pt ? 'pt' : 'en',
         ...(data.workflows ? { workflows: data.workflows } : {}),
+      }
+    : undefined
+
+  /**
+   * THE COMPOSER'S CONTEXT GAUGE (design item 3) — the SAME reading `selected`'s own mobile-header
+   * `SessionStatsMenu` call takes, below, bundled through `SessionComposerMetrics` so `SessionChat`
+   * gets it as one prop rather than five. `undefined` whenever there is no selected session at all;
+   * the component itself withholds `onOpenFull` further when the store has no record, exactly as
+   * the mobile card does.
+   */
+  const composerMetrics: SessionComposerMetrics | undefined = selected
+    ? {
+        meta: selectedMeta,
+        currency,
+        brlRate,
+        costBasis: ctx.costBasis,
+        planFactor: sessionPlanFactor(ctx.planBasis.basis, selected.harness),
+        onOpenTask: ref => navigate(`/tasks/${encodeURIComponent(ref)}`),
+        onOpenLive: ref => openArtifacts('live', ref),
+        ...(sessionMetrics ? { onOpenFull: () => openArtifacts('metrics') } : {}),
       }
     : undefined
 
@@ -1019,10 +1040,11 @@ export default function SessionsPage() {
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
         width: '100%', padding: '7px 14px', textAlign: 'left', cursor: 'pointer',
         // On the desktop board the strip is its OWN small panel — border, 10px corners and the
-        // 6px gap below it — instead of a square band laid across the top of the conversation.
+        // same inner gap (`PANEL_GAP`) below it every other panel seam uses — instead of a square
+        // band laid across the top of the conversation.
         ...(isMobile
           ? { border: 'none', borderBottom: '1px solid var(--border-subtle)' }
-          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: 6, boxSizing: 'border-box' as const }),
+          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: PANEL_GAP, boxSizing: 'border-box' as const }),
         background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
         fontFamily: 'inherit', fontSize: 11.5,
       }}
@@ -1690,6 +1712,7 @@ export default function SessionsPage() {
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
+      {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
       // button — one bar instead of two stacked ones saying overlapping things.
@@ -1955,6 +1978,12 @@ export default function SessionsPage() {
         // A panel on the board like every other: border and 10px corners (its top corners were
         // square). No border while collapsed to width 0, or a 2px sliver would remain.
         ...(asideIn ? { border: '1px solid var(--border)', borderRadius: 10, boxSizing: 'border-box' as const } : {}),
+        // TOP ALIGNMENT (owner, 2026-09-27): this panel used to start flush against the header, the
+        // one panel on the board with no gap above it at all. `6` is the SAME outer-gap figure the
+        // centre column's own `marginTop` uses (`OUTER_GAP`, declared further down this component —
+        // a bare literal here rather than that binding, since this style is computed above where
+        // `OUTER_GAP` is declared and referencing it here would be a temporal-dead-zone reference).
+        marginTop: 6,
         transition: asideMotion,
       }
   const artInner: CSSProperties = split
@@ -2733,6 +2762,19 @@ export default function SessionsPage() {
    */
   const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
   /**
+   * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
+   * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
+   * and the two panels' `marginTop` below: it is the SAME number as `PANEL_GAP` used to be before the
+   * owner's 6→10 bump for the INNER seams (`lib/panelLayout.ts`'s own `PANEL_GAP`), and it stays 6
+   * because an outer edge has no neighbour to grip against — the request was for more room around the
+   * grip, not a wider margin to the window.
+   */
+  const OUTER_GAP = 6
+  /** The T-junction's own hit-zone square — `junctionHitRect`'s formula (`gap + extra`) applied to
+   *  the CURRENT inner gap, so a future `PANEL_GAP` change resizes the junction's target along with
+   *  the seam it sits on instead of leaving it sized for the old gap. */
+  const JUNCTION_SIZE = junctionHitRect({ x: 0, y: 0 }, PANEL_GAP, 4).width
+  /**
    * FLOATING-PANELS DESIGN (`sdd/brief.md`) — `SessionPanel` now draws its OWN two panels (the
    * conversation, then a gap, then the bottom band) with their own borders/radius/overflow-hidden,
    * because the bottom band moved from being docked INSIDE the conversation's card to being its own
@@ -2779,7 +2821,7 @@ export default function SessionsPage() {
         // the rail. The LEFT edge is the aside's own concern (`App.tsx`'s `SideNav`, `mode ===
         // 'sessions'` padding) — this row starts exactly where that padding ends, so adding a
         // paddingLeft here too would double the gap between the sessions list and the conversation.
-        ...(isMobile ? {} : { paddingRight: 6, paddingBottom: 6 }),
+        ...(isMobile ? {} : { paddingRight: OUTER_GAP, paddingBottom: OUTER_GAP }),
       }}
     >
       {/* `display: flex` is the load-bearing part, not `flex: 1`. This file has recorded the same
@@ -2802,18 +2844,21 @@ export default function SessionsPage() {
         // right-click menu, the "more" menu) all open within their own nested containers, inset
         // from this box's edges, and stay inside it under normal use.
         //
-        // ONLY `marginTop` SURVIVES HERE UNCONDITIONALLY (the gap under the shared header — see
-        // `SESSIONS_TAB_TOP_OFFSET`'s own comment in `App.tsx`, which this geometry must not move).
+        // ONLY `marginTop` SURVIVES HERE UNCONDITIONALLY. TOP ALIGNMENT (owner, 2026-09-27): this
+        // used to be `CENTRAL_PANE.gap` (5px) — close enough to flush that the panel read as touching
+        // the header, while the left list (`App.tsx`'s `SideNav`) has real room above it from its own
+        // mark/mode-switch row. It is now `OUTER_GAP` (6px), the SAME figure every outer edge already
+        // uses, so no panel in this workspace sits closer to a frame edge than any other.
         // `marginLeft`/`marginRight`/`marginBottom` are ZERO when this div owns its own two panels
-        // (`centreOwnsItsPanels`): each of those three edges already has its own 6px gap drawn by
+        // (`centreOwnsItsPanels`): each of those three edges already has its own gap drawn by
         // something else — the LEFT one by the sessions-list panel's own resize gap, the RIGHT one
         // by the vertical `.ag-panel-gap` sibling below, the BOTTOM one by `splitRef`'s own
-        // `paddingBottom` above — and adding a SECOND 5px margin on top of any of them doubled the
-        // visual gap (measured live: 11px on the right instead of 6). The plain `FleetOverview`/
-        // dedicated-terminal case has no such neighbour gaps of its own, so it keeps the uniform
-        // margin exactly as before.
+        // `paddingBottom` above — and adding a SECOND margin on top of any of them doubles the visual
+        // gap (measured live, before this: 11px on the right instead of 6, back when both were 6px).
+        // The plain `FleetOverview`/dedicated-terminal case has no such neighbour gaps of its own, so
+        // it keeps the uniform `CENTRAL_PANE.gap` margin exactly as before.
         ...(isMobile ? {} : centreOwnsItsPanels
-          ? { marginTop: CENTRAL_PANE.gap, marginLeft: 0, marginRight: 0, marginBottom: 0 }
+          ? { marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0 }
           : {
             margin: CENTRAL_PANE.gap,
             border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
@@ -2843,7 +2888,7 @@ export default function SessionsPage() {
             setArtDragging(true)
             document.body.style.userSelect = 'none'
           }}
-          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
+          style={{ width: PANEL_GAP, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
         ><PanelGapDots orientation="vertical" /></div> : null}
       {/* THE T-JUNCTIONS THEMSELVES — see the effect above this component's `return` for the
           measuring and `PanelGap.tsx`'s `PanelJunction`/`armGap` for what a press on one actually
@@ -2854,8 +2899,8 @@ export default function SessionsPage() {
         <PanelJunction
           key="bottom-right"
           label={pt ? 'Redimensionar altura da barra e largura do painel' : 'Resize band height and panel width'}
-          size={10}
-          left={rightAsideEdgeNow - 3}
+          size={JUNCTION_SIZE}
+          left={rightAsideEdgeNow - PANEL_GAP / 2}
           top={bandGapY}
           onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-right')}
         />
@@ -2864,8 +2909,8 @@ export default function SessionsPage() {
         <PanelJunction
           key="bottom-left"
           label={pt ? 'Redimensionar altura da barra e largura da lista' : 'Resize band height and list width'}
-          size={10}
-          left={leftAsideEdge - 3}
+          size={JUNCTION_SIZE}
+          left={leftAsideEdge - PANEL_GAP / 2}
           top={bandGapY}
           onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-left')}
         />
