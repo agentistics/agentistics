@@ -176,6 +176,9 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
       probed: 'agy 1.1.25, 2026-09-09',
     },
   },
+  // No spawn-spec/session-manager support (CLAUDE.md step 4, skipped by scope): agentop cannot start
+  // or drive an opencode session, so there is no dialog to approve.
+  opencode: null,
 }
 
 /**

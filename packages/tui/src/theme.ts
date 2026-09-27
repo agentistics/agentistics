@@ -46,6 +46,8 @@ export const HARNESS_COLOR: Record<HarnessId, string> = {
   copilot: '#9ca3af',
   antigravity: '#8b5cf6',
   kimi: '#e11d48',
+  // Mirrors HARNESS_COLORS.opencode in packages/web/src/lib/harness.ts.
+  opencode: '#06b6d4',
 }
 
 export const HARNESS_LABEL: Record<HarnessId, string> = {
@@ -55,4 +57,5 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   copilot: 'Copilot',
   antigravity: 'Antigravity',
   kimi: 'Kimi',
+  opencode: 'opencode',
 }

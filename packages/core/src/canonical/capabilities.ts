@@ -141,6 +141,21 @@ export const LEGACY_FALSE_NOTES: LegacyFalseNotes = {
     gitLines: { state: 'not_supported', reason: 'Kimi records the Edit/Write strings but no diff counters.', source: `${TYPES} HARNESS_CAPABILITIES entry comment (kimi)` },
     compaction: COMPACTION,
   },
+  // opencode has NO legacy adapter at all (every HARNESS_CAPABILITIES.opencode cell is false), so
+  // every one of these is a false->false migration UNLESS refined below. `agents`/`gitLines`/
+  // `dynamicWorkflows`/`mcpServers` get a recorded reason because they were checked and found
+  // absent from the real store measured for this integration. `compaction`, `skills` and
+  // `contextWindow` are deliberately left with NO note — each has a real candidate signal in
+  // opencode's schema (`session.time_compacting`; a `skill` tool part naming the skill by
+  // `input.name`; a per-message `tokens.input` that plausibly IS the context size at that call) that
+  // was seen but not independently verified against a second source, so they read as `unknown`
+  // rather than a confident `not_supported` this integration cannot back up.
+  opencode: {
+    agents: { state: 'not_supported', reason: "Every real session had parent_id/workspace_id null; the schema's nested-session columns exist but were never observed populated, so every session folds into one main agent with no per-agent breakdown.", source: 'integrations/opencode/index.ts header (measured on the real store, 2 sessions)' },
+    gitLines: { state: 'not_supported', reason: 'The session table carries git-shaped summary columns but both real sessions show 0, and no tool part carries a diff field, so this is not wired into the replay.', source: 'integrations/opencode/replay.ts header (measured on the real store)' },
+    dynamicWorkflows: { state: 'not_supported', reason: 'opencode has no equivalent of the multi-agent orchestration tool this flag gates.', source: `${TYPES} HarnessCapabilities.dynamicWorkflows docstring` },
+    mcpServers: { state: 'not_supported', reason: 'No mcp__-shaped (or any MCP-prefixed) tool name was observed among the real tool parts measured (bash, write, read, skill), so this replay never has a server to read back.', source: 'integrations/opencode/replay.ts header (measured on the real store)' },
+  },
 }
 
 /** The one sentence used for every legacy `false` with no entry in `LEGACY_FALSE_NOTES`. */
@@ -210,7 +225,86 @@ export function capabilityReason(s: CapabilityState): string | null {
   }
 }
 
-/** `HARNESS_CAPABILITIES`, projected once at module load — the default table every future reader
- *  reads unless it has its own notes to apply. */
-export const CAPABILITY_STATES: Record<HarnessId, Record<CapabilityMetric, CapabilityState>> =
+/** `HARNESS_CAPABILITIES` projected by the boolean rule alone — the migration, before P2's evidence. */
+export const LEGACY_CAPABILITY_STATES: Record<HarnessId, Record<CapabilityMetric, CapabilityState>> =
   fromLegacyCapabilities(HARNESS_CAPABILITIES)
+
+/**
+ * A P2 refinement of one cell: a state the boolean could not express, re-derived from the harness's
+ * replay integration and its parity differential (P2 §3), with `source` naming where the evidence
+ * lives. Two directions only, both pinned by `capabilities.test.ts`:
+ * - a legacy `true` may NARROW to `partial` (the metric is real, and narrower than its name — only
+ *   one file shape carries it, only a shutdown total exists, a counter is not read);
+ * - a legacy `false` may become `partial` ONLY where the canonical model produces what the legacy
+ *   `SessionMeta` could not (kimi's per-agent events, agy's child conversation as a child Agent).
+ *   `HARNESS_CAPABILITIES` itself is untouched — it describes today's surfaces, which still read the
+ *   legacy shape — so every legacy `false` is still accounted for, now with the reason it moved.
+ * A refinement never makes a cell plain `supported` that was `false`, and never removes a capability.
+ */
+export interface CapabilityRefinement {
+  state: Extract<CapabilityState, { state: 'partial' }>
+  source: string
+}
+
+export type CapabilityRefinements = Partial<Record<HarnessId, Partial<Record<CapabilityMetric, CapabilityRefinement>>>>
+
+// Where each refinement's evidence lives (the A3 handbacks on task t-e1dea7cd6f, and the files).
+const P2 = 'docs/superpowers/specs/2026-09-19-runtime-p2-adapters-import.md §3'
+const REPLAY = (h: string) => `packages/server/server/integrations/${h}/ + projections/differential-${h}.ts (A3)`
+
+export const CAPABILITY_REFINEMENTS: CapabilityRefinements = {
+  codex: {
+    tokens: { source: REPLAY('codex'), state: { state: 'partial', exactness: 'exact', limit: 'three of four counters: the cache-write counter is not read (newer Codex writes cache_write_input_tokens, whose relation to input_tokens is unverified); usage is a per-turn delta of cumulative totals, not per response.' } },
+    cost: { source: REPLAY('codex'), state: { state: 'partial', exactness: 'estimated', limit: 'priced from the table over three of four counters; the unread cache-write counter is not priced.' } },
+  },
+  gemini: {
+    tokens: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape carries per-record tokens that are deliberately not read until the owner decides (it changes money on every cost surface).' } },
+    cost: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'estimated', limit: 'rich-JSON chat shape only, priced from the table; see tokens.' } },
+    model: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape is not read for its model.' } },
+    tools: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape is not read for tool calls.' } },
+  },
+  copilot: {
+    tokens: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'only at session.shutdown, one cumulative report per model; a crashed session has none (absent, never zero).' } },
+    cost: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'estimated', limit: 'priced from the table over the shutdown-only totals; see tokens.' } },
+    gitLines: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'one aggregate for the whole session at shutdown (codeChanges); no per-call attribution.' } },
+  },
+  kimi: {
+    agents: { source: `${P2}; ${REPLAY('kimi')}`, state: { state: 'partial', exactness: 'exact', limit: 'the canonical replay emits one Agent per agent id with its own usage; the legacy SessionMeta still folds them into the session totals, with no per-invocation breakdown.' } },
+  },
+  antigravity: {
+    agents: { source: REPLAY('antigravity'), state: { state: 'partial', exactness: 'exact', limit: 'an invoke_subagent child becomes a child Agent under the parent run with its own tokens, cost and tools; linked to its launch only by INVOKE_SUBAGENT content, with no duration or agent type.' } },
+    gitLines: { source: `${P2}; ${REPLAY('antigravity')}`, state: { state: 'partial', exactness: 'exact', limit: 'request-time line counts from edit payloads (CodeContent / ReplacementContent vs TargetContent), not git diff; agy stores no git metadata.' } },
+  },
+  // opencode: every cell here upgrades a legacy FALSE to `partial`, because the legacy false is not
+  // "opencode cannot produce this" — it is "there is no legacy adapter to carry it to a surface"
+  // (CLAUDE.md step 4, skipped by scope). The canonical replay reads it straight from the SQLite
+  // store and proves it equal, per session, to an independent recount
+  // (`projections/differential-opencode.ts`) — the exact evidence CAPABILITY_REFINEMENTS exists for.
+  opencode: {
+    tokens: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'no legacy adapter surfaces an opencode SessionMeta at all; the canonical counters (input/output/cacheRead/cacheWrite + a separate additive reasoning counter) are real, read from each assistant message\'s own tokens field and proven equal to session.tokens_* by an independent recount.' } },
+    cost: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "opencode's own per-message cost is carried as costSource: 'harness' (not the shared table) because both real sessions measured used unpriced local/free models (cost 0); no legacy adapter surfaces it on any surface." } },
+    model: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "the bare model id (message.modelID) is real; no legacy adapter surfaces it on any surface." } },
+    tools: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'real tool calls (name, status, timing) from part rows of type "tool"; no legacy adapter surfaces them on any surface, and only the four tool names measured on the real store (bash, write, read, skill) are known to map through canonicalTool.' } },
+    activeTime: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "turn.started/turn.ended are emitted per user message and per settled assistant reply, closing 'last-line' always (opencode states no whole-turn duration, only per-step timing); no legacy adapter surfaces active_minutes on any surface." } },
+  },
+}
+
+/** Applies refinements over a projected table. Pure; returns fresh objects. */
+export function applyCapabilityRefinements(
+  base: Record<HarnessId, Record<CapabilityMetric, CapabilityState>>,
+  refinements: CapabilityRefinements = CAPABILITY_REFINEMENTS,
+): Record<HarnessId, Record<CapabilityMetric, CapabilityState>> {
+  const out = {} as Record<HarnessId, Record<CapabilityMetric, CapabilityState>>
+  for (const h of Object.keys(base) as HarnessId[]) {
+    out[h] = { ...base[h] }
+    for (const [m, r] of Object.entries(refinements[h] ?? {}) as [CapabilityMetric, CapabilityRefinement][]) {
+      out[h][m] = { ...r.state }
+    }
+  }
+  return out
+}
+
+/** The canonical capability table: the boolean migration plus P2's refinements. What every reader
+ *  of the canonical vocabulary reads; `HARNESS_CAPABILITIES` stays what today's surfaces read. */
+export const CAPABILITY_STATES: Record<HarnessId, Record<CapabilityMetric, CapabilityState>> =
+  applyCapabilityRefinements(LEGACY_CAPABILITY_STATES)

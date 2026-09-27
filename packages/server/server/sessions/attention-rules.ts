@@ -125,6 +125,10 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /Do you want to proceed/i,
     ],
   },
+  // Never spawned by agentop (no spawn-spec, CLAUDE.md step 4 skipped by scope), so nobody has
+  // captured a dialog footer for it — `rulesFor` reads this as "never probed" via the `?? undefined`
+  // below, exactly like a harness nobody has looked at.
+  opencode: null,
 }
 
 /** The rules for a harness, or `undefined` when it was never probed. */

@@ -414,7 +414,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
 // ---------------------------------------------------------------------------
 
 /** Extract the text content from a message object (handles both array and string forms). */
-function extractMessageText(msg: any): string {
+export function extractMessageText(msg: any): string {
   const content = msg.content
   if (Array.isArray(content)) {
     return content.map((c: any) => (typeof c === 'object' && c !== null ? c.text ?? '' : '')).join('')
@@ -424,7 +424,7 @@ function extractMessageText(msg: any): string {
 }
 
 /** Extract the display text from a message (user-visible portion only, skipping injected context). */
-function extractDisplayText(msg: any): string {
+export function extractDisplayText(msg: any): string {
   const display = msg.displayContent
   if (Array.isArray(display)) {
     return display.map((c: any) => (typeof c === 'object' && c !== null ? c.text ?? '' : '')).join('')
@@ -433,7 +433,7 @@ function extractDisplayText(msg: any): string {
 }
 
 /** Returns true when a user message is a genuine user message (not a bootstrap injection). */
-function isGenuineUserMessage(text: string): boolean {
+export function isGenuineUserMessage(text: string): boolean {
   if (!text || text.trim() === '') return false
   if (text.includes('<session_context>')) return false
   if (text.includes('<environment_context>')) return false

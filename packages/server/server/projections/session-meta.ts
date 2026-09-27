@@ -68,6 +68,7 @@ import {
   totalTokens,
   USAGE_COUNTERS,
   activeMinutesOf,
+  HARNESS_ORDER,
   type AnyAgentisticsEvent,
   type HarnessId,
   type ModelUsageCounters,
@@ -76,6 +77,7 @@ import {
   type TurnEvent,
   type UsageCounter,
 } from '@agentistics/core'
+import { WEB_FETCH_TOOLS as AGY_WEB_FETCH, WEB_SEARCH_TOOLS as AGY_WEB_SEARCH } from '../adapters/antigravity-parse'
 
 // ── What the projection says about itself ───────────────────────────────────────────────────────
 
@@ -141,13 +143,13 @@ export interface Caveat {
 export const COMPACTION_SINCE: Readonly<Record<string, string>> = { claude: '1.1.0' }
 
 /** The first adapter version, per source, that records human turns (`turn.started`, D22) as events. */
-export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0' }
+export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0' }
 
 /**
  * The first adapter version, per source, that records turn CLOSES (`turn.ended`) and
  * `turn.started.previousAssistantAt` (D25) — what `active_minutes` and `user_response_times` need.
  */
-export const TURN_END_SINCE: Readonly<Record<string, string>> = { claude: '1.5.0' }
+export const TURN_END_SINCE: Readonly<Record<string, string>> = { claude: '1.5.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0' }
 
 // ── The result ──────────────────────────────────────────────────────────────────────────────────
 
@@ -253,6 +255,8 @@ interface AgentAcc {
   ttl1h: number
   ttl5m: number
   toolNames: Map<string, number>
+  /** Counts by the harness's OWN tool name (`tool.requested.data.name`) — see `HarnessToolRules`. */
+  rawToolNames: Map<string, number>
   linesAdded: number
   linesRemoved: number
   files: Set<string>
@@ -281,7 +285,7 @@ interface AgentAcc {
 function emptyAcc(): AgentAcc {
   return {
     tokens: zero(), byModel: new Map(), daily: new Map(), absentCounters: new Set(), sawTtl: false, ttl1h: 0, ttl5m: 0,
-    toolNames: new Map(), linesAdded: 0, linesRemoved: 0, files: new Set(),
+    toolNames: new Map(), rawToolNames: new Map(), linesAdded: 0, linesRemoved: 0, files: new Set(),
     compactCount: 0, compactMs: 0, compactDropped: undefined, compactionRecorded: true,
     turns: [], turnsRecorded: true, turnEnds: [], turnEndsRecorded: true, sawTime: false,
     gauge: undefined, firstModel: undefined,
@@ -322,8 +326,10 @@ export interface SessionMetaState {
   agents: Map<string, AgentAcc>
   started: Map<string, StartedRecord>
   ended: Map<string, { id: string; status: string }>
-  toolNameById: Map<string, string>
-  failures: { agentId: string; toolExecutionId: string; status: string }[]
+  toolNameById: Map<string, { canonical: string; raw: string }>
+  failures: { agentId: string; toolExecutionId: string; status: string; errorClass?: string }[]
+  /** `model.failed` events — a tool error only where `HARNESS_TOOL_RULES` says legacy counts it. */
+  modelFailures: { agentId: string; errorClass?: string }[]
   /** The session.started that wins the order key — it names the project path. */
   sessionStart: { key: OrderKey; projectPath?: string } | undefined
   /** The earliest session.started `occurredAt`. */
@@ -361,7 +367,86 @@ function recordsSince(table: Readonly<Record<string, string>>, e: AnyAgentistics
   return since !== undefined && atLeast(e.provenance.adapterVersion, since)
 }
 
-const HARNESS_IDS: readonly string[] = ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi']
+// `HARNESS_ORDER` (core `types.ts`), NEVER a hardcoded array — CLAUDE.md step 3 exists precisely
+// because a plain array literal here would silently drop the next harness added to `HarnessId`
+// (which this line itself once did: it hardcoded six ids and was found missing 'opencode' by the
+// A3.8 ease test, the same class of bug the rule already names).
+const HARNESS_IDS: readonly string[] = HARNESS_ORDER
+
+/**
+ * How a harness's TOOL facts become the `uses_*` flags and the error figures. The flags are a
+ * statement about the harness's OWN tool names (legacy reads them raw), so a harness whose names
+ * differ from Claude's needs its own predicates here — never a Claude name tested against it.
+ * Absent from `HARNESS_TOOL_RULES` means `DEFAULT_TOOL_RULES` (Claude's names, read off the canonical
+ * counts, which for Claude ARE its own names).
+ */
+interface HarnessToolRules {
+  /** Which names the predicates read: the harness's own (`tool.requested.data.name`) or canonical. */
+  names: 'raw' | 'canonical'
+  /**
+   * Which name `tool_counts`, `tool_error_categories` and an invocation's `toolStats` are keyed by.
+   * Claude's legacy counts its OWN names — measured: a Claude session can carry a tool literally named
+   * `bash`, which `canonicalTool` folds into `Bash` (3 of 495 sessions differed, A3); every other
+   * legacy parser counts `canonicalTool` names.
+   */
+  counts: 'raw' | 'canonical'
+  mcp(name: string): boolean
+  webSearch(name: string): boolean
+  webFetch(name: string): boolean
+  taskAgent(name: string): boolean
+  /** `tool_error_categories` key: the failing TOOL's name (Claude) or the event's `errorClass`. */
+  errorsBy: 'tool' | 'errorClass'
+  /** A `model.failed` of a main agent is a legacy tool error (agy counts its ERROR_MESSAGE step). */
+  modelFailuresAreErrors: boolean
+  /** A failed tool call is a legacy tool error. False where legacy never reads a call's outcome. */
+  toolFailuresAreErrors: boolean
+}
+
+const DEFAULT_TOOL_RULES: HarnessToolRules = {
+  names: 'canonical',
+  counts: 'canonical',
+  mcp: n => n.startsWith('mcp__'),
+  webSearch: n => n === 'WebSearch',
+  webFetch: n => n === 'WebFetch',
+  taskAgent: n => n === 'Task' || n === 'Agent',
+  errorsBy: 'tool',
+  modelFailuresAreErrors: false,
+  toolFailuresAreErrors: true,
+}
+
+export const HARNESS_TOOL_RULES: Readonly<Record<string, HarnessToolRules>> = {
+  // jsonl.ts counts and flags by the tool's OWN name (see `counts`).
+  claude: { ...DEFAULT_TOOL_RULES, names: 'raw', counts: 'raw' },
+  // adapters/antigravity-parse.ts's own sets; `mcp_` has ONE underscore there, and legacy names an
+  // error category `error_<code>` / `exit_code` / `status_error`, never by tool (A3.5).
+  antigravity: {
+    names: 'raw',
+    counts: 'canonical',
+    mcp: n => n.startsWith('mcp_') || n === 'call_mcp_tool',
+    webSearch: n => AGY_WEB_SEARCH.has(n),
+    webFetch: n => AGY_WEB_FETCH.has(n),
+    taskAgent: n => n === 'invoke_subagent',
+    errorsBy: 'errorClass',
+    modelFailuresAreErrors: true,
+    toolFailuresAreErrors: true,
+  },
+  // copilot-parse.ts derives NONE of the four flags from a tool name — web search / fetch / task are
+  // hard-coded false and `uses_mcp` comes from a `session.info` marker no event carries — and never
+  // reads `tool.execution_complete.success`. Stated here so the agreement is structural (A3.3).
+  copilot: {
+    names: 'canonical',
+    counts: 'canonical',
+    mcp: () => false,
+    webSearch: () => false,
+    webFetch: () => false,
+    taskAgent: () => false,
+    errorsBy: 'tool',
+    modelFailuresAreErrors: false,
+    toolFailuresAreErrors: false,
+  },
+  // kimi-parse.ts: uses_task_agent is `Agent` OR `AgentSwarm` (A3.4); the rest are Claude's names.
+  kimi: { ...DEFAULT_TOOL_RULES, taskAgent: n => n === 'Task' || n === 'Agent' || n === 'AgentSwarm' },
+}
 
 // ── Fold ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -448,12 +533,17 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
         && (!acc.gauge || compareKey(key, acc.gauge.key) > 0)) {
         acc.gauge = { key, tokens: e.data.contextTokens, window: e.data.contextWindow }
       }
-      if (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0) acc.firstModel = { key, model: e.data.model }
+      // A response that names no model (agy's row with no 1.19) never becomes the session's model.
+      if (e.data.model && (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0)) acc.firstModel = { key, model: e.data.model }
       return
     }
     case 'tool.requested': {
-      acc.toolNames.set(e.data.name, (acc.toolNames.get(e.data.name) ?? 0) + 1)
-      s.toolNameById.set(e.data.toolExecutionId, e.data.name)
+      // Both names are kept; `HARNESS_TOOL_RULES[harness].counts` decides at finish which one keys the
+      // counts (Claude's legacy counts its own names, every other parser `canonicalTool`'s).
+      const toolName = e.data.canonicalName
+      acc.toolNames.set(toolName, (acc.toolNames.get(toolName) ?? 0) + 1)
+      s.toolNameById.set(e.data.toolExecutionId, { canonical: toolName, raw: e.data.name })
+      acc.rawToolNames.set(e.data.name, (acc.rawToolNames.get(e.data.name) ?? 0) + 1)
       return
     }
     case 'tool.completed': {
@@ -463,7 +553,14 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       return
     }
     case 'tool.failed': {
-      s.failures.push({ agentId: e.agentId ?? NO_AGENT, toolExecutionId: e.data.toolExecutionId, status: e.data.status })
+      s.failures.push({
+        agentId: e.agentId ?? NO_AGENT, toolExecutionId: e.data.toolExecutionId, status: e.data.status,
+        ...(e.data.errorClass ? { errorClass: e.data.errorClass } : {}),
+      })
+      return
+    }
+    case 'model.failed': {
+      s.modelFailures.push({ agentId: e.agentId ?? NO_AGENT, ...(e.data.errorClass ? { errorClass: e.data.errorClass } : {}) })
       return
     }
     case 'turn.started': {
@@ -612,7 +709,10 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   }
 
   const main = emptyAcc()
+  const rules = (s.run && HARNESS_TOOL_RULES[s.run.harness]) || DEFAULT_TOOL_RULES
+  const countedNames = (a: AgentAcc) => rules.counts === 'raw' ? a.rawToolNames : a.toolNames
   const mainToolNames = new Map<string, number>()
+  const mainRawNames = new Set<string>()
   for (const id of mains) {
     const a = s.agents.get(id)
     if (!a) continue
@@ -620,7 +720,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
     for (const c of a.absentCounters) main.absentCounters.add(c)
     main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
-    for (const [n, c] of a.toolNames) mainToolNames.set(n, (mainToolNames.get(n) ?? 0) + c)
+    for (const [n, c] of countedNames(a)) mainToolNames.set(n, (mainToolNames.get(n) ?? 0) + c)
+    for (const n of a.rawToolNames.keys()) mainRawNames.add(n)
     main.linesAdded += a.linesAdded; main.linesRemoved += a.linesRemoved
     for (const f of a.files) main.files.add(f)
     main.turns.push(...a.turns)
@@ -640,6 +741,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   const sessionEnds = s.agents.get(NO_AGENT)?.turnEnds ?? []
   const sawTime = main.sawTime || (s.agents.get(NO_AGENT)?.sawTime ?? false)
 
+  const ruleNames = rules.names === 'raw' ? [...mainRawNames] : [...mainToolNames.keys()]
   const meta: ProjectedSessionMeta = {
     tool_counts: Object.fromEntries(mainToolNames),
     tool_errors: 0,
@@ -649,9 +751,9 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     cache_read_input_tokens: main.tokens.cacheRead,
     cache_creation_input_tokens: main.tokens.cacheWrite,
     uses_task_agent: false,
-    uses_mcp: [...mainToolNames.keys()].some(n => n.startsWith('mcp__')),
-    uses_web_search: mainToolNames.has('WebSearch'),
-    uses_web_fetch: mainToolNames.has('WebFetch'),
+    uses_mcp: ruleNames.some(rules.mcp),
+    uses_web_search: ruleNames.some(rules.webSearch),
+    uses_web_fetch: ruleNames.some(rules.webFetch),
     lines_added: main.linesAdded,
     lines_removed: main.linesRemoved,
     files_modified: main.files.size,
@@ -682,11 +784,25 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   const mainSet = new Set(mains)
   let cancelled = 0
   for (const f of s.failures) {
-    if (!mainSet.has(f.agentId)) continue
+    if (!mainSet.has(f.agentId) || !rules.toolFailuresAreErrors) continue
     if (f.status === 'cancelled') { cancelled++; continue }
+    if (rules.errorsBy === 'errorClass') {
+      if (!f.errorClass) continue
+      meta.tool_errors++
+      meta.tool_error_categories[f.errorClass] = (meta.tool_error_categories[f.errorClass] ?? 0) + 1
+      continue
+    }
     meta.tool_errors++
-    const name = s.toolNameById.get(f.toolExecutionId) ?? 'unknown'
+    const ref = s.toolNameById.get(f.toolExecutionId)
+    const name = ref ? (rules.counts === 'raw' ? ref.raw : ref.canonical) : 'unknown'
     meta.tool_error_categories[name] = (meta.tool_error_categories[name] ?? 0) + 1
+  }
+  if (rules.modelFailuresAreErrors) {
+    for (const f of s.modelFailures) {
+      if (!mainSet.has(f.agentId) || !f.errorClass) continue
+      meta.tool_errors++
+      meta.tool_error_categories[f.errorClass] = (meta.tool_error_categories[f.errorClass] ?? 0) + 1
+    }
   }
   if (cancelled > 0) {
     caveats.push({ field: 'tool_errors', reason: `${cancelled} interrupted call(s) are not counted; legacy counts their error block` })
@@ -807,7 +923,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
           partialInvocations.set(root, set)
         }
         for (const [m, t] of a.byModel) { const cur = byModel.get(m) ?? zero(); add(cur, t); byModel.set(m, cur) }
-        for (const [name, c] of a.toolNames) {
+        for (const [name, c] of countedNames(a)) {
           inv.totalToolUseCount += c
           if (name === 'Read') inv.toolStats.readCount += c
           else if (SEARCH_TOOLS.has(name)) inv.toolStats.searchCount += c
@@ -843,7 +959,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
       totalCostUSD: measured.reduce((n, i) => n + i.costUSD, 0),
     }
   }
-  meta.uses_task_agent = mainToolNames.has('Task') || mainToolNames.has('Agent') || subKind.size > 0
+  meta.uses_task_agent = ruleNames.some(rules.taskAgent) || subKind.size > 0
 
   // Priced exactly as the legacy path prices: `sessionCostUSD` over the projected counters.
   const costUSD = sessionCostUSD({
@@ -864,7 +980,7 @@ export const sessionMetaProjection: Projection<SessionMetaState, SessionMetaProj
   version: 1,
   empty: () => ({
     seen: new Set(), agents: new Map(), started: new Map(), ended: new Map(), toolNameById: new Map(),
-    failures: [], sessionStart: undefined, startAt: undefined, sessionEnd: undefined, run: undefined,
+    failures: [], modelFailures: [], sessionStart: undefined, startAt: undefined, sessionEnd: undefined, run: undefined,
   }),
   fold(state, events) {
     for (const e of events) foldOne(state, e)

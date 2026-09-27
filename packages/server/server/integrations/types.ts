@@ -30,6 +30,18 @@ import {
 } from '@agentistics/core'
 import { claudeReplay } from './claude'
 import { CLAUDE_ADAPTER_VERSION } from './claude/replay-core'
+import { codexReplay } from './codex'
+import { CODEX_ADAPTER_VERSION } from './codex/replay-core'
+import { antigravityReplay } from './antigravity'
+import { geminiReplay } from './gemini'
+import { copilotReplay } from './copilot'
+import { kimiReplay } from './kimi'
+import { KIMI_ADAPTER_VERSION } from './kimi/replay-core'
+import { COPILOT_ADAPTER_VERSION } from './copilot/replay-core'
+import { GEMINI_ADAPTER_VERSION } from './gemini/replay-core'
+import { ANTIGRAVITY_ADAPTER_VERSION } from './antigravity/replay-core'
+import { opencodeReplay } from './opencode'
+import { OPENCODE_ADAPTER_VERSION } from './opencode/replay-core'
 
 /** One thing a replay can be pointed at — a transcript, a database, a session directory. */
 export interface ReplaySource {
@@ -93,12 +105,11 @@ export function hasReplay(
   return integration.replay !== undefined
 }
 
-/** Every entry below starts here; the integration that gets built bumps its own. */
-const UNIMPLEMENTED = '0.0.0'
-
-/** The one place the P1 scoping sentence for the five absences is worded. */
-const P1_CLAUDE_ONLY = 'P1 replays Claude Code transcripts only'
-
+/**
+ * Since A3 (P2 §1), every harness has a replay — each proven by its own parity differential
+ * (`projections/differential-<id>.ts`). A future harness without one must still say why, in
+ * `replayAbsent`; the type forbids an entry that does neither.
+ */
 export const INTEGRATIONS: Record<HarnessId, HarnessIntegration> = {
   claude: {
     id: 'claude',
@@ -108,33 +119,42 @@ export const INTEGRATIONS: Record<HarnessId, HarnessIntegration> = {
   },
   codex: {
     id: 'codex',
-    version: UNIMPLEMENTED,
+    version: CODEX_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.codex,
-    replayAbsent: `${P1_CLAUDE_ONLY}; Codex rollouts (~/.codex/sessions) are still read only by adapters/codex.ts.`,
+    replay: codexReplay,
   },
   gemini: {
     id: 'gemini',
-    version: UNIMPLEMENTED,
+    version: GEMINI_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.gemini,
-    replayAbsent: `${P1_CLAUDE_ONLY}; Gemini chat journals (~/.gemini/tmp) are still read only by adapters/gemini.ts.`,
+    replay: geminiReplay,
   },
   copilot: {
     id: 'copilot',
-    version: UNIMPLEMENTED,
+    version: COPILOT_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.copilot,
-    replayAbsent: `${P1_CLAUDE_ONLY}; Copilot session events (~/.copilot/session-state) are still read only by adapters/copilot.ts.`,
+    replay: copilotReplay,
   },
   antigravity: {
     id: 'antigravity',
-    version: UNIMPLEMENTED,
+    version: ANTIGRAVITY_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.antigravity,
-    replayAbsent: `${P1_CLAUDE_ONLY}; agy transcripts and gen_metadata databases are still read only by adapters/antigravity.ts.`,
+    replay: antigravityReplay,
   },
   kimi: {
     id: 'kimi',
-    version: UNIMPLEMENTED,
+    version: KIMI_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.kimi,
-    replayAbsent: `${P1_CLAUDE_ONLY}; Kimi wire streams (~/.kimi-code/sessions) are still read only by adapters/kimi.ts.`,
+    replay: kimiReplay,
+  },
+  // No legacy adapter exists for opencode (CLAUDE.md "Adding a harness" step 4, skipped by scope) —
+  // it never produces a SessionMeta and therefore never appears on any surface. It still has a full
+  // replay integration (this is the P2 half of the checklist, which does not depend on step 4).
+  opencode: {
+    id: 'opencode',
+    version: OPENCODE_ADAPTER_VERSION,
+    capabilities: CAPABILITY_STATES.opencode,
+    replay: opencodeReplay,
   },
 }
 

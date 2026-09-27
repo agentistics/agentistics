@@ -21,7 +21,7 @@ describe('HARNESS_MODELS', () => {
   })
 
   it('names every harness, so adding one breaks the build here', () => {
-    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi']) {
+    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode']) {
       expect(HARNESS_MODELS[h as keyof typeof HARNESS_MODELS]).toBeDefined()
     }
   })

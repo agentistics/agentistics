@@ -223,7 +223,7 @@ export function accumulateKimiWire(
 
 function num(v: unknown): number { return typeof v === 'number' && Number.isFinite(v) ? v : 0 }
 
-function isToolError(ev: Record<string, unknown>): boolean {
+export function isToolError(ev: Record<string, unknown>): boolean {
   if (ev.isError === true || ev.error) return true
   const status = typeof ev.status === 'string' ? ev.status.toLowerCase() : ''
   if (status === 'error' || status === 'failed') return true
