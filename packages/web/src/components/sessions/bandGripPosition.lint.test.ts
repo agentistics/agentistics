@@ -120,36 +120,52 @@ describe('the grip renders BEFORE the bar row, in every band — Studio, Content
 })
 
 /**
- * GATING: the grip is drawn only while there is something to resize — `open` in every band, and
- * never in true full screen (`StudioBand`/`SimpleDockedBand`, where fullscreen is an in-place
- * overlay with nothing left to negotiate a height for). `ShellBand`'s own docked branch has no
- * in-place fullscreen — it NAVIGATES to a dedicated screen instead — so `open` alone gates it there,
- * exactly as it did before this fix.
+ * GATING: the grip is drawn only while there is something to resize.
+ *
+ * UPDATED for the floating-panels redesign (`sdd/brief.md`): the band is now its OWN panel, and the
+ * gap between it and the conversation panel above it must stay PRESENT even while the band is
+ * collapsed (two panels with no gap between them would touch) — only the DRAG becomes a no-op. So
+ * the JSX condition around `<BandResizeHandle>` narrowed to `{!fullscreen && (` (StudioBand /
+ * SimpleDockedBand — never drawn in true full screen, where there is nothing left to negotiate a
+ * height for) or dropped entirely (ShellBand's docked branch, which has no in-place fullscreen at
+ * all — it NAVIGATES to a dedicated screen instead), and `open` moved INTO the spread: the handle
+ * gets the real drag handlers while open, and inert no-op ones while collapsed.
  */
 describe('the grip is gated on open (and, where relevant, not-fullscreen) — never drawn collapsed', () => {
-  test('StudioBand: `{open && !fullscreen && (` immediately precedes the grip', () => {
+  test('StudioBand: `{!fullscreen && (` precedes the grip, and `open` picks real handlers vs. no-ops', () => {
     const body = bandBody('StudioBand')
-    const gateAt = body.indexOf('{open && !fullscreen && (')
+    const gateAt = body.indexOf('{!fullscreen && (')
     const gripAt = body.indexOf('<BandResizeHandle')
     expect(gateAt).toBeGreaterThan(-1)
     expect(gripAt).toBeGreaterThan(gateAt)
     // Nothing but whitespace/JSX punctuation between the gate opening and the grip itself — no
     // stray element sneaks in ahead of it.
-    expect(body.slice(gateAt + '{open && !fullscreen && ('.length, gripAt).trim()).toBe('')
+    expect(body.slice(gateAt + '{!fullscreen && ('.length, gripAt).trim()).toBe('')
+    expect(body).toContain(
+      "{...(open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}",
+    )
   })
 
-  test('SimpleDockedBand: `{open && !fullscreen && (` immediately precedes the grip', () => {
+  test('SimpleDockedBand: `{!fullscreen && (` precedes the grip, and `open` picks real handlers vs. no-ops', () => {
     const body = bandBody('SimpleDockedBand')
-    const gateAt = body.indexOf('{open && !fullscreen && (')
+    const gateAt = body.indexOf('{!fullscreen && (')
     const gripAt = body.indexOf('<BandResizeHandle')
     expect(gateAt).toBeGreaterThan(-1)
     expect(gripAt).toBeGreaterThan(gateAt)
-    expect(body.slice(gateAt + '{open && !fullscreen && ('.length, gripAt).trim()).toBe('')
+    expect(body.slice(gateAt + '{!fullscreen && ('.length, gripAt).trim()).toBe('')
+    expect(body).toContain(
+      "{...(open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}",
+    )
   })
 
-  test('ShellBand: `{prefs.open && ` immediately precedes the grip', () => {
-    const gateAt = SHELL_BAND_SRC.indexOf('{prefs.open && <BandResizeHandle')
-    expect(gateAt).toBeGreaterThan(-1)
+  test('ShellBand: always rendered (no in-place fullscreen to skip it for), `prefs.open` picks real handlers vs. no-ops', () => {
+    expect(SHELL_BAND_SRC).toContain(
+      "{...(prefs.open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}",
+    )
+    const gripAt = SHELL_BAND_SRC.indexOf('<BandResizeHandle')
+    const gateAt = SHELL_BAND_SRC.indexOf('prefs.open ? grip')
+    expect(gripAt).toBeGreaterThan(-1)
+    expect(gateAt).toBeGreaterThan(gripAt)
   })
 })
 

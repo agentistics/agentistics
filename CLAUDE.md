@@ -2598,7 +2598,18 @@ interchangeable.
   the centre holding either the overview (`FleetOverview`) or the open session's chat and terminal.
   On a central it is the same workspace, showing the relayed fleet of the machine its picker has
   chosen. When someone says "a interface de sessões", "a tela de sessões" or "the sessions view",
-  this is it.
+  this is it. **Desktop, it is a VS-Code-style floating-panel workspace** (the "floating panels"
+  design, owner-approved 2026-09-27): the sessions list, the conversation, the bottom band (Claude Code /
+  Shell / Studio / Contents) and the artifacts aside are each their OWN bordered, 10px-radius panel
+  on the frame background — never one nested inside another. The 6px gap between two panels IS the
+  resize handle for that boundary (`lib/panelLayout.ts`'s pure geometry, `PanelGap`/`PanelGapDots`
+  in `components/sessions/PanelGap.tsx`, three dots at rest and an accent line on hover/drag),
+  reusing each axis's EXISTING clamp/persistence exactly (`asideWidth.ts` for the list,
+  `shellBand.ts`'s `resolveBandDrag`/`resolveBandHeight` for the band) — only the hit area and the
+  visual moved into the gap. Where a horizontal gap meets a vertical one (the band's foot meeting
+  the left list or the artifacts aside), a T-junction square hot zone drags both boundaries at once,
+  each on its own axis. `Ctrl/Cmd+B` toggles the left list, `Ctrl/Cmd+Shift+B` the artifacts aside,
+  `Ctrl/Cmd+'`/`` Ctrl/Cmd+` `` the bottom band (`lib/panelShortcuts.ts`) — mobile is untouched.
 - **the cockpit** — the TERMINAL one: `agentop`'s control center (`packages/tui/src/control`), whose
   own `sessions` tab draws the fleet. Never call the web one a cockpit; the ambiguity is the whole
   reason this list exists.
