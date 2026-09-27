@@ -97,6 +97,28 @@ export function suggestGroup(
   return existing ? { kind: 'existing', groupId: existing.id, name: existing.name } : { kind: 'new', name: dated }
 }
 
+/**
+ * PURE: the default "File & end" destination for one candidate — a session already sitting in a
+ * user group MUST be offered THAT group first, ahead of `suggestGroup`'s task/date rules. Filing it
+ * anywhere else would move it out of a place its owner put it on purpose, which the modal cannot
+ * know is wrong (a group named after a task the row's own `taskId` no longer names, or one holding
+ * work the owner is tracking by hand rather than by task).
+ *
+ * Delegates to `suggestGroup` outright when the candidate belongs to no group — this is a
+ * precedence rule layered in FRONT of it, never a second implementation of it.
+ */
+export function defaultGroupFor(
+  c: IdleCandidate,
+  groups: readonly { id: string; name: string; sessionKeys: string[] }[],
+  rows: readonly IdleRowInput[],
+  taskName: string | undefined,
+  today: string,
+): GroupSuggestion {
+  const current = groups.find(g => g.sessionKeys.includes(c.key))
+  if (current) return { kind: 'existing', groupId: current.id, name: current.name }
+  return suggestGroup(c, groups, rows, taskName, today)
+}
+
 /** One notification per BATCH: fire only when a session not already announced joins. */
 export function idleNotifyStep(
   prevNotified: ReadonlySet<string>,

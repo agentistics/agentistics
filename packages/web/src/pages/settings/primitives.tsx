@@ -864,6 +864,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
         aria-expanded={open}
         style={{
           width: '100%',
+          minHeight: isMobile ? 44 : undefined,
           padding: '8px 11px',
           background: 'var(--bg-elevated)',
           border: `1px solid ${open ? 'var(--anthropic-orange)' : 'var(--border)'}`,

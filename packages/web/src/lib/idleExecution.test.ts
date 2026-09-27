@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  bannerVisible, idleBannerText, idleSessionNoun, idleSummaryText, resolveGroupSuggestion, runIdlePlan,
+  bannerVisible, idleCardText, idleSessionNoun, idleSummaryText, resolveGroupSuggestion, runIdlePlan,
   type IdleEffects, type IdlePlanItem,
 } from './idleExecution'
 
@@ -90,11 +90,13 @@ describe('idle-sessions plural copy', () => {
     expect(idleSessionNoun(1, 'pt')).toBe('sessão')
     expect(idleSessionNoun(2, 'pt')).toBe('sessões')
   })
-  it('idleBannerText agrees the PT verb and adjective, not only the noun', () => {
-    expect(idleBannerText(1, 'en')).toBe('1 idle session could be ended')
-    expect(idleBannerText(3, 'en')).toBe('3 idle sessions could be ended')
-    expect(idleBannerText(1, 'pt')).toBe('1 sessão ociosa pode ser encerrada')
-    expect(idleBannerText(3, 'pt')).toBe('3 sessões ociosas podem ser encerradas')
+  it('idleCardText agrees the PT adjective, not only the noun, and states memory only when known', () => {
+    expect(idleCardText(1, null, 'en')).toBe('1 idle session')
+    expect(idleCardText(3, null, 'en')).toBe('3 idle sessions')
+    expect(idleCardText(3, '1.2 GB', 'en')).toBe('3 idle sessions · ~1.2 GB')
+    expect(idleCardText(1, null, 'pt')).toBe('1 sessão ociosa')
+    expect(idleCardText(3, null, 'pt')).toBe('3 sessões ociosas')
+    expect(idleCardText(3, '1,2 GB', 'pt')).toBe('3 sessões ociosas · ~1,2 GB')
   })
   it('idleSummaryText never prints "session(s)"', () => {
     expect(idleSummaryText(1, null, 'en')).toBe('1 session')
@@ -112,5 +114,30 @@ describe('bannerVisible', () => {
     expect(bannerVisible({ candidates: 2, modalOpen: true, snoozedUntil: null, now: 10 })).toBe(false)
     expect(bannerVisible({ candidates: 2, modalOpen: false, snoozedUntil: 20, now: 10 })).toBe(false)
     expect(bannerVisible({ candidates: 2, modalOpen: false, snoozedUntil: 5, now: 10 })).toBe(true)
+  })
+  it('with no candidateKeys/dismissedKeys given, dismissal plays no part (back-compat)', () => {
+    expect(bannerVisible({ candidates: 2, modalOpen: false, snoozedUntil: null, now: 10 })).toBe(true)
+  })
+  it('a batch entirely inside dismissedKeys stays hidden', () => {
+    expect(bannerVisible({
+      candidates: 2, modalOpen: false, snoozedUntil: null, now: 10,
+      candidateKeys: ['a', 'b'], dismissedKeys: new Set(['a', 'b']),
+    })).toBe(false)
+  })
+  it('a session outside the dismissed set makes it visible again', () => {
+    expect(bannerVisible({
+      candidates: 3, modalOpen: false, snoozedUntil: null, now: 10,
+      candidateKeys: ['a', 'b', 'c'], dismissedKeys: new Set(['a', 'b']),
+    })).toBe(true)
+  })
+  it('modal-open and snooze still win over dismissal state', () => {
+    expect(bannerVisible({
+      candidates: 2, modalOpen: true, snoozedUntil: null, now: 10,
+      candidateKeys: ['x'], dismissedKeys: new Set(),
+    })).toBe(false)
+    expect(bannerVisible({
+      candidates: 2, modalOpen: false, snoozedUntil: 20, now: 10,
+      candidateKeys: ['x'], dismissedKeys: new Set(),
+    })).toBe(false)
   })
 })

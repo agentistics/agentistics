@@ -38,6 +38,7 @@ import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
 import { SessionPickModal } from '../sessions/SessionPickModal'
+import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { buildPickRows } from '../../lib/sessionPick'
 import { rowMenuEntries, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -850,6 +851,12 @@ export function SessionsAside({
             </div>
           </div>
         )}
+
+        {/* THE IDLE-REVIEW CARD — right above Groups (where "File & end" would put a session), so
+            the offer sits beside the thing it acts on. See `IdleReviewCard.tsx`'s own header for
+            why mounting it HERE, rather than in `SessionsPage.tsx`, is what covers the desktop
+            aside and the mobile list with the one change: this component is both. */}
+        <IdleReviewCard lang={lang} tap={tap} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above
