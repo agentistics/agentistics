@@ -79,13 +79,116 @@ Order matters, and every step is where it is for a reason
 | 4 | **Rate limiting** | before any expensive work, so an unauthenticated caller cannot spend CPU |
 | 5 | **CSRF** | before auth, so a cross-site request is refused without touching the session |
 | 6 | **Capability guard** | before auth, so an exposed instance does not reveal whether the caller is authenticated |
-| 7 | **Auth** — session cookie → principal | deny-by-default: everything under `/api` outside `AUTH_PUBLIC` |
-| 8 | **Role** — owner-only admin paths | includes nested detail routes |
-| 9 | **MFA enrolment** gate | a `public` owner without a second factor reaches only enrolment |
-| 10 | **Step-up** | destructive operations need proof of presence, not just of identity |
-| 11 | Handler | per-resource authority (tags by source, machines by ownership) |
-| 12 | **Team scoping** of the response | a principal never receives another team's rows |
-| 13 | Security headers stamped on the way out | in a wrapper, so a new route cannot forget them |
+| 7 | **Host allowlist** (`localShell` routes only, HTTP and WS upgrades alike) | closes DNS rebinding before a host-power route dispatches — see §4a for what it does and does not close |
+| 8 | **Auth** — session cookie → principal | deny-by-default: everything under `/api` outside `AUTH_PUBLIC` |
+| 9 | **Role** — owner-only admin paths | includes nested detail routes |
+| 10 | **MFA enrolment** gate | a `public` owner without a second factor reaches only enrolment |
+| 11 | **Step-up** | destructive operations need proof of presence, not just of identity |
+| 12 | Handler | per-resource authority (tags by source, machines by ownership) |
+| 13 | **Team scoping** of the response | a principal never receives another team's rows |
+| 14 | Security headers stamped on the way out | in a wrapper, so a new route cannot forget them |
+
+## 4a. S-1 — the local server binds every interface: what the Host allowlist closes, and what it leaves open
+
+**The finding.** HIGH, pre-existing, found 2026-09-27 by the UI.4 security review of the
+provider-key settings. The native `agentop server` binds `0.0.0.0` unconditionally, on both ports
+(`index.ts`, `Bun.serve({ hostname: '0.0.0.0', … })`), regardless of profile — while `exposure.ts`'s
+own `local` profile is documented as "solo machine on 127.0.0.1" and grants it full host power
+(`localShell`, `localChat`, `localTranscripts`, `localProcesses`, `mcpAdmin`) with no authentication
+at all. Nothing in the request pipeline checked the *Host* header, and the one place that came
+close — `wsInputOriginOk` (`sessions/input-protocol.ts`), guarding the fleet-input and utility-shell
+WebSocket upgrades — compares **Origin against Host**, never either one against the machine's own
+identity. So every `localShell` route — the utility shell, the fleet input/screens sockets,
+`/api/provider`, `/api/exec`, `/api/tasks`, `/api/backup`, and everything else §6's capability-guard
+row lists — answered two callers it was never meant to:
+
+1. **DNS rebinding.** A page served from `attacker.example`, whose name is re-pointed at `127.0.0.1`
+   after the browser has already loaded it, is same-origin with itself: the browser sends both
+   `Origin: https://attacker.example` and `Host: attacker.example`, and the Origin-vs-Host
+   comparison above passes them as a matching pair.
+2. **Any peer that can already reach the port** — the LAN, and the tailnet (the machine holds a
+   `100.x` address) — since binding every interface serves the same routes to them, unauthenticated,
+   with no Host check at all.
+
+`agentop doctor` never caught this: its bind check reads `BIND_IP`, which only the Docker
+deployment sets. The native binary's bind is not env-configured, so the check judged a variable the
+native server never reads, on the one deployment it should have flagged.
+
+**The gate.** `host-allow.ts`'s `hostGate` is called from ONE place in the pipeline — step 7 above,
+right after the capability guard and before any route handler — so it covers HTTP routes and the
+WebSocket upgrades alike; a socket is refused at the same point an ordinary request would be, before
+either reaches a handler. It applies only to the requests `capability-guard.ts` already classes as
+`localShell`, walked from that same table rather than a second list — a `localShell` route added
+later is covered by having been added, the guarantee `capability-guard.ts` already gives itself for
+everything else. It is skipped entirely wherever the profile has revoked `localShell`
+(`lan`/`public` without the opt-in): those requests still get the existing 403, unchanged.
+
+A request's Host passes when it is, on one of the server's own two ports:
+- a loopback name or address — `localhost`, `127.0.0.0/8`, `::1`;
+- the machine's own hostname, or `<hostname>.local`;
+- the machine's MagicDNS name, full (`<machine>.<tailnet>.ts.net`) and short (`<machine>`) — read
+  from `tailscale status --json` (`Self.DNSName`) at startup and on the same refresh timer, because
+  it is not the OS hostname (under WSL the kernel reports the Windows machine's name). Tailscale
+  absent, stopped or answering something unreadable adds no names, keeps the last known ones, and is
+  logged once;
+- any of the machine's own interface addresses, the tailnet included — read from the OS at startup
+  and refreshed on a timer, **never resolved per request**;
+- an exact entry in `AGENTISTICS_ALLOWED_ORIGINS`, or the Tailscale Serve secure origin the machine
+  detects for itself (`secure-origin.ts`) — that origin exactly, and its name on the server's own
+  ports too.
+
+Anything else is refused with `421 Misdirected Request`, naming the refused Host and the env var that
+would allow it. The refusal is audited (`host.misdirected`, path and refused Host). The ports rule is
+real: a MagicDNS name (`http://<machine>:47292`, `http://<machine>.<tailnet>.ts.net:47292`) passes
+on the server's own ports and is refused on any other, exactly like the hostname — and only while
+Tailscale reports it, so on a machine where `tailscale status` cannot be read, address the machine by
+its tailnet IP or add the origin to the allowlist. A request with no Host at all (or an empty one, or
+one that does not form a readable URL) never reaches the gate: it is answered `400` on every route,
+before anything parses its URL, with a JSON body naming the problem (`missing_host` /
+`bad_request_target`) — it used to surface as a `500`, because Bun builds the request URL out of the
+Host and the first parse threw. In dev (`bun run dev`), Vite proxies `/api` with
+`changeOrigin: true`, so the server sees Vite's rewritten Host and the gate cannot see rebinding
+aimed at the Vite port — a dev-only gap.
+
+**How to allow a name on purpose.** Add the exact `scheme://host:port` to
+`AGENTISTICS_ALLOWED_ORIGINS` (comma-separated, same variable CORS and CSRF already read) and
+restart `agentop server` — the list is read at startup, not polled.
+
+**What it closes.** DNS rebinding specifically: the attacker's page's Host is its own domain, never
+one the gate accepts, so it is refused regardless of which Origin the browser sends alongside it.
+
+**What it explicitly does not close:**
+- **Reachability.** The gate decides which *Host* is acceptable, not who may send a request with
+  one. A phone on the tailnet addressing the machine by its tailnet name or address keeps
+  working — that Host is legitimately the machine's own — and that is also exactly why any peer that
+  can already reach the port and sends one of the machine's own names passes unchanged. For a
+  non-browser client this is trivial: it sends whatever Host it likes. The gate closes the one thing
+  a page running in a stranger's browser cannot forge — a Host equal to the machine's own name — and
+  nothing about who is allowed to hold that name in the first place.
+- **The softer capabilities.** `localChat`, `localTranscripts`, `localProcesses` and `mcpAdmin` are
+  not `localShell`; a route classed under one of them does not ride this gate.
+
+**The doctor check.** `agentop doctor` (and `--exposed`) gains a `native-bind` check that reads the native
+server's ACTUAL listening sockets — `/proc/net/tcp{,6}` on Linux, `lsof` on macOS — instead of
+`BIND_IP`, which the native binary never sets.
+
+| Bind | Profile | Verdict |
+|---|---|---|
+| loopback only | any | pass |
+| wildcard / non-loopback | `local` | **warn** — names S-1 and decision (b) below |
+| wildcard / non-loopback | `lan` | pass — intended |
+| wildcard / non-loopback | the strict `--exposed` bar (`public`) | **fail**, unless loopback |
+| unreadable | any | **fail** — never a reassuring pass |
+| nothing listening | any | warn — nothing could be verified |
+
+**Open — decision (b), not yet shipped.** Whether a non-loopback peer must additionally
+authenticate (pairing, or a token), or whether `local` instead binds `127.0.0.1` and a wider bind
+becomes an explicit opt-in, is pending with the product owner. Until it is decided, a LAN or
+tailnet peer that can reach the port uses every `localShell` route with no authentication at
+all — including replacing a stored provider key and base URL. (Closing THAT specific exposure — to
+a new origin, and to a cross-site request — is F-1/F-2 in the provider routes, not this finding.)
+The Host allowlist above narrows WHICH Host such a peer must present; it does not decide whether
+that peer should be trusted with `localShell` at all.
 
 ## 5. Identity and sessions
 
@@ -135,6 +238,7 @@ test asserting exactly that (`auth-principal.test.ts`, `stepup.test.ts`).
 |---|---|---|
 | **Exposure profile** (`exposure.ts`) | decides whether host-power routes exist at all; `public` revokes them permanently and ignores the opt-in flag; an unknown value fails closed | protect you from marking a public instance `local` — that env value is the trust anchor, which is why `doctor --exposed` re-checks against the strict bar |
 | **Capability guard** (`capability-guard.ts`) | 403s `/api/exec`, `/api/chat-tty`, the whole `/api/fleet` prefix, host transcript readers and MCP admin before auth | cover a route nobody registered — an unregistered route is assumed harmless |
+| **Host allowlist** (`host-allow.ts`, §4a) | 421s a `localShell` request (HTTP or WS) whose Host is not the machine's own name/address or an allowlisted origin, closing DNS rebinding | decide who may reach the port — any peer already on the LAN/tailnet passes by sending one of the machine's own names, and non-`localShell` capabilities ride no such gate |
 | **Rate limiting** (`rate-limit.ts`) | 5 logins / 15 min per IP with doubling backoff; a soft per-account bucket checked before the argon2 verify | survive a process restart, or coordinate across replicas — the edge limiter is the front line |
 | **Password policy** (`@agentistics/core`, re-exported by `password-policy.ts`) | 8-char floor, one uppercase, one symbol, 1024 ceiling | a length floor beats composition rules (NIST SP 800-63B) — this is a deliberate product choice, taken knowing that; there is no breach-corpus or common-password check, so `Agentistics@123!` is accepted |
 | **TOTP** (`totp.ts`) | RFC 6238 second factor with single-use, hashed recovery codes | help if the authenticator device itself is compromised |

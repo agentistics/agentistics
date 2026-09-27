@@ -10,6 +10,7 @@
  */
 import type { Capabilities, ExposureProfile } from './exposure'
 import { validateSecret } from './secret-store'
+import { isLoopbackAddress, type NativeBindResult, type NativeListener } from './native-bind'
 
 export interface Check {
   id: string
@@ -34,6 +35,15 @@ export interface PreflightInput {
   /** True when the account/token lookups could not run. Their checks then report "unknown"
    *  rather than a reassuring pass — a control you did not verify is not a control. */
   dbUnavailable?: boolean
+  /**
+   * What the NATIVE `agentop server` process is actually listening on, for `ports` (config.ts's
+   * PORT and WEB_PORT) — read independently of `bindIp`/`BIND_IP`, since `index.ts` hardcodes
+   * `hostname: '0.0.0.0'` today regardless of the exposure profile (security finding S-1; see
+   * `native-bind.ts`'s header). Optional so existing callers and tests keep compiling unchanged:
+   * an ABSENT field means "not asked", so the check below is SKIPPED entirely rather than
+   * rendered as a pass — the `bind-ip` check above already covers `BIND_IP` on its own.
+   */
+  nativeBind?: { ports: number[]; result: NativeBindResult }
 }
 
 export function runPreflight(input: PreflightInput): Check[] {
@@ -77,6 +87,60 @@ export function runPreflight(input: PreflightInput): Check[] {
     status: !strict || loopback ? 'pass' : 'fail',
     detail: `BIND_IP=${input.bindIp}. Behind a tunnel this must be 127.0.0.1 — the tunnel connects locally, so binding wider only adds a way in that bypasses it.`,
   })
+
+  // Absent when the caller has not wired up native-bind.ts yet (or the platform cannot read it
+  // and the caller chose not to ask) — a SKIPPED check, never a passed one.
+  if (input.nativeBind) {
+    const { ports, result } = input.nativeBind
+    const label = "The native server's actual listening addresses (read from the OS, not BIND_IP)"
+    const fmt = (rows: NativeListener[]) => rows.map(l => `${l.address}:${l.port}`).join(', ')
+    if (result.kind === 'unreadable') {
+      checks.push({
+        id: 'native-bind',
+        label,
+        status: 'fail',
+        detail: `Could not read the native server's real listening addresses (${result.reason}). A check that cannot verify the bind reports fail, never a reassuring pass.`,
+      })
+    } else if (result.listeners.length === 0) {
+      checks.push({
+        id: 'native-bind',
+        label,
+        status: 'warn',
+        detail: `No native agentistics server is listening on port(s) ${ports.join(', ')}, so the native bind was not checked. This is a readable fact, not a verified guarantee — it proves nothing while the server is not running.`,
+      })
+    } else {
+      const wide = result.listeners.filter(l => !isLoopbackAddress(l.address))
+      if (wide.length === 0) {
+        checks.push({
+          id: 'native-bind',
+          label,
+          status: 'pass',
+          detail: `Listening on loopback only: ${fmt(result.listeners)}.`,
+        })
+      } else if (strict) {
+        checks.push({
+          id: 'native-bind',
+          label,
+          status: 'fail',
+          detail: `Listening on ${fmt(wide)} — not loopback-only. Behind a tunnel this must be 127.0.0.1/::1, exactly like BIND_IP above: binding wider only adds a way in that bypasses it.`,
+        })
+      } else if (input.profile === 'lan') {
+        checks.push({
+          id: 'native-bind',
+          label,
+          status: 'pass',
+          detail: `Listening on ${fmt(wide)} — a wide bind is what the \`lan\` profile intends.`,
+        })
+      } else {
+        checks.push({
+          id: 'native-bind',
+          label,
+          status: 'warn',
+          detail: `The native server listens on ${fmt(wide)} — every interface, LAN and tailnet included — on the \`local\` profile, which is described as 127.0.0.1. Host-header checking stops DNS rebinding, but any peer that can reach the port still gets the host-power routes without authentication (security finding S-1). Whether such a peer must authenticate, or whether \`local\` binds 127.0.0.1, is decision (b), pending with the owner.`,
+        })
+      }
+    }
+  }
 
   checks.push({
     id: 'trust-proxy',

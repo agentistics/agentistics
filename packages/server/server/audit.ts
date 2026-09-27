@@ -33,6 +33,9 @@ export type AuditAction =
   | 'repo.register' | 'repo.unregister'
   | 'config.update' | 'bootstrap.consume'
   | 'capability.denied' | 'authz.denied' | 'rate.blocked'
+  // A `localShell` route reached by a Host that does not name this machine — the signature of a DNS
+  // rebinding attempt (host-allow.ts). Carries the path and the refused Host, never a credential.
+  | 'host.misdirected'
   | 'stepup.granted' | 'stepup.failure' | 'stepup.missing'
   // A live-terminal WRITE channel was opened (a keyboard attached to a session) or refused — ONE
   // entry per channel, never per keystroke. `fleet.input.denied` records a rejected WS upgrade
