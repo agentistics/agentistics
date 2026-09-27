@@ -10,11 +10,33 @@
  *
  * See docs/superpowers/specs/2026-09-25-runtime-b1-provider.md §6.3.2.
  *
+ * C1.1 moved most of this directory's provider modules into the standalone `@agentistics/runtime`
+ * package (`packages/runtime/src/provider/**`) — `credentials.ts`, `credential-plan.ts` and this
+ * test STAY here (they are the host's own key storage; see `runtime-boundary.lint.test.ts` for the
+ * companion rule that the runtime may never import them back). The walk below now ALSO covers
+ * `packages/runtime/src`, so a moved module stays guarded at its new address rather than quietly
+ * dropping out of this test's coverage the moment it left `packages/server`.
+ *
  * HOLDERS — the only files that may ever hold the key's value in a variable:
- *   - provider/credentials.ts        (reads/writes the file; wraps in a handle)
- *   - provider/credential-plan.ts    (validates a string it is given; not a storage holder, but
- *                                      receives the value, so it is listed as one for the guard)
- *   - provider/anthropic/client.ts   (the SDK needs a string — unwraps the handle once)
+ *   - provider/credentials.ts               (reads/writes the file; wraps in a handle)
+ *   - provider/credential-plan.ts           (validates a string it is given; not a storage holder,
+ *                                             but receives the value, so it is listed as one)
+ *   - runtime src/provider/anthropic/client.ts   (the SDK needs a string — unwraps the handle once;
+ *                                             moved from this directory's own `anthropic/client.ts`)
+ *   - runtime src/provider/credential.ts    (NEW, C1.2: types only — declares the runtime's own
+ *                                             `CredentialHandle` interface, including its
+ *                                             `reveal(): string` method signature. It holds no
+ *                                             runtime VALUE — nothing in it can produce a real key —
+ *                                             but its source text literally spells the Guard 1
+ *                                             needle `reveal(` as that method's name, so a plain
+ *                                             non-holder scan would trip on the type declaration
+ *                                             itself. Listed as a holder for exactly that reason,
+ *                                             the same way `credential-plan.ts` is: it receives/
+ *                                             names the shape of the value without storing one.)
+ *   - runtime src/provider/openai-compatible/client.ts  (B5a.1: builds the Chat Completions bearer
+ *                                             header — the one place that endpoint's key is unwrapped)
+ *   - runtime src/provider/openai-compatible/models.ts  (B5a.3: its `list()` receives the key as a
+ *                                             STRING by contract D5 and builds the same header)
  * `cli-provider.ts` receives the typed value from the prompt and hands it to `credentials.ts`; it
  * is not a HOLDER (Guard 1 does not apply to it — its `PROVIDER_KEYS_DIR` doc mention is fine
  * precisely because Guard 1 never scans it), but it is host-facing provider code, so Guards 2 and
@@ -53,6 +75,18 @@ export function importsRuntimeFromCredentials(src: string): boolean {
 }
 
 /**
+ * True when `src` reads one of `names` out of `process.env` as CODE — `process.env.X`,
+ * `process.env['X']` / `["X"]`, or a destructure `{ X } = process.env` / `{ X: y } = process.env`.
+ * This is Guard 3 for a DEFINER (below): a module that legitimately reads the environment for other
+ * settings may still never read a CREDENTIAL variable out of it.
+ */
+export function readsCredentialEnv(src: string, names: readonly string[]): string[] {
+  return names.filter(n =>
+    new RegExp(`process\\.env(?:\\.${n}\\b|\\[\\s*['"\`]${n}['"\`]\\s*\\])`).test(src)
+    || new RegExp(`\\{[^}]*\\b${n}\\b[^}]*\\}\\s*=\\s*process\\.env\\b`).test(src))
+}
+
+/**
  * True when `src` reads `process.env` as CODE — `process.env.X` / `process.env['X']` — never when
  * the phrase merely appears inside backtick-quoted prose (a doc comment saying a module does NOT
  * read it is not a violation; stripping backtick spans first is what tells the two apart).
@@ -82,17 +116,84 @@ const PROVIDER_DIR = join(S_ROOT, 'provider')
 const CORE_PROVIDER_DIR = join(S_ROOT, '../../core/src/provider')
 const JOURNAL_DIR = join(S_ROOT, 'journal')
 const CLI_PROVIDER = join(S_ROOT, 'cli-provider.ts')
+// C1.1 moved the bulk of the provider layer here; walked too, so a moved module stays covered.
+const RUNTIME_SRC_DIR = join(S_ROOT, '../../runtime/src')
 
-const WALKED = [...walk(PROVIDER_DIR), ...walk(CORE_PROVIDER_DIR), ...walk(JOURNAL_DIR)]
+const WALKED = [
+  ...walk(PROVIDER_DIR),
+  ...walk(CORE_PROVIDER_DIR),
+  ...walk(JOURNAL_DIR),
+  ...walk(RUNTIME_SRC_DIR),
+  // B5a.3 — the `models` verb. A NON-holder under Guard 1 in full: it passes the endpoint's handle
+  // on unrevealed, so it must never spell `reveal(` or any key-carrying name.
+  join(S_ROOT, 'cli-provider-models.ts'),
+]
 
 const HOLDERS = [
   join(S_ROOT, 'provider/credentials.ts'),
   join(S_ROOT, 'provider/credential-plan.ts'),
-  join(S_ROOT, 'provider/anthropic/client.ts'),
+  join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'),
+  // B5a.1 — unwraps an endpoint's handle into the Chat Completions bearer header, once per call.
+  join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'),
+  // B5a.3 — the model lister reveals the endpoint's handle inline into its one request's header.
+  join(RUNTIME_SRC_DIR, 'provider/openai-compatible/models.ts'),
+  // NEW, C1.2 — types-only, but spells `reveal(` as its handle interface's method name. See the
+  // "HOLDERS" doc block above for why it is listed rather than exempted.
+  join(RUNTIME_SRC_DIR, 'provider/credential.ts'),
 ]
+
+// NOT a holder — see "GUARD 1 EXEMPTION" above. Excluded from Guard 1 only; Guards 2/3 still run
+// over it via GUARD_2_3_FILES.
 
 const NON_HOLDERS = WALKED.filter(f => !HOLDERS.includes(f))
 const GUARD_2_3_FILES = [...WALKED, CLI_PROVIDER]
+
+// ── the DEFINERS (B1.8 sweep, LOW c) ────────────────────────────────────────────────────────────
+//
+// The files that DEFINE what the guards forbid were never walked: `server/config.ts` (the key
+// directory, the key-file function, the subscription-credential paths) and `core/src/providers.ts`
+// (the `ProviderId` union). They are walked now. A guard applies to a definer IN FULL unless the
+// definer provably cannot satisfy it BY DEFINITION — and then ONLY the needles it defines are
+// exempt, each named below with its reason, and a test fails if an exemption stops being used (a
+// stale exemption is a hole nobody can see).
+
+interface Definer {
+  file: string
+  /** Guard 1 needles this file may spell, and why. Empty = Guard 1 applies in full. */
+  guard1Defines: Record<string, string>
+  /** Guard 2 needles this file may spell, and why. Empty = Guard 2 applies in full. */
+  guard2Defines: Record<string, string>
+  /** Guard 3 (ANY `process.env` read) cannot apply — the reason; `null` = it applies in full. Guard
+   *  3b (no CREDENTIAL variable read) applies to every definer regardless. */
+  guard3Exempt: string | null
+}
+
+const DEFINERS: readonly Definer[] = [
+  {
+    file: join(S_ROOT, 'config.ts'),
+    guard1Defines: {
+      ['PROVIDER_KEYS' + '_DIR']: 'config.ts DEFINES the key directory constant every holder reads',
+      ['provider' + '-keys']: "the directory NAME inside that constant's definition",
+      ['provider' + 'KeyFile']: 'config.ts DEFINES the one function that turns a provider id into a key path',
+    },
+    guard2Defines: {
+      ['CLAUDE_CREDENTIALS' + '_FILE']: 'config.ts DEFINES the constant (billing-detect reads it; no provider module may)',
+      ['.credentials' + '.json']: "the file name inside that constant's definition",
+      ['CLAUDE_JSON' + '_FILE']: 'config.ts DEFINES the constant (billing-detect reads it)',
+      ['CLAUDE' + '_DIR']: 'config.ts DEFINES the harness data root every adapter reads',
+      ['auth' + '.json']: 'config.ts DEFINES the Codex auth-file path (CODEX_AUTH_FILE) billing-detect reads',
+      ['billing' + '-detect']: "config.ts's doc comments name the module its billing paths exist for",
+    },
+    guard3Exempt: 'config.ts is WHERE the environment is read, for dozens of non-credential settings '
+      + '(ports, directories, feature flags) — its job, not a leak. Guard 3b still forbids a credential variable.',
+  },
+  {
+    file: join(S_ROOT, '../../core/src/providers.ts'),
+    guard1Defines: {},
+    guard2Defines: {},
+    guard3Exempt: null,
+  },
+]
 
 // ── needles, assembled from fragments so this file never spells the thing it forbids ───────────
 
@@ -108,6 +209,8 @@ const GUARD1_CS: readonly string[] = [
 const GUARD1_CI: readonly string[] = [
   'x-' + 'api' + '-key',
   'author' + 'ization',
+  // B5a — the Chat Completions credential rides a bearer header; only a holder may build one.
+  'bear' + 'er',
 ]
 
 /** billing-detect.test.ts's FORBIDDEN list, rebuilt with the same fragment technique. */
@@ -144,6 +247,19 @@ const GUARD2: readonly string[] = [...BILLING_FORBIDDEN, ...GUARD2_EXTRA]
 /** None in B1 — a future non-secret variable (a feature flag name, say) would be named here. */
 const ENV_ALLOWLIST: readonly string[] = []
 
+/** Guard 3b — environment variables that hold (or redirect) a provider CREDENTIAL. No provider module
+ *  and no definer may read one: the Anthropic pair (B1) plus the variables the OpenAI SDK family and
+ *  the B5a endpoints fall back to — a base URL counts, because redirecting the host a key is sent to
+ *  is as good as reading the key. */
+const CREDENTIAL_ENV_NAMES: readonly string[] = [
+  'ANTHROPIC_API' + '_KEY',
+  'ANTHROPIC_BASE' + '_URL',
+  'OPENAI_API' + '_KEY',
+  'OPENAI_BASE' + '_URL',
+  'OPENROUTER_API' + '_KEY',
+  'DEEPSEEK_API' + '_KEY',
+]
+
 // ── a clean fixture the self-tests can measure against ─────────────────────────────────────────
 
 const CLEAN_SOURCE = `
@@ -160,6 +276,22 @@ describe('provider-secrets.lint — a provider API key never leaves its holders'
     expect(WALKED).toContain(join(S_ROOT, 'provider/credentials.ts'))
     expect(WALKED).toContain(join(S_ROOT, 'provider/credential-plan.ts'))
     expect(existsSync(CLI_PROVIDER)).toBe(true)
+  })
+
+  test('non-vacuity: the B5a client is walked AND listed as a holder', () => {
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'))
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/raw.ts'))
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'))
+  })
+
+  test('non-vacuity: the walk also reaches the moved runtime modules, not only this directory', () => {
+    // Without this, a typo in RUNTIME_SRC_DIR (or the package moving again) would silently turn
+    // Guards 1-3 into checks that scan nothing under packages/runtime while staying green.
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'))
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/emit.ts'))
+    expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/credential.ts'))
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/anthropic/client.ts'))
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/credential.ts'))
   })
 
   test('self-test: Guard 1 needles each trip alone, and a clean source trips nothing', () => {
@@ -207,6 +339,47 @@ describe('provider-secrets.lint — a provider API key never leaves its holders'
     for (const file of GUARD_2_3_FILES) {
       const src = readFileSync(file, 'utf8')
       expect({ file, hits: violations(src, GUARD2) }).toEqual({ file, hits: [] })
+    }
+  })
+
+  test('self-test: Guard 3b catches every read shape of a credential variable, and only those', () => {
+    const k = 'OPENAI_API' + '_KEY'
+    expect(readsCredentialEnv(`const a = process.env.${k}`, CREDENTIAL_ENV_NAMES)).toEqual([k])
+    expect(readsCredentialEnv(`const a = process.env['${k}']`, CREDENTIAL_ENV_NAMES)).toEqual([k])
+    expect(readsCredentialEnv(`const { ${k}: a } = process.env`, CREDENTIAL_ENV_NAMES)).toEqual([k])
+    expect(readsCredentialEnv(`const a = process.env.${k}_OLD`, CREDENTIAL_ENV_NAMES)).toEqual([])
+    expect(readsCredentialEnv('const a = process.env.PORT', CREDENTIAL_ENV_NAMES)).toEqual([])
+    expect(readsCredentialEnv(`// never reads ${k}`, CREDENTIAL_ENV_NAMES)).toEqual([])
+  })
+
+  test('non-vacuity: the definers are walked, and every exemption is still used', () => {
+    for (const d of DEFINERS) {
+      expect(existsSync(d.file)).toBe(true)
+      const src = readFileSync(d.file, 'utf8')
+      for (const needle of [...Object.keys(d.guard1Defines), ...Object.keys(d.guard2Defines)]) {
+        expect({ file: d.file, needle, used: src.includes(needle) }).toEqual({ file: d.file, needle, used: true })
+      }
+    }
+  })
+
+  test('Guards 1-3 over the DEFINERS, minus only the needles each one defines', () => {
+    for (const d of DEFINERS) {
+      const src = readFileSync(d.file, 'utf8')
+      const g1 = GUARD1_CS.filter(n => !(n in d.guard1Defines))
+      const g2 = GUARD2.filter(n => !(n in d.guard2Defines))
+      expect({ file: d.file, cs: violations(src, g1) }).toEqual({ file: d.file, cs: [] })
+      expect({ file: d.file, ci: violationsCI(src, GUARD1_CI) }).toEqual({ file: d.file, ci: [] })
+      expect({ file: d.file, g2: violations(src, g2) }).toEqual({ file: d.file, g2: [] })
+      if (d.guard3Exempt === null) {
+        expect({ file: d.file, hasRawRead: usesProcessEnv(src) }).toEqual({ file: d.file, hasRawRead: false })
+      }
+    }
+  })
+
+  test('Guard 3b: no provider module and no definer reads a credential variable from the environment', () => {
+    for (const file of [...GUARD_2_3_FILES, ...DEFINERS.map(d => d.file)]) {
+      const src = readFileSync(file, 'utf8')
+      expect({ file, reads: readsCredentialEnv(src, CREDENTIAL_ENV_NAMES) }).toEqual({ file, reads: [] })
     }
   })
 

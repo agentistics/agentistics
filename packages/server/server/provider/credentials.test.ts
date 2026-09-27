@@ -289,3 +289,107 @@ describe('§6.4 — a subscription credential lying around is never touched, and
     },
   )
 })
+
+// ── B5a — endpoint records ──────────────────────────────────────────────────────────────────────
+
+import {
+  readEndpointCredential,
+  resolveCredentialRef,
+  storeEndpointCredential,
+} from './credentials.ts'
+
+const FAKE_EP_KEY = 'sk-or-' + 'test' + 'z'.repeat(40)
+
+describe('storeEndpointCredential / readEndpointCredential', () => {
+  test('writes 0600 in a 0700 dir, with the base URL beside the key, atomically (no .tmp left)', async () => {
+    await withTempDir(async (dir) => {
+      const r = await storeEndpointCredential('openrouter', { baseUrl: 'https://openrouter.ai/api/v1/', key: FAKE_EP_KEY }, { dir })
+      expect(r.ok).toBe(true)
+      const path = providerKeyFile('openrouter', dir)
+      expect(await modeOf(path)).toBe(0o600)
+      expect(await modeOf(dir)).toBe(0o700)
+      expect((await readdir(dir)).filter(n => n.startsWith('.tmp-'))).toEqual([])
+      const doc = JSON.parse(await readFile(path, 'utf-8'))
+      expect(doc).toMatchObject({ provider: 'openai-compatible', endpoint: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1' })
+      const read = await readEndpointCredential('openrouter', { dir })
+      if (!read.ok) throw new Error('expected ok')
+      expect(read.baseUrl).toBe('https://openrouter.ai/api/v1')
+      expect(read.handle?.fingerprint).toBe(fingerprintOf(FAKE_EP_KEY))
+    })
+  })
+
+  test('refuses a bad base URL or a missing key before touching disk; keyless only for ollama', async () => {
+    await withTempDir(async (dir) => {
+      expect(await storeEndpointCredential('openai', { baseUrl: 'http://evil.example/v1', key: FAKE_EP_KEY }, { dir }))
+        .toEqual({ ok: false, reason: 'invalid-base-url', baseUrl: 'insecure-remote' })
+      expect(await storeEndpointCredential('openai', { baseUrl: 'https://api.openai.com/v1', key: null }, { dir }))
+        .toEqual({ ok: false, reason: 'key-required' })
+      expect(await readdir(dir)).toEqual([])
+      const keyless = await storeEndpointCredential('ollama', { baseUrl: 'http://localhost:11434/v1', key: null }, { dir })
+      expect(keyless.ok).toBe(true)
+      const read = await readEndpointCredential('ollama', { dir })
+      expect(read.ok && read.handle === null).toBe(true)
+    })
+  })
+
+  test('an existing record is not replaced without replace; a failed rename leaves the old one intact', async () => {
+    await withTempDir(async (dir) => {
+      await storeEndpointCredential('openai', { baseUrl: 'https://api.openai.com/v1', key: FAKE_EP_KEY }, { dir })
+      const again = await storeEndpointCredential('openai', { baseUrl: 'https://api.openai.com/v1', key: FAKE_EP_KEY + 'b' }, { dir })
+      expect(again.ok).toBe(false)
+      const crashed = await storeEndpointCredential('openai', { baseUrl: 'https://api.openai.com/v1', key: FAKE_EP_KEY + 'b' }, {
+        dir, replace: true, beforeRename: () => { throw new Error('simulated crash') },
+      })
+      expect(crashed).toEqual({ ok: false, reason: 'write-failed' })
+      const read = await readEndpointCredential('openai', { dir })
+      expect(read.ok && read.handle?.fingerprint).toBe(fingerprintOf(FAKE_EP_KEY))
+      expect((await readdir(dir)).filter(n => n.startsWith('.tmp-'))).toEqual([])
+    })
+  })
+
+  test('a too-open file is refused on the stat alone', async () => {
+    await withTempDir(async (dir) => {
+      await storeEndpointCredential('openai', { baseUrl: 'https://api.openai.com/v1', key: FAKE_EP_KEY }, { dir })
+      await chmod(providerKeyFile('openai', dir), 0o644)
+      expect(await readEndpointCredential('openai', { dir })).toEqual({ ok: false, reason: 'permissions-too-open' })
+      const st = await credentialStatus('openai', { dir })
+      expect(st.state).toBe('permissions-too-open')
+    })
+  })
+
+  test('status shows the base URL, fingerprint and last 4 — never the key', async () => {
+    await withTempDir(async (dir) => {
+      await storeEndpointCredential('deepseek', { baseUrl: 'https://api.deepseek.com/v1', key: FAKE_EP_KEY }, { dir })
+      const st = await credentialStatus('deepseek', { dir })
+      expect(st).toMatchObject({ state: 'present', baseUrl: 'https://api.deepseek.com/v1', fingerprint: fingerprintOf(FAKE_EP_KEY), last4: FAKE_EP_KEY.slice(-4) })
+      expect(JSON.stringify(st)).not.toContain(FAKE_EP_KEY)
+      const removed = await removeCredential('deepseek', { dir })
+      expect(removed).toMatchObject({ removed: true, fingerprint: fingerprintOf(FAKE_EP_KEY) })
+    })
+  })
+})
+
+describe('resolveCredentialRef — the one ref mapping', () => {
+  test('maps {openai-compatible, endpoint}; a keyless endpoint answers absent; mismatched pairs are wrong-provider', async () => {
+    await withTempDir(async (dir) => {
+      await storeEndpointCredential('openrouter', { baseUrl: 'https://openrouter.ai/api/v1', key: FAKE_EP_KEY }, { dir })
+      await storeEndpointCredential('ollama', { baseUrl: 'http://localhost:11434/v1', key: null }, { dir })
+
+      const ok = await resolveCredentialRef({ provider: 'openai-compatible', id: 'openrouter' }, { dir })
+      expect(ok.ok && ok.handle.provider).toBe('openai-compatible')
+      expect(ok.ok && ok.handle.reveal()).toBe(FAKE_EP_KEY)
+
+      expect(await resolveCredentialRef({ provider: 'openai-compatible', id: 'ollama' }, { dir })).toEqual({ ok: false, reason: 'absent' })
+      expect(await resolveCredentialRef({ provider: 'openai-compatible', id: 'deepseek' }, { dir })).toEqual({ ok: false, reason: 'absent' })
+
+      for (const ref of [
+        { provider: 'openai' as const, id: 'openrouter' },
+        { provider: 'openai-compatible' as const, id: 'anthropic' },
+        { provider: 'openai-compatible' as const, id: '../anthropic' },
+        { provider: 'google' as const, id: 'default' },
+      ]) {
+        expect(await resolveCredentialRef(ref, { dir })).toEqual({ ok: false, reason: 'wrong-provider' })
+      }
+    })
+  })
+})

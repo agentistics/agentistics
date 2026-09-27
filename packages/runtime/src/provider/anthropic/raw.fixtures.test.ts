@@ -1,6 +1,6 @@
 /**
  * raw.fixtures.test.ts — `readAnthropicExchange` against the on-disk fixtures in
- * `packages/server/test/fixtures/provider/anthropic/` (spec §15 B1.5, §5.1). No network, no key.
+ * `packages/runtime/test/fixtures/provider/anthropic/` (spec §15 B1.5, §5.1). No network, no key.
  *
  * Two kinds of fixture share the directory, told apart by `meta.provenance`:
  *  - `documented-shape` — hand-built from the shapes research 12 documents; counters are ILLUSTRATIVE

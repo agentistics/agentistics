@@ -199,6 +199,64 @@ stay not-projectable with that reason, and P1 §12.3 stays open for `active_minu
 master §13.2/§14.1 and P1 §12.3. *Rejected:* deriving turns in the projection from gaps between
 `model.invoked` events — that is the idle-gap inference `docs/harness-contract.md` § 1 forbids.
 
+**D23 · The native harness is its own package (2026-09-26).** Decided by the owner directly (task
+t-e1dea7cd6f, comment "OWNER DECISIONS 2026-09-26") — not taken under delegation like D17-D22, and
+held as a blocker: C1 (the package) and B4.4 (the terminal command) both waited for this answer
+before they could be filed. `packages/runtime` (`@agentistics/runtime`) is compiled into the single
+`agentop` binary AND kept publishable on its own; it may **never** import from `packages/server` or
+`packages/web`, and `packages/runtime/runtime-boundary.lint.test.ts` fails the build if it does (the
+`tokens.lint.test.ts` shape). The server only **hosts** it: it holds the credential (0600 files
+under its data dir) and passes in a `CredentialResolver` returning the opaque `CredentialHandle`,
+the capture directory, and a journal sink typed by an interface the runtime owns — no global inside
+the runtime reads a host path. Web, terminal and VS Code are windows onto the same session. What
+moved out of `packages/server/server/provider/`: `client.ts` (`ProviderClient` + registry),
+`anthropic/{client,raw}.ts`, `retry.ts`, `capture.ts`, `emit.ts`. What stayed in the host:
+`credentials.ts`, `credential-plan.ts`, `cli-provider.ts`, `config.ts`. *Reason:* the loop, its
+provider layer and its capture/emit plumbing are the reusable core the brief's objective B asks for
+— a runtime shared by Web, CLI, TUI, VS Code and API — and a package boundary enforced by a lint
+test is the only way "never imports server/web" survives a refactor instead of eroding one import at
+a time; publishing it standalone later needs the boundary to already be true, not retrofitted.
+*Rejected:* keep the loop inside `packages/server` — it can drift into calling server-only globals
+(`config.ts`'s `AGENTISTICS_DATA_DIR`, the credential store) with no lint to catch it, and standalone
+publication would then need this exact same extraction later, under more code depending on the
+violation. Applied by C1 to the new `packages/runtime` package and to the master spec's architecture
+and where-code-goes sections.
+
+**D24 · The terminal command is `agentop code` (2026-09-26).** Decided by the owner directly (task
+t-e1dea7cd6f, comment "OWNER DECISIONS 2026-09-26"). *Rejected:* `agentop chat` — it already names
+the feature that runs Claude/Codex/… inside the web (the Sessions workspace's in-browser chat), and
+reusing it for the terminal front door would make one word name two different surfaces. Applied by
+B4.4 (title only at the time of C1; the terminal entry point itself lands with B4).
+
+**D25 · A human turn CLOSES as an event, and a prompt names the instant its response time is
+measured from.** Taken on 2026-09-26; approved by the leader (688e4a0205) under the owner's
+delegation; the owner may veto. Implemented by A2.8. The canonical vocabulary gains `turn.ended`
+with data `{ close: 'measured' | 'last-line'; durationMs?: number }` — OPTIONAL and additive, not in
+the required set — and `turn.started` gains an optional `previousAssistantAt` (the verbatim
+timestamp of the last assistant line before the prompt). `turn.ended` is emitted only for an OPEN
+turn, where legacy's active-time rule closes it: `'measured'` on Claude's own `system/turn_duration`
+line (its `durationMs` wins), `'last-line'` at the last timestamped line of any kind before the next
+prompt or the end of the transcript. `durationMs` is absent unless the harness stated it (D21), and
+neither shape carries text or a text size (D5). `previousAssistantAt` sits on `turn.started`, not on
+`turn.ended`, because legacy's `lastAssistantTs` persists across turns and a prompt with no open
+turn gets no `turn.ended`, while every prompt gets a `turn.started`. *Reason:* a projection that
+cannot reproduce a legacy figure keeps P1 §12.3 open forever, and a duration the harness measured
+itself is the contract's preferred time source (`docs/harness-contract.md` § 1) — A2.7 measured
+`active_minutes` at 305/477 and `user_response_times` at 381/477 from `turn.started` alone, because
+legacy closes a turn with `turn_duration` or the last line of any kind and measures response time
+from the LAST assistant line while `model.completed` carries the first. `message_hours` stays
+LEGACY-ONLY: legacy takes the hour of every timestamped line, which a stream of turns cannot
+reproduce (measured 1/477). Applied to `canonical/event.ts` (type tests prove both closes, the
+optional duration, the closed union and the absence of text; every pre-D25 literal still compiles)
+and to master §13.2/§14.1. *Rejected:* deriving turn ends from the gaps between `turn.started`
+events — the idle-gap inference `docs/harness-contract.md` § 1 forbids, measured by A2.7 at 305/477
+equal.
+*Measured outcome (A2.8, 2026-09-26):* Claude adapter 1.5.0; the differential over this machine's real
+store (read-only, isolated `AGENTISTICS_DIR`) reads "sessions compared: 484 · with at least one bug row:
+0 · skipped: 2 live". `active_minutes` 484 equal / 0 bug; `user_response_times` 483 equal / 1 explained
+(the known 0-byte transcript, where legacy writes `[]`) / 0 bug; `message_hours` 484 not-projectable, by
+this decision. Both fields left `NOT_PROJECTABLE`; P1 §12.3 is closed.
+
 ## Also decided on 2026-09-25
 
 - **The native context manager** — every decision is in `2026-09-25-runtime-context-manager-design.md`.

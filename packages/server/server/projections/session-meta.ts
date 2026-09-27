@@ -49,9 +49,17 @@
  * Human turns (D22, `turn.started`) follow the same rule under `TURNS_SINCE`: a walk replayed
  * before the adapter emitted them carries none, and `user_message_count: 0` there would claim a
  * session nobody ever typed into. What they make projectable is exactly what legacy derives from the
- * human line ALONE — its count, its timestamp, and `count - 1` interruptions. What legacy derives
- * from EVERY line (the hour of each, the turn's close, the last assistant line before a prompt)
- * stays in `NOT_PROJECTABLE`, each with the fact no event carries.
+ * human line ALONE — its count, its timestamp, and `count - 1` interruptions.
+ *
+ * Turn CLOSES (D25, `turn.ended`) and the last assistant line before each prompt
+ * (`turn.started.previousAssistantAt`) make the two remaining turn figures projectable, under their
+ * own gate `TURN_END_SINCE`: `active_minutes` is `activeMinutesOf` (`activeTime.ts`) — never a second
+ * implementation of the rule — over one `TurnEvent` per exact prompt plus the LAST close of that turn
+ * (a resumed transcript may close one turn several times; the last word wins), and
+ * `user_response_times` is legacy's own arithmetic over `previousAssistantAt`. A walk still open (its
+ * last turn not yet closed) reports no `active_minutes` and says so, like `end_time`. `message_hours`
+ * stays in `NOT_PROJECTABLE` by decision (D25): it is the local hour of EVERY timestamped line, which
+ * an event stream of turns cannot reproduce.
  */
 import {
   absentUsageCounters,
@@ -59,11 +67,13 @@ import {
   sessionCostUSD,
   totalTokens,
   USAGE_COUNTERS,
+  activeMinutesOf,
   type AnyAgentisticsEvent,
   type HarnessId,
   type ModelUsageCounters,
   type Projection,
   type SessionMeta,
+  type TurnEvent,
   type UsageCounter,
 } from '@agentistics/core'
 
@@ -76,19 +86,12 @@ export interface NotProjectable {
 }
 
 /**
- * The human-turn fields `turn.started` (D22) does NOT make projectable. Each names the exact fact
- * legacy reads that no event carries — measured against the real store, not assumed (see the
- * differential's `time` family).
+ * The one turn-family field left legacy-only, BY DECISION (D25, 2026-09-26) rather than for want of
+ * an event: it is a per-LINE fact, and the events are per-turn.
  */
-const EVERY_LINE_HOURS = 'legacy pushes the local hour of EVERY timestamped transcript line (every role, '
-  + 'system lines, attachments, tool results); events exist for a subset of lines, and turn.started '
-  + 'covers the human lines only'
-const TURN_CLOSE = 'legacy closes a turn with Claude\'s own system/turn_duration measurement (which wins) '
-  + 'or else at the LAST timestamped line of any kind before the next prompt; no event carries the '
-  + 'turn_duration value or that last line\'s time'
-const LAST_ASSISTANT_LINE = 'legacy measures from the LAST assistant transcript line before the prompt; '
-  + 'model.completed/model.failed carry the FIRST line of a response (a thinking/text/tool_use response '
-  + 'spans several lines), and an assistant line with no usage emits no event at all'
+const MESSAGE_HOURS = 'legacy takes the local hour of EVERY timestamped transcript line (every role, system '
+  + 'lines, attachments, tool results); an event stream of turns cannot reproduce it (measured: 1 of 477 '
+  + 'sessions equal, A2.7), so it is left legacy-only by decision D25'
 const DAILY_MESSAGES = 'its `messages` counts every user- and assistant-role LINE (tool results included) and '
   + 'its `hours` every timestamped line; events cover a subset of lines. Tokens are in `daily_tokens`'
 
@@ -99,9 +102,7 @@ const DAILY_MESSAGES = 'its `messages` counts every user- and assistant-role LIN
  * here, partial, or stamped from outside the transcript.
  */
 export const NOT_PROJECTABLE: readonly NotProjectable[] = [
-  { field: 'user_response_times', reason: LAST_ASSISTANT_LINE },
-  { field: 'message_hours', reason: EVERY_LINE_HOURS },
-  { field: 'active_minutes', reason: TURN_CLOSE },
+  { field: 'message_hours', reason: MESSAGE_HOURS },
   { field: 'assistant_message_count', reason: 'legacy counts transcript LINES; an event is one billed response' },
   { field: 'user_chars', reason: 'the journal carries no conversation text or text sizes (D5)' },
   { field: 'user_char_messages', reason: 'the journal carries no conversation text or text sizes (D5)' },
@@ -141,6 +142,12 @@ export const COMPACTION_SINCE: Readonly<Record<string, string>> = { claude: '1.1
 
 /** The first adapter version, per source, that records human turns (`turn.started`, D22) as events. */
 export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0' }
+
+/**
+ * The first adapter version, per source, that records turn CLOSES (`turn.ended`) and
+ * `turn.started.previousAssistantAt` (D25) — what `active_minutes` and `user_response_times` need.
+ */
+export const TURN_END_SINCE: Readonly<Record<string, string>> = { claude: '1.5.0' }
 
 // ── The result ──────────────────────────────────────────────────────────────────────────────────
 
@@ -183,6 +190,7 @@ export type ProjectedSessionMeta =
     | 'context_tokens' | 'context_window'
     | 'compact_count' | 'compact_ms' | 'compact_dropped_tokens'
     | 'user_message_count' | 'user_interruptions' | 'user_message_timestamps'
+    | 'active_minutes' | 'user_response_times'
     | 'model' | 'harness'>>
   & {
     /** Four counters per UTC day, the day of the response's first line — legacy `daily[day].*_tokens`. */
@@ -210,7 +218,7 @@ export interface SessionMetaProjection {
 
 // ── State ───────────────────────────────────────────────────────────────────────────────────────
 
-interface OrderKey { ord: number; at: string; id: string }
+export interface OrderKey { ord: number; at: string; id: string }
 
 function compareKey(a: OrderKey, b: OrderKey): number {
   if (a.ord !== b.ord) return a.ord - b.ord
@@ -254,9 +262,18 @@ interface AgentAcc {
   /** Every event of this agent came from an adapter that records compactions. */
   compactionRecorded: boolean
   /** Human turns (`turn.started`), each with its order key; sorted at finish, never on arrival. */
-  turns: { key: OrderKey; at: string; stamped: boolean }[]
+  turns: TurnStart[]
   /** Every event of this agent came from an adapter that records human turns (`TURNS_SINCE`). */
   turnsRecorded: boolean
+  /** Turn closes (`turn.ended`), each with its order key; assigned to their turn at finish. */
+  turnEnds: TurnEnd[]
+  /** Every event of this agent came from an adapter that records turn closes (`TURN_END_SINCE`). */
+  turnEndsRecorded: boolean
+  /**
+   * Some event of this agent proves the transcript carried a line with a usable timestamp — legacy's
+   * `sawTime`, the difference between an `active_minutes` of `0` and an absent one.
+   */
+  sawTime: boolean
   gauge: { key: OrderKey; tokens: number; window: number | undefined } | undefined
   firstModel: { key: OrderKey; model: string } | undefined
 }
@@ -266,7 +283,7 @@ function emptyAcc(): AgentAcc {
     tokens: zero(), byModel: new Map(), daily: new Map(), absentCounters: new Set(), sawTtl: false, ttl1h: 0, ttl5m: 0,
     toolNames: new Map(), linesAdded: 0, linesRemoved: 0, files: new Set(),
     compactCount: 0, compactMs: 0, compactDropped: undefined, compactionRecorded: true,
-    turns: [], turnsRecorded: true,
+    turns: [], turnsRecorded: true, turnEnds: [], turnEndsRecorded: true, sawTime: false,
     gauge: undefined, firstModel: undefined,
   }
 }
@@ -277,6 +294,17 @@ function emptyAcc(): AgentAcc {
 function materialize(u: ModelUsageCounters): Tokens {
   return { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 }
 }
+
+export interface TurnStart { key: OrderKey; at: string; stamped: boolean; previousAssistantAt?: string }
+export interface TurnEnd { key: OrderKey; at: string; close: 'measured' | 'last-line'; durationMs?: number }
+
+/** A time usable as a clock — legacy's `Date.parse` filter on a line's timestamp. */
+const usableTime = (at: string): boolean => Number.isFinite(Date.parse(at))
+
+/** Lifecycle events: each is stamped with a real transcript line's own time, never the replay clock. */
+const LIFECYCLE: ReadonlySet<string> = new Set([
+  'session.started', 'session.ended', 'run.started', 'run.ended', 'agent.started', 'agent.ended',
+])
 
 interface StartedRecord {
   id: string
@@ -346,6 +374,9 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
   const acc = accOf(s, e.agentId)
   if (!recordsSince(COMPACTION_SINCE, e)) acc.compactionRecorded = false
   if (!recordsSince(TURNS_SINCE, e)) acc.turnsRecorded = false
+  if (!recordsSince(TURN_END_SINCE, e)) acc.turnEndsRecorded = false
+  if ((LIFECYCLE.has(e.type) || e.type === 'turn.started' || e.type === 'turn.ended')
+    && e.provenance.confidence !== 'estimated' && usableTime(e.occurredAt)) acc.sawTime = true
 
   switch (e.type) {
     case 'session.started': {
@@ -440,7 +471,17 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       // A human line the harness did not stamp is still a turn (legacy counts it), but its
       // `occurredAt` is the replay's own clock and the emitter says so with `estimated` confidence —
       // legacy leaves such a line out of `user_message_timestamps`, and so does this projection.
-      acc.turns.push({ key: keyOf(e), at: e.occurredAt, stamped: e.provenance.confidence !== 'estimated' })
+      acc.turns.push({
+        key: keyOf(e), at: e.occurredAt, stamped: e.provenance.confidence !== 'estimated',
+        ...(e.data.previousAssistantAt !== undefined ? { previousAssistantAt: e.data.previousAssistantAt } : {}),
+      })
+      return
+    }
+    case 'turn.ended': {
+      acc.turnEnds.push({
+        key: keyOf(e), at: e.occurredAt, close: e.data.close,
+        ...(e.data.durationMs !== undefined ? { durationMs: e.data.durationMs } : {}),
+      })
       return
     }
     case 'context.compacted': {
@@ -474,6 +515,84 @@ function tokensOfModel(t: Tokens, ttl?: { h1: number; m5: number }) {
   }
 }
 
+/**
+ * Source order for turn events, with the one tie that matters settled START-first.
+ *
+ * A `last-line` close is read from the LAST TIMED LINE of its turn (`replay-turns.ts` stamps it with
+ * that line's `sourceRef`), and that line can be the prompt itself: a prompt followed only by untimed
+ * lines closes on its own line, whether the close comes from the next prompt or from the final finish.
+ * The close belongs to the turn that line OPENED, so on a shared line the start sorts first. A close
+ * can never share a line with a LATER prompt — the pre-prompt close is stamped with a line strictly
+ * before it.
+ */
+function compareTurnItems(a: { key: OrderKey; end: boolean }, b: { key: OrderKey; end: boolean }): number {
+  if (a.key.ord === b.key.ord && a.end !== b.end) return a.end ? 1 : -1
+  return compareKey(a.key, b.key)
+}
+
+/**
+ * PURE. Legacy's two turn-time figures, from the main transcript's turn events.
+ *
+ * `active_minutes` is `activeMinutesOf` over the `TurnEvent`s that decide legacy's answer: one
+ * `{userPrompt}` per EXACT prompt with a usable time (an estimated or unparseable one neither opens
+ * nor closes a turn in legacy), then the LAST `turn.ended` before the next such prompt — `measured` as
+ * `{measuredMs}` (the harness's own number wins) and `last-line` as `{turnEnd}` at the last timestamped
+ * line, which is exactly where legacy closes the turn when the next prompt arrives or the file ends. A
+ * resumed transcript can close one turn several times (a finish, then more lines); the last close is
+ * the true one. Everything is ordered by SOURCE line (`keyOf`), never by time: legacy walks transcript
+ * order, and timestamps can go backwards. A transcript with a usable timestamp and no prompt is `0`, as
+ * legacy's `sawTime` makes it; one with none is absent. A turn with no usable close is OPEN — the walk
+ * has not seen its end, and a figure would be a partial sum.
+ *
+ * `user_response_times` is legacy's arithmetic verbatim over each stamped prompt and its
+ * `previousAssistantAt`: `(prompt - lastAssistant) / 1000`, kept rounded when in `[0, 3600)`.
+ */
+export function turnTime(
+  turns: readonly TurnStart[], ends: readonly TurnEnd[], sawTime: boolean,
+): { activeMinutes?: number; open: boolean; responseTimes: number[] } {
+  type Item = { key: OrderKey; end: true; e: TurnEnd } | { key: OrderKey; end: false; t: TurnStart }
+  const items: Item[] = [
+    ...turns.map(t => ({ key: t.key, end: false as const, t })),
+    ...ends.map(e => ({ key: e.key, end: true as const, e })),
+  ].sort(compareTurnItems)
+
+  const responseTimes: number[] = []
+  const events: TurnEvent[] = []
+  let current: TurnStart | null = null
+  let close: TurnEnd | null = null
+  let open = false
+  const flush = (): void => {
+    if (!current) return
+    events.push({ ts: Date.parse(current.at), userPrompt: true })
+    if (close?.close === 'measured' && typeof close.durationMs === 'number'
+      && Number.isFinite(close.durationMs) && close.durationMs >= 0) {
+      events.push({ ts: Date.parse(close.at), measuredMs: close.durationMs })
+    } else if (close?.close === 'last-line' && usableTime(close.at)) {
+      events.push({ ts: Date.parse(close.at), turnEnd: true })
+    } else {
+      open = true
+    }
+  }
+  for (const it of items) {
+    if (it.end) { if (current) close = it.e; continue }
+    const t = it.t
+    if (!t.stamped) continue
+    if (t.previousAssistantAt) {
+      const delta = (new Date(t.at).getTime() - new Date(t.previousAssistantAt).getTime()) / 1000
+      if (delta >= 0 && delta < 3600) responseTimes.push(Math.round(delta))
+    }
+    if (!usableTime(t.at)) continue
+    flush()
+    current = t
+    close = null
+  }
+  flush()
+
+  if (open) return { open: true, responseTimes }
+  const activeMinutes = events.length > 0 ? activeMinutesOf(events) : (sawTime ? 0 : undefined)
+  return { ...(activeMinutes !== undefined ? { activeMinutes } : {}), open: false, responseTimes }
+}
+
 function finish(s: SessionMetaState): SessionMetaProjection {
   const caveats: Caveat[] = []
 
@@ -505,6 +624,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     main.linesAdded += a.linesAdded; main.linesRemoved += a.linesRemoved
     for (const f of a.files) main.files.add(f)
     main.turns.push(...a.turns)
+    main.turnEnds.push(...a.turnEnds)
+    main.sawTime ||= a.sawTime
     main.compactCount += a.compactCount; main.compactMs += a.compactMs
     if (a.compactDropped !== undefined) main.compactDropped = (main.compactDropped ?? 0) + a.compactDropped
     if (a.gauge && (!main.gauge || compareKey(a.gauge.key, main.gauge.key) > 0)) main.gauge = a.gauge
@@ -515,6 +636,9 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   // …and on whether human turns were: a turn carries no agent only if the emitter says so.
   const turnsRecorded = [...mains, NO_AGENT].every(id => s.agents.get(id)?.turnsRecorded ?? true)
   const sessionTurns = s.agents.get(NO_AGENT)?.turns ?? []
+  const turnEndsRecorded = [...mains, NO_AGENT].every(id => s.agents.get(id)?.turnEndsRecorded ?? true)
+  const sessionEnds = s.agents.get(NO_AGENT)?.turnEnds ?? []
+  const sawTime = main.sawTime || (s.agents.get(NO_AGENT)?.sawTime ?? false)
 
   const meta: ProjectedSessionMeta = {
     tool_counts: Object.fromEntries(mainToolNames),
@@ -614,6 +738,22 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     meta.user_message_timestamps = turns.filter(t => t.stamped).map(t => t.at)
   } else if (s.agents.size > 0) {
     caveats.push({ field: 'user_message_count', reason: 'not recorded by this adapter version (events replayed before turn.started existed); absent, not zero' })
+  }
+
+  // Turn time (D25) — `active_minutes` and `user_response_times`, the main transcript's, under their
+  // own gate: a walk replayed before `turn.ended` existed cannot vouch for a single close.
+  if (turnEndsRecorded && s.agents.size > 0) {
+    const t = turnTime([...main.turns, ...sessionTurns], [...main.turnEnds, ...sessionEnds], sawTime)
+    meta.user_response_times = t.responseTimes
+    if (t.open) {
+      caveats.push({ field: 'active_minutes', reason: 'a turn has no usable turn.ended yet (the transcript is still open); absent, not a partial sum' })
+    } else if (t.activeMinutes !== undefined) {
+      meta.active_minutes = t.activeMinutes
+    }
+  } else if (s.agents.size > 0) {
+    for (const field of ['active_minutes', 'user_response_times']) {
+      caveats.push({ field, reason: 'not recorded by this adapter version (events replayed before turn.ended existed); absent, not zero' })
+    }
   }
 
   // ── The agent rollup ──

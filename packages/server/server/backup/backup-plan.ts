@@ -183,7 +183,7 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
     restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
     why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '
-      + 'attempt by provider/capture.ts, 0600. Raw model output can echo anything the model read — a '
+      + 'attempt by @agentistics/runtime (provider/capture.ts), 0600. Raw model output can echo anything the model read — a '
       + 'token printed by a tool included — so it is excluded by default like a credential, not '
       + 'carried and hoped clean.',
   },
@@ -269,6 +269,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'not have.',
   },
   {
+    pattern: '.agentistics/journal.db.stamps.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the shadow writer re-derives it by re-reading its sources',
+    why: 'Which source versions the shadow writer already folded into the journal. Restored beside a '
+      + 'journal that is not the one it describes, it would make the writer SKIP sources it never '
+      + 'ingested there; absent, it re-reads and the journal dedupes.',
+  },
+  {
     pattern: '.agentistics/auto-upgrade.log', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'A log.',
@@ -328,6 +335,11 @@ const RUNTIME: ExcludeRule[] = [
   {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
+  },
+  {
+    pattern: '.agentistics/journal.db.status.json', match: 'prefix', reason: 'runtime',
+    why: 'A live process\'s counters since its boot, read by `agentop journal status` from another '
+      + 'process. Meaningless on a machine whose writer never ran.',
   },
   {
     pattern: '.agentistics/server.lock', match: 'prefix', reason: 'runtime',

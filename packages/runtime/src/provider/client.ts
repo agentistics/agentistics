@@ -9,8 +9,12 @@
  * invocation is a confident 0 for a call that may have been billed.
  *
  * This module is a NON-holder of the credential: it names the opaque `CredentialRef` and the
- * `CredentialHandle` TYPE only. The one place a key is unwrapped is `anthropic/client.ts`
- * (`provider-secrets.lint.test.ts`, Guard 1).
+ * `CredentialHandle` TYPE only (declared in `./credential.ts`). The places a key is unwrapped are
+ * `anthropic/client.ts` and `openai-compatible/client.ts` (`provider-secrets.lint.test.ts`, Guard 1).
+ *
+ * There is no module-level client registry: a client needs a `CredentialResolver` and a capture
+ * directory, and both belong to the HOST (D23 — the runtime reads no host path and no host store).
+ * `createProviderClients` builds the registry from what the host injects.
  */
 import type {
   EditPolicy,
@@ -20,20 +24,10 @@ import type {
   StopReason,
   UsageAnomaly,
 } from '@agentistics/core'
-import type { CredentialHandle, CredentialResolution } from './credentials.ts'
-import { ANTHROPIC_CLIENT } from './anthropic/client.ts'
+import type { CredentialRef } from './credential.ts'
+import type { CostStatement, UsageCertainty } from './openai-compatible/usage.ts'
 
-/** Opaque reference to a stored credential. NEVER the credential itself. */
-export interface CredentialRef {
-  provider: ProviderId
-  id: string
-}
-
-/** Implemented over `credentials.ts`'s `resolveCredential`; injected so tests never touch disk. */
-export interface CredentialResolver {
-  resolve(ref: CredentialRef): Promise<CredentialResolution>
-}
-export type { CredentialHandle }
+export type { CredentialHandle, CredentialRef, CredentialResolution, CredentialResolver } from './credential.ts'
 
 export interface CallCorrelation {
   /** minted by the caller, `inv_` prefix — the grouping key of an invocation's attempts */
@@ -50,9 +44,22 @@ export type ProviderMessagePart =
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
 
+/** Marks a prompt prefix as cacheable. The cache breakpoint sits at the END of what it is set on;
+ *  Anthropic caches everything up to and including that block. `ttl` absent = the provider's
+ *  default (5 minutes). Never journaled — it shapes the request, and the resulting cache activity
+ *  comes back on `usage` (cacheRead / cacheWrite / cacheWriteByTtl). */
+// A type alias, not an interface: the AI SDK's `providerOptions` is a JSON-object type, and only an
+// alias is assignable to its index signature.
+export type ProviderCacheControl = {
+  type: 'ephemeral'
+  ttl?: '5m' | '1h'
+}
+
 export interface ProviderMessage {
   role: 'user' | 'assistant'
   content: string | ProviderMessagePart[]
+  /** Optional: put a cache breakpoint after this message. */
+  cache?: ProviderCacheControl
 }
 
 /** A tool DECLARATION only: B1 executes no tool (B3). */
@@ -67,6 +74,8 @@ export interface ProviderRequest {
   /** the REQUESTED id; the served one comes back on the result */
   model: string
   system?: string
+  /** Optional: put a cache breakpoint after the system prompt. No effect without `system`. */
+  systemCache?: ProviderCacheControl
   messages: ProviderMessage[]
   tools?: ProviderToolDecl[]
   /** required: Anthropic requires it and a default is a guess */
@@ -91,7 +100,9 @@ export interface CaptureRef {
 
 /**
  * The one HTTP exchange of an attempt, as the capturing fetch saw it. `headers` has ALREADY passed
- * through the allowlist (`anthropic/raw.ts` `allowlistHeaders`) — request headers are never here.
+ * through the calling client's allowlist (`anthropic/raw.ts` `allowlistHeaders` by default,
+ * `openai-compatible/raw.ts` `allowlistOpenAICompatibleHeaders` for that client) — request headers
+ * are never here.
  */
 export interface RawExchange {
   status: number
@@ -128,6 +139,15 @@ export type InvocationResult =
       usageAnomalies: UsageAnomaly[]
       stopReason: StopReason
       content: ProviderContent[]
+      /** B5a — WHO made the statement the counters come from (`openai-compatible/usage.ts`). Absent
+       *  on a client that does not grade it (Anthropic: always the billing vendor's own API). */
+      usageCertainty?: UsageCertainty
+      /** B5a — a cost the ENDPOINT itself stated (a router's own figure), or why there is none.
+       *  Never a table price and never the fallback rate. Absent on a client that does not state it. */
+      cost?: CostStatement
+      /** B5a — runtime-local divergence codes met while reading the usage (e.g.
+       *  `cached-exceeds-prompt`). Absent on a client that does not produce them. */
+      usageNotes?: string[]
     })
   | (InvocationCommon & {
       status: 'failed'
@@ -145,26 +165,13 @@ export interface ProviderClient {
   invokeOnce(req: ProviderRequest, attempt: number): Promise<InvocationResult>
 }
 
-/**
- * Every provider, a decision. TOTAL over `ProviderId` (P1's `INTEGRATIONS` rule): a provider with
- * no client is a declared `null` with its reason beside it, and removing `anthropic` fails the build.
- */
-export const PROVIDER_CLIENTS: Record<ProviderId, ProviderClient | null> = {
-  anthropic: ANTHROPIC_CLIENT,
-  // B5 — the OpenAI Responses / Chat Completions usage map is not verified yet (spec §5.2).
-  openai: null,
-  // B5 — Gemini `generateContent` usage map not verified yet (spec §5.2).
-  google: null,
-  // B5 — Moonshot/Kimi routing is not a direct provider call B1 makes.
-  moonshot: null,
-  // Not a vendor: the bucket for models no provider claims. Nothing to call.
-  other: null,
-}
-
 /** Why a provider has no client — a sentence code, rendered by the caller. */
 export const PROVIDER_CLIENT_ABSENT: Record<Exclude<ProviderId, 'anthropic'>, string> = {
   openai: 'provider.not_in_b1',
   google: 'provider.not_in_b1',
   moonshot: 'provider.not_in_b1',
+  // B5a — the client exists, but only when the host configured an endpoint (`createProviderClients`
+  // given `openaiCompatible`). Absent deps = nothing to call, said in words rather than a null.
+  'openai-compatible': 'provider.not_configured',
   other: 'provider.not_a_vendor',
 }

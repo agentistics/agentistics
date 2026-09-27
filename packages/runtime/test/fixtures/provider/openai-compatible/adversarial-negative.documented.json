@@ -1,0 +1,10 @@
+{
+  "_source": "adversarial — a negative completion_tokens (never a real provider response; exercises the non-negative counter guard).",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-negative-0001",
+    "model": "gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }],
+    "usage": { "prompt_tokens": 10, "completion_tokens": -5, "total_tokens": 5 }
+  }
+}

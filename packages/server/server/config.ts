@@ -80,7 +80,16 @@ export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
 )
 // What the WRITING process reports about itself (counters since boot), for `agentop journal status`
 // to read from a different process. It sits beside the journal, whichever directory that is.
-export const JOURNAL_STATUS_PATH = `${JOURNAL_PATH}.status.json`
+// Both side-files below are written as literal `join`s, like `JOURNAL_PATH`, so
+// `backup-coverage.lint.test.ts` can SEE the names and hold each to a decision in `backup-plan.ts`.
+export const JOURNAL_STATUS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.status.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.status.json')
+// The shadow writer's accepted-stamps memory (`journal/shadow.ts`, default `<journal path>.stamps.json`),
+// which lets a run skip sources it has already folded in. Same directory rule as the journal itself.
+export const JOURNAL_STAMPS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.stamps.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.stamps.json')
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json
@@ -322,18 +331,68 @@ export function providerFlagOn(env: Record<string, string | undefined> = process
  *  backup. Excluded from backups as a `secret` in backup-plan.ts. */
 export const PROVIDER_KEYS_DIR = join(AGENTISTICS_DATA_DIR, 'provider-keys')
 
+/** The content store (context-manager spec §8.1): `<sha[0:2]>/<sha256>`, content-addressed. The
+ *  native runtime's raw provider captures land here — `@agentistics/runtime` has no path of its own
+ *  (D23), so the host passes this as the client's `captureDir`. Excluded from backups as a `secret`
+ *  in backup-plan.ts. */
+export const CONTENT_DIR = join(AGENTISTICS_DATA_DIR, 'content')
+
+/**
+ * The OpenAI-compatible ENDPOINTS a machine may configure (B5a, contract D1). CLOSED: each one is a
+ * named instance of the Chat Completions protocol with its own stored base URL and (usually) key, and
+ * the id doubles as the key FILE name — so a new endpoint is a line here, never a free-form string
+ * that reaches a path.
+ */
+export type OpenAICompatibleEndpointId = 'openai' | 'openrouter' | 'deepseek' | 'litellm' | '9router' | 'ollama'
+export const OPENAI_COMPATIBLE_ENDPOINTS: readonly OpenAICompatibleEndpointId[] =
+  ['openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
+
+export function isOpenAICompatibleEndpoint(id: unknown): id is OpenAICompatibleEndpointId {
+  return typeof id === 'string' && (OPENAI_COMPATIBLE_ENDPOINTS as readonly string[]).includes(id)
+}
+
+/** Who stands behind an endpoint's usage figures (contract D2) — never inferred from a URL. */
+export type EndpointKind = 'direct' | 'router' | 'local'
+
+export interface EndpointPreset {
+  kind: EndpointKind
+  /** The documented default base URL, or `null` when there is none and `--base-url` is REQUIRED. */
+  defaultBaseUrl: string | null
+  /** May the endpoint be stored with NO key (`--no-key`)? Only a local server that takes none. */
+  keyOptional: boolean
+  /** Human name for a sentence ("the key is still valid at …"). */
+  label: string
+}
+
+/** Contract D2 (kinds) + D6 (defaults). `Record<OpenAICompatibleEndpointId, …>`, so a new endpoint
+ *  fails the build until its row is written. */
+export const ENDPOINT_PRESETS: Readonly<Record<OpenAICompatibleEndpointId, EndpointPreset>> = {
+  openai: { kind: 'direct', defaultBaseUrl: 'https://api.openai.com/v1', keyOptional: false, label: 'OpenAI' },
+  openrouter: { kind: 'router', defaultBaseUrl: 'https://openrouter.ai/api/v1', keyOptional: false, label: 'OpenRouter' },
+  deepseek: { kind: 'direct', defaultBaseUrl: 'https://api.deepseek.com/v1', keyOptional: false, label: 'DeepSeek' },
+  // No default: a LiteLLM proxy lives wherever its operator put it.
+  litellm: { kind: 'router', defaultBaseUrl: null, keyOptional: false, label: 'the LiteLLM proxy' },
+  '9router': { kind: 'router', defaultBaseUrl: 'http://localhost:20128/v1', keyOptional: false, label: '9router' },
+  ollama: { kind: 'local', defaultBaseUrl: 'http://localhost:11434/v1', keyOptional: true, label: 'Ollama' },
+}
+
 /** The providers a key may be STORED for. Closed, and deliberately narrower than core's
- *  `ProviderId`: B1 enters an Anthropic key and nothing else (owner decision D3). */
-export type KeyedProviderId = 'anthropic'
-export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic']
+ *  `ProviderId`: Anthropic (B1, owner decision D3) plus the six OpenAI-compatible endpoints (B5a).
+ *  An endpoint is keyed by its ENDPOINT id, never by `'openai-compatible'` — one protocol, six files. */
+export type KeyedProviderId = 'anthropic' | OpenAICompatibleEndpointId
+export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic', ...OPENAI_COMPATIBLE_ENDPOINTS]
 
 export function isKeyedProvider(id: unknown): id is KeyedProviderId {
   return typeof id === 'string' && (KEYED_PROVIDERS as readonly string[]).includes(id)
 }
 
-/** A provider id is interpolated into a path only after this check, the `safeConnId` rule. */
+/** A provider id is interpolated into a path only after this check, the `safeConnId` rule — and
+ *  since the set is closed, every name it lets through is a plain `[a-z0-9]+` word (no separator, no
+ *  dot, no traversal), asserted once more below so a future entry cannot widen it by accident. */
 export function providerKeyFile(provider: KeyedProviderId, dir: string = PROVIDER_KEYS_DIR): string {
-  if (!isKeyedProvider(provider)) throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
+  if (!isKeyedProvider(provider) || !/^[a-z0-9]+$/.test(provider)) {
+    throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
+  }
   return join(dir, `${provider}.json`)
 }
 

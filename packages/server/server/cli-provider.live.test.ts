@@ -1,5 +1,7 @@
 /**
- * client.live.test.ts — B1.7: `agentop provider try anthropic`.
+ * cli-provider.live.test.ts — B1.7: `agentop provider try anthropic`. (It was
+ * `provider/anthropic/client.live.test.ts`; it drives the HOST verb, so it stayed in the server when
+ * the client moved to `@agentistics/runtime` — D23 forbids a runtime test from importing it.)
  *
  * TWO parts, and only the second can spend money:
  *
@@ -21,13 +23,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentisticsEvent, ProviderUsage } from '@agentistics/core'
-import { runProvider, TRY_DEFAULT_MODEL, TRY_MAX_TOKENS, TRY_PROMPT, type ProviderCliDeps } from '../../cli-provider.ts'
-import { openJournal } from '../../journal/journal'
-import type { Journal } from '../../journal/types'
-import { PROVIDER_KEYS_DIR } from '../../config.ts'
-import { validateKeyShape } from '../credential-plan.ts'
-import { resolveCredential, storeCredential } from '../credentials.ts'
-import type { InvocationResult, ProviderClient, ProviderRequest } from '../client.ts'
+import { runProvider, TRY_DEFAULT_MODEL, TRY_MAX_TOKENS, TRY_PROMPT, type ProviderCliDeps } from './cli-provider.ts'
+import { openJournal } from './journal/journal'
+import type { Journal } from './journal/types'
+import { PROVIDER_KEYS_DIR } from './config.ts'
+import { validateKeyShape } from './provider/credential-plan.ts'
+import { resolveCredential, storeCredential, storeEndpointCredential } from './provider/credentials.ts'
+import type { InvocationResult, ProviderClient, ProviderRequest } from '@agentistics/runtime'
 
 const FAKE_KEY = 'sk-ant-' + 'live' + 'q'.repeat(40)
 expect(validateKeyShape(FAKE_KEY).ok).toBe(true)
@@ -152,6 +154,9 @@ describe('agentop provider try — against a stub client (no network)', () => {
     const r = await runTry(['anthropic'], { dir, client }, jd)
     expect(r.code).toBe(1)
     expect(r.err.join('\n')).toContain('authentication')
+    // B1.8 sweep (LOW): the failure path prints nothing of the key either, on either stream.
+    expect(r.out.join('\n')).not.toContain(FAKE_KEY)
+    expect(r.err.join('\n')).not.toContain(FAKE_KEY)
     expect((await r.events()).map(e => e.type)).toEqual(['model.invoked', 'model.failed'])
     expect(JSON.stringify(await r.events())).not.toContain('"usage"')
     r.journal.close()
@@ -180,6 +185,108 @@ describe('agentop provider try — against a stub client (no network)', () => {
   })
 })
 
+// ── B5a — `try <endpoint>` against a stub client (no network) ──────────────────────────────────
+
+const FAKE_OR_KEY = 'sk-or-' + 'live' + 'p'.repeat(40)
+
+async function endpointDir(): Promise<string> {
+  const dir = await tmp('agentop-try-ep-')
+  const r = await storeEndpointCredential('openrouter', { baseUrl: 'https://openrouter.ai/api/v1', key: FAKE_OR_KEY }, { dir })
+  expect(r.ok).toBe(true)
+  return dir
+}
+
+function endpointStub(result: Partial<Extract<InvocationResult, { status: 'completed' }>>, seen: ProviderRequest[] = []): ProviderClient {
+  return {
+    provider: 'openai-compatible', adapterVersion: 'stub-oai-1', capabilities: { streaming: false, editPolicy: 'none' as never },
+    async invokeOnce(req, attempt) {
+      seen.push(req)
+      return {
+        invocationId: req.correlation.invocationId, attempt, provider: 'openai-compatible',
+        requestedModel: req.model, startedAt: new Date().toISOString(), latencyMs: 7,
+        status: 'completed', messageId: 'gen-stub', servedModel: 'openai/gpt-served',
+        usage: { input: 9, output: 1, cacheRead: 0, cacheWrite: 0, missing: ['cacheWrite'] },
+        usageAnomalies: [], stopReason: { kind: 'end-turn' }, content: [{ type: 'text', text: 'ok' }],
+        ...result,
+      }
+    },
+  }
+}
+
+describe('agentop provider try <endpoint> — against a stub client (no network)', () => {
+  test('ONE call with the tiny prompt, journaled invoked -> completed; prints certainty and the router cost', async () => {
+    const dir = await endpointDir(); const jd = await tmp('agentop-try-j-')
+    const seen: ProviderRequest[] = []
+    const r = await runTry(['openrouter', '--model', 'openai/gpt-test'], {
+      dir,
+      client: endpointStub({ usageCertainty: 'router-stated', cost: { kind: 'router-reported', usd: 0.00042, field: 'usage.cost' } }, seen),
+    }, jd)
+    expect(r.code).toBe(0)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.maxTokens).toBe(TRY_MAX_TOKENS)
+    expect(seen[0]!.messages).toEqual([{ role: 'user', content: TRY_PROMPT }])
+    expect(seen[0]!.credential).toEqual({ provider: 'openai-compatible', id: 'openrouter' })
+    expect((await r.events()).map(e => e.type)).toEqual(['model.invoked', 'model.completed'])
+    const text = r.out.join('\n')
+    expect(text).toContain('served model: openai/gpt-served')
+    expect(text).toContain('id: gen-stub')
+    expect(text).toContain('cacheWrite: not reported by the endpoint')
+    expect(text).toContain('certainty: router-stated')
+    expect(text).toContain('cost: US$ 0.00042 (reported by the endpoint, usage.cost)')
+    expect(text).toContain('journaled: yes')
+    expect([...r.out, ...r.err].join('\n')).not.toContain(FAKE_OR_KEY)
+    r.journal.close()
+  })
+
+  test('no router cost prints N/A with its reason — never a table price, never the fallback rate', async () => {
+    const dir = await endpointDir(); const jd = await tmp('agentop-try-j-')
+    const r = await runTry(['openrouter', '--model', 'openai/gpt-test'], {
+      dir,
+      client: endpointStub({ usageCertainty: 'provider-stated', cost: { kind: 'unavailable', reason: 'no-verified-price' } }),
+    }, jd)
+    expect(r.code).toBe(0)
+    const text = r.out.join('\n')
+    expect(text).toMatch(/cost: N\/A — /)
+    expect(text).not.toMatch(/cost: US\$/)
+    r.journal.close()
+  })
+
+  test('a failed call is model.failed, exits 1, and prints no key', async () => {
+    const dir = await endpointDir(); const jd = await tmp('agentop-try-j-')
+    const client: ProviderClient = {
+      provider: 'openai-compatible', adapterVersion: 'stub-oai-1', capabilities: { streaming: false, editPolicy: 'none' as never },
+      async invokeOnce(req, attempt) {
+        return {
+          invocationId: req.correlation.invocationId, attempt, provider: 'openai-compatible', requestedModel: req.model,
+          startedAt: new Date().toISOString(), latencyMs: 3, status: 'failed',
+          error: { kind: 'rate-limited', retryable: true, usageOutcome: 'none-reported', userCode: 'provider.rate_limited' },
+        }
+      },
+    }
+    const r = await runTry(['openrouter', '--model', 'x/y'], { dir, client }, jd)
+    expect(r.code).toBe(1)
+    expect((await r.events()).map(e => e.type)).toEqual(['model.invoked', 'model.failed'])
+    expect(r.out.join('\n')).not.toContain(FAKE_OR_KEY)
+    expect(r.err.join('\n')).not.toContain(FAKE_OR_KEY)
+    r.journal.close()
+  })
+
+  test('refuses with no --model, with no stored record (journaling nothing), and when the flag is off', async () => {
+    const jd = await tmp('agentop-try-j-')
+    const seen: ProviderRequest[] = []
+    const client = endpointStub({}, seen)
+    expect((await runTry(['openrouter'], { client }, jd)).code).toBe(2)
+    const empty = await tmp('agentop-try-empty-')
+    const none = await runTry(['openrouter', '--model', 'x/y'], { dir: empty, client }, jd)
+    expect(none.code).toBe(1)
+    expect(none.err.join('\n')).toContain('not configured')
+    expect(await none.events()).toHaveLength(0)
+    expect((await runTry(['openrouter', '--model', 'x/y'], { flagOn: () => false, client }, jd)).code).toBe(1)
+    expect(seen).toHaveLength(0)
+    none.journal.close()
+  })
+})
+
 // ── the live call ───────────────────────────────────────────────────────────────────────────────
 
 const OPT_IN = process.env.AGENTISTICS_LIVE_ANTHROPIC === '1'
@@ -190,7 +297,7 @@ const skipReason = !OPT_IN
     ? `AGENTISTICS_LIVE_ANTHROPIC=1 but no usable key is stored in ${PROVIDER_KEYS_DIR} — run \`agentop provider key set anthropic\``
     : ''
 
-if (skipReason) console.log(`[client.live.test] SKIPPED — ${skipReason}`)
+if (skipReason) console.log(`[cli-provider.live.test] SKIPPED — ${skipReason}`)
 
 describe('agentop provider try — LIVE (one real, billed call)', () => {
   const t = skipReason ? test.skip : test

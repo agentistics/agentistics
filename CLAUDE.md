@@ -17,6 +17,7 @@ This file stays Claude-Code-specific implementation memory and does not duplicat
 ```
 packages/
   core/     (@agentistics/core)   — shared types, pricing, formatters, i18n, otel helpers
+  runtime/  (@agentistics/runtime) — the native harness (provider layer, loop); publishable; NEVER imports server/web (runtime-boundary.lint.test.ts)
   server/   (@agentistics/server) — Bun HTTP server, CLI (agentop), otel-watcher, scripts
   web/      (@agentistics/web)    — React + Vite frontend
   mcp/      (@agentistics/mcp)    — MCP server, publishable to npm standalone

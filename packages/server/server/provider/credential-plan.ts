@@ -12,40 +12,52 @@
  * forbids every non-holder from spelling it.
  */
 import { createHash } from 'node:crypto'
-import { PROVIDER_FLAG_ENV, type KeyedProviderId } from '../config.ts'
+import {
+  ENDPOINT_PRESETS,
+  PROVIDER_FLAG_ENV,
+  type KeyedProviderId,
+  type OpenAICompatibleEndpointId,
+} from '../config.ts'
+import type { CredentialHandle, CredentialResolution } from '@agentistics/runtime'
 
 /** `sha256:<first 8 hex of sha256(key)>`. Non-reversible for a high-entropy key, stable across
- *  reads (so a rotation shows as `old → new`), and never a substring of the key: a suffix would be
- *  literal key material and would defeat the grep that proves nothing leaked (§6.2.6). */
+ *  reads (so a rotation shows as `old → new`), and itself never a substring of the key. The ONE
+ *  piece of literal key material `status` may show is `lastFourOf` below (owner decision C-3). */
 export function fingerprintOf(value: string): string {
   return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 8)}`
 }
 
-/** The ONLY shape in which a stored key leaves `credentials.ts`. */
-export interface CredentialHandle {
-  readonly provider: KeyedProviderId
-  /** `sha256:xxxxxxxx` — safe to print, log and compare. */
-  readonly fingerprint: string
-  /** The key itself. Callable only by the holders (`anthropic/client.ts` in practice) — the lint
-   *  refuses the spelling everywhere else. Never store what it returns on an object that outlives
-   *  the call that needed it. */
-  reveal(): string
+/** How many trailing characters of a key `status` may show — a ceiling, never more (C-3). Enough to
+ *  tell two keys apart in the console's list, far too few to be the key. */
+export const KEY_TAIL_LENGTH = 4
+
+/** The last `KEY_TAIL_LENGTH` characters, for `agentop provider key status` — what the Anthropic
+ *  console itself shows beside a key, so the person can match the two. A value shorter than the
+ *  tail yields nothing rather than the whole key (a validated key is never that short). */
+export function lastFourOf(value: string): string {
+  return value.length > KEY_TAIL_LENGTH * 4 ? value.slice(-KEY_TAIL_LENGTH) : ''
 }
 
-/** What resolving a stored credential can answer. The refusals are CODES, rendered by the verb. */
-export type CredentialResolution =
-  | { ok: true; handle: CredentialHandle }
-  | { ok: false; reason: 'absent' | 'unreadable' | 'permissions-too-open' | 'wrong-provider' }
+/** The ONLY shape in which a stored key leaves `credentials.ts`. The interface is the RUNTIME's
+ *  (`@agentistics/runtime`, `provider/credential.ts`, D23): the runtime consumes it and the host
+ *  builds it. Only the TYPES cross — `createCredentialHandle` below, the one constructor, stays
+ *  here with the key store, so the runtime never holds a way to mint a handle. */
+export type { CredentialHandle, CredentialResolution }
 
 const INSPECT = Symbol.for('nodejs.util.inspect.custom')
 
-/** Wraps a value that has ALREADY been validated. The label is what every stringification yields. */
+/** Wraps a value that has ALREADY been validated. The label is what every stringification yields.
+ *  An ENDPOINT's handle names the PROTOCOL as its provider (`openai-compatible`, core's `ProviderId`)
+ *  and the endpoint only in its label — `openai` the endpoint is not `openai` the vendor. */
 export function createCredentialHandle(provider: KeyedProviderId, value: string): CredentialHandle {
   const fingerprint = fingerprintOf(value)
-  const label = `[credential ${provider} ${fingerprint}]`
+  const handleProvider = provider === 'anthropic' ? 'anthropic' as const : 'openai-compatible' as const
+  const label = provider === 'anthropic'
+    ? `[credential anthropic ${fingerprint}]`
+    : `[credential openai-compatible/${provider} ${fingerprint}]`
   const handle = Object.create(null) as CredentialHandle
   Object.defineProperties(handle, {
-    provider: { value: provider, enumerable: false },
+    provider: { value: handleProvider, enumerable: false },
     fingerprint: { value: fingerprint, enumerable: false },
     reveal: { value: () => value, enumerable: false },
     toJSON: { value: () => label, enumerable: false },
@@ -85,29 +97,66 @@ export type KeyShapeRefusal =
   | 'control'
   | 'bracketed-paste'
   | 'prefix'
+  | 'foreign-prefix'
   | 'too-short'
   | 'too-long'
 
 export type KeyShapeResult = { ok: true } | { ok: false; reason: KeyShapeRefusal }
 
 /**
- * Is `value` shaped like an Anthropic API key? Pure — never touches disk, never logs, and its
- * OWN return value never carries `value` (only a `KeyShapeRefusal` code) so a caller cannot
- * accidentally echo the key back through this function's result.
+ * The per-endpoint key rules — deliberately LOOSE (B5a). No endpoint's prefix is enforced: OpenRouter
+ * says `sk-or-…`, a LiteLLM proxy key is whatever its operator minted (its own docs use `sk-1234`), and
+ * a prefix rule that is wrong rejects a genuine key. What IS refused, everywhere: whitespace, control
+ * characters, bracketed-paste residue, absurd lengths — and an ANTHROPIC key (`foreign-prefix`), because
+ * storing one here would send it, in a bearer header, to a host that is not Anthropic.
+ * `minLength` is a truncated-paste guard, never a claim about the vendor's real minimum.
  */
-export function validateKeyShape(value: string): KeyShapeResult {
+const ENDPOINT_KEY_MIN_LENGTH: Readonly<Record<OpenAICompatibleEndpointId, number>> = {
+  openai: 20,
+  openrouter: 20,
+  deepseek: 20,
+  // Operator-minted keys: short ones are real (LiteLLM's own examples are 7 characters).
+  litellm: 4,
+  '9router': 4,
+  ollama: 4,
+}
+
+function commonShape(value: string): KeyShapeResult {
   if (value.length === 0) return { ok: false, reason: 'empty' }
   if (WHITESPACE_CHAR.test(value)) return { ok: false, reason: 'whitespace' }
   if (CONTROL_CHARS.test(value)) return { ok: false, reason: 'control' }
   if (value.includes('[') || value.includes('~')) return { ok: false, reason: 'bracketed-paste' }
-  if (!value.startsWith(ANTHROPIC_KEY_PREFIX)) return { ok: false, reason: 'prefix' }
-  if (value.length < MIN_KEY_LENGTH) return { ok: false, reason: 'too-short' }
+  return { ok: true }
+}
+
+/**
+ * Is `value` shaped like a key for `provider` (default: Anthropic)? Pure — never touches disk, never
+ * logs, and its OWN return value never carries `value` (only a `KeyShapeRefusal` code) so a caller
+ * cannot accidentally echo the key back through this function's result.
+ */
+export function validateKeyShape(value: string, provider: KeyedProviderId = 'anthropic'): KeyShapeResult {
+  const common = commonShape(value)
+  if (!common.ok) return common
+  if (provider === 'anthropic') {
+    if (!value.startsWith(ANTHROPIC_KEY_PREFIX)) return { ok: false, reason: 'prefix' }
+    if (value.length < MIN_KEY_LENGTH) return { ok: false, reason: 'too-short' }
+    if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
+    return { ok: true }
+  }
+  if (value.startsWith(ANTHROPIC_KEY_PREFIX)) return { ok: false, reason: 'foreign-prefix' }
+  if (value.length < ENDPOINT_KEY_MIN_LENGTH[provider]) return { ok: false, reason: 'too-short' }
   if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
   return { ok: true }
 }
 
 /** One English sentence per refusal reason. Never includes the value that was rejected. */
-export function keyShapeSentence(reason: KeyShapeRefusal): string {
+export function keyShapeSentence(reason: KeyShapeRefusal, provider: KeyedProviderId = 'anthropic'): string {
+  // Anything that is not a known endpoint id (including a stray second argument from `.map`) reads
+  // as Anthropic — the sentence stays total rather than indexing a table with a non-key.
+  const endpoint = typeof provider === 'string' && Object.hasOwn(ENDPOINT_PRESETS, provider)
+    ? provider as OpenAICompatibleEndpointId
+    : null
+  const whose = endpoint === null ? 'an Anthropic API key' : `a key for ${ENDPOINT_PRESETS[endpoint].label}`
   switch (reason) {
     case 'empty':
       return 'a key is required — nothing was entered.'
@@ -120,11 +169,120 @@ export function keyShapeSentence(reason: KeyShapeRefusal): string {
         + 'key itself — paste it again, or type it.'
     case 'prefix':
       return `an Anthropic API key begins with "${ANTHROPIC_KEY_PREFIX}" — this value does not.`
-    case 'too-short':
-      return `a key this short (under ${MIN_KEY_LENGTH} characters) is not a valid Anthropic API key.`
+    case 'foreign-prefix':
+      return 'that looks like an Anthropic key — it is never sent to another endpoint. Store it with '
+        + '`agentop provider key set anthropic`.'
+    case 'too-short': {
+      const min = endpoint === null ? MIN_KEY_LENGTH : ENDPOINT_KEY_MIN_LENGTH[endpoint]
+      return `a key this short (under ${min} characters) is not a valid ${whose.replace(/^an? /, '')}.`
+    }
     case 'too-long':
-      return `a value this long (over ${MAX_KEY_LENGTH} characters) is not a valid Anthropic API key.`
+      return `a value this long (over ${MAX_KEY_LENGTH} characters) is not a valid ${whose.replace(/^an? /, '')}.`
   }
+}
+
+// ---------------------------------------------------------------------------
+// B5a, contract D6 — an endpoint's BASE URL. It is configuration, not a secret, and `status` prints
+// it; but it decides which host receives the bearer key, so it is validated as strictly as the key:
+// https anywhere, plain http ONLY to this machine (a loopback host), no userinfo (a `user:pass@` in a
+// URL is a second credential riding in plain sight), no query or fragment (a path is all a base URL
+// has), trailing slashes normalised away. A refusal never quotes the URL it refused — it may be the
+// very thing carrying a pasted secret.
+// ---------------------------------------------------------------------------
+
+export type BaseUrlRefusal = 'empty' | 'unparseable' | 'scheme' | 'insecure-remote' | 'userinfo' | 'query-or-fragment'
+export type BaseUrlResult = { ok: true; baseUrl: string } | { ok: false; reason: BaseUrlRefusal }
+
+/** Loopback hosts: `localhost`, `127.0.0.0/8`, and `::1`. Nothing else is "this machine". */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  if (h === 'localhost' || h === '[::1]' || h === '::1') return true
+  return /^127(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(h)
+}
+
+export function validateBaseUrl(raw: string): BaseUrlResult {
+  if (raw.length === 0) return { ok: false, reason: 'empty' }
+  if (/\s/.test(raw) || CONTROL_CHARS.test(raw)) return { ok: false, reason: 'unparseable' }
+  if (raw.includes('?') || raw.includes('#')) return { ok: false, reason: 'query-or-fragment' }
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return { ok: false, reason: 'unparseable' }
+  }
+  if (url.username !== '' || url.password !== '' || raw.includes('@')) return { ok: false, reason: 'userinfo' }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return { ok: false, reason: 'scheme' }
+  if (url.hostname === '') return { ok: false, reason: 'unparseable' }
+  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) return { ok: false, reason: 'insecure-remote' }
+  const path = url.pathname.replace(/\/+$/, '')
+  return { ok: true, baseUrl: `${url.protocol}//${url.host}${path}` }
+}
+
+/** One English sentence per refusal. Never includes the URL. */
+export function baseUrlSentence(reason: BaseUrlRefusal): string {
+  switch (reason) {
+    case 'empty':
+      return 'a base URL is required — nothing was given.'
+    case 'unparseable':
+      return 'that base URL could not be read as a URL.'
+    case 'scheme':
+      return 'a base URL must be https:// (or http:// to this machine).'
+    case 'insecure-remote':
+      return 'plain http:// is accepted only for this machine (localhost, 127.x, ::1) — use https:// for '
+        + 'anything else, or the key would cross the network in clear text.'
+    case 'userinfo':
+      return 'a base URL may not carry a user or password ("user:pass@") — the key is stored separately.'
+    case 'query-or-fragment':
+      return 'a base URL may not carry a query ("?") or fragment ("#").'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// B5a, contract D6 — an endpoint's record on disk, in the SAME 0600 file as its key:
+// `{ v: 1, provider: 'openai-compatible', endpoint, baseUrl, key | null, storedAt }`.
+// ---------------------------------------------------------------------------
+
+export type StoredEndpointResult =
+  | { ok: true; baseUrl: string; key: string | null; storedAt: string }
+  | { ok: false; reason: 'unreadable' | 'wrong-provider' }
+
+/**
+ * Parse an endpoint's record. Everything it carries is RE-validated — a hand-edited file with a
+ * plain-http remote base URL, a malformed key, or a null key on an endpoint that requires one is
+ * `unreadable`, never trusted because it happened to be on disk. A record for another endpoint (or
+ * an Anthropic record) is `wrong-provider`.
+ */
+export function parseStoredEndpoint(text: string, endpoint: OpenAICompatibleEndpointId): StoredEndpointResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { ok: false, reason: 'unreadable' }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, reason: 'unreadable' }
+  const o = parsed as Record<string, unknown>
+  if (o.provider !== 'openai-compatible' || o.endpoint !== endpoint) {
+    return typeof o.provider === 'string' ? { ok: false, reason: 'wrong-provider' } : { ok: false, reason: 'unreadable' }
+  }
+  if (typeof o.baseUrl !== 'string' || typeof o.storedAt !== 'string') return { ok: false, reason: 'unreadable' }
+  const url = validateBaseUrl(o.baseUrl)
+  if (!url.ok || url.baseUrl !== o.baseUrl) return { ok: false, reason: 'unreadable' }
+  if (o.key === null) {
+    if (!ENDPOINT_PRESETS[endpoint].keyOptional) return { ok: false, reason: 'unreadable' }
+    return { ok: true, baseUrl: o.baseUrl, key: null, storedAt: o.storedAt }
+  }
+  if (typeof o.key !== 'string' || !validateKeyShape(o.key, endpoint).ok) return { ok: false, reason: 'unreadable' }
+  return { ok: true, baseUrl: o.baseUrl, key: o.key, storedAt: o.storedAt }
+}
+
+/** The inverse — what `credentials.ts` writes. Inputs are assumed already validated by the caller. */
+export function serializeEndpoint(
+  endpoint: OpenAICompatibleEndpointId,
+  baseUrl: string,
+  key: string | null,
+  storedAt: string,
+): string {
+  return JSON.stringify({ v: 1, provider: 'openai-compatible', endpoint, baseUrl, key, storedAt })
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +318,7 @@ export type StoredCredentialResult =
  * validation reads as `'unreadable'` — a corrupt credential is exactly as unusable as corrupt JSON,
  * and giving it a different code would tempt a caller to treat it as "present but wrong provider".
  */
-export function parseStoredCredential(text: string, provider: KeyedProviderId): StoredCredentialResult {
+export function parseStoredCredential(text: string, provider: 'anthropic'): StoredCredentialResult {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -181,7 +339,7 @@ export function parseStoredCredential(text: string, provider: KeyedProviderId): 
 
 /** The inverse of `parseStoredCredential` — what `credentials.ts` writes to disk. `value` is
  *  assumed already shape-validated by the caller (`storeCredential` validates before calling). */
-export function serializeCredential(provider: KeyedProviderId, value: string, storedAt: string): string {
+export function serializeCredential(provider: 'anthropic', value: string, storedAt: string): string {
   return JSON.stringify({ v: 1, provider, value, storedAt })
 }
 

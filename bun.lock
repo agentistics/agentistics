@@ -46,14 +46,14 @@
     },
     "packages/agentop": {
       "name": "@agentistics/agentop",
-      "version": "2.49.2",
+      "version": "2.61.0",
       "bin": {
         "agentop": "bin/agentop.js",
       },
     },
     "packages/core": {
       "name": "@agentistics/core",
-      "version": "2.49.2",
+      "version": "2.61.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.1",
         "date-fns": "^4.1.0",
@@ -71,7 +71,7 @@
     },
     "packages/mcp": {
       "name": "@agentistics/mcp",
-      "version": "2.49.2",
+      "version": "2.61.0",
       "bin": {
         "agentistics-mcp": "dist/agentistics-mcp.js",
       },
@@ -79,21 +79,29 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
     },
-    "packages/server": {
-      "name": "@agentistics/server",
-      "version": "2.49.2",
+    "packages/runtime": {
+      "name": "@agentistics/runtime",
+      "version": "2.61.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
-        "@agentistics/tui": "workspace:*",
         "@ai-sdk/anthropic": "4.0.58",
         "ai": "7.0.107",
+      },
+    },
+    "packages/server": {
+      "name": "@agentistics/server",
+      "version": "2.61.0",
+      "dependencies": {
+        "@agentistics/core": "workspace:*",
+        "@agentistics/runtime": "workspace:*",
+        "@agentistics/tui": "workspace:*",
         "jose": "^6.2.3",
         "mongodb": "^6.12.0",
       },
     },
     "packages/tui": {
       "name": "@agentistics/tui",
-      "version": "2.49.2",
+      "version": "2.61.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "es-toolkit": "^1.50.0",
@@ -118,7 +126,7 @@
     },
     "packages/web": {
       "name": "@agentistics/web",
-      "version": "2.49.2",
+      "version": "2.61.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/tui": "workspace:*",
@@ -159,6 +167,8 @@
     "@agentistics/desktop": ["@agentistics/desktop@workspace:packages/desktop"],
 
     "@agentistics/mcp": ["@agentistics/mcp@workspace:packages/mcp"],
+
+    "@agentistics/runtime": ["@agentistics/runtime@workspace:packages/runtime"],
 
     "@agentistics/server": ["@agentistics/server@workspace:packages/server"],
 
