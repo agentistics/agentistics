@@ -119,6 +119,27 @@ export interface FleetPayload {
 
 const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
 
+/**
+ * THE ANSWER AS THIS CLIENT READS IT — every list the page iterates is a list, whatever arrived.
+ *
+ * `/api/fleet` omitted `finishedTasks` when it was empty and the page called `.includes` on it, so
+ * on every machine where no task had been finished the Sessions page threw (`TypeError: Cannot read
+ * properties of undefined (reading 'includes')`, reported on v2.65.0). The server now always sends
+ * it, but a newer page can be served by an older server (a central, a stale binary) and read back
+ * from this browser's cache, so the boundary is where absence becomes an empty list. PURE.
+ */
+export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
+  const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : [])
+  return {
+    ...raw,
+    sessions: list(raw.sessions),
+    rows: list(raw.rows),
+    attention: typeof raw.attention === 'number' ? raw.attention : 0,
+    tasks: list(raw.tasks),
+    finishedTasks: list(raw.finishedTasks),
+  }
+}
+
 /** How often the page re-reads the fleet. The cockpit polls at 5s; matching it keeps the two in step. */
 const FLEET_POLL_MS = 5000
 
@@ -183,7 +204,7 @@ function readFleetCache(): FleetPayload | null {
     const p = parsed.payload
     if (!p || !Array.isArray(p.rows) || !Array.isArray(p.sessions)) return null
     cachedAt = parsed.at ?? 0
-    return p
+    return normalizeFleetPayload(p)
   } catch {
     return null
   }
@@ -340,7 +361,7 @@ async function pollOnce(): Promise<void> {
     // poll left a minutes-old list on screen looking live — a stale list is worse than an empty
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
-    const json = await res.json() as FleetPayload
+    const json = normalizeFleetPayload(await res.json() as FleetPayload)
     snapUnsupported = false
     snapshot = json
     snapFailures = 0
