@@ -950,19 +950,26 @@ row (`backup-plan.ts:160-165`):
 #### 6.2.6 What `status` may print, and what it must never print
 
 `agentop provider key status` prints, per provider: **present / absent / unreadable / permissions
-too open**, the **path**, the **file mode**, `storedAt`, and a **fingerprint**
-`sha256:<first 8 hex of sha256(key)>`.
+too open**, the **path**, the **file mode**, `storedAt`, a **fingerprint**
+`sha256:<first 8 hex of sha256(key)>`, and the key's **last 4 characters** (`lastFourOf`). The web
+path (Settings → Providers, `/api/provider`) shows the same pair — fingerprint and last 4 — and
+never the path.
 
-- **Decided: no substring of the key — not the last 4, not the prefix after `sk-ant-`, not the
-  length.** A suffix is literal key material: it narrows a brute force, it appears in every
-  screenshot and paste of the status output, and — the decisive reason for this repo — it defeats
-  the fixture/log grep (§6.3.3): a test cannot distinguish "four characters of the key, printed on
-  purpose" from "the key, leaking". A truncated hash is non-reversible for a high-entropy key, is
-  stable across reads (so a rotation is visible as `old → new`), and matches the fingerprint idiom
-  the repo already uses for public keys (`envelope-keys.ts:57-61`, `fingerprintOf`).
-- Its cost is stated: a hash cannot be compared against the Anthropic console, which (if it shows
-  anything) shows a masked form of the key itself. Whether matching against the console is needed
-  is C-3; until an owner asks, the hash is the answer.
+- **Decided (C-3, 2026-09-26, spec session — superseding this section's first decision of "no
+  substring at all"): the last 4 characters are shown, and nothing more** — not the prefix after
+  `sk-ant-`, not the length, never a longer tail. The reason is the one the first decision named as
+  its cost: a hash cannot be compared against the provider's console, which shows a masked form
+  ending in the key's last characters, and an owner holding several keys has to be able to tell
+  which one is stored. Four characters of a high-entropy key narrow a brute force by a negligible
+  amount; `lastFourOf` is the ONE place the tail is cut, so "more than four" cannot happen at a call
+  site.
+- **What the first decision protected is kept by construction**: the fixture/log/response greps
+  (§6.3.3, `provider-web.test.ts`, `provider-secrets.lint.test.ts`) assert that no substring of
+  **8 characters or more** of the test key appears — a 4-character tail cannot trip them, so "four
+  characters printed on purpose" and "the key, leaking" stay distinguishable. The fingerprint stays
+  the stable identity (a rotation is visible as `old → new`); the tail is a human aid beside it.
+- **Audit events carry the fingerprint only, never the last 4** (§6.3.3): an audit record is kept
+  and forwarded where a status line is not.
 - Must never print: the value, any substring, the file's contents, the raw JSON.
 
 ### 6.3 The name guard — who may hold the key, and everyone else cannot name it
@@ -1039,10 +1046,18 @@ an opaque `CredentialHandle`:
   strip it, so it must never print the container). A test captures stdout/stderr across `key set`
   (tty and `--stdin`), `status`, `remove`, a failed call and a successful call, and asserts the key
   string appears in none.
-- **Audit** — `audit.ts` writes to the central's Mongo `audit` collection (`audit.ts:1-12`,
-  `:98-101`); a solo machine has no audit sink, so `key set`/`remove` write **no** audit event and
-  the key never approaches `writeAudit`. `audit.ts:72-75`'s `REDACT` set (`token`, `secret`, …)
-  does not contain `apiKey`; B1 does not rely on it and does not add the key to any `meta`.
+- **Audit** — **decided (2026-09-27, leader, UI.4 N-2): setting and removing a key IS audited,
+  on a solo machine and on a central alike** (`provider.set` / `provider.remove`, written by the web
+  path `provider-web.ts`). This supersedes this bullet's first reading ("a solo machine has no audit
+  sink, so no audit event"). The event carries the provider id and the key's **fingerprint** (plus
+  `previousFingerprint` / `keyChanged` on a set) — **never the key, never the last 4, never any
+  other substring**. Why: replacing a key or a base URL redirects every later request the runtime
+  makes, which is exactly the act an audit trail exists to answer "who changed this, and when" for;
+  a fingerprint names WHICH key without being key material. `audit.ts:72-75`'s `REDACT` set does not
+  contain `apiKey` and is not relied on: the key is never placed in `meta` in the first place, and
+  `provider-web.test.ts` asserts no 8-character substring of the test key reaches `buildAuditEvent`.
+  `writeAudit` is fire-and-forget to Mongo — on a solo machine with no database the event is
+  dropped, which loses the trail and never the key.
 - **Errors** — anything returned to a client goes through `safeError` (`errors.ts:12-20`: generic
   code + correlation ref to the client, message to the log). B1 has no route, so the rule that
   matters is the other half: `core/provider/errors.ts` builds its taxonomy from an **allowlist** of

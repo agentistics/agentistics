@@ -370,6 +370,47 @@ export async function storeEndpointCredential(
   }
 }
 
+export type RebaseEndpointResult =
+  | { ok: true; fingerprint: string | null; previousBaseUrl: string; baseUrl: string; path: string }
+  | { ok: false; reason: 'invalid-base-url'; baseUrl: BaseUrlRefusal }
+  | { ok: false; reason: 'absent' | 'unreadable' | 'permissions-too-open' | 'wrong-provider' }
+  | { ok: false; reason: 'write-failed' | 'permissions' }
+
+/**
+ * Change ONLY an endpoint's base URL, keeping the key (or keylessness) already stored — the web
+ * settings screen's "edit the URL, leave the key field empty" (UI.1). The stored key is read and
+ * re-written HERE, inside the holder, so the route layer never needs the value to keep it: a caller
+ * that wanted to preserve a key would otherwise have to reveal it just to hand it straight back.
+ * Refuses when nothing usable is stored (there is no key to keep), and never partially writes.
+ */
+export async function rebaseEndpointCredential(
+  endpoint: OpenAICompatibleEndpointId,
+  baseUrl: string,
+  opts: CredentialIoOpts & { now?: () => Date } = {},
+): Promise<RebaseEndpointResult> {
+  const url = validateBaseUrl(baseUrl)
+  if (!url.ok) return { ok: false, reason: 'invalid-base-url', baseUrl: url.reason }
+
+  const dir = opts.dir ?? PROVIDER_KEYS_DIR
+  const finalPath = providerKeyFile(endpoint, dir)
+  const existing = await readEndpointCredential(endpoint, { dir })
+  if (!existing.ok) return { ok: false, reason: existing.reason }
+
+  const now = opts.now ?? (() => new Date())
+  const body = serializeEndpoint(
+    endpoint, url.baseUrl, existing.handle === null ? null : existing.handle.reveal(), now().toISOString(),
+  )
+  const written = await writeRecordAtomic(dir, finalPath, body)
+  if (!written.ok) return written
+  return {
+    ok: true,
+    fingerprint: existing.handle?.fingerprint ?? null,
+    previousBaseUrl: existing.baseUrl,
+    baseUrl: url.baseUrl,
+    path: finalPath,
+  }
+}
+
 export type EndpointReadResult =
   | { ok: true; baseUrl: string; storedAt: string; handle: CredentialHandle | null }
   | { ok: false; reason: 'absent' | 'unreadable' | 'permissions-too-open' | 'wrong-provider' }
