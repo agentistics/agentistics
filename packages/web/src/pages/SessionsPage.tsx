@@ -2760,7 +2760,7 @@ export default function SessionsPage() {
    *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
    *     them be dropped rather than sandwiched.
    */
-  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 10, gap: 5 } as const
   /**
    * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
    * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
@@ -2856,11 +2856,14 @@ export default function SessionsPage() {
         // `paddingBottom` above — and adding a SECOND margin on top of any of them doubles the visual
         // gap (measured live, before this: 11px on the right instead of 6, back when both were 6px).
         // The plain `FleetOverview`/dedicated-terminal case has no such neighbour gaps of its own, so
-        // it keeps the uniform `CENTRAL_PANE.gap` margin exactly as before.
+        // it takes the same top-only gap as `SessionPanel`'s own panels (no side margin).
         ...(isMobile ? {} : centreOwnsItsPanels
           ? { marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0 }
           : {
-            margin: CENTRAL_PANE.gap,
+            // Same placement as the panels `SessionPanel` draws for itself: only the top gap under
+            // the header. A margin on the LEFT added itself to the left list's 10px gap (a 15px gap
+            // with the grip's dots hugging the list — owner report); the sides are already the gaps.
+            marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0,
             border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
           }),
       }}>
