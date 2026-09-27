@@ -43,7 +43,6 @@ import { RelayedScreen } from './RelayedScreen'
 import { RelayedComposer } from './RelayedComposer'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
-import { TerminalRegion } from '../RecentSessions'
 import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from './SessionChat'
 import { SessionActions } from './SessionActions'
 import { ShellBand } from './ShellBand'
@@ -51,6 +50,7 @@ import {
   BAND_MIN_PX, bandPanelFull, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
   writeBandPrefs,
 } from '../../lib/shellBand'
+import { floatPanel } from '../../lib/floatingPanels'
 import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
@@ -424,21 +424,18 @@ export function SessionPanel({
           </>
         ) : (
           <div style={{ flex: 1, minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column' }}>
-            {/* The very component the sessions list uses. Assembling a second one from the stream
-                hook, the emulator and a composer would be three things that must agree about
-                reconnects, stalls, zoom and the consent gate on typing into a live session. */}
-            <TerminalRegion
-              /* REPLACING the conversation, and inside the workspace — so focus is the consent and
-                 a phone gets the key strip. See `lib/terminalSurface.ts`. */
-              placement="replacing"
-              {...(onOpenTerminal ? { onMaximize: onOpenTerminal } : {})}
-              id={session.id}
-              theme={theme}
+            <ShellBand
+              /* REPLACING the conversation, inside the workspace — the same terminal the bottom band
+                 draws (`fixedTarget`), so the Sessions workspace has one terminal, not two. */
+              key={`replacing-cli-${session.id}`}
+              placement="dedicated"
+              fixedTarget="cli"
+              sessionId={session.id}
+              {...(session.cwd ? { cwd: session.cwd } : {})}
+              {...(session.harness ? { harness: session.harness } : {})}
               lang={lang}
-              fill
-              {...(row ? { row } : {})}
-              act={act}
-              {...(authorName ? { authorName } : {})}
+              theme={theme}
+              {...(onOpenTerminal ? { onOpenFullscreen: () => onOpenTerminal() } : {})}
             />
           </div>
         )}
@@ -1058,6 +1055,8 @@ function SimpleDockedBand({
           onMinimize={onToggleOpen}
           minimizeLabel={open ? (pt ? `Recolher ${panelName}` : `Collapse ${panelName}`)
             : (pt ? `Expandir ${panelName}` : `Expand ${panelName}`)}
+          // PIN = FLOAT (`lib/floatingPanels.ts`) — this band is desktop-only, so always offered.
+          pinned={{ active: false, onToggle: () => floatPanel(panel) }}
           gearLabel={pt ? `Opções — ${panelName}` : `${panelName} options`}
           gearEntries={gearEntries}
         />
