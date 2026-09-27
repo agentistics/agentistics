@@ -1059,7 +1059,9 @@ an opaque `CredentialHandle`:
   response per step. Research 13 §2 (`13-ai-sdk-fidelity.md:116-137`) found the SDK copies
   **every** response header indiscriminately (`extractResponseHeaders` → `Object.fromEntries([...
   response.headers])`). `anthropic/raw.ts` therefore stores headers through an **allowlist**
-  (`request-id`, `anthropic-ratelimit-*`, `retry-after`, `content-type`) — never a denylist, the
+  (`request-id`, `anthropic-ratelimit-*`, `retry-after`, `content-type`, `date`) — `date` because it
+  is the server's own clock at response time, which anchors a capture for a support ticket and lets
+  clock skew be judged, and is no identifier (the same list §7 gives) — never a denylist, the
   same rule as the relayed fleet row. **Any raw REQUEST capture must strip the key header**:
   `x-api-key`, plus `authorization`, `cookie`, `set-cookie` defensively; the default is to capture
   **no request headers at all**, and — per §7 — no request body either in B1.

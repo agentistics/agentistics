@@ -385,20 +385,24 @@ export function compareTokens(legacy: SessionMeta, p: SessionMetaProjection, ev?
   return out
 }
 
-/** Family (b): the clock — start/end/duration, the per-day token split, and the human-turn family. */
+/**
+ * Family (b): the clock — start/end/duration, the per-day token split, and the human-turn family,
+ * including (D25, A2.8) the turn-time pair `active_minutes` / `user_response_times`, compared EQUAL or
+ * bug like every counter. `message_hours` stays declared not-projectable (D25).
+ */
 export function compareTime(legacy: SessionMeta, p: SessionMetaProjection): FieldRow[] {
   const out: FieldRow[] = [
     row('time', 'start_time', legacy.start_time || undefined, p.meta.start_time),
     row('time', 'end_time', legacy.end_time || undefined, p.meta.end_time),
     row('time', 'duration_minutes', legacy.duration_minutes, p.meta.duration_minutes),
-    np('time', 'active_minutes', legacy.active_minutes),
+    row('time', 'active_minutes', legacy.active_minutes, p.meta.active_minutes),
     // `rounds` is not a stored SessionMeta field: `task-rollup.ts` derives it as `user_message_count`,
     // so legacy's side is that rule applied to the legacy meta, and the projection's is its own.
     row('time', 'rounds', legacy.user_message_count, p.meta.rounds),
     row('time', 'user_message_count', legacy.user_message_count, p.meta.user_message_count),
     row('time', 'user_interruptions', legacy.user_interruptions, p.meta.user_interruptions),
     row('time', 'user_message_timestamps', legacy.user_message_timestamps, p.meta.user_message_timestamps),
-    np('time', 'user_response_times', legacy.user_response_times?.length),
+    row('time', 'user_response_times', legacy.user_response_times, p.meta.user_response_times),
     np('time', 'message_hours', legacy.message_hours?.length),
   ]
   // daily: tokens are projectable per day; messages/hours are not (the human-turn event).
@@ -575,7 +579,7 @@ export function compareTools(
  */
 const EMPTY_ZERO_FIELDS = new Set([
   'duration_minutes', 'compact_count', 'compact_ms',
-  'rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps',
+  'rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps', 'user_response_times',
 ])
 const emptyMeasurement = (v: unknown): boolean => v === 0 || (Array.isArray(v) && v.length === 0)
 

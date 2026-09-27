@@ -155,10 +155,12 @@ describe('runProvider — refusals that must never echo the argument', () => {
 
   test('an unknown provider is refused, naming the supported ones', async () => {
     const h = await makeHarness()
-    const code = await runProvider(['key', 'status', 'openai'], h.deps)
+    // (`openai` became a keyed ENDPOINT in B5a, so the unknown id here is one no table holds.)
+    const code = await runProvider(['key', 'status', 'mistralx'], h.deps)
     expect(code).toBe(2)
     expect(h.all()).toContain('anthropic')
-    expect(h.all()).not.toContain('openai')
+    expect(h.all()).toContain('openrouter')
+    expect(h.all()).not.toContain('mistralx')
     await cleanup(h)
   })
 })
@@ -438,6 +440,183 @@ describe('runProvider — try --stream (fake client, no network)', () => {
     const h = await makeHarness()
     expect(await runProvider(['try', '--help'], h.deps)).toBe(0)
     expect(h.out.join('\n')).toContain('[--stream]')
+    await cleanup(h)
+  })
+})
+
+// ── B5a — OpenAI-compatible endpoints ───────────────────────────────────────────────────────────
+
+// Fakes built at runtime, never a literal key in source.
+const FAKE_OR_KEY = 'sk-or-' + 'test' + 'w'.repeat(40)
+const FAKE_OAI_KEY = 'sk-' + 'test' + 'v'.repeat(40)
+
+describe('runProvider — endpoint key set/status/remove', () => {
+  test('set openrouter via --stdin stores the preset base URL and prints only a fingerprint', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_OR_KEY })
+    expect(await runProvider(['key', 'set', 'openrouter', '--stdin'], h.deps)).toBe(0)
+    expect(h.all()).toContain('https://openrouter.ai/api/v1')
+    expect(h.all()).toMatch(/sha256:[0-9a-f]{8}/)
+    expect(h.all()).not.toContain(FAKE_OR_KEY)
+
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'status', 'openrouter'], h.deps)).toBe(0)
+    expect(h.all()).toContain('base url: https://openrouter.ai/api/v1')
+    expect(h.all()).toContain(`ends with: …${FAKE_OR_KEY.slice(-4)}`)
+    expect(h.all()).not.toContain(FAKE_OR_KEY.slice(-5))
+    expect(h.all()).not.toContain(FAKE_OR_KEY)
+    await cleanup(h)
+  })
+
+  test('--base-url overrides the preset and is normalised; litellm without one is refused', async () => {
+    const h = await makeHarness({ readStdinLine: async () => 'sk-1234' })
+    expect(await runProvider(['key', 'set', 'litellm', '--stdin'], h.deps)).toBe(2)
+    expect(h.all()).toContain('--base-url')
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'set', 'litellm', '--stdin', '--base-url', 'https://proxy.example.com/v1/'], h.deps)).toBe(0)
+    expect(h.all()).toContain('https://proxy.example.com/v1 ')
+    expect(h.all()).not.toContain('sk-1234')
+    await cleanup(h)
+  })
+
+  test('a plain-http remote or a userinfo base URL is refused BEFORE the key is asked, and never echoed', async () => {
+    let asked = false
+    const h = await makeHarness({ readStdinLine: async () => { asked = true; return FAKE_OAI_KEY } })
+    for (const url of ['http://evil.example/v1', 'https://user:hunter2secret@api.example.com/v1', 'https://x.example/v1?k=v', 'ftp://x/v1']) {
+      h.out.length = 0; h.err.length = 0
+      expect(await runProvider(['key', 'set', 'openai', '--stdin', '--base-url', url], h.deps)).toBe(1)
+      expect(h.all()).not.toContain(url)
+      expect(h.all()).not.toContain('hunter2secret')
+    }
+    expect(asked).toBe(false)
+    await cleanup(h)
+  })
+
+  test('http to loopback is accepted (9router preset)', async () => {
+    const h = await makeHarness({ readStdinLine: async () => 'router-key-1' })
+    expect(await runProvider(['key', 'set', '9router', '--stdin'], h.deps)).toBe(0)
+    expect(h.all()).toContain('http://localhost:20128/v1')
+    await cleanup(h)
+  })
+
+  test('ollama may be stored keyless; --no-key is refused where a key is required', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['key', 'set', 'ollama', '--no-key'], h.deps)).toBe(0)
+    expect(h.all()).toContain('no key at http://localhost:11434/v1')
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'status', 'ollama'], h.deps)).toBe(0)
+    expect(h.all()).toContain('key: none (keyless)')
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'set', 'openai', '--no-key'], h.deps)).toBe(2)
+    await cleanup(h)
+  })
+
+  test('an Anthropic key is refused for an endpoint (it would be sent to another host), and never echoed', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_KEY })
+    expect(await runProvider(['key', 'set', 'openai', '--stdin'], h.deps)).toBe(1)
+    expect(h.all()).toBe(keyShapeSentence('foreign-prefix', 'openai'))
+    expect(h.all()).not.toContain(FAKE_KEY)
+    await cleanup(h)
+  })
+
+  test('a key on argv is refused for an endpoint too', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['key', 'set', 'openai', FAKE_OAI_KEY], h.deps)).toBe(2)
+    expect(h.all()).not.toContain(FAKE_OAI_KEY)
+    await cleanup(h)
+  })
+
+  test('a replace via --stdin needs --replace, and shows old → new with the base URLs', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_OAI_KEY })
+    expect(await runProvider(['key', 'set', 'openai', '--stdin'], h.deps)).toBe(0)
+    h.deps.readStdinLine = async () => FAKE_OAI_KEY + 'x'
+    expect(await runProvider(['key', 'set', 'openai', '--stdin'], h.deps)).toBe(1)
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'set', 'openai', '--stdin', '--replace'], h.deps)).toBe(0)
+    expect(h.all()).toMatch(/sha256:[0-9a-f]{8} at https:\/\/api\.openai\.com\/v1 → sha256:[0-9a-f]{8} at https:\/\/api\.openai\.com\/v1/)
+    expect(h.all()).not.toContain(FAKE_OAI_KEY)
+    await cleanup(h)
+  })
+
+  test('remove says where the key is still valid, never the key', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_OR_KEY })
+    expect(await runProvider(['key', 'set', 'openrouter', '--stdin'], h.deps)).toBe(0)
+    h.out.length = 0; h.err.length = 0
+    expect(await runProvider(['key', 'remove', 'openrouter'], h.deps)).toBe(0)
+    expect(h.all()).toContain('still valid at OpenRouter')
+    expect(h.all()).not.toContain(FAKE_OR_KEY)
+    await cleanup(h)
+  })
+
+  test('a central refuses set, remove and try for an endpoint exactly like Anthropic', async () => {
+    const h = await makeHarness({ isCentral: async () => true, readStdinLine: async () => FAKE_OR_KEY })
+    expect(await runProvider(['key', 'set', 'openrouter', '--stdin'], h.deps)).toBe(1)
+    expect(await runProvider(['key', 'remove', 'openrouter'], h.deps)).toBe(1)
+    expect(await runProvider(['try', 'openrouter', '--model', 'x/y'], h.deps)).toBe(1)
+    expect(h.err.filter(l => l === refusalSentence('central'))).toHaveLength(3)
+    await cleanup(h)
+  })
+
+  test('`models` runs over THIS call\'s deps by default (no network: nothing stored), and a hook overrides it', async () => {
+    const h = await makeHarness()
+    // default wiring: the harness's own dir holds no openrouter record → refused before any request
+    expect(await runProvider(['models', 'openrouter'], h.deps)).toBe(1)
+    expect(h.all()).toContain('agentop provider key set openrouter')
+    // an argument outside the closed set is refused without being repeated back
+    expect(await runProvider(['models', 'sk-or-v1-' + 'x'.repeat(40)], h.deps)).toBe(2)
+    expect(h.all()).not.toContain('sk-or-v1-')
+    let got: string[] = []
+    h.deps.runModels = async (a) => { got = a; return 0 }
+    expect(await runProvider(['models', 'openrouter', '--json'], h.deps)).toBe(0)
+    expect(got).toEqual(['openrouter', '--json'])
+    await cleanup(h)
+  })
+})
+
+describe('runProvider — try <endpoint> --stream (B2 × B5a)', () => {
+  // The openai-compatible client has no stream yet: `--stream` against an endpoint must be refused in
+  // words — never a hang, never quietly answered by the non-streamed call — and journal nothing.
+  async function setup(streaming: boolean) {
+    const { openJournal } = await import('./journal/journal')
+    const h = await makeHarness({ readStdinLine: async () => FAKE_OR_KEY })
+    expect(await runProvider(['key', 'set', 'openrouter', '--stdin'], h.deps)).toBe(0)
+    h.out.length = 0; h.err.length = 0
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    const calls = { invokeOnce: 0, stream: 0 }
+    const client: import('@agentistics/runtime').ProviderClient = {
+      provider: 'openai-compatible', adapterVersion: 'fake-1', capabilities: { streaming, editPolicy: 'none' as never },
+      async invokeOnce() { calls.invokeOnce++; throw new Error('invokeOnce must not be called') },
+      ...(streaming ? { async *stream() { calls.stream++; yield { type: 'text-delta' as const, index: 0, text: 'x' } } } : {}),
+    }
+    h.deps.client = client
+    h.deps.openJournal = async () => journal
+    return { h, journal, calls }
+  }
+
+  test('is refused with the runtime\'s streaming_unsupported code, exits non-zero, calls nothing, journals nothing', async () => {
+    const { h, journal, calls } = await setup(false)
+    expect(await runProvider(['try', 'openrouter', '--model', 'x/y', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('openrouter: this client cannot stream (provider.streaming_unsupported) — run without --stream.')
+    expect(calls).toEqual({ invokeOnce: 0, stream: 0 })
+    expect(h.out).toEqual([])
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('is refused even if the client someday declares a stream — this verb has no streamed endpoint path', async () => {
+    const { h, journal, calls } = await setup(true)
+    expect(await runProvider(['try', 'openrouter', '--model', 'x/y', '--stream'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('(provider.streaming_unsupported)')
+    expect(calls).toEqual({ invokeOnce: 0, stream: 0 })
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('without --model the missing-model sentence still comes first', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['try', 'openrouter', '--stream'], h.deps)).toBe(2)
+    expect(h.err.join('\n')).toContain('has no default model')
     await cleanup(h)
   })
 })

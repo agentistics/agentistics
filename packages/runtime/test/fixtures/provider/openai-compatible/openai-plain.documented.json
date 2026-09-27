@@ -1,0 +1,21 @@
+{
+  "_source": "docs/superpowers/research/12-provider-apis.md §2.1 (Chat Completions usage object, fetched 2026-09-20). Counters illustrative.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-openai-plain-0001",
+    "model": "gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hello." } }],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "total_tokens": 150,
+      "prompt_tokens_details": { "cached_tokens": 0, "audio_tokens": 0 },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    }
+  }
+}

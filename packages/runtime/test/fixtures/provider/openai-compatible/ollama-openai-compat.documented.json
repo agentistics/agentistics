@@ -1,0 +1,10 @@
+{
+  "_source": "docs/superpowers/research/12-provider-apis.md §5.1 (Ollama has no cache/reasoning concept documented on its native API; this fixture models Ollama served through its OpenAI-compatible /v1/chat/completions surface — D6's preset base URL — whose usage shape beyond prompt_tokens/completion_tokens/total_tokens is UNVERIFIED and not assumed here).",
+  "kind": "local",
+  "body": {
+    "id": "chatcmpl-documented-ollama-0001",
+    "model": "llama3.3",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }],
+    "usage": { "prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18 }
+  }
+}

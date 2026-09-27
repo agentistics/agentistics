@@ -24,7 +24,14 @@ import { chmod, lstat, mkdir, open, readFile, rename, rmdir, unlink } from 'node
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import type { Stats } from 'node:fs'
-import { providerKeyFile, PROVIDER_KEYS_DIR, type KeyedProviderId } from '../config.ts'
+import {
+  ENDPOINT_PRESETS,
+  isOpenAICompatibleEndpoint,
+  providerKeyFile,
+  PROVIDER_KEYS_DIR,
+  type KeyedProviderId,
+  type OpenAICompatibleEndpointId,
+} from '../config.ts'
 import {
   createCredentialHandle,
   fingerprintOf,
@@ -32,12 +39,17 @@ import {
   formatMode,
   isModeTooOpen,
   parseStoredCredential,
+  parseStoredEndpoint,
   serializeCredential,
+  serializeEndpoint,
+  validateBaseUrl,
   validateKeyShape,
+  type BaseUrlRefusal,
   type CredentialHandle,
   type CredentialResolution,
   type KeyShapeRefusal,
 } from './credential-plan.ts'
+import type { CredentialRef } from '@agentistics/runtime'
 
 export interface CredentialIoOpts {
   /** Overrides `PROVIDER_KEYS_DIR` — the test-injection point. Never read from the process environment. */
@@ -76,7 +88,7 @@ export type StoreCredentialResult =
  * if any — untouched).
  */
 export async function storeCredential(
-  provider: KeyedProviderId,
+  provider: 'anthropic',
   value: string,
   opts: CredentialIoOpts & {
     replace?: boolean
@@ -100,6 +112,25 @@ export async function storeCredential(
   }
   const previous = existing.ok ? existing.handle.fingerprint : null
 
+  const now = opts.now ?? (() => new Date())
+  const written = await writeRecordAtomic(dir, finalPath, serializeCredential(provider, value, now().toISOString()), opts.beforeRename)
+  if (!written.ok) return written
+  return { ok: true, fingerprint: fingerprintOf(value), previous, path: finalPath }
+}
+
+/**
+ * The ONE atomic write every record in `provider-keys/` goes through (§6.2.3): 0700 directory,
+ * `open(tmp, 'wx', 0o600)` in the same directory, write, fsync, close, rename, then an explicit
+ * `chmod 0600`. On any failure the tmp file is unlinked and a failure is reported — never a truncated
+ * record left on disk. Shared by the Anthropic key and every endpoint record, so the discipline cannot
+ * drift between them.
+ */
+async function writeRecordAtomic(
+  dir: string,
+  finalPath: string,
+  body: string,
+  beforeRename?: () => Promise<void> | void,
+): Promise<{ ok: true } | { ok: false; reason: 'write-failed' | 'permissions' }> {
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 })
   } catch {
@@ -113,10 +144,7 @@ export async function storeCredential(
     return { ok: false, reason: 'permissions' }
   }
 
-  const now = opts.now ?? (() => new Date())
-  const body = serializeCredential(provider, value, now().toISOString())
   const tmp = tmpNameIn(dir)
-
   let handle
   try {
     handle = await open(tmp, 'wx', 0o600)
@@ -134,9 +162,9 @@ export async function storeCredential(
   }
   await handle.close()
 
-  if (opts.beforeRename) {
+  if (beforeRename) {
     try {
-      await opts.beforeRename()
+      await beforeRename()
     } catch {
       await unlink(tmp).catch(() => {})
       return { ok: false, reason: 'write-failed' }
@@ -160,8 +188,7 @@ export async function storeCredential(
   } catch {
     return { ok: false, reason: 'permissions' }
   }
-
-  return { ok: true, fingerprint: fingerprintOf(value), previous, path: finalPath }
+  return { ok: true }
 }
 
 /**
@@ -170,7 +197,7 @@ export async function storeCredential(
  * refuses a world-readable private key, without ever reading what it contains.
  */
 export async function resolveCredential(
-  provider: KeyedProviderId,
+  provider: 'anthropic',
   opts: CredentialIoOpts = {},
 ): Promise<CredentialResolution> {
   const dir = opts.dir ?? PROVIDER_KEYS_DIR
@@ -207,12 +234,16 @@ export interface CredentialStatus {
   fingerprint?: string
   /** The last 4 characters of the key — never more (`lastFourOf`). */
   last4?: string
+  /** B5a — an endpoint's stored base URL (configuration, not a secret). Absent for Anthropic. */
+  baseUrl?: string
+  /** B5a — true when an endpoint (Ollama) was stored with NO key (`--no-key`). */
+  keyless?: boolean
 }
 
 /**
  * What `agentop provider key status` may print (§6.2.6): presence, path, mode, `storedAt` and a
  * fingerprint and the key's last 4 characters — NEVER the value, more than that tail, or the raw
- * file content.
+ * file content. For an endpoint, also its base URL and whether it is keyless.
  *
  * `opts.readContent: false` is the flag-off path (`AGENTISTICS_PROVIDER` unset): only an `lstat` is
  * done, so `status` can still answer present/absent/too-open without ever opening the file — the
@@ -246,15 +277,156 @@ export async function credentialStatus(
   } catch {
     return { provider, path, state: 'unreadable', mode }
   }
-  const parsed = parseStoredCredential(text, provider)
-  if (!parsed.ok) return { provider, path, state: 'unreadable', mode }
 
+  if (provider === 'anthropic') {
+    const parsed = parseStoredCredential(text, provider)
+    if (!parsed.ok) return { provider, path, state: 'unreadable', mode }
+    return {
+      provider, path, state: 'present', mode,
+      storedAt: parsed.storedAt,
+      fingerprint: fingerprintOf(parsed.value),
+      last4: lastFourOf(parsed.value),
+    }
+  }
+
+  const parsed = parseStoredEndpoint(text, provider)
+  if (!parsed.ok) return { provider, path, state: 'unreadable', mode }
+  if (parsed.key === null) {
+    return { provider, path, state: 'present', mode, storedAt: parsed.storedAt, baseUrl: parsed.baseUrl, keyless: true }
+  }
   return {
     provider, path, state: 'present', mode,
     storedAt: parsed.storedAt,
-    fingerprint: fingerprintOf(parsed.value),
-    last4: lastFourOf(parsed.value),
+    baseUrl: parsed.baseUrl,
+    fingerprint: fingerprintOf(parsed.key),
+    last4: lastFourOf(parsed.key),
   }
+}
+
+// ---------------------------------------------------------------------------
+// B5a — OpenAI-compatible ENDPOINTS. One record per endpoint in the SAME 0600 file shape family as
+// the Anthropic key (contract D6): `{ v, provider: 'openai-compatible', endpoint, baseUrl, key|null,
+// storedAt }`, written through the same `writeRecordAtomic` and read under the same mode check.
+// ---------------------------------------------------------------------------
+
+export type StoreEndpointResult =
+  | {
+      ok: true
+      /** `null` for a keyless (Ollama) record. */
+      fingerprint: string | null
+      /** What was replaced, when anything was: its key fingerprint (or `null`: keyless) and base URL. */
+      previous: { fingerprint: string | null; baseUrl: string } | null
+      baseUrl: string
+      path: string
+    }
+  | { ok: false; reason: 'invalid-shape'; shape: KeyShapeRefusal }
+  | { ok: false; reason: 'invalid-base-url'; baseUrl: BaseUrlRefusal }
+  | { ok: false; reason: 'key-required' }
+  | { ok: false; reason: 'exists'; previous: { fingerprint: string | null; baseUrl: string } }
+  | { ok: false; reason: 'write-failed' | 'permissions' }
+
+/**
+ * Store (or replace) an endpoint's base URL and key. `key: null` is accepted only where the preset
+ * says the endpoint may be keyless (Ollama). Refuses outright — never partially writes — on a bad base
+ * URL, a bad key shape, or an existing record without `replace`.
+ */
+export async function storeEndpointCredential(
+  endpoint: OpenAICompatibleEndpointId,
+  input: { baseUrl: string; key: string | null },
+  opts: CredentialIoOpts & {
+    replace?: boolean
+    now?: () => Date
+    beforeRename?: () => Promise<void> | void
+  } = {},
+): Promise<StoreEndpointResult> {
+  const url = validateBaseUrl(input.baseUrl)
+  if (!url.ok) return { ok: false, reason: 'invalid-base-url', baseUrl: url.reason }
+  if (input.key === null) {
+    if (!ENDPOINT_PRESETS[endpoint].keyOptional) return { ok: false, reason: 'key-required' }
+  } else {
+    const shape = validateKeyShape(input.key, endpoint)
+    if (!shape.ok) return { ok: false, reason: 'invalid-shape', shape: shape.reason }
+  }
+
+  const dir = opts.dir ?? PROVIDER_KEYS_DIR
+  const finalPath = providerKeyFile(endpoint, dir)
+
+  const existing = await readEndpointCredential(endpoint, { dir })
+  const previous = existing.ok
+    ? { fingerprint: existing.handle?.fingerprint ?? null, baseUrl: existing.baseUrl }
+    : null
+  if (previous !== null && !opts.replace) return { ok: false, reason: 'exists', previous }
+
+  const now = opts.now ?? (() => new Date())
+  const body = serializeEndpoint(endpoint, url.baseUrl, input.key, now().toISOString())
+  const written = await writeRecordAtomic(dir, finalPath, body, opts.beforeRename)
+  if (!written.ok) return written
+  return {
+    ok: true,
+    fingerprint: input.key === null ? null : fingerprintOf(input.key),
+    previous,
+    baseUrl: url.baseUrl,
+    path: finalPath,
+  }
+}
+
+export type EndpointReadResult =
+  | { ok: true; baseUrl: string; storedAt: string; handle: CredentialHandle | null }
+  | { ok: false; reason: 'absent' | 'unreadable' | 'permissions-too-open' | 'wrong-provider' }
+
+/** Read an endpoint's record: its base URL and, unless keyless, an opaque handle over its key. Mode is
+ *  checked BEFORE content is read, exactly as for the Anthropic key. */
+export async function readEndpointCredential(
+  endpoint: OpenAICompatibleEndpointId,
+  opts: CredentialIoOpts = {},
+): Promise<EndpointReadResult> {
+  const dir = opts.dir ?? PROVIDER_KEYS_DIR
+  const path = providerKeyFile(endpoint, dir)
+
+  let stats: Stats
+  try {
+    stats = await lstat(path)
+  } catch {
+    return { ok: false, reason: 'absent' }
+  }
+  if (isModeTooOpen(stats.mode)) return { ok: false, reason: 'permissions-too-open' }
+
+  let text: string
+  try {
+    text = await readFile(path, 'utf-8')
+  } catch {
+    return { ok: false, reason: 'unreadable' }
+  }
+  const parsed = parseStoredEndpoint(text, endpoint)
+  if (!parsed.ok) return { ok: false, reason: parsed.reason }
+  return {
+    ok: true,
+    baseUrl: parsed.baseUrl,
+    storedAt: parsed.storedAt,
+    handle: parsed.key === null ? null : createCredentialHandle(endpoint, parsed.key),
+  }
+}
+
+/**
+ * The host's answer to a runtime `CredentialRef` (D23) — the one mapping every resolver in this
+ * binary goes through. `{anthropic, *}` → the Anthropic key. `{openai-compatible, <endpoint id>}` →
+ * that endpoint's key; a KEYLESS endpoint answers `absent` (there is no key to hand over — the client
+ * decides whether its endpoint may proceed without one). Any other pair — an unknown endpoint id, a
+ * vendor `ProviderId` like `openai` that this store never keys by, `openai-compatible` naming
+ * `anthropic` — is `wrong-provider`, refused without asking the store about it.
+ */
+export async function resolveCredentialRef(
+  ref: CredentialRef,
+  opts: CredentialIoOpts = {},
+): Promise<CredentialResolution> {
+  if (ref.provider === 'anthropic') return resolveCredential('anthropic', opts)
+  if (ref.provider === 'openai-compatible' && isOpenAICompatibleEndpoint(ref.id)) {
+    const read = await readEndpointCredential(ref.id, opts)
+    if (!read.ok) return { ok: false, reason: read.reason }
+    if (read.handle === null) return { ok: false, reason: 'absent' }
+    return { ok: true, handle: read.handle }
+  }
+  return { ok: false, reason: 'wrong-provider' }
 }
 
 /**
@@ -277,8 +449,13 @@ export async function removeCredential(
   let fingerprint: string | null = null
   try {
     const text = await readFile(path, 'utf-8')
-    const parsed = parseStoredCredential(text, provider)
-    if (parsed.ok) fingerprint = fingerprintOf(parsed.value)
+    if (provider === 'anthropic') {
+      const parsed = parseStoredCredential(text, provider)
+      if (parsed.ok) fingerprint = fingerprintOf(parsed.value)
+    } else {
+      const parsed = parseStoredEndpoint(text, provider)
+      if (parsed.ok && parsed.key !== null) fingerprint = fingerprintOf(parsed.key)
+    }
   } catch {
     // absent, unreadable, or a permissions error stat would also have hit — nothing to report,
     // fall through to the unlink attempt below, which is the operation that actually decides
