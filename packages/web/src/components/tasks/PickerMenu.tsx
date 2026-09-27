@@ -26,6 +26,7 @@ import { Check, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { microLabel, surface } from './board'
+import { boardCopy, type Lang } from './copy'
 
 export interface PickerItem {
   value: string
@@ -50,10 +51,15 @@ export interface PickerMenuProps {
   note?: string
   width?: number
   triggerStyle?: React.CSSProperties
+  /** The reader's language, for the ▲▼ buttons' own `aria-label`s — everything else here (the
+   *  title, the note, the trigger's contents) is already text the caller passes in, already
+   *  localized from `boardCopy`. Absent = English, for a caller that has not been threaded yet. */
+  lang?: Lang
 }
 
 export function PickerMenu(p: PickerMenuProps) {
   const isMobile = useIsMobile()
+  const copy = boardCopy(p.lang ?? 'en')
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
@@ -119,7 +125,7 @@ export function PickerMenu(p: PickerMenuProps) {
     <button
       onClick={e => { e.stopPropagation(); step(v, by) }}
       disabled={disabled}
-      aria-label={by === -1 ? 'Move up' : 'Move down'}
+      aria-label={by === -1 ? copy.pickers.moveUp : copy.pickers.moveDown}
       className="ag-tap-icon"
       style={{
         background: 'none', border: 'none', padding: 0, flexShrink: 0,

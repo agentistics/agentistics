@@ -216,6 +216,28 @@ export interface BoardCopy {
     /** Every key a list can be ordered by, in words. */
     keys: Record<string, string>
   }
+  /**
+   * The "Columns"/"Groups" pickers' own chrome (`PickerMenu.tsx`) — the popover title, the note
+   * under the list, the trigger's own label, and the ▲▼ reorder buttons. This was the one piece of
+   * chrome around an otherwise-translated table/kanban that never read `lang` at all: the table's
+   * "Show groups" and "Columns" pickers (`TaskTable.tsx`) and the kanban's own "Columns on the
+   * board" one (`BoardArrange.tsx`) all wrote English straight into their JSX regardless of the
+   * toggle. Everything else a `PickerMenu` draws (the item labels, the hint counts) is supplied by
+   * the caller from elsewhere in this file, never from here.
+   */
+  pickers: {
+    moveUp: string
+    moveDown: string
+    groupsTitle: string
+    groupsTrigger: string
+    groupsNote: string
+    columnsTitle: string
+    columnsTrigger: string
+    columnsNote: string
+    boardColumnsTitle: string
+    boardColumnsTrigger: string
+    boardColumnsNote: string
+  }
 }
 
 const EN: BoardCopy = {
@@ -387,6 +409,20 @@ const EN: BoardCopy = {
       attempts: 'Attempts', comments: 'Comments', subtasks: 'Subtasks', progress: 'Progress', harnesses: 'Harnesses',
       delivered: 'Delivered', started: 'Started',
     },
+  },
+  pickers: {
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    groupsTitle: 'Show groups',
+    groupsTrigger: 'Groups',
+    groupsNote: 'Drag a ticked group, or use ▲▼, to reorder the bands. A hidden group’s tasks are still there.',
+    columnsTitle: 'Columns',
+    columnsTrigger: 'Columns',
+    columnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — the table follows this order.',
+    boardColumnsTitle: 'Columns on the board',
+    boardColumnsTrigger: 'Columns',
+    boardColumnsNote:
+      'Drag a ticked column, or use ▲▼, to reorder the pipeline. A hidden column’s tasks are still there.',
   },
 }
 
@@ -561,6 +597,20 @@ const PT: BoardCopy = {
       attempts: 'Tentativas', comments: 'Comentários', subtasks: 'Subtarefas', progress: 'Progresso', harnesses: 'Harnesses',
       delivered: 'Entregue em', started: 'Início',
     },
+  },
+  pickers: {
+    moveUp: 'Mover para cima',
+    moveDown: 'Mover para baixo',
+    groupsTitle: 'Mostrar grupos',
+    groupsTrigger: 'Grupos',
+    groupsNote: 'Arraste um grupo marcado, ou use ▲▼, para reordenar as faixas. As tarefas de um grupo oculto continuam lá.',
+    columnsTitle: 'Colunas',
+    columnsTrigger: 'Colunas',
+    columnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — a tabela segue essa ordem.',
+    boardColumnsTitle: 'Colunas do quadro',
+    boardColumnsTrigger: 'Colunas',
+    boardColumnsNote:
+      'Arraste uma coluna marcada, ou use ▲▼, para reordenar o fluxo. As tarefas de uma coluna oculta continuam lá.',
   },
 }
 

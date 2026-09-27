@@ -19,6 +19,7 @@ import { scrollIsOutside } from '../../lib/popoverScroll'
 import {
   button, field, liveStatusMap, liveStatusOrder, microLabel, pill, surface, type BoardStatus,
 } from './board'
+import { boardCopy, type Lang } from './copy'
 import { PickerMenu } from './PickerMenu'
 import { LANE_KEYS, type LaneKey } from './boardPrefs'
 import type { ColumnSorts } from './columnSort'
@@ -69,10 +70,14 @@ export interface BoardArrangeProps {
   counts: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
+  /** The reader's language. Absent = English, for a caller that has not been threaded yet — same
+   *  default `TaskTable`'s own `lang` prop uses. */
+  lang?: Lang
 }
 
 export function BoardArrange(p: BoardArrangeProps) {
   const isMobile = useIsMobile()
+  const copy = boardCopy(p.lang ?? 'en')
   const [menu, setMenu] = useState<'sort' | 'lanes' | 'wip' | null>(null)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const bar = useRef<HTMLDivElement>(null)
@@ -163,7 +168,8 @@ export function BoardArrange(p: BoardArrangeProps) {
        * to say so.
        */}
       <PickerMenu
-        title="Columns on the board"
+        title={copy.pickers.boardColumnsTitle}
+        lang={p.lang ?? 'en'}
         triggerStyle={trigger}
         items={statusOrder.map(st => ({
           value: st,
@@ -174,9 +180,9 @@ export function BoardArrange(p: BoardArrangeProps) {
         value={p.columns}
         onChange={next => p.onColumns(next as BoardStatus[])}
         orderable
-        note="Drag a ticked column, or use ▲▼, to reorder the pipeline. A hidden column's tasks are still there."
+        note={copy.pickers.boardColumnsNote}
       >
-        <Columns3 size={13} /> Columns · {p.columns.length}
+        <Columns3 size={13} /> {copy.pickers.boardColumnsTrigger} · {p.columns.length}
       </PickerMenu>
 
       <div>

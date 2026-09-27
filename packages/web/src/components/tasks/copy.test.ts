@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { boardCopy, statusLabel } from './copy'
+import { boardCopy, statusLabel, type BoardCopy } from './copy'
 import { COLUMN_ORDER, type ColumnId } from './board'
 
 describe('boardCopy', () => {
@@ -11,6 +11,21 @@ describe('boardCopy', () => {
     expect(Object.keys(pt).sort()).toEqual(Object.keys(en).sort())
     expect(Object.keys(pt.status).sort()).toEqual(Object.keys(en.status).sort())
     expect(Object.keys(pt.columns).sort()).toEqual(Object.keys(en.columns).sort())
+    expect(Object.keys(pt.list).sort()).toEqual(Object.keys(en.list).sort())
+    expect(Object.keys(pt.pickers).sort()).toEqual(Object.keys(en.pickers).sort())
+  })
+
+  it('names every control the Columns/Groups pickers draw', () => {
+    const keys: Array<keyof BoardCopy['pickers']> = [
+      'moveUp', 'moveDown',
+      'groupsTitle', 'groupsTrigger', 'groupsNote',
+      'columnsTitle', 'columnsTrigger', 'columnsNote',
+      'boardColumnsTitle', 'boardColumnsTrigger', 'boardColumnsNote',
+    ]
+    for (const key of keys) {
+      expect(boardCopy('en').pickers[key]).toBeTruthy()
+      expect(boardCopy('pt').pickers[key]).toBeTruthy()
+    }
   })
 
   it('names every column the main task table can show', () => {
