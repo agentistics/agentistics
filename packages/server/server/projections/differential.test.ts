@@ -127,12 +127,33 @@ describe('legacy defects, proven per session', () => {
 })
 
 describe('declared absences', () => {
-  test('what turn.started cannot reach is not-projectable, never a bug', () => {
-    const rows = compareTime(legacy({ active_minutes: 12, message_hours: [9, 9], user_response_times: [4] }), projection())
-    for (const f of ['active_minutes', 'message_hours', 'user_response_times']) {
-      expect(rows.find(r => r.field === f)!.verdict).toBe('not-projectable')
-      expect(rows.find(r => r.field === f)!.reason).toBeTruthy()
+  test('message_hours stays not-projectable by decision D25, never a bug', () => {
+    const rows = compareTime(legacy({ message_hours: [9, 9] }), projection())
+    expect(rows.find(r => r.field === 'message_hours')!.verdict).toBe('not-projectable')
+    expect(rows.find(r => r.field === 'message_hours')!.reason).toContain('D25')
+  })
+})
+
+describe('the turn-time pair turn.ended reaches (D25) is compared, equal or bug', () => {
+  test('equal when the projection agrees — active_minutes (0 included) and the response-time list', () => {
+    for (const m of [12, 0]) {
+      const rows = compareTime(legacy({ active_minutes: m, user_response_times: [4, 90] }),
+        projection({ active_minutes: m, user_response_times: [4, 90] }))
+      expect(rows.find(r => r.field === 'active_minutes')!.verdict).toBe('equal')
+      expect(rows.find(r => r.field === 'user_response_times')!.verdict).toBe('equal')
     }
+  })
+  test('one minute or one response time off is a bug; so is an absent projection against a legacy value', () => {
+    const l = legacy({ active_minutes: 12, user_response_times: [4, 90] })
+    const off = compareTime(l, projection({ active_minutes: 13, user_response_times: [4] }))
+    expect(off.find(r => r.field === 'active_minutes')!.verdict).toBe('bug')
+    expect(off.find(r => r.field === 'user_response_times')!.verdict).toBe('bug')
+    const absent = compareTime(l, projection())
+    expect(absent.find(r => r.field === 'active_minutes')!.verdict).toBe('bug')
+  })
+  test('both absent (a transcript with no usable time) is equal', () => {
+    const rows = compareTime(legacy({ active_minutes: undefined }), projection())
+    expect(rows.find(r => r.field === 'active_minutes')!.verdict).toBe('equal')
   })
 })
 
@@ -153,9 +174,11 @@ describe('the human-turn fields turn.started DOES reach are compared, equal or b
   })
   test('an empty transcript: legacy writes 0 / [] for the turn counters too, explained like the others', () => {
     const e = compareSession({ sessionId: 's', legacy: legacy(), projection: projection(), evidence: { ...evidence(50, 50), mainBytes: 0 } })
-    for (const f of ['rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps']) {
+    for (const f of ['rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps', 'user_response_times']) {
       expect(e.rows.find(r => r.field === f)!.reason).toBe(EXPLANATIONS.emptyTranscript)
     }
+    // Legacy has no usable time there either, so `active_minutes` is absent on both sides: equal.
+    expect(e.rows.find(r => r.field === 'active_minutes')!.verdict).toBe('equal')
   })
 })
 
@@ -373,7 +396,7 @@ describe('the fixture row (A2.2\'s redacted transcripts)', () => {
     const r = await runDifferential({ projectsDir: join(FIXTURES, 'claude-replay-turns'), settledMs: 0, keepDiffs: true })
     expect(r.sessions).toBe(1)
     const rows = r.diffs![0]!.rows
-    for (const f of ['rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps']) {
+    for (const f of ['rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps', 'active_minutes', 'user_response_times']) {
       expect(rows.find(x => x.field === f)!.verdict).toBe('equal')
     }
     // The unstamped human line is a round and not a timestamp, on both sides.
@@ -382,6 +405,18 @@ describe('the fixture row (A2.2\'s redacted transcripts)', () => {
     // Nothing else in the fixture may differ either: its assistant lines carry a real usage, so the
     // token family (model, cost, the four counters) is compared on it like on every other fixture.
     expect(rows.filter(x => x.verdict === 'bug')).toEqual([])
+  })
+  test('D25: active_minutes and user_response_times are EQUAL on every fixture, and carry real values', async () => {
+    const seen = { minutes: 0, responses: 0 }
+    for (const dir of ['claude-replay', 'claude-replay-compact', 'claude-replay-turns']) {
+      const r = await runDifferential({ projectsDir: join(FIXTURES, dir), settledMs: 0, keepDiffs: true })
+      const rows = r.diffs![0]!.rows
+      for (const f of ['active_minutes', 'user_response_times']) expect(rows.find(x => x.field === f)!.verdict).toBe('equal')
+      seen.minutes += rows.find(x => x.field === 'active_minutes')!.legacy as number
+      seen.responses += (rows.find(x => x.field === 'user_response_times')!.legacy as number[]).length
+    }
+    expect(seen.minutes).toBeGreaterThan(0)
+    expect(seen.responses).toBeGreaterThan(0)
   })
   test('claude-replay: after M-1 the subagent token total is EQUAL — nothing left to explain', async () => {
     const r = await runDifferential({ projectsDir: join(FIXTURES, 'claude-replay'), settledMs: 0 })

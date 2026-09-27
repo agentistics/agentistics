@@ -452,6 +452,19 @@ reproduce the token counters and none of these. So each entry that predicate acc
 cannot diverge by construction. The turn itself is a fact about the conversation, not a new entity:
 it needs no id beyond its `eventId`.
 
+**A turn also CLOSES as an event, and a prompt carries the instant its response time is measured
+from (D25, 2026-09-26).** A2.7 measured that `turn.started` alone cannot reproduce `active_minutes`
+(305/477 equal) or `user_response_times` (381/477): legacy (`foldClaudeParse` + `activeTime.ts`)
+closes a turn with Claude's own `system/turn_duration` line — its `durationMs` wins — or else at the
+LAST timestamped line of any kind before the next prompt, and measures response time from the LAST
+assistant line (`lastAssistantTs`, never reset between turns), while `model.completed` carries the
+first. So the vocabulary gains `turn.ended { close: 'measured' | 'last-line', durationMs? }`, emitted
+where legacy closes an OPEN turn, and `turn.started` gains `previousAssistantAt?` — the verbatim
+timestamp of the last assistant line before the prompt (§14.1). A duration the harness measured
+itself is the contract's preferred time source (`docs/harness-contract.md` § 1), and the event
+carries it rather than a reconstruction. `message_hours` stays LEGACY-ONLY: legacy takes the hour of
+EVERY timestamped line, which a stream of turns cannot reproduce (measured 1/477).
+
 ### 13.3 Identity and correlation
 
 ```
@@ -581,7 +594,7 @@ browser.click  browser.input  browser.scroll  browser.screenshot  browser.downlo
 context.compacted    context.window.observed
 policy.requested     policy.approved    policy.denied
 alm.task.created     alm.task.updated   alm.task.completed   alm.evidence.attached
-turn.started                                                   (human turns — D22)
+turn.started         turn.ended                                (human turns — D22, D25)
 ```
 
 **`turn.started` — a HUMAN TURN is an event (D22, decided 2026-09-26 by the specification session
@@ -606,6 +619,29 @@ measured duration; the last assistant line's time on `turn.started`) — a vocab
 D22, and therefore a decision, not an implementation detail. *Rejected:* deriving turns in the projection from gaps between `model.invoked` events —
 that is the idle-gap inference `docs/harness-contract.md` § 1 forbids, and a turn inferred from a
 pause would count a long tool run as the person speaking.
+
+**`turn.ended` and `turn.started.previousAssistantAt` — closing the turn (D25, decided 2026-09-26 by
+the specification session under the owner's delegation; approved by the leader).** The widening the
+paragraph above names, taken as a decision. `turn.ended` is OPTIONAL and additive, like
+`turn.started`; its data is `{ close: 'measured' | 'last-line'; durationMs?: number }` and nothing
+else (D5: no text, no size). It is emitted only for a turn that is OPEN, at the point legacy's
+active-time rule closes it: `'measured'` when the harness wrote its own duration for the turn
+(Claude's `system/turn_duration` line — `durationMs` carries it and wins over anything
+reconstructed, `occurredAt` is that line's), `'last-line'` when no measurement arrived before the
+next prompt or the end of the transcript (the turn closes at the LAST timestamped line of any kind,
+whose time is `occurredAt`). A stray measurement with no open turn emits nothing, and `durationMs`
+is ABSENT unless the harness stated one (D21's rule) — never a 0 standing in for "not measured".
+`previousAssistantAt` is the verbatim `timestamp` of the LAST assistant-role line written before the
+prompt — the instant legacy's `user_response_times` measures from — absent when no timestamped
+assistant line preceded it. It lives on `turn.started` rather than on `turn.ended` because legacy's
+`lastAssistantTs` persists across turns and a prompt arriving with no open turn gets no `turn.ended`
+at all, while every prompt gets a `turn.started`. With both, `active_minutes` and
+`user_response_times` leave `NOT_PROJECTABLE`; `message_hours` stays there (legacy takes the hour of
+every line; measured 1/477). *Rejected:* deriving turn ends in the projection from the gaps between
+`turn.started` events — the idle-gap inference `docs/harness-contract.md` § 1 forbids, and measured
+by A2.7 at 305/477 equal. *Measured (A2.8, Claude adapter 1.5.0):* over this machine's real store,
+484 sessions compared, 0 bug rows — `active_minutes` 484 equal, `user_response_times` 483 equal and 1
+explained (the 0-byte transcript).
 
 Harness-specific facts do **not** get their own event types. They travel as typed `data` on the
 event that carries them, so the vocabulary stays closed and a new harness cannot widen it silently.

@@ -199,6 +199,35 @@ stay not-projectable with that reason, and P1 §12.3 stays open for `active_minu
 master §13.2/§14.1 and P1 §12.3. *Rejected:* deriving turns in the projection from gaps between
 `model.invoked` events — that is the idle-gap inference `docs/harness-contract.md` § 1 forbids.
 
+**D25 · A human turn CLOSES as an event, and a prompt names the instant its response time is
+measured from.** Taken on 2026-09-26; approved by the leader (688e4a0205) under the owner's
+delegation; the owner may veto. Implemented by A2.8. The canonical vocabulary gains `turn.ended`
+with data `{ close: 'measured' | 'last-line'; durationMs?: number }` — OPTIONAL and additive, not in
+the required set — and `turn.started` gains an optional `previousAssistantAt` (the verbatim
+timestamp of the last assistant line before the prompt). `turn.ended` is emitted only for an OPEN
+turn, where legacy's active-time rule closes it: `'measured'` on Claude's own `system/turn_duration`
+line (its `durationMs` wins), `'last-line'` at the last timestamped line of any kind before the next
+prompt or the end of the transcript. `durationMs` is absent unless the harness stated it (D21), and
+neither shape carries text or a text size (D5). `previousAssistantAt` sits on `turn.started`, not on
+`turn.ended`, because legacy's `lastAssistantTs` persists across turns and a prompt with no open
+turn gets no `turn.ended`, while every prompt gets a `turn.started`. *Reason:* a projection that
+cannot reproduce a legacy figure keeps P1 §12.3 open forever, and a duration the harness measured
+itself is the contract's preferred time source (`docs/harness-contract.md` § 1) — A2.7 measured
+`active_minutes` at 305/477 and `user_response_times` at 381/477 from `turn.started` alone, because
+legacy closes a turn with `turn_duration` or the last line of any kind and measures response time
+from the LAST assistant line while `model.completed` carries the first. `message_hours` stays
+LEGACY-ONLY: legacy takes the hour of every timestamped line, which a stream of turns cannot
+reproduce (measured 1/477). Applied to `canonical/event.ts` (type tests prove both closes, the
+optional duration, the closed union and the absence of text; every pre-D25 literal still compiles)
+and to master §13.2/§14.1. *Rejected:* deriving turn ends from the gaps between `turn.started`
+events — the idle-gap inference `docs/harness-contract.md` § 1 forbids, measured by A2.7 at 305/477
+equal.
+*Measured outcome (A2.8, 2026-09-26):* Claude adapter 1.5.0; the differential over this machine's real
+store (read-only, isolated `AGENTISTICS_DIR`) reads "sessions compared: 484 · with at least one bug row:
+0 · skipped: 2 live". `active_minutes` 484 equal / 0 bug; `user_response_times` 483 equal / 1 explained
+(the known 0-byte transcript, where legacy writes `[]`) / 0 bug; `message_hours` 484 not-projectable, by
+this decision. Both fields left `NOT_PROJECTABLE`; P1 §12.3 is closed.
+
 ## Also decided on 2026-09-25
 
 - **The native context manager** — every decision is in `2026-09-25-runtime-context-manager-design.md`.

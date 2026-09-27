@@ -16,7 +16,9 @@
  * - `replay-tools.ts` — one `tool.requested` per `tool_use` block, one `tool.completed` /
  *   `tool.failed` per result.
  * - `replay-context.ts` — one `context.compacted` per `compact_boundary` record.
- * - `replay-turns.ts` — one `turn.started` per person's turn on the MAIN transcript (D22).
+ * - `replay-turns.ts` — one `turn.started` per person's turn on the MAIN transcript (D22), plus one
+ *   `turn.ended` per turn close (D25) — everything a projection needs to reproduce legacy's
+ *   `active_minutes` and `user_response_times` exactly.
  *
  * The fold never collects events: it hands each one to `emit` as it is made, so the caller decides
  * how many to hold (P1 §9 — no unbounded accumulation). `lineNo` is 1-based and counts EVERY raw
@@ -28,7 +30,7 @@ import { emptyLifecycleFold, finishLifecycleFold, foldLifecycleEntry, type Lifec
 import { emptyContextFold, foldContextEntry, type ContextFoldState } from './replay-context'
 import { emptyModelFold, finishModelFold, foldModelEntry, type ModelFoldState } from './replay-model'
 import { emptyToolFold, finishToolFold, foldToolEntry, type ToolFoldState } from './replay-tools'
-import { emptyTurnFold, foldTurnEntry, type TurnFoldState } from './replay-turns'
+import { emptyTurnFold, finishTurnFold, foldTurnEntry, type TurnFoldState } from './replay-turns'
 
 /**
  * `main`: the conversation's own transcript, which opens and closes the session, the run and the
@@ -100,5 +102,8 @@ export interface FinishOptions {
 export function finishClaudeReplay(state: ClaudeReplayState, opts: FinishOptions, emit: EmitEvent): void {
   finishModelFold(state.model, state.ctx, opts.final, emit)
   finishToolFold(state.tools, state.ctx, opts.final, emit)
+  // Turns before lifecycle: a turn's own close is a fact about that turn, which conceptually
+  // precedes (and reads more naturally before) the session/run/agent it happened inside of ending.
+  finishTurnFold(state.turns, state.ctx, state.role, opts.final, emit)
   finishLifecycleFold(state.lifecycle, state.ctx, state.role, opts.final, emit)
 }

@@ -11,6 +11,7 @@ import {
   type AgentisticsEvent,
   type EventProvenance,
   type ModelCompletedData,
+  type TurnEndedData,
   type TurnStartedData,
 } from './event'
 import { REASONING_BILLINGS, SIDE_PROCESS_ENDED_BY } from './entities'
@@ -283,6 +284,85 @@ describe('turn.started (D22)', () => {
 
   test('the @ts-expect-error fixtures above are type-checked, not exercised', () => {
     void _withText; void _byAssistant; void _noBy
+    expect(true).toBe(true)
+  })
+})
+
+/**
+ * D25 (2026-09-26): a person's turn CLOSES as an event, and a prompt carries the instant legacy's
+ * `user_response_times` measures from. Both ADDITIVE: `turn.ended` is an optional type (not in
+ * REQUIRED_EVENT_TYPES) and `previousAssistantAt` an optional field on the D22 shape, so every
+ * pre-D25 `turn.started` literal above keeps type-checking. `turn.ended` is metadata only (D5) and
+ * its `close` is a CLOSED union naming WHICH legacy rule closed the turn — the harness's own
+ * measurement, or the last timestamped line. `durationMs` is absent unless the harness stated one
+ * (D21's rule), never a 0 standing in for "not measured".
+ */
+describe('turn.ended + previousAssistantAt (D25)', () => {
+  const base = {
+    schema: CANONICAL_EVENT_SCHEMA,
+    recordedAt: '2026-09-26T12:10:01.000Z',
+    sessionId: 'ses_1',
+    source: { kind: 'harness', id: 'claude', version: '2.1.263' },
+    provenance: {
+      mode: 'observed', confidence: 'exact', adapterVersion: '1.0.0',
+      sourceRef: 'projects/-x/ses_1.jsonl:8192',
+    },
+  } as const
+
+  const measured: AgentisticsEvent<'turn.ended'> = {
+    ...base, eventId: 'evt_turn_end_1', type: 'turn.ended',
+    occurredAt: '2026-09-26T12:10:00.000Z',
+    data: { close: 'measured', durationMs: 600_000 },
+  }
+  const lastLine: AgentisticsEvent<'turn.ended'> = {
+    ...base, eventId: 'evt_turn_end_2', type: 'turn.ended',
+    occurredAt: '2026-09-26T12:09:58.000Z',
+    data: { close: 'last-line' },
+  }
+  const startedWithPrevious: AgentisticsEvent<'turn.started'> = {
+    ...base, eventId: 'evt_turn_2', type: 'turn.started',
+    occurredAt: '2026-09-26T12:11:00.000Z',
+    data: { by: 'user', previousAssistantAt: '2026-09-26T12:09:58.000Z' },
+  }
+
+  test('turn.ended is in the vocabulary and isEventType accepts it', () => {
+    expect(EVENT_TYPES).toContain('turn.ended')
+    expect(isEventType('turn.ended')).toBe(true)
+  })
+
+  test('turn.ended is optional: NOT in REQUIRED_EVENT_TYPES', () => {
+    expect(REQUIRED_EVENT_TYPES as readonly string[]).not.toContain('turn.ended')
+  })
+
+  test('both closes are accepted, and durationMs is optional', () => {
+    expect(measured.data).toEqual({ close: 'measured', durationMs: 600_000 })
+    expect(lastLine.data).toEqual({ close: 'last-line' })
+    expect('durationMs' in lastLine.data).toBe(false)
+    const asUnion: AnyAgentisticsEvent = measured
+    expect(asUnion.type === 'turn.ended' ? asUnion.data.close : null).toBe('measured')
+  })
+
+  test('turn.started accepts previousAssistantAt, verbatim, and still carries no text', () => {
+    expect(startedWithPrevious.data).toEqual({ by: 'user', previousAssistantAt: '2026-09-26T12:09:58.000Z' })
+    const asUnion: AnyAgentisticsEvent = startedWithPrevious
+    expect(asUnion.type === 'turn.started' ? asUnion.data.previousAssistantAt : null)
+      .toBe('2026-09-26T12:09:58.000Z')
+  })
+
+  // A measured close with no stated duration is typeable: `durationMs` is optional in the TYPE; the
+  // replay is what keeps it present exactly when the harness wrote one.
+  const _measuredNoDuration: TurnEndedData = { close: 'measured' }
+  // @ts-expect-error — D5: a turn's close carries no text; `text` is not a field of TurnEndedData.
+  const _endWithText: TurnEndedData = { close: 'last-line', text: 'bye' }
+  // @ts-expect-error — `close` is a closed union; 'idle-gap' is the inference the harness contract forbids.
+  const _unknownClose: TurnEndedData = { close: 'idle-gap' }
+  // @ts-expect-error — `close` is required: WHICH rule closed the turn is the fact this event states.
+  const _noClose: TurnEndedData = { durationMs: 1000 }
+  // @ts-expect-error — `previousAssistantAt` is a verbatim timestamp string, not an epoch number.
+  const _previousAsNumber: TurnStartedData = { by: 'user', previousAssistantAt: 1_758_888_000_000 }
+
+  test('the @ts-expect-error fixtures above are type-checked, not exercised', () => {
+    void _measuredNoDuration; void _endWithText; void _unknownClose; void _noClose; void _previousAsNumber
     expect(true).toBe(true)
   })
 })

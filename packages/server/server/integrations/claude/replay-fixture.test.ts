@@ -14,7 +14,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentisticsEvent } from '@agentistics/core'
+import { emptyActiveTime, finishActiveTime, foldActiveTime, type AgentisticsEvent, type TurnEvent } from '@agentistics/core'
 import { emptyClaudeParse, finishCompacts, foldClaudeParse, iterLines } from '../../jsonl'
 import { emptyClaudeReplay, finishClaudeReplay, foldClaudeReplay, foldClaudeReplayEntry } from './replay'
 import { CLAUDE_ADAPTER_VERSION, mainContext } from './replay-core'
@@ -262,10 +262,21 @@ describe('Claude replay over a small excerpt exercising human turns (D22)', () =
     expect(turns[2]!.provenance.confidence).toBe('estimated')
   })
 
-  test('no event carries anything beyond who and when — same forbidden-key check as the main fixture', () => {
+  test('no event carries anything beyond who, when and (D25) the last prior assistant reply', () => {
     const forbidden = new Set(['content', 'text', 'prompt', 'thinking', 'command', 'title', 'message'])
     for (const e of turns) for (const key of Object.keys(e.data)) expect(forbidden.has(key)).toBe(false)
-    expect(turns.every(e => Object.keys(e.data).length === 1)).toBe(true)
+    // Every key present is one of the two D5/D25-allowed fields — never more.
+    for (const e of turns) for (const key of Object.keys(e.data)) expect(['by', 'previousAssistantAt']).toContain(key)
+  })
+
+  test('(D25) previousAssistantAt: absent before any assistant line, present (line 2\'s own reply) once one has spoken', () => {
+    // Line 2 is the fixture's only assistant line, timestamped 2026-09-26T10:00:05.000Z, and it sits
+    // between turn 1 (line 1) and turns 2 and 3 (lines 4 and 7) — so only the first turn has none.
+    expect('previousAssistantAt' in turns[0]!.data).toBe(false)
+    expect((turns[1]!.data as { previousAssistantAt?: string }).previousAssistantAt).toBe('2026-09-26T10:00:05.000Z')
+    // Never reset between turns: turn 3 (estimated, no timestamp of its own) still carries it, and
+    // line 8's assistant reply (which answers turn 3) comes AFTER it and cannot be the value.
+    expect((turns[2]!.data as { previousAssistantAt?: string }).previousAssistantAt).toBe('2026-09-26T10:00:05.000Z')
   })
 
   test('chunk independence at every line boundary, including across the timestamp-less line', () => {
@@ -287,5 +298,182 @@ describe('Claude replay over a small excerpt exercising human turns (D22)', () =
     expect(split.map(essence)).toEqual(all3.map(essence))
     expect(new Set(split.filter(e => e.type === 'turn.started').map(e => e.eventId)))
       .toEqual(new Set(turns.map(e => e.eventId)))
+  })
+})
+
+describe('Claude replay over a small excerpt exercising turn.ended (A2.8, D25)', () => {
+  // A tiny hand-built conversation (not a redacted real one) exercising, in one file: a turn closed
+  // by a measured `turn_duration` line, a stray `turn_duration` with no turn open, a negative
+  // `durationMs` (an ordinary timed line — the turn stays open), a human line with no `timestamp` at
+  // all sitting mid-open-turn, a turn closed by `last-line` at the next prompt, a multi-line
+  // assistant response (so `previousAssistantAt` is the LAST of the two), a final turn left open to
+  // EOF and closed only at `finish`, and a prompt (line 1) with no preceding assistant line at all.
+  const CONV4 = '00000000-0000-4000-8000-000000000004'
+  const lines4 = [...iterLines(readFileSync(
+    join(import.meta.dir, '../../../test/fixtures/claude-replay-turn-end/proj', `${CONV4}.jsonl`), 'utf-8'))]
+  const run4 = (chunks: string[][]) => {
+    const out: AgentisticsEvent[] = []
+    const s = emptyClaudeReplay(mainContext(CONV4, RECORDED_AT))
+    for (const c of chunks) foldClaudeReplay(s, c, e => out.push(e))
+    finishClaudeReplay(s, { final: true }, e => out.push(e))
+    return out
+  }
+  const all4 = run4([lines4])
+  const turns = all4.filter((e): e is AgentisticsEvent<'turn.started'> => e.type === 'turn.started')
+  const closes = all4.filter((e): e is AgentisticsEvent<'turn.ended'> => e.type === 'turn.ended')
+
+  test('the shape: four turns (one of them untimed), three closes, one of each close reason', () => {
+    // Four HUMAN lines (1, 6, 9, 10) each get their own turn.started — line 9 counts as a round
+    // (`user_message_count`) exactly like the others, even though it carries no timestamp — but only
+    // THREE of them are ever closed, because line 9 never opens or closes anything in the bookkeeping
+    // (see the dedicated test below).
+    expect(turns).toHaveLength(4)
+    expect(turns.map(e => e.provenance.sourceRef)).toEqual(
+      [`claude:${CONV4}:1`, `claude:${CONV4}:6`, `claude:${CONV4}:9`, `claude:${CONV4}:10`])
+    expect(closes).toHaveLength(3)
+    expect(closes.map(e => e.data.close)).toEqual(['measured', 'last-line', 'last-line'])
+  })
+
+  test('the measured close: line 4\'s own durationMs, at line 4', () => {
+    expect(closes[0]!.data).toEqual({ close: 'measured', durationMs: 7000 })
+    expect(closes[0]!.provenance.sourceRef).toBe(`claude:${CONV4}:4`)
+    expect(closes[0]!.occurredAt).toBe('2026-09-26T11:00:07.000Z')
+  })
+
+  test('the stray turn_duration (line 5) closes nothing and is never referenced by any close', () => {
+    // No turn is open when line 5 is processed (turn 1 already closed at line 4), so it emits
+    // nothing — and because line 6 (a timed human line) immediately follows and overwrites the
+    // last-timed reference when it opens turn 2, line 5 never becomes anyone's close point either.
+    // Only three closes total (asserted above): the fourth close a stray measurement might otherwise
+    // have produced never happens.
+    expect(closes.every(e => e.provenance.sourceRef !== `claude:${CONV4}:5`)).toBe(true)
+  })
+
+  test('the second turn closes last-line at line 8 (the negative-duration line), not at line 6, 9 or 10', () => {
+    expect(closes[1]!.data).toEqual({ close: 'last-line' })
+    expect(closes[1]!.provenance.sourceRef).toBe(`claude:${CONV4}:8`)
+    expect(closes[1]!.occurredAt).toBe('2026-09-26T11:00:16.000Z')
+  })
+
+  test('the third turn is closed only at finish, last-line, at line 11 (the final assistant reply)', () => {
+    expect(closes[2]!.data).toEqual({ close: 'last-line' })
+    expect(closes[2]!.provenance.sourceRef).toBe(`claude:${CONV4}:11`)
+    expect(closes[2]!.occurredAt).toBe('2026-09-26T11:00:25.000Z')
+  })
+
+  test('line 9 (the untimed human line) gets an ESTIMATED turn.started, but touches no close at all', () => {
+    const line9 = turns.find(e => e.provenance.sourceRef === `claude:${CONV4}:9`)!
+    expect(line9.occurredAt).toBe(RECORDED_AT)
+    expect(line9.provenance.confidence).toBe('estimated')
+    // None of the three closes reference line 9 in any way — it neither closed the still-open turn
+    // from line 6 nor moved the last-timed line the NEXT close (line 10, closing at line 8) uses.
+    expect(closes.some(e => e.provenance.sourceRef === `claude:${CONV4}:9`)).toBe(false)
+  })
+
+  test('previousAssistantAt: absent for turn 1, and the LAST of a multi-line response for the turns after it', () => {
+    // turns = [line 1, line 6, line 9, line 10]
+    expect('previousAssistantAt' in turns[0]!.data).toBe(false)
+    // Lines 2 and 3 are both assistant replies to turn 1; line 3 (11:00:06) is the later one.
+    expect((turns[1]!.data as { previousAssistantAt?: string }).previousAssistantAt).toBe('2026-09-26T11:00:06.000Z')
+    // Line 7 answers turn 2 at 11:00:15, and BOTH lines 9 and 10 come after it — line 9, the untimed
+    // human line in between, is not an assistant line and does not move it, so it and line 10 carry
+    // the identical value.
+    expect((turns[2]!.data as { previousAssistantAt?: string }).previousAssistantAt).toBe('2026-09-26T11:00:15.000Z')
+    expect((turns[3]!.data as { previousAssistantAt?: string }).previousAssistantAt).toBe('2026-09-26T11:00:15.000Z')
+  })
+
+  test('THE GOAL: turn.started + turn.ended alone reproduce legacy\'s active_minutes exactly', () => {
+    const legacy = emptyClaudeParse()
+    foldClaudeParse(legacy, lines4)
+    const legacyMinutes = finishActiveTime(legacy.active).activeMinutes
+
+    // Every EXACT turn.started becomes a `userPrompt` TurnEvent — an ESTIMATED one (line 9) is
+    // skipped, exactly as legacy's own walk never pushes a `TurnEvent` for a line whose `timestamp`
+    // did not `Date.parse` (it is not that `ts` was falsy on `entry.timestamp` — it is genuinely
+    // absent here). Every turn.ended becomes either a `measuredMs` one (close: 'measured') or a
+    // `turnEnd` one (close: 'last-line') — including the FINISH-time close, which is why
+    // `finishActiveTime` below has nothing left open to close on its own. This is exactly the
+    // reconstruction a projection is expected to perform.
+    const reconstructed: TurnEvent[] = all4
+      .filter((e): e is AgentisticsEvent<'turn.started'> | AgentisticsEvent<'turn.ended'> =>
+        (e.type === 'turn.started' && e.provenance.confidence === 'exact') || e.type === 'turn.ended')
+      .map(e => {
+        const ts = Date.parse(e.occurredAt)
+        if (e.type === 'turn.started') return { ts, userPrompt: true }
+        return e.data.close === 'measured' ? { ts, measuredMs: e.data.durationMs } : { ts, turnEnd: true }
+      })
+    const state = emptyActiveTime()
+    foldActiveTime(state, reconstructed)
+    const result = finishActiveTime(state)
+
+    // The three turns here are each a handful of seconds long, so `activeMinutes` itself may well
+    // round to 0 — the point of this test is that the RECONSTRUCTION agrees with legacy EXACTLY,
+    // never that the number is large.
+    expect(result.activeMinutes).toBe(legacyMinutes)
+    expect(result.turns).toBe(3)
+    expect(result.measuredTurns).toBe(1)
+  })
+
+  test('THE GOAL: turn.started.previousAssistantAt alone reproduces legacy\'s user_response_times exactly', () => {
+    const legacy = emptyClaudeParse()
+    foldClaudeParse(legacy, lines4)
+
+    // Mirrors jsonl.ts's own computation exactly: only an EXACT turn.started (a real timestamp on
+    // the line — legacy's outer `if (ts)`) with a previousAssistantAt counts, and only when the
+    // delta lands in [0, 3600)s.
+    const reconstructed = turns
+      .filter(e => e.provenance.confidence === 'exact')
+      .map(e => {
+        const prev = (e.data as { previousAssistantAt?: string }).previousAssistantAt
+        if (prev === undefined) return null
+        const delta = (Date.parse(e.occurredAt) - Date.parse(prev)) / 1000
+        return delta >= 0 && delta < 3600 ? Math.round(delta) : null
+      })
+      .filter((v): v is number => v !== null)
+
+    expect(legacy.userResponseTimes.length).toBeGreaterThan(0)
+    expect(reconstructed).toEqual(legacy.userResponseTimes)
+  })
+
+  test('chunk independence at every line boundary', () => {
+    const whole = all4.map(essence)
+    for (let i = 1; i < lines4.length; i++) {
+      expect(run4([lines4.slice(0, i), lines4.slice(i)]).map(essence)).toEqual(whole)
+    }
+  })
+
+  test('chunk independence: many uneven chunks, the same events', () => {
+    const sizes = [1, 4, 2, 3]
+    const chunks: string[][] = []
+    for (let at = 0, k = 0; at < lines4.length; k++) {
+      const n = sizes[k % sizes.length]!
+      chunks.push(lines4.slice(at, at + n))
+      at += n
+    }
+    expect(run4(chunks).map(essence)).toEqual(all4.map(essence))
+  })
+
+  test('a resumed live transcript: an intermediate final:true finish, then more folding, closes AGAIN', () => {
+    // Fold everything up to and including line 10 (turn 3 opens, nothing closes it yet), finish as
+    // `final: true` (closes turn 3 at line 10, since nothing timed came after it YET), then fold the
+    // rest (line 11) and finish `final: true` again — the SAME turn closes a second time, further
+    // along, mirroring a live transcript that keeps writing after a poll believed it had settled.
+    const out: AgentisticsEvent[] = []
+    const s = emptyClaudeReplay(mainContext(CONV4, RECORDED_AT))
+    foldClaudeReplay(s, lines4.slice(0, 10), e => out.push(e))
+    finishClaudeReplay(s, { final: true }, e => out.push(e))
+    const firstCloses = out.filter(e => e.type === 'turn.ended')
+    expect(firstCloses).toHaveLength(3) // the two earlier turns, plus turn 3 closed early at line 10
+
+    foldClaudeReplay(s, lines4.slice(10), e => out.push(e))
+    finishClaudeReplay(s, { final: true }, e => out.push(e))
+    const allCloses = out.filter(e => e.type === 'turn.ended')
+    expect(allCloses).toHaveLength(4) // one more: turn 3 closes again, now at line 11
+    expect(allCloses[3]!.occurredAt).toBe('2026-09-26T11:00:25.000Z')
+    expect(allCloses[3]!.provenance.sourceRef).toBe(`claude:${CONV4}:11`)
+
+    // A THIRD final finish with nothing new folded since adds nothing more — idempotent.
+    finishClaudeReplay(s, { final: true }, e => out.push(e))
+    expect(out.filter(e => e.type === 'turn.ended')).toHaveLength(4)
   })
 })

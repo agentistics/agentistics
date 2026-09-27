@@ -350,14 +350,18 @@ product knows the file exists; no data that any surface reads was written or cha
    `tool_counts`, the agent rollup and the context gauge.
    The human-turn half of this is carried by `turn.started { by: 'user' }` (D22, 2026-09-26;
    master §13.2, §14.1), emitted from the same `isHumanUserEntry` predicate the legacy parser counts
-   with. **Status after A2.7 (2026-09-26): rounds is CLOSED; `active_minutes` is OPEN.** `rounds`,
-   `user_message_count`, `user_interruptions` and `user_message_timestamps` are EQUAL on every
-   fixture and on this machine's real store (479 sessions, 0 bug rows, the one 0-byte transcript
-   explained). `active_minutes` is not reproducible from `turn.started` alone — legacy closes a
-   turn with Claude's `system/turn_duration`, which no event carries (measured by approximation: 305
-   of 477 sessions would match, 172 would not) — and stays in `NOT_PROJECTABLE` with that reason,
-   as do `message_hours` and `user_response_times`. The additive field that would close it is an
-   open decision (master §14.1).
+   with. **Status after A2.7 (2026-09-26): rounds is CLOSED.** `rounds`, `user_message_count`,
+   `user_interruptions` and `user_message_timestamps` are EQUAL on every fixture and on this
+   machine's real store (479 sessions, 0 bug rows, the one 0-byte transcript explained).
+   **Status after A2.8 (2026-09-26): CLOSED.** `active_minutes` and `user_response_times` are
+   carried by `turn.ended { close: 'measured' | 'last-line', durationMs? }` and
+   `turn.started.previousAssistantAt` (D25; master §13.2, §14.1; Claude adapter 1.5.0), and the
+   projection computes `active_minutes` through `activeMinutesOf` (`core/activeTime.ts`) — no second
+   implementation. Both are EQUAL on every fixture and on the real store: 484 sessions compared, 0 bug
+   rows (`active_minutes` 484 equal; `user_response_times` 483 equal, 1 explained — the 0-byte
+   transcript). `message_hours` stays legacy-only by decision D25 (legacy takes the hour of every
+   line; a stream of turn events cannot reproduce it, measured 1/477) and remains in
+   `NOT_PROJECTABLE` with that reason.
 4. Every event carries a non-empty `adapterVersion`, a `confidence` and a `sourceRef` that can be
    re-read.
 5. Every budget in §9 is met and the measurement is in the PR.

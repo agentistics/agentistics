@@ -51,8 +51,12 @@ import {
  *   never a 0, and `contextTokens` is omitted unless all three input-side counters were reported.
  *   A 1.3.0 event carries a 0 where 1.4.0 carries nothing; on a transcript that reports all four
  *   (every line measured on this machine) the two are identical, ids included.
+ * - 1.5.0 — adds `turn.ended` (A2.8, D25) and `turn.started.previousAssistantAt`, together enough
+ *   for a projection to reproduce legacy's `active_minutes` and `user_response_times` exactly.
+ *   Events replayed at an older version carry no turn close, which a projection must read as NOT
+ *   RECORDED, never as zero — the same rule 1.3.0's own note states for `turn.started` itself.
  */
-export const CLAUDE_ADAPTER_VERSION = '1.4.0'
+export const CLAUDE_ADAPTER_VERSION = '1.5.0'
 
 /** `source.id` on every event. */
 export const CLAUDE_SOURCE_ID = 'claude'

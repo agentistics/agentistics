@@ -88,6 +88,9 @@ describe('replay — from a null cursor', () => {
     expect(typesOf(batch.events)).toEqual([
       'session.started', 'run.started', 'agent.started', 'turn.started',
       'model.invoked', 'model.completed',
+      // The turn opened at the user line is still open when the transcript settles, so the finish
+      // closes it (last-line, at the assistant line) before the lifecycle events do (A2.8, D25).
+      'turn.ended',
       'agent.ended', 'run.ended', 'session.ended',
     ])
     expect(batch.cursor).not.toBeNull()
@@ -213,8 +216,11 @@ describe('replay — a rewrite is never resumed', () => {
     // can tell the two apart from a same-length rewrite.
     await writeFile(file, userLine('2026-01-01T00:00:00.000Z', { cwd: '/rewritten' }) + original)
     const second = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, first.cursor)
+    // Both lines are human, timed, and back-to-back: the first opens a turn, and the second closes
+    // it (last-line, at the first line itself — nothing timed came between them) before opening its
+    // own (A2.8, D25).
     expect(typesOf(second.events)).toEqual(
-      ['session.started', 'run.started', 'agent.started', 'turn.started', 'turn.started'])
+      ['session.started', 'run.started', 'agent.started', 'turn.started', 'turn.ended', 'turn.started'])
     expect((second.events[0]!.data as { projectPath?: string }).projectPath).toBe('/rewritten')
   })
 })
