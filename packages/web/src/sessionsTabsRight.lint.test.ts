@@ -33,7 +33,7 @@ describe('the Filtros tab is anchored to the artifacts aside, on the right', () 
     // from the central pane's own rounded top border now, and need the extra clearance to clear its
     // curve) rides on top of the same right-anchored base this test was written to pin — the base
     // itself, `filtrosBounds.right`, is untouched.
-    expect(SRC).toContain('right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,')
+    expect(SRC).toContain('right: Math.max(filtrosBounds.right, SESSIONS_HEADER_TRAILING_W),')
     expect(SRC).not.toMatch(/left: filtrosBounds\.left/)
   })
 
@@ -44,7 +44,7 @@ describe('the Filtros tab is anchored to the artifacts aside, on the right', () 
   test('the scan still sees the old left-anchored shape reintroduced', () => {
     const planted = SRC
       .replace('const filtrosBounds = filtrosPanelBoundsRight(', 'const filtrosBounds = filtrosPanelBounds(')
-      .replace('right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,', 'left: filtrosBounds.left,')
+      .replace('right: Math.max(filtrosBounds.right, SESSIONS_HEADER_TRAILING_W),', 'left: filtrosBounds.left,')
     expect(planted).toMatch(/left: filtrosBounds\.left/)
   })
 })
@@ -55,12 +55,12 @@ describe('the session-metrics tab is anchored the same way, beside Filtros', () 
   })
 
   test('its own wrapper is positioned with `right`, never `left`', () => {
-    expect(SRC).toContain('right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,')
+    expect(SRC).toContain('right: metricsBounds.right + Math.max(0, SESSIONS_HEADER_TRAILING_W - filtrosBounds.right),')
     expect(SRC).not.toMatch(/left: metricsBounds\.left/)
   })
 
   test('the scan still sees the old left-anchored shape reintroduced', () => {
-    const planted = SRC.replace('right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,', 'left: metricsBounds.left,')
+    const planted = SRC.replace('right: metricsBounds.right + Math.max(0, SESSIONS_HEADER_TRAILING_W - filtrosBounds.right),', 'left: metricsBounds.left,')
     expect(planted).toMatch(/left: metricsBounds\.left/)
   })
 })

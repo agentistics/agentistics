@@ -1343,7 +1343,7 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
             border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
             background: 'var(--bg-surface)',
             // Inner breathing room: the search, buttons and rows no longer touch the panel's edges.
-            padding: collapsed ? 0 : '8px 8px 0',
+            padding: collapsed ? 0 : 8,
           }}>
             {collapsed ? (
               <SessionsRail rows={railRows} lang={pt ? 'pt' : 'en'} {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})} />
@@ -2250,8 +2250,11 @@ export default function AppLayout() {
    * border sits `CENTRAL_PANE.gap` inside it and curves away over the last 12px, and the tabs need to
    * clear that curve rather than hang over it.
    */
-  const SESSIONS_TAB_TOP_OFFSET = 12 // sits INSIDE the conversation panel's top, like the mockup's chips
-  const SESSIONS_TAB_CORNER_CLEARANCE = 14
+  // Owner decision 2026-09-27: the two controls live IN the main header, vertically centred, not
+  // hanging over the conversation panel. `SESSIONS_HEADER_TRAILING_W` is the room the header's own
+  // trailing buttons (zoom, bell, ⋯) take at its right end — the controls never sit on top of them.
+  const SESSIONS_TAB_TOP_OFFSET = 12
+  const SESSIONS_HEADER_TRAILING_W = 160
 
   /**
    * The selected session's title/tabs/actions row, lifted UP into this shared header from
@@ -3706,8 +3709,8 @@ export default function AppLayout() {
           above), it is moved back to the trigger rather than left to fall wherever the browser
           resets an `inert`ed focus to. */}
       <div style={{
-        position: 'absolute', top: `calc(100% + ${SESSIONS_TAB_TOP_OFFSET}px)`,
-        right: filtrosBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,
+        position: 'absolute', top: SESSIONS_TAB_TOP_OFFSET,
+        right: Math.max(filtrosBounds.right, SESSIONS_HEADER_TRAILING_W),
         zIndex: 10, pointerEvents: 'none',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
@@ -3819,8 +3822,8 @@ export default function AppLayout() {
           the filter panel is open. */}
       {selectedFleetSession && (
         <div style={{
-          position: 'absolute', top: `calc(100% + ${SESSIONS_TAB_TOP_OFFSET}px)`,
-          right: metricsBounds.right + SESSIONS_TAB_CORNER_CLEARANCE,
+          position: 'absolute', top: SESSIONS_TAB_TOP_OFFSET,
+          right: metricsBounds.right + Math.max(0, SESSIONS_HEADER_TRAILING_W - filtrosBounds.right),
           zIndex: 10, pointerEvents: 'none',
         }}>
           <div style={{ pointerEvents: 'auto' }}>

@@ -1930,6 +1930,9 @@ export default function SessionsPage() {
         display: 'flex', flexDirection: 'column', width: asideIn ? shownArtWidth : 0,
         flexShrink: 0, minHeight: 0, background: 'var(--bg-surface)',
         overflow: 'hidden',
+        // A panel on the board like every other: border and 10px corners (its top corners were
+        // square). No border while collapsed to width 0, or a 2px sliver would remain.
+        ...(asideIn ? { border: '1px solid var(--border)', borderRadius: 10, boxSizing: 'border-box' as const } : {}),
         transition: asideMotion,
       }
   const artInner: CSSProperties = split
