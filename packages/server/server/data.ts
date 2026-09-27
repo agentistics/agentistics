@@ -10,6 +10,7 @@ import { planProjectFacts, applyProjectFacts, type ResolvedFacts } from './proje
 import { mergeLocalAndIngestedSessions, sessionKey } from './session-merge'
 import { writeWorkflowRuns, loadWorkflowRuns } from './workflow-store'
 import { createLimiter, safeReadDir, safeReadJson, safeStat } from './utils'
+import { withTimeout } from './with-timeout'
 import { UUID_RE, decodeProjectDir, getProjectGitStats, getGitRemote, gcGitStatsCache } from './git'
 // `activeMinutesFromClaudeJsonl` / `contextTokensFromClaudeJsonl` are no longer called
 // here — the meta-session enrichment they served now runs inside `cachedEnrich`, which
@@ -1170,12 +1171,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), userStatsCaches, machineStatsCaches, machineOwners, workflows }
   }
 
-  return Promise.race([
-    buildPromise(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Request timed out after 5 minutes')), timeoutMs)
-    ),
-  ])
+  // `withTimeout`, never a bare `Promise.race` against `setTimeout`: the bare form left the 5-minute
+  // timer armed after every build, and its closure kept that build's whole ApiResponse reachable
+  // until it fired — the leak behind the 7.4 GB OOM of 2026-09-26. See `with-timeout.ts`.
+  return withTimeout(buildPromise(), timeoutMs, 'Request timed out after 5 minutes')
 }
 
 async function _buildApiResponse(): Promise<ApiResponse> {
