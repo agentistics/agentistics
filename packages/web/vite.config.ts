@@ -224,6 +224,15 @@ export default defineConfig({
         // DROPS the handshake, so the socket times out with no status to look up — the live screen
         // keeps drawing over SSE (a plain GET) and typing into it just does nothing.
         ws: true,
+        // AND THE ORIGIN of that handshake. `changeOrigin` rewrites the Host but not the Origin, and
+        // the server refuses a write-channel upgrade whose Origin is not its own (CSWSH, 403) — so
+        // in dev the screen drew and no key ever landed. The dev proxy speaks for the page it
+        // serves; the server's own check is untouched.
+        configure: proxy => {
+          proxy.on('proxyReqWs', proxyReq => {
+            proxyReq.setHeader('origin', `http://localhost:${apiPort}`)
+          })
+        },
       },
     },
   },
