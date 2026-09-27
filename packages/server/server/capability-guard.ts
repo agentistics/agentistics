@@ -108,6 +108,29 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/mcp', 'mcpAdmin'],
 ]
 
+/** One registration, as `registeredRoutes()` reports it. */
+export interface RegisteredRoute {
+  readonly path: string
+  readonly match: 'exact' | 'prefix'
+  readonly capability: keyof Capabilities
+}
+
+/**
+ * Every registration in both tables, read-only, in declaration order.
+ *
+ * Exists so a test can WALK the table instead of restating it: `host-allow.test.ts` asserts that
+ * every `localShell` route — and a sub-path under every prefix, including one nobody has written
+ * yet — is refused under a rebinding Host. A route added here is covered by that test by having
+ * been added, which is the same property the prefix table gives the capability check itself.
+ * A copy, so a caller cannot mutate the tables the guard reads.
+ */
+export function registeredRoutes(): readonly RegisteredRoute[] {
+  const out: RegisteredRoute[] = []
+  for (const [path, capability] of EXACT) out.push(Object.freeze({ path, match: 'exact' as const, capability }))
+  for (const [path, capability] of PREFIXES) out.push(Object.freeze({ path, match: 'prefix' as const, capability }))
+  return Object.freeze(out)
+}
+
 export function routeCapability(pathname: string): keyof Capabilities | null {
   const exact = EXACT.get(pathname)
   if (exact) return exact
