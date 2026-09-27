@@ -78,6 +78,8 @@ import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
 import { bannerVisible } from '../lib/idleExecution'
+import { forcedNote, isAdmissionRefusal } from '../lib/spawnAdmission'
+import { pushNotification } from '../lib/notifications'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
 import { IdleSessionsBanner } from '../components/sessions/IdleSessionsBanner'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
@@ -239,6 +241,13 @@ export default function SessionsPage() {
   const [launchingPreset, setLaunchingPreset] = useState<SessionPreset | null>(null)
   const [presetLaunchBusy, setPresetLaunchBusy] = useState(false)
   const [presetLaunchError, setPresetLaunchError] = useState<string | null>(null)
+  /**
+   * Set exactly when `presetLaunchError` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`) rather than an ordinary spawn error — the only case `PresetLaunchConfirm`
+   * offers its second, deliberate "start anyway" button (re-posts with `force: true`). Cleared
+   * whenever a fresh preset is selected, so the override never survives into a different launch.
+   */
+  const [presetLaunchForceable, setPresetLaunchForceable] = useState(false)
   const [presetPrefill, setPresetPrefill] = useState<NonNullable<
     Parameters<typeof NewSessionModal>[0]['initialPreset']
   > | null>(null)
@@ -247,6 +256,7 @@ export default function SessionsPage() {
     if (preset.cwd) {
       setLaunchingPreset(preset)
       setPresetLaunchError(null)
+      setPresetLaunchForceable(false)
     } else {
       setPresetPrefill({
         harness: preset.harness, prompt: preset.promptTemplate,
@@ -257,7 +267,12 @@ export default function SessionsPage() {
     }
   }
 
-  async function confirmPresetLaunch() {
+  /**
+   * `force` is the deliberate second click on "start anyway" — see `PresetLaunchConfirm`'s
+   * `onForce`. The ordinary "Launch" button never passes it; only a prior memory-budget refusal on
+   * THIS exact request offers the option at all.
+   */
+  async function confirmPresetLaunch(force = false) {
     if (!launchingPreset) return
     setPresetLaunchBusy(true)
     setPresetLaunchError(null)
@@ -274,22 +289,31 @@ export default function SessionsPage() {
           ...(launchingPreset.model ? { model: launchingPreset.model } : {}),
           ...(launchingPreset.effort ? { effort: launchingPreset.effort } : {}),
           label: launchingPreset.label,
+          ...(force ? { force: true as const } : {}),
         }),
       })
       const json = await res.json() as { ok: boolean; message: string; id?: string }
       if (!json.ok) {
         setPresetLaunchError(json.message)
+        setPresetLaunchForceable(isAdmissionRefusal(json))
         setPresetLaunchBusy(false)
         return
       }
+      // Forced through despite the budget — surfaced through the persisted notification store
+      // (never silently), the same "already-localized sentence, meta-carried" pattern
+      // `hardware.pressure` uses for its own server-computed sentence.
+      const note = forcedNote(json)
+      if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
       const started = launchingPreset
       setLaunchingPreset(null)
       setPresetLaunchBusy(false)
+      setPresetLaunchForceable(false)
       if (json.id) {
         navigate(sessionPath(json.id), { state: { creating: { harness: started.harness, label: started.label } } })
       }
     } catch {
       setPresetLaunchError(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
+      setPresetLaunchForceable(false)
       setPresetLaunchBusy(false)
     }
   }
@@ -2663,8 +2687,10 @@ export default function SessionsPage() {
           preset={launchingPreset}
           busy={presetLaunchBusy}
           error={presetLaunchError}
-          onCancel={() => { if (!presetLaunchBusy) setLaunchingPreset(null) }}
+          forceable={presetLaunchForceable}
+          onCancel={() => { if (!presetLaunchBusy) { setLaunchingPreset(null); setPresetLaunchForceable(false) } }}
           onConfirm={() => void confirmPresetLaunch()}
+          onForce={() => void confirmPresetLaunch(true)}
         />
       )}
       {presetPrefill && (

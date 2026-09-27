@@ -19,11 +19,21 @@ export interface PresetLaunchConfirmProps {
   preset: SessionPreset
   busy: boolean
   error: string | null
+  /**
+   * True exactly when `error` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`), never for an ordinary spawn error — the only case a second,
+   * deliberate "start anyway" button is offered at all.
+   */
+  forceable?: boolean
   onCancel: () => void
   onConfirm: () => void
+  /** Re-sends the same request with `force: true`. Only ever called from the "start anyway" button. */
+  onForce?: () => void
 }
 
-export function PresetLaunchConfirm({ lang, preset, busy, error, onCancel, onConfirm }: PresetLaunchConfirmProps) {
+export function PresetLaunchConfirm({
+  lang, preset, busy, error, forceable, onCancel, onConfirm, onForce,
+}: PresetLaunchConfirmProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
 
@@ -96,7 +106,8 @@ export function PresetLaunchConfirm({ lang, preset, busy, error, onCancel, onCon
 
         <div style={{
           display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--border)',
-          justifyContent: 'flex-end', flexDirection: isMobile ? 'column-reverse' : 'row',
+          justifyContent: 'flex-end', flexWrap: 'wrap',
+          flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
           <button
             type="button"
@@ -113,6 +124,30 @@ export function PresetLaunchConfirm({ lang, preset, busy, error, onCancel, onCon
           >
             {pt ? 'Cancelar' : 'Cancel'}
           </button>
+          {/*
+            * "Start anyway" — a DELIBERATE second click, never automatic and never remembered
+            * across attempts: it appears only while `forceable` is true, which the caller clears the
+            * moment a fresh preset is picked or this dialog is cancelled. Styled as a secondary
+            * (bordered) button, same shape as Cancel, so the filled orange "Launch" stays the one
+            * button that reads as the ordinary, unconditional action.
+            */}
+          {forceable && onForce && (
+            <button
+              type="button"
+              onClick={onForce}
+              disabled={busy}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                padding: isMobile ? '0 14px' : '8px 14px', minHeight: isMobile ? 44 : undefined,
+                width: isMobile ? '100%' : undefined,
+                borderRadius: 8, border: '1px solid var(--accent-red)', background: 'transparent',
+                color: 'var(--accent-red)', fontSize: 13, fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {busy ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Iniciar mesmo assim' : 'Start anyway')}
+            </button>
+          )}
           <button
             type="button"
             onClick={onConfirm}

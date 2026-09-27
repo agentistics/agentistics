@@ -27,6 +27,15 @@ describe('parseSessionArgs', () => {
     expect(parseSessionArgs(['kimi'])).toEqual({ kind: 'start', harness: 'kimi', background: false })
   })
 
+  it('reads --force and --json on a start, for the memory gate', () => {
+    expect(parseSessionArgs(['claude', '--force'])).toEqual({
+      kind: 'start', harness: 'claude', background: false, force: true,
+    })
+    expect(parseSessionArgs(['claude', '--json', '--force'])).toEqual({
+      kind: 'start', harness: 'claude', background: false, json: true, force: true,
+    })
+  })
+
   it('reads the subcommands', () => {
     expect(parseSessionArgs(['list'])).toEqual({ kind: 'list' })
     expect(parseSessionArgs(['attach', 'a1'])).toEqual({ kind: 'attach', ref: 'a1' })
@@ -175,6 +184,20 @@ describe('batch — the form an assistant drives', () => {
   it('parses open with a multi-word task name', () => {
     expect(parseSessionArgs(['open', 'auth', 'refactor'])).toMatchObject({
       kind: 'open', task: 'auth refactor',
+    })
+  })
+
+  it('carries --force through on a batch, gating the whole batch rather than one session', () => {
+    expect(parseSessionArgs(['batch', '--task', 't', '--session', 'claude: a', '--force']))
+      .toMatchObject({ force: true })
+  })
+
+  it('strips --force out of an open task name, same as --json', () => {
+    expect(parseSessionArgs(['open', 'auth', 'refactor', '--force'])).toEqual({
+      kind: 'open', task: 'auth refactor', force: true,
+    })
+    expect(parseSessionArgs(['open', 'auth', '--json', '--force'])).toEqual({
+      kind: 'open', task: 'auth', json: true, force: true,
     })
   })
 })

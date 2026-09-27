@@ -43,6 +43,8 @@ import { attachSession, useTaskList, type TaskDetail } from '../../lib/tasks'
 import { BlockedSubtaskResolve } from '../tasks/BlockedSubtaskResolve'
 import { deliveryHint, suggestDelivery } from '../../lib/taskSuggest'
 import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFleetNewOptions'
+import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
+import { pushNotification } from '../../lib/notifications'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
   visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
@@ -199,6 +201,14 @@ export function NewSessionModal({
 
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  /**
+   * Set exactly when `notice` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`), never for an ordinary spawn error — the only case the footer offers its
+   * second, deliberate "start anyway" button (re-posts with `force: true`). Cleared whenever the
+   * draft changes (see the effect below) or the dialog closes, so the override never survives into
+   * an edited attempt.
+   */
+  const [forceable, setForceable] = useState(false)
 
   /** Which question is on screen. The ORDER and the gating are `wizardSteps.ts`'s, not this file's. */
   const [step, setStep] = useState<StepId>('assistant')
@@ -231,6 +241,13 @@ export function NewSessionModal({
     () => ({ harness: harness?.id ?? '', cwd, task, model, effort, prompt, label, attachments }),
     [harness, cwd, task, model, effort, prompt, label, attachments],
   )
+
+  // The "start anyway" override is a DELIBERATE act on ONE attempt — editing any answer means this
+  // is no longer the request the machine refused, so the override is cleared rather than carried
+  // into whatever gets submitted next. Runs on mount too, which is harmless: `forceable` starts
+  // `false` already, and it is only ever set to `true` inside `start()`, at a render where `draft`
+  // itself has not changed.
+  useEffect(() => { setForceable(false) }, [draft])
 
   // What survives a change of assistant: a model or an effort the NEW assistant also names is KEPT,
   // and anything it cannot accept is dropped rather than sent as a flag the CLI rejects at spawn.
@@ -447,7 +464,12 @@ export function NewSessionModal({
   /** The first message as it will be TYPED: the attachment paths, then the words. */
   const promptWithAttachments = [...attachments.map(a => a.path), prompt].filter(x => x !== '').join('\n')
 
-  async function start() {
+  /**
+   * `force` is the deliberate second click on "start anyway" — see the footer's own button below.
+   * The ordinary "Start session" button never passes it; only a prior memory-budget refusal on THIS
+   * exact request offers the option at all.
+   */
+  async function start(force = false) {
     if (!canStart) return
     setBusy(true)
     setNotice(null)
@@ -471,10 +493,16 @@ export function NewSessionModal({
           // a sentence is one it can miss.
           ...(promptWithAttachments ? { prompt: promptWithAttachments } : {}),
           ...(label ? { label } : {}),
+          ...(force ? { force: true as const } : {}),
         }),
       })
       const json = await res.json() as { ok: boolean; message: string; id?: string }
       if (json.ok) {
+        // Forced through despite the budget — surfaced through the persisted notification store
+        // (never silently), the same "already-localized sentence, meta-carried" pattern
+        // `hardware.pressure` uses for its own server-computed sentence.
+        const note = forcedNote(json)
+        if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
         // Still `busy` — the button keeps saying it is working, because it is.
         if (json.id) await waitForRow(json.id)
 
@@ -513,9 +541,11 @@ export function NewSessionModal({
       }
       setBusy(false)
       setNotice(json.message)
+      setForceable(isAdmissionRefusal(json))
     } catch {
       setBusy(false)
       setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
+      setForceable(false)
     }
   }
 
@@ -890,7 +920,7 @@ export function NewSessionModal({
         </div>
 
         <footer style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap',
           padding: '14px 20px', borderTop: '1px solid var(--border)',
         }}>
           {/* WHY THE STEP IS BLOCKED, beside the button that will not move. A disabled control
@@ -929,7 +959,30 @@ export function NewSessionModal({
               {pt ? 'Continuar' : 'Continue'}
               <ChevronRight size={14} />
             </button>
-          ) : (
+          ) : (<>
+            {/*
+              * "Start anyway" — a DELIBERATE second click, offered only while `forceable` is true (a
+              * prior submit came back as the machine's own memory-budget refusal). Never automatic,
+              * and cleared the moment any answer changes (see the effect on `draft` above) or the
+              * dialog is reopened — the override applies to THIS exact request, never to whatever
+              * gets submitted next. Same secondary (bordered) shape the Back button already uses, so
+              * "Start session" stays the one button that reads as the ordinary, unconditional action.
+              */}
+            {forceable && (
+              <button
+                onClick={() => void start(true)}
+                disabled={busy}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '9px 14px', borderRadius: 9, cursor: busy ? 'default' : 'pointer',
+                  minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box',
+                  border: '1px solid var(--accent-red)', background: 'transparent',
+                  color: 'var(--accent-red)', fontFamily: 'inherit', fontSize: 13,
+                }}
+              >
+                {busy ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Iniciar mesmo assim' : 'Start anyway')}
+              </button>
+            )}
             <button
               onClick={() => void start()}
               disabled={!canStart}
@@ -947,7 +1000,7 @@ export function NewSessionModal({
                 ? (pt ? 'Iniciando…' : 'Starting…')
                 : (pt ? 'Iniciar sessão' : 'Start session')}
             </button>
-          )}
+          </>)}
         </footer>
       </div>
     </div>

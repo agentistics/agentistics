@@ -54,6 +54,12 @@ export interface FleetSpawnBody {
   model?: unknown
   effort?: unknown
   label?: unknown
+  /**
+   * Start even if this machine's memory budget refuses. Read with a STRICT `typeof` check — see
+   * `readForce` below — because JSON carries no guarantee this is a boolean, and a truthy string
+   * must never read as consent nobody gave.
+   */
+  force?: unknown
 }
 
 /** An accepted request, in the shape `ControlHost.spawnSession` takes. */
@@ -67,6 +73,8 @@ export interface FleetSpawnPlan {
   label?: string
   /** Always false — see the header. */
   attach: false
+  /** See `FleetSpawnBody.force`. Always a genuine boolean, never merely truthy. */
+  force?: boolean
 }
 
 /** Why a request was refused. The caller turns it into the user's own language. */
@@ -106,6 +114,16 @@ function absolutePath(raw: string): boolean {
 }
 
 /**
+ * `true` only for the literal boolean `true` — a STRICT check, not a truthiness one. `force` is
+ * consent to start a session this machine's memory budget refused, and JSON gives no guarantee a
+ * caller sent a boolean at all: a stray string (`"false"`, a pasted `"0"`) is truthy in JavaScript
+ * and must never be read as an override nobody actually gave.
+ */
+function readForce(raw: unknown): boolean {
+  return raw === true
+}
+
+/**
  * Read one start request, or say why it cannot be honoured.
  *
  * Total: it never throws, whatever arrives, and it performs no I/O — whether the directory EXISTS
@@ -137,6 +155,7 @@ export function planFleetSpawn(
   const task = text(body.task)
   const prompt = text(body.prompt)
   const label = text(body.label)
+  const force = readForce(body.force)
 
   return {
     ok: true,
@@ -148,6 +167,7 @@ export function planFleetSpawn(
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(label ? { label } : {}),
+      ...(force ? { force: true } : {}),
       attach: false,
     },
   }

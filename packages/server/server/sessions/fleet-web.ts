@@ -28,6 +28,7 @@ import type { ProjectSearchResult } from '@agentistics/tui/control'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { fleetRow, type FleetActionRequest, type FleetRow } from './fleet-row'
 import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
+import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { cachedBaseline } from './fleet-baseline'
@@ -773,6 +774,24 @@ export interface FleetSpawnResponse {
   message: string
   /** The id of the session that was started, so the caller can attach to the very one it created. */
   id?: string
+  /**
+   * Present ONLY on `ok: false` when this was refused by the memory budget — never on any other
+   * refusal (an unknown harness, a relative path, …), which are `ok: false` with `message` alone.
+   * `code` is fixed so a client can tell this refusal apart from every other one without parsing
+   * `message`; `refusal` is the DATA behind it, so a client can offer "start anyway" (re-post with
+   * `force: true`) without composing its own sentence. `index.ts` answers this shape with HTTP 409.
+   * See `spawn-admission.ts`'s `AdmissionRefusalBody`.
+   */
+  code?: 'memory_budget'
+  refusal?: AdmissionRefusal
+  /**
+   * `ok: true` and this is set exactly when the request carried `force: true` and the budget had, in
+   * fact, refused — so the caller knows this session exists ONLY because it insisted. `note` is the
+   * sentence saying what was overridden, kept separate from `message` ("session X started") for the
+   * same reason `SpawnSessionResult` keeps them separate on the host side.
+   */
+  overridden?: boolean
+  note?: string
 }
 
 /**
@@ -818,7 +837,16 @@ export async function runFleetSpawn(
   }
 
   const out = await host.spawnSession(decision.plan)
-  return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+  return {
+    ok: out.ok,
+    message: out.message,
+    ...(out.id ? { id: out.id } : {}),
+    // Flattened rather than nested — `out.admission` is `{code, refusal, message}` and this
+    // response already carries its own `message`, so nesting it again would give the client two
+    // routes to the same sentence.
+    ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
+    ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
+  }
 }
 
 /**

@@ -116,4 +116,45 @@ describe('planFleetSpawn', () => {
   it('refuses everything when this machine can start nothing', () => {
     expect(planFleetSpawn({ harness: 'claude', cwd: '/x' }, []).ok).toBe(false)
   })
+
+  describe('force — a STRICT typeof check, never a truthiness one', () => {
+    it('carries force through only for the literal boolean true', () => {
+      const out = planFleetSpawn({ harness: 'claude', cwd: '/x', force: true }, HARNESSES)
+      expect(out.ok).toBe(true)
+      if (!out.ok) return
+      expect(out.plan.force).toBe(true)
+    })
+
+    it('omits force from the plan when absent — never a stored `false`', () => {
+      const out = planFleetSpawn({ harness: 'claude', cwd: '/x' }, HARNESSES)
+      expect(out.ok).toBe(true)
+      if (!out.ok) return
+      expect(out.plan).not.toHaveProperty('force')
+    })
+
+    it('a truthy STRING is never consent — "false", "0" and "" all read as no override', () => {
+      for (const bad of ['false', '0', '', 'true']) {
+        const out = planFleetSpawn({ harness: 'claude', cwd: '/x', force: bad }, HARNESSES)
+        expect(out.ok).toBe(true)
+        if (!out.ok) return
+        expect(out.plan).not.toHaveProperty('force')
+      }
+    })
+
+    it('a bare truthy value (1, an object) is never consent either', () => {
+      for (const bad of [1, {}, [] as unknown, 'true'] as unknown[]) {
+        const out = planFleetSpawn({ harness: 'claude', cwd: '/x', force: bad }, HARNESSES)
+        expect(out.ok).toBe(true)
+        if (!out.ok) return
+        expect(out.plan).not.toHaveProperty('force')
+      }
+    })
+
+    it('an explicit false is indistinguishable from absent', () => {
+      const out = planFleetSpawn({ harness: 'claude', cwd: '/x', force: false }, HARNESSES)
+      expect(out.ok).toBe(true)
+      if (!out.ok) return
+      expect(out.plan).not.toHaveProperty('force')
+    })
+  })
 })

@@ -29,6 +29,10 @@ export type SessionCommand =
       /** See `ManagedSession.taskId`. Resolved from the task book before the spawn. */
       taskId?: string
       attemptId?: string
+      /** Start anyway when the memory gate would refuse — see `spawn-admission.ts`. */
+      force?: boolean
+      /** A refusal is machine-readable too — see `admissionRefusalBody`. */
+      json?: boolean
     }
   | { kind: 'list'; json?: boolean }
   /**
@@ -66,8 +70,10 @@ export type SessionCommand =
       /** One entry per session to start. */
       specs: BatchSpec[]
       json?: boolean
+      /** Start the whole batch anyway when the memory gate would refuse it. */
+      force?: boolean
     }
-  | { kind: 'open'; task: string; json?: boolean }
+  | { kind: 'open'; task: string; json?: boolean; force?: boolean }
   | { kind: 'attach'; ref: string }
   | { kind: 'kill'; ref: string }
   | { kind: 'rename'; ref: string; label: string }
@@ -115,9 +121,11 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (head === 'batch') return parseBatch(argv.slice(1), jsonFlag)
 
   if (head === 'open') {
-    const task = argv.slice(1).filter(a => a !== '--json').join(' ').trim()
-    if (!task) return { kind: 'error', message: 'Usage: agentop session open "<task>"' }
-    return { kind: 'open', task, ...(jsonFlag ? { json: true } : {}) }
+    const rest = argv.slice(1)
+    const forceFlag = rest.includes('--force')
+    const task = rest.filter(a => a !== '--json' && a !== '--force').join(' ').trim()
+    if (!task) return { kind: 'error', message: 'Usage: agentop session open "<task>" [--force]' }
+    return { kind: 'open', task, ...(jsonFlag ? { json: true } : {}), ...(forceFlag ? { force: true } : {}) }
   }
 
   if (head === 'attach' || head === 'kill') {
@@ -154,10 +162,11 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i]!
     if (arg === '--bg' || arg === '--background') { cmd.background = true; continue }
-    if (arg === '--json') continue
+    if (arg === '--json') { cmd.json = true; continue }
+    if (arg === '--force') { cmd.force = true; continue }
     if (arg === '--task') {
       const value = argv[i + 1]
-      if (value === undefined || VALUE_FLAGS.has(value)) {
+      if (value === undefined || VALUE_FLAGS.has(value) || value === '--force') {
         return { kind: 'error', message: 'Missing value for --task' }
       }
       i++
@@ -168,7 +177,10 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       return { kind: 'error', message: `Unknown option: ${arg}` }
     }
     const value = argv[i + 1]
-    if (value === undefined || VALUE_FLAGS.has(value) || value === '--bg' || value === '--background') {
+    if (
+      value === undefined || VALUE_FLAGS.has(value)
+      || value === '--bg' || value === '--background' || value === '--force'
+    ) {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
     i++
@@ -257,12 +269,18 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   const specs: BatchSpec[] = []
   const shared: { cwd?: string; model?: string; effort?: string; attempt?: string } = {}
 
+  let force = false
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
     if (arg === '--json') continue
+    // Gates the WHOLE batch, not a per-session flag — `--session` already has its own grammar and
+    // a per-session force would mean "start this one anyway, refuse the rest", which is not what
+    // the memory gate decides (see `spawn-admission.ts`: a batch is admitted or refused as a unit).
+    if (arg === '--force') { force = true; continue }
     if (!VALUE_FLAGS.has(arg)) return { kind: 'error', message: `Unknown option: ${arg}` }
     const value = argv[i + 1]
-    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json') {
+    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json' || value === '--force') {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
     i++
@@ -288,7 +306,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 
   if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
-  return { kind: 'batch', task, specs, ...(json ? { json: true } : {}) }
+  return { kind: 'batch', task, specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}) }
 }
 
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */
