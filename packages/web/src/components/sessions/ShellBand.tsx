@@ -218,6 +218,14 @@ export interface ShellBandProps {
    */
   placement?: 'docked' | 'dedicated' | 'aside'
   /**
+   * PIN WHICH PANE this mount shows, for the placements that show exactly one: the right slot, a
+   * floating window and the dedicated screen each ask for `cli` or `shell` by name. Without it the
+   * pane came from the DOCKED band's stored preference, so a right-slot "Claude Code" could open
+   * on the shell. This band is the ONE terminal of the Sessions workspace — the older
+   * `TerminalRegion` with its line-input fallback is no longer used there (owner, 2026-09-27).
+   */
+  fixedTarget?: TerminalTarget
+  /**
    * Offered only when there is somewhere to go: the band's "take the whole screen" control.
    *
    * Takes the TARGET this band is showing right now (`cli`/`shell`) — never a bare callback. It
@@ -345,7 +353,7 @@ export interface ShellBandProps {
 }
 
 export function ShellBand({
-  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen,
+  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen, fixedTarget,
   barEntries, onBarPick, onBarDrop, onBarMove, studioSeen = true, bottomOccupant = null, shellEnabled = true,
   shellCapable = true, onShellEnabledChange,
   columnHeight = 0, open: openSeed, onOpenChange,
@@ -376,9 +384,10 @@ export function ShellBand({
    * empty state below can explain it), and only a fresh mount's own invented DEFAULT is clamped to
    * `'cli'` — see that function's own header.
    */
-  const [target, setTarget] = useState<TerminalTarget>(
-    () => resolveDockedTarget(bottomOccupant, readBandPrefs().target, shellEnabled),
+  const [storedTarget, setTarget] = useState<TerminalTarget>(
+    () => fixedTarget ?? resolveDockedTarget(bottomOccupant, readBandPrefs().target, shellEnabled),
   )
+  const target: TerminalTarget = fixedTarget ?? storedTarget
   const scope = targetScope(target)
   /**
    * EXCLUSIVITY WITH THE RIGHT SLOT (C3) — only the DOCKED placement needs this. This band's own
@@ -425,9 +434,11 @@ export function ShellBand({
 
   /** Choosing a terminal is remembered, so the band comes back on the one you were using. */
   const chooseTarget = useCallback((next: TerminalTarget) => {
+    // A mount pinned to one pane never switches, and never rewrites the docked band's choice.
+    if (fixedTarget) return
     setTarget(next)
     try { writeBandPrefs({ ...readBandPrefs(), target: next }) } catch { /* storage blocked */ }
-  }, [])
+  }, [fixedTarget])
 
   /**
    * FOLLOW `bottomOccupant` FOR THE LIFE OF THE MOUNT, not only at the first frame — see that prop's

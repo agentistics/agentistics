@@ -107,7 +107,6 @@ import {
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
 import { targetLabel } from '../lib/terminalTarget'
-import { TerminalRegion } from '../components/RecentSessions'
 import { sessionPlanFactor } from '../lib/costBasis'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
@@ -1636,14 +1635,15 @@ export default function SessionsPage() {
         <>
           {floatingBar('cli')}
           <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
-            <TerminalRegion
+            <ShellBand
+              key={`float-cli-${selected.id}`}
               placement="aside"
-              id={selected.id}
-              theme={theme === 'light' ? 'light' : 'dark'}
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              {...(selected.harness ? { harness: selected.harness } : {})}
               lang={pt ? 'pt' : 'en'}
-              fill
-              {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-              act={act}
+              theme={theme === 'light' ? 'light' : 'dark'}
             />
           </div>
         </>
@@ -1657,6 +1657,7 @@ export default function SessionsPage() {
             <ShellBand
               key={`float-${selected.id}`}
               placement="aside"
+              fixedTarget="shell"
               sessionId={selected.id}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               {...(selected.harness ? { harness: selected.harness } : {})}
@@ -1691,7 +1692,7 @@ export default function SessionsPage() {
     (rightIsStudio && studioFullscreen) || ((rightIsTab || rightIsHardware) && tabFullscreen)
 
   /** What the right box actually shows: the Studio's own target (StudioHost re-parents its carrier
-   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `TerminalRegion`/`ShellBand`
+   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `ShellBand`
    *  with `placement="aside"` (design §1.5) — ordinary mounts, no persistent carrier needed since
    *  neither holds a buffer that must survive the move; `hardware` its own `HardwarePanel`; any of
    *  the ten former Contents tabs its own `ArtifactsAside` mount (`rightTabPane`, bound to
@@ -1706,14 +1707,15 @@ export default function SessionsPage() {
       {rightSlotHeader}
       {rightSlotBar('cli', targetLabel('cli', selected.harness, pt ? 'pt' : 'en'), () => closeSlotPanel('cli'))}
       <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
-        <TerminalRegion
+        <ShellBand
+          key={`aside-cli-${selected.id}`}
           placement="aside"
-          id={selected.id}
-          theme={theme === 'light' ? 'light' : 'dark'}
+          fixedTarget="cli"
+          sessionId={selected.id}
+          {...(selected.cwd ? { cwd: selected.cwd } : {})}
+          {...(selected.harness ? { harness: selected.harness } : {})}
           lang={pt ? 'pt' : 'en'}
-          fill
-          {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-          act={act}
+          theme={theme === 'light' ? 'light' : 'dark'}
         />
       </div>
     </div>
@@ -1725,6 +1727,7 @@ export default function SessionsPage() {
         <ShellBand
           key={`aside-${selected.id}`}
           placement="aside"
+          fixedTarget="shell"
           sessionId={selected.id}
           {...(selected.cwd ? { cwd: selected.cwd } : {})}
           {...(selected.harness ? { harness: selected.harness } : {})}
@@ -2417,6 +2420,7 @@ export default function SessionsPage() {
             <ShellBand
               key={`shell-${selected.id}`}
               placement="dedicated"
+              fixedTarget="shell"
               sessionId={selected.id}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
@@ -2424,16 +2428,17 @@ export default function SessionsPage() {
               {...(selected.harness ? { harness: selected.harness } : {})}
             />
           ) : (
-            <TerminalRegion
-              /* DEDICATED: you asked for this screen, so focus is the consent and there is no arm
-                 button; on a phone it carries the key strip. */
+            <ShellBand
+              /* DEDICATED: you asked for this screen, so focus is the consent; on a phone it carries
+                 the key strip. The same terminal the bottom band draws — see `fixedTarget`. */
+              key={`cli-${selected.id}`}
               placement="dedicated"
-              id={selected.id}
-              theme={theme === 'light' ? 'light' : 'dark'}
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
-              fill
-              {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-              act={act}
+              theme={theme === 'light' ? 'light' : 'dark'}
+              {...(selected.harness ? { harness: selected.harness } : {})}
             />
           )}
         </div>
