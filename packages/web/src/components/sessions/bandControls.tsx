@@ -11,7 +11,7 @@ import { resolveBandDrag, resolveBandHeight } from '../../lib/shellBand'
 import { targetLabel } from '../../lib/terminalTarget'
 import { panelIconFor } from '../../lib/panelIcons'
 import { panelTitle } from '../../lib/panelMeta'
-import { ResizeGrip } from '../ResizeGrip'
+import { PanelGapDots } from './PanelGap'
 
 /**
  * bandControls.tsx — ONE height, ONE padding, ONE icon/label size for every control drawn on the
@@ -55,6 +55,13 @@ import { ResizeGrip } from '../ResizeGrip'
  * Presentation only — `useBandDrag` below is the one state machine that decides WHAT a drag on it
  * means; this component never reads `columnHeight` or persists anything itself, so a caller cannot
  * forget to gate it on `open`/`fullscreen` and get away with a HANDLE that draws but does nothing.
+ *
+ * FLOATING-PANELS DESIGN (`sdd/brief.md`): the bottom band is now its OWN panel, no longer docked
+ * INSIDE the conversation's card, so this handle is rendered as the GAP between the two panels — a
+ * sibling BEFORE the band's own bordered box, never its first child — and wears the same three-dot
+ * grip (`PanelGapDots`/`.ag-panel-gap`) every other gap in the workspace does, in place of the
+ * single pill this used to share with `AsideResizer`'s own edge. The hit area is unchanged (6px
+ * tall, full width) — only the visual and its position moved.
  */
 export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }: {
   /** The full sentence — this handle's accessible name, band-specific ("Resize the Studio", "Resize
@@ -70,15 +77,12 @@ export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }
       aria-orientation="horizontal"
       aria-label={label}
       tabIndex={0}
-      className="ag-resize-handle"
+      className="ag-panel-gap"
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onKeyDown={onKeyDown}
-      // Hit area UNCHANGED from before this fix (6px tall, full band width — well over the 44px
-      // mobile floor already) — only the visual grip inside it is drawn by `ResizeGrip`, which adds
-      // no size of its own. Never narrower than this.
-      style={{ height: 6, cursor: 'ns-resize', background: 'transparent' }}
-    ><ResizeGrip orientation="horizontal" /></div>
+      style={{ height: 6, flexShrink: 0, cursor: 'row-resize', background: 'transparent' }}
+    ><PanelGapDots orientation="horizontal" /></div>
   )
 }
 

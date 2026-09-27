@@ -30,6 +30,14 @@
  * itself must still be a direct, un-wrapped flex item of the root — the freeze this file exists for
  * is about THAT box, never about where the handle happens to sit.
  *
+ * UPDATED AGAIN for the floating-panels redesign (`sdd/brief.md`): the band is now its OWN panel,
+ * rendered as a Fragment whose FIRST child is the workspace's ordinary panel gap (a sibling BEFORE
+ * the band's bordered box, never inside it) and whose gesture is only wired up while `open` — so the
+ * handle's own guard is `{!fullscreen && (`, with the `open` check now living inside the spread
+ * grip/no-op choice rather than in the JSX condition. The ORDERING invariant this test asserts is
+ * unchanged (the handle is textually even further before the content box now, being outside the
+ * bordered box entirely) — only the literal string identifying the handle's guard moved.
+ *
  * Not reachable by rendering: `StudioBand` is not exported (there is no seam to mount it through),
  * and this package has no jsdom regardless. The SHAPE is what went wrong, so the shape is what is
  * asserted, over comment-free source, with the defect planted below to prove the scan still sees it.

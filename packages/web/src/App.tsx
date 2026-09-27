@@ -73,9 +73,10 @@ import { ModeSwitch } from './components/nav/ModeSwitch'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
-import { isPanelShown, usePanelSlots } from './lib/panelSlots'
+import { getPanelLayout, isPanelShown, setBandOpen, setSlotRightOpen, showPanel, usePanelSlots } from './lib/panelSlots'
 import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
+import { matchPanelShortcut, shouldHandlePanelShortcut } from './lib/panelShortcuts'
 import { SessionsAside } from './components/nav/SessionsAside'
 import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
@@ -87,7 +88,8 @@ import {
 } from '@agentistics/tui/control/session-fleet'
 import { AsideResizer } from './components/nav/AsideResizer'
 import { modeOfPath } from './lib/workspaceMode'
-import { ASIDE_DEFAULT } from './lib/asideWidth'
+import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
+import { PanelGap } from './components/sessions/PanelGap'
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
@@ -1160,16 +1162,124 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
     color: 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.15s',
   }
+  /**
+   * THE FOOTER — account row + config actions, computed ONCE so it can render either inside the
+   * dashboard nav's own flow (`mode !== 'sessions'`, unchanged) or inside the sessions workspace's
+   * new floating panel (`mode === 'sessions'`, see the return below) without being two copies of
+   * the same JSX that could drift from each other.
+   */
+  const footer = (
+    <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid var(--border)' }}>
+      {/* Row A — account: a single profile button (avatar) opening a popover menu */}
+      {principal && (
+        <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'stretch', paddingBottom: 10 }}>
+          <CollapsedTip label={principal.name} show={collapsed}>
+            <button ref={avatarRef} onClick={openMenu} aria-haspopup="menu" aria-expanded={menuOpen}
+              title={collapsed ? undefined : principal.name}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, width: collapsed ? 'auto' : '100%',
+                padding: collapsed ? 0 : '4px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                border: '1px solid transparent', background: menuOpen ? 'var(--bg-elevated)' : 'transparent', transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
+              onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
+              <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
+              {!collapsed && (
+                <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
+                  <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
+                </span>
+              )}
+              {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
+            </button>
+          </CollapsedTip>
+        </div>
+      )}
+
+      {/* Profile popover — rendered via portal so it escapes the sidebar's overflow clip */}
+      {principal && menuOpen && menuPos && createPortal(
+        <div ref={menuRef} role="menu"
+          style={{
+            position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)',
+            minWidth: 220, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
+            boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
+          }}>
+          <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
+            <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
+          </div>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
+          </button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
+          </button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {/* Self-service change-password modal */}
+      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
+      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
+
+      {/* Thin divider between account and actions */}
+      {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
+
+      {/* Row B — config actions (theme · language · export · settings), evenly spaced */}
+      <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
+        <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
+          <button onClick={onToggleTheme} aria-label={pt ? 'Tema' : 'Theme'} title={collapsed ? undefined : (theme === 'dark' ? (pt ? 'Tema claro' : 'Light theme') : (pt ? 'Tema escuro' : 'Dark theme'))} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Idioma' : 'Language'} show={collapsed}>
+          <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
+            <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
+          <button onClick={onExport} aria-label={pt ? 'Exportar relatório PDF' : 'Export PDF report'} title={collapsed ? undefined : (pt ? 'Exportar relatório PDF' : 'Export PDF report')}
+            style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, borderColor: 'var(--anthropic-orange)50', color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
+            <Download size={15} />
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
+          <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
+            <SlidersHorizontal size={15} />
+          </NavLink>
+        </CollapsedTip>
+      </div>
+    </div>
+  )
   return (
     <aside style={{
       position: 'fixed', top: 0, left: 0, bottom: 0,
       width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
-      background: 'var(--bg-surface)',
-      // Owner-approved central-pane inset (2026-09-26): in the sessions workspace the pane 5px to
-      // this aside's right now carries its OWN left-facing border, so the aside's line would
-      // sandwich a gap between two borders instead of reading as one inset card. `AsideResizer`'s
-      // grip pill still marks this edge as draggable either way — only the full-height line goes.
-      // Every OTHER workspace (`mode !== 'sessions'`) keeps the border unchanged.
+      // FLOATING-PANELS DESIGN (`sdd/brief.md`): in the sessions workspace this element is the
+      // FRAME, not a panel — its own background reads as the frame's ground colour, and the actual
+      // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
+      // the bordered box a reader sees. Every OTHER workspace keeps the plain elevated-surface aside
+      // it always had — this is a `mode === 'sessions'` styling branch, nothing else.
+      background: mode === 'sessions' ? 'var(--bg-base)' : 'var(--bg-surface)',
       borderRight: mode === 'sessions' ? 'none' : '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', padding: collapsed ? '0 8px 12px' : '0 12px 14px', boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
@@ -1180,44 +1290,89 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
       // a transition on it makes the edge lag behind the cursor and then catch up.
       transition: dragging ? 'none' : 'width 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
-      {/* The aside is the full height of the window, so it carries its own mark and fold control. */}
+      {/* The aside is the full height of the window, so it carries its own mark and fold control —
+          this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
       <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
-      {/* The workspace switch, PINNED above the scrolling body. */}
+      {/* The workspace switch, PINNED above the scrolling body — frame chrome too, same reason. */}
       <div style={{ padding: '0 2px 10px' }}>
         <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
         {/* Member machine: live connection status + latency to the central. Null unless connected. */}
         {!collapsed && !isCentral && <div style={{ marginTop: 8 }}><MemberConnectionStatus lang={lang} compact /></div>}
       </div>
 
-      {/* ONE aside, two bodies — never two asides. The shell above and the footer below are the
-          same in both workspaces; only what sits between them changes. Collapsed, the sessions
-          workspace draws the RAIL — sessions, not the dashboard's Home/Costs/Tools nav, which is
-          the one thing this workspace certainly is not. */}
+      {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
+          it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
+          dashboard's Home/Costs/Tools nav, which is the one thing this workspace certainly is not. */}
       {mode === 'sessions' ? (
-        collapsed ? (
-          <SessionsRail rows={railRows} lang={pt ? 'pt' : 'en'} {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})} />
-        ) : (
-        <>
-        {/* On a central the workspace is ABOUT a machine, so the choice sits above the list it
-            governs. Absent on a machine, which is its own. */}
-        {isCentral && <div style={{ padding: '0 2px 8px' }}><CentralSessions lang={pt ? 'pt' : 'en'} /></div>}
-        <SessionsAside
-          lang={pt ? 'pt' : 'en'}
-          rows={fleet.rows}
-          finishedTasks={fleet.finishedTasks}
-          loading={fleetLoading}
-          unsupported={fleetUnsupported}
-          filters={sessionsFilters}
-          activeOnly={sessionsActiveOnly}
-          {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
-          stale={fleetStale}
-          {...(isCentral ? { hideNew: true } : {})}
-          rowsById={asideRowIndex}
-          act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
-        />
-        </>
-        )
+        /**
+         * THE LEFT SESSIONS-LIST PANEL (`sdd/brief.md`, region 1) — a POSITIONING HOST (no clip of
+         * its own) holding the visually-bordered panel box, with the resize gap as a SEPARATE
+         * absolutely-positioned sibling: the gap's own hit area must sit OUTSIDE the panel's
+         * `overflow: hidden` clip (`sdd/52a454c6-image.png`/`b6a3778b-image.png`), or it would be
+         * cut off at the panel's own border the instant the pointer moved past it.
+         *
+         * The FOOTER (account + config actions) moves INSIDE this panel, at its own foot — it used
+         * to be a sibling of the list, flush against the aside's own (now removed) edge line; folding
+         * it into the panel is what keeps "no panel sits inside another, no line doubles the gap" —
+         * the alternative (a second bordered box under this one, for the footer alone) would be
+         * exactly the extra divider design item 2 exists to remove.
+         *
+         * COLLAPSED (the existing 64px icon rail — untouched functionality, `SessionsRail`) still
+         * gets the panel treatment, just narrower: the brief's "closed" state (panel and gap both
+         * gone, neighbour takes the space) is a DIFFERENT lever from this one, and nothing here asks
+         * for that third state — `Today's collapse/expand controls keep working` unchanged. Only the
+         * RESIZE GAP is withheld while collapsed (`!collapsed` below): a fixed 64px rail has nothing
+         * to resize.
+         */
+        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+            border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+            background: 'var(--bg-surface)',
+          }}>
+            {collapsed ? (
+              <SessionsRail rows={railRows} lang={pt ? 'pt' : 'en'} {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})} />
+            ) : (
+              <>
+                {/* On a central the workspace is ABOUT a machine, so the choice sits above the list
+                    it governs. Absent on a machine, which is its own. */}
+                {isCentral && <div style={{ padding: '8px 2px 0' }}><CentralSessions lang={pt ? 'pt' : 'en'} /></div>}
+                <SessionsAside
+                  lang={pt ? 'pt' : 'en'}
+                  rows={fleet.rows}
+                  finishedTasks={fleet.finishedTasks}
+                  loading={fleetLoading}
+                  unsupported={fleetUnsupported}
+                  filters={sessionsFilters}
+                  activeOnly={sessionsActiveOnly}
+                  {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
+                  stale={fleetStale}
+                  {...(isCentral ? { hideNew: true } : {})}
+                  rowsById={asideRowIndex}
+                  act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
+                />
+              </>
+            )}
+            {footer}
+          </div>
+          {/* THE GAP IS THE HANDLE — see `PanelGap`'s own header. `sign={1}`: the pointer moving
+              RIGHT grows this panel, the same convention `AsideResizer`'s own keyboard handler
+              already used for this exact edge. `clampAsideWidth` is the SAME existing resolver
+              `AsideResizer` calls — reused exactly, never re-implemented; only the hit area and the
+              visuals moved into the gap. */}
+          {!collapsed && (
+            <PanelGap
+              orientation="vertical"
+              label={pt ? 'Redimensionar lista de sessões' : 'Resize sessions list'}
+              value={width} min={ASIDE_MIN} max={ASIDE_MAX} sign={1}
+              onChange={w => { setDragging(true); onResize(clampAsideWidth(w, window.innerWidth)) }}
+              onCommit={w => { setDragging(false); onCommitWidth(clampAsideWidth(w, window.innerWidth)) }}
+              style={{ position: 'absolute', top: 0, bottom: 0, right: -3 }}
+            />
+          )}
+        </div>
       ) : (
+      <>
       <nav className="ag-noscroll" style={{ display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
         {items.map(item => {
           const active = item.to === '/'
@@ -1256,11 +1411,10 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
           )
         })}
       </nav>
-      )}
 
-      {/* The resize handle. In BOTH workspaces — the dashboard's labels benefit from a wider
-          column too, and a control that exists on one screen and vanishes on the next reads as
-          broken. Only while the sidebar is open: there is nothing to resize about a 64px rail. */}
+      {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-
+          as-handle model is the sessions workspace's alone. Only while the sidebar is open: there is
+          nothing to resize about a 64px rail. */}
       {!collapsed && (
         <AsideResizer
           width={width}
@@ -1270,107 +1424,9 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
         />
       )}
 
-      {/* Footer — Row A account · thin divider · Row B config actions */}
-      <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid var(--border)' }}>
-        {/* Row A — account: a single profile button (avatar) opening a popover menu */}
-        {principal && (
-          <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'stretch', paddingBottom: 10 }}>
-            <CollapsedTip label={principal.name} show={collapsed}>
-              <button ref={avatarRef} onClick={openMenu} aria-haspopup="menu" aria-expanded={menuOpen}
-                title={collapsed ? undefined : principal.name}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, width: collapsed ? 'auto' : '100%',
-                  padding: collapsed ? 0 : '4px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-                  border: '1px solid transparent', background: menuOpen ? 'var(--bg-elevated)' : 'transparent', transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
-                onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
-                <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
-                {!collapsed && (
-                  <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-                    <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-                  </span>
-                )}
-                {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
-              </button>
-            </CollapsedTip>
-          </div>
-        )}
-
-        {/* Profile popover — rendered via portal so it escapes the sidebar's overflow clip */}
-        {principal && menuOpen && menuPos && createPortal(
-          <div ref={menuRef} role="menu"
-            style={{
-              position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)',
-              minWidth: 220, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
-            }}>
-            <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
-              <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
-            </div>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
-            </button>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
-            </button>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
-            </button>
-          </div>,
-          document.body,
-        )}
-
-        {/* Self-service change-password modal */}
-        {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
-
-        {/* Thin divider between account and actions */}
-        {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
-
-        {/* Row B — config actions (theme · language · export · settings), evenly spaced */}
-        <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
-          <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
-            <button onClick={onToggleTheme} aria-label={pt ? 'Tema' : 'Theme'} title={collapsed ? undefined : (theme === 'dark' ? (pt ? 'Tema claro' : 'Light theme') : (pt ? 'Tema escuro' : 'Dark theme'))} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1 }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Idioma' : 'Language'} show={collapsed}>
-            <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
-              <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
-            <button onClick={onExport} aria-label={pt ? 'Exportar relatório PDF' : 'Export PDF report'} title={collapsed ? undefined : (pt ? 'Exportar relatório PDF' : 'Export PDF report')}
-              style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, borderColor: 'var(--anthropic-orange)50', color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
-              <Download size={15} />
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
-            <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
-              <SlidersHorizontal size={15} />
-            </NavLink>
-          </CollapsedTip>
-        </div>
-      </div>
+      {footer}
+      </>
+      )}
     </aside>
   )
 }
@@ -2242,6 +2298,16 @@ export default function AppLayout() {
   useEffect(() => {
     if (!inSessionsWorkspace || !selectedFleetSession) return
     const onKey = (e: KeyboardEvent) => {
+      // Bare Ctrl/Cmd+B is now the workspace's own panel shortcut — TOGGLE THE LEFT SESSIONS LIST
+      // (owner addition, `lib/panelShortcuts.ts`). It shares that one combo with this Studio toggle,
+      // and the owner named it for the sessions list explicitly, so it wins here: this effect skips
+      // it entirely rather than also acting on it. `Ctrl+Shift+F` (search) shares no combo with the
+      // panel shortcuts and is unaffected.
+      const asPanelShortcut = matchPanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal: false,
+      })
+      if (asPanelShortcut === 'toggle-left') return
       const shortcut = shouldHandleGlobally(e, e.target as { tagName?: string; isContentEditable?: boolean } | null)
       if (shortcut === null) return
       e.preventDefault()
@@ -2250,6 +2316,52 @@ export default function AppLayout() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, selectedFleetSession])
+
+  /**
+   * THE THREE WORKSPACE PANEL SHORTCUTS (owner addition, VS-Code style) — `Ctrl/Cmd+B` toggles the
+   * LEFT sessions list (the same `sidebarCollapsed` state `AsideHeader`'s own collapse button already
+   * drives — see that component's "Ctrl+B" tooltip, which this makes true rather than aspirational),
+   * `Ctrl/Cmd+Shift+B` toggles the RIGHT aside, and `Ctrl/Cmd+'` / `` Ctrl/Cmd+` `` toggle the BOTTOM
+   * band. Desktop only (`!isMobile`) and only on the Sessions workspace route — a phone has no such
+   * panels and every other route has no floating-panel frame for these to act on.
+   *
+   * `matchPanelShortcut`/`shouldHandlePanelShortcut` (`lib/panelShortcuts.ts`) decide EVERYTHING
+   * about which keystroke means what and whether it may be stolen from the current focus target —
+   * never re-derived here. `focusInTerminal` is read the same way `MagnifierLayer.tsx` already
+   * detects a terminal surface (`closest('.xterm')`), because xterm's own hidden input is an
+   * ordinary `<textarea>` by tag and would otherwise be caught by the generic typing-target guard.
+   *
+   * The RIGHT AND BOTTOM toggles go straight through `panelSlots.ts`'s own module-level setters
+   * (`setSlotRightOpen`/`setBandOpen`), which flip only the `rightOpen`/`bottomOpen` flags and never
+   * touch which panel occupies the slot — so reopening always restores the tab that was showing when
+   * it closed, for free. Opening the right aside for the FIRST time (nothing ever assigned) shows the
+   * Live panel, since a bare `rightOpen: true` with no occupant has nothing to reveal.
+   */
+  useEffect(() => {
+    if (!inSessionsWorkspace || isMobile) return
+    const onKey = (e: KeyboardEvent) => {
+      const focusInTerminal = document.activeElement instanceof Element
+        && document.activeElement.closest('.xterm') !== null
+      const shortcut = shouldHandlePanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal,
+      }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
+      if (shortcut === null) return
+      // `Ctrl+Shift+B` is Chrome's own bookmarks-bar toggle — the page must win it.
+      e.preventDefault()
+      if (shortcut === 'toggle-left') { setSidebarCollapsed(c => !c); return }
+      if (shortcut === 'toggle-right') {
+        const layout = getPanelLayout()
+        if (layout.right === null) showPanel('live')
+        else setSlotRightOpen(!layout.rightOpen)
+        return
+      }
+      // toggle-band
+      setBandOpen(!getPanelLayout().bottomOpen)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [inSessionsWorkspace, isMobile])
 
   // The Chat/Terminal choice lives in the URL (`?view=`) rather than in state here or in
   // `SessionPanel`, so the ONE control (now in this shared header) and the ONE reader (the panel,

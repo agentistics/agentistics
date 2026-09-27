@@ -731,6 +731,36 @@ textarea,
 .ag-resize-handle:active .ag-resize-grip,
 .ag-resize-handle:focus-visible .ag-resize-grip { background: var(--anthropic-orange); }
 
+/* --- .ag-panel-gap / .ag-panel-junction: the floating-panel workspace's gap-as-handle (design
+   `sdd/brief.md`) — the gap between two panels IS the only divider and IS the resize handle. Three
+   dots, subtle at rest, brighter on hover/drag (`.ag-panel-gap-dot`), plus a thin accent line
+   through the gap's own centre (`::after`, matching the approved mockup's `.gutter::after`) that
+   only appears on hover/drag — at rest the gap is meant to read as empty space between two panels,
+   not as a painted line. `.ag-panel-junction` gets no line of its own: the two gaps it overlaps
+   already draw theirs, and its own hover state is carried by them showing simultaneously. */
+.ag-panel-gap { position: relative; }
+.ag-panel-gap::after {
+  content: ""; position: absolute; border-radius: 2px; background: var(--anthropic-orange);
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.ag-panel-gap[aria-orientation="vertical"]::after { top: 30%; bottom: 30%; left: calc(50% - 1px); width: 2px; }
+.ag-panel-gap[aria-orientation="horizontal"]::after { left: 30%; right: 30%; top: calc(50% - 1px); height: 2px; }
+.ag-panel-gap:hover::after,
+.ag-panel-gap:active::after,
+.ag-panel-gap:focus-visible::after { opacity: 0.9; }
+
+.ag-panel-gap-dot {
+  display: block; width: 3px; height: 3px; border-radius: 50%;
+  background: var(--border-subtle); transition: background 0.15s ease;
+}
+.ag-panel-gap:hover .ag-panel-gap-dot,
+.ag-panel-gap:active .ag-panel-gap-dot,
+.ag-panel-gap:focus-visible .ag-panel-gap-dot { background: var(--anthropic-orange); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-panel-gap::after, .ag-panel-gap-dot { transition: none; }
+}
+
 /* The row's pin. Hidden until the row is hovered or something in it has focus — a column of pin
    glyphs down an unpinned list is noise beside the titles they sit next to — but always visible
    once set, and always reachable by keyboard. */
