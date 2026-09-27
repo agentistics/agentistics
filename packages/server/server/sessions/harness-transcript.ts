@@ -366,6 +366,11 @@ export const HARNESS_TRANSCRIPTS: Record<HarnessId, HarnessTranscript | null> = 
   copilot: COPILOT,
   kimi: KIMI,
   gemini: GEMINI,
+  // No legacy adapter (CLAUDE.md step 4, skipped by scope) and therefore no ManagedSession can ever
+  // carry an opencode conversationId — the LINK half this table's own header distinguishes from the
+  // format half. A `null` reader here is refused IN WORDS by the caller, naming the harness, exactly
+  // as this file's own rule requires.
+  opencode: null,
 }
 
 /**

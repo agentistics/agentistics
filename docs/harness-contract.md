@@ -230,3 +230,92 @@ now required before a decoded field is trusted:
 
 Record the reconciliation in the reader's own header, with the figures and the date. The next
 person to touch those field numbers needs to see what pinned them, not just what they are.
+
+## 9. Replay integration and parity (P2)
+
+Sections 1–8 define what each `SessionMeta` field means for the legacy pipeline. This section
+carries the same meanings into the **canonical event stream** (`@agentistics/core`'s
+`AgentisticsEvent`), which every harness's replay integration emits, and into the **parity
+differential** that proves the replay agrees with legacy. `CLAUDE.md`'s "Adding a harness — the
+complete checklist" (steps 11–19) lists the mechanical files to touch; this section says what each
+one must be honest about. Do both, for the same reason the top of this document already gives.
+
+### What an event may say
+
+- **An id is derived, never random.** `deriveEventId` is a pure function of the event's own fields
+  — re-reading the same bytes twice must produce the same id, or an idempotent import becomes a
+  duplicate one.
+- **A per-record `sourceRef` must end in a numeric ordinal** (`:<line or index>`). The projection's
+  `keyOf` (`projections/session-meta.ts`) reads that trailing `/:(\d+)$/` for first/last-wins
+  ordering; without it, ordering silently degrades to timestamp-only, which is wrong wherever two
+  records share a timestamp.
+- **A path is emitted unconditionally, even `''`.** `session.started.projectPath` /
+  `run.started.cwd` follow legacy's own rule that `project_path` is always a string, never absent —
+  an absent field and an empty one are different claims.
+- **A counter the source did not report is ABSENT, never a `0`** (decision D21). This is the event
+  stream's version of § 4's "N/A vs a real `0`": a harness with no cache-write counter omits
+  `usage.cacheWrite` from `model.completed` rather than writing zero into it.
+- **No conversation text travels, ever** (decision D5). Counters, ids, names, model ids and
+  `commandSummary`-shaped shell fragments only — never a prompt, a reply, a thinking block, a tool
+  argument or a tool's raw output, in any event of any harness.
+- **`confidence` is exactly `exact | estimated | inferred`** (decision D17; D17 removed a fourth
+  value, `derived`, on the grounds that a deterministic computation over exact inputs is itself
+  exact — there is one confidence scale, shared with the capability table below, and no second one
+  for "the event's own idea of certainty").
+- **Turns are the person's turns, and their coverage is versioned.** `turn.started` / `turn.ended`
+  are emitted per the same predicate legacy counts as a human turn (D22); a harness only gains turn
+  fields in the projection once its id and adapter version are listed in `session-meta.ts`'s
+  `TURNS_SINCE` / `TURN_END_SINCE` (and `COMPACTION_SINCE` where it compacts) — the version gate
+  exists because an OLDER replay of the same harness may not have emitted turns yet, and a projector
+  that assumed every event of a known harness carries them would silently backdate a capability.
+
+### Capability states — a richer scale than the boolean, and it may only ever be honest
+
+`packages/core/src/canonical/capabilities.ts`'s `CAPABILITY_STATES` (fed by
+`CAPABILITY_REFINEMENTS`) reads `state: 'supported' | 'partial' | 'not_supported' | 'unknown'` plus
+the `exactness` scale above, and is what the canonical model reads — `HARNESS_CAPABILITIES` (§ 4)
+is untouched and stays what today's surfaces read. Two rules, one in each direction:
+
+- **A `true` can only ever NARROW**, to `partial` with a one-line `limit` and a `source` naming
+  where the limit was measured (a replay, a spec section). It can never *widen* — a metric that is
+  merely as capable as legacy claimed is left alone, at `supported`.
+- **A `false` may become `partial` only as a deliberately named, pinned upgrade** —
+  `capabilities.test.ts`'s `UPGRADED_FALSES` is the exhaustive list, and it is a decision made once
+  per cell, never inferred from "the replay happens to produce a number now." Every `false` not on
+  that list must still carry its `LEGACY_FALSE_NOTES` reason; there is no cell that is simply
+  false with nothing said about why.
+
+### Differential verdicts — three, and the bar for each
+
+The parity differential (`projections/differential-<id>.ts`, over `differential.ts`'s shared
+`compareTokens`/`compareTime`/`compareTools`/`compareSession`/`summarize`/`renderReport`) settles
+every field of every session into one of three verdicts:
+
+- **`equal`** — the projected and legacy values match exactly. No tolerance anywhere; a field that
+  is "close enough" is not equal.
+- **`explained`** — the field differs for a reason that is written down, and that reason is proven
+  for THIS session, not asserted for the harness in general (a `daily` field with no legacy
+  equivalent is `explained` only once the projected days are shown to sum exactly to the projected
+  totals; a rounding difference is `explained` only once `Math.round(legacy) === projected` holds
+  for that row).
+- **`bug`** — everything else. A caveat that only describes the harness in the abstract, with
+  nothing tying it to the specific row, leaves the row a `bug`; `not-projectable` is legitimate only
+  when the projection itself declares the gap (a caveat naming the field, or a static per-harness
+  declaration), never as a way to file away a difference nobody has explained.
+
+See `CLAUDE.md`'s "Adding a harness — the complete checklist" for exactly which files each of these
+rules lives in, and `docs/superpowers/specs/2026-09-19-runtime-p2-adapters-import.md` for how wave 1
+(A3) applied them across all six harnesses.
+
+**A harness can have a replay integration with NO legacy adapter at all** — opencode (A3.8) is the
+first: it has no `adapters/opencode.ts`/`opencode-parse.ts` (CLAUDE.md step 4 was deliberately
+skipped), so it never produces a `SessionMeta` and never appears on a surface, but it still has a
+full `integrations/opencode/` replay and its own parity differential
+(`projections/differential-opencode.ts`). In that shape there is no `parseXRollout` to read as "the
+legacy side" — both sides of the differential are built inside that one module, from the same raw
+store rows, sharing no function with the replay's own fold; see its header. `HARNESS_CAPABILITIES`
+for such a harness is honestly ALL-false (no surface can ever receive its data), while
+`CAPABILITY_REFINEMENTS` in the canonical vocabulary can still upgrade the metrics the replay
+genuinely produces to `partial` — the two tables answer different questions ("what can today's
+surfaces show" vs "what can the canonical model produce"), and this is the case that shows they can
+disagree in this specific direction.

@@ -1,0 +1,7 @@
+{
+  "title": "<redacted>",
+  "workDir": "/redacted/workdir",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000100000,
+  "agents": { "main": { "type": "main" } }
+}

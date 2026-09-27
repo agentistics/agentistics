@@ -299,10 +299,19 @@ export function renderJournalStatus(r: JournalReport): string {
 
 const USAGE = `Usage:
   agentop journal status [--json]
+  agentop journal import [--harness <id>…] [--from <yyyy-MM-dd>] [--dry-run] [--json]
+                         [--batch-size <n>] [--concurrency <n>]
 
-A read-only look at the durable event journal from outside the process that writes it. It never
-creates the journal — a machine that has never had it on stays reporting "no journal", never a
-silent 0.`
+status  A read-only look at the durable event journal from outside the process that writes it. It
+        never creates the journal — a machine that has never had it on stays reporting "no
+        journal", never a silent 0.
+import  Replays this machine's history into the journal (mode 'replayed'): every harness's own
+        files first, then the consolidate store for conversations whose files are gone (a coarse
+        run + totals). Resumable (a cursor per source, beside the journal) and idempotent — run it
+        twice and the second adds nothing. Ctrl-C stops between batches with progress saved.
+        --harness   limit to these harnesses (repeat it, or comma-separate)
+        --from      only conversations that started on or after this UTC day
+        --dry-run   write nothing; report what would be written`
 
 export async function runJournal(argv: string[], deps?: JournalCliDeps): Promise<number> {
   const cmd = argv[0]
@@ -310,6 +319,7 @@ export async function runJournal(argv: string[], deps?: JournalCliDeps): Promise
     console.log(USAGE)
     return 0
   }
+  if (cmd === 'import') return runJournalImport(argv.slice(1))
   if (cmd === 'status') {
     const json = argv.includes('--json')
     const report = await collectJournalReport(deps)
@@ -318,4 +328,55 @@ export async function runJournal(argv: string[], deps?: JournalCliDeps): Promise
   }
   console.error(USAGE)
   return 1
+}
+
+/**
+ * `agentop journal import`. The engine is `journal/import.ts`; this is the terminal around it:
+ * flags, live progress on stderr, SIGINT → stop between batches (a second one exits at once), the
+ * report on stdout. Exit 0 when it ran (failures are REPORTED, by reason), 130 when interrupted,
+ * 1 on a usage error or a journal that cannot be opened.
+ */
+export async function runJournalImport(argv: string[], deps: { run?: typeof import('./journal/import').runImport } = {}): Promise<number> {
+  const { parseImportArgs, renderImportReport } = await import('./journal/import-plan')
+  const parsed = parseImportArgs(argv)
+  if (!parsed.ok) {
+    console.error(`agentop journal import: ${parsed.error}\n\n${USAGE}`)
+    return 1
+  }
+  const args = parsed.args
+  const run = deps.run ?? (await import('./journal/import')).runImport
+  const controller = new AbortController()
+  let signals = 0
+  const onSigint = () => {
+    signals++
+    if (signals > 1) process.exit(130)
+    controller.abort()
+    process.stderr.write('\n[import] stopping after the current batch — progress is saved (Ctrl-C again to exit now)\n')
+  }
+  process.on('SIGINT', onSigint)
+  const tty = process.stderr.isTTY === true
+  try {
+    const result = await run({
+      harnesses: args.harnesses,
+      ...(args.from !== undefined ? { from: args.from } : {}),
+      dryRun: args.dryRun,
+      ...(args.batchSize !== undefined ? { batchSize: args.batchSize } : {}),
+      ...(args.concurrency !== undefined ? { concurrency: args.concurrency } : {}),
+      signal: controller.signal,
+      onProgress: p => {
+        const mb = p.bytes !== undefined ? ` · ${(p.bytes / 1e6).toFixed(1)} MB (${(p.bytes / 1e6 / Math.max(0.001, p.ms / 1000)).toFixed(1)} MB/s)` : ''
+        const line = `[import] ${p.harness} ${p.phase} ${p.done}/${p.total} · ${p.events.toLocaleString('en-US')} events · ${p.written.toLocaleString('en-US')} ${args.dryRun ? 'would write' : 'written'}${mb} · ${(p.ms / 1000).toFixed(1)} s`
+        process.stderr.write(tty ? `\r\x1b[2K${line}` : `${line}\n`)
+      },
+    })
+    if (tty) process.stderr.write('\n')
+    if (!result.ok) {
+      console.error(`agentop journal import: ${result.error}`)
+      return 1
+    }
+    console.log(args.json ? JSON.stringify(result.report, null, 2) : renderImportReport(result.report))
+    return result.report.interrupted ? 130 : 0
+  } finally {
+    process.off('SIGINT', onSigint)
+  }
 }

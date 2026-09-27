@@ -90,6 +90,11 @@ export const JOURNAL_STATUS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
 export const JOURNAL_STAMPS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
   ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.stamps.json')
   : join(AGENTISTICS_DATA_DIR, 'journal.db.stamps.json')
+// `agentop journal import`'s resume state (`journal/import.ts`: a cursor per replayed source + the
+// store entries already imported), bound to the journal file's identity. Same directory rule.
+export const JOURNAL_IMPORT_STATE_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.import.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.import.json')
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json
@@ -256,6 +261,15 @@ export const COPILOT_DIR = process.env.COPILOT_DIR ?? (_selfContributingCentral 
 // ---------------------------------------------------------------------------
 // Kimi Code CLI harness. Override with KIMI_DIR; disable with AGENTISTICS_HARNESS_KIMI=0.
 export const KIMI_DIR = process.env.KIMI_DIR ?? join(HOME_DIR, '.kimi-code')
+
+// ---------------------------------------------------------------------------
+// opencode CLI harness — P2 replay ONLY, no legacy adapter (CLAUDE.md "Adding a harness" step 4,
+// skipped by scope: it never produces a SessionMeta). Override the store path with
+// OPENCODE_DB_PATH. `opencode-local.db` (a SEPARATE, per-project database this integration does not
+// read — see integrations/opencode/index.ts's header) is deliberately not named here.
+// ---------------------------------------------------------------------------
+export const OPENCODE_DIR = process.env.OPENCODE_DIR ?? join(HOME_DIR, '.local', 'share', 'opencode')
+export const OPENCODE_DB_PATH = process.env.OPENCODE_DB_PATH ?? join(OPENCODE_DIR, 'opencode.db')
 
 export const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_DIR ?? join(GEMINI_DIR, 'antigravity-cli')
 export const ANTIGRAVITY_BRAIN_DIR = join(ANTIGRAVITY_DIR, 'brain')

@@ -77,10 +77,15 @@ const TOOL_ALIASES: Record<string, string> = {
   read_file: 'Read',
   read_many_files: 'Read',
   view_file: 'Read',
+  read: 'Read',
   // write / edit
   write_to_file: 'Write',
   write_file: 'Write',
   create_file: 'Write',
+  write: 'Write',
+  // skill (opencode names its skill-invocation tool literally "skill"; Claude's own tool_use is
+  // already "Skill" and needs no alias)
+  skill: 'Skill',
   replace_file_content: 'Edit',
   multi_replace_file_content: 'Edit',
   str_replace: 'Edit',

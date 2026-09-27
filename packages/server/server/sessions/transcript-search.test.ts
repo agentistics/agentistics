@@ -125,7 +125,7 @@ describe('parseGrepOutput', () => {
 
 describe('TRANSCRIPT_SOURCES', () => {
   test('every harness is accounted for — a new one cannot be forgotten silently', () => {
-    const ids = ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] as const
+    const ids = ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode'] as const
     for (const id of ids) expect(TRANSCRIPT_SOURCES[id]).toBeDefined()
   })
 

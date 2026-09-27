@@ -125,5 +125,13 @@ export async function readHarnessDefaults(harness: HarnessId): Promise<HarnessDe
     case 'gemini':
     case 'copilot':
       return {}
+    // UNVERIFIED, not "carries no model key": no config file was found at all on the machine this
+    // was written on (opencode's own docs describe one at ~/.config/opencode/opencode.json or
+    // similar), so there was nothing to read a real key from — and this module's own rule ("EVERY
+    // ENTRY NAMES ITS FILE AND KEY, and was verified by reading a real one") forbids guessing one.
+    // Also moot today: opencode has no spawn-spec (CLAUDE.md step 4, skipped by scope), so agentop
+    // never starts one and this default is never asked for in practice.
+    case 'opencode':
+      return {}
   }
 }
