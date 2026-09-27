@@ -39,6 +39,7 @@ jobs:
       PKG_FILES: >-
         package.json
         packages/core/package.json
+        packages/runtime/package.json
         packages/server/package.json
         packages/web/package.json
         packages/mcp/package.json

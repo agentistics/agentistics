@@ -65,7 +65,26 @@ import {
   type ProviderUsage,
   type StopReason,
 } from '@agentistics/core'
-import type { AppendResult, Journal } from '../journal/types'
+
+// ── The sink (D23) ──────────────────────────────────────────────────────────────────────────────
+//
+// The runtime owns the SHAPE of what it appends to, never the journal itself: the host passes its
+// own. agentop's A1 journal (`server/journal/types.ts` `Journal`) satisfies this structurally — its
+// `append` resolves to an `AppendResult` carrying `written`, `duplicates` and more.
+
+/** The part of an append's answer the emitter reads. A host's richer result is assignable to it. */
+export interface ProviderAppendResult {
+  /** Rows actually inserted. */
+  written: number
+  /** Events whose `eventId` was already there — a duplicate is NOT a loss. */
+  duplicates: number
+}
+
+/** Where provider events go. Implemented by the host; the runtime never opens one. `R` lets a
+ *  host's richer answer come back to it through the emitter unchanged. */
+export interface ProviderJournalSink<R extends ProviderAppendResult = ProviderAppendResult> {
+  append(events: readonly AgentisticsEvent[]): Promise<R>
+}
 
 // ── Inputs ──────────────────────────────────────────────────────────────────────────────────────
 //
@@ -275,24 +294,26 @@ export interface EmitCounters {
   lost: Record<EmittedType, number>
 }
 
-export interface EmitterOptions {
+export interface EmitterOptions<R extends ProviderAppendResult = ProviderAppendResult> {
   /** `null` when there is no journal at all — every event is then counted lost, and the call goes on. */
-  journal: Journal | null
+  journal: ProviderJournalSink<R> | null
   adapterVersion: string
   sourceVersion?: string
   /** Injected clock. */
   now?: () => Date
 }
 
-export interface ProviderEmitter {
+export interface ProviderEmitter<R extends ProviderAppendResult = ProviderAppendResult> {
   /** Before the request leaves. Resolves to the journal's result, or `null` when nothing was appended. */
-  invoked(start: AttemptStart, scope?: EmitScope): Promise<AppendResult | null>
+  invoked(start: AttemptStart, scope?: EmitScope): Promise<R | null>
   /** When the outcome is known. `observedAt` defaults to the clock. */
-  terminal(outcome: AttemptOutcome, scope?: EmitScope, observedAt?: string): Promise<AppendResult | null>
+  terminal(outcome: AttemptOutcome, scope?: EmitScope, observedAt?: string): Promise<R | null>
   counters(): EmitCounters
 }
 
-export function createProviderEmitter(opts: EmitterOptions): ProviderEmitter {
+export function createProviderEmitter<R extends ProviderAppendResult = ProviderAppendResult>(
+  opts: EmitterOptions<R>,
+): ProviderEmitter<R> {
   const now = opts.now ?? (() => new Date())
   const lost: Record<EmittedType, number> = { 'model.invoked': 0, 'model.completed': 0, 'model.failed': 0 }
   const ctx = (): EmitContext => ({
@@ -301,7 +322,7 @@ export function createProviderEmitter(opts: EmitterOptions): ProviderEmitter {
     ...(opts.sourceVersion === undefined ? {} : { sourceVersion: opts.sourceVersion }),
   })
 
-  async function append(event: AgentisticsEvent<EmittedType>): Promise<AppendResult | null> {
+  async function append(event: AgentisticsEvent<EmittedType>): Promise<R | null> {
     if (!opts.journal) { lost[event.type] += 1; return null }
     try {
       const r = await opts.journal.append([event])

@@ -1,5 +1,7 @@
 /**
- * client.live.test.ts — B1.7: `agentop provider try anthropic`.
+ * cli-provider.live.test.ts — B1.7: `agentop provider try anthropic`. (It was
+ * `provider/anthropic/client.live.test.ts`; it drives the HOST verb, so it stayed in the server when
+ * the client moved to `@agentistics/runtime` — D23 forbids a runtime test from importing it.)
  *
  * TWO parts, and only the second can spend money:
  *
@@ -21,13 +23,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentisticsEvent, ProviderUsage } from '@agentistics/core'
-import { runProvider, TRY_DEFAULT_MODEL, TRY_MAX_TOKENS, TRY_PROMPT, type ProviderCliDeps } from '../../cli-provider.ts'
-import { openJournal } from '../../journal/journal'
-import type { Journal } from '../../journal/types'
-import { PROVIDER_KEYS_DIR } from '../../config.ts'
-import { validateKeyShape } from '../credential-plan.ts'
-import { resolveCredential, storeCredential } from '../credentials.ts'
-import type { InvocationResult, ProviderClient, ProviderRequest } from '../client.ts'
+import { runProvider, TRY_DEFAULT_MODEL, TRY_MAX_TOKENS, TRY_PROMPT, type ProviderCliDeps } from './cli-provider.ts'
+import { openJournal } from './journal/journal'
+import type { Journal } from './journal/types'
+import { PROVIDER_KEYS_DIR } from './config.ts'
+import { validateKeyShape } from './provider/credential-plan.ts'
+import { resolveCredential, storeCredential } from './provider/credentials.ts'
+import type { InvocationResult, ProviderClient, ProviderRequest } from '@agentistics/runtime'
 
 const FAKE_KEY = 'sk-ant-' + 'live' + 'q'.repeat(40)
 expect(validateKeyShape(FAKE_KEY).ok).toBe(true)
@@ -190,7 +192,7 @@ const skipReason = !OPT_IN
     ? `AGENTISTICS_LIVE_ANTHROPIC=1 but no usable key is stored in ${PROVIDER_KEYS_DIR} — run \`agentop provider key set anthropic\``
     : ''
 
-if (skipReason) console.log(`[client.live.test] SKIPPED — ${skipReason}`)
+if (skipReason) console.log(`[cli-provider.live.test] SKIPPED — ${skipReason}`)
 
 describe('agentop provider try — LIVE (one real, billed call)', () => {
   const t = skipReason ? test.skip : test

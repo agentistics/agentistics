@@ -92,47 +92,42 @@ const COMPACTION: LegacyFalseNote = {
   reason: 'Claude Code writes a compact_boundary system line; no other harness has an equivalent marker, so the compaction figures are absent rather than zero.',
   source: `${TYPES} HarnessCapabilities.compaction docstring`,
 }
-const SKILLS: LegacyFalseNote = {
-  state: 'not_applicable',
-  reason: 'Claude Code writes a Skill tool_use naming the skill; no other harness has the concept at all, so skills are absent rather than an empty map.',
-  source: `${TYPES} HarnessCapabilities.skills docstring`,
-}
 
 /**
  * The recorded reasons for today's legacy `false` cells. A reason is here only when a sentence
  * ALREADY EXISTED for it — a field docstring or entry comment in `types.ts`, a `HARNESS_INFO`
  * `missing` entry, the master spec — and `source` names which. A `false` with no such sentence has
- * NO entry and therefore reads as `unknown`; that is deliberate for seven cells today
+ * NO entry and therefore reads as `unknown`; that is deliberate for eleven cells today
  * (`dynamicWorkflows` on all five non-Claude harnesses — every source says only that it is
  * Claude-only, never that the others lack an orchestration tool; gemini `contextWindow` — its only
- * written reason says gemini carries no token data, which the table itself contradicts; antigravity
- * `skills` — the docstring's "no other harness has the concept" is contradicted by agy's own skill
- * directories in `sessions/skill-source.ts`). `capabilities.test.ts` pins the whole classification.
+ * written reason says gemini carries no token data, which the table itself contradicts; `skills` on
+ * antigravity, codex, gemini, copilot and kimi — the only source for "the concept is absent" was the
+ * `skills` docstring's "no other harness has the concept", which `sessions/skill-source.ts` shows
+ * false for agy's own skill directories; an absence nobody verified is `unknown`, not a fact, and
+ * the same sentence cannot be trusted for the other four). `capabilities.test.ts` pins the whole
+ * classification.
  *
- * `not_applicable` is used for one metric only, `skills`, because it is the only one whose source
- * says the CONCEPT is absent rather than that its record is. `compaction` is `not_supported`: the
- * source denies a MARKER, not that these harnesses compact.
+ * No cell is `not_applicable` today: that state needs a source that says the CONCEPT is absent and
+ * was checked, and `skills` — the one metric that had it — turned out not to. `compaction` is
+ * `not_supported`: the source denies a MARKER, not that these harnesses compact.
  */
 export const LEGACY_FALSE_NOTES: LegacyFalseNotes = {
   codex: {
     agents: { state: 'not_supported', reason: 'Codex does not record per-subagent breakdowns in its transcripts.', source: `${INFO}.codex.missing (Subagent metrics)` },
     gitLines: { state: 'not_supported', reason: 'Git line counts are not present in Codex transcripts.', source: `${INFO}.codex.missing (Git line counts)` },
     compaction: COMPACTION,
-    skills: SKILLS,
     mcpServers: { state: 'not_supported', reason: 'Codex records no MCP tool at all, so the MCP server cannot be read back off tool_counts.', source: `${TYPES} HarnessCapabilities.mcpServers docstring` },
   },
   gemini: {
     agents: { state: 'not_supported', reason: 'Gemini CLI does not record per-subagent breakdowns.', source: `${INFO}.gemini.missing (Subagent metrics)` },
     gitLines: { state: 'not_supported', reason: "Gemini's tool calls name the file they touched but carry no diff counters.", source: `${TYPES} HARNESS_CAPABILITIES entry comment (gemini)` },
     compaction: COMPACTION,
-    skills: SKILLS,
     mcpServers: { state: 'not_supported', reason: 'Gemini records no MCP tool at all, so the MCP server cannot be read back off tool_counts.', source: `${TYPES} HarnessCapabilities.mcpServers docstring` },
   },
   copilot: {
     agents: { state: 'not_supported', reason: 'Sub-agent metrics are not available in Copilot local event logs.', source: `${INFO}.copilot.missing (Sub-agent metrics)` },
     contextWindow: { state: 'not_supported', reason: "Copilot's only token report is a cumulative one written at shutdown, and a cumulative total is not a context size.", source: `${TYPES} HarnessCapabilities.contextWindow docstring` },
     compaction: COMPACTION,
-    skills: SKILLS,
     mcpServers: { state: 'not_supported', reason: 'Copilot keeps MCP names in mcp_tool_names and never records the server.', source: `${TYPES} HarnessCapabilities.mcpServers docstring` },
   },
   antigravity: {
@@ -145,7 +140,6 @@ export const LEGACY_FALSE_NOTES: LegacyFalseNotes = {
     agents: { state: 'not_supported', reason: "Kimi's agent tree is merged into one set of session totals with no per-agent breakdown.", source: `${MASTER} §5` },
     gitLines: { state: 'not_supported', reason: 'Kimi records the Edit/Write strings but no diff counters.', source: `${TYPES} HARNESS_CAPABILITIES entry comment (kimi)` },
     compaction: COMPACTION,
-    skills: SKILLS,
   },
 }
 

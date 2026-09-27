@@ -17,6 +17,7 @@
  */
 
 import {
+  CONTENT_DIR,
   isKeyedProvider,
   KEYED_PROVIDERS,
   PROVIDER_FLAG_ENV,
@@ -37,7 +38,7 @@ import {
   resolveCredential,
   storeCredential,
 } from './provider/credentials.ts'
-import type { ProviderClient } from './provider/client.ts'
+import type { AnthropicClientDeps, CredentialResolver, ProviderClient } from '@agentistics/runtime'
 import type { Journal } from './journal/types'
 
 /** Inferred from the function itself rather than a separately named exported type — this module
@@ -80,8 +81,32 @@ export interface ProviderCliDeps {
   /** `try` only: opens the journal the call is recorded in. Default `openJournal()` (the machine's
    *  journal, `AGENTISTICS_DIR`). A failure to open is not a failure of the call. */
   openJournal?: () => Promise<Journal | null>
-  /** `try` only: where the raw capture is written. Default is `capture.ts`'s own directory. */
+  /** `try` only: where the raw capture is written. Default is the machine's content store,
+   *  `CONTENT_DIR` (`config.ts`) — the runtime has no default of its own (D23). */
   captureDir?: string
+}
+
+// ---------------------------------------------------------------------------
+// The host's half of the runtime's injection seams (D23). `@agentistics/runtime` never finds a key
+// or a directory on its own: whoever builds a client hands it a resolver and a capture directory.
+// Everything that builds an Anthropic client in this binary — `runTry` below, and a registry via
+// the runtime's `createProviderClients({ anthropic: hostAnthropicClientDeps() })` — goes through
+// here, so the two seams are bound in exactly one place.
+// ---------------------------------------------------------------------------
+
+/** Resolves a runtime `CredentialRef` against the key store (`credentials.ts`). A ref for any
+ *  provider this store cannot hold is refused outright rather than asked about. */
+export function hostCredentialResolver(dir?: string): CredentialResolver {
+  return {
+    resolve: (ref) => ref.provider === 'anthropic'
+      ? resolveCredential('anthropic', { dir })
+      : Promise.resolve({ ok: false as const, reason: 'wrong-provider' as const }),
+  }
+}
+
+/** The Anthropic client's host-owned dependencies: the key store's resolver and the content store. */
+export function hostAnthropicClientDeps(opts: { dir?: string; captureDir?: string } = {}): AnthropicClientDeps {
+  return { resolver: hostCredentialResolver(opts.dir), captureDir: opts.captureDir ?? CONTENT_DIR }
 }
 
 async function defaultIsCentral(): Promise<boolean> {
@@ -251,6 +276,7 @@ async function printStatusFor(provider: KeyedProviderId, d: ProviderCliDeps): Pr
   if (res.mode !== undefined) d.stdout(`  mode: ${res.mode}`)
   if (res.storedAt !== undefined) d.stdout(`  stored: ${res.storedAt}`)
   if (res.fingerprint !== undefined) d.stdout(`  fingerprint: ${res.fingerprint}`)
+  if (res.last4) d.stdout(`  ends with: …${res.last4}`)
 }
 
 async function runStatus(rest: string[], d: ProviderCliDeps): Promise<number> {
@@ -379,16 +405,9 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     return 1
   }
 
-  const [{ createAnthropicClient }, { createProviderEmitter, invokedEvent, terminalEvent }] = await Promise.all([
-    import('./provider/anthropic/client.ts'),
-    import('./provider/emit.ts'),
-  ])
-  const client = d.client ?? createAnthropicClient({
-    resolver: { resolve: (ref) => ref.provider === 'anthropic'
-      ? resolveCredential('anthropic', { dir: d.dir })
-      : Promise.resolve({ ok: false as const, reason: 'wrong-provider' as const }) },
-    ...(d.captureDir === undefined ? {} : { captureDir: d.captureDir }),
-  })
+  // Lazy: `key set|status|remove` never load the AI SDK the runtime carries.
+  const { createAnthropicClient, createProviderEmitter, invokedEvent, terminalEvent } = await import('@agentistics/runtime')
+  const client = d.client ?? createAnthropicClient(hostAnthropicClientDeps({ dir: d.dir, captureDir: d.captureDir }))
 
   let journal: Journal | null = null
   try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
@@ -460,7 +479,7 @@ Usage: agentop provider key <set|status|remove> [options]
   agentop provider key set anthropic            Hidden prompt (default) — nothing is echoed
   agentop provider key set anthropic --stdin    Read ONE line from a pipe; no prompt
   agentop provider key set anthropic --replace  With --stdin, allow overwriting a stored key
-  agentop provider key status [anthropic]       Presence + fingerprint — never the key itself
+  agentop provider key status [anthropic]       Presence + fingerprint + last 4 characters
   agentop provider key remove anthropic         Delete the stored key (does not revoke it)
   agentop provider try anthropic [--model <id>] ONE real, billed call with a fixed tiny prompt
                                                 (max_tokens 16); records it in the journal and
@@ -483,10 +502,10 @@ Nobody should ever paste a key into a chat message, a GitHub issue, a task comme
 including a prompt to an assistant implementing or reviewing this feature. If a key was ever
 pasted somewhere it can be read back, revoke it in the Anthropic console and mint a new one.
 
-\`agentop provider key status\` never prints the value, a substring of it, its length, or the raw
-stored file — only whether a key is present, its path, its file mode, when it was stored and a
-one-way \`sha256:xxxxxxxx\` fingerprint, so a rotation is visible as \`old → new\` without ever
-showing either key.
+\`agentop provider key status\` never prints the value, more than its last 4 characters, its length,
+or the raw stored file — only whether a key is present, its path, its file mode, when it was
+stored, a one-way \`sha256:xxxxxxxx\` fingerprint (a rotation is visible as \`old → new\`) and the
+key's last 4 characters, which is what the Anthropic console shows beside each key.
 `.trim()
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
  * journal events" rule the emission layer (B1.6) builds on top of `AttemptHooks`.
  *
  * NON-HOLDER (provider-secrets.lint.test.ts): this file never touches a credential. It imports only
- * TYPES from `./client.ts` (never `PROVIDER_CLIENTS` or any runtime binding), so its tests never
+ * TYPES from `./client.ts` (never `createProviderClients` or any runtime binding), so its tests never
  * depend on `./anthropic/client.ts` — and by extension never on the Anthropic SDK or a credential —
  * existing at all.
  */
