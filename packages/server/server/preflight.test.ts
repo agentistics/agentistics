@@ -107,3 +107,94 @@ describe('when the database could not be reached', () => {
     expect(allPassed(checks)).toBe(false)
   })
 })
+
+describe('the native-bind check (S-1)', () => {
+  it('is absent when the caller has not wired up native-bind.ts', () => {
+    const checks = runPreflight(good)
+    expect(checks.find(c => c.id === 'native-bind')).toBeUndefined()
+  })
+
+  it('fails, never a reassuring pass, when the bind could not be read at all', () => {
+    const checks = runPreflight({
+      ...good,
+      nativeBind: { ports: [47291, 47292], result: { kind: 'unreadable', reason: 'no /proc, no lsof' } },
+    })
+    const nb = checks.find(c => c.id === 'native-bind')!
+    expect(nb.status).toBe('fail')
+    expect(nb.detail).toContain('Could not read')
+    expect(allPassed(checks)).toBe(false)
+  })
+
+  it('warns, never passes, when nothing is listening on the checked ports', () => {
+    const checks = runPreflight({
+      ...good,
+      nativeBind: { ports: [47291, 47292], result: { kind: 'read', listeners: [] } },
+    })
+    const nb = checks.find(c => c.id === 'native-bind')!
+    expect(nb.status).toBe('warn')
+    expect(nb.detail).toContain('47291')
+    expect(nb.detail).toContain('47292')
+    expect(allPassed(checks)).toBe(true)
+  })
+
+  it('passes when every listener is loopback-only, on any profile', () => {
+    const checks = runPreflight({
+      ...good,
+      profile: 'public',
+      nativeBind: {
+        ports: [47291, 47292],
+        result: { kind: 'read', listeners: [{ port: 47291, address: '127.0.0.1' }, { port: 47292, address: '::1' }] },
+      },
+    })
+    expect(checks.find(c => c.id === 'native-bind')!.status).toBe('pass')
+    expect(allPassed(checks)).toBe(true)
+  })
+
+  it('warns and names S-1 when the local profile is bound wide open', () => {
+    const checks = runPreflight({
+      ...good,
+      profile: 'local',
+      nativeBind: {
+        ports: [47291, 47292],
+        result: { kind: 'read', listeners: [{ port: 47291, address: '0.0.0.0' }] },
+      },
+    })
+    const nb = checks.find(c => c.id === 'native-bind')!
+    expect(nb.status).toBe('warn')
+    expect(nb.detail).toContain('0.0.0.0:47291')
+    expect(nb.detail).toContain('S-1')
+    expect(nb.detail).toContain('local')
+    expect(allPassed(checks)).toBe(true)
+  })
+
+  it('passes on the lan profile, which intends a wide bind', () => {
+    const checks = runPreflight({
+      ...good,
+      profile: 'lan',
+      nativeBind: {
+        ports: [47291, 47292],
+        result: { kind: 'read', listeners: [{ port: 47291, address: '0.0.0.0' }] },
+      },
+    })
+    const nb = checks.find(c => c.id === 'native-bind')!
+    expect(nb.status).toBe('pass')
+    expect(nb.detail).toContain('lan')
+    expect(allPassed(checks)).toBe(true)
+  })
+
+  it('fails on the strict (public/--exposed) bar unless every listener is loopback', () => {
+    const checks = runPreflight({
+      ...good,
+      profile: 'public',
+      nativeBind: {
+        ports: [47291, 47292],
+        result: { kind: 'read', listeners: [{ port: 47291, address: '0.0.0.0' }, { port: 47292, address: '127.0.0.1' }] },
+      },
+    })
+    const nb = checks.find(c => c.id === 'native-bind')!
+    expect(nb.status).toBe('fail')
+    expect(nb.detail).toContain('0.0.0.0:47291')
+    expect(nb.detail).not.toContain('127.0.0.1:47292')
+    expect(allPassed(checks)).toBe(false)
+  })
+})

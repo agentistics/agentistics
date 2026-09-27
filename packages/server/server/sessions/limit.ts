@@ -113,6 +113,9 @@ export const LIMIT_RULES: Record<HarnessId, LimitRule | null> = {
   copilot: null,
   antigravity: null,
   kimi: null,
+  // No spawn-spec support (CLAUDE.md step 4, skipped by scope): agentop cannot drive an opencode
+  // session, so no limit banner has ever been probed.
+  opencode: null,
 }
 
 /** The rules for a harness, or `undefined` when it was never probed. */

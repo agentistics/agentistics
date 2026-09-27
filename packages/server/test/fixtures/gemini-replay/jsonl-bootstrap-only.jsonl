@@ -1,0 +1,3 @@
+{"sessionId":"fixture-jsonl-bootstrap","projectHash":"abc","startTime":"2026-04-02T09:00:00.000Z","lastUpdated":"2026-04-02T09:00:00.000Z","kind":"main"}
+{"$set":{"messages":[]}}
+{"id":"jb-u1","timestamp":"2026-04-02T09:00:00.500Z","type":"user","content":[{"text":"<environment_context>\n<redacted>\n</environment_context>"}]}

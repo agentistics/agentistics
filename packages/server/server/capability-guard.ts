@@ -84,10 +84,11 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],
-  // No provider route exists yet in B1 — this entry is registered ahead of the route it will
-  // guard, so the first one is guarded by having been ADDED, never by having remembered a second
-  // table. A provider route touches a host secret (the native runtime's stored API key,
-  // credentials.ts), which is exactly the class of route this table exists to catch.
+  // The native runtime's provider settings (`provider-web.ts`, UI.1): the list, PUT/DELETE of one
+  // provider's base URL and key, and its `/test` and `/models` sub-resources. Registered as a PREFIX
+  // ahead of the routes, so each one is guarded by having been ADDED, never by having remembered a
+  // second table. They touch a host secret (the stored API key, credentials.ts) and reach out to a
+  // provider on this machine's account — exactly the class of route this table exists to catch.
   ['/api/provider', 'localShell'],
   // The web dashboard's read of the backup engine and its "run now" button. `status` walks the
   // metrics layer and the backup history; `run` spawns `git bundle`/`git diff` across every known
@@ -106,6 +107,29 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // a second lister giving a different, wrong answer is the drift this codebase is built against.
   ['/api/mcp', 'mcpAdmin'],
 ]
+
+/** One registration, as `registeredRoutes()` reports it. */
+export interface RegisteredRoute {
+  readonly path: string
+  readonly match: 'exact' | 'prefix'
+  readonly capability: keyof Capabilities
+}
+
+/**
+ * Every registration in both tables, read-only, in declaration order.
+ *
+ * Exists so a test can WALK the table instead of restating it: `host-allow.test.ts` asserts that
+ * every `localShell` route — and a sub-path under every prefix, including one nobody has written
+ * yet — is refused under a rebinding Host. A route added here is covered by that test by having
+ * been added, which is the same property the prefix table gives the capability check itself.
+ * A copy, so a caller cannot mutate the tables the guard reads.
+ */
+export function registeredRoutes(): readonly RegisteredRoute[] {
+  const out: RegisteredRoute[] = []
+  for (const [path, capability] of EXACT) out.push(Object.freeze({ path, match: 'exact' as const, capability }))
+  for (const [path, capability] of PREFIXES) out.push(Object.freeze({ path, match: 'prefix' as const, capability }))
+  return Object.freeze(out)
+}
 
 export function routeCapability(pathname: string): keyof Capabilities | null {
   const exact = EXACT.get(pathname)

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { routeCapability, capabilityDenied } from './capability-guard'
+import { routeCapability, capabilityDenied, registeredRoutes } from './capability-guard'
 import { capabilitiesFor } from './exposure'
 
 const publicCaps = capabilitiesFor('public', {
@@ -204,10 +204,43 @@ test('the prefix does not swallow a neighbouring path', () => {
   expect(routeCapability('/api/shellfish')).toBeNull()
 })
 
-test('a provider route nobody has written yet is guarded by having been ADDED', () => {
-  // No `/api/provider/*` route exists in B1 — the entry is registered ahead of the route it will
-  // guard, so a provider route touches a host secret (the stored API key) from the moment it
-  // exists, never from the moment somebody remembers to add it to this table.
-  expect(routeCapability('/api/provider/anthropic/try')).toBe('localShell')
-  expect(routeCapability('/api/provider')).toBe('localShell')
+test('every /api/provider route is guarded by the one prefix entry', () => {
+  // UI.1 wrote the routes (`provider-web.ts`): the list, PUT/DELETE on one provider, and its `/test`
+  // and `/models` sub-resources. They touch a host secret (the stored API key, credentials.ts), and
+  // they are guarded by the prefix entry registered ahead of them — never by a second table somebody
+  // had to remember. A future sub-route is covered by having been ADDED.
+  for (const p of [
+    '/api/provider',
+    '/api/provider/anthropic',
+    '/api/provider/openrouter',
+    '/api/provider/ollama/test',
+    '/api/provider/openai/models',
+    '/api/provider/anthropic/some-future-verb',
+  ]) {
+    expect(routeCapability(p)).toBe('localShell')
+  }
+  // The prefix does not swallow a neighbour.
+  expect(routeCapability('/api/providers')).toBeNull()
 })
+
+describe('registeredRoutes — the table, exported for walking', () => {
+  it('reports every registration, and each one resolves to the capability it claims', () => {
+    const routes = registeredRoutes()
+    // Spot-check both tables are in it — the host-allow walk is only as good as this list.
+    expect(routes.some(r => r.path === '/api/exec' && r.match === 'exact' && r.capability === 'localShell')).toBe(true)
+    expect(routes.some(r => r.path === '/api/fleet' && r.match === 'prefix' && r.capability === 'localShell')).toBe(true)
+    for (const r of routes) {
+      expect(routeCapability(r.path)).toBe(r.capability)
+      if (r.match === 'prefix') expect(routeCapability(`${r.path}/not-written-yet`)).toBe(r.capability)
+    }
+  })
+
+  it('is read-only: a caller cannot widen or narrow the guard through it', () => {
+    const routes = registeredRoutes() as RegisteredRouteMutable[]
+    expect(() => { routes.push({ path: '/api/x', match: 'exact', capability: 'localShell' }) }).toThrow()
+    expect(() => { (routes[0] as { capability: string }).capability = 'mcpAdmin' }).toThrow()
+    expect(routeCapability('/api/exec')).toBe('localShell')
+  })
+})
+
+type RegisteredRouteMutable = { path: string; match: 'exact' | 'prefix'; capability: string }
