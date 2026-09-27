@@ -141,6 +141,17 @@ describe('decideRetry — O-1: ambiguous outcomes are never retried', () => {
     expect(decision).toEqual({ retry: false, reason: 'ambiguous-outcome' })
   })
 
+  it('an IN-BAND overloaded_error mid-stream (HTTP 200, retryable, usage unknown) is refused (B2)', () => {
+    // The shape the Anthropic stream reader produces for `event: error` after a 200: the status
+    // table says `overloaded` is retryable, but the response had begun and may have been billed.
+    const decision = decideRetry({
+      attempt: 1,
+      elapsedMs: 0,
+      error: err({ kind: 'overloaded', retryable: true, httpStatus: 200, errorType: 'overloaded_error', usageOutcome: 'unknown' }),
+    })
+    expect(decision).toEqual({ retry: false, reason: 'ambiguous-outcome' })
+  })
+
   it('a network failure with requestSent false (known outcome) retries normally', () => {
     const decision = decideRetry({
       attempt: 1,
