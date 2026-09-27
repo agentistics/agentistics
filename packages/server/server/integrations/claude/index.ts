@@ -75,6 +75,7 @@ import { cloneLifecycleFold, launchedInvocations, subagentLaunchEvents, type Sub
 import { cloneModelFold } from './replay-model'
 import { cloneToolFold } from './replay-tools'
 import { cloneContextFold } from './replay-context'
+import { cloneTurnFold } from './replay-turns'
 import { iterLines } from '../../jsonl'
 
 /** Claude Code writes a whole response in one burst — a transcript quiet this long is settled. */
@@ -139,6 +140,7 @@ function cloneClaudeReplayState(s: ClaudeReplayState): ClaudeReplayState {
     model: cloneModelFold(s.model),
     tools: cloneToolFold(s.tools),
     context: cloneContextFold(s.context),
+    turns: cloneTurnFold(s.turns),
   }
 }
 

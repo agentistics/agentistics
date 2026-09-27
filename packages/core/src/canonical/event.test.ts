@@ -8,8 +8,10 @@ import {
   weakestConfidence,
   type AnyAgentisticsEvent,
   type Confidence,
+  type AgentisticsEvent,
   type EventProvenance,
   type ModelCompletedData,
+  type TurnStartedData,
 } from './event'
 import { REASONING_BILLINGS, SIDE_PROCESS_ENDED_BY } from './entities'
 
@@ -161,9 +163,10 @@ describe('narrowing on AnyAgentisticsEvent.type', () => {
    * It also proves that inside the `model.completed` case, `e.data.usage.cacheRead` compiles,
    * i.e. `e.data` is narrowed to `ModelCompletedData` and not the union of every data shape.
    */
-  function narrows(e: AnyAgentisticsEvent): number {
+  function narrows(e: AnyAgentisticsEvent): number | undefined {
     switch (e.type) {
       case 'model.completed':
+        // D21: a counter is optional — absent when the source did not report it.
         return e.data.usage.cacheRead
       case 'model.failed':
         return e.data.latencyMs ?? 0
@@ -227,6 +230,59 @@ describe('narrowing on AnyAgentisticsEvent.type', () => {
   test('the @ts-expect-error fixtures above exist only to be type-checked, not exercised at runtime', () => {
     // bun test does not evaluate types; this assertion exists so the block above is not dead code
     // as far as a coverage tool is concerned, and so `tsc --noEmit` is the thing that can fail it.
+    expect(true).toBe(true)
+  })
+})
+
+/**
+ * D22 (2026-09-26): a HUMAN TURN is an event. `turn.started` is ADDITIVE — an optional type, not a
+ * required one, since no adapter claiming the §14.1 capability set is obliged to see a person — and
+ * it carries WHO and nothing else (D5: no text, no text size; WHEN is `occurredAt`, WHICH LINE is
+ * `provenance.sourceRef`). The `@ts-expect-error` lines prove the shape is CLOSED rather than
+ * loose: a field nobody types is the door a prompt's text would walk back in through. Every pre-D22 literal in
+ * this file and in d20-additive.test.ts is untouched and must keep type-checking — that is the
+ * "additive" half, and `tsc --noEmit` is its assertion.
+ */
+describe('turn.started (D22)', () => {
+  const turn: AgentisticsEvent<'turn.started'> = {
+    eventId: 'evt_turn_1',
+    schema: CANONICAL_EVENT_SCHEMA,
+    type: 'turn.started',
+    occurredAt: '2026-09-26T12:00:00.000Z',
+    recordedAt: '2026-09-26T12:00:01.000Z',
+    sessionId: 'ses_1',
+    source: { kind: 'harness', id: 'claude', version: '2.1.263' },
+    provenance: {
+      mode: 'observed', confidence: 'exact', adapterVersion: '1.0.0',
+      sourceRef: 'projects/-x/ses_1.jsonl:4096',
+    },
+    data: { by: 'user' },
+  }
+
+  test('is in the vocabulary and isEventType accepts it', () => {
+    expect(EVENT_TYPES).toContain('turn.started')
+    expect(isEventType('turn.started')).toBe(true)
+  })
+
+  test('is optional: NOT in REQUIRED_EVENT_TYPES', () => {
+    expect(REQUIRED_EVENT_TYPES as readonly string[]).not.toContain('turn.started')
+  })
+
+  test('a CanonicalEvent<\'turn.started\'> carries only { by: \'user\' }', () => {
+    expect(turn.data).toEqual({ by: 'user' })
+    const asUnion: AnyAgentisticsEvent = turn
+    expect(asUnion.type === 'turn.started' ? asUnion.data.by : null).toBe('user')
+  })
+
+  // @ts-expect-error — D5: a turn carries no text; `text` is not a field of TurnStartedData.
+  const _withText: TurnStartedData = { by: 'user', text: 'hello' }
+  // @ts-expect-error — `by` is a closed union of one member today; 'assistant' is not a person's turn.
+  const _byAssistant: TurnStartedData = { by: 'assistant' }
+  // @ts-expect-error — `by` is required: "who" is the one fact this event exists to state.
+  const _noBy: TurnStartedData = {}
+
+  test('the @ts-expect-error fixtures above are type-checked, not exercised', () => {
+    void _withText; void _byAssistant; void _noBy
     expect(true).toBe(true)
   })
 })

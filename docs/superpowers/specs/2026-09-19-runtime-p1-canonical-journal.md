@@ -348,6 +348,16 @@ product knows the file exists; no data that any surface reads was written or cha
 3. The projection reproduces `legacy(SessionMeta)` on every fixture, field by field, with no
    unexplained difference — including the four token counters, `active_minutes`, rounds,
    `tool_counts`, the agent rollup and the context gauge.
+   The human-turn half of this is carried by `turn.started { by: 'user' }` (D22, 2026-09-26;
+   master §13.2, §14.1), emitted from the same `isHumanUserEntry` predicate the legacy parser counts
+   with. **Status after A2.7 (2026-09-26): rounds is CLOSED; `active_minutes` is OPEN.** `rounds`,
+   `user_message_count`, `user_interruptions` and `user_message_timestamps` are EQUAL on every
+   fixture and on this machine's real store (479 sessions, 0 bug rows, the one 0-byte transcript
+   explained). `active_minutes` is not reproducible from `turn.started` alone — legacy closes a
+   turn with Claude's `system/turn_duration`, which no event carries (measured by approximation: 305
+   of 477 sessions would match, 172 would not) — and stays in `NOT_PROJECTABLE` with that reason,
+   as do `message_hours` and `user_response_times`. The additive field that would close it is an
+   open decision (master §14.1).
 4. Every event carries a non-empty `adapterVersion`, a `confidence` and a `sourceRef` that can be
    re-read.
 5. Every budget in §9 is met and the measurement is in the PR.

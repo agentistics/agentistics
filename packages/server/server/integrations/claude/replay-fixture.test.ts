@@ -98,10 +98,21 @@ describe('Claude replay over a redacted real transcript', () => {
     foldClaudeParse(legacy, LINES)
     const completed = WHOLE.filter((e): e is AgentisticsEvent<'model.completed'> => e.type === 'model.completed')
     const sum = completed.reduce(
-      (a, e) => ({
-        input: a.input + e.data.usage.input, output: a.output + e.data.usage.output,
-        cacheRead: a.cacheRead + e.data.usage.cacheRead, cacheWrite: a.cacheWrite + e.data.usage.cacheWrite,
-      }),
+      (a, e) => {
+        // D21 (2026-09-26): a counter is now individually optional on the event. This fixture's own
+        // replay always reports all four, so asserting that here — rather than defaulting a missing
+        // one to 0 — keeps the parity check honest: a counter that silently went absent would fail
+        // this assertion instead of quietly summing to a smaller, wrong total.
+        const { input, output, cacheRead, cacheWrite } = e.data.usage
+        expect(input).toBeDefined()
+        expect(output).toBeDefined()
+        expect(cacheRead).toBeDefined()
+        expect(cacheWrite).toBeDefined()
+        return {
+          input: a.input + input!, output: a.output + output!,
+          cacheRead: a.cacheRead + cacheRead!, cacheWrite: a.cacheWrite + cacheWrite!,
+        }
+      },
       { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     )
     expect(sum).toEqual({
@@ -202,5 +213,79 @@ describe('Claude replay over a redacted excerpt with five compactions', () => {
     for (let i = 1; i < lines2.length; i++) {
       expect(run2([lines2.slice(0, i), lines2.slice(i)]).map(essence)).toEqual(whole)
     }
+  })
+})
+
+describe('Claude replay over a small excerpt exercising human turns (D22)', () => {
+  // A tiny hand-built conversation (not a redacted real one, unlike the fixtures above — its whole
+  // point is to exercise five specific line shapes together, which no real transcript on this
+  // machine happened to carry in one file): a plain human prompt (string content), a human prompt
+  // with array text content, a pure tool_result user line, an isMeta user line, an isCompactSummary
+  // user line, and a human prompt with NO `timestamp` field at all — three of the six are turns.
+  const CONV3 = '00000000-0000-4000-8000-000000000003'
+  const lines3 = [...iterLines(readFileSync(
+    join(import.meta.dir, '../../../test/fixtures/claude-replay-turns/proj', `${CONV3}.jsonl`), 'utf-8'))]
+  const run3 = (chunks: string[][]) => {
+    const out: AgentisticsEvent[] = []
+    const s = emptyClaudeReplay(mainContext(CONV3, RECORDED_AT))
+    for (const c of chunks) foldClaudeReplay(s, c, e => out.push(e))
+    finishClaudeReplay(s, { final: true }, e => out.push(e))
+    return out
+  }
+  const all3 = run3([lines3])
+  const turns = all3.filter((e): e is AgentisticsEvent<'turn.started'> => e.type === 'turn.started')
+
+  test('exactly the three human lines become turn.started — never the tool_result, isMeta or isCompactSummary lines', () => {
+    expect(turns).toHaveLength(3)
+    // line 1 (string content), line 4 (array text content), line 7 (no timestamp at all) — 1-based,
+    // matching `lineRef`'s own numbering (blanks included, none here).
+    expect(turns.map(e => e.provenance.sourceRef)).toEqual([
+      `claude:${CONV3}:1`, `claude:${CONV3}:4`, `claude:${CONV3}:7`,
+    ])
+    expect(turns.every(e => e.data.by === 'user')).toBe(true)
+  })
+
+  test('the count equals BOTH a hand count and legacy\'s user_message_count on the same bytes', () => {
+    const legacy = emptyClaudeParse()
+    foldClaudeParse(legacy, lines3)
+    expect(turns.length).toBe(3)
+    expect(turns.length).toBe(legacy.userMsgs)
+  })
+
+  test('a timestamped line is exact; the timestamp-less line falls back to recordedAt and reads estimated', () => {
+    expect(turns[0]!.occurredAt).toBe('2026-09-26T10:00:00.000Z')
+    expect(turns[0]!.provenance.confidence).toBe('exact')
+    expect(turns[1]!.occurredAt).toBe('2026-09-26T10:00:10.000Z')
+    expect(turns[1]!.provenance.confidence).toBe('exact')
+    // line 7 carries no `timestamp` at all
+    expect(turns[2]!.occurredAt).toBe(RECORDED_AT)
+    expect(turns[2]!.provenance.confidence).toBe('estimated')
+  })
+
+  test('no event carries anything beyond who and when — same forbidden-key check as the main fixture', () => {
+    const forbidden = new Set(['content', 'text', 'prompt', 'thinking', 'command', 'title', 'message'])
+    for (const e of turns) for (const key of Object.keys(e.data)) expect(forbidden.has(key)).toBe(false)
+    expect(turns.every(e => Object.keys(e.data).length === 1)).toBe(true)
+  })
+
+  test('chunk independence at every line boundary, including across the timestamp-less line', () => {
+    const whole = all3.map(essence)
+    for (let i = 1; i < lines3.length; i++) {
+      expect(run3([lines3.slice(0, i), lines3.slice(i)]).map(essence)).toEqual(whole)
+    }
+  })
+
+  test('chunk independence: many uneven chunks, the same events (and the same turn ids)', () => {
+    const sizes = [1, 3, 2]
+    const chunks: string[][] = []
+    for (let at = 0, k = 0; at < lines3.length; k++) {
+      const n = sizes[k % sizes.length]!
+      chunks.push(lines3.slice(at, at + n))
+      at += n
+    }
+    const split = run3(chunks)
+    expect(split.map(essence)).toEqual(all3.map(essence))
+    expect(new Set(split.filter(e => e.type === 'turn.started').map(e => e.eventId)))
+      .toEqual(new Set(turns.map(e => e.eventId)))
   })
 })
