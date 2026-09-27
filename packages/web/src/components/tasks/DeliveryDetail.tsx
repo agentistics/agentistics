@@ -39,7 +39,7 @@ import {
   type CommentAttachment, type CommentPart,
 } from '../../lib/commentBody'
 import {
-  NA, PRIORITY, SESSION_STATE, button, field, fmtInt, fmtStamp, fmtTokens,
+  NA, PRIORITY, SESSION_STATE, button, field, fmtDateOnly, fmtInt, fmtStamp, fmtTokens,
   harnessColor, microLabel, numeric, pill, statusStyle, surface,
 } from './board'
 import { useMoney } from './money'
@@ -180,17 +180,23 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.started}</span>
-            <span style={{
-              fontSize: 12,
-              color: task.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(task.startedAt, lang)}</span>
+            <span
+              title={task.startedAt ? fmtStamp(task.startedAt, lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: task.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(task.startedAt, lang)}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
-            <span style={{
-              fontSize: 12,
-              color: task.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-            }}>{fmtStamp(task.deliveredAt, lang)}</span>
+            <span
+              title={task.deliveredAt ? fmtStamp(task.deliveredAt, lang) : undefined}
+              style={{
+                fontSize: 12,
+                color: task.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}
+            >{fmtDateOnly(task.deliveredAt, lang)}</span>
           </span>
         </div>
       </div>

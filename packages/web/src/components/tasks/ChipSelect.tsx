@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 import { surface } from './board'
 
 export interface ChipOption {
@@ -53,18 +54,25 @@ export function ChipSelect({
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState<{ left: number; top?: number; bottom?: number; width: number } | null>(null)
   const trigger = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
   const current = options.find(o => o.value === value) ?? options[options.length - 1]
 
   // A panel anchored to a trigger in normal flow must not chase it: close instead. Same rule the
   // settings popovers follow — a panel that has drifted away from its control is worse than one
-  // that shut.
+  // that shut. But the panel is PORTALED into `document.body`, so it is never a descendant of the
+  // trigger — the capture-phase listener also fires when the panel's OWN option list scrolls (a
+  // seven-option list on a short screen), and closing on that made the options past the fold
+  // unreachable. Only a scroll outside the panel closes it.
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
-    window.addEventListener('scroll', close, true)
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
     }
   }, [open])
@@ -118,7 +126,7 @@ export function ChipSelect({
             onClick={e => { e.stopPropagation(); setOpen(false) }}
             style={{ position: 'fixed', inset: 0, zIndex: 1199 }}
           />
-          <div style={{
+          <div ref={panel} style={{
             position: 'fixed', left: at.left, width: at.width, zIndex: 1200,
             ...(at.bottom !== undefined ? { bottom: at.bottom } : { top: at.top }),
             ...surface, background: 'var(--bg-elevated)', padding: 4, display: 'grid', gap: 2,

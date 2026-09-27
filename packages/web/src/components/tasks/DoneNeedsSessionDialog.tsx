@@ -11,9 +11,9 @@
  *
  * Unlike `blocked`, there is nothing to type or pick — the fix is always the same gesture (file a
  * session), so this is an acknowledgement plus a one-click shortcut rather than a form. The
- * shortcut itself is the CALLER's: a subtask's own "filiar" control (`SubtaskSessions`) when this
- * fired from a subtask row, or the Subtasks tab — where every filing control lives — when it fired
- * from the delivery's own status chip.
+ * shortcut itself is the CALLER's: a subtask's own filing flow (`SubtaskSessions`'s `⋯` menu) when
+ * this fired from a subtask row, or the Subtasks tab — where every filing control lives — when it
+ * fired from the delivery's own status chip.
  */
 
 import { createPortal } from 'react-dom'

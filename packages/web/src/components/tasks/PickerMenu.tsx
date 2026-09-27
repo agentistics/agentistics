@@ -24,7 +24,9 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 import { microLabel, surface } from './board'
+import { boardCopy, type Lang } from './copy'
 
 export interface PickerItem {
   value: string
@@ -49,23 +51,36 @@ export interface PickerMenuProps {
   note?: string
   width?: number
   triggerStyle?: React.CSSProperties
+  /** The reader's language, for the ▲▼ buttons' own `aria-label`s — everything else here (the
+   *  title, the note, the trigger's contents) is already text the caller passes in, already
+   *  localized from `boardCopy`. Absent = English, for a caller that has not been threaded yet. */
+  lang?: Lang
 }
 
 export function PickerMenu(p: PickerMenuProps) {
   const isMobile = useIsMobile()
+  const copy = boardCopy(p.lang ?? 'en')
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
   const trigger = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
   const width = p.width ?? 250
 
+  // The panel is portaled into `document.body`, so it is never a descendant of the trigger — a
+  // capture-phase scroll listener on `window` fires for the panel's OWN list scrolling too, and
+  // closing on that made every row past the fold unreachable. Only a scroll OUTSIDE the panel
+  // closes it; page/ancestor scroll still does, which is the point of listening at all.
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
-    window.addEventListener('scroll', close, true)
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
     }
   }, [open])
@@ -110,7 +125,7 @@ export function PickerMenu(p: PickerMenuProps) {
     <button
       onClick={e => { e.stopPropagation(); step(v, by) }}
       disabled={disabled}
-      aria-label={by === -1 ? 'Move up' : 'Move down'}
+      aria-label={by === -1 ? copy.pickers.moveUp : copy.pickers.moveDown}
       className="ag-tap-icon"
       style={{
         background: 'none', border: 'none', padding: 0, flexShrink: 0,
@@ -140,7 +155,7 @@ export function PickerMenu(p: PickerMenuProps) {
       {open && at && createPortal(
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
-          <div style={{
+          <div ref={panel} style={{
             position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
             boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
