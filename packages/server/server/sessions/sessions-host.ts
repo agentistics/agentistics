@@ -13,6 +13,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { createLimiter } from '../utils'
+import { retainKeys } from '../prune-keys'
 import type { HarnessProcess } from '../live-sessions'
 import { rulesFor } from './attention-rules'
 import { approvalTail, attentionOf, digestFrame, frameTail } from './attention'
@@ -568,6 +569,7 @@ export function createSessionsPoller(o: {
       const sessionHardware = new Map<string, { pid?: number; cpuPercent?: number | null; rssBytes?: number | null }>()
       const procStatStart = performance.now()
       if (canReadProc) {
+        const seenPids = new Set<number>()
         for (const r of reconciled) {
           const own = harnessSessions.byManagedId.get(r.id)
           const harness = r.managed?.harness
@@ -589,10 +591,14 @@ export function createSessionsPoller(o: {
               const prevStat = prevProcStats.get(pid)
               cpuPercent = calculateProcCpu(prevStat, currStat)
               prevProcStats.set(pid, currStat)
+              seenPids.add(pid)
             }
             sessionHardware.set(r.id, { pid, cpuPercent, rssBytes })
           }
         }
+        // A pid not sampled this poll is a process that is gone (or a session no longer listed);
+        // without this every pid the fleet ever had stayed in the map for the life of the server.
+        retainKeys(prevProcStats, seenPids)
       }
       if (canReadProc) markFleetPhase(`poll: procStat+procRss x${reconciled.length} (sequential)`, procStatStart)
 
