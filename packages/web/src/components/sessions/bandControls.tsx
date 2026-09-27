@@ -809,15 +809,12 @@ export function BandOverflowMenu({ label, entries, isMobile = false, icon }: {
  * The owner's own order is "config, maximizar, minimizar"; pin, which only a right-slot header
  * draws, sits beside the gear so it never comes between the pointer and minimize either.
  *
- * PIN (narrow-overlay pass, 2026-09-22, spec §11) — "quero em todos um botao de pin que fica ativo
- * e salvo como preferencia". `pinned` is `undefined` wherever this cluster is NOT drawing a
- * right-slot header — the bottom band's own bar (`ShellBand`, `SimpleDockedBand`) and the Studio's
- * bottom-docked toolbar never pass it, because §11 item 4 is explicit: "The rail only. The bottom
- * band keeps today's behaviour exactly." Present, it is a toggle whose PRESSED state is the pin's
- * own glyph swap (`Pin`, filled when active via `fill: currentColor` — never colour alone, which a
- * colour-blind reader could miss) so pinned-ness is visible at a glance on the row itself, not only
- * in the tooltip. `panelSlots.ts`'s own `pinned` record is what this reads/writes; see that
- * module's header for what CLEARS it (moving the panel off the rail).
+ * PIN = FLOAT (owner, 2026-09-27; it replaced the narrow-overlay pass's "keep this overlay open").
+ * Pressed on a docked panel — right slot or bottom band — it turns the panel into a floating window
+ * over the session area (`lib/floatingPanels.ts`); pressed on that window's header (`active`) it
+ * docks the panel back. `pinned` is `undefined` wherever there is nothing to float: on a phone,
+ * where nothing floats. The PRESSED state is the pin's own glyph swap (`Pin`, filled when active
+ * via `fill: currentColor` — never colour alone, which a colour-blind reader could miss).
  *
  * FULL SCREEN IS NEVER A MENU ROW ANY MORE. It used to be a row inside the same "⋯"/gear menu that
  * also offered move and close, which is what let a reader miss it entirely under two clicks for a
@@ -890,11 +887,11 @@ export function PanelFixedControls({
           aria-pressed={pinned.active}
           onClick={e => { e.stopPropagation(); pinned.onToggle() }}
           title={pinned.active
-            ? (pt ? `Desafixar ${panelName}` : `Unpin ${panelName}`)
-            : (pt ? `Fixar ${panelName}` : `Pin ${panelName}`)}
+            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
+            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
           aria-label={pinned.active
-            ? (pt ? `Desafixar ${panelName}` : `Unpin ${panelName}`)
-            : (pt ? `Fixar ${panelName}` : `Pin ${panelName}`)}
+            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
+            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
           style={{ ...iconBtn, color: pinned.active ? 'var(--anthropic-orange)' : 'var(--text-secondary)' }}
         ><Pin size={14} {...(pinned.active ? { fill: 'currentColor' } : {})} /></button>
       )}

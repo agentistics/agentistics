@@ -38,11 +38,11 @@
  * ready.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { xtermTheme, type TerminalFrame } from '../lib/terminalStream'
-import { shortcutDecision } from '../lib/terminalShortcuts'
+import { guardNoticeText, NOTICE_TONE, shortcutDecision, type NoticeKind, type NoticeTone } from '../lib/terminalShortcuts'
 import { terminalScrollTop, stillFollowing } from '../lib/terminalScroll'
 import { sanitizePasteText } from '@agentistics/core'
 
@@ -80,6 +80,45 @@ interface Props {
    * asymmetry is `server/sessions/pane-resize.ts`'s.
    */
   onGeometry?: (g: { cols: number; rows: number }) => void
+  /** The language of the guard notice (see `guardInterrupt`). */
+  lang?: 'pt' | 'en'
+  /**
+   * REFUSE a plain `Ctrl+C` on this terminal (`terminalShortcuts.ts`'s session-ending guard). True
+   * for an assistant's pane, where the interrupt — twice — ends the session; false for the
+   * utility shell, where `Ctrl+C` stops the command you ran and ends nothing. `Ctrl+D` is guarded
+   * on both, since it ends either.
+   */
+  guardInterrupt?: boolean
+  /**
+   * Where the terminal's confirmations go — one per command typed (a key sent, refused, a copy, a
+   * paste). The caller draws it in the line it already has under the screen, so every message the
+   * terminal gives is in ONE place. Absent, the terminal draws it over itself.
+   */
+  onNotice?: (notice: TerminalNotice) => void
+}
+
+export interface TerminalNotice { text: string; tone: NoticeTone; at: number }
+
+/** Copy text without relying on the async Clipboard API alone — it exists only in a secure
+ *  context, and the dashboard is also opened over plain HTTP on a LAN address. */
+function copyText(text: string): void {
+  if (!text) return
+  const viaTextarea = () => {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    } catch { /* nothing left to try */ }
+  }
+  try {
+    if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(viaTextarea); return }
+  } catch { /* fall through */ }
+  viaTextarea()
 }
 
 const FONT_SIZE = 13
@@ -133,7 +172,7 @@ function naturalSize(term: Terminal): { w: number; h: number } | null {
   return null
 }
 
-export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onPaste, onGeometry }: Props) {
+export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, interactive = false, onInput, onPaste, onGeometry, lang = 'pt', guardInterrupt = true, onNotice }: Props) {
   // boxRef is the fixed viewport the parent sizes; scaleRef takes the SCALED footprint so the page
   // lays out correctly; hostRef holds the emulator at its natural cols×rows pixels and is the thing
   // the transform shrinks.
@@ -167,6 +206,27 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
   interactiveRef.current = interactive
   const onGeometryRef = useRef<Props['onGeometry']>(onGeometry)
   onGeometryRef.current = onGeometry
+  // The session-ending-key guard reads these once-attached, so through refs like the rest.
+  const guardInterruptRef = useRef(guardInterrupt)
+  guardInterruptRef.current = guardInterrupt
+  const langRef = useRef(lang)
+  langRef.current = lang
+  /** The sentence the terminal just said — handed to `onNotice`, or drawn over the terminal. */
+  const [notice, setNotice] = useState<TerminalNotice | null>(null)
+  const onNoticeRef = useRef(onNotice)
+  onNoticeRef.current = onNotice
+  const say = (kind: NoticeKind, n?: number) => {
+    const next: TerminalNotice = { text: guardNoticeText(kind, langRef.current, n), tone: NOTICE_TONE[kind], at: Date.now() }
+    if (onNoticeRef.current) onNoticeRef.current(next)
+    else setNotice(next)
+  }
+  const sayRef = useRef(say)
+  sayRef.current = say
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(n => (n && n.at === notice.at ? null : n)), 5000)
+    return () => clearTimeout(t)
+  }, [notice])
   /** The last geometry REPORTED, so a steady stream of identical fits says nothing. */
   const reportedRef = useRef<{ cols: number; rows: number } | null>(null)
   /** The `scrollTop` the last repaint anchored on — what "still watching the live screen" is
@@ -436,8 +496,41 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
         if (e.type !== 'keydown') return true
         if (!interactiveRef.current) return true
         const decision = shortcutDecision(e, term.hasSelection())
-        if (decision === 'copy') return false
-        if (decision === 'take') e.preventDefault()
+        if (decision === 'copy') {
+          // Ctrl+Shift+C would otherwise open Chrome's element inspector; copy the selection here.
+          e.preventDefault()
+          const selected = term.getSelection()
+          copyText(selected)
+          sayRef.current(selected ? 'copied' : 'copy-empty', selected.length)
+          return false
+        }
+        // The clipboard comes through the DOM paste event below; xterm must not ALSO emit \x16.
+        if (decision === 'paste') return false
+        if (decision === 'word-delete') {
+          e.preventDefault()
+          onInputRef.current?.('\x17')
+          sayRef.current('word-delete')
+          return false
+        }
+        // SESSION-ENDING KEYS (`terminalShortcuts.ts`): refused with a sentence, or sent on purpose
+        // with Shift and announced. `return false` keeps xterm from emitting the byte itself.
+        if (decision === 'blocked-interrupt' && !guardInterruptRef.current) return true
+        if (decision === 'blocked-interrupt' || decision === 'blocked-eof') {
+          e.preventDefault()
+          sayRef.current(decision)
+          return false
+        }
+        if (decision === 'confirmed-eof') {
+          e.preventDefault()
+          onInputRef.current?.('\x04')
+          sayRef.current(decision)
+          return false
+        }
+        if (decision === 'take') {
+          e.preventDefault()
+          const kind = `C-${e.key.toLowerCase()}` as NoticeKind
+          if (kind in NOTICE_TONE) sayRef.current(kind)
+        }
         return true
       })
 
@@ -478,7 +571,10 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
         e.stopPropagation()
         if (!raw) return
         const text = sanitizePasteText(raw)
-        if (text) onPasteRef.current(text)
+        if (text) {
+          onPasteRef.current(text)
+          sayRef.current('pasted', text.split(/\r\n|\r|\n/).length)
+        }
       }
       pasteTarget = boxRef.current
       pasteTarget?.addEventListener('paste', onPasteEvent, true)
@@ -546,18 +642,32 @@ export default function SessionTerminal({ frame, theme, showCursor, zoom = 1, in
   }, [interactive])
 
   return (
-    <div
-      ref={boxRef}
-      // The box the parent sizes. At the default zoom the grid is fit to the box width, so it does
-      // not scroll; zoomed in past the box it scrolls INSIDE here rather than pushing the page
-      // sideways (the repo's responsive rule). The buffer is untouched, so scrolling never reflows.
-      // The terminal's own background, so a grid shorter than the box (a cleared screen, a fresh
-      // shell) reads as an empty terminal rather than as a hole in the page.
-      style={{ width: '100%', height: '100%', overflow: 'auto', background: xtermTheme(theme).background }}
-    >
-      <div ref={scaleRef}>
-        <div ref={hostRef} />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        ref={boxRef}
+        // The box the parent sizes. At the default zoom the grid is fit to the box width, so it does
+        // not scroll; zoomed in past the box it scrolls INSIDE here rather than pushing the page
+        // sideways (the repo's responsive rule). The buffer is untouched, so scrolling never reflows.
+        // The terminal's own background, so a grid shorter than the box (a cleared screen, a fresh
+        // shell) reads as an empty terminal rather than as a hole in the page.
+        style={{ width: '100%', height: '100%', overflow: 'auto', background: xtermTheme(theme).background }}
+      >
+        <div ref={scaleRef}>
+          <div ref={hostRef} />
+        </div>
       </div>
+      {notice && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute', left: 10, right: 10, bottom: 10, zIndex: 2,
+            padding: '8px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.45,
+            background: 'var(--bg-elevated, var(--bg-surface))', color: 'var(--text-primary)',
+            border: `1px solid ${notice.tone === 'danger' ? 'var(--accent-red)' : notice.tone === 'warn' ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+            boxShadow: '0 6px 18px rgba(0, 0, 0, 0.3)', pointerEvents: 'none',
+          }}
+        >{notice.text}</div>
+      )}
     </div>
   )
 }

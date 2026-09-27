@@ -18,7 +18,7 @@
  */
 
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactElement, type ReactNode,
 } from 'react'
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
@@ -35,6 +35,11 @@ import {
   type OpenPlacement, type PanelGates, type PanelId, type TabPanelId,
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
+import {
+  dockPanel, floatPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession, useFloatingPanels,
+} from '../lib/floatingPanels'
+import { FloatingPanelLayer } from '../components/sessions/FloatingPanelLayer'
+import { sessionIdentityKey } from '../lib/sessionIdentity'
 import { panelTitle } from '../lib/panelMeta'
 import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
@@ -102,7 +107,6 @@ import {
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
 import { targetLabel } from '../lib/terminalTarget'
-import { TerminalRegion } from '../components/RecentSessions'
 import { sessionPlanFactor } from '../lib/costBasis'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
@@ -138,7 +142,7 @@ export interface StudioHostMountParams {
   onMove: () => void
   /** The always-visible minimize icon, right-slot only — see `Studio.tsx`'s own `onMinimizeRight`. */
   onMinimizeRight?: () => void
-  /** PIN (spec §11 item 3), right-slot only — see `Studio.tsx`'s own `pinned` prop. */
+  /** PIN = FLOAT (`lib/floatingPanels.ts`) — see `Studio.tsx`'s own `pinned` prop. */
   pinned?: { active: boolean; onToggle: () => void }
   /**
    * NEVER A REAL FIELD (I4, fix wave 3) — declared `never` so a stray `key` on this params object is
@@ -760,8 +764,18 @@ export default function SessionsPage() {
   const {
     layout: rawSlotLayout, openPanel: openSlotPanel, closePanel: closeSlotPanel,
     movePanel: moveSlotPanel, dropPanel: dropSlotPanel, setRightOpen,
-    hidePanelToConfig: hideSlotPanel, restorePanel: revealSlotPanel, setRailWidth, togglePinned,
+    hidePanelToConfig: hideSlotPanel, restorePanel: revealSlotPanel, setRailWidth,
   } = usePanelSlots()
+  /**
+   * PINNED PANELS FLOAT (`lib/floatingPanels.ts`, owner 2026-09-27). The windows belong to the
+   * session on screen — keyed by `sessionIdentityKey`, so a reopen keeps them — and nothing floats
+   * on a phone. Declared to the store in a LAYOUT effect, before paint, because `usePanelSlots()`
+   * reads it to take the floating panels out of their docked slots for every consumer at once.
+   */
+  const floatingKey = !isMobile && selected ? sessionIdentityKey(selected) : null
+  useLayoutEffect(() => { setFloatingSession(floatingKey) }, [floatingKey])
+  useLayoutEffect(() => () => setFloatingSession(null), [])
+  const floating = useFloatingPanels()
   const panelFocus = usePanelFocusRequest()
   const panelGates: PanelGates = { editorEnabled, shellEnabled, relayed }
   const slotLayout = resolveForGates(resolveForViewport(rawSlotLayout, isMobile), panelGates)
@@ -789,11 +803,16 @@ export default function SessionsPage() {
   const bottomIsHardware = slotLayout.bottom === 'hardware'
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
   const [bottomStudioEl, setBottomStudioEl] = useState<HTMLDivElement | null>(null)
+  /** The floating window's box, when the Studio floats — a third place `StudioHost` can move its
+   *  carrier into, so floating it is a MOVE (buffers survive), never a remount. */
+  const [floatStudioEl, setFloatStudioEl] = useState<HTMLDivElement | null>(null)
+  const studioFloating = floating.studio !== undefined
   /** `null` PARKS the Studio — mounted, hidden, taking no space — which is also what a COLLAPSED
    *  bottom band, or a MINIMIZED right slot (`slotLayout.rightOpen`, the right slot's own analogue
    *  of `bottomOpen` — see `panelSlots.ts`'s own doc comment), holding it means: collapsing or
    *  minimizing must not be a way to lose a buffer. */
-  const studioTarget: HTMLElement | null = rightIsStudio && slotLayout.rightOpen
+  const studioTarget: HTMLElement | null = studioFloating ? floatStudioEl
+    : rightIsStudio && slotLayout.rightOpen
     ? rightSlotEl
     : bottomIsStudio && slotLayout.bottomOpen ? bottomStudioEl : null
   /**
@@ -1142,9 +1161,9 @@ export default function SessionsPage() {
         fullscreen={fullscreen}
         onMinimize={onMinimize}
         minimizeLabel={pt ? `Minimizar ${panelName}` : `Minimize ${panelName}`}
-        // PIN (spec §11 item 3) — every caller of this function builds a RIGHT-SLOT header, so this
-        // is unconditional here, unlike the bottom band's own bars which never pass it at all.
-        pinned={{ active: rawSlotLayout.pinned[panel], onToggle: () => togglePinned(panel) }}
+        // PIN = FLOAT (`lib/floatingPanels.ts`): the panel leaves the right slot and becomes a
+        // window over the session area. Desktop only — this function already returns null on a phone.
+        pinned={{ active: false, onToggle: () => floatPanel(panel) }}
         gearLabel={pt ? `Opções — ${panelName}` : `${panelName} options`}
         gearEntries={gearEntries}
       />
@@ -1287,6 +1306,11 @@ export default function SessionsPage() {
     if (id === 'hardware') return hardwareOffered
     return true
   }
+  /** The floating windows this session can actually serve right now — `railGateOpen` again, so a
+   *  window is never drawn for a panel whose gate has closed since it was floated. */
+  const floatingShown = Object.fromEntries(
+    Object.entries(floating).filter(([id]) => railGateOpen(id as PanelId)),
+  ) as typeof floating
   /** THE RAIL'S OWN LIST (spec §2) — `panelSlots.railPanels` already sorts by the stored order. */
   const gatedRailPanels = railPanels(slotLayout).filter(railGateOpen)
   /** THE EYE'S OWN LIST (spec §5) — everything currently `hidden`, gated the same way. */
@@ -1570,6 +1594,94 @@ export default function SessionsPage() {
   const rightSlotHeader = isMobile ? rightSwitcherMobile : null
 
   /**
+   * WHAT A FLOATING WINDOW HOLDS (`lib/floatingPanels.ts`) — the SAME content the right slot mounts
+   * for each panel, with the pin shown pressed: pressing it docks the panel back into the slot its
+   * placement names, and opens it there. A panel whose gate has closed since it was floated (the
+   * Studio switched off, a relayed session with no terminal) draws no window — the same read-time
+   * rule `resolveForGates` applies to the docked slots.
+   */
+  const dockBack = (id: PanelId) => { dockPanel(id); openSlotPanel(id) }
+  const dockControls = (id: PanelId, name: string): ReactNode => (
+    <PanelFixedControls
+      lang={pt ? 'pt' : 'en'}
+      panelName={name}
+      pinned={{ active: true, onToggle: () => dockBack(id) }}
+      gearLabel={pt ? `Opções — ${name}` : `${name} options`}
+      gearEntries={[]}
+    />
+  )
+  const floatingTitle = (id: PanelId): string => (id === 'cli' || id === 'shell') && selected
+    ? targetLabel(id, selected.harness, pt ? 'pt' : 'en')
+    : panelTitle(id, pt)
+  const floatingBar = (id: PanelId): ReactNode => (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, padding: '6px 8px 0 12px', flexShrink: 0,
+    }}>
+      <span style={{
+        fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--text-primary)',
+        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{floatingTitle(id)}</span>
+      <span style={{ flex: 1 }} />
+      {dockControls(id, floatingTitle(id))}
+    </div>
+  )
+  const floatingBody = (id: PanelId): ReactNode => {
+    if (!selected) return null
+    if (id === 'studio') {
+      return <div ref={setFloatStudioEl} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }} />
+    }
+    if (id === 'cli') {
+      return (
+        <>
+          {floatingBar('cli')}
+          <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+            <ShellBand
+              key={`float-cli-${selected.id}`}
+              placement="aside"
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              {...(selected.harness ? { harness: selected.harness } : {})}
+              lang={pt ? 'pt' : 'en'}
+              theme={theme === 'light' ? 'light' : 'dark'}
+            />
+          </div>
+        </>
+      )
+    }
+    if (id === 'shell') {
+      return (
+        <>
+          {floatingBar('shell')}
+          <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+            <ShellBand
+              key={`float-${selected.id}`}
+              placement="aside"
+              fixedTarget="shell"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              {...(selected.harness ? { harness: selected.harness } : {})}
+              lang={pt ? 'pt' : 'en'}
+              theme={theme === 'light' ? 'light' : 'dark'}
+            />
+          </div>
+        </>
+      )
+    }
+    if (id === 'hardware') {
+      return (
+        <HardwarePanel
+          lang={pt ? 'pt' : 'en'}
+          onClose={() => dockBack('hardware')}
+          hideCloseButton
+          controls={dockControls('hardware', panelTitle('hardware', pt))}
+        />
+      )
+    }
+    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt)) })
+  }
+
+  /**
    * IS THE RIGHT SLOT'S OWN CONTENT CURRENTLY FULL SCREEN — `fullscreenModeFor`'s `'overlay'` mode
    * (Studio, or any of the ten former Contents tabs, or Hardware) applied to whichever of them
    * actually occupies the right slot right now. `cli`/`shell` are never included: their full screen
@@ -1580,7 +1692,7 @@ export default function SessionsPage() {
     (rightIsStudio && studioFullscreen) || ((rightIsTab || rightIsHardware) && tabFullscreen)
 
   /** What the right box actually shows: the Studio's own target (StudioHost re-parents its carrier
-   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `TerminalRegion`/`ShellBand`
+   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `ShellBand`
    *  with `placement="aside"` (design §1.5) — ordinary mounts, no persistent carrier needed since
    *  neither holds a buffer that must survive the move; `hardware` its own `HardwarePanel`; any of
    *  the ten former Contents tabs its own `ArtifactsAside` mount (`rightTabPane`, bound to
@@ -1595,14 +1707,15 @@ export default function SessionsPage() {
       {rightSlotHeader}
       {rightSlotBar('cli', targetLabel('cli', selected.harness, pt ? 'pt' : 'en'), () => closeSlotPanel('cli'))}
       <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
-        <TerminalRegion
+        <ShellBand
+          key={`aside-cli-${selected.id}`}
           placement="aside"
-          id={selected.id}
-          theme={theme === 'light' ? 'light' : 'dark'}
+          fixedTarget="cli"
+          sessionId={selected.id}
+          {...(selected.cwd ? { cwd: selected.cwd } : {})}
+          {...(selected.harness ? { harness: selected.harness } : {})}
           lang={pt ? 'pt' : 'en'}
-          fill
-          {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-          act={act}
+          theme={theme === 'light' ? 'light' : 'dark'}
         />
       </div>
     </div>
@@ -1614,6 +1727,7 @@ export default function SessionsPage() {
         <ShellBand
           key={`aside-${selected.id}`}
           placement="aside"
+          fixedTarget="shell"
           sessionId={selected.id}
           {...(selected.cwd ? { cwd: selected.cwd } : {})}
           {...(selected.harness ? { harness: selected.harness } : {})}
@@ -2102,14 +2216,18 @@ export default function SessionsPage() {
       const target = e.target
       const overlayEl = rightAsideRef.current
       const insideOverlay = !!(overlayEl && target instanceof Node && overlayEl.contains(target))
+      // A floating window counts as part of the workspace's own chrome here, like the rail: working
+      // in one is not "clicking away" from the overlay.
       const insideRail = target instanceof Element
-        && (target.closest('[data-panel-rail]') !== null || target.closest('[role="menu"]') !== null)
-      const action = overlayOutsideAction({ pinned: rawSlotLayout.pinned[panel] === true, insideOverlay, insideRail })
+        && (target.closest('[data-panel-rail]') !== null || target.closest('[role="menu"]') !== null
+          || target.closest('[data-floating-panel]') !== null)
+      // The pin no longer keeps an overlay open — it floats the panel (`lib/floatingPanels.ts`).
+      const action = overlayOutsideAction({ pinned: false, insideOverlay, insideRail })
       if (action === 'minimize') minimize()
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      const action = overlayOutsideAction({ pinned: rawSlotLayout.pinned[panel] === true, insideOverlay: false, insideRail: false })
+      const action = overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false })
       if (action === 'minimize') minimize()
     }
     document.addEventListener('mousedown', onPointerDown)
@@ -2118,7 +2236,7 @@ export default function SessionsPage() {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [artShell, slotLayout.right, rawSlotLayout.pinned, closeSlotPanel, setRightOpen])
+  }, [artShell, slotLayout.right, closeSlotPanel, setRightOpen])
 
   /**
    * What the pane sits beside or under. A VALUE, never a `return`: the moment one of these is
@@ -2302,6 +2420,7 @@ export default function SessionsPage() {
             <ShellBand
               key={`shell-${selected.id}`}
               placement="dedicated"
+              fixedTarget="shell"
               sessionId={selected.id}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
@@ -2309,16 +2428,17 @@ export default function SessionsPage() {
               {...(selected.harness ? { harness: selected.harness } : {})}
             />
           ) : (
-            <TerminalRegion
-              /* DEDICATED: you asked for this screen, so focus is the consent and there is no arm
-                 button; on a phone it carries the key strip. */
+            <ShellBand
+              /* DEDICATED: you asked for this screen, so focus is the consent; on a phone it carries
+                 the key strip. The same terminal the bottom band draws — see `fixedTarget`. */
+              key={`cli-${selected.id}`}
               placement="dedicated"
-              id={selected.id}
-              theme={theme === 'light' ? 'light' : 'dark'}
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
-              fill
-              {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-              act={act}
+              theme={theme === 'light' ? 'light' : 'dark'}
+              {...(selected.harness ? { harness: selected.harness } : {})}
             />
           )}
         </div>
@@ -2760,7 +2880,7 @@ export default function SessionsPage() {
    *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
    *     them be dropped rather than sandwiched.
    */
-  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 10, gap: 5 } as const
   /**
    * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
    * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
@@ -2830,6 +2950,9 @@ export default function SessionsPage() {
           composer once ended up 40.305px down the page on an iPhone 12. */}
       <div style={{
         display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0,
+        // `relative` so the floating-window layer below (`FloatingPanelLayer`, `inset: 0`) covers
+        // exactly the session area and nothing beside it — the rail and the aside are siblings.
+        position: 'relative',
         // Desktop-only inset card (see `CENTRAL_PANE`, above). `margin`, never `padding`: this div
         // is a flex ITEM inside `splitRef`'s row (or the sole item in its column, in the fleet-
         // overview case), so the flex algorithm sizes it INCLUDING the margin — the pane simply
@@ -2856,15 +2979,31 @@ export default function SessionsPage() {
         // `paddingBottom` above — and adding a SECOND margin on top of any of them doubles the visual
         // gap (measured live, before this: 11px on the right instead of 6, back when both were 6px).
         // The plain `FleetOverview`/dedicated-terminal case has no such neighbour gaps of its own, so
-        // it keeps the uniform `CENTRAL_PANE.gap` margin exactly as before.
+        // it takes the same top-only gap as `SessionPanel`'s own panels (no side margin).
         ...(isMobile ? {} : centreOwnsItsPanels
           ? { marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0 }
           : {
-            margin: CENTRAL_PANE.gap,
+            // Same placement as the panels `SessionPanel` draws for itself: only the top gap under
+            // the header. A margin on the LEFT added itself to the left list's 10px gap (a 15px gap
+            // with the grip's dots hugging the list — owner report); the sides are already the gaps.
+            marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0,
             border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
           }),
       }}>
         {centre}
+        {/* PINNED PANELS FLOAT HERE (`lib/floatingPanels.ts`) — a layer over the session area, so
+            a window can never be dragged outside it. Desktop only; always mounted with a session
+            selected so the area is measured before the first pin is pressed. */}
+        {!isMobile && selected && (
+          <FloatingPanelLayer
+            windows={floatingShown}
+            render={floatingBody}
+            title={floatingTitle}
+            onRaise={raisePanel}
+            onPlace={placePanel}
+            onArea={setFloatingArea}
+          />
+        )}
       </div>
       {/* THE RIGHT GAP IS THE HANDLE (`sdd/brief.md`) — no painted border of its own any more (that
           was the doubled divider next to the aside's own left border, screenshot `68381135`): the
@@ -2978,7 +3117,7 @@ export default function SessionsPage() {
           is the one guarantee that closes that: it fails `tsc` for the literal below AND for that
           routed shape, pinned in `studioHostMountParams.types.test.ts`. */}
       {selected && mountStudioHostPanel({
-        shown: editorEnabled === true && isPanelShown(slotLayout, 'studio'),
+        shown: editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating),
         sessionId: selected.id,
         lang: pt ? 'pt' : 'en',
         autosave: editorAutosave === true,
@@ -2995,13 +3134,14 @@ export default function SessionsPage() {
         // of 2026-09-19 (`fullscreenModeFor`'s `'overlay'` mode): `SessionsPage`'s own
         // `rightSlotContent` wrapper and `SessionPanel.tsx`'s `StudioBand` both read the SAME flag
         // to draw the actual viewport-covering box, whichever of the two currently holds it.
-        fullscreen: studioFullscreen,
-        onToggleFullscreen: () => setStudioFullscreen(f => !f),
+        // A floating Studio has no full screen of its own: the window IS its size control.
+        fullscreen: studioFloating ? false : studioFullscreen,
+        onToggleFullscreen: studioFloating ? undefined : () => setStudioFullscreen(f => !f),
         // WHERE IT IS, AND HOW TO MOVE IT — the Studio's own ONE menu (`studioGearEntries`) reads
         // these to offer exactly the move the CURRENT slot allows, and nothing about a different
         // panel (owner, 2026-09-19). `rightIsStudio`/`bottomIsStudio` are already mutually
         // exclusive wherever `shown` is true, the same fact `studioTarget` above rests on.
-        slot: rightIsStudio ? 'right' : 'bottom',
+        slot: rightIsStudio || studioFloating ? 'right' : 'bottom',
         // THE REAL PLACEMENT (rail-loose-ends, item 4) — `studioPlacement`, never `rightIsStudio`,
         // which a phone's viewport fold can leave reading `true` long after the real placement has
         // already become `'bottom'`. `onMove` is driven by the SAME fact for the SAME reason: with
@@ -3011,12 +3151,13 @@ export default function SessionsPage() {
         onMove: () => moveSlotPanel('studio', studioPlacement === 'bottom' ? 'rail' : 'bottom'),
         // THE ALWAYS-VISIBLE MINIMIZE ICON — right-slot only; at the bottom `StudioBand`'s own
         // collapse chevron already is this control (`panelMenu.ts`'s own `panelMinimizeAction`).
-        onMinimizeRight: rightIsStudio ? () => setRightOpen(false) : undefined,
-        // PIN (spec §11 item 3) — right-slot only, same gating as `onMinimizeRight` immediately
-        // above and for the same reason: "the rail only".
-        pinned: rightIsStudio
-          ? { active: rawSlotLayout.pinned.studio, onToggle: () => togglePinned('studio') }
-          : undefined,
+        onMinimizeRight: rightIsStudio && !studioFloating ? () => setRightOpen(false) : undefined,
+        // PIN = FLOAT (`lib/floatingPanels.ts`) — pressed on the docked Studio it floats it, pressed
+        // on the floating window it docks it back. Nothing floats on a phone.
+        pinned: isMobile ? undefined
+          : studioFloating
+            ? { active: true, onToggle: () => dockBack('studio') }
+            : { active: false, onToggle: () => floatPanel('studio') },
       })}
       {/* Mobile-only chrome, and a slot that is always here so it can never shift the pane. */}
       {isMobile ? filtersSheet : null}
