@@ -15,10 +15,11 @@
  * overflow can clip it and it never drifts away from the title it belongs to.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react'
 import type { SortKey, SortSpec } from '@agentistics/core'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 import { microLabel, surface } from './board'
 
 export function ColumnSortMenu({ title, color, sort, overridden, options, onPick, onClear, tooltip, followLabel, isMobile }: {
@@ -39,16 +40,23 @@ export function ColumnSortMenu({ title, color, sort, overridden, options, onPick
   isMobile: boolean
 }) {
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+  const panel = useRef<HTMLDivElement>(null)
 
+  // The panel is portaled into `document.body`, so a capture-phase `window` scroll listener also
+  // fires when the panel's OWN option list scrolls — closing on that made options past the fold
+  // unreachable. Only a scroll outside the panel closes it.
   useEffect(() => {
     if (!at) return
     const close = () => setAt(null)
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
-    window.addEventListener('scroll', close, true)
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     window.addEventListener('keydown', esc)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
       window.removeEventListener('keydown', esc)
     }
@@ -95,6 +103,7 @@ export function ColumnSortMenu({ title, color, sort, overridden, options, onPick
         <>
           <div onClick={() => setAt(null)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
           <div
+            ref={panel}
             role="menu"
             style={{
               position: 'fixed', left: at.left, top: at.top, width: 220, zIndex: 1200,

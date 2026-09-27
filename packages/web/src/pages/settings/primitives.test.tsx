@@ -108,6 +108,45 @@ describe('popovers are not clipped by a scrolling ancestor', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Touch targets — the project rule is >= 44px on mobile ONLY, never desktop.
+// ---------------------------------------------------------------------------
+
+describe('Select trigger touch target', () => {
+  // Unlike the `withWindow` helper above (which only needs SOME window to exist), this test's
+  // outcome depends on the exact width — so it cannot skip stubbing just because some other test
+  // file in this same bun process left a `window` behind (e.g. UnsavedChangesGuard.test.tsx sets
+  // one at module scope). Always force the width for the call and restore whatever was there
+  // before, own-property-ness included, rather than conditionally no-op-ing on `'window' in g`.
+  const withWindowWidth = (width: number, fn: () => string): string => {
+    const g = globalThis as { window?: unknown }
+    const hadOwn = Object.prototype.hasOwnProperty.call(g, 'window')
+    const prev = g.window
+    g.window = {
+      innerWidth: width, innerHeight: 900,
+      matchMedia: () => ({ matches: width < 768, addEventListener() {}, removeEventListener() {} }),
+      addEventListener() {}, removeEventListener() {},
+    }
+    try { return fn() } finally { if (hadOwn) g.window = prev; else delete g.window }
+  }
+  const withMobileWindow = (fn: () => string) => withWindowWidth(390, fn)
+  const withDesktopWindow = (fn: () => string) => withWindowWidth(1440, fn)
+
+  test('the closed trigger button is at least 44px tall on mobile', () => {
+    const html = withMobileWindow(() => renderToStaticMarkup(
+      <Select value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }]} />,
+    ))
+    expect(html).toMatch(/<button\b[^>]*style="[^"]*min-height:44px/)
+  })
+
+  test('the closed trigger has no min-height on desktop', () => {
+    const html = withDesktopWindow(() => renderToStaticMarkup(
+      <Select value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }]} />,
+    ))
+    expect(html).not.toMatch(/<button\b[^>]*style="[^"]*min-height/)
+  })
+})
+
 describe('popoverPosition', () => {
   const rect = (top: number, height = 40, left = 100, width = 240) =>
     ({ top, bottom: top + height, left, width, right: left + width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect

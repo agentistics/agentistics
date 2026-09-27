@@ -15,9 +15,11 @@ import { createPortal } from 'react-dom'
 import { ArrowDownUp, Columns3, LayoutList, Rows3, X } from 'lucide-react'
 import { PRIORITY_ORDER, type SortKey, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { scrollIsOutside } from '../../lib/popoverScroll'
 import {
   button, field, liveStatusMap, liveStatusOrder, microLabel, pill, surface, type BoardStatus,
 } from './board'
+import { boardCopy, type Lang } from './copy'
 import { PickerMenu } from './PickerMenu'
 import { LANE_KEYS, type LaneKey } from './boardPrefs'
 import type { ColumnSorts } from './columnSort'
@@ -68,13 +70,20 @@ export interface BoardArrangeProps {
   counts: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
+  /** The reader's language. Absent = English, for a caller that has not been threaded yet — same
+   *  default `TaskTable`'s own `lang` prop uses. */
+  lang?: Lang
 }
 
 export function BoardArrange(p: BoardArrangeProps) {
   const isMobile = useIsMobile()
+  const copy = boardCopy(p.lang ?? 'en')
   const [menu, setMenu] = useState<'sort' | 'lanes' | 'wip' | null>(null)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const bar = useRef<HTMLDivElement>(null)
+  // Only one of the three panels is ever mounted at a time (`menu` is a single value), so one ref
+  // covers all of them.
+  const panel = useRef<HTMLDivElement>(null)
   const statusOrder = liveStatusOrder(p.statuses)
   const statusMap = liveStatusMap(p.statuses)
 
@@ -89,14 +98,23 @@ export function BoardArrange(p: BoardArrangeProps) {
    *
    * They close on scroll rather than chasing the button: a panel that drifts away from the control
    * it belongs to is worse than one that closed. Same rule the settings popovers follow.
+   *
+   * But the listener is capture-phase on `window`, so it ALSO fires when the panel's OWN list
+   * scrolls (the WIP panel's per-column rows, or a keyboard scroll-into-view) — closing on that
+   * beats the click that was reaching a row past the fold. Only a scroll OUTSIDE the panel closes
+   * it; a portaled panel is never a descendant of the button, so the check is against the panel's
+   * own ref, not `bar`.
    */
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    window.addEventListener('scroll', close, true)
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
     }
   }, [menu])
@@ -113,12 +131,12 @@ export function BoardArrange(p: BoardArrangeProps) {
     setMenu(which)
   }
 
-  const panel = (which: 'sort' | 'lanes' | 'wip', width: number, body: React.ReactNode) =>
+  const renderPanel = (which: 'sort' | 'lanes' | 'wip', width: number, body: React.ReactNode) =>
     menu === which && at
       ? createPortal(
         <>
           <div onClick={() => setMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
-          <div style={{
+          <div ref={panel} style={{
             position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 3,
             boxShadow: 'var(--shadow-elevated)', maxHeight: 340, overflowY: 'auto',
@@ -150,7 +168,8 @@ export function BoardArrange(p: BoardArrangeProps) {
        * to say so.
        */}
       <PickerMenu
-        title="Columns on the board"
+        title={copy.pickers.boardColumnsTitle}
+        lang={p.lang ?? 'en'}
         triggerStyle={trigger}
         items={statusOrder.map(st => ({
           value: st,
@@ -161,9 +180,9 @@ export function BoardArrange(p: BoardArrangeProps) {
         value={p.columns}
         onChange={next => p.onColumns(next as BoardStatus[])}
         orderable
-        note="Drag a ticked column, or use ▲▼, to reorder the pipeline. A hidden column's tasks are still there."
+        note={copy.pickers.boardColumnsNote}
       >
-        <Columns3 size={13} /> Columns · {p.columns.length}
+        <Columns3 size={13} /> {copy.pickers.boardColumnsTrigger} · {p.columns.length}
       </PickerMenu>
 
       <div>
@@ -172,7 +191,7 @@ export function BoardArrange(p: BoardArrangeProps) {
           {BOARD_SORTS.find(s => s.key === p.sort.key)?.label ?? 'Order'}
           {p.sort.key !== 'manual' && <span>{p.sort.dir === 'asc' ? '↑' : '↓'}</span>}
         </button>
-        {panel('sort', 230, (
+        {renderPanel('sort', 230, (
           <>
               <div style={{ ...microLabel, marginBottom: 3 }}>Order cards by</div>
               {BOARD_SORTS.map(s => (
@@ -205,7 +224,7 @@ export function BoardArrange(p: BoardArrangeProps) {
         <button style={trigger} onClick={openAt('lanes')}>
           <Rows3 size={13} /> {LANE_LABEL[p.lanes]}
         </button>
-        {panel('lanes', 230, (
+        {renderPanel('lanes', 230, (
           <>
               <div style={{ ...microLabel, marginBottom: 3 }}>Swimlanes</div>
               {LANE_KEYS.map(k => (
@@ -228,7 +247,7 @@ export function BoardArrange(p: BoardArrangeProps) {
         <button style={trigger} onClick={openAt('wip')}>
           <LayoutList size={13} /> WIP{limited > 0 ? ` · ${limited}` : ''}
         </button>
-        {panel('wip', 260, (
+        {renderPanel('wip', 260, (
           <>
               <div style={{ ...microLabel, marginBottom: 3 }}>Cards per column</div>
               {statusOrder.map(st => {

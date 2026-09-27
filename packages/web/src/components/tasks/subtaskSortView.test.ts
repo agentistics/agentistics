@@ -32,9 +32,15 @@ describe('measureOfSubtask', () => {
   })
 
   it('reads cost and tokens the way the cells do: no session → nothing, unpriced → null', () => {
-    expect(measureOfSubtask(sub('cheap'), views, sessions)).toEqual({ sessions: 2, costUSD: 1, tokens: 100 })
-    expect(measureOfSubtask(sub('nobody'), views, sessions)).toEqual({ sessions: 0, costUSD: null, tokens: null })
-    expect(measureOfSubtask(sub('unpriced'), views, sessions)).toEqual({ sessions: 0, costUSD: null, tokens: null })
+    expect(measureOfSubtask(sub('cheap'), views, sessions)).toEqual({ sessions: 2, rounds: 1, costUSD: 1, tokens: 100 })
+    expect(measureOfSubtask(sub('nobody'), views, sessions)).toEqual({ sessions: 0, rounds: null, costUSD: null, tokens: null })
+    // `rounds` follows the ROLLUP's own `sessionsUsed` (1 here, per the `rollup()` fixture above),
+    // never the locally-filtered `sessions` count (0) — the same "untracked" gate cost/tokens use.
+    expect(measureOfSubtask(sub('unpriced'), views, sessions)).toEqual({ sessions: 0, rounds: 1, costUSD: null, tokens: null })
+  })
+
+  it('rounds is null once the bucket says nothing is tracked, even if the rollup carries a stray value', () => {
+    expect(measureOfSubtask(sub('nobody'), views, sessions)?.rounds).toBeNull()
   })
 
   it('a Copilot-credits cost is no dollar figure to compare', () => {

@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import {
-  freedBytes, suggestGroup,
+  defaultGroupFor, freedBytes, groupOfSession,
   type GroupSuggestion, type IdleCandidate, type IdleReason,
 } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -36,6 +36,16 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import { inputStyle } from './formBits'
 import type { FleetState } from '../../lib/fleet'
+// The project's own dropdown, in place of the two native `<select>`s below — see `DeliveryDetail.tsx`
+// for the same usage. Its popover is `position: fixed; z-index: 1200`, painted as a DESCENDANT of
+// this dialog's own `zIndex: 640` overlay. The overlay DOES set `backdropFilter: 'blur(3px)'`, which
+// (like `transform`) creates a containing block for a `position: fixed` descendant — so the popover's
+// `left`/`top`/`bottom` in `popoverPosition` resolve against the OVERLAY's box, not the true viewport.
+// It still lands in the right place only because the overlay is `inset: 0` (the full viewport), so
+// that box and the viewport coincide; shrinking the overlay to anything less than full-viewport would
+// break the popover's positioning, since `popoverPosition` measures `window.innerHeight` while the
+// containing block would then be smaller than the window.
+import { Select } from '../../pages/settings/primitives'
 
 const NEW_GROUP = '__new__'
 
@@ -73,7 +83,9 @@ function buildInitialPlans(
   const map = new Map<string, RowPlan>()
   for (const c of frozen) {
     const row = rows.find(r => r.id === c.row.id)
-    const suggestion = suggestGroup(c, groups, allIdleRows, row?.task, today)
+    // A session already sitting in a user group is offered THAT group first — see
+    // `defaultGroupFor`'s own header for why this outranks `suggestGroup`'s task/date rules.
+    const suggestion = defaultGroupFor(c, groups, allIdleRows, row?.task, today)
     map.set(c.key, suggestion.kind === 'existing'
       ? { action: 'file-end', groupSel: suggestion.groupId, newName: '' }
       : { action: 'file-end', groupSel: NEW_GROUP, newName: suggestion.name })
@@ -242,6 +254,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
     newGroupPlaceholder: pt ? 'Nome do grupo' : 'Group name',
     memory: pt ? 'Memória' : 'Memory',
     nothingIdle: pt ? 'Nenhuma sessão ociosa agora.' : 'Nothing idle right now.',
+    inGroup: pt ? 'No grupo:' : 'In group:',
   }
 
   const summary = idleSummaryText(frozen.length, freed !== null ? fmtGB(freed) : null, lang)
@@ -339,6 +352,10 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
               const prompt = row ? lastPromptOf(row) : null
               const mem = typeof c.row.rssBytes === 'number' ? fmtGB(c.row.rssBytes) : null
               const cpu = typeof c.row.cpuPercent === 'number' ? `${Math.round(c.row.cpuPercent)}%` : null
+              // The modal never used to say whether this session already belongs to a user group —
+              // `defaultGroupFor` (above) already prefers it for the suggestion; this is what makes
+              // that fact visible on the row itself, not only in the pre-filled group picker.
+              const currentGroup = groupOfSession(getSessionGroups(), c.key)
               return (
                 <div key={c.key} style={{
                   display: 'flex', flexDirection: 'column', gap: 8,
@@ -357,6 +374,11 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                       {mem && ` · ${t.memory} ${mem}`}
                       {cpu && ` · CPU ${cpu}`}
                     </span>
+                    {currentGroup && (
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                        {t.inGroup} {currentGroup.name}
+                      </span>
+                    )}
                     {prompt && (
                       <span style={{
                         fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic',
@@ -380,33 +402,33 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <select
-                      value={plan?.action ?? 'file-end'}
-                      onChange={e => updatePlan(c.key, { action: e.target.value as IdleAction })}
-                      style={{
-                        ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto',
-                        width: isMobile ? '100%' : 190, minHeight: isMobile ? 44 : undefined,
-                      }}
-                    >
-                      <option value="file-end">{t.actionFileEnd}</option>
-                      <option value="end">{t.actionEnd}</option>
-                      <option value="keep">{t.actionKeep}</option>
-                    </select>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    <div style={{ flex: isMobile ? '1 1 100%' : '0 0 190px', minWidth: 0 }}>
+                      <Select
+                        value={plan?.action ?? 'file-end'}
+                        onChange={v => updatePlan(c.key, { action: v as IdleAction })}
+                        options={[
+                          { value: 'file-end', label: t.actionFileEnd },
+                          { value: 'end', label: t.actionEnd },
+                          { value: 'keep', label: t.actionKeep },
+                        ]}
+                      />
+                    </div>
 
                     {plan?.action === 'file-end' && (
                       <>
-                        <select
-                          value={plan.groupSel}
-                          onChange={e => updatePlan(c.key, { groupSel: e.target.value })}
-                          style={{
-                            ...inputStyle, padding: '7px 10px', flex: isMobile ? '1 1 100%' : '0 0 auto',
-                            width: isMobile ? '100%' : 190, minHeight: isMobile ? 44 : undefined,
-                          }}
-                        >
-                          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                          <option value={NEW_GROUP}>{t.newGroup}</option>
-                        </select>
+                        <div style={{ flex: isMobile ? '1 1 100%' : '0 0 190px', minWidth: 0 }}>
+                          <Select
+                            value={plan.groupSel}
+                            onChange={v => updatePlan(c.key, { groupSel: v })}
+                            // `searchable` is left to `Select`'s own default (on past 8 options) —
+                            // exactly "gets searchable when there are many groups".
+                            options={[
+                              ...groups.map(g => ({ value: g.id, label: g.name })),
+                              { value: NEW_GROUP, label: t.newGroup },
+                            ]}
+                          />
+                        </div>
                         {plan.groupSel === NEW_GROUP && (
                           <input
                             value={plan.newName}

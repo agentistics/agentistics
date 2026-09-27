@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { freedBytes, idleCandidates, idleNotifyStep, suggestGroup, type IdleRowInput } from './idleSessions'
+import { defaultGroupFor, freedBytes, idleCandidates, idleNotifyStep, suggestGroup, type IdleRowInput } from './idleSessions'
 
 const H = 3_600_000
 const NOW = 1_800_000_000_000
@@ -72,6 +72,29 @@ describe('suggestGroup', () => {
     expect(suggestGroup(plain!, [], [], undefined, '2026-09-25')).toEqual({ kind: 'new', name: 'Idle · 2026-09-25' })
     expect(suggestGroup(plain!, [{ id: 'gd', name: 'Idle · 2026-09-25', sessionKeys: [] }], [], undefined, '2026-09-25'))
       .toEqual({ kind: 'existing', groupId: 'gd', name: 'Idle · 2026-09-25' })
+  })
+})
+
+describe('defaultGroupFor', () => {
+  const rows = [row({ id: 'a', taskId: 't1' }), row({ id: 'b', taskId: 't1' })]
+  const [cand] = idleCandidates([rows[0]!], opts)
+  it('prefers the group already holding the candidate, ahead of the task rule', () => {
+    const groups = [
+      { id: 'g-current', name: 'Saved to later', sessionKeys: ['a'] },
+      // Would win under `suggestGroup`'s own task rule (most sessions of the same task) — must lose.
+      { id: 'g-task', name: 'Task group', sessionKeys: ['b'] },
+    ]
+    expect(defaultGroupFor(cand!, groups, rows, 'Task one', '2026-09-25'))
+      .toEqual({ kind: 'existing', groupId: 'g-current', name: 'Saved to later' })
+  })
+  it('delegates to suggestGroup when the candidate is in no group', () => {
+    const groups = [{ id: 'g-task', name: 'Task group', sessionKeys: ['b'] }]
+    expect(defaultGroupFor(cand!, groups, rows, 'Task one', '2026-09-25'))
+      .toEqual(suggestGroup(cand!, groups, rows, 'Task one', '2026-09-25'))
+  })
+  it('delegates all the way to the dated fallback when nothing else applies', () => {
+    const [plain] = idleCandidates([row({ id: 'z' })], opts)
+    expect(defaultGroupFor(plain!, [], [], undefined, '2026-09-25')).toEqual({ kind: 'new', name: 'Idle · 2026-09-25' })
   })
 })
 

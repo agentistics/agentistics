@@ -46,9 +46,29 @@ export async function runIdlePlan(items: IdlePlanItem[], fx: IdleEffects): Promi
   return out.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
 }
 
-export function bannerVisible(a: { candidates: number; modalOpen: boolean; snoozedUntil: number | null; now: number }): boolean {
+/**
+ * Whether the idle-review card/notice should show. `candidateKeys`/`dismissedKeys` are optional —
+ * the modal-suppression and snooze rules alone are what `SessionsPage` used to check before the
+ * card existed, and still all that a caller with no dismissal state needs. When BOTH are given, a
+ * batch every one of whose sessions is in `dismissedKeys` stays hidden until a session outside that
+ * set becomes a candidate — the `×` on the card dismisses the CURRENT batch, never "idle sessions
+ * forever": `lib/idleReviewStore.ts` is what actually keeps `dismissedKeys` across renders.
+ */
+export function bannerVisible(a: {
+  candidates: number
+  modalOpen: boolean
+  snoozedUntil: number | null
+  now: number
+  candidateKeys?: readonly string[]
+  dismissedKeys?: ReadonlySet<string>
+}): boolean {
   if (a.candidates === 0 || a.modalOpen) return false
-  return a.snoozedUntil === null || a.now >= a.snoozedUntil
+  if (!(a.snoozedUntil === null || a.now >= a.snoozedUntil)) return false
+  if (a.candidateKeys && a.dismissedKeys) {
+    const dismissed = a.dismissedKeys
+    return a.candidateKeys.some(k => !dismissed.has(k))
+  }
+  return true
 }
 
 export type GroupResolution = { action: 'reuse'; groupId: string } | { action: 'create'; name: string }
@@ -86,22 +106,23 @@ export function resolveGroupSuggestion(
 }
 
 /** "1 session" / "2 sessions" / "1 sessão" / "2 sessões" — proper singular/plural for the idle-
- *  sessions count, shared by the banner, the review modal's summary and the `sessions.idle`
- *  notification so the three surfaces never disagree on when to say "session" and when "sessions". */
+ *  sessions count, shared by the idle-review card, the review modal's summary and the
+ *  `sessions.idle` notification so the surfaces never disagree on when to say "session" and when
+ *  "sessions". */
 export function idleSessionNoun(count: number, lang: 'pt' | 'en'): string {
   if (lang === 'pt') return count === 1 ? 'sessão' : 'sessões'
   return count === 1 ? 'session' : 'sessions'
 }
 
-/** The banner's one-line offer, with the PT verb and adjective agreeing in number too
- *  ("pode"/"podem", "ociosa"/"ociosas") — not just the noun. */
-export function idleBannerText(count: number, lang: 'pt' | 'en'): string {
-  if (lang === 'pt') {
-    return count === 1
-      ? '1 sessão ociosa pode ser encerrada'
-      : `${count} sessões ociosas podem ser encerradas`
-  }
-  return count === 1 ? '1 idle session could be ended' : `${count} idle sessions could be ended`
+/** The idle-review card's one-line offer — "N idle session(s)", with the PT adjective agreeing in
+ *  number too ("ociosa"/"ociosas"), plus the optional "· ~freed" clause (absent, never "· ~", when
+ *  no candidate's memory is known). Renamed from `idleBannerText` when the full-width banner was
+ *  replaced by this compact card at the top of the sessions list. */
+export function idleCardText(count: number, freed: string | null, lang: 'pt' | 'en'): string {
+  const sessions = lang === 'pt'
+    ? (count === 1 ? '1 sessão ociosa' : `${count} sessões ociosas`)
+    : (count === 1 ? '1 idle session' : `${count} idle sessions`)
+  return freed === null ? sessions : `${sessions} · ~${freed}`
 }
 
 /** The review modal's header summary — "N session(s)" (now properly pluralized) plus the optional

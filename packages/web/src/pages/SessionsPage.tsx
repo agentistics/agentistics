@@ -35,9 +35,11 @@ import {
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
 import { panelTitle } from '../lib/panelMeta'
+import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
+import { freedBytes } from '@agentistics/core'
 import { getCentralMachine } from '../lib/centralMachinePick'
 import type { AppContext } from '../lib/app-context'
 import { useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
@@ -77,11 +79,10 @@ import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
-import { bannerVisible } from '../lib/idleExecution'
 import { forcedNote, isAdmissionRefusal } from '../lib/spawnAdmission'
 import { pushNotification } from '../lib/notifications'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
-import { IdleSessionsBanner } from '../components/sessions/IdleSessionsBanner'
+import { publishIdleReview } from '../lib/idleReviewStore'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
 import type { SessionDrilldownProps } from '../components/SessionDrilldown'
 import type { Artifact } from '../lib/sessionArtifacts'
@@ -340,7 +341,8 @@ export default function SessionsPage() {
   const rowIndex = useFleetIndex(fleet.sessions)
 
   /**
-   * IDLE SESSIONS (Task 6) — the review modal, its banner, and the state that owns them.
+   * IDLE SESSIONS (Task 6) — the review modal, and the candidates published for the card in
+   * `SessionsAside` (see `lib/idleReviewStore.ts`).
    *
    * `useHardwarePressureWatch` is called HERE, ahead of the rail's own use of `hardwareCritical`
    * further down this file, so `ramUnderPressure` — the SAME 5s hardware poll the rail's red icon
@@ -361,12 +363,6 @@ export default function SessionsPage() {
     enabled: !isCentral && !pollUnsupported && !loading,
   })
   const [idleOpen, setIdleOpen] = useState(false)
-  const [idleSnoozedUntil, setIdleSnoozedUntil] = useState<number | null>(() => {
-    try {
-      const v = Number(sessionStorage.getItem('agentistics-idle-snooze'))
-      return Number.isFinite(v) && v > 0 ? v : null
-    } catch { return null }
-  })
   useEffect(() => {
     const open = () => setIdleOpen(true)
     window.addEventListener('agentistics:open-idle-sessions', open)
@@ -375,6 +371,16 @@ export default function SessionsPage() {
     if (takeIdleReviewRequest()) setIdleOpen(true)
     return () => window.removeEventListener('agentistics:open-idle-sessions', open)
   }, [])
+  // Publish the summary the idle-review CARD reads (`SessionsAside.tsx`, mounted twice — the
+  // desktop sidebar and the mobile list) — see `lib/idleReviewStore.ts`'s own header for why the
+  // card cannot simply take these as props. Snooze and dismiss live in that store too, so this page
+  // no longer owns any idle-review state beyond the modal's own open/closed flag.
+  useEffect(() => {
+    publishIdleReview(
+      { count: idleCandidates.length, freedBytes: freedBytes(idleCandidates), candidateKeys: idleCandidates.map(c => c.key) },
+      idleOpen,
+    )
+  }, [idleCandidates, idleOpen])
 
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
@@ -1302,14 +1308,96 @@ export default function SessionsPage() {
     .filter(railGateOpen)
     .filter(id => id !== 'metrics' || sessionMetrics !== undefined)
   const [mobileHiddenAt, setMobileHiddenAt] = useState<{ x: number; y: number } | null>(null)
+  /**
+   * THE MOBILE TAB STRIP SCROLLS IN ONE ROW rather than wrapping into a grid (owner screenshot,
+   * iPhone 390pt: fourteen tabs wrapped four rows deep ate roughly a quarter of the screen). It is a
+   * single `overflow-x: auto` row (`.tabscroll`, the same hidden-scrollbar class `RepoDetailPage`'s
+   * own tab strip already uses) rather than a second overflow control: unlike the desktop rail (a
+   * fixed-height COLUMN that genuinely cannot grow, spec §4's own reason for its "more" button), this
+   * row sits in normal flow above a column that already scrolls, so a row that simply grows wide and
+   * lets the finger move it needs nothing else.
+   *
+   * THE ACTIVE TAB IS KEPT ON SCREEN, centred, whenever it changes AND whenever the switcher itself
+   * mounts (the aside opening) — a tab picked from a chip/deep link must not land off the visible
+   * edge of its own picker. `activeMobileTab` prefers the right slot's occupant (the one usually
+   * shown full-screen on a phone) and falls back to the bottom band's, since only one of the two
+   * genuinely reflects "what a tap here would return you to".
+   */
+  const tabStripRef = useRef<HTMLDivElement | null>(null)
+  const tabButtonRefs = useRef<Map<PanelId, HTMLButtonElement>>(new Map())
+  const [tabStripEdges, setTabStripEdges] = useState<{ left: boolean; right: boolean }>({ left: false, right: false })
+  const updateTabStripEdges = useCallback(() => {
+    const el = tabStripRef.current
+    if (!el) return
+    setTabStripEdges(tabStripEdgeFade({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }))
+  }, [])
+  const activeMobileTab: PanelId | null = rightActivePanel
+    ?? (slotLayout.bottom !== null && gatedMobilePanels.includes(slotLayout.bottom) ? slotLayout.bottom : null)
+  const scrollActiveMobileTabIntoView = useCallback((id: PanelId | null) => {
+    if (id === null) return
+    tabButtonRefs.current.get(id)?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [])
+  /**
+   * THE STRIP'S FIRST MEASUREMENT CANNOT WAIT FOR AN EFFECT KEYED ON `activeMobileTab`. This
+   * container is not always in the tree — it mounts only once the aside itself opens (gated deeper
+   * in this render tree, by `artShell`), so on the very render where a tap on "Session contents"
+   * both picks the first tab AND creates this DOM node for the first time, `activeMobileTab` can
+   * already read that tab's id BEFORE the container exists (an intermediate render this component
+   * legitimately produces while `artShell` itself is still settling) — a `useEffect` on
+   * `[activeMobileTab]` then never re-fires once the node finally mounts, because the value it
+   * watches never changed a second time. A REF CALLBACK has no such gap: it runs at the exact
+   * moment this node is attached, whatever render that happens to be, so the strip is centred on
+   * whatever `activeMobileTab` is holding right then and its overflow is measured immediately —
+   * "the aside opens" no longer needs a second event to notice it happened. Child buttons attach
+   * their own refs (`tabButtonRefs`) before this parent's, in the same commit, so the lookup below
+   * never races an empty map.
+   *
+   * MEMOIZED ON `activeMobileTab` — an inline (non-memoized) ref function is a NEW function identity
+   * every render, and React detaches-then-reattaches a ref whose identity changed even when the DOM
+   * node itself did not move. `updateTabStripEdges` always commits a fresh `EdgeFade` object (it is
+   * a new object literal on every call, equal by value but not by reference), so every one of those
+   * spurious reattachments re-ran it, which re-rendered this component, which built yet another new
+   * inline function — measured live as React's own "Maximum update depth exceeded" (error #185) the
+   * instant this panel opened. Keying the callback on `activeMobileTab` (plus the two already-stable
+   * `useCallback`s below) means React only calls it again when the tab this strip should be centred
+   * on actually changes, which is also the one moment this module wants it to run again anyway.
+   */
+  const attachTabStrip = useCallback((el: HTMLDivElement | null) => {
+    tabStripRef.current = el
+    if (el === null) return
+    updateTabStripEdges()
+    scrollActiveMobileTabIntoView(activeMobileTab)
+  }, [activeMobileTab, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  // The ONGOING case: the strip is already mounted and the active tab changes underneath it (a
+  // chip/deep link opening a different panel while the aside stays open, or the gated panel list
+  // itself changing shape). The mount-time case above and this one are deliberately separate — one
+  // reacts to the DOM appearing, the other to the DATA changing once it already has.
+  useEffect(() => {
+    if (tabStripRef.current === null) return
+    scrollActiveMobileTabIntoView(activeMobileTab)
+    updateTabStripEdges()
+  }, [activeMobileTab, gatedMobilePanels.length, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  const tabStripFade = tabStripFadeMask(tabStripEdges)
   const rightSwitcherMobile = (isMobile && selected) ? (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0,
       padding: '4px 6px', borderBottom: '1px solid var(--border)',
     }}>
-      <div role="tablist" aria-label={pt ? 'O que mostrar' : 'What to show'} style={{
-        display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0,
-      }}>
+      <div
+        ref={attachTabStrip}
+        className="tabscroll"
+        role="tablist"
+        aria-label={pt ? 'O que mostrar' : 'What to show'}
+        onScroll={updateTabStripEdges}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap', overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
+          flex: 1, minWidth: 0,
+          ...(tabStripFade !== null
+            ? { maskImage: tabStripFade, WebkitMaskImage: tabStripFade }
+            : null),
+        }}
+      >
         {gatedMobilePanels.map(id => {
           const on = isPanelShown(slotLayout, id)
           // THE HARDWARE TAB'S OWN RED (addendum item 6, carried to the phone) — the rail's icon
@@ -1321,16 +1409,23 @@ export default function SessionsPage() {
           return (
             <button
               key={id}
+              ref={el => {
+                if (el) tabButtonRefs.current.set(id, el)
+                else tabButtonRefs.current.delete(id)
+              }}
               role="tab"
               aria-selected={on}
               onClick={() => openSlotPanel(id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                minHeight: 44, padding: '0 14px',
+                display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
                 borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500,
+                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',
                 background: on ? 'var(--bg-elevated)' : 'transparent',
-                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-tertiary)'),
+                // Inactive tabs read as TAPPABLE (owner: they were faded to the point of looking
+                // disabled) — `--text-secondary`, the same token `RepoDetailPage`'s own scrolling tab
+                // strip already uses for its inactive tabs, never the fainter `--text-tertiary`.
+                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-secondary)'),
               }}
             >{panelIconFor(id, 12, selected.harness)}{panelTitle(id, pt)}{hot ? ` — ${pt ? 'sob pressão' : 'under pressure'}` : ''}</button>
           )
@@ -2489,22 +2584,33 @@ export default function SessionsPage() {
    * regardless of what the content box itself currently has to show.
    */
   const railDesktop = !isMobile && selected !== undefined
+
+  /**
+   * OWNER-APPROVED VISUAL, mockup option "C" (2026-09-26): the central pane — the region below
+   * that holds the open session's conversation/terminal, and the fleet overview when nothing is
+   * selected — reads as a card fitted into the surrounding frame. DESKTOP ONLY (`!isMobile`): a
+   * phone's screens already cover the viewport edge to edge, and insetting them would just clip
+   * the composer against the rounded corner for no visual gain.
+   *
+   * Four numbers, held in one place rather than scattered across the wrapper below and the three
+   * frame dividers it replaces (`TopBar.tsx`'s `noBottomBorder`, `SideNav`'s own `borderRight`,
+   * `PanelRail.tsx`'s `borderLeft`):
+   *   - `border` — the existing `--border` token; no new colour.
+   *   - `radius` — all four corners.
+   *   - `gap` — the space cleared on every side, which is what makes those three frame borders
+   *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
+   *     them be dropped rather than sandwiched.
+   */
+  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+
   return (
     <>
-    {/* IDLE SESSIONS (Task 6) — a real sibling ABOVE the workspace body, not `position: fixed`, so
-        it occupies space and pushes the rest down rather than covering whichever branch's own
-        top-of-screen header happens to be showing (the mobile list/panel headers already claim
-        y=0). This is the ONE known gap: the mobile DEDICATED TERMINAL (`if (isMobile) return
-        dedicated` above) returns before this point and never shows the banner or the modal — a
-        deliberate, documented limitation rather than a restructuring of that early return. */}
-    {bannerVisible({ candidates: idleCandidates.length, modalOpen: idleOpen, snoozedUntil: idleSnoozedUntil, now: Date.now() }) && (
-      <IdleSessionsBanner
-        lang={pt ? 'pt' : 'en'}
-        count={idleCandidates.length}
-        onReview={() => setIdleOpen(true)}
-        onSnooze={until => setIdleSnoozedUntil(until)}
-      />
-    )}
+    {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`
+        (both its desktop and mobile-list instances), never here — see that card's own header. This
+        page still owns the REVIEW MODAL below, and the ONE known gap stated for the old banner still
+        holds for it: the mobile DEDICATED TERMINAL (`if (isMobile) return dedicated` above) returns
+        before this point and never shows it — a deliberate, documented limitation rather than a
+        restructuring of that early return. */}
     <div
       ref={splitRef}
       // `position: relative` ON EVERY BRANCH (fix, narrow-overlay pass, 2026-09-22) — it is the one
@@ -2533,7 +2639,28 @@ export default function SessionsPage() {
           bug three times: `flex: 1` on a child means nothing until its PARENT is a flex container,
           and a block child ignores its parent's height and grows to its content — which is how the
           composer once ended up 40.305px down the page on an iPhone 12. */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0,
+        // Desktop-only inset card (see `CENTRAL_PANE`, above). `margin`, never `padding`: this div
+        // is a flex ITEM inside `splitRef`'s row (or the sole item in its column, in the fleet-
+        // overview case), so the flex algorithm sizes it INCLUDING the margin — the pane simply
+        // ends up 5px smaller on every side within the space it was already given, rather than the
+        // margin being added on top of a size already computed and overflowing the fixed-height
+        // column this workspace is built on (see the file's own note on the sessions workspace
+        // never growing a page-level scrollbar). `overflow: hidden` clips children to the curve —
+        // checked: the narrow-desktop `overlay` aside (`artOuter`) and every `position: fixed`
+        // element in this file (the mention toast, the preset modals, `leaveGuard`) are SIBLINGS of
+        // this div under `splitRef`, never descendants, so neither is clipped by it; the in-panel
+        // popovers that are descendants (the composer's `/` and `@` pickers, the bubble's
+        // right-click menu, the "more" menu) all open within their own nested containers, inset
+        // from this box's edges, and stay inside it under normal use.
+        ...(isMobile ? {} : {
+          margin: CENTRAL_PANE.gap,
+          border: CENTRAL_PANE.border,
+          borderRadius: CENTRAL_PANE.radius,
+          overflow: 'hidden',
+        }),
+      }}>
         {centre}
       </div>
       {/* The handle. Four pixels of hit area over a one-pixel rule — the rule is what you see, the

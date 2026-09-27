@@ -341,6 +341,7 @@ function TaskList() {
       {view === 'board' && shown.length > 0 && (
         <>
           <BoardArrange
+            lang={lang}
             sort={sort} onSort={setSort}
             columnSorts={columnSort} onColumnSorts={setColumnSort}
             lanes={lanes} onLanes={setLanes}
