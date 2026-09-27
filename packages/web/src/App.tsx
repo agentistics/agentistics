@@ -112,7 +112,7 @@ import { setLeftAsideEdge } from './lib/leftAsideEdge'
 import { CentralSessions } from './components/sessions/CentralSessions'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
-import { PAGE_INSET, PAGE_MAX_WIDTH } from './components/sessions/FleetOverview'
+import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionStatsMenu } from './components/sessions/SessionStatsMenu'
@@ -3853,7 +3853,7 @@ export default function AppLayout() {
         const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
         return (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ maxWidth: PAGE_MAX_WIDTH, width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: PAGE_INSET, boxSizing: 'border-box', pointerEvents: 'none' }}>
+            <div style={{ maxWidth: pageMaxWidth(location.pathname), width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: PAGE_INSET, boxSizing: 'border-box', pointerEvents: 'none' }}>
               <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                 <button
                   onClick={toggleFleet}
