@@ -35,6 +35,7 @@ import {
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
 import { panelTitle } from '../lib/panelMeta'
+import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
@@ -1278,14 +1279,96 @@ export default function SessionsPage() {
     .filter(railGateOpen)
     .filter(id => id !== 'metrics' || sessionMetrics !== undefined)
   const [mobileHiddenAt, setMobileHiddenAt] = useState<{ x: number; y: number } | null>(null)
+  /**
+   * THE MOBILE TAB STRIP SCROLLS IN ONE ROW rather than wrapping into a grid (owner screenshot,
+   * iPhone 390pt: fourteen tabs wrapped four rows deep ate roughly a quarter of the screen). It is a
+   * single `overflow-x: auto` row (`.tabscroll`, the same hidden-scrollbar class `RepoDetailPage`'s
+   * own tab strip already uses) rather than a second overflow control: unlike the desktop rail (a
+   * fixed-height COLUMN that genuinely cannot grow, spec §4's own reason for its "more" button), this
+   * row sits in normal flow above a column that already scrolls, so a row that simply grows wide and
+   * lets the finger move it needs nothing else.
+   *
+   * THE ACTIVE TAB IS KEPT ON SCREEN, centred, whenever it changes AND whenever the switcher itself
+   * mounts (the aside opening) — a tab picked from a chip/deep link must not land off the visible
+   * edge of its own picker. `activeMobileTab` prefers the right slot's occupant (the one usually
+   * shown full-screen on a phone) and falls back to the bottom band's, since only one of the two
+   * genuinely reflects "what a tap here would return you to".
+   */
+  const tabStripRef = useRef<HTMLDivElement | null>(null)
+  const tabButtonRefs = useRef<Map<PanelId, HTMLButtonElement>>(new Map())
+  const [tabStripEdges, setTabStripEdges] = useState<{ left: boolean; right: boolean }>({ left: false, right: false })
+  const updateTabStripEdges = useCallback(() => {
+    const el = tabStripRef.current
+    if (!el) return
+    setTabStripEdges(tabStripEdgeFade({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }))
+  }, [])
+  const activeMobileTab: PanelId | null = rightActivePanel
+    ?? (slotLayout.bottom !== null && gatedMobilePanels.includes(slotLayout.bottom) ? slotLayout.bottom : null)
+  const scrollActiveMobileTabIntoView = useCallback((id: PanelId | null) => {
+    if (id === null) return
+    tabButtonRefs.current.get(id)?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [])
+  /**
+   * THE STRIP'S FIRST MEASUREMENT CANNOT WAIT FOR AN EFFECT KEYED ON `activeMobileTab`. This
+   * container is not always in the tree — it mounts only once the aside itself opens (gated deeper
+   * in this render tree, by `artShell`), so on the very render where a tap on "Session contents"
+   * both picks the first tab AND creates this DOM node for the first time, `activeMobileTab` can
+   * already read that tab's id BEFORE the container exists (an intermediate render this component
+   * legitimately produces while `artShell` itself is still settling) — a `useEffect` on
+   * `[activeMobileTab]` then never re-fires once the node finally mounts, because the value it
+   * watches never changed a second time. A REF CALLBACK has no such gap: it runs at the exact
+   * moment this node is attached, whatever render that happens to be, so the strip is centred on
+   * whatever `activeMobileTab` is holding right then and its overflow is measured immediately —
+   * "the aside opens" no longer needs a second event to notice it happened. Child buttons attach
+   * their own refs (`tabButtonRefs`) before this parent's, in the same commit, so the lookup below
+   * never races an empty map.
+   *
+   * MEMOIZED ON `activeMobileTab` — an inline (non-memoized) ref function is a NEW function identity
+   * every render, and React detaches-then-reattaches a ref whose identity changed even when the DOM
+   * node itself did not move. `updateTabStripEdges` always commits a fresh `EdgeFade` object (it is
+   * a new object literal on every call, equal by value but not by reference), so every one of those
+   * spurious reattachments re-ran it, which re-rendered this component, which built yet another new
+   * inline function — measured live as React's own "Maximum update depth exceeded" (error #185) the
+   * instant this panel opened. Keying the callback on `activeMobileTab` (plus the two already-stable
+   * `useCallback`s below) means React only calls it again when the tab this strip should be centred
+   * on actually changes, which is also the one moment this module wants it to run again anyway.
+   */
+  const attachTabStrip = useCallback((el: HTMLDivElement | null) => {
+    tabStripRef.current = el
+    if (el === null) return
+    updateTabStripEdges()
+    scrollActiveMobileTabIntoView(activeMobileTab)
+  }, [activeMobileTab, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  // The ONGOING case: the strip is already mounted and the active tab changes underneath it (a
+  // chip/deep link opening a different panel while the aside stays open, or the gated panel list
+  // itself changing shape). The mount-time case above and this one are deliberately separate — one
+  // reacts to the DOM appearing, the other to the DATA changing once it already has.
+  useEffect(() => {
+    if (tabStripRef.current === null) return
+    scrollActiveMobileTabIntoView(activeMobileTab)
+    updateTabStripEdges()
+  }, [activeMobileTab, gatedMobilePanels.length, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  const tabStripFade = tabStripFadeMask(tabStripEdges)
   const rightSwitcherMobile = (isMobile && selected) ? (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0,
       padding: '4px 6px', borderBottom: '1px solid var(--border)',
     }}>
-      <div role="tablist" aria-label={pt ? 'O que mostrar' : 'What to show'} style={{
-        display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0,
-      }}>
+      <div
+        ref={attachTabStrip}
+        className="tabscroll"
+        role="tablist"
+        aria-label={pt ? 'O que mostrar' : 'What to show'}
+        onScroll={updateTabStripEdges}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap', overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
+          flex: 1, minWidth: 0,
+          ...(tabStripFade !== null
+            ? { maskImage: tabStripFade, WebkitMaskImage: tabStripFade }
+            : null),
+        }}
+      >
         {gatedMobilePanels.map(id => {
           const on = isPanelShown(slotLayout, id)
           // THE HARDWARE TAB'S OWN RED (addendum item 6, carried to the phone) — the rail's icon
@@ -1297,16 +1380,23 @@ export default function SessionsPage() {
           return (
             <button
               key={id}
+              ref={el => {
+                if (el) tabButtonRefs.current.set(id, el)
+                else tabButtonRefs.current.delete(id)
+              }}
               role="tab"
               aria-selected={on}
               onClick={() => openSlotPanel(id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                minHeight: 44, padding: '0 14px',
+                display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
                 borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500,
+                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',
                 background: on ? 'var(--bg-elevated)' : 'transparent',
-                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-tertiary)'),
+                // Inactive tabs read as TAPPABLE (owner: they were faded to the point of looking
+                // disabled) — `--text-secondary`, the same token `RepoDetailPage`'s own scrolling tab
+                // strip already uses for its inactive tabs, never the fainter `--text-tertiary`.
+                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-secondary)'),
               }}
             >{panelIconFor(id, 12, selected.harness)}{panelTitle(id, pt)}{hot ? ` — ${pt ? 'sob pressão' : 'under pressure'}` : ''}</button>
           )
