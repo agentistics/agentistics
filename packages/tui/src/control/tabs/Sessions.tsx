@@ -1801,9 +1801,15 @@ export function Sessions({
           onDone={result => {
             setAsk(null)
             // A successful ATTACHED start is the same handover `enter` performs — the screen reports
-            // the intent and the shell releases the terminal.
+            // the intent and the shell releases the terminal. The override note (if this was forced
+            // through a refused memory check) has nowhere else to go on this path — the attach
+            // sentence is composed elsewhere — so it is folded into the ONE thing the status line
+            // shows on the way back from a background start.
             if (result.ok && result.ticket) return onExit({ kind: 'attach', ticket: result.ticket })
-            void run(async () => ({ ok: result.ok, message: result.message })).then(onRefreshFleet)
+            const message = result.overridden && result.note
+              ? `${result.message} ${result.note}`
+              : result.message
+            void run(async () => ({ ok: result.ok, message })).then(onRefreshFleet)
           }}
         />
       </Box>

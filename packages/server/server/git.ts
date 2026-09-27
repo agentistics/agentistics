@@ -282,7 +282,7 @@ export async function gcGitStatsCache(cutoffMs: number): Promise<number> {
   return (await disk()).gc(cutoffMs)
 }
 
-interface Memo<T> { at: number; value: T }
+export interface Memo<T> { at: number; value: T }
 const toplevelMemo = new Map<string, Memo<string | undefined>>()
 const statsMemo = new Map<string, Memo<ProjectGitStats | undefined>>()
 const statsInflight = new Map<string, Promise<ProjectGitStats | undefined>>()
@@ -291,6 +291,37 @@ function memoRead<T>(memo: Map<string, Memo<T>>, key: string): { hit: true; valu
   const entry = memo.get(key)
   if (!entry || Date.now() - entry.at >= STATS_TTL_MS) return { hit: false }
   return { hit: true, value: entry.value }
+}
+
+/** Delete every entry older than `ttlMs`; returns how many went. Pure over the map it is given.
+ *
+ *  `memoRead` IGNORES an expired entry but nothing ever REMOVED one, so both memos only grew:
+ *  `statsMemo` is keyed on the HEAD sha, so every commit on every repository added a row for the
+ *  life of the process, and `toplevelMemo` gains a key for every directory the workspace fallback
+ *  has ever probed — a session filed under `/tmp` has every subdirectory of `/tmp` probed, and
+ *  `/tmp` gains new ones all day (measured 17988 -> 18446 over 60 builds with nothing appended; the
+ *  new keys were `/tmp/pw-…`, `/tmp/playwright-artifacts-…`, `/tmp/com.google.Chrome.…`). Sweeping expired
+ *  rows bounds each memo to what was touched inside one TTL, which is exactly what it can serve. */
+export function sweepExpired<T>(memo: Map<string, Memo<T>>, nowMs: number, ttlMs: number): number {
+  let dropped = 0
+  for (const [key, entry] of memo) {
+    if (nowMs - entry.at >= ttlMs) { memo.delete(key); dropped++ }
+  }
+  return dropped
+}
+
+/** At most one sweep per minute: a sweep is a walk of every row, and writes come in bursts. */
+const SWEEP_EVERY_MS = 60_000
+let lastSweepMs = 0
+
+function memoWrite<T>(memo: Map<string, Memo<T>>, key: string, value: T): void {
+  const now = Date.now()
+  if (now - lastSweepMs >= SWEEP_EVERY_MS) {
+    lastSweepMs = now
+    sweepExpired(toplevelMemo, now, STATS_TTL_MS)
+    sweepExpired(statsMemo, now, STATS_TTL_MS)
+  }
+  memo.set(key, { at: now, value })
 }
 
 /** Drop the IN-PROCESS memos. The disk rows are deliberately left: they are keyed on immutable
@@ -356,7 +387,7 @@ async function resolveToplevel(projectPath: string): Promise<string | undefined>
   } catch {
     value = undefined
   }
-  toplevelMemo.set(projectPath, { at: Date.now(), value })
+  memoWrite(toplevelMemo, projectPath, value)
   return value
 }
 
@@ -453,18 +484,18 @@ async function statsForRepoRoot(toplevel: string, sinceIso?: string): Promise<Pr
     // about this commit. Promoted into the in-process memo so the next read costs no query.
     const stored = (await disk()).get(key)
     if (stored) {
-      statsMemo.set(key, { at: Date.now(), value: stored.value })
+      memoWrite(statsMemo, key, stored.value)
       return stored.value
     }
     return walkRepoStats(toplevel, sinceIso)
   })()
     .then(value => {
-      statsMemo.set(key, { at: Date.now(), value })
+      memoWrite(statsMemo, key, value)
       void disk().then(c => c.set(key, value)).catch(() => {})
       return value
     })
     .catch(() => {
-      statsMemo.set(key, { at: Date.now(), value: undefined })
+      memoWrite(statsMemo, key, undefined)
       return undefined
     })
     .finally(() => { statsInflight.delete(key) })

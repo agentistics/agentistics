@@ -34,8 +34,11 @@ import {
 import {
   credentialStatus,
   removeCredential,
+  resolveCredential,
   storeCredential,
 } from './provider/credentials.ts'
+import type { ProviderClient } from './provider/client.ts'
+import type { Journal } from './journal/types'
 
 /** Inferred from the function itself rather than a separately named exported type — this module
  *  depends only on `credentials.ts`'s function SIGNATURES, never on how it happens to name its
@@ -71,6 +74,14 @@ export interface ProviderCliDeps {
   /** Key-directory override, threaded straight through to `credentials.ts`. `undefined` means
    *  "use the real `PROVIDER_KEYS_DIR`" — tests pass a temp directory here. */
   dir?: string
+  /** `try` only: the client that makes the call. Default is the real Anthropic client, built over
+   *  the stored key in `dir`. Tests inject a stub so `bun test` never spends money. */
+  client?: ProviderClient
+  /** `try` only: opens the journal the call is recorded in. Default `openJournal()` (the machine's
+   *  journal, `AGENTISTICS_DIR`). A failure to open is not a failure of the call. */
+  openJournal?: () => Promise<Journal | null>
+  /** `try` only: where the raw capture is written. Default is `capture.ts`'s own directory. */
+  captureDir?: string
 }
 
 async function defaultIsCentral(): Promise<boolean> {
@@ -291,14 +302,170 @@ async function runRemove(rest: string[], d: ProviderCliDeps): Promise<number> {
 // Help
 // ---------------------------------------------------------------------------
 
+// ── `try` — the first real call (B1.7) ──────────────────────────────────────────────────────────
+
+/** The cheapest current Anthropic model in the price table — the first call should cost as little
+ *  as it can while still being a real one. `--model` overrides it. */
+export const TRY_DEFAULT_MODEL = 'claude-haiku-4-5-20251001'
+/** Fixed on purpose: not a flag, so no invocation of this verb can ask for a large answer.
+ *  Spec §6.6 — the first-call verb uses a fixed tiny prompt with `max_tokens ≤ 64`. */
+export const TRY_PROMPT = 'Reply with the single word: ok'
+export const TRY_MAX_TOKENS = 16
+
+const TRY_USAGE = 'usage: agentop provider try anthropic [--model <id>]'
+
+type TryParse =
+  | { kind: 'ok'; provider: string; model: string }
+  | { kind: 'usage' }
+  | { kind: 'unknown-flag' }
+
+function parseTryArgs(rest: string[]): TryParse {
+  if (rest.length === 0 || rest[0]!.startsWith('-')) return { kind: 'usage' }
+  const provider = rest[0]!
+  let model = TRY_DEFAULT_MODEL
+  for (let i = 1; i < rest.length; i++) {
+    const tok = rest[i]!
+    if (tok === '--model') {
+      const v = rest[++i]
+      if (v === undefined || v.startsWith('-') || v.length === 0) return { kind: 'usage' }
+      model = v
+      continue
+    }
+    if (tok.startsWith('--model=')) {
+      const v = tok.slice('--model='.length)
+      if (v.length === 0) return { kind: 'usage' }
+      model = v
+      continue
+    }
+    if (tok.startsWith('-')) return { kind: 'unknown-flag' }
+    return { kind: 'usage' }
+  }
+  return { kind: 'ok', provider, model }
+}
+
+const COUNTERS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+
+async function defaultOpenJournal(): Promise<Journal | null> {
+  const { openJournal } = await import('./journal/journal')
+  return openJournal()
+}
+
+/**
+ * One attempt, no retry: a smoke test that quietly re-sent a billable call would spend more than
+ * the owner authorised. The retry loop (`retry.ts`) is the runtime's, not this verb's.
+ *
+ * Order matters and is the emitter's contract: `model.invoked` is appended BEFORE the request
+ * leaves, so a crash mid-call still leaves a record that a billable call was outstanding.
+ */
+async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
+  if (rest[0] === '--help') { d.stdout(TRY_USAGE); return 0 }
+  const parsed = parseTryArgs(rest)
+  if (parsed.kind === 'usage') { d.stderr(TRY_USAGE); return 2 }
+  if (parsed.kind === 'unknown-flag') { d.stderr('unknown flag — see `agentop provider try --help`'); return 2 }
+  if (!isKeyedProvider(parsed.provider)) { d.stderr(unknownProviderMessage()); return 2 }
+
+  if (!d.flagOn()) { d.stderr(refusalSentence('flag-off')); return 1 }
+  if (await d.isCentral()) { d.stderr(refusalSentence('central')); return 1 }
+
+  // Refuse BEFORE anything is journaled: a call that cannot be made must not leave a
+  // `model.invoked` claiming a billable request was outstanding.
+  const cred = await resolveCredential('anthropic', { dir: d.dir })
+  if (!cred.ok) {
+    d.stderr(
+      cred.reason === 'absent'
+        ? 'no key stored — run `agentop provider key set anthropic` first.'
+        : `the stored key cannot be used (${cred.reason}) — see \`agentop provider key status anthropic\`.`,
+    )
+    return 1
+  }
+
+  const [{ createAnthropicClient }, { createProviderEmitter, invokedEvent, terminalEvent }] = await Promise.all([
+    import('./provider/anthropic/client.ts'),
+    import('./provider/emit.ts'),
+  ])
+  const client = d.client ?? createAnthropicClient({
+    resolver: { resolve: (ref) => ref.provider === 'anthropic'
+      ? resolveCredential('anthropic', { dir: d.dir })
+      : Promise.resolve({ ok: false as const, reason: 'wrong-provider' as const }) },
+    ...(d.captureDir === undefined ? {} : { captureDir: d.captureDir }),
+  })
+
+  let journal: Journal | null = null
+  try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
+
+  const emitter = createProviderEmitter({ journal, adapterVersion: client.adapterVersion })
+  const invocationId = `inv_${crypto.randomUUID().replaceAll('-', '')}`
+  const attempt = 1
+  const startedAt = new Date().toISOString()
+
+  const start = { invocationId, attempt, provider: 'anthropic' as const, requestedModel: parsed.model, startedAt }
+  d.stdout(`anthropic: one call to ${parsed.model} (max_tokens ${TRY_MAX_TOKENS}) — this is billed to your account.`)
+  await emitter.invoked(start)
+
+  const result = await client.invokeOnce({
+    model: parsed.model,
+    messages: [{ role: 'user', content: TRY_PROMPT }],
+    maxTokens: TRY_MAX_TOKENS,
+    correlation: { invocationId },
+    credential: { provider: 'anthropic', id: 'default' },
+  }, attempt)
+
+  const outcome = result.status === 'completed'
+    ? {
+        status: 'completed' as const, ...start, latencyMs: result.latencyMs,
+        ...(result.requestId === undefined ? {} : { requestId: result.requestId }),
+        messageId: result.messageId, servedModel: result.servedModel, usage: result.usage, stopReason: result.stopReason,
+      }
+    : {
+        status: 'failed' as const, ...start, latencyMs: result.latencyMs,
+        ...(result.requestId === undefined ? {} : { requestId: result.requestId }),
+        error: result.error,
+      }
+  const terminalAt = new Date().toISOString()
+  const terminalResult = await emitter.terminal(outcome, {}, terminalAt)
+
+  const ctx = { adapterVersion: client.adapterVersion, recordedAt: terminalAt }
+  const invokedId = invokedEvent(start, {}, ctx).eventId
+  const terminal = terminalEvent(outcome, {}, ctx, terminalAt)
+
+  const lost = emitter.counters().lost
+  const journaled = journal !== null && lost['model.invoked'] === 0 && terminalResult !== null && lost[terminal.type] === 0
+
+  if (result.status === 'failed') {
+    d.stderr(`the call failed: ${result.error.kind} (${result.error.retryable ? 'retryable' : 'not retryable'}).`)
+    if (result.requestId !== undefined) d.stderr(`  request-id: ${result.requestId}`)
+    d.stderr(`  recorded as ${terminal.type}: ${terminal.eventId}${journaled ? '' : ' (NOT journaled)'}`)
+    return 1
+  }
+
+  const u = result.usage
+  const missing = new Set(u.missing ?? [])
+  d.stdout(`  served model: ${result.servedModel}`)
+  d.stdout(`  message id: ${result.messageId === '' ? '(none stated)' : result.messageId}`)
+  d.stdout(`  request-id: ${result.requestId ?? '(none stated)'}`)
+  for (const c of COUNTERS) d.stdout(`  ${c}: ${missing.has(c) ? 'not reported by the provider' : u[c]}`)
+  d.stdout(`  stop: ${result.stopReason.kind}`)
+  d.stdout(`  latency: ${Math.round(result.latencyMs)} ms`)
+  if (result.capture) d.stdout(`  raw capture: sha256:${result.capture.sha256} (${result.capture.bytes} bytes)`)
+  d.stdout(`  ${invokedEvent(start, {}, ctx).type}: ${invokedId}`)
+  d.stdout(`  ${terminal.type}: ${terminal.eventId}`)
+  d.stdout(journaled ? '  journaled: yes' : `  journaled: NO (lost: ${JSON.stringify(lost)}) — the call succeeded but is not on record.`)
+  return journaled ? 0 : 1
+}
+
 const HELP = `
 Usage: agentop provider key <set|status|remove> [options]
+       agentop provider try anthropic [--model <id>]
 
   agentop provider key set anthropic            Hidden prompt (default) — nothing is echoed
   agentop provider key set anthropic --stdin    Read ONE line from a pipe; no prompt
   agentop provider key set anthropic --replace  With --stdin, allow overwriting a stored key
   agentop provider key status [anthropic]       Presence + fingerprint — never the key itself
   agentop provider key remove anthropic         Delete the stored key (does not revoke it)
+  agentop provider try anthropic [--model <id>] ONE real, billed call with a fixed tiny prompt
+                                                (max_tokens 16); records it in the journal and
+                                                prints usage, request-id and the event ids. Set a
+                                                spend limit in the Anthropic console first.
 
 The key is NEVER accepted on the command line, in ANY position — not as an argument, not in a
 flag. A value on argv lands in shell history and in \`/proc/<pid>/cmdline\`, readable by any
@@ -332,6 +499,15 @@ export async function runProvider(args: string[], deps: Partial<ProviderCliDeps>
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     d.stdout(HELP)
     return 0
+  }
+
+  if (args[0] === 'try') {
+    try {
+      return await runTry(args.slice(1), d)
+    } catch (err) {
+      d.stderr(`unexpected error: ${err instanceof Error ? err.message : String(err)}`)
+      return 1
+    }
   }
 
   if (args[0] !== 'key') {

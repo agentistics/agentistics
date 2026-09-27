@@ -357,3 +357,52 @@ describe('event ids are keyed on providerRequestId, ignoring sourceRef (O-8)', (
     expect(completed.provenance.sourceRef).toBe(invoked.provenance.sourceRef)
   })
 })
+
+// ---- D21: a counter the transcript did not report is ABSENT, never 0 ---------------------------
+
+describe('D21 — an absent transcript usage counter stays absent', () => {
+  function completedFrom(usage: Record<string, unknown>): AgentisticsEvent<'model.completed'> {
+    const out: AgentisticsEvent[] = []
+    const s = emptyModelFold()
+    const emit: EmitEvent = e => { out.push(e) }
+    foldModelEntry(s, ctx, {
+      type: 'assistant', timestamp: '2026-01-01T00:00:01.000Z',
+      message: { id: 'msg_d21', model: 'claude-opus-5', usage },
+    }, 1, emit)
+    finishModelFold(s, ctx, true, emit)
+    return out.find(e => e.type === 'model.completed') as AgentisticsEvent<'model.completed'>
+  }
+
+  it('a missing key is absent from the event, and the reported ones are kept as reported', () => {
+    const e = completedFrom({ input_tokens: 5, output_tokens: 7, cache_creation_input_tokens: 11 })
+    expect(e.data.usage).toEqual({ input: 5, output: 7, cacheWrite: 11 })
+    expect('cacheRead' in e.data.usage).toBe(false)
+  })
+
+  it('a value that is not a finite non-negative number is absent too — it was not reported usably', () => {
+    const e = completedFrom({ input_tokens: 'x', output_tokens: -1, cache_read_input_tokens: 3, cache_creation_input_tokens: 0 })
+    expect(e.data.usage).toEqual({ cacheRead: 3, cacheWrite: 0 })
+  })
+
+  it('a reported zero is a real zero, not an absence', () => {
+    const e = completedFrom({ input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
+    expect(e.data.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+  })
+
+  it('the context gauge is not built from a missing input-side term', () => {
+    expect(completedFrom({ input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 100 }).data.contextTokens).toBeUndefined()
+    expect(completedFrom({ input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: 2 }).data.contextTokens).toBe(107)
+  })
+
+  it('the LAST record of an id wins, absences included — a counter from an earlier line is not carried forward', () => {
+    const out: AgentisticsEvent[] = []
+    const s = emptyModelFold()
+    const emit: EmitEvent = e => { out.push(e) }
+    const line = (usage: Record<string, unknown>) => ({ type: 'assistant', timestamp: '2026-01-01T00:00:01.000Z', message: { id: 'msg_lw', model: 'claude-opus-5', usage } })
+    foldModelEntry(s, ctx, line({ input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }), 1, emit)
+    foldModelEntry(s, ctx, line({ input_tokens: 1, output_tokens: 9 }), 2, emit)
+    finishModelFold(s, ctx, true, emit)
+    const c = out.find(e => e.type === 'model.completed') as AgentisticsEvent<'model.completed'>
+    expect(c.data.usage).toEqual({ input: 1, output: 9 })
+  })
+})

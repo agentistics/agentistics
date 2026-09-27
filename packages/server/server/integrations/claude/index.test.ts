@@ -86,7 +86,7 @@ describe('replay — from a null cursor', () => {
     const batch = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, null)
 
     expect(typesOf(batch.events)).toEqual([
-      'session.started', 'run.started', 'agent.started',
+      'session.started', 'run.started', 'agent.started', 'turn.started',
       'model.invoked', 'model.completed',
       'agent.ended', 'run.ended', 'session.ended',
     ])
@@ -124,7 +124,7 @@ describe('replay — resuming from a cursor reads only what is new', () => {
 
     const replay = createClaudeReplay({ projectsDir, settledMs: 60 * 60_000 })
     const first = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, null)
-    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started', 'turn.started'])
 
     await appendFile(file, assistantLine('m2', '2026-01-01T00:00:02.000Z'))
     const second = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, first.cursor)
@@ -150,7 +150,7 @@ describe('replay — resuming from a cursor reads only what is new', () => {
     // "another process". It must still work, at the cost of re-emitting from the start.
     const second = createClaudeReplay({ projectsDir, settledMs: 60 * 60_000 })
     const batch2 = await second.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, batch1.cursor)
-    expect(typesOf(batch2.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(batch2.events)).toEqual(['session.started', 'run.started', 'agent.started', 'turn.started'])
   })
 })
 
@@ -161,7 +161,7 @@ describe('replay — a partial trailing line is never consumed', () => {
 
     const replay = createClaudeReplay({ projectsDir, settledMs: 60 * 60_000 })
     const first = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, null)
-    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started', 'turn.started'])
 
     const nextLine = assistantLine('m1', '2026-01-01T00:00:01.000Z')
     await appendFile(file, nextLine.slice(0, Math.floor(nextLine.length / 2)))
@@ -188,7 +188,7 @@ describe('replay — a rewrite is never resumed', () => {
 
     const replay = createClaudeReplay({ projectsDir, settledMs: 60 * 60_000 })
     const first = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, null)
-    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(first.events)).toEqual(['session.started', 'run.started', 'agent.started', 'turn.started'])
 
     const rewritten = original.replace('/repo', '/REPO')
     expect(rewritten.length).toBe(original.length)
@@ -197,7 +197,7 @@ describe('replay — a rewrite is never resumed', () => {
 
     const second = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, first.cursor)
     // A full re-read opens the session again, from scratch, with the NEW cwd.
-    expect(typesOf(second.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(second.events)).toEqual(['session.started', 'run.started', 'agent.started', 'turn.started'])
     expect((second.events[0]!.data as { projectPath?: string }).projectPath).toBe('/REPO')
   })
 
@@ -213,7 +213,8 @@ describe('replay — a rewrite is never resumed', () => {
     // can tell the two apart from a same-length rewrite.
     await writeFile(file, userLine('2026-01-01T00:00:00.000Z', { cwd: '/rewritten' }) + original)
     const second = await replay.replay({ sessionId: 'conv-1', sourceRef: 'claude:conv-1' }, first.cursor)
-    expect(typesOf(second.events)).toEqual(['session.started', 'run.started', 'agent.started'])
+    expect(typesOf(second.events)).toEqual(
+      ['session.started', 'run.started', 'agent.started', 'turn.started', 'turn.started'])
     expect((second.events[0]!.data as { projectPath?: string }).projectPath).toBe('/rewritten')
   })
 })

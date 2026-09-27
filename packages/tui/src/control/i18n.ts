@@ -607,6 +607,12 @@ export interface ControlStrings {
   wizNeedCwd: string
   wizAttached: string
   wizBackground: string
+  /**
+   * Offered ONLY after a spawn was refused by the memory budget — a THIRD row on the "how" step, in
+   * words rather than a hidden key, so the choice to override is discoverable and not merely a
+   * shortcut somebody has to already know. See `spawn-admission.ts`.
+   */
+  wizStartAnyway: string
   wizSkip: string
   wizNoMatch: string
   /** The project table's column headings — four unlabelled columns are four columns of guesswork. */
@@ -1273,6 +1279,7 @@ const EN: ControlStrings = {
   wizNeedCwd: 'pick a folder first.',
   wizAttached: 'attached — take this terminal now',
   wizBackground: 'background — keep it running and stay here',
+  wizStartAnyway: 'start anyway — ignore the memory check',
   wizSkip: 'use the default',
   wizNoMatch: 'nothing matches — paste a full path to use a directory anywhere on this machine',
   wizColName: 'folder',
@@ -1843,6 +1850,7 @@ const PT: ControlStrings = {
   wizNeedCwd: 'escolha uma pasta primeiro.',
   wizAttached: 'anexada — assume este terminal agora',
   wizBackground: 'background — deixa rodando e fica aqui',
+  wizStartAnyway: 'iniciar mesmo assim — ignorar a verificação de memória',
   wizSkip: 'usar o padrão',
   wizNoMatch: 'nada corresponde — cole um caminho completo para usar um diretório sem histórico',
   wizColName: 'pasta',

@@ -18,8 +18,12 @@ import { controlStrings, sessionWordBook } from '@agentistics/tui/control/i18n'
 import { wrapText } from '@agentistics/tui/control/surface'
 import { parseSessionArgs, LS_DEFAULT, type SessionCommand } from './cli-parse'
 import { cliStrings } from '../cli-i18n'
-import { resolveLang } from '../cli-lang'
+import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
+import {
+  admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusalBody, type Admission,
+} from './spawn-admission'
+import { readSpawnBudget } from './memory-probe'
 import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
@@ -62,7 +66,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -75,11 +79,15 @@ const USAGE = `Usage:
   sections. \`list\` stays the tab-separated dump a script can read line by line; both take
   \`--json\` and print the same data.
 
+  \`--force\` starts anyway when this machine cannot hold another assistant session (see the
+  memory gate below) — every verb that starts or reopens a process takes it, and it never fails
+  silently: the check that was overridden is printed regardless.
+
 Orchestrating several at once — the form an assistant should use:
 
   agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] \\
-                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--json]
-  agentop session open  "<task>" [--json]
+                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--json] [--force]
+  agentop session open  "<task>" [--json] [--force]
   agentop session list  [--json]
 
   \`batch\` starts every session detached and files them all under one task, so \`open\` brings the
@@ -94,7 +102,11 @@ Orchestrating several at once — the form an assistant should use:
       --session "codex: port the tests" \\
       --session "gemini: review the migration"
 
-Harnesses that can be started: ${STARTABLE.join(', ')}`
+Harnesses that can be started: ${STARTABLE.join(', ')}
+
+Memory gate: before starting (or reopening) a session, agentop checks whether this machine has
+room for it — a refusal names how many WOULD fit and exits non-zero without starting anything.
+\`--force\` starts anyway; a machine that cannot be measured (no /proc) is never refused.`
 
 /**
  * A reconciled row as `resolveSessionRef` needs it. Unlike the registry alone, this includes
@@ -118,6 +130,23 @@ function explainPlanError(e: SpawnPlanError): string {
   }
 }
 
+/**
+ * The memory gate's console output, shared by every verb that starts or reopens a process — a
+ * single spawn, a whole batch, or a task reopen — so a refusal reads the same sentence wherever it
+ * happens. Returns `true` when the caller must stop: nothing below this point may spawn, register
+ * or retire anything. `--force` never overrides silently (`admissionOverrideNote`), and an
+ * unmeasured machine (`admission.unmeasured`) prints nothing here — see spawn-admission.ts.
+ */
+function reportAdmission(admission: Admission, lang: CliLang, json: boolean): boolean {
+  if (!admission.admit) {
+    if (json) console.log(JSON.stringify(admissionRefusalBody(admission.refusal, lang), null, 2))
+    else console.error(admissionMessage(admission.refusal, lang))
+    return true
+  }
+  if (admission.overridden) console.error(admissionOverrideNote(admission, lang))
+  return false
+}
+
 export async function runSession(argv: string[]): Promise<number> {
   const cmd = parseSessionArgs(argv)
   if (cmd.kind === 'help') { console.log(USAGE); return 0 }
@@ -130,7 +159,7 @@ export async function runSession(argv: string[]): Promise<number> {
   switch (cmd.kind) {
     case 'start': return start(cmd, backend)
     case 'batch': return batch(cmd, backend)
-    case 'open': return openTask(cmd.task, cmd.json ?? false, backend)
+    case 'open': return openTask(cmd.task, cmd.json ?? false, cmd.force ?? false, backend)
     case 'list': return list(backend, cmd.json ?? false)
     case 'ls': return ls(cmd, backend)
     case 'attach': return attach(cmd.ref, backend)
@@ -206,6 +235,15 @@ async function start(
     conversationId: randomUUID(),
   })
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
+
+  // The memory GATE, before anything is registered or launched — `requested: 1` is this one
+  // process. A refusal here means nothing below this point runs: no id is minted, no row is
+  // written, nothing is spawned. `--force` still goes through this check, so the override note
+  // is printed from the SAME place a plain refusal would have been.
+  const lang = await resolveLang()
+  if (reportAdmission(
+    admitSpawn(await readSpawnBudget(), 1, { force: cmd.force ?? false }), lang, cmd.json ?? false,
+  )) return 1
 
   const id = newSessionId()
   // Stamped BEFORE the process is launched, not after it has been checked for a crash.
@@ -368,6 +406,16 @@ async function batch(
   const started: Array<{ id: string; harness: string; cwd: string }> = []
   const failed: Array<{ harness: string; reason: string }> = []
 
+  // The memory GATE, for the WHOLE batch — `requested` is every session it asks for, and a batch
+  // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
+  // is a plan nobody approved). Refused BEFORE the task book is even touched, so a refused batch
+  // creates no task, no attempt, and spawns nothing.
+  const lang = await resolveLang()
+  if (reportAdmission(
+    admitSpawn(await readSpawnBudget(), cmd.specs.length, { force: cmd.force ?? false }),
+    lang, cmd.json ?? false,
+  )) return 1
+
   // The task book, resolved BEFORE the first spawn: the ids are stamped on the rows, and a row
   // started before its task existed would carry a name and no id — the unattributed case
   // `task-rollup.ts` has to report as a hole. Best effort: a book that cannot be written costs the
@@ -458,7 +506,7 @@ async function batch(
 }
 
 /** `agentop session open "<task>"` — reopen every session of a task, detached. */
-async function openTask(task: string, json: boolean, backend: SessionBackend): Promise<number> {
+async function openTask(task: string, json: boolean, force: boolean, backend: SessionBackend): Promise<number> {
   const wanted = (await readRegistry()).filter(m => m.task === task)
   if (wanted.length === 0) {
     console.error(`No sessions are filed under "${task}".`)
@@ -496,6 +544,18 @@ async function openTask(task: string, json: boolean, backend: SessionBackend): P
       return { sessionId: conv.sessionId, title: conv.title }
     },
   })
+
+  // The memory GATE, for the WHOLE reopen — `requested` is only `plan.reopen`, the rows this call
+  // would actually SPAWN, never `plan.already` or `plan.heldElsewhere`, which cost nothing (nothing
+  // new starts for them). Skipped entirely when there is nothing left to start: `admitSpawn` treats
+  // a `requested` of zero as a caller bug, not as "nothing to admit", and a task that is already
+  // fully running has no business being refused for memory it does not need.
+  if (plan.reopen.length > 0) {
+    const lang = await resolveLang()
+    if (reportAdmission(
+      admitSpawn(await readSpawnBudget(), plan.reopen.length, { force }), lang, json,
+    )) return 1
+  }
 
   const started: string[] = []
   const skipped: string[] = [...plan.skipped]
@@ -812,6 +872,11 @@ async function attach(ref: string, backend: SessionBackend): Promise<number> {
  * Not claude-specific: the two steps are the same everywhere, and `planSpawn` already knows which
  * harnesses can resume by id at all. Today only claude publishes a live-session list to search
  * (`claude agents --json`); the day another does, it joins the search and nothing else changes.
+ *
+ * **Deliberately NOT gated by the memory check.** This is a takeover, not a net-new spawn: the
+ * holder process is killed (below) before the replacement is started, so the machine never carries
+ * both at once and the memory cost is zero, not +1. Gating it would refuse a swap that frees the
+ * exact memory it would need.
  */
 async function takeOver(ref: string, backend: SessionBackend): Promise<number | null> {
   const live = await liveAgentFor(ref)
