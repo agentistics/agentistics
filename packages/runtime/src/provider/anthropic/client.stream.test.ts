@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetCaptureCounters } from '../capture.ts'
+import { decideRetry } from '@agentistics/core'
 import { anthropicCounters, createAnthropicClient, resetAnthropicCounters, streamOnce } from './client.ts'
 import type { CredentialHandle, CredentialResolver } from '../credential.ts'
 import type { InvocationResult, ProviderRequest, ProviderStreamEvent } from '../client.ts'
@@ -232,6 +233,15 @@ describe('anthropic/client.ts — streamOnce against a stub streaming fetch (no 
     expect(result.requestId).toBe('req_stream_1')
     expect(stub.calls()).toBe(1)
     expect(readCapture(result.capture).body).toBe(ERROR)
+  })
+
+  test('an in-band overloaded_error mid-stream is NOT retried, though its kind is retryable (leader decision 2026-09-27)', async () => {
+    const result = endOf(await collect(streamOnce(baseRequest(), 1, deps(streamingFetch(ERROR)))))
+    expect(result.status).toBe('failed')
+    if (result.status !== 'failed') return
+    // The kind alone would retry; the possibly-billed outcome is what refuses it.
+    expect(result.error.retryable).toBe(true)
+    expect(decideRetry({ attempt: 1, elapsedMs: 0, error: result.error })).toEqual({ retry: false, reason: 'ambiguous-outcome' })
   })
 
   test('a body that closes before message_stop → failed network, usage unknown, captured as far as it got', async () => {

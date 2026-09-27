@@ -19,6 +19,16 @@
  * retryable (e.g. a `network` failure where the capturing fetch could not tell whether the request
  * left) and still be refused here because its BILLING state, not its retryability, is what is
  * unknown.
+ *
+ * THE SAME RULE COVERS A STREAM THAT FAILS IN-BAND (B2, leader decision 2026-09-27). A streamed
+ * response can fail AFTER it began: Anthropic sends HTTP 200, streams part of an answer, then an
+ * `event: error` (e.g. `overloaded_error`). The status table classifies that kind as retryable —
+ * which is right for a 529 that was refused before any work — but here the provider had already
+ * accepted the request and may have billed the tokens it produced, and no final usage was stated.
+ * The stream reader therefore reports `usageOutcome: 'unknown'`, and check 2 below refuses it
+ * exactly like the timeout case: retrying would risk a second charge for one question. No new
+ * branch is needed, and none is added — a separate "in-band" check would be a second place to
+ * decide the same thing.
  */
 
 import type { ProviderError } from './errors'
