@@ -379,7 +379,16 @@ export function SessionPanel({
       </header>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        // FLOATING-PANELS DESIGN (`sdd/brief.md`, region 2 — the conversation) — desktop only: this
+        // box is now its OWN panel, separate from the bottom band below it (that one carries its
+        // own border, via the Fragment split in `StudioBand`/`SimpleDockedBand`/`ShellBand`). Mobile
+        // is untouched — a phone's screens run edge to edge, and a rounded inset here would just
+        // clip the composer against the curve for no visual gain, the same reasoning
+        // `SessionsPage.tsx`'s old `CENTRAL_PANE` comment already gave for skipping `isMobile`.
+        ...(isMobile ? {} : { border: '1px solid var(--border)', borderRadius: 10 }),
+      }}>
         {/* KEYED BY THE SESSION, and this is a correctness fix rather than a hint to React.
             Without it the same instance is reused when `session` changes, so every piece of state
             that is READ ONCE AT MOUNT belongs to whichever session was open first: the draft

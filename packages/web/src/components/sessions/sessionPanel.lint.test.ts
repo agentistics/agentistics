@@ -69,7 +69,7 @@ describe('StudioBand — the content box is a direct, un-wrapped flex item of th
     // hide the content in full screen or show a handle with nothing left to negotiate a height for.
     const contentAt = body.indexOf('{open && (')
     expect(contentAt).toBeGreaterThan(-1)
-    const handleAt = body.indexOf('{open && !fullscreen && (')
+    const handleAt = body.indexOf('{!fullscreen && (')
     expect(handleAt).toBeGreaterThan(-1)
     expect(handleAt).toBeLessThan(contentAt)
   })
@@ -181,8 +181,12 @@ describe('the fullscreen overlay respects the artifacts aside (I2)', () => {
   })
 
   test('the scan still sees `inset: 0` reintroduced on a fullscreen branch', () => {
+    // Indentation shifted by the floating-panels fragment split (`sdd/brief.md`) — the fullscreen
+    // branch now sits one level deeper (inside the Fragment's bordered-box `<div>`), so this
+    // planted string matches on CONTENT, via a whitespace-insensitive regex, rather than an exact
+    // literal that would need re-editing on every re-indent.
     const planted = SRC.replace(
-      "position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,\n          right: fullscreenInsetRight(rightAsideEdge, viewportWidth, isMobile ? 0 : railWidth),\n          zIndex: PANEL_FULLSCREEN_Z,",
+      /position: 'fixed', top: 0, left: leftAsideEdge, bottom: 0,\s*right: fullscreenInsetRight\(rightAsideEdge, viewportWidth, isMobile \? 0 : railWidth\),\s*zIndex: PANEL_FULLSCREEN_Z,/,
       "position: 'fixed', inset: 0, zIndex: PANEL_FULLSCREEN_Z,",
     )
     expect(planted).toMatch(/position: 'fixed', inset: 0/)

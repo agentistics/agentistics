@@ -27,7 +27,7 @@ import {
   X as XIcon, ArrowRight,
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
-import { ResizeGrip } from '../components/ResizeGrip'
+import { PanelGapDots } from '../components/sessions/PanelGap'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
@@ -2602,6 +2602,16 @@ export default function SessionsPage() {
    *     them be dropped rather than sandwiched.
    */
   const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+  /**
+   * FLOATING-PANELS DESIGN (`sdd/brief.md`) — `SessionPanel` now draws its OWN two panels (the
+   * conversation, then a gap, then the bottom band) with their own borders/radius/overflow-hidden,
+   * because the bottom band moved from being docked INSIDE the conversation's card to being its own
+   * panel below it. So this wrapper must NOT also draw a border around the pair — that would be a
+   * panel drawn around two panels, exactly the nesting the brief forbids. It still draws the border
+   * for every OTHER `centre` (nothing selected → `FleetOverview`; the dedicated terminal route),
+   * which are genuinely a single region and still want the old inset-card treatment.
+   */
+  const centreOwnsItsPanels = panel !== null && !dedicatedTerminal
 
   return (
     <>
@@ -2656,21 +2666,24 @@ export default function SessionsPage() {
         // from this box's edges, and stay inside it under normal use.
         ...(isMobile ? {} : {
           margin: CENTRAL_PANE.gap,
-          border: CENTRAL_PANE.border,
-          borderRadius: CENTRAL_PANE.radius,
-          overflow: 'hidden',
+          ...(centreOwnsItsPanels
+            ? {}
+            : { border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden' }),
         }),
       }}>
         {centre}
       </div>
-      {/* The handle. Four pixels of hit area over a one-pixel rule — the rule is what you see, the
-          area is what you can grab, and matching them makes a divider people miss. It goes with the
-          panel: a grab handle for something that is halfway out of the room resizes nothing.
-          `ResizeGrip` (design item 6) paints the small pill that says so without touching the hit
-          area itself — `.ag-resize-handle` is what gives it something to key its hover/drag state
-          off, in `index.css`. */}
+      {/* THE RIGHT GAP IS THE HANDLE (`sdd/brief.md`) — no painted border of its own any more (that
+          was the doubled divider next to the aside's own left border, screenshot `68381135`): the
+          panel's border plus this gap's three dots are now the ONLY line between the centre column
+          and the artifacts aside. Drag math UNCHANGED (`dragArt`/`shownArtWidth`, above) — only the
+          visual and the hit area moved onto the shared `.ag-panel-gap` grip. */}
         {split && asideIn ? <div
-          className="ag-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={pt ? 'Redimensionar painel lateral' : 'Resize the artifacts aside'}
+          tabIndex={0}
+          className="ag-panel-gap"
           onMouseDown={e => {
             // From the width on screen, not the remembered one: a clamped panel would otherwise
             // jump to its stored width the moment the handle is touched.
@@ -2678,11 +2691,8 @@ export default function SessionsPage() {
             setArtDragging(true)
             document.body.style.userSelect = 'none'
           }}
-          style={{
-            width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent',
-            borderLeft: '1px solid var(--border)',
-          }}
-        ><ResizeGrip orientation="vertical" /></div> : null}
+          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
+        ><PanelGapDots orientation="vertical" /></div> : null}
       {/* THE ONE PANE. See the block comment at the top of this section. */}
       {artShell === 'none' ? null : (
         <div style={artOuter} ref={rightAsideRef}>
