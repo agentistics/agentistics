@@ -82,7 +82,7 @@ export const EXPLANATIONS = {
     + 'counters equals the projected cost exactly',
   emptyTranscript:
     'LEGACY DEFECT: the transcript is 0 bytes and replays to no event; legacy still reports a measured '
-    + '0 (finishClaudeSession writes duration/compactions unconditionally), the projection says nothing',
+    + '0 (finishClaudeSession writes duration/compactions/human-turn counters unconditionally), the projection says nothing',
   apiErrorOnly:
     'LEGACY DEFECT: every usage line of this transcript is a synthetic API-error record with an all-zero '
     + 'cache_creation object; legacy counts it as an observed 0/0 TTL split, the replay emits no response',
@@ -392,9 +392,13 @@ export function compareTime(legacy: SessionMeta, p: SessionMetaProjection): Fiel
     row('time', 'end_time', legacy.end_time || undefined, p.meta.end_time),
     row('time', 'duration_minutes', legacy.duration_minutes, p.meta.duration_minutes),
     np('time', 'active_minutes', legacy.active_minutes),
-    // `rounds` is not a stored SessionMeta field (it is derived from the human turns), so no legacy value is shown.
-    np('time', 'rounds', undefined),
-    np('time', 'user_message_count', legacy.user_message_count),
+    // `rounds` is not a stored SessionMeta field: `task-rollup.ts` derives it as `user_message_count`,
+    // so legacy's side is that rule applied to the legacy meta, and the projection's is its own.
+    row('time', 'rounds', legacy.user_message_count, p.meta.rounds),
+    row('time', 'user_message_count', legacy.user_message_count, p.meta.user_message_count),
+    row('time', 'user_interruptions', legacy.user_interruptions, p.meta.user_interruptions),
+    row('time', 'user_message_timestamps', legacy.user_message_timestamps, p.meta.user_message_timestamps),
+    np('time', 'user_response_times', legacy.user_response_times?.length),
     np('time', 'message_hours', legacy.message_hours?.length),
   ]
   // daily: tokens are projectable per day; messages/hours are not (the human-turn event).
@@ -564,8 +568,16 @@ export function compareTools(
   return out
 }
 
-/** The fields legacy writes as a measured 0 even when it walked no line at all. */
-const EMPTY_ZERO_FIELDS = new Set(['duration_minutes', 'compact_count', 'compact_ms'])
+/**
+ * The fields legacy writes as a measured 0 (or an empty list) even when it walked no line at all —
+ * `finishClaudeSession` writes the human-turn counters unconditionally, the M-3 guard covers only
+ * the compactions.
+ */
+const EMPTY_ZERO_FIELDS = new Set([
+  'duration_minutes', 'compact_count', 'compact_ms',
+  'rounds', 'user_message_count', 'user_interruptions', 'user_message_timestamps',
+])
+const emptyMeasurement = (v: unknown): boolean => v === 0 || (Array.isArray(v) && v.length === 0)
 
 /** PURE. Every row for one session. */
 export function compareSession(input: {
@@ -582,7 +594,7 @@ export function compareSession(input: {
   ]
   if (evidence?.mainBytes === 0 && projection.eventsFolded === 0) {
     for (const r of rows) {
-      if (r.verdict === 'bug' && EMPTY_ZERO_FIELDS.has(r.field) && r.legacy === 0 && r.projected === undefined) {
+      if (r.verdict === 'bug' && EMPTY_ZERO_FIELDS.has(r.field) && emptyMeasurement(r.legacy) && r.projected === undefined) {
         r.verdict = 'explained'
         r.reason = EXPLANATIONS.emptyTranscript
       }

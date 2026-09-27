@@ -67,12 +67,20 @@ import { contextOfUsage } from '../../jsonl'
 import type { ModelCompletedData, ModelFailedData, ModelInvokedData } from '@agentistics/core'
 import { type ClaudeReplayContext, type EmitEvent, lineRef, makeEvent, num, str } from './replay-core'
 
-/** `message.usage`, flattened to primitives at read time — see the header on `cloneModelFold`. */
+/**
+ * `message.usage`, flattened to primitives at read time — see the header on `cloneModelFold`.
+ *
+ * The four counters are OPTIONAL (D21, 2026-09-26): a counter the transcript did not report — the key
+ * missing, or a value that is not a finite non-negative number — is ABSENT here and absent on the
+ * emitted `model.completed`, never a 0. `num()` used to turn each into a 0, which every surface that
+ * sums the counters would then have read as a measured zero. Latent on this machine (0 of 189.377
+ * assistant usage lines lack a key, B1.7a), and a correct answer the day a harness version drops one.
+ */
 interface RawUsage {
-  input_tokens: number
-  output_tokens: number
-  cache_read_input_tokens: number
-  cache_creation_input_tokens: number
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
   /** Whether `usage.cache_creation` existed AT ALL — `cacheWriteByTtl` is gated on this, not on the two fields being non-zero. */
   hasCacheCreation: boolean
   ephemeral5m: number
@@ -91,15 +99,25 @@ function extractUsage(msg: Record<string, unknown> | undefined): RawUsage | unde
   const cc = u.cache_creation
   const hasCacheCreation = !!cc && typeof cc === 'object'
   const ccObj = hasCacheCreation ? (cc as Record<string, unknown>) : undefined
-  return {
-    input_tokens: num(u.input_tokens),
-    output_tokens: num(u.output_tokens),
-    cache_read_input_tokens: num(u.cache_read_input_tokens),
-    cache_creation_input_tokens: num(u.cache_creation_input_tokens),
+  const raw: RawUsage = {
     hasCacheCreation,
     ephemeral5m: hasCacheCreation ? num(ccObj!.ephemeral_5m_input_tokens) : 0,
     ephemeral1h: hasCacheCreation ? num(ccObj!.ephemeral_1h_input_tokens) : 0,
   }
+  const input = counter(u.input_tokens)
+  const output = counter(u.output_tokens)
+  const cacheRead = counter(u.cache_read_input_tokens)
+  const cacheWrite = counter(u.cache_creation_input_tokens)
+  if (input !== undefined) raw.input_tokens = input
+  if (output !== undefined) raw.output_tokens = output
+  if (cacheRead !== undefined) raw.cache_read_input_tokens = cacheRead
+  if (cacheWrite !== undefined) raw.cache_creation_input_tokens = cacheWrite
+  return raw
+}
+
+/** A usage counter as the transcript reported it — `num()`'s test, but absent instead of 0. */
+function counter(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined
 }
 
 /** One response still being assembled across its several transcript lines — see the module header. */
@@ -150,25 +168,25 @@ function invokedData(model: string): ModelInvokedData {
 }
 
 function completedData(u: RawUsage, model: string, providerRequestId: string | undefined): ModelCompletedData {
-  const data: ModelCompletedData = {
-    provider: 'anthropic',
-    model,
-    usage: {
-      input: u.input_tokens,
-      output: u.output_tokens,
-      cacheRead: u.cache_read_input_tokens,
-      cacheWrite: u.cache_creation_input_tokens,
-    },
-    status: 'completed',
-  }
+  const usage: ModelCompletedData['usage'] = {}
+  if (u.input_tokens !== undefined) usage.input = u.input_tokens
+  if (u.output_tokens !== undefined) usage.output = u.output_tokens
+  if (u.cache_read_input_tokens !== undefined) usage.cacheRead = u.cache_read_input_tokens
+  if (u.cache_creation_input_tokens !== undefined) usage.cacheWrite = u.cache_creation_input_tokens
+  const data: ModelCompletedData = { provider: 'anthropic', model, usage, status: 'completed' }
   if (providerRequestId) data.providerRequestId = providerRequestId
   if (u.hasCacheCreation) data.cacheWriteByTtl = { ephemeral_5m: u.ephemeral5m, ephemeral_1h: u.ephemeral1h }
-  const contextTokens = contextOfUsage({
-    input_tokens: u.input_tokens,
-    cache_creation_input_tokens: u.cache_creation_input_tokens,
-    cache_read_input_tokens: u.cache_read_input_tokens,
-  })
-  if (contextTokens > 0) data.contextTokens = contextTokens
+  // The gauge is the SUM of the three input-side counters, so it exists only when all three were
+  // reported: one built over a missing term is a confident undercount of the context (D17 — a value
+  // is as confident as its weakest input, and an absent input has none).
+  if (u.input_tokens !== undefined && u.cache_creation_input_tokens !== undefined && u.cache_read_input_tokens !== undefined) {
+    const contextTokens = contextOfUsage({
+      input_tokens: u.input_tokens,
+      cache_creation_input_tokens: u.cache_creation_input_tokens,
+      cache_read_input_tokens: u.cache_read_input_tokens,
+    })
+    if (contextTokens > 0) data.contextTokens = contextTokens
+  }
   return data
 }
 

@@ -183,6 +183,16 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
     en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },
   },
+  // Client-originated, from the three `/api/fleet/new` callers (`NewSessionModal.tsx`,
+  // `SessionsPage.tsx`'s `confirmPresetLaunch`, `DeliveryDetail.tsx`'s `confirmFire`) — raised only
+  // when a session was started with `force: true` over the machine's own memory-budget refusal
+  // (`spawnAdmission.ts`'s `forcedNote`). `{note}` is the server's own already-localized sentence
+  // naming what was overridden (available RAM, swap, per-session cost) — never composed here, the
+  // same reason `hardware.pressure`'s `{detail}` is not.
+  'sessions.forced_start': {
+    pt: { title: 'Sessão iniciada apesar do aviso de memória', message: '{note}' },
+    en: { title: 'Session started despite the memory warning', message: '{note}' },
+  },
 }
 
 /**

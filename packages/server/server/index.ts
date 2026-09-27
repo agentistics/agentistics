@@ -2198,7 +2198,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           })
         }
         const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), body.value)
+        // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
+        // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
+        // Conflict, because the request is well-formed and refused only by the state of the machine
+        // right now, which a retry with `force: true` or fewer sessions can resolve.
         return new Response(JSON.stringify(out), {
+          status: out.code === 'memory_budget' ? 409 : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {

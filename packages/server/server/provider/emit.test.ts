@@ -149,6 +149,11 @@ describe('model.completed — the exact usage, and the D20 fields', () => {
     expect(e.data.contextTokens).toBe(12 + 45_000 + 1_500)
   })
 
+  test('all four counters present: confidence stays exact, nothing absent', () => {
+    expect(e.provenance.confidence).toBe('exact')
+    for (const k of ['input', 'output', 'cacheRead', 'cacheWrite']) expect(k in e.data.usage).toBe(true)
+  })
+
   test('served vs requested model: `model` is the served one', () => {
     expect(e.data.model).toBe('claude-opus-5-20260901')
     expect(e.data.modelServed).toBe('claude-opus-5-20260901')
@@ -185,11 +190,36 @@ describe('model.completed — the exact usage, and the D20 fields', () => {
     expect(e.recordedAt).toBe(ctx.recordedAt)
   })
 
-  test('a counter the provider did not state makes the event inferred, not exact', () => {
+  // D21 (2026-09-26): a counter the source did not report is ABSENT from `data.usage` — never a
+  // placeholder 0, and never a reason to mark the whole event `inferred`. The counters that ARE
+  // present are exact statements, so the event's confidence stays `exact`.
+  test('a counter the provider did not state is ABSENT from usage, and confidence stays exact', () => {
     const partial = fromAnthropicUsage({ input_tokens: 5, output_tokens: 6 }).usage
     const p = completedEvent(completed({ usage: partial }), {}, ctx, 't')
-    expect(p.provenance.confidence).toBe('inferred')
+    expect(p.provenance.confidence).toBe('exact')
+    expect(p.data.usage).toEqual({ input: 5, output: 6 })
+    expect('cacheRead' in p.data.usage).toBe(false)
+    expect('cacheWrite' in p.data.usage).toBe(false)
     expect(p.data.contextTokens).toBeUndefined()
+  })
+
+  test('every counter missing: usage is an empty object, confidence still exact', () => {
+    const empty = fromAnthropicUsage({}).usage
+    const e2 = completedEvent(completed({ usage: empty }), {}, ctx, 't')
+    expect(e2.provenance.confidence).toBe('exact')
+    expect(e2.data.usage).toEqual({})
+    expect(e2.data.contextTokens).toBeUndefined()
+  })
+
+  test('a missing cacheWrite never carries a placeholder-zero TTL split', () => {
+    const noCacheWrite = fromAnthropicUsage({
+      input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3,
+      cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    }).usage
+    const e3 = completedEvent(completed({ usage: noCacheWrite }), {}, ctx, 't')
+    expect('cacheWrite' in e3.data.usage).toBe(false)
+    expect('cacheWriteByTtl' in e3.data).toBe(false)
+    expect(e3.provenance.confidence).toBe('exact')
   })
 })
 

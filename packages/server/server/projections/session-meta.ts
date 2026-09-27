@@ -9,6 +9,15 @@
  * response's, never a sum), the agent rollup excludes unmeasured invocations from its totals and
  * counts them apart.
  *
+ * D21 (2026-09-26): `model.completed.usage` carries only the counters its source actually reported
+ * (`ModelUsageCounters`, a `Partial<TokenBreakdown>`) — an absent one is never folded in as a 0. The
+ * fold sums only what each event reports and separately remembers, per main-agent counter, whether
+ * ANY event left it out (`AgentAcc.absentCounters`); FINISH turns that into a `caveats` row per
+ * affected token field plus one for `costUSD` (priced from the very same, now-partial, counters) —
+ * so a reader sees the number AND is told it is a partial sum, never a confident wrong one. When no
+ * event ever lacked a counter this adds nothing: no caveat, and the output is byte-identical to the
+ * pre-D21 projection.
+ *
  * ## The fold is order independent and idempotent, by construction
  *
  * A `Projection` is resumable (`projection.ts`), and P1 §8 adds two properties: shuffling the
@@ -36,15 +45,26 @@
  * adapter version that records them (`COMPACTION_SINCE`): a walk replayed at Claude adapter 1.0.0
  * carries no `context.compacted` at all, and reading that as `0` would claim a session that
  * compacted five times never did.
+ *
+ * Human turns (D22, `turn.started`) follow the same rule under `TURNS_SINCE`: a walk replayed
+ * before the adapter emitted them carries none, and `user_message_count: 0` there would claim a
+ * session nobody ever typed into. What they make projectable is exactly what legacy derives from the
+ * human line ALONE — its count, its timestamp, and `count - 1` interruptions. What legacy derives
+ * from EVERY line (the hour of each, the turn's close, the last assistant line before a prompt)
+ * stays in `NOT_PROJECTABLE`, each with the fact no event carries.
  */
 import {
+  absentUsageCounters,
   calcCost,
   sessionCostUSD,
   totalTokens,
+  USAGE_COUNTERS,
   type AnyAgentisticsEvent,
   type HarnessId,
+  type ModelUsageCounters,
   type Projection,
   type SessionMeta,
+  type UsageCounter,
 } from '@agentistics/core'
 
 // ── What the projection says about itself ───────────────────────────────────────────────────────
@@ -55,8 +75,22 @@ export interface NotProjectable {
   reason: string
 }
 
-const HUMAN_TURN = 'needs the human-turn event, which does not exist yet (decision pending) — '
-  + 'never approximated from model events'
+/**
+ * The human-turn fields `turn.started` (D22) does NOT make projectable. Each names the exact fact
+ * legacy reads that no event carries — measured against the real store, not assumed (see the
+ * differential's `time` family).
+ */
+const EVERY_LINE_HOURS = 'legacy pushes the local hour of EVERY timestamped transcript line (every role, '
+  + 'system lines, attachments, tool results); events exist for a subset of lines, and turn.started '
+  + 'covers the human lines only'
+const TURN_CLOSE = 'legacy closes a turn with Claude\'s own system/turn_duration measurement (which wins) '
+  + 'or else at the LAST timestamped line of any kind before the next prompt; no event carries the '
+  + 'turn_duration value or that last line\'s time'
+const LAST_ASSISTANT_LINE = 'legacy measures from the LAST assistant transcript line before the prompt; '
+  + 'model.completed/model.failed carry the FIRST line of a response (a thinking/text/tool_use response '
+  + 'spans several lines), and an assistant line with no usage emits no event at all'
+const DAILY_MESSAGES = 'its `messages` counts every user- and assistant-role LINE (tool results included) and '
+  + 'its `hours` every timestamped line; events cover a subset of lines. Tokens are in `daily_tokens`'
 
 /**
  * Every legacy `SessionMeta` field this projection deliberately does NOT produce. Static: the reason
@@ -65,13 +99,9 @@ const HUMAN_TURN = 'needs the human-turn event, which does not exist yet (decisi
  * here, partial, or stamped from outside the transcript.
  */
 export const NOT_PROJECTABLE: readonly NotProjectable[] = [
-  { field: 'rounds', reason: HUMAN_TURN },
-  { field: 'user_message_count', reason: HUMAN_TURN },
-  { field: 'user_interruptions', reason: HUMAN_TURN },
-  { field: 'user_response_times', reason: HUMAN_TURN },
-  { field: 'user_message_timestamps', reason: HUMAN_TURN },
-  { field: 'message_hours', reason: HUMAN_TURN },
-  { field: 'active_minutes', reason: `turn boundaries: ${HUMAN_TURN}` },
+  { field: 'user_response_times', reason: LAST_ASSISTANT_LINE },
+  { field: 'message_hours', reason: EVERY_LINE_HOURS },
+  { field: 'active_minutes', reason: TURN_CLOSE },
   { field: 'assistant_message_count', reason: 'legacy counts transcript LINES; an event is one billed response' },
   { field: 'user_chars', reason: 'the journal carries no conversation text or text sizes (D5)' },
   { field: 'user_char_messages', reason: 'the journal carries no conversation text or text sizes (D5)' },
@@ -86,7 +116,7 @@ export const NOT_PROJECTABLE: readonly NotProjectable[] = [
   { field: 'git_commits', reason: 'a shell command travels as a summary, not the command line legacy counts' },
   { field: 'git_pushes', reason: 'a shell command travels as a summary, not the command line legacy counts' },
   { field: 'skill_uses', reason: 'a Skill tool call does not carry the skill name in its event' },
-  { field: 'daily', reason: 'its message and hour counts need the human-turn event; tokens are in `daily_tokens`' },
+  { field: 'daily', reason: DAILY_MESSAGES },
   { field: 'agentMetrics.totalDurationMs', reason: 'events do not span every line of a subagent transcript' },
   { field: 'agentMetrics.invocations[].toolUseId', reason: 'the launching tool_use id is not in agent.started' },
   { field: 'agentMetrics.invocations[].totalDurationMs', reason: 'events do not span every line of a subagent transcript' },
@@ -108,6 +138,9 @@ export interface Caveat {
 
 /** The first adapter version, per source, that records compactions as events. */
 export const COMPACTION_SINCE: Readonly<Record<string, string>> = { claude: '1.1.0' }
+
+/** The first adapter version, per source, that records human turns (`turn.started`, D22) as events. */
+export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0' }
 
 // ── The result ──────────────────────────────────────────────────────────────────────────────────
 
@@ -149,10 +182,16 @@ export type ProjectedSessionMeta =
     | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'
     | 'context_tokens' | 'context_window'
     | 'compact_count' | 'compact_ms' | 'compact_dropped_tokens'
+    | 'user_message_count' | 'user_interruptions' | 'user_message_timestamps'
     | 'model' | 'harness'>>
   & {
     /** Four counters per UTC day, the day of the response's first line — legacy `daily[day].*_tokens`. */
     daily_tokens?: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>
+    /**
+     * `task-rollup.ts`'s ROUNDS — defined there as `user_message_count`, and projected under that
+     * same rule so the differential can compare the figure the board shows, not only its input.
+     */
+    rounds?: number
     agentMetrics?: ProjectedAgentMetrics
   }
 
@@ -195,6 +234,13 @@ interface AgentAcc {
   tokens: Tokens
   byModel: Map<string, Tokens>
   daily: Map<string, Tokens>
+  /**
+   * Counters some `model.completed` event of THIS agent did not report (D21, 2026-09-26). `tokens`
+   * already sums only the counters each event DID report — an absent one contributes nothing, never
+   * a 0 folded in — so this is purely the record of what happened, spent at FINISH to say the sum is
+   * partial rather than silently letting it read as measured.
+   */
+  absentCounters: Set<UsageCounter>
   sawTtl: boolean
   ttl1h: number
   ttl5m: number
@@ -207,17 +253,29 @@ interface AgentAcc {
   compactDropped: number | undefined
   /** Every event of this agent came from an adapter that records compactions. */
   compactionRecorded: boolean
+  /** Human turns (`turn.started`), each with its order key; sorted at finish, never on arrival. */
+  turns: { key: OrderKey; at: string; stamped: boolean }[]
+  /** Every event of this agent came from an adapter that records human turns (`TURNS_SINCE`). */
+  turnsRecorded: boolean
   gauge: { key: OrderKey; tokens: number; window: number | undefined } | undefined
   firstModel: { key: OrderKey; model: string } | undefined
 }
 
 function emptyAcc(): AgentAcc {
   return {
-    tokens: zero(), byModel: new Map(), daily: new Map(), sawTtl: false, ttl1h: 0, ttl5m: 0,
+    tokens: zero(), byModel: new Map(), daily: new Map(), absentCounters: new Set(), sawTtl: false, ttl1h: 0, ttl5m: 0,
     toolNames: new Map(), linesAdded: 0, linesRemoved: 0, files: new Set(),
     compactCount: 0, compactMs: 0, compactDropped: undefined, compactionRecorded: true,
+    turns: [], turnsRecorded: true,
     gauge: undefined, firstModel: undefined,
   }
+}
+
+/** Every counter `u` reports, defaulted to 0 for SUMMING purposes only — an absent counter must
+ * contribute nothing to a total, which is exactly what adding 0 for it does; `absentUsageCounters`
+ * (called by the caller of this) is what remembers that it was never actually reported. */
+function materialize(u: ModelUsageCounters): Tokens {
+  return { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 }
 }
 
 interface StartedRecord {
@@ -269,8 +327,9 @@ function atLeast(version: string, floor: string): boolean {
   return true
 }
 
-function recordsCompaction(e: AnyAgentisticsEvent): boolean {
-  const since = COMPACTION_SINCE[e.source.id]
+/** Whether `e`'s adapter is at least the version `table` names for its source. */
+function recordsSince(table: Readonly<Record<string, string>>, e: AnyAgentisticsEvent): boolean {
+  const since = table[e.source.id]
   return since !== undefined && atLeast(e.provenance.adapterVersion, since)
 }
 
@@ -285,7 +344,8 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
 
   // Every event of an agent bears on whether that agent's compactions were recorded at all.
   const acc = accOf(s, e.agentId)
-  if (!recordsCompaction(e)) acc.compactionRecorded = false
+  if (!recordsSince(COMPACTION_SINCE, e)) acc.compactionRecorded = false
+  if (!recordsSince(TURNS_SINCE, e)) acc.turnsRecorded = false
 
   switch (e.type) {
     case 'session.started': {
@@ -331,7 +391,12 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       return
     }
     case 'model.completed': {
-      const u = e.data.usage
+      // D21 (2026-09-26): a counter the source did not report is ABSENT, not a 0 — `materialize`
+      // sums only what was reported (an absent one contributes nothing, which is arithmetically the
+      // same as folding in a 0 for it), and `absentUsageCounters` is what remembers the absence so
+      // FINISH can say the total is partial rather than let it read as a measured sum.
+      for (const c of absentUsageCounters(e.data.usage)) acc.absentCounters.add(c)
+      const u = materialize(e.data.usage)
       add(acc.tokens, u)
       let m = acc.byModel.get(e.data.model)
       if (!m) { m = zero(); acc.byModel.set(e.data.model, m) }
@@ -370,6 +435,14 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       s.failures.push({ agentId: e.agentId ?? NO_AGENT, toolExecutionId: e.data.toolExecutionId, status: e.data.status })
       return
     }
+    case 'turn.started': {
+      // Counted once per event id (the `seen` gate above); ordered by the source line at finish.
+      // A human line the harness did not stamp is still a turn (legacy counts it), but its
+      // `occurredAt` is the replay's own clock and the emitter says so with `estimated` confidence —
+      // legacy leaves such a line out of `user_message_timestamps`, and so does this projection.
+      acc.turns.push({ key: keyOf(e), at: e.occurredAt, stamped: e.provenance.confidence !== 'estimated' })
+      return
+    }
     case 'context.compacted': {
       acc.compactCount++
       acc.compactMs += e.data.durationMs ?? 0
@@ -385,6 +458,12 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
 
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+
+/** Which legacy `SessionMeta` field each usage counter feeds — the caveat names the field a reader
+ * actually looks at, not the event-side counter name. */
+const TOKEN_FIELD_OF: Record<UsageCounter, 'input_tokens' | 'output_tokens' | 'cache_read_input_tokens' | 'cache_creation_input_tokens'> = {
+  input: 'input_tokens', output: 'output_tokens', cacheRead: 'cache_read_input_tokens', cacheWrite: 'cache_creation_input_tokens',
+}
 
 function tokensOfModel(t: Tokens, ttl?: { h1: number; m5: number }) {
   return {
@@ -420,10 +499,12 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     if (!a) continue
     add(main.tokens, a.tokens)
     for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
+    for (const c of a.absentCounters) main.absentCounters.add(c)
     main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
     for (const [n, c] of a.toolNames) mainToolNames.set(n, (mainToolNames.get(n) ?? 0) + c)
     main.linesAdded += a.linesAdded; main.linesRemoved += a.linesRemoved
     for (const f of a.files) main.files.add(f)
+    main.turns.push(...a.turns)
     main.compactCount += a.compactCount; main.compactMs += a.compactMs
     if (a.compactDropped !== undefined) main.compactDropped = (main.compactDropped ?? 0) + a.compactDropped
     if (a.gauge && (!main.gauge || compareKey(a.gauge.key, main.gauge.key) > 0)) main.gauge = a.gauge
@@ -431,6 +512,9 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   }
   // Session-level events (no agent) also bear on whether compactions were recorded.
   const recorded = [...mains, NO_AGENT].every(id => s.agents.get(id)?.compactionRecorded ?? true)
+  // …and on whether human turns were: a turn carries no agent only if the emitter says so.
+  const turnsRecorded = [...mains, NO_AGENT].every(id => s.agents.get(id)?.turnsRecorded ?? true)
+  const sessionTurns = s.agents.get(NO_AGENT)?.turns ?? []
 
   const meta: ProjectedSessionMeta = {
     tool_counts: Object.fromEntries(mainToolNames),
@@ -447,6 +531,26 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     lines_added: main.linesAdded,
     lines_removed: main.linesRemoved,
     files_modified: main.files.size,
+  }
+
+  // D21 (2026-09-26): a counter absent from at least one main-agent `model.completed` event means
+  // the corresponding field above is a sum over what was reported, not a measured total — said as a
+  // caveat per counter, in `USAGE_COUNTERS` order, rather than silently letting it read as exact.
+  // The cost is priced from those very counters (`sessionCostUSD` below), so it gets the same caveat.
+  if (main.absentCounters.size > 0) {
+    const absent = USAGE_COUNTERS.filter(c => main.absentCounters.has(c))
+    for (const c of absent) {
+      caveats.push({
+        field: TOKEN_FIELD_OF[c],
+        reason: `at least one main-agent model.completed event did not report ${c}; the figure sums only what was `
+          + 'reported and is a PARTIAL total, never a measured one',
+      })
+    }
+    caveats.push({
+      field: 'costUSD',
+      reason: `priced from a token set missing ${absent.join(', ')} on at least one event; the figure is an `
+        + 'estimate over a partial sum, never a measured cost',
+    })
   }
 
   // Tool errors: a `failed` result is a tool error. A `cancelled` one (the whole call interrupted)
@@ -499,6 +603,19 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     caveats.push({ field: 'compact_count', reason: 'not recorded by this adapter version (events replayed before context.compacted existed); absent, not zero' })
   }
 
+  // Human turns — the MAIN transcript's, exactly as legacy counts `isHumanUserEntry` lines there.
+  // Same shape as the compactions above: a walk of events that predate `turn.started` says nothing,
+  // and a walk of nothing says nothing; only a walk that could have seen a turn reports a count.
+  if (turnsRecorded && s.agents.size > 0) {
+    const turns = [...main.turns, ...sessionTurns].sort((a, b) => compareKey(a.key, b.key))
+    meta.user_message_count = turns.length
+    meta.rounds = turns.length
+    meta.user_interruptions = Math.max(0, turns.length - 1)
+    meta.user_message_timestamps = turns.filter(t => t.stamped).map(t => t.at)
+  } else if (s.agents.size > 0) {
+    caveats.push({ field: 'user_message_count', reason: 'not recorded by this adapter version (events replayed before turn.started existed); absent, not zero' })
+  }
+
   // ── The agent rollup ──
   const parentOf = (id: string): string | undefined => s.started.get(id)?.parentAgentId
   const rootOf = (id: string): string => {
@@ -514,6 +631,9 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   const members = new Map<string, string[]>(roots.map(r => [r, [r]]))
   for (const id of subKind) if (rootOf(id) !== id) members.get(rootOf(id))?.push(id)
 
+  // D21 — a subagent's rollup is a sum too, so an absent counter under it makes THAT invocation's
+  // figures partial. Kept apart from the main agent's set: the session totals are not affected.
+  const partialInvocations = new Map<string, Set<UsageCounter>>()
   const invocations: ProjectedInvocation[] = roots
     .sort((a, b) => {
       const ra = s.started.get(a)!, rb = s.started.get(b)!
@@ -541,6 +661,11 @@ function finish(s: SessionMetaState): SessionMetaProjection {
         const a = s.agents.get(id)
         if (!a) continue
         add(tokens, a.tokens)
+        if (a.absentCounters.size > 0) {
+          const set = partialInvocations.get(root) ?? new Set<UsageCounter>()
+          for (const c of a.absentCounters) set.add(c)
+          partialInvocations.set(root, set)
+        }
         for (const [m, t] of a.byModel) { const cur = byModel.get(m) ?? zero(); add(cur, t); byModel.set(m, cur) }
         for (const [name, c] of a.toolNames) {
           inv.totalToolUseCount += c
@@ -558,6 +683,15 @@ function finish(s: SessionMetaState): SessionMetaProjection {
       for (const [m, t] of byModel) inv.costUSD += calcCost(tokensOfModel(t), m)
       return inv
     })
+
+  for (const [root, set] of partialInvocations) {
+    const absent = USAGE_COUNTERS.filter(c => set.has(c))
+    caveats.push({
+      field: `agentMetrics.invocations[${root}]`,
+      reason: `a model.completed event of this invocation did not report ${absent.join(', ')}; its tokens and `
+        + 'cost sum only what was reported and are PARTIAL, never measured',
+    })
+  }
 
   if (invocations.length > 0) {
     const measured = invocations.filter(i => !i.unmeasured)

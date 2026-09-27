@@ -33,6 +33,8 @@ import { PRIORITY_ORDER, composePromptWithPaths, type TaskPriorityId } from '@ag
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { sessionPath } from '../../lib/sessionRoute'
+import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
+import { pushNotification } from '../../lib/notifications'
 import { NewSessionModal } from '../sessions/NewSessionModal'
 import {
   bodyWithAttachments, looksLikeImage, looksLikeVideo, parseCommentBody,
@@ -1238,6 +1240,13 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
   const [firing, setFiring] = useState<Subtask | null>(null)
   const [fireBusy, setFireBusy] = useState(false)
   const [fireError, setFireError] = useState<string | null>(null)
+  /**
+   * Set exactly when `fireError` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`), never for an ordinary spawn error — the only case
+   * `StagedSessionLaunchConfirm` offers its second, deliberate "start anyway" button (re-posts
+   * with `force: true`). Cleared whenever a fresh draft is opened for firing.
+   */
+  const [fireForceable, setFireForceable] = useState(false)
   const [firePrefillFor, setFirePrefillFor] = useState<{ subtask: Subtask; prompt: string } | null>(null)
   /** The subtask id whose attachments are being materialized into real paths — a brief round trip
    *  through `/api/fleet/attach`, shown so the fire button does not look inert while it runs. */
@@ -1247,6 +1256,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
     const draft = t.stagedSession
     if (!draft) return
     setFireError(null)
+    setFireForceable(false)
     if (draft.harness && draft.cwd) {
       setFiring(t)
       return
@@ -1259,7 +1269,12 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
     setFirePrefillFor({ subtask: t, prompt: composePromptWithPaths(paths, draft.prompt) })
   }
 
-  async function confirmFire() {
+  /**
+   * `force` is the deliberate second click on "start anyway" — see
+   * `StagedSessionLaunchConfirm`'s `onForce`. The ordinary "Fire" button never passes it; only a
+   * prior memory-budget refusal on THIS exact request offers the option at all.
+   */
+  async function confirmFire(force = false) {
     if (!firing) return
     const t = firing
     const draft = t.stagedSession!
@@ -1280,16 +1295,24 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
           ...(draft.effort ? { effort: draft.effort } : {}),
           prompt: finalPrompt,
           label: t.title,
+          ...(force ? { force: true as const } : {}),
         }),
       })
       const json = await res.json() as { ok: boolean; message: string; id?: string }
       if (!json.ok) {
         setFireError(json.message)
+        setFireForceable(isAdmissionRefusal(json))
         setFireBusy(false)
         return
       }
+      // Forced through despite the budget — surfaced through the persisted notification store
+      // (never silently), the same "already-localized sentence, meta-carried" pattern
+      // `hardware.pressure` uses for its own server-computed sentence.
+      const note = forcedNote(json)
+      if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
       setFiring(null)
       setFireBusy(false)
+      setFireForceable(false)
       if (json.id) {
         // The session EXISTS now — the true first moment its filing can actually be attempted, the
         // same reasoning `NewSessionModal`'s own `subtaskTarget` attach applies. A `blocked` refusal
@@ -1303,6 +1326,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
       }
     } catch {
       setFireError(lang === 'pt' ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
+      setFireForceable(false)
       setFireBusy(false)
     }
   }
@@ -1645,8 +1669,10 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             .filter((n): n is string => !!n)}
           busy={fireBusy}
           error={fireError}
-          onCancel={() => setFiring(null)}
+          forceable={fireForceable}
+          onCancel={() => { setFiring(null); setFireForceable(false) }}
           onConfirm={() => void confirmFire()}
+          onForce={() => void confirmFire(true)}
         />
       )}
 

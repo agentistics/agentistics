@@ -161,6 +161,9 @@ export interface BoardCopy {
     launchIntro: string
     launch: string
     launching: string
+    /** The deliberate second button offered only after a memory-budget refusal — see
+     *  `spawnAdmission.ts`'s `isAdmissionRefusal`. Re-sends the same request with `force: true`. */
+    startAnyway: string
     preparing: string
     networkError: string
     /** The read-only summary — the gear menu's own row label, and that dialog's own title prefix. */
@@ -374,6 +377,7 @@ const EN: BoardCopy = {
     launchIntro: 'This starts a real assistant now, billed like any other session, and files it under this exact subtask automatically.',
     launch: 'Fire',
     launching: 'Starting…',
+    startAnyway: 'Start anyway',
     preparing: 'Preparing attachments…',
     networkError: 'Network error talking to this machine.',
     view: 'View staged session',
@@ -562,6 +566,7 @@ const PT: BoardCopy = {
     launchIntro: 'Isso inicia um assistente de verdade agora, cobrado como qualquer outra sessão, e a filia automaticamente a esta subtarefa.',
     launch: 'Disparar',
     launching: 'Iniciando…',
+    startAnyway: 'Iniciar mesmo assim',
     preparing: 'Preparando anexos…',
     networkError: 'Erro de rede ao falar com esta máquina.',
     view: 'Ver sessão em espera',

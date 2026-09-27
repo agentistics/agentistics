@@ -11,8 +11,8 @@
  */
 
 import { readFile, readdir } from 'node:fs/promises'
-import type { MemorySample } from './memory-budget'
-import { parseMeminfo } from './memory-budget'
+import type { MemoryBudget, MemorySample } from './memory-budget'
+import { memoryBudget, parseMeminfo } from './memory-budget'
 
 /** The machine's memory, or `null` where it cannot be read. */
 export async function readMemory(): Promise<MemorySample | null> {
@@ -49,6 +49,42 @@ export async function readRss(pids: readonly number[]): Promise<{ bytes: number;
     }
   }
   return { bytes, read }
+}
+
+/**
+ * The budget a spawn is admitted against — the ONE measurement behind both the cockpit's gauge and
+ * the spawn gate (`spawn-admission.ts`), so the number a person reads and the number that refuses
+ * them can never disagree. `null` when this machine cannot be measured (no `/proc/meminfo`).
+ *
+ * The pids are the assistants: every harness process `scanProcesses()` finds, plus every harness
+ * record Claude Code marks alive (a managed session whose process the scan could not attribute),
+ * deduplicated. The whole machine is deliberately NOT priced — `MemAvailable` already accounts for
+ * everything else and `RESERVED_BYTES` holds room back for it.
+ *
+ * Both sources are imported lazily: `live-sessions.ts` and `harness-sessions.ts` pull in `config.ts`
+ * and the process walkers, and this module's two syscall helpers must stay cheap to import. A pid
+ * source that throws costs its pids, never the measurement: the budget then falls back to the
+ * `assumed` cost, which the result says.
+ */
+export async function readSpawnBudget(): Promise<{ budget: MemoryBudget; sample: MemorySample } | null> {
+  const sample = await readMemory()
+  if (!sample) return null
+
+  const pidsFromProc = await import('../live-sessions')
+    .then(m => m.scanProcesses())
+    .then(scan => scan.procs.map(p => p.pid).filter((pid): pid is number => pid !== undefined))
+    .catch(() => [] as number[])
+
+  const pidsFromHarness = await import('./harness-sessions')
+    .then(m => m.loadHarnessSessions())
+    .then(index => [...index.byConversation.values()]
+      .filter(f => f.alive === true && f.pid !== undefined)
+      .map(f => f.pid!))
+    .catch(() => [] as number[])
+
+  const pids = Array.from(new Set([...pidsFromProc, ...pidsFromHarness]))
+  const { bytes, read } = await readRss(pids)
+  return { budget: memoryBudget({ sample, sessionBytes: bytes, sessions: read }), sample }
 }
 
 /**

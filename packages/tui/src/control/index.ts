@@ -154,6 +154,8 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
 export type {
   ActionResult,
   ActionTarget,
+  AdmissionRefusal,
+  AdmissionRefusalBody,
   AttachTicket,
   BackupLayer,
   BackupScheduleId,

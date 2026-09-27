@@ -1,9 +1,9 @@
 import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import type { SessionAgentMetrics } from '@agentistics/core'
-import { enrichFromSubagentTranscripts } from './subagent-metrics'
+import { enrichFromSubagentTranscripts, subagentCacheSize } from './subagent-metrics'
 
 /** A real directory tree, because the thing under test is the file layout itself. */
 async function machine(
@@ -180,4 +180,26 @@ test('a top-level transcript nobody claims adds no row — the list is the paren
   expect(out.invocations).toHaveLength(1)
   expect(out.invocations[0]!.unmeasured).toBe(true)
   expect(out.totalTokens).toBe(0)
+})
+
+test('a subagent transcript that grows between builds holds ONE cache entry, and the new numbers', async () => {
+  // The memory leak this pins (OOM at 7.4 GB, 2026-09-26): the cache was keyed on path + mtime +
+  // size, so every version of a LIVE transcript added an entry and the superseded one was never
+  // dropped. A growing file must REPLACE its entry, not add one beside it.
+  const lines = [turn('claude-sonnet-5', 100, '2026-09-01T10:00:00.000Z')]
+  const { transcriptPath } = await machine('sGrow', { aLive: lines })
+  const file = join(dirname(transcriptPath), 'sGrow', 'subagents', 'agent-aLive.jsonl')
+
+  const first = await enrichFromSubagentTranscripts(metrics(unmeasured('toolu_1', 'aLive')), transcriptPath, 'sGrow')
+  expect(first.invocations[0]!.outputTokens).toBe(100)
+  const held = subagentCacheSize()
+
+  for (let i = 1; i <= 5; i++) {
+    lines.push(turn('claude-sonnet-5', 100, `2026-09-01T10:0${i}:00.000Z`))
+    await writeFile(file, lines.join('\n'))
+    const out = await enrichFromSubagentTranscripts(metrics(unmeasured('toolu_1', 'aLive')), transcriptPath, 'sGrow')
+    expect(out.invocations[0]!.outputTokens).toBe(100 * (i + 1))
+  }
+
+  expect(subagentCacheSize()).toBe(held)
 })
