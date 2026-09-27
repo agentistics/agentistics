@@ -44,7 +44,9 @@ export function TopBar({ height, asideWidth, trailing, trailingFlush = false, no
       style={{
         position: 'fixed', top: 0, left: asideWidth, right: 0, height, zIndex: 300,
         display: 'flex', alignItems: 'center', padding: 0, boxSizing: 'border-box',
-        background: 'var(--bg-surface)',
+        // On the Sessions board (`noBottomBorder`) the bar is FRAME, not a panel: the same ground
+        // colour as the gaps and the icon rail, so the board reads as one surface.
+        background: noBottomBorder ? 'var(--bg-base)' : 'var(--bg-surface)',
         borderBottom: noBottomBorder ? 'none' : '1px solid var(--border)',
         // Follows the aside's own fold, on the same curve `<main>`'s left padding uses.
         transition: 'left 0.22s cubic-bezier(0.22, 1, 0.36, 1)',

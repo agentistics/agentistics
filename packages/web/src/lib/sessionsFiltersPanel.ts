@@ -55,8 +55,14 @@ export interface HorizontalEdges {
   right: number
 }
 
-/** The panel's preferred width when there is room for it — the old fixed cap, now a ceiling. */
-export const FILTROS_PANEL_PREFERRED_WIDTH = 440
+/**
+ * The panel's preferred width when there is room for it — the old fixed cap, now a ceiling.
+ * 460, not 440 (owner, 2026-09-27): the trigger moved off the header and into the aside's own
+ * button row, so the panel is no longer squeezed between two asides on its usual side — it opens
+ * with the FiltersBar's own natural width available (roughly 460px before its date row/chips wrap),
+ * and 440 read narrower than that content wants, forcing an unnecessary inner scroll.
+ */
+export const FILTROS_PANEL_PREFERRED_WIDTH = 460
 
 /**
  * The panel's floor — narrow enough that it is reached only when the room between the two asides

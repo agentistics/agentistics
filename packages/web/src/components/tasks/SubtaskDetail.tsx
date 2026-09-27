@@ -35,7 +35,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { sessionPath } from '../../lib/sessionRoute'
-import { NA, fmtDateOnly, fmtInt, fmtStamp, microLabel, surface } from './board'
+import { NA, fmtDateTime, fmtInt, fmtStamp, microLabel, surface } from './board'
 import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
 import { StatusChip } from './StatusChip'
@@ -121,20 +121,20 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
             <span
               title={p.subtask.startedAt ? fmtStamp(p.subtask.startedAt, p.lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: p.subtask.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(p.subtask.startedAt, p.lang)}</span>
+            >{fmtDateTime(p.subtask.startedAt, p.lang, Date.now())}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
             <span
               title={p.subtask.deliveredAt ? fmtStamp(p.subtask.deliveredAt, p.lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: p.subtask.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(p.subtask.deliveredAt, p.lang)}</span>
+            >{fmtDateTime(p.subtask.deliveredAt, p.lang, Date.now())}</span>
           </span>
         </div>
       </div>

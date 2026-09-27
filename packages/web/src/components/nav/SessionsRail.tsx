@@ -23,7 +23,7 @@ import { HarnessMark } from '../sessions/HarnessMark'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { sessionPath } from '../../lib/sessionRoute'
 import { NewSessionModal } from '../sessions/NewSessionModal'
-import { Plus } from 'lucide-react'
+import { Filter, Plus } from 'lucide-react'
 
 /**
  * The dot a state earns, or null for one that earns none.
@@ -41,12 +41,21 @@ function stateDot(state: string): string | null {
 /** How many marks the rail draws before it says how many more there are. */
 const RAIL_MAX = 12
 
-export function SessionsRail({ rows, selectedId, lang, hideNew }: {
+export function SessionsRail({
+  rows, selectedId, lang, hideNew, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
+}: {
   rows: readonly ControlSession[]
   selectedId?: string
   lang: 'pt' | 'en'
   /** Withholds "New session" where this surface cannot start one (a central). */
   hideNew?: boolean
+  /** THE FILTROS TRIGGER (design item 4) — "visível também com ela minimizada": the rail is
+   *  exactly that minimized state, so the icon carries the same badge the open list's button does.
+   *  See `SessionsAside`'s own prop of the same name for the full story. */
+  filtersOpen: boolean
+  filtersCount: number
+  onToggleFilters: () => void
+  filtersButtonRef: (el: HTMLButtonElement | null) => void
 }) {
   const navigate = useNavigate()
   const pt = lang === 'pt'
@@ -80,6 +89,35 @@ export function SessionsRail({ rows, selectedId, lang, hideNew }: {
           <Plus size={18} />
         </button>
       )}
+      {/* FILTROS, minimized — the same trigger `SessionsAside`'s open row carries, one icon instead
+          of a labelled button. The badge is the digit alone (no room here for a pill around it). */}
+      <button
+        ref={filtersButtonRef}
+        onClick={onToggleFilters}
+        aria-expanded={filtersOpen}
+        aria-label={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
+        title={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
+        style={{
+          position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, width: 40, height: 40, borderRadius: 10, cursor: 'pointer', marginBottom: 4,
+          border: `1px solid ${filtersOpen ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+          background: filtersOpen ? 'var(--anthropic-orange-dim)' : 'transparent',
+          color: filtersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+        }}
+      >
+        <Filter size={16} />
+        {filtersCount > 0 && (
+          <span aria-hidden style={{
+            position: 'absolute', top: 2, right: 2,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 13, height: 13, padding: '0 3px', borderRadius: 7,
+            background: 'var(--anthropic-orange)', color: '#fff',
+            fontSize: 8.5, fontWeight: 700, lineHeight: 1,
+          }}>
+            {filtersCount}
+          </span>
+        )}
+      </button>
       {shown.map(s => (
         <button
           key={s.id}

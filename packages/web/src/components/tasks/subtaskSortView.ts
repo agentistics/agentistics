@@ -71,6 +71,7 @@ export function orderedSubtasks(
 /** Columns a subtask list can be ordered by, in the order the grids draw them. `rounds` is
  *  deliberately absent — no subtask grid draws a "rounds"/"Your prompts" column of its own, so
  *  there is no header here to click; that key is reached only by inheriting the main table's own
- *  sort (`subtaskSortInherit.ts`). */
+ *  sort (`subtaskSortInherit.ts`). `duration` needs no `measureOf` entry — it is read straight off
+ *  the subtask's own `startedAt`/`deliveredAt` by the comparator, not measured through sessions. */
 export const SUBTASK_SORT_KEYS: readonly SubtaskSortKey[] =
-  ['title', 'status', 'started', 'completed', 'sessions', 'cost', 'tokens']
+  ['title', 'status', 'started', 'completed', 'duration', 'sessions', 'cost', 'tokens']

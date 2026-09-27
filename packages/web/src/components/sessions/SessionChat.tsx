@@ -80,7 +80,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 
-import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
+import { SessionStatsMenu } from './SessionStatsMenu'
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -97,6 +98,36 @@ interface ChatPayload {
   attachmentSends?: AttachmentSend[]
   /** What each delivered message CARRIED, for this conversation — see `AttachmentMessage`. */
   attachmentMessages?: AttachmentMessage[]
+}
+
+/**
+ * WHAT THE COMPOSER'S CONTEXT GAUGE NEEDS to open the SAME card the desktop header's old metrics
+ * tab opened (design item 3, owner 2026-09-27: "círculo de métricas no composer, que abre pra
+ * cima"). `session` (a `ControlSession`) already carries `task`/`model`/`effort`/`conversationId`/
+ * `id`/`harness` directly, so this bundle only holds what it does NOT — the store's own record for
+ * the conversation and the money settings, neither of which lives on the fleet row.
+ *
+ * Deliberately a bundle and not five loose props: it is the exact same reading `SessionStatsMenu`
+ * has always taken (`sessions/SessionsPage.tsx`'s own mobile header call is the template this
+ * mirrors), so a caller with no data source for it simply omits the prop and the gauge does not
+ * render — never a control open on numbers nobody supplied.
+ */
+export interface SessionComposerMetrics {
+  /** The store's record for this conversation, or `undefined` when it has none yet. */
+  meta: SessionMeta | undefined
+  currency: 'USD' | 'BRL'
+  brlRate: number
+  costBasis: CostBasis
+  /** `C/A` for this session's OWN harness — `null` when no plan covers it, which removes the
+   *  basis toggle inside the card rather than offering one whose only outcome is "no plan". */
+  planFactor: number | null
+  /** Open the delivery this session is filed under — absent where there is nowhere to go. */
+  onOpenTask?: (ref: string) => void
+  /** Open the aside's Live tab, on the step running right now when there is one. */
+  onOpenLive?: (ref?: string) => void
+  /** Open the full reading — the aside's own Metrics tab. Absent when the store has no record of
+   *  this conversation, the same fact that decides whether that tab exists at all. */
+  onOpenFull?: () => void
 }
 
 export interface SessionChatProps {
@@ -144,6 +175,11 @@ export interface SessionChatProps {
     /** The turns themselves, for the panel's LIVE tab. Handed over rather than re-fetched. */
     turns: readonly LiveTurn[]
   }) => void
+  /** The composer's context gauge (design item 3) — see `SessionComposerMetrics`'s own header.
+   *  Absent means the caller has no data source for it and the gauge does not render. Desktop
+   *  only: mobile keeps its existing header metrics button (`SessionsPage.tsx`'s own `touch`
+   *  variant), so this is never a second, redundant control on a phone. */
+  metrics?: SessionComposerMetrics
 }
 
 // How often the conversation is re-read — and for how long it keeps being read after you leave —
@@ -168,7 +204,7 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, metrics }: SessionChatProps) {
   const pt = lang === 'pt'
   /** Touch targets grow on a phone and nowhere else — 44px on a desktop is a row of buttons. */
   const isMobile = useIsMobile()
@@ -743,6 +779,45 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
     if (!el) return
     setChatGutterPx(el.offsetWidth - el.clientWidth)
   }, [])
+
+  /**
+   * THE SCROLL AREA RUNS THE FULL HEIGHT OF THE PANEL (owner, 2026-09-27: "a conversa deveria rolar
+   * a altura toda do painel, com o composer flutuando por cima do fim da lista"). The composer used
+   * to be a `flexShrink: 0` SIBLING of the scroller, which is what left its scrollbar's own track
+   * stopping short at the composer's top edge instead of running to the panel's true bottom — a flex
+   * column always hands the scroller `container height − composer height`, sibling or not. The
+   * composer is now `position: absolute` (see its own style, below) — OUT of the flex flow entirely,
+   * so the scroller (still the flex item that fills the column) gets the WHOLE height, and the
+   * composer floats over its bottom edge instead of pushing it up.
+   *
+   * `composerHeight` is what keeps the LAST message (and the "trabalhando" line under it) from
+   * landing behind that float: spent as the scroller's own bottom padding, below, plus `12` for
+   * breathing room. MEASURED, never assumed — the composer grows with a multi-line draft
+   * (`maxComposerH`, its own field's ceiling), and a constant sized for one line would let the
+   * composer's own growth silently swallow the last visible line of the conversation, exactly the
+   * "confident zero" this codebase refuses everywhere else applied to a pixel count instead of a
+   * metric. A `ResizeObserver` on the composer's own ground element catches every cause it can grow
+   * for — a longer draft wrapping to a new line, an attachment chip added, the language toggle
+   * changing a label's width — without this component having to enumerate them.
+   */
+  const [composerHeight, setComposerHeight] = useState(0)
+  const composerObserver = useRef<ResizeObserver | null>(null)
+  const setComposerGroundEl = useCallback((el: HTMLDivElement | null) => {
+    composerObserver.current?.disconnect()
+    composerObserver.current = null
+    if (el === null) return
+    // `getBoundingClientRect().height`, not the observer entry's own `contentRect` — that one is the
+    // CONTENT box (excludes this element's own padding), and the composer ground carries real
+    // padding (`paddingTop`/`paddingBottom`, below) that has to count toward what the scroller
+    // reserves for it, or the last message would still peek out from under the field by that much.
+    const measure = () => setComposerHeight(el.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    composerObserver.current = ro
+  }, [])
+  useEffect(() => () => composerObserver.current?.disconnect(), [])
 
   /**
    * Insert the picked skill into the draft. IT DOES NOT SEND — that rule already exists in the
@@ -1502,7 +1577,10 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+      // `position: 'relative'` is what makes the composer's own `position: absolute` below resolve
+      // against THIS box (the whole conversation panel) rather than the next positioned ancestor up
+      // the tree — see the composer's own header for why it is absolute now.
+      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}
       onDragOver={e => {
         if (!canPrompt) return
         if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(REPO_DRAG_MIME)) {
@@ -1515,7 +1593,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
         ref={scrollRef}
         onScroll={onScroll}
         style={{
-          flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 20px 8px',
+          flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
+          // LONGHAND, not the `'20px 20px 8px'` shorthand this used to be: the bottom side alone now
+          // carries the composer's own measured height plus 12px of breathing room, so the last
+          // message (and the "trabalhando" line under it) never lands behind the floating field —
+          // see `composerHeight`'s own header for why it is measured rather than assumed.
+          paddingTop: 20, paddingRight: 20, paddingBottom: composerHeight + 12, paddingLeft: 20,
           // A flick that reaches the top of the conversation stops HERE. Without it the
           // gesture chains to the document, which has nothing to scroll and rubber-bands the
           // whole page instead — reported as "ele roda a página inteira e não deixa scrollar",
@@ -1654,11 +1737,16 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
           something further up used to mean scroll down, write, scroll back — and it is a shade
           apart from the bubbles, which are `--bg-card` on `--bg-base`: at the same value it read as
           another message rather than as the place you type. */}
-      <div className="ag-composer-ground" style={{
-        // `sticky` alongside `flexShrink:0` for the same reason the header above takes both — a
-        // scroll-away ancestor anywhere between here and the viewport must not carry this off with
-        // it, and sticky is the guarantee that holds even then.
-        position: 'sticky', bottom: 0, flexShrink: 0,
+      <div ref={setComposerGroundEl} className="ag-composer-ground" style={{
+        // `absolute`, not `sticky` (owner, 2026-09-27: "a conversa deveria rolar a altura toda do
+        // painel, com o composer flutuando por cima") — `sticky` still made this a FLEX SIBLING of
+        // the scroller above, so the column handed the scroller `container height − composer
+        // height` regardless, and the scrollbar's own track stopped at the composer's top edge
+        // instead of running to the panel's true bottom. `absolute` removes it from the flex flow
+        // entirely: the scroller now fills the WHOLE column (see its own `flex: 1`, unchanged), and
+        // this floats over its bottom edge instead of shrinking it. `left`/`right: 0` span the same
+        // width `sticky` always gave it (the panel's own width); `bottom: 0` is the same anchor.
+        position: 'absolute', left: 0, right: 0, bottom: 0,
         // NO border and NO surface of its own. This used to be a full-width footer bar with a rule
         // across the top, which read as a region of the page rather than as a control — and the
         // thing people recognise as "where I type" is a bounded field, not a strip. The FIELD
@@ -2491,6 +2579,36 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened }
                       <Mic size={15} />
                     </span>
                   </button>
+                )}
+
+                {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
+                    microphone, the header's old "66%" tab moved down into the composer it was
+                    always about. DESKTOP ONLY: mobile already has its own header metrics button
+                    (`SessionsPage.tsx`'s `touch`-variant `SessionStatsMenu`), and this would be a
+                    second, redundant control on a phone. `metrics` is absent on any surface with
+                    no data source for it (never expected on a real page, but keeps a caller that
+                    forgot to wire it up silent rather than crashing), and the component itself
+                    renders NOTHING when the session's context cannot be measured — see its own
+                    `variant === 'gauge'` branch. */}
+                {!isMobile && metrics && (
+                  <SessionStatsMenu
+                    variant="gauge"
+                    harness={session.harness}
+                    sessionId={session.conversationId ?? session.id}
+                    meta={metrics.meta}
+                    lang={lang}
+                    currency={metrics.currency}
+                    brlRate={metrics.brlRate}
+                    costBasis={metrics.costBasis}
+                    planFactor={metrics.planFactor}
+                    {...(session.task ? { task: session.task } : {})}
+                    {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
+                    {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
+                    {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
+                    rowId={session.id}
+                    {...(session.model ? { startedModel: session.model } : {})}
+                    {...(session.effort ? { startedEffort: session.effort } : {})}
+                  />
                 )}
 
                 {/* Mode · Stop · Recall · Send · More, held together at the far end, in that

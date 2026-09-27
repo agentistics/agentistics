@@ -27,7 +27,8 @@ import {
   X as XIcon, ArrowRight,
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
-import { ResizeGrip } from '../components/ResizeGrip'
+import { PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
+import { activeJunctions, isDragEndEvent, junctionHitRect, PANEL_GAP } from '../lib/panelLayout'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
@@ -54,6 +55,7 @@ import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 // while creating was the only thing that could announce a session; a reopen announces one too, and
 // two constants for one budget is two answers.
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
+import type { SessionComposerMetrics } from '../components/sessions/SessionChat'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
@@ -73,8 +75,9 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
-import { closedRightEdge, restingLeftEdge, setRightAsideEdge } from '../lib/rightAsideEdge'
+import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { useLeftAsideEdge } from '../lib/leftAsideEdge'
+import { useLeftAsideOpen } from '../lib/leftAsideOpen'
 import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
@@ -480,6 +483,26 @@ export default function SessionsPage() {
     : undefined
 
   /**
+   * THE COMPOSER'S CONTEXT GAUGE (design item 3) — the SAME reading `selected`'s own mobile-header
+   * `SessionStatsMenu` call takes, below, bundled through `SessionComposerMetrics` so `SessionChat`
+   * gets it as one prop rather than five. `undefined` whenever there is no selected session at all;
+   * the component itself withholds `onOpenFull` further when the store has no record, exactly as
+   * the mobile card does.
+   */
+  const composerMetrics: SessionComposerMetrics | undefined = selected
+    ? {
+        meta: selectedMeta,
+        currency,
+        brlRate,
+        costBasis: ctx.costBasis,
+        planFactor: sessionPlanFactor(ctx.planBasis.basis, selected.harness),
+        onOpenTask: ref => navigate(`/tasks/${encodeURIComponent(ref)}`),
+        onOpenLive: ref => openArtifacts('live', ref),
+        ...(sessionMetrics ? { onOpenFull: () => openArtifacts('metrics') } : {}),
+      }
+    : undefined
+
+  /**
    * A SESSION THAT IS ON ITS WAY IS NOT A SESSION THAT IS MISSING.
    *
    * `NewSessionModal` navigates here the moment the spawn returns, and this browser's fleet does
@@ -678,6 +701,10 @@ export default function SessionsPage() {
   const dragArt = useRef<{ x: number; w: number } | null>(null)
   /** A resize in progress. Only used to suspend the open/close animation — see `asideMotion`. */
   const [artDragging, setArtDragging] = useState(false)
+  // The value actually being persisted on release — read through a ref, not the `artWidth` state
+  // itself, so the effect below never needs `artWidth` as a dependency. See the ref's own comment.
+  const artWidthRef = useRef(artWidth)
+  artWidthRef.current = artWidth
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragArt.current) return
@@ -688,17 +715,35 @@ export default function SessionsPage() {
       const next = Math.max(PANEL_MIN_WIDTH, Math.min(cap, dragArt.current.w + (dragArt.current.x - e.clientX)))
       setArtWidth(next)
     }
-    const up = () => {
+    // Every event that must end a drag (`isDragEndEvent`), not `mouseup` alone — and, LOAD-BEARING,
+    // this effect is now REGISTERED ONCE (`[]` below) rather than on `[artWidth]`. It used to tear
+    // its window listeners down and rebuild them on every `setArtWidth` call inside `move` — i.e. on
+    // every single `mousemove` of the drag — which is harmless on its own (teardown and resubscribe
+    // happen back to back) but is exactly the failure mode a T-junction (`PanelGap.tsx`'s `armGap`)
+    // exposes: this gap and the band's own drag are armed together off ONE synthetic `mousedown`, and
+    // a release landing in the gap between one side's teardown and its resubscribe left this panel
+    // still tracking the pointer after the mouse button had already come up.
+    const up = (e: Event) => {
       if (!dragArt.current) return
+      if (!isDragEndEvent(e.type)) return
       dragArt.current = null
       setArtDragging(false)
       document.body.style.userSelect = ''
-      try { localStorage.setItem('agentistics:artifacts-w', String(artWidth)) } catch { /* private mode */ }
+      try { localStorage.setItem('agentistics:artifacts-w', String(artWidthRef.current)) } catch { /* private mode */ }
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [artWidth])
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    window.addEventListener('blur', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('blur', up)
+    }
+  }, [])
   /**
    * WHERE THE STUDIO, CLI AND SHELL SIT — `lib/panelSlots.ts`, design §1. `resolveForViewport` is
    * the phone reading: a stored `bottom: 'studio'` becomes the fullscreen right sheet without
@@ -994,7 +1039,12 @@ export default function SessionsPage() {
         // eye goes when something changes, which is the whole reason it exists.
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
         width: '100%', padding: '7px 14px', textAlign: 'left', cursor: 'pointer',
-        border: 'none', borderBottom: '1px solid var(--border-subtle)',
+        // On the desktop board the strip is its OWN small panel — border, 10px corners and the
+        // same inner gap (`PANEL_GAP`) below it every other panel seam uses — instead of a square
+        // band laid across the top of the conversation.
+        ...(isMobile
+          ? { border: 'none', borderBottom: '1px solid var(--border-subtle)' }
+          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: PANEL_GAP, boxSizing: 'border-box' as const }),
         background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
         fontFamily: 'inherit', fontSize: 11.5,
       }}
@@ -1604,6 +1654,15 @@ export default function SessionsPage() {
    * those two already read rather than the `left: 0` this one still had.
    */
   const leftAsideEdge = useLeftAsideEdge()
+  /** Whether the left list is actually resizable right now — the bottom-left T-junction (below)
+   *  exists only then; see `leftAsideOpen.ts`'s own header for why this needs its own bridge rather
+   *  than a comparison against `leftAsideEdge` above. */
+  const leftAsideOpenNow = useLeftAsideOpen()
+  /** The artifacts aside's own live left edge, REACTIVELY — the bottom-right T-junction's own X
+   *  coordinate is this minus half the 6px gap, matching the gap's own centre line exactly. `null`
+   *  when there is no aside on screen (see `rightAsideEdge.ts`'s own header) — the junction has
+   *  nothing to sit beside then and is withheld, same as the plain vertical gap a few lines below. */
+  const rightAsideEdgeNow = useRightAsideEdge()
   const rightSlotContent = rightSlotFullscreen ? (
     <div style={{
       position: 'fixed', top: 0, left: isMobile ? 0 : leftAsideEdge, bottom: 0,
@@ -1653,6 +1712,7 @@ export default function SessionsPage() {
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
+      {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
       // button — one bar instead of two stacked ones saying overlapping things.
@@ -1915,6 +1975,15 @@ export default function SessionsPage() {
         display: 'flex', flexDirection: 'column', width: asideIn ? shownArtWidth : 0,
         flexShrink: 0, minHeight: 0, background: 'var(--bg-surface)',
         overflow: 'hidden',
+        // A panel on the board like every other: border and 10px corners (its top corners were
+        // square). No border while collapsed to width 0, or a 2px sliver would remain.
+        ...(asideIn ? { border: '1px solid var(--border)', borderRadius: 10, boxSizing: 'border-box' as const } : {}),
+        // TOP ALIGNMENT (owner, 2026-09-27): this panel used to start flush against the header, the
+        // one panel on the board with no gap above it at all. `6` is the SAME outer-gap figure the
+        // centre column's own `marginTop` uses (`OUTER_GAP`, declared further down this component —
+        // a bare literal here rather than that binding, since this style is computed above where
+        // `OUTER_GAP` is declared and referencing it here would be a temporal-dead-zone reference).
+        marginTop: 6,
         transition: asideMotion,
       }
   const artInner: CSSProperties = split
@@ -2081,6 +2150,96 @@ export default function SessionsPage() {
   // and `artShell` would otherwise draw one as a FULL-SCREEN OVERLAY on top of the very screen this
   // route exists to show — so mobile keeps the original early `return`, unaffected by any of this.
   // ---------------------------------------------------------------------------
+
+  /**
+   * THE T-JUNCTIONS (design item, owner requirement) — where the band's own horizontal gap meets a
+   * vertical one. `activeJunctions` (`lib/panelLayout.ts`) says WHICH exist for the current
+   * open/closed combination; this effect answers the one question that module deliberately leaves
+   * to its caller, WHERE — the band's own horizontal gap's Y (`bandGapY`), since nothing else in
+   * this codebase already tracks it (unlike the two vertical gaps' X, which are already live,
+   * reactive bridges: `leftAsideEdge`/`rightAsideEdgeNow`, read above). Placed BEFORE the
+   * `dedicatedTerminal` early `return` below, like every other hook in this component — a hook
+   * after it would only run on SOME renders, which is the crash `sessionsPage.lint.test.ts`'s own
+   * "hook-order" describe block exists to catch.
+   *
+   * The band gap's OWN size never changes (a fixed 6px strip), so `ResizeObserver` on the element
+   * itself would never fire for a REPOSITION — only its containing row resizing (a window resize, an
+   * aside width change) moves it without changing its own box, which is exactly the case
+   * `ResizeObserver` on `splitRef` catches. A band-height drag (through the band's own gap directly,
+   * never through a junction) is the one case neither that nor the dependency list below catches
+   * live — accepted, because nothing here is VERIFIED against dragging the plain band gap while a
+   * junction sits on screen; the junction re-measures on its own next open/close.
+   */
+  const [bandGapY, setBandGapY] = useState<number | null>(null)
+  const measureBandGapY = useCallback(() => {
+    const el = document.getElementById('ag-gap-band-height')
+    if (!el) { setBandGapY(null); return }
+    const r = el.getBoundingClientRect()
+    setBandGapY(r.top + r.height / 2)
+  }, [])
+  useEffect(() => {
+    if (isMobile) { setBandGapY(null); return }
+    measureBandGapY()
+    const el = splitRef.current
+    let ro: ResizeObserver | undefined
+    if (el && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measureBandGapY)
+      ro.observe(el)
+    }
+    window.addEventListener('resize', measureBandGapY)
+    return () => { ro?.disconnect(); window.removeEventListener('resize', measureBandGapY) }
+  }, [isMobile, measureBandGapY, slotLayout.bottom, slotLayout.bottomOpen, split, asideIn, artWidth])
+  /**
+   * A junction drag is in progress from the moment its own `mousedown` arms the two real gaps
+   * (`onJunctionDown`, below) until the NEXT `mouseup` anywhere — the same moment either armed gap's
+   * own listener stops applying, so this never outlives the drag it tracks. While it is true, a
+   * `requestAnimationFrame` loop keeps `bandGapY` current AS the band's own height changes under the
+   * junction's own drag; the dependency-driven effect above is what re-measures for every OTHER
+   * reason a junction can move (a window resize, the OTHER axis changing outside a junction drag).
+   */
+  const junctionDraggingRef = useRef(false)
+  const onJunctionDown = useCallback((bandId: string, asideId: string) => (e: { clientX: number; clientY: number }) => {
+    armGap(bandId, e)
+    armGap(asideId, e)
+    if (junctionDraggingRef.current) return
+    junctionDraggingRef.current = true
+    const step = () => {
+      if (!junctionDraggingRef.current) return
+      measureBandGapY()
+      requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+    const unsubscribe = () => {
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('blur', stop)
+    }
+    const stop = (e: Event) => {
+      if (!isDragEndEvent(e.type)) return
+      junctionDraggingRef.current = false
+      unsubscribe()
+    }
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    window.addEventListener('blur', stop)
+  }, [measureBandGapY])
+  const junctionIds = isMobile ? [] : activeJunctions({
+    leftOpen: leftAsideOpenNow,
+    rightOpen: split && asideIn,
+    // NOT `slotLayout.bottom !== null && slotLayout.bottomOpen` — which of `StudioBand`/`ShellBand`/
+    // `SimpleDockedBand`/`PanelBarBand` actually renders is `bottomBandFor` (`lib/panelBar.ts`),
+    // a function of MORE than `slotLayout.bottom` (relayed status, the session's own harness), so
+    // `slotLayout.bottom` can read `null` while a real, open, resizable band sits on screen —
+    // measured live: `bottom: null, bottomOpen: true` on a perfectly ordinary docked Shell. Whether
+    // the band's own gap actually EXISTS (`bandGapY`, which mirrors it exactly — see that state's
+    // own effect) is the one true signal, and it is `null` for a `PanelBarBand` (a relayed session's
+    // bar-only band, which draws no `BandResizeHandle` at all — there is nothing there to junction
+    // with, which is the correct answer for it too).
+    bandOpen: bandGapY !== null,
+  })
+
   if (dedicatedTerminal && selected) {
     const back = () => navigate(sessionPath(selected.id))
     const dedicated = (
@@ -2602,6 +2761,29 @@ export default function SessionsPage() {
    *     them be dropped rather than sandwiched.
    */
   const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 12, gap: 5 } as const
+  /**
+   * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
+   * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
+   * and the two panels' `marginTop` below: it is the SAME number as `PANEL_GAP` used to be before the
+   * owner's 6→10 bump for the INNER seams (`lib/panelLayout.ts`'s own `PANEL_GAP`), and it stays 6
+   * because an outer edge has no neighbour to grip against — the request was for more room around the
+   * grip, not a wider margin to the window.
+   */
+  const OUTER_GAP = 6
+  /** The T-junction's own hit-zone square — `junctionHitRect`'s formula (`gap + extra`) applied to
+   *  the CURRENT inner gap, so a future `PANEL_GAP` change resizes the junction's target along with
+   *  the seam it sits on instead of leaving it sized for the old gap. */
+  const JUNCTION_SIZE = junctionHitRect({ x: 0, y: 0 }, PANEL_GAP, 4).width
+  /**
+   * FLOATING-PANELS DESIGN (`sdd/brief.md`) — `SessionPanel` now draws its OWN two panels (the
+   * conversation, then a gap, then the bottom band) with their own borders/radius/overflow-hidden,
+   * because the bottom band moved from being docked INSIDE the conversation's card to being its own
+   * panel below it. So this wrapper must NOT also draw a border around the pair — that would be a
+   * panel drawn around two panels, exactly the nesting the brief forbids. It still draws the border
+   * for every OTHER `centre` (nothing selected → `FleetOverview`; the dedicated terminal route),
+   * which are genuinely a single region and still want the old inset-card treatment.
+   */
+  const centreOwnsItsPanels = panel !== null && !dedicatedTerminal
 
   return (
     <>
@@ -2633,6 +2815,13 @@ export default function SessionsPage() {
         ...(split || railDesktop
           ? { display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }
           : { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }),
+        // OUTER FRAME GAPS (`sdd/brief.md`, task 2) — the RIGHT edge (rail to window edge) and the
+        // BOTTOM edge (every panel's own bottom, plus the rail's) are both spent HERE, uniformly,
+        // for every child of this row: the centre column, the right gap, the artifacts aside and
+        // the rail. The LEFT edge is the aside's own concern (`App.tsx`'s `SideNav`, `mode ===
+        // 'sessions'` padding) — this row starts exactly where that padding ends, so adding a
+        // paddingLeft here too would double the gap between the sessions list and the conversation.
+        ...(isMobile ? {} : { paddingRight: OUTER_GAP, paddingBottom: OUTER_GAP }),
       }}
     >
       {/* `display: flex` is the load-bearing part, not `flex: 1`. This file has recorded the same
@@ -2654,23 +2843,44 @@ export default function SessionsPage() {
         // popovers that are descendants (the composer's `/` and `@` pickers, the bubble's
         // right-click menu, the "more" menu) all open within their own nested containers, inset
         // from this box's edges, and stay inside it under normal use.
-        ...(isMobile ? {} : {
-          margin: CENTRAL_PANE.gap,
-          border: CENTRAL_PANE.border,
-          borderRadius: CENTRAL_PANE.radius,
-          overflow: 'hidden',
-        }),
+        //
+        // ONLY `marginTop` SURVIVES HERE UNCONDITIONALLY. TOP ALIGNMENT (owner, 2026-09-27): this
+        // used to be `CENTRAL_PANE.gap` (5px) — close enough to flush that the panel read as touching
+        // the header, while the left list (`App.tsx`'s `SideNav`) has real room above it from its own
+        // mark/mode-switch row. It is now `OUTER_GAP` (6px), the SAME figure every outer edge already
+        // uses, so no panel in this workspace sits closer to a frame edge than any other.
+        // `marginLeft`/`marginRight`/`marginBottom` are ZERO when this div owns its own two panels
+        // (`centreOwnsItsPanels`): each of those three edges already has its own gap drawn by
+        // something else — the LEFT one by the sessions-list panel's own resize gap, the RIGHT one
+        // by the vertical `.ag-panel-gap` sibling below, the BOTTOM one by `splitRef`'s own
+        // `paddingBottom` above — and adding a SECOND margin on top of any of them doubles the visual
+        // gap (measured live, before this: 11px on the right instead of 6, back when both were 6px).
+        // The plain `FleetOverview`/dedicated-terminal case has no such neighbour gaps of its own, so
+        // it keeps the uniform `CENTRAL_PANE.gap` margin exactly as before.
+        ...(isMobile ? {} : centreOwnsItsPanels
+          ? { marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0 }
+          : {
+            margin: CENTRAL_PANE.gap,
+            border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
+          }),
       }}>
         {centre}
       </div>
-      {/* The handle. Four pixels of hit area over a one-pixel rule — the rule is what you see, the
-          area is what you can grab, and matching them makes a divider people miss. It goes with the
-          panel: a grab handle for something that is halfway out of the room resizes nothing.
-          `ResizeGrip` (design item 6) paints the small pill that says so without touching the hit
-          area itself — `.ag-resize-handle` is what gives it something to key its hover/drag state
-          off, in `index.css`. */}
+      {/* THE RIGHT GAP IS THE HANDLE (`sdd/brief.md`) — no painted border of its own any more (that
+          was the doubled divider next to the aside's own left border, screenshot `68381135`): the
+          panel's border plus this gap's three dots are now the ONLY line between the centre column
+          and the artifacts aside. Drag math UNCHANGED (`dragArt`/`shownArtWidth`, above) — only the
+          visual and the hit area moved onto the shared `.ag-panel-gap` grip. */}
         {split && asideIn ? <div
-          className="ag-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={pt ? 'Redimensionar painel lateral' : 'Resize the artifacts aside'}
+          tabIndex={0}
+          className="ag-panel-gap"
+          // A stable id — the bottom-right T-junction (below) replays a synthetic `mousedown` on
+          // this exact element (`PanelGap.tsx`'s `armGap`) to arm its own window-level drag
+          // listener, reusing `dragArt`/`shownArtWidth`'s own clamp/persistence verbatim.
+          id="ag-gap-aside-right"
           onMouseDown={e => {
             // From the width on screen, not the remembered one: a clamped panel would otherwise
             // jump to its stored width the moment the handle is touched.
@@ -2678,11 +2888,33 @@ export default function SessionsPage() {
             setArtDragging(true)
             document.body.style.userSelect = 'none'
           }}
-          style={{
-            width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent',
-            borderLeft: '1px solid var(--border)',
-          }}
-        ><ResizeGrip orientation="vertical" /></div> : null}
+          style={{ width: PANEL_GAP, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
+        ><PanelGapDots orientation="vertical" /></div> : null}
+      {/* THE T-JUNCTIONS THEMSELVES — see the effect above this component's `return` for the
+          measuring and `PanelGap.tsx`'s `PanelJunction`/`armGap` for what a press on one actually
+          does. `position: fixed`, so rendering them here (rather than at each individual gap, which
+          is what they sit BETWEEN) is only a matter of convenience — this is the one place both
+          `bandGapY` and the two asides' own live edges are already in scope. */}
+      {bandGapY !== null && junctionIds.includes('bottom-right') && rightAsideEdgeNow !== null && (
+        <PanelJunction
+          key="bottom-right"
+          label={pt ? 'Redimensionar altura da barra e largura do painel' : 'Resize band height and panel width'}
+          size={JUNCTION_SIZE}
+          left={rightAsideEdgeNow - PANEL_GAP / 2}
+          top={bandGapY}
+          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-right')}
+        />
+      )}
+      {bandGapY !== null && junctionIds.includes('bottom-left') && (
+        <PanelJunction
+          key="bottom-left"
+          label={pt ? 'Redimensionar altura da barra e largura da lista' : 'Resize band height and list width'}
+          size={JUNCTION_SIZE}
+          left={leftAsideEdge - PANEL_GAP / 2}
+          top={bandGapY}
+          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-left')}
+        />
+      )}
       {/* THE ONE PANE. See the block comment at the top of this section. */}
       {artShell === 'none' ? null : (
         <div style={artOuter} ref={rightAsideRef}>

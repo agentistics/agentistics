@@ -29,9 +29,10 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  NA, PRIORITY, button, claimLeft, field, fmtDateOnly, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
+  NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus, type ColumnId,
 } from './board'
+import { DurationCellView } from './SubtaskDurationCell'
 import { useMoney, type Money } from './money'
 import {
   DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
@@ -231,14 +232,25 @@ function cellFor(
         {new Date(row.task.updatedAt).toLocaleDateString()}
       </span>
     )
-    case 'sessions': return (
-      <span>
-        <Num v={r.sessionsUsed} />
-        {r.sessionsLinked < r.sessionsUsed && (
-          <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}> ({r.sessionsLinked} priced)</span>
-        )}
-      </span>
-    )
+    case 'sessions': {
+      // "N · M priced" — a SEPARATOR, not parentheses ("N (M priced)" wrapped onto a second line in
+      // an 84px column), one line, and the WORD is localized (`boardCopy`, `sessionsPriced`) rather
+      // than hardcoded English on an otherwise-Portuguese board.
+      const short = r.sessionsLinked < r.sessionsUsed
+      return (
+        <span
+          style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap' }}
+          title={short ? `${r.sessionsLinked} ${boardCopy(lang).sessionsPriced}` : undefined}
+        >
+          <Num v={r.sessionsUsed} />
+          {short && (
+            <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+              · {r.sessionsLinked} {boardCopy(lang).sessionsPriced}
+            </span>
+          )}
+        </span>
+      )
+    }
     case 'rounds': return <Num v={r.rounds} />
     case 'cost': return r.mixedCurrency || (r.credits !== null && r.costUSD === null)
       ? <span style={{ ...numeric, fontSize: 12 }}>{r.credits!.premiumRequests} req</span>
@@ -288,13 +300,14 @@ export const subtaskColumns = (lang: Lang): Array<{ label: string; key: SubtaskS
   return [
     { label: c.subtasks, key: 'title' }, { label: 'Status', key: 'status' },
     { label: c.started, key: 'started' }, { label: c.completed, key: 'completed' },
+    { label: c.duration, key: 'duration' },
     { label: c.sessions, key: 'sessions' }, { label: c.cost, key: 'cost' },
     { label: c.tokens, key: 'tokens' },
   ]
 }
 
 function SubtaskRows({
-  subtasks, subtaskRollups, indent, cols, sessions, lang, statuses, onPatch, onRemove, onCreateGroup,
+  subtasks, subtaskRollups, indent, cols, sessions, lang, nowMs, statuses, onPatch, onRemove, onCreateGroup,
   onLinkSession, onUnfile, onOpenSession,
 }: {
   subtasks: Subtask[]
@@ -310,6 +323,8 @@ function SubtaskRows({
   /** The DELIVERY's sessions. Each subtask draws the ones filed under IT — see `SubtaskSessions`. */
   sessions: readonly TaskSessionRow[]
   lang: Lang
+  /** Feeds `fmtDateTime`'s "same calendar year as now" check — see `TaskTable`'s own `nowMs`. */
+  nowMs: number
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
   onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
@@ -347,11 +362,11 @@ function SubtaskRows({
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
     flexShrink: 0, minWidth: 18, minHeight: 18,
   }
-  // 1 (leading) + 7 named cells (status/started/completed/sessions/cost/tokens, plus the title
-  // cell) + filler must equal cols + 2 — the task row above is [leading][title][cols…], and the
-  // leading column is there in BOTH modes (Select only adds the checkbox INSIDE it), so this
+  // 1 (leading) + 8 named cells (status/started/completed/DURATION/sessions/cost/tokens, plus the
+  // title cell) + filler must equal cols + 2 — the task row above is [leading][title][cols…], and
+  // the leading column is there in BOTH modes (Select only adds the checkbox INSIDE it), so this
   // arithmetic does not depend on whether rows are being picked.
-  const filler = Math.max(0, cols - 6)
+  const filler = Math.max(0, cols - 7)
   // See `SubtaskTable`'s own doc comment for the full §F.1 clustering reasoning — this mirrors it
   // exactly, over the same `subtasks` pool (already scoped to one delivery): a member renders
   // directly under its group regardless of creation order, connected by an inset bar plus a shared
@@ -399,7 +414,10 @@ function SubtaskRows({
           </td>
           {/* A MEMBER is indented one level further than the base subtask indent — the visual
               nesting that replaces the old "parte do grupo" caption for every properly clustered
-              row. */}
+              row. `indent` is the BASE (0 here — see the call site's own note: it used to be 34,
+              leaving a ~50px gap between the gear button and the title nobody asked for); the
+              member's own +20 offset is unchanged, so a member still sits exactly as far under its
+              group as it always did. */}
           <td style={{ padding: cellPad, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {/* Same accordion toggle as `SubtaskTable`'s inline view — collapsed by default. */}
@@ -466,23 +484,26 @@ function SubtaskRows({
           {/* `startedAt`/`deliveredAt` are SYSTEM facts, never a date somebody typed — see
               `Subtask.startedAt`'s own note. Read-only: no picker, no owner column, mirroring
               `SubtaskTable`'s own inline row exactly. */}
-          <td style={{ padding: cellPad, ...tint }}>
+          <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint }}>
             <span
               title={t.startedAt ? fmtStamp(t.startedAt, lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(t.startedAt, lang)}</span>
+            >{fmtDateTime(t.startedAt, lang, nowMs)}</span>
           </td>
-          <td style={{ padding: cellPad, ...tint }}>
+          <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint }}>
             <span
               title={t.deliveredAt ? fmtStamp(t.deliveredAt, lang) : undefined}
               style={{
-                fontSize: 12,
+                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateOnly(t.deliveredAt, lang)}</span>
+            >{fmtDateTime(t.deliveredAt, lang, nowMs)}</span>
+          </td>
+          <td style={{ padding: cellPad, textAlign: 'right', whiteSpace: 'nowrap', ...tint }}>
+            <DurationCellView startedAt={t.startedAt} deliveredAt={t.deliveredAt} lang={lang} />
           </td>
           <td style={{ padding: cellPad, ...tint }}>
             {/* A MEMBER can never hold a session (§F.1, refused server-side) — no filing control,
@@ -894,13 +915,17 @@ export function TaskTable(p: TaskTableProps) {
                                 ))}
                                 title={L.sortByColumn.replace('{column}', h.label)}
                                 style={{
-                                  ...microLabel, fontWeight: 600, padding: '5px 10px',
-                                  paddingLeft: i === 0 ? 34 : 10,
-                                  textAlign: h.key === 'cost' || h.key === 'tokens' ? 'right' : 'left',
+                                  ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
+                                  // Matches the title cell's own base `indent` (0 — see
+                                  // `SubtaskRows`'s call site) so the header label and the input
+                                  // below it start at the same x.
+                                  paddingLeft: i === 0 ? 0 : 10,
+                                  textAlign: h.key === 'cost' || h.key === 'tokens' || h.key === 'duration'
+                                    ? 'right' : 'left',
                                 }}
                               />
                             ))}
-                            {effectiveCols > 6 && <td colSpan={effectiveCols - 6} />}
+                            {effectiveCols > 7 && <td colSpan={effectiveCols - 7} />}
                           </tr>
                           <SubtaskRows
                             subtasks={orderedSubtasks(
@@ -912,9 +937,14 @@ export function TaskTable(p: TaskTableProps) {
                               },
                             )}
                             subtaskRollups={detail?.subtaskRollups ?? []}
-                            indent={34} cols={effectiveCols}
+                            // Was 34 — the gear cell's own right padding (10px, `cellPad`) already
+                            // separates the button from the title, so a further 34px was an
+                            // unintended ~44-50px gap nobody asked for. A GROUP MEMBER still sits
+                            // its own +20 deeper (see the title cell's own note).
+                            indent={0} cols={effectiveCols}
                             sessions={detail?.sessions ?? []}
                             lang={p.lang ?? 'en'}
+                            nowMs={nowMs}
                             statuses={p.statuses}
                             onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
                             onRemove={id => p.onRemoveSubtask(row.task.id, id)}
