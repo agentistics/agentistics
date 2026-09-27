@@ -781,6 +781,45 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   }, [])
 
   /**
+   * THE SCROLL AREA RUNS THE FULL HEIGHT OF THE PANEL (owner, 2026-09-27: "a conversa deveria rolar
+   * a altura toda do painel, com o composer flutuando por cima do fim da lista"). The composer used
+   * to be a `flexShrink: 0` SIBLING of the scroller, which is what left its scrollbar's own track
+   * stopping short at the composer's top edge instead of running to the panel's true bottom — a flex
+   * column always hands the scroller `container height − composer height`, sibling or not. The
+   * composer is now `position: absolute` (see its own style, below) — OUT of the flex flow entirely,
+   * so the scroller (still the flex item that fills the column) gets the WHOLE height, and the
+   * composer floats over its bottom edge instead of pushing it up.
+   *
+   * `composerHeight` is what keeps the LAST message (and the "trabalhando" line under it) from
+   * landing behind that float: spent as the scroller's own bottom padding, below, plus `12` for
+   * breathing room. MEASURED, never assumed — the composer grows with a multi-line draft
+   * (`maxComposerH`, its own field's ceiling), and a constant sized for one line would let the
+   * composer's own growth silently swallow the last visible line of the conversation, exactly the
+   * "confident zero" this codebase refuses everywhere else applied to a pixel count instead of a
+   * metric. A `ResizeObserver` on the composer's own ground element catches every cause it can grow
+   * for — a longer draft wrapping to a new line, an attachment chip added, the language toggle
+   * changing a label's width — without this component having to enumerate them.
+   */
+  const [composerHeight, setComposerHeight] = useState(0)
+  const composerObserver = useRef<ResizeObserver | null>(null)
+  const setComposerGroundEl = useCallback((el: HTMLDivElement | null) => {
+    composerObserver.current?.disconnect()
+    composerObserver.current = null
+    if (el === null) return
+    // `getBoundingClientRect().height`, not the observer entry's own `contentRect` — that one is the
+    // CONTENT box (excludes this element's own padding), and the composer ground carries real
+    // padding (`paddingTop`/`paddingBottom`, below) that has to count toward what the scroller
+    // reserves for it, or the last message would still peek out from under the field by that much.
+    const measure = () => setComposerHeight(el.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    composerObserver.current = ro
+  }, [])
+  useEffect(() => () => composerObserver.current?.disconnect(), [])
+
+  /**
    * Insert the picked skill into the draft. IT DOES NOT SEND — that rule already exists in the
    * "more options" menu and does not change here: most skills take an argument, and what reaches
    * the session is what the person chose to send.
@@ -1538,7 +1577,10 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+      // `position: 'relative'` is what makes the composer's own `position: absolute` below resolve
+      // against THIS box (the whole conversation panel) rather than the next positioned ancestor up
+      // the tree — see the composer's own header for why it is absolute now.
+      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}
       onDragOver={e => {
         if (!canPrompt) return
         if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(REPO_DRAG_MIME)) {
@@ -1551,7 +1593,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         ref={scrollRef}
         onScroll={onScroll}
         style={{
-          flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 20px 8px',
+          flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
+          // LONGHAND, not the `'20px 20px 8px'` shorthand this used to be: the bottom side alone now
+          // carries the composer's own measured height plus 12px of breathing room, so the last
+          // message (and the "trabalhando" line under it) never lands behind the floating field —
+          // see `composerHeight`'s own header for why it is measured rather than assumed.
+          paddingTop: 20, paddingRight: 20, paddingBottom: composerHeight + 12, paddingLeft: 20,
           // A flick that reaches the top of the conversation stops HERE. Without it the
           // gesture chains to the document, which has nothing to scroll and rubber-bands the
           // whole page instead — reported as "ele roda a página inteira e não deixa scrollar",
@@ -1690,11 +1737,16 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           something further up used to mean scroll down, write, scroll back — and it is a shade
           apart from the bubbles, which are `--bg-card` on `--bg-base`: at the same value it read as
           another message rather than as the place you type. */}
-      <div className="ag-composer-ground" style={{
-        // `sticky` alongside `flexShrink:0` for the same reason the header above takes both — a
-        // scroll-away ancestor anywhere between here and the viewport must not carry this off with
-        // it, and sticky is the guarantee that holds even then.
-        position: 'sticky', bottom: 0, flexShrink: 0,
+      <div ref={setComposerGroundEl} className="ag-composer-ground" style={{
+        // `absolute`, not `sticky` (owner, 2026-09-27: "a conversa deveria rolar a altura toda do
+        // painel, com o composer flutuando por cima") — `sticky` still made this a FLEX SIBLING of
+        // the scroller above, so the column handed the scroller `container height − composer
+        // height` regardless, and the scrollbar's own track stopped at the composer's top edge
+        // instead of running to the panel's true bottom. `absolute` removes it from the flex flow
+        // entirely: the scroller now fills the WHOLE column (see its own `flex: 1`, unchanged), and
+        // this floats over its bottom edge instead of shrinking it. `left`/`right: 0` span the same
+        // width `sticky` always gave it (the panel's own width); `bottom: 0` is the same anchor.
+        position: 'absolute', left: 0, right: 0, bottom: 0,
         // NO border and NO surface of its own. This used to be a full-width footer bar with a rule
         // across the top, which read as a region of the page rather than as a control — and the
         // thing people recognise as "where I type" is a bounded field, not a strip. The FIELD
