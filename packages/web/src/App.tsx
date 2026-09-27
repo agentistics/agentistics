@@ -2250,7 +2250,7 @@ export default function AppLayout() {
    * border sits `CENTRAL_PANE.gap` inside it and curves away over the last 12px, and the tabs need to
    * clear that curve rather than hang over it.
    */
-  const SESSIONS_TAB_TOP_OFFSET = 4 // CENTRAL_PANE.gap(5) - CENTRAL_PANE.border(1)
+  const SESSIONS_TAB_TOP_OFFSET = 12 // sits INSIDE the conversation panel's top, like the mockup's chips
   const SESSIONS_TAB_CORNER_CLEARANCE = 14
 
   /**
@@ -3719,8 +3719,8 @@ export default function AppLayout() {
             title={lang === 'pt' ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
             style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
-              border: '1px solid var(--border)', borderTop: 'none',
-              borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 7, background: 'var(--bg-surface)',
               color: sessionsFiltersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
             }}
@@ -4025,8 +4025,8 @@ export default function AppLayout() {
                   title={fleetOpen ? (lang === 'pt' ? 'Minimizar' : 'Collapse') : (lang === 'pt' ? 'Mostrar estatísticas' : 'Show stats')}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
-                    border: '1px solid var(--border)', borderTop: 'none',
-                    borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 7, background: 'var(--bg-surface)',
                     color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
                   }}
                 >
