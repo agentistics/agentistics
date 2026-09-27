@@ -131,6 +131,27 @@ export function pointInRect(p: { x: number; y: number }, r: Rect): boolean {
 }
 
 /**
+ * The window-level events that must always END an active drag-resize gesture. A plain `mouseup` is
+ * not enough on its own: the pointer can leave the window before the button comes up (the tab loses
+ * focus — `blur`), or the OS/browser can cancel the pointer sequence outright (`pointercancel`, a
+ * touch drag interrupted by a system gesture). A T-junction (`PanelJunction`/`armGap`, `PanelGap.tsx`)
+ * arms TWO independent drags off one synthetic `mousedown`, and a release neither gap's own listener
+ * happens to see left both panels tracking the pointer forever — reported live: releasing the mouse
+ * button after a junction drag left the band height and the aside width still following every
+ * subsequent `mousemove`. Every drag-resize listener in this workspace (`PanelGap`, `useBandDrag`,
+ * the artifacts aside's own resize effect) ends on every one of these, not `mouseup` alone.
+ */
+export const DRAG_END_EVENTS = ['mouseup', 'pointerup', 'pointercancel', 'touchend', 'touchcancel', 'blur'] as const
+export type DragEndEvent = typeof DRAG_END_EVENTS[number]
+
+/** Whether a given DOM event type is one of `DRAG_END_EVENTS` — the one decision every drag-resize
+ *  listener in this workspace shares, kept in one place so a fifth "this also means release" event
+ *  is added once rather than found missing in a third copy. */
+export function isDragEndEvent(type: string): boolean {
+  return (DRAG_END_EVENTS as readonly string[]).includes(type)
+}
+
+/**
  * Which hit zone a pointer at `p` should act on, given the (up to) three candidates that can
  * overlap near a corner: the vertical gap's own strip, the horizontal gap's own strip, and the
  * junction's square. The JUNCTION WINS wherever it claims the point — it is the more specific

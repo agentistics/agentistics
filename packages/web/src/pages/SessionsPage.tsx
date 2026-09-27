@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
 import { PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
-import { activeJunctions } from '../lib/panelLayout'
+import { activeJunctions, isDragEndEvent, junctionHitRect, PANEL_GAP } from '../lib/panelLayout'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
@@ -680,6 +680,10 @@ export default function SessionsPage() {
   const dragArt = useRef<{ x: number; w: number } | null>(null)
   /** A resize in progress. Only used to suspend the open/close animation — see `asideMotion`. */
   const [artDragging, setArtDragging] = useState(false)
+  // The value actually being persisted on release — read through a ref, not the `artWidth` state
+  // itself, so the effect below never needs `artWidth` as a dependency. See the ref's own comment.
+  const artWidthRef = useRef(artWidth)
+  artWidthRef.current = artWidth
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragArt.current) return
@@ -690,17 +694,35 @@ export default function SessionsPage() {
       const next = Math.max(PANEL_MIN_WIDTH, Math.min(cap, dragArt.current.w + (dragArt.current.x - e.clientX)))
       setArtWidth(next)
     }
-    const up = () => {
+    // Every event that must end a drag (`isDragEndEvent`), not `mouseup` alone — and, LOAD-BEARING,
+    // this effect is now REGISTERED ONCE (`[]` below) rather than on `[artWidth]`. It used to tear
+    // its window listeners down and rebuild them on every `setArtWidth` call inside `move` — i.e. on
+    // every single `mousemove` of the drag — which is harmless on its own (teardown and resubscribe
+    // happen back to back) but is exactly the failure mode a T-junction (`PanelGap.tsx`'s `armGap`)
+    // exposes: this gap and the band's own drag are armed together off ONE synthetic `mousedown`, and
+    // a release landing in the gap between one side's teardown and its resubscribe left this panel
+    // still tracking the pointer after the mouse button had already come up.
+    const up = (e: Event) => {
       if (!dragArt.current) return
+      if (!isDragEndEvent(e.type)) return
       dragArt.current = null
       setArtDragging(false)
       document.body.style.userSelect = ''
-      try { localStorage.setItem('agentistics:artifacts-w', String(artWidth)) } catch { /* private mode */ }
+      try { localStorage.setItem('agentistics:artifacts-w', String(artWidthRef.current)) } catch { /* private mode */ }
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [artWidth])
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    window.addEventListener('blur', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('blur', up)
+    }
+  }, [])
   /**
    * WHERE THE STUDIO, CLI AND SHELL SIT — `lib/panelSlots.ts`, design §1. `resolveForViewport` is
    * the phone reading: a stored `bottom: 'studio'` becomes the fullscreen right sheet without
@@ -2158,8 +2180,21 @@ export default function SessionsPage() {
       requestAnimationFrame(step)
     }
     requestAnimationFrame(step)
-    const stop = () => { junctionDraggingRef.current = false; window.removeEventListener('mouseup', stop) }
+    const unsubscribe = () => {
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('blur', stop)
+    }
+    const stop = (e: Event) => {
+      if (!isDragEndEvent(e.type)) return
+      junctionDraggingRef.current = false
+      unsubscribe()
+    }
     window.addEventListener('mouseup', stop)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    window.addEventListener('blur', stop)
   }, [measureBandGapY])
   const junctionIds = isMobile ? [] : activeJunctions({
     leftOpen: leftAsideOpenNow,

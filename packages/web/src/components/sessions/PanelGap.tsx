@@ -15,9 +15,11 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import { applyAxisDrag } from '../../lib/panelLayout'
+import { applyAxisDrag, isDragEndEvent, PANEL_GAP } from '../../lib/panelLayout'
 
-export const PANEL_GAP_PX = 6
+/** Re-exported for callers that already import the pixel size from here — see `lib/panelLayout.ts`'s
+ *  `PANEL_GAP` for the single source of truth this mirrors. */
+export const PANEL_GAP_PX = PANEL_GAP
 
 export interface PanelGapProps {
   orientation: 'vertical' | 'horizontal'
@@ -61,36 +63,60 @@ export function PanelGap({
   const latest = useRef(value)
   latest.current = value
 
+  /**
+   * LATEST-REF PATTERN — `orientation`/`sign`/`min`/`max`/`onChange`/`onCommit` are read through a
+   * ref updated on every render, so the drag effect below can stay REGISTERED ONCE for the whole
+   * gesture instead of tearing its window listeners down and rebuilding them on every `onChange`
+   * (which itself triggers the re-render that would otherwise retrigger this effect). That churn was
+   * harmless for an ORDINARY drag — cleanup and re-subscribe happen back to back, so `window` is
+   * never actually listener-less — but it is exactly the shape of bug a T-junction (`armGap`,
+   * `PanelJunction`, below) exposes: TWO gaps armed off one synthetic `mousedown` both rebuild their
+   * listeners on every `mousemove`, and a release landing in the narrow window between one gap's
+   * teardown and its resubscribe was reported as "the panel keeps following the mouse after I let
+   * go". A single, stable listener removes that window entirely.
+   */
+  const propsRef = useRef({ orientation, sign, min, max, onChange, onCommit })
+  propsRef.current = { orientation, sign, min, max, onChange, onCommit }
+
   const resolve = useCallback((clientPos: number) => {
+    const p = propsRef.current
     const delta = clientPos - start.current.pointer
-    return applyAxisDrag(start.current.value, delta, sign, min, max)
-  }, [sign, min, max])
+    return applyAxisDrag(start.current.value, delta, p.sign, p.min, p.max)
+  }, [])
 
   useEffect(() => {
     if (disabled) return
     const move = (e: MouseEvent) => {
       if (!dragging.current) return
-      const next = resolve(orientation === 'vertical' ? e.clientX : e.clientY)
+      const next = resolve(propsRef.current.orientation === 'vertical' ? e.clientX : e.clientY)
       latest.current = next
-      onChange(next)
+      propsRef.current.onChange(next)
     }
-    const up = () => {
+    // Every event that must end a drag (`isDragEndEvent` — see its own header for why `mouseup`
+    // alone is not enough), not only the one a lone gap happened to be tested against.
+    const end = (e: Event) => {
       if (!dragging.current) return
+      if (!isDragEndEvent(e.type)) return
       dragging.current = false
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      onCommit?.(latest.current)
+      propsRef.current.onCommit?.(latest.current)
     }
     window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    window.addEventListener('mouseup', end)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    window.addEventListener('blur', end)
     return () => {
       window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+      window.removeEventListener('mouseup', end)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('blur', end)
     }
-    // `onChange`/`onCommit` are read fresh each render via closure capture is unnecessary here since
-    // this effect re-subscribes whenever any of its own reactive inputs change; kept minimal on
-    // purpose (the same shape `AsideResizer` already uses).
-  }, [disabled, orientation, resolve, onChange, onCommit])
+    // Registered ONCE per `disabled`/`resolve` identity (both stable across a drag) — never on
+    // `onChange`/`onCommit`, which is the whole point of the latest-ref pattern above.
+  }, [disabled, resolve])
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (disabled) return

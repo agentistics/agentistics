@@ -1,7 +1,7 @@
 import { expect, test, describe } from 'bun:test'
 import {
-  activeJunctions, applyAxisDrag, applyJunctionDrag, clampSize, gapHitRect, junctionHitRect,
-  pointInRect, resolveHitZone, type JunctionAxis,
+  activeJunctions, applyAxisDrag, applyJunctionDrag, clampSize, gapHitRect, isDragEndEvent,
+  junctionHitRect, pointInRect, resolveHitZone, type JunctionAxis,
 } from './panelLayout'
 
 describe('clampSize', () => {
@@ -129,6 +129,24 @@ describe('pointInRect', () => {
   test('inside is true', () => { expect(pointInRect({ x: 15, y: 15 }, r)).toBe(true) })
   test('on the edge is true (inclusive)', () => { expect(pointInRect({ x: 10, y: 10 }, r)).toBe(true); expect(pointInRect({ x: 30, y: 30 }, r)).toBe(true) })
   test('outside is false', () => { expect(pointInRect({ x: 5, y: 5 }, r)).toBe(false); expect(pointInRect({ x: 31, y: 15 }, r)).toBe(false) })
+})
+
+describe('isDragEndEvent', () => {
+  test('mouseup, pointerup, pointercancel, touchend, touchcancel and blur all end a drag', () => {
+    expect(isDragEndEvent('mouseup')).toBe(true)
+    expect(isDragEndEvent('pointerup')).toBe(true)
+    expect(isDragEndEvent('pointercancel')).toBe(true)
+    expect(isDragEndEvent('touchend')).toBe(true)
+    expect(isDragEndEvent('touchcancel')).toBe(true)
+    expect(isDragEndEvent('blur')).toBe(true)
+  })
+
+  test('a move or an unrelated event never ends a drag', () => {
+    expect(isDragEndEvent('mousemove')).toBe(false)
+    expect(isDragEndEvent('pointermove')).toBe(false)
+    expect(isDragEndEvent('keydown')).toBe(false)
+    expect(isDragEndEvent('')).toBe(false)
+  })
 })
 
 describe('resolveHitZone', () => {
