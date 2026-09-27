@@ -60,6 +60,7 @@ import {
 import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { PickerMenu } from './PickerMenu'
+import { subtaskGridLayout, SUBTASK_GRID_MIN_COLS } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import type {
@@ -632,6 +633,11 @@ export function TaskTable(p: TaskTableProps) {
       (a, b) => shown.indexOf(a.id) - shown.indexOf(b.id)),
     [shown],
   )
+  // How few shown columns it takes before an expanded delivery's subtasks no longer fit as rows of
+  // THIS table without overshooting the main row's own width — see `subtaskGridLayout.ts`. Every
+  // row's column count is the same `cols.length`, so this is decided once for the whole table
+  // rather than per expanded row.
+  const gridLayout = useMemo(() => subtaskGridLayout(cols.length), [cols.length])
 
   // Every group is BUILT, even a hidden one: the chooser needs its count to say what it is hiding.
   // Sorted INSIDE the group, never across: the grouping is the first ordering and a sort that
@@ -730,7 +736,8 @@ export function TaskTable(p: TaskTableProps) {
         )}
         <span style={{ flex: 1 }} />
         <PickerMenu
-          title="Show groups"
+          title={copy.pickers.groupsTitle}
+          lang={p.lang ?? 'en'}
           triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
           items={groups.map(g => ({
             value: g.status,
@@ -751,21 +758,22 @@ export function TaskTable(p: TaskTableProps) {
           // walks `groupsShown`, not the live list's raw order) and the only way to change it was to
           // untick every group and tick them back in the order you wanted — a sequence with no control.
           orderable
-          note="Drag a ticked group, or use ▲▼, to reorder the bands. A hidden group's tasks are still there."
+          note={copy.pickers.groupsNote}
         >
-          <Rows3 size={13} /> Groups
+          <Rows3 size={13} /> {copy.pickers.groupsTrigger}
         </PickerMenu>
         <PickerMenu
-          title="Columns"
+          title={copy.pickers.columnsTitle}
+          lang={p.lang ?? 'en'}
           width={270}
           orderable
           triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
           items={COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) }))}
           value={shown}
           onChange={next => setColumns(next as ColumnId[])}
-          note="Drag a ticked column, or use ▲▼, to reorder it — the table follows this order."
+          note={copy.pickers.columnsNote}
         >
-          <Columns3 size={13} /> Columns
+          <Columns3 size={13} /> {copy.pickers.columnsTrigger}
         </PickerMenu>
         <button
           type="button"
@@ -859,6 +867,87 @@ export function TaskTable(p: TaskTableProps) {
                       const open = expanded.has(row.task.id)
                       const detail = p.details.get(row.task.id)
                       const subs = detail?.subtasks ?? []
+                      // The sub-header row, `SubtaskRows` and the "+ Add subtask" row, sized against
+                      // `effectiveCols` — the REAL `cols.length` when they are drawn as rows of this
+                      // table (`gridLayout.mode === 'inline'`), or `SUBTASK_GRID_MIN_COLS` when they
+                      // are drawn inside their OWN nested table (see `subtaskGridLayout.ts`), which
+                      // is what makes their filler come out to zero in that case.
+                      const renderSubtaskGrid = (effectiveCols: number) => (
+                        <>
+                          <tr style={{ background: 'var(--bg-surface)' }}>
+                            <td style={{ padding: '5px 10px' }} />
+                            {subtaskColumns(p.lang ?? 'en').map((h, i) => (
+                              // Sortable like every other header. The grid orders itself by the
+                              // EFFECTIVE sort (`subtaskSortInherit.ts`): an explicit click on
+                              // THIS grid's own header (`subSort`) if there is one, otherwise
+                              // whatever the main table's own sort translates to — so sorting
+                              // the board by "Cost" re-sorts every open subtask grid by cost too,
+                              // until a reader clicks one of these headers directly. Clusters
+                              // survive either way because the renderer rebuilds them from the
+                              // sorted list (`subtaskSortView.ts`).
+                              <SortTh
+                                key={h.key} label={h.label} sortKey={h.key}
+                                current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}
+                                mobile={isMobile}
+                                onSort={k => setSubSort(m => (
+                                  { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
+                                ))}
+                                title={L.sortByColumn.replace('{column}', h.label)}
+                                style={{
+                                  ...microLabel, fontWeight: 600, padding: '5px 10px',
+                                  paddingLeft: i === 0 ? 34 : 10,
+                                  textAlign: h.key === 'cost' || h.key === 'tokens' ? 'right' : 'left',
+                                }}
+                              />
+                            ))}
+                            {effectiveCols > 6 && <td colSpan={effectiveCols - 6} />}
+                          </tr>
+                          <SubtaskRows
+                            subtasks={orderedSubtasks(
+                              subs, effectiveSubtaskSort(sort, subSort[row.task.id] ?? null),
+                              {
+                                views: detail?.subtaskRollups ?? [],
+                                sessions: detail?.sessions ?? [],
+                                statusOrder: liveStatusOrder(p.statuses),
+                              },
+                            )}
+                            subtaskRollups={detail?.subtaskRollups ?? []}
+                            indent={34} cols={effectiveCols}
+                            sessions={detail?.sessions ?? []}
+                            lang={p.lang ?? 'en'}
+                            statuses={p.statuses}
+                            onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
+                            onRemove={id => p.onRemoveSubtask(row.task.id, id)}
+                            onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
+                            onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
+                            onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
+                            onOpenSession={p.onOpenSession}
+                          />
+                          <tr style={{ background: 'var(--bg-surface)' }}>
+                            <td style={{ padding: '5px 10px' }} />
+                            <td colSpan={effectiveCols + 1} style={{ padding: '5px 10px', paddingLeft: 34 }}>
+                              <input
+                                value={subDraft[row.task.id] ?? ''}
+                                placeholder="+ Add subtask"
+                                onChange={e => setSubDraft({ ...subDraft, [row.task.id]: e.target.value })}
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => {
+                                  const v = subDraft[row.task.id] ?? ''
+                                  if (e.key === 'Enter' && v.trim()) {
+                                    p.onAddSubtask(row.task.id, v.trim())
+                                    setSubDraft({ ...subDraft, [row.task.id]: '' })
+                                  }
+                                }}
+                                style={{
+                                  width: '100%', maxWidth: 320, background: 'transparent', border: 'none',
+                                  outline: 'none', color: 'var(--text-secondary)', fontSize: 12,
+                                  fontFamily: 'inherit',
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        </>
+                      )
                       return (
                         <React.Fragment key={row.task.id}>
                           <tr
@@ -957,80 +1046,30 @@ export function TaskTable(p: TaskTableProps) {
                           </tr>
 
                           {open && (
-                            <>
-                              <tr style={{ background: 'var(--bg-surface)' }}>
-                                <td style={{ padding: '5px 10px' }} />
-                                {subtaskColumns(p.lang ?? 'en').map((h, i) => (
-                                  // Sortable like every other header. The grid orders itself by the
-                                  // EFFECTIVE sort (`subtaskSortInherit.ts`): an explicit click on
-                                  // THIS grid's own header (`subSort`) if there is one, otherwise
-                                  // whatever the main table's own sort translates to — so sorting
-                                  // the board by "Cost" re-sorts every open subtask grid by cost too,
-                                  // until a reader clicks one of these headers directly. Clusters
-                                  // survive either way because the renderer rebuilds them from the
-                                  // sorted list (`subtaskSortView.ts`).
-                                  <SortTh
-                                    key={h.key} label={h.label} sortKey={h.key}
-                                    current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}
-                                    mobile={isMobile}
-                                    onSort={k => setSubSort(m => (
-                                      { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
-                                    ))}
-                                    title={L.sortByColumn.replace('{column}', h.label)}
-                                    style={{
-                                      ...microLabel, fontWeight: 600, padding: '5px 10px',
-                                      paddingLeft: i === 0 ? 34 : 10,
-                                      textAlign: h.key === 'cost' || h.key === 'tokens' ? 'right' : 'left',
-                                    }}
-                                  />
-                                ))}
-                                {cols.length > 6 && <td colSpan={cols.length - 6} />}
-                              </tr>
-                              <SubtaskRows
-                                subtasks={orderedSubtasks(
-                                  subs, effectiveSubtaskSort(sort, subSort[row.task.id] ?? null),
-                                  {
-                                    views: detail?.subtaskRollups ?? [],
-                                    sessions: detail?.sessions ?? [],
-                                    statusOrder: liveStatusOrder(p.statuses),
-                                  },
-                                )}
-                                subtaskRollups={detail?.subtaskRollups ?? []}
-                                indent={34} cols={cols.length}
-                                sessions={detail?.sessions ?? []}
-                                lang={p.lang ?? 'en'}
-                                statuses={p.statuses}
-                                onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
-                                onRemove={id => p.onRemoveSubtask(row.task.id, id)}
-                                onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
-                                onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
-                                onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
-                                onOpenSession={p.onOpenSession}
-                              />
-                              <tr style={{ background: 'var(--bg-surface)' }}>
-                                <td style={{ padding: '5px 10px' }} />
-                                <td colSpan={cols.length + 1} style={{ padding: '5px 10px', paddingLeft: 34 }}>
-                                  <input
-                                    value={subDraft[row.task.id] ?? ''}
-                                    placeholder="+ Add subtask"
-                                    onChange={e => setSubDraft({ ...subDraft, [row.task.id]: e.target.value })}
-                                    onClick={e => e.stopPropagation()}
-                                    onKeyDown={e => {
-                                      const v = subDraft[row.task.id] ?? ''
-                                      if (e.key === 'Enter' && v.trim()) {
-                                        p.onAddSubtask(row.task.id, v.trim())
-                                        setSubDraft({ ...subDraft, [row.task.id]: '' })
-                                      }
-                                    }}
-                                    style={{
-                                      width: '100%', maxWidth: 320, background: 'transparent', border: 'none',
-                                      outline: 'none', color: 'var(--text-secondary)', fontSize: 12,
-                                      fontFamily: 'inherit',
-                                    }}
-                                  />
-                                </td>
-                              </tr>
-                            </>
+                            gridLayout.mode === 'inline'
+                              ? renderSubtaskGrid(cols.length)
+                              : (
+                                // Fewer than `SUBTASK_GRID_MIN_COLS` shown columns: the subtask
+                                // grid's own 8 fixed cells alone would already overshoot the main
+                                // row's `cols.length + 2`, so instead of drawing more rows of THIS
+                                // table it gets ONE row — a leading cell plus a single cell spanning
+                                // the rest (matching the "+ Add subtask" row's own
+                                // `colSpan={cols.length + 1}` right below it) — holding its own
+                                // nested table, sized as though there were exactly
+                                // `SUBTASK_GRID_MIN_COLS` columns (so ITS filler comes out to zero)
+                                // and scrolling horizontally inside itself rather than ever widening
+                                // the outer one.
+                                <tr style={{ background: 'var(--bg-surface)' }}>
+                                  <td style={{ padding: '5px 10px' }} />
+                                  <td colSpan={cols.length + 1} style={{ padding: '6px 10px' }}>
+                                    <div style={{ overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+                                        <tbody>{renderSubtaskGrid(SUBTASK_GRID_MIN_COLS)}</tbody>
+                                      </table>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
                           )}
                         </React.Fragment>
                       )
