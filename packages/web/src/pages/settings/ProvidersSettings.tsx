@@ -15,14 +15,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Beaker, Check, Cpu, Loader2, Pencil, Search, Trash2 } from 'lucide-react'
+import { Beaker, Check, CheckCheck, Copy, Cpu, Loader2, Pencil, Search, Trash2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
+import { copyText } from '../../lib/clipboard'
 import {
   type AiProviderId, type ProviderEntry, type ProviderModel, type Refusal, type TestResult,
   providerStateLabel, providerStateDot, providerCredentialMask, refusalMessage, testResultSentence,
-  validateProviderForm, buildProviderPutBody, filterModels, modelsFetchedSentence, clearTestState,
+  validateProviderForm, buildProviderPutBody, filterModels, modelsFetchedSentence, clearTestState, providerOffGuide,
 } from '../../lib/providerSettings'
 import {
   Checkbox, ConfirmModal, RecordCard, RecordCardAction, Select, StatusDot,
@@ -269,6 +270,10 @@ export default function ProvidersSettings() {
 
   if (state.loading) {
     return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando…' : 'Loading…'}</div>
+  }
+
+  if (state.refusal?.code === 'flag-off') {
+    return <FlagOffGuide pt={pt} isMobile={isMobile} />
   }
 
   if (state.refusal) {
@@ -566,6 +571,85 @@ export default function ProvidersSettings() {
         onConfirm={() => void confirmRemove()}
         onCancel={() => setRemoveTarget(null)}
       />
+    </div>
+  )
+}
+
+/** A command in a block of its own: long lines scroll inside it (never the page), and the copy
+ *  control is a full-width 44px row under the block on a phone. `copyText` is the shared helper that
+ *  also works over plain HTTP — the dashboard is often opened through a LAN/Tailscale address. */
+function CommandBlock({ text, pt, isMobile }: { text: string; pt: boolean; isMobile: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const copy = async () => {
+    const ok = await copyText(text)
+    setFailed(!ok)
+    setCopied(ok)
+    if (ok) setTimeout(() => setCopied(false), 1800)
+  }
+  const label = failed ? (pt ? 'Não copiou' : 'Copy failed') : copied ? (pt ? 'Copiado' : 'Copied') : (pt ? 'Copiar' : 'Copy')
+  return (
+    <div style={{
+      position: 'relative', minWidth: 0, background: 'var(--bg-card)',
+      border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden',
+    }}>
+      <pre style={{
+        margin: 0, padding: isMobile ? '10px 12px' : '10px 84px 10px 12px', fontSize: 12,
+        fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1.55,
+        whiteSpace: 'pre', overflowX: 'auto',
+      }}>{text}</pre>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        title={label}
+        style={{
+          background: 'var(--bg-elevated)', border: '1px solid var(--border)', cursor: 'pointer',
+          color: failed ? 'var(--text-secondary)' : copied ? 'var(--accent-green)' : 'var(--text-tertiary)',
+          display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+          transition: 'color 0.15s',
+          ...(isMobile
+            ? { width: '100%', minHeight: 44, justifyContent: 'center', borderWidth: '1px 0 0', borderRadius: 0 }
+            : { position: 'absolute' as const, top: 6, right: 6, borderRadius: 6, padding: '3px 8px' }),
+        }}
+      >
+        {copied ? <CheckCheck size={13} /> : <Copy size={13} />}
+        {label}
+      </button>
+    </div>
+  )
+}
+
+/** Shown instead of the provider list while the runtime flag is off. A notice, not an error: nothing
+ *  is broken, the feature is simply not switched on — so no fault colour, only what to do. */
+function FlagOffGuide({ pt, isMobile }: { pt: boolean; isMobile: boolean }) {
+  const guide = providerOffGuide(pt)
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0,
+      padding: isMobile ? 12 : 16, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+    }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{guide.title}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 4 }}>{guide.lead}</div>
+      </div>
+      {guide.sections.map(section => (
+        <div key={section.heading} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>{section.heading}</div>
+          {section.note && (
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{section.note}</div>
+          )}
+          {section.steps.map(step => (
+            <div key={step.text} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{step.text}</div>
+              <CommandBlock text={step.command} pt={pt} isMobile={isMobile} />
+            </div>
+          ))}
+        </div>
+      ))}
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{guide.after}</div>
     </div>
   )
 }
