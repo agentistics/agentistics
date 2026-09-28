@@ -51,11 +51,17 @@ export interface AsideGroupPrefs {
   /** User groups whose NAME is hidden (a grey block instead of text). Per-viewer: it is about what is
    *  on THIS screen — a shared one, a recording — not a fact about the work. */
   hiddenUserGroups: string[]
+  /** Is the "Fixadas" (pinned) section itself folded — separate from any one row inside it. */
+  foldedPinned: boolean
+  /** Is the "Grupos" section itself folded — hides every top-level folder (the heading and "Novo
+   *  grupo" stay, so a folder can still be added without unfolding first), distinct from any one
+   *  folder's own fold (`collapsedUserGroups`). */
+  foldedGroupsSection: boolean
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
-  sort: DEFAULT_ORDER, hiddenUserGroups: [],
+  sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -107,6 +113,8 @@ export function readAsideGroupPrefs(): AsideGroupPrefs {
       hiddenUserGroups: Array.isArray(p.hiddenUserGroups)
         ? p.hiddenUserGroups.filter((x): x is string => typeof x === 'string')
         : [],
+      foldedPinned: p.foldedPinned === true,
+      foldedGroupsSection: p.foldedGroupsSection === true,
     }
   } catch { return DEFAULT_ASIDE_GROUP_PREFS }
 }
