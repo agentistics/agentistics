@@ -1,0 +1,349 @@
+<title>agentop code — direções da TUI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Schibsted+Grotesk:wght@400;600;800&display=swap">
+<style>
+/* Layout: a long read — each idea is a header, a real-size terminal, then three short facts. */
+:root{
+  --bg:#f6f5f2; --fg:#1c1b19; --muted:#6b675f; --rule:#dedad2; --card:#ffffff; --accent:#c26d05;
+  --term-bg:#0c0c0e; --term-fg:#d4d4d8; --term-edge:#2a2a30;
+  --display:"Schibsted Grotesk",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#111113;--fg:#ededee;--muted:#9a9aa3;--rule:#26262b;--card:#18181b;--accent:#f59e0b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111113;--fg:#ededee;--muted:#9a9aa3;--rule:#26262b;--card:#18181b;--accent:#f59e0b;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--display);font-size:16px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:40px 80px}
+h1{font-size:clamp(28px,4vw,44px);line-height:1.1;margin:0 0 12px;font-weight:800;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:26px;margin:0;font-weight:800;text-wrap:balance}
+h3{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px;font-weight:600}
+p{margin:0 0 12px;max-width:72ch}
+.lede{color:var(--muted);font-size:18px;max-width:70ch}
+nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 8px}
+nav.toc a{font:600 13px var(--mono);color:var(--fg);text-decoration:none;border:1px solid var(--rule);padding:6px 10px;border-radius:6px;background:var(--card)}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--accent);outline:none}
+section.idea{margin-top:64px;scroll-margin-top:16px}
+.head{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}
+.tag{font:700 12px var(--mono);color:var(--accent);border:1px solid currentColor;border-radius:4px;padding:2px 7px}
+.pitch{color:var(--muted);margin-bottom:16px}
+.termbox{background:var(--term-bg);border:1px solid var(--term-edge);border-radius:10px;padding:14px 16px;overflow-x:auto;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.term{margin:0;font-family:var(--mono);color:var(--term-fg);font-size:min(12.5px,calc((100vw - 90px)/66));line-height:1.32;white-space:pre;font-variant-ligatures:none}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:18px}
+.facts>div{min-width:0}
+.facts p{font-size:15px}
+@media (max-width:760px){.facts{grid-template-columns:1fr}}
+.kicker{margin-top:56px;padding-top:24px;border-top:1px solid var(--rule)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.tw{overflow-x:auto}
+.rec{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:8px;padding:18px 20px;margin-top:20px}
+code{font-family:var(--mono);font-size:.9em}
+/* terminal palette = packages/tui/src/theme.ts */
+.a{color:#f59e0b}.b{font-weight:700}.g{color:#22c55e}.r{color:#f43f5e}.i{color:#38bdf8}.p{color:#818cf8}
+.m{color:#71717a}.l{color:#a1a1aa}.w{color:#fafafa}.d{color:#3f3f46}.y{color:#fbbf24}.u{text-decoration:underline}
+.sel{background:#232327}.add{background:#0b2e1a;color:#86efac}.del{background:#3b0d16;color:#fda4af}
+.dim{opacity:.28}.inv{background:#f59e0b;color:#111}.sb{background:#1d1d22}
+@media (prefers-reduced-motion:no-preference){.blink{animation:bl 1.1s steps(1) infinite}@keyframes bl{50%{opacity:0}}}
+</style>
+
+<div class="wrap">
+  <h3>agentop code · design da TUI · rascunho para decisão</h3>
+  <h1>Oito telas para o harness nativo no terminal</h1>
+  <p class="lede">Quatro direções de layout (A–D) e quatro telas que servem para qualquer uma delas (E–H). Todas usam a paleta e as molduras do cockpit do agentop, a logo real convertida para meios-blocos e os mesmos dados de exemplo: uma sessão consertando um bug no parser, com um pedido de permissão pendente. Os números são ilustrativos.</p>
+  <nav class="toc" aria-label="Ideias">
+    <a href="#A">A · Cockpit</a><a href="#B">B · HUD</a><a href="#C">C · Inspetor</a><a href="#D">D · Gravador de voo</a>
+    <a href="#E">E · Início</a><a href="#F">F · Configurações</a><a href="#G">G · Paleta</a><a href="#H">H · Permissão + diff</a><a href="#cmp">Comparação</a>
+  </nav>
+
+  <section class="idea" id="A">
+    <div class="head"><span class="tag">A</span><h2>Cockpit</h2></div>
+    <p class="pitch">O opencode melhorado. A conversa fica à esquerda e uma lateral fixa mostra, a cada turno, tudo o que a sessão gastou e ainda tem.</p>
+    <div class="termbox"><pre class="term" data-screen="A"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>O medidor de contexto é dividido em sistema, ferramentas e conversa. Nós montamos a requisição, então conseguimos medir isso. O gasto aparece por turno, por sessão e no dia, e a mesma sessão aberta na web ou no VS Code fica indicada.</p></div>
+      <div><h3>Custo</h3><p>Baixo. É o mesmo padrão de painéis do cockpit (`Pane`, `fitDetailLines`), e a lateral só lê o stream.</p></div>
+      <div><h3>80 colunas</h3><p>A lateral vira uma linha de estado de uma linha só (contexto, custo, modo, sem sandbox). `ctrl+i` abre a lateral por cima da conversa.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="B">
+    <div class="head"><span class="tag">B</span><h2>HUD</h2></div>
+    <p class="pitch">A conversa ocupa a largura toda, com uma faixa de instrumentos no topo e uma linha de métricas embaixo de cada turno. A informação fica onde o olho já está.</p>
+    <div class="termbox"><pre class="term" data-screen="B"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>Cada resposta traz o próprio recibo: duração, tempo até o primeiro token, tokens, cache e custo. Sparklines mostram o ritmo da sessão (tokens por turno, gasto por hora).</p></div>
+      <div><h3>Custo</h3><p>Baixo. Sem colunas, é o layout que degrada melhor.</p></div>
+      <div><h3>80 colunas</h3><p>A faixa cai para uma linha e a linha de cada turno perde primeiro o TTFT e depois o cache. Custo e tokens ficam sempre.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="C">
+    <div class="head"><span class="tag">C</span><h2>Inspetor</h2></div>
+    <p class="pitch">Três colunas: sessões, conversa e um inspetor. Ao selecionar um turno com ↑↓ na conversa, o inspetor abre esse turno por dentro. É a granularidade máxima.</p>
+    <div class="termbox"><pre class="term" data-screen="C"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>Nenhum harness mostra isto: o custo de cada contador em cada chamada, o motivo da parada, a latência de cada ferramenta e qual regra da política decidiu cada uma. Ausente aparece como N/A, nunca como 0.</p></div>
+      <div><h3>Custo</h3><p>Médio. Exige cursor sobre a conversa e três painéis que dividem a largura.</p></div>
+      <div><h3>80 colunas</h3><p>A coluna de sessões some primeiro (`ctrl+s` abre uma lista por cima). Depois o inspetor vira uma tela inteira alternada com `tab`.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="D">
+    <div class="head"><span class="tag">D</span><h2>Gravador de voo</h2></div>
+    <p class="pitch">Embaixo da conversa fica uma linha do tempo da execução atual, parecida com um gantt: chamadas ao modelo, ferramentas e o tempo esperando por você.</p>
+    <div class="termbox"><pre class="term" data-screen="D"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>Responde para onde foram o tempo e o dinheiro. Separa o tempo do modelo, das ferramentas e esperando uma pessoa. Nenhum harness separa essa última parte.</p></div>
+      <div><h3>Custo</h3><p>Médio. Os eventos já trazem os tempos de início e fim; o que falta é o desenho.</p></div>
+      <div><h3>80 colunas</h3><p>A escala do tempo encolhe e a coluna de custo por linha sai. Com menos de 20 linhas de altura, a linha do tempo vira painel sob demanda (`ctrl+t`).</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="E">
+    <div class="head"><span class="tag">E</span><h2>Tela inicial</h2></div>
+    <p class="pitch">O que aparece quando você digita <code>agentop code</code>: a logo, o prompt, o seu dia, as sessões para retomar, o estado de cada provider e a frota da máquina.</p>
+    <div class="termbox"><pre class="term" data-screen="E"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>A tela inicial já mostra números: gasto do dia, sequência de dias, sessões retomáveis com custo e contexto, e as outras sessões da máquina, inclusive de outros harnesses.</p></div>
+      <div><h3>Logo</h3><p>É gerada a partir do ícone real, só com escala e cor. A versão final sai do SVG, com o wordmark de blocos que o cockpit já usa.</p></div>
+      <div><h3>80 colunas</h3><p>A logo fica e o wordmark vira texto. Os três cartões ficam empilhados e mostram só as duas primeiras linhas de cada um.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="F">
+    <div class="head"><span class="tag">F</span><h2>Central de configurações</h2></div>
+    <p class="pitch">Tudo o que hoje exige a web: providers, chaves, modelos com preço e janela de contexto (com a fonte), a política de permissões, o tema e os atalhos.</p>
+    <div class="termbox"><pre class="term" data-screen="F"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>Cada preço mostra de onde veio e em que data. Um modelo sem preço verificado aparece como N/A com uma frase explicando, nunca com um valor inventado. O teste de conexão mostra a latência.</p></div>
+      <div><h3>Segurança</h3><p>A chave é digitada mascarada, guardada com permissão 0600 e exibida só pelo final. As mesmas recusas de prefixo do servidor valem aqui.</p></div>
+      <div><h3>Mesma fonte</h3><p>Web e terminal escrevem nas mesmas preferências. Não existe uma segunda cópia da configuração.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="G">
+    <div class="head"><span class="tag">G</span><h2>Paleta de comandos</h2></div>
+    <p class="pitch"><code>ctrl+p</code> abre uma busca sobre todos os comandos e mostra o atalho de cada um. É assim que se descobre a interface sem ler a ajuda.</p>
+    <div class="termbox"><pre class="term" data-screen="G"></pre></div>
+    <div class="facts">
+      <div><h3>Diferencial</h3><p>Cada linha ensina o atalho que a substitui. Os comandos que não se aplicam agora aparecem com uma frase dizendo o motivo, em vez de sumirem.</p></div>
+      <div><h3>Barra</h3><p>Digitar <code>/</code> no prompt abre a mesma lista, filtrada. Uma fonte, duas portas de entrada.</p></div>
+      <div><h3>Atalhos</h3><p>São configuráveis na central (F). Os padrões seguem o cockpit, então ninguém aprende duas vezes.</p></div>
+    </div>
+  </section>
+
+  <section class="idea" id="H">
+    <div class="head"><span class="tag">H</span><h2>Pedido de permissão com diff</h2></div>
+    <p class="pitch">A lista de opções vem da política real e mostra o diff inteiro antes da decisão, o motivo da pergunta e o checkpoint que permite desfazer.</p>
+    <div class="termbox"><pre class="term" data-screen="H"></pre></div>
+    <div class="facts">
+      <div><h3>Regra</h3><p>As opções são numeradas e lidas do estado da política. Não existe um "aprovar" que escolhe pela pessoa, e o enter sozinho não confirma nada.</p></div>
+      <div><h3>Honestidade</h3><p>O pedido mostra por que está perguntando (qual regra), que roda como você, sem sandbox, e que existe um checkpoint salvo.</p></div>
+      <div><h3>Opções</h3><p><code>e</code> abre no $EDITOR, <code>d</code> alterna para lado a lado e a opção 4 devolve o seu motivo para o agente.</p></div>
+    </div>
+  </section>
+
+  <section class="kicker" id="cmp">
+    <h2>Comparação</h2>
+    <div class="tw" style="margin-top:14px"><table>
+      <thead><tr><th>Direção</th><th>Onde as métricas aparecem</th><th>Granularidade</th><th>80 colunas</th><th>Esforço</th></tr></thead>
+      <tbody>
+        <tr><td><b>A · Cockpit</b></td><td>Lateral fixa</td><td>Sessão e turno atual</td><td>Boa (vira linha de estado)</td><td>Baixo</td></tr>
+        <tr><td><b>B · HUD</b></td><td>Faixa no topo e linha por turno</td><td>Cada turno</td><td>A melhor</td><td>Baixo</td></tr>
+        <tr><td><b>C · Inspetor</b></td><td>Painel do item selecionado</td><td>Cada chamada e cada ferramenta</td><td>Média (vira tela alternada)</td><td>Médio</td></tr>
+        <tr><td><b>D · Gravador</b></td><td>Linha do tempo da execução</td><td>Tempo de cada passo</td><td>Média</td><td>Médio</td></tr>
+      </tbody>
+    </table></div>
+    <div class="rec">
+      <h3>Minha recomendação</h3>
+      <p><b>A como esqueleto, e a lateral troca de conteúdo.</b> Por padrão ela mostra a visão de sessão (A). Com <code>ctrl+i</code> vira o inspetor do turno selecionado (C). Com <code>ctrl+t</code> vira a linha do tempo (D). A linha de recibo embaixo de cada turno vem do B e está sempre visível. Assim as quatro ideias ficam num layout só, que degrada para uma linha de estado em 80 colunas.</p>
+      <p style="margin:0">E, F, G e H entram em qualquer direção escolhida. Para o M1 eu sugiro A + B (recibo) + E + H, e em seguida F, G, C e D.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+const W=108,H=34;
+const LOGO=["        ▄▄██▄▄        ","     ▄█▀▀    ▀▀█▄▄    ","  ▄█▀▀           ▀█▄  "," ▄█    ▄      ▄    █▄ ","███  ▄█▀█    █▀█▄  ███","███                ███","███                ███","▀▀█▄             ▄▄█▀▀","   ▀█▄        ▄█▀▀    ","    ██▄█▀█▄▄█▀▀       ","    █▀▀               "];
+const WORD=['▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀ █ █▀ ▀█▀ █ █▀▀ █▀','█▀█ █▄█ ██▄ █░▀█ ░█░ █ ▄█ ░█░ █ █▄▄ ▄█'];
+
+function P(str){const segs=[];const re=/\{([\w.]+):([^}]*)\}/g;let i=0,m;while((m=re.exec(str))){if(m.index>i)segs.push({c:'',t:str.slice(i,m.index)});segs.push({c:m[1].split('.').join(' '),t:m[2]});i=re.lastIndex}if(i<str.length)segs.push({c:'',t:str.slice(i)});return segs}
+const N=l=>Array.isArray(l)?l:P(l||'');
+const cl=t=>[...t].length;
+const len=s=>N(s).reduce((n,x)=>n+cl(x.t),0);
+function fit(s,w,fill=''){s=N(s);const out=[];let n=0;for(const x of s){const ch=[...x.t];if(n+ch.length<=w){out.push(x);n+=ch.length}else{const k=w-n;if(k>0)out.push({c:x.c,t:ch.slice(0,k-1).join('')+'…'});n=w;break}}if(n<w)out.push({c:fill,t:' '.repeat(w-n)});return out}
+function lr(l,r,w){const L=N(l),R=N(r);const g=Math.max(1,w-len(L)-len(R));return [...L,{c:'',t:' '.repeat(g)},...R]}
+const isBlock=x=>Array.isArray(x)&&x.length>0&&Array.isArray(x[0]);
+function box({w,h,title='',badge='',focus=false,lines=[],pad=1}){const bc=focus?'a':'d';const inner=w-2-2*pad;const top=[{c:bc,t:'╭─'}];let used=2;if(title){const t=' '+title+' ';top.push({c:focus?'a b':'l',t});used+=cl(t)}const B=badge?[{c:'',t:' '},...N(badge),{c:'',t:' '}]:[];const bl=len(B);top.push({c:bc,t:'─'.repeat(Math.max(0,w-used-1-bl))});top.push(...B);top.push({c:bc,t:'╮'});const out=[top];for(let i=0;i<h-2;i++){out.push([{c:bc,t:'│'+' '.repeat(pad)},...fit(lines[i]||'',inner),{c:bc,t:' '.repeat(pad)+'│'}])}out.push([{c:bc,t:'╰'+'─'.repeat(w-2)+'╯'}]);return out}
+function flat(items){return items.flatMap(x=>isBlock(x)?x:[x])}
+function column(w,h,top,bottom=[],indent=1){const T=flat(top).map(l=>[{c:'',t:' '.repeat(indent)},...N(l)]),B=flat(bottom).map(l=>[{c:'',t:' '.repeat(indent)},...N(l)]);const fill=Math.max(0,h-T.length-B.length);return [...T.slice(0,h-B.length),...Array(fill).fill(''),...B].map(l=>fit(l,w))}
+function hcat(cols){const h=Math.max(...cols.map(c=>c.lines.length));const out=[];for(let i=0;i<h;i++){let row=[];for(const c of cols)row=row.concat(fit(c.lines[i]||'',c.w));out.push(row)}return out}
+function chars(l){const a=[];for(const s of N(l))for(const ch of s.t)a.push({c:s.c,ch});return a}
+function group(a){const out=[];for(const x of a){const l=out[out.length-1];if(l&&l.c===x.c)l.t+=x.ch;else out.push({c:x.c,t:x.ch})}return out}
+function overlay(base,top,x,y){return base.map((ln,i)=>{if(i<y||i>=y+top.length)return ln;const a=chars(fit(ln,W));chars(top[i-y]).forEach((v,j)=>{if(x+j<a.length)a[x+j]=v});return group(a)})}
+function dim(lines){return lines.map(l=>N(l).map(s=>({c:(s.c+' dim').trim(),t:s.t})))}
+function hl(lines,w){return lines.map(l=>fit(N(l).map(s=>({c:(s.c+' sel').trim(),t:s.t})),w,'sel'))}
+const row=(cells,ws)=>cells.map((c,i)=>fit(c,ws[i])).flat();
+const gauge=(f,n)=>{const k=Math.floor(f*n);return '{a:'+'▓'.repeat(k)+'}{d:'+'░'.repeat(n-k)+'}'};
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function render(lines){const L=[...lines];while(L.length<H)L.push('');return L.slice(0,H).map(l=>fit(l,W).map(s=>s.c?`<span class="${s.c}">${esc(s.t)}</span>`:esc(s.t)).join('')).join('\n')}
+
+/* shared pieces */
+const header=(extra='{l:›} {w:parser fix} {m:· blpsoares/agentistics · feat/parser}')=>lr(`{a:◢◣} {w.b:agentistics} {a:code}  ${extra}`,'{y.b:▲ no sandbox}  {m:mode} {p.b:ask}  {m:v1.24.0}',W);
+const footer=(k='{a:1-4} answer  {a:ctrl+p} commands  {a:ctrl+s} sessions  {a:shift+tab} mode  {a:ctrl+i} inspector  {a:esc} stop  {a:?} help')=>k;
+const tool=(ic,v,t,meta,w)=>lr(`${ic} {l:${v.padEnd(6)}}${t}`,meta,w);
+function convo(w,o={}){const L=[];
+ L.push(lr('{i.b:you}','{m:14:02}',w));L.push('fix the off-by-one in the token parser and');L.push('run the core tests');L.push('');
+ if(o.prev){L.push('{m:▸ turn 6 · "add fixture for empty buffer" · 3 tools · $0.012}');L.push('')}
+ L.push(lr('{a.b:agentistics} {m:· claude-sonnet-5}','{m:14:02}',w));
+ L.push("I'll read the parser, patch the boundary check,");L.push('then run the tests.');
+ L.push(tool('{g:✓}','read','core/src/tokens.ts','{m:212 ln · 40ms}',w));
+ L.push(tool('{g:✓}','grep','"sliceEnd" in core','{m:3 hits · 18ms}',w));
+ L.push(tool('{g:✓}','patch','core/src/tokens.ts','{g:+3} {r:−1}',w));
+ L.push(fit('{m: 41 │}   const end = start + len',w));
+ L.push(fit('{m: 42 │}{del:- if (end > buf.length - 1) return null}',w,''));
+ L.push(fit('{m: 42 │}{add:+ if (end > buf.length) return null}',w,''));
+ if(o.receipt)L.push('{m:↳ 4.2s · ttft 0.7s · 11.9k tok · cache 83% · $0.017}');
+ L.push(tool('{y:◐}','shell','bun test packages/core','{y:needs you}',w));
+ return L}
+const perm=w=>box({w,h:10,focus:true,title:'permission · shell',badge:'{y:waiting 21s}',lines:[
+ '{w.b:bun test packages/core}','{m:cwd ~/agentistics · runs as you · }{y:no sandbox}','{m:asked because: no allow rule matches "bun test"}','',
+ '{a.b:1} Allow once','{a.b:2} Allow {w:bun test *} for this session','{a.b:3} Deny','{a.b:4} Deny, and tell the agent why…']});
+const input=(w,t='{m:› answer the permission above (1–4) · }{a:esc}{m: interrupts}')=>box({w,h:3,lines:[t]});
+
+const S={};
+/* A — Cockpit */
+{const LW=70,RW=38,BH=H-2;
+ const left=column(LW,BH,[...convo(LW-2),'',perm(LW-2)],[input(LW-2)]);
+ const side=box({w:RW,h:BH,title:'session',badge:'{m:3f5f}',lines:[
+  '{w:parser fix}','{m:anthropic · claude-sonnet-5}','{m:turn 7 · 12m · }{g:● working}','',
+  lr('{l.b:CONTEXT}','{m:200k window}',RW-4),gauge(.41,22)+' {w:41%}',lr('{m:sys 6.1k · tools 9.8k}','{m:chat 66.5k}',RW-4),'',
+  lr('{l.b:SPEND}','{m:api-equivalent}',RW-4),lr('this turn','{w:$0.041}',RW-4),lr('session  {a:▁▂▂▃▅▃▆}','{w:$0.38}',RW-4),lr('today · 6 sessions','{w:$4.12}',RW-4),'',
+  lr('{l.b:TOKENS}','{w:86.4k}',RW-4),lr('in 12.3k','out 8.9k',RW-4),lr('cache read 61.0k','write 4.2k',RW-4),lr('{m:cache hit}','{g:81%}',RW-4),'',
+  lr('{l.b:TOOLS}','{m:12 calls · 0 err}',RW-4),'read 6  grep 3  patch 2  shell 1','',
+  lr('{l.b:FILES}','{g:+18} {r:−4}',RW-4),lr('{y:M} core/src/tokens.ts','{g:+3} {r:−1}',RW-4),lr('{y:M} core/src/tokens.test.ts','{g:+15} {r:−3}',RW-4),'',
+  lr('{l.b:PLAN}','{m:2/4}',RW-4),'{g:✓} locate boundary check','{g:✓} patch parser','{y:◐} run tests','{m:○ summarize}']});
+ S.A=[header(),...hcat([{w:LW,lines:left},{w:RW,lines:side}]),footer()];}
+
+/* B — HUD */
+{const hud=box({w:W,h:4,title:'hud',lines:[
+  `ctx ${gauge(.41,16)} {w:41%} {m:82.4k/200k}   {l:$} turn {w:0.041}  session {w:0.38}  today {w:4.12}   burn {w:$1.90/h}   cache {g:81%}`,
+  '{l:tok/turn} {a:▁▂▃▂▅▃▇}   ttft {w:0.7s}  {w:42} tok/s   tools {w:12} ok {w:0} err   files {g:+18} {r:−4}   plan {w:2/4}   {g:● working 12m}']});
+ const body=column(W,H-2-4,[...convo(W-40,{receipt:true}),perm(66)],[input(W-2)]);
+ S.B=[header(),...hud,...body,footer()];}
+
+/* C — Inspector */
+{const A=24,Cw=48,Iw=36,BH=H-2;
+ const rail=box({w:A,h:BH,title:'sessions',lines:[
+  '{l.b:THIS REPO}',lr('{a:▸} {w:parser fix}','{w:$0.38}',A-4),'  {g:● working} {m:12m}',lr('  ui refactor','$1.20',A-4),'  {y:● needs you}',lr('  docs pass','$0.07',A-4),'  {m:ended · 1d}','',
+  '{l.b:OTHER HARNESSES}',lr('  claude','2 {y:●1}',A-4),lr('  codex','1',A-4),'','{l.b:TODAY}','  {w:$4.12} {m:· 6 sessions}','  {a:▁▂▅▃▇▂▁▃▅}','','{m:n new · r resume}']});
+ const cv=convo(Cw-2,{});const sel=hl(cv.slice(4,13),Cw-2);
+ const mid=column(Cw,BH,[...cv.slice(0,4),...sel,...cv.slice(13),'',input(Cw-2,'{m:› message · ↑↓ select a turn}')],[],1);
+ const insp=box({w:Iw,h:BH,title:'inspector',focus:true,badge:'{m:turn 7}',lines:[
+  '{a.b.u:turn} {l:tools} {l:files} {l:cost} {l:policy}','',
+  lr('{w:14:02:31}','{m:4.2s}',Iw-4),lr('{m:model}','claude-sonnet-5',Iw-4),lr('{m:stop}','tool_use',Iw-4),lr('{m:ttft · rate}','0.71s · 38 tok/s',Iw-4),'',
+  lr('{l.b:REQUEST}','{w:11.9k tok}',Iw-4),lr('input      1.1k','$0.003',Iw-4),lr('cache read 9.8k','$0.003',Iw-4),lr('cache wr   0.4k','$0.002',Iw-4),lr('output     0.6k','$0.009',Iw-4),lr('{w:total}','{w:$0.017}',Iw-4),'',
+  lr('{l.b:CONTEXT AFTER}','{w:41%}',Iw-4),gauge(.41,Iw-4),'',
+  '{l.b:TOOLS IN THIS TURN}',lr('read  tokens.ts','40ms {g:ok}',Iw-4),lr('grep  sliceEnd','18ms {g:ok}',Iw-4),lr('patch tokens.ts','12ms {g:+3}{r:−1}',Iw-4),'',
+  '{l.b:POLICY}',lr('read, grep','{g:allowed}',Iw-4),lr('patch','{y:asked}{m: → you: 1}',Iw-4),lr('{m:rule}','{m:mode ask}',Iw-4)]});
+ S.C=[header(),...hcat([{w:A,lines:rail},{w:Cw,lines:mid},{w:Iw,lines:insp}]),footer('{a:↑↓} turn  {a:tab} pane  {a:1-4} answer  {a:ctrl+p} commands  {a:ctrl+t} timeline  {a:?} help')];}
+
+/* D — Flight recorder */
+{const scale=56/40;
+ function tl(label,spans,meta){const cells=Array.from({length:56},(_,k)=>({c:'d',ch:k%14===0?'┆':' '}));for(const [s,e,c,ch] of spans){const a=Math.floor(s*scale),b=Math.max(a+1,Math.round(e*scale));for(let k=a;k<b&&k<56;k++)cells[k]={c,ch}}return [...fit(label,24),...group(cells),{c:'',t:'  '},...N(meta)]}
+ const ax=' '.repeat(24)+'0s'.padEnd(14)+'10s'.padEnd(14)+'20s'.padEnd(14)+'30s'.padEnd(12)+'40s';
+ const tlb=box({w:W,h:14,title:'timeline · run 7',badge:'{m:38.2s wall · live}',lines:['{m:'+ax+'}',
+  tl('{a:model} call 1',[[0,2.1,'a','█']],'{m:1.2k→0.2k}  $0.004'),
+  tl('{i:read}  tokens.ts',[[2.2,2.4,'i','█']],'{m:40ms}'),
+  tl('{i:grep}  sliceEnd',[[2.4,2.6,'i','█']],'{m:18ms}'),
+  tl('{a:model} call 2',[[2.7,6.7,'a','█']],'{m:9.8k→0.6k}  $0.017'),
+  tl('{i:patch} tokens.ts',[[6.8,12.9,'y','░'],[12.9,13.2,'i','█']],'{y:asked 6.1s}'),
+  tl('{a:model} call 3',[[13.3,16.3,'a','█']],'{m:10.4k→0.4k} $0.015'),
+  tl('{i:shell} bun test',[[16.4,38.2,'y','░']],'{y:waiting on you ▸}'),
+  '',lr('{a:█} model   {i:█} tool   {y:░} waiting on you','money this run {w:$0.036} {m:· 3 model calls · cache 81%}',W-4),
+  'wall {w:38.2s}  ·  model {w:9.1s} {m:(24%)}  ·  tools {w:0.3s} {m:(1%)}  ·  {y:waiting on you 28.8s (75%)}']});
+ const cv=box({w:W,h:H-2-14-3,title:'conversation',lines:convo(W-4,{receipt:true})});
+ S.D=[header(),...cv,...tlb,...input(W,'{m:› the shell call above needs you · }{a:enter}{m: opens the permission · }{a:ctrl+t}{m: hides the timeline}'),footer()];}
+
+/* E — Home */
+{const right=['',...WORD.map(l=>'{a:'+l+'}'),'','{w.b:code} {m:· the agentistics native harness · v1.24.0}','{m:anthropic · claude-sonnet-5 · mode }{p:ask}','{y:▲ no sandbox}{m: — tools run as you in ~/agentistics}','{m:everything not allowlisted asks first}'];
+ const logoBlock=hcat([{w:24,lines:LOGO.map(l=>'{a:'+l+'}')},{w:60,lines:right}]).map(l=>[{c:'',t:' '.repeat(12)},...l]);
+ const prompt=box({w:80,h:3,focus:true,lines:[lr('{w:›} {m:what are we building?}{a.blink:▍}','{m:@ files  / commands  ! shell}',76)]}).map(l=>[{c:'',t:' '.repeat(14)},...l]);
+ const cw=34;
+ const today=box({w:cw,h:9,title:'today',lines:[lr('cost','{w:$4.12} {m:api-eq.}',cw-4),lr('tokens','{w:1.94M} {m:all 4}',cw-4),lr('sessions','{w:6} {m:· 2 live}',cw-4),lr('streak','{w:12 days}',cw-4),lr('{m:14d}','{a:▂▃▁▅▃▆▂▃▅▇▄▃▆▅}',cw-4)]});
+ const recent=box({w:cw,h:9,title:'resume',lines:[lr('{a:1} parser fix','$0.38 {m:12m}',cw-4),'  {m:agentistics · ctx 41%}',lr('{a:2} ui refactor','$1.20 {m: 2h}',cw-4),'  {m:agentistics · ctx 77%}',lr('{a:3} billing export','$0.64 {m: 1d}',cw-4),'  {m:embark · ctx N/A}']});
+ const prov=box({w:cw,h:9,title:'providers',lines:[lr('{g:●} anthropic','{m:ready · env}',cw-4),lr('{g:●} openrouter','{m:ready · keychain}',cw-4),lr('{m:○} google','{m:beta · off}',cw-4),'',lr('{a:+} add provider','{m:ctrl+,}',cw-4)]});
+ const cards=hcat([{w:3,lines:[]},{w:cw,lines:today},{w:1,lines:[]},{w:cw,lines:recent},{w:1,lines:[]},{w:cw,lines:prov}]);
+ S.E=['','',...logoBlock,'','',...prompt,'',...cards,'','   {m:this machine:} 3 other assistant sessions {m:·} {y:1 needs you} {m:·} {a:ctrl+s}{m: to see them}','','',footer('{a:enter} start  {a:1-3} resume  {a:ctrl+p} commands  {a:ctrl+s} sessions  {a:ctrl+,} settings  {a:?} help  {a:ctrl+c} quit')];}
+
+/* F — Settings */
+{const NW=26,RW=W-NW,BH=H-2;
+ const nav=box({w:NW,h:BH,title:'settings',lines:['{a:▸} {w.b:Providers}','  Models & pricing','  Permissions','  Sessions & storage','  Appearance','  Keybindings','  Language','  Sync & central','','','{m:the same preferences}','{m:the web edits; no}','{m:second copy}']});
+ const pw=RW;
+ const prov=box({w:pw,h:9,focus:true,title:'providers',badge:'{m:a add · t test · d remove}',lines:[
+  row(['{l:  provider}','{l:status}','{l:credential}','{l:default model}'],[17,16,26,19]),
+  hl([row(['{a:▸} anthropic','{g:● ready}','env ANTHROPIC_API_KEY','claude-sonnet-5'],[17,16,26,19])],78)[0],
+  row(['  openrouter','{g:● ready}','keychain (agentop)','openai/gpt-5.1'],[17,16,26,19]),
+  row(['  google','{m:○ beta, off}','{m:—}','{m:—}'],[17,16,26,19]),
+  row(['  {m:ollama}','{r:● unreachable}','{m:none needed}','{m:llama4:70b}'],[17,16,26,19]),
+  '','{m:  google sits behind the provider BETA switch (Sync & central)}']});
+ const det=box({w:pw,h:8,title:'anthropic',lines:[
+  lr('{m:credential}  env ANTHROPIC_API_KEY  {m:(sk-ant-…9f2c)}','{a:k}{m: set a stored key (0600)}',pw-4),
+  lr('{m:base url}    api.anthropic.com  {m:(fixed for this provider)}','',pw-4),
+  lr('{m:last test}   14:01 · {g:ok} · 212ms · 3 models listed','{a:t}{m: test now}',pw-4),
+  lr('{m:default}     claude-sonnet-5','{a:m}{m: change}',pw-4),'',
+  '{m:a key of the wrong vendor (sk-… here, AIza… elsewhere) is refused in words}']});
+ const mw=box({w:pw,h:BH-9-8,title:'models & pricing · anthropic',badge:'{m:per 1M tokens}',lines:[
+  row(['{l:  model}','{l:input}','{l:output}','{l:cache r}','{l:cache w}','{l:window}','{l:source}'],[22,8,8,8,8,8,16]),
+  hl([row(['{a:▸} claude-sonnet-5','$3.00','$15.00','$0.30','$3.75','200k','{g:official} {m:09-25}'],[22,8,8,8,8,8,16])],78)[0],
+  row(['  claude-opus-5','$5.00','$25.00','$0.50','$6.25','1M','{g:official} {m:09-25}'],[22,8,8,8,8,8,16]),
+  row(['  claude-haiku-4-5','$1.00','$5.00','$0.10','$1.25','200k','{g:official} {m:09-20}'],[22,8,8,8,8,8,16]),
+  row(['  claude-next-preview','{m:N/A}','{m:N/A}','{m:N/A}','{m:N/A}','{m:N/A}','{y:no verified price}'],[22,8,8,8,8,8,16]),
+  '','{m:  no source can price it → N/A everywhere, never a guessed rate}']});
+ S.F=[header('{l:›} {w:settings}'),...hcat([{w:NW,lines:nav},{w:RW,lines:[...prov,...det,...mw]}]),footer('{a:↑↓} move  {a:enter} edit  {a:tab} pane  {a:a} add  {a:t} test  {a:esc} back  {a:?} help')];}
+
+/* G — Palette over A */
+{const pw=72;
+ const pal=box({w:pw,h:19,focus:true,title:'commands',badge:'{m:ctrl+p}',lines:[
+  '{w:›} {a.blink:▍}','',
+  '{l.b:SESSION}',
+  hl([lr('{a:▸} /model        switch model or provider','ctrl+m',pw-4)],pw-4)[0],
+  lr('  /mode         permission mode: ask · edits · plan','shift+tab',pw-4),
+  lr('  /resume       open an earlier session','ctrl+r',pw-4),
+  lr('  /compact      summarize to free context','',pw-4),
+  lr('  {m:/undo         nothing to undo yet — no write this turn}','',pw-4),
+  '{l.b:VIEW}',
+  lr('  /inspector    the selected turn, in detail','ctrl+i',pw-4),
+  lr('  /timeline     where this run spent time and money','ctrl+t',pw-4),
+  lr('  /cost         this session, today, by model','',pw-4),
+  '{l.b:SETTINGS}',
+  lr('  /providers    keys, models and prices','ctrl+,',pw-4),
+  lr('  /lang         english · português','',pw-4),'',
+  '{m:26 commands · ↑↓ move · enter run · esc close}']});
+ S.G=overlay(dim(S.A),pal,Math.floor((W-pw)/2),5);}
+
+/* H — Permission with diff over A */
+{const mw=94;
+ const L=[
+  lr('{w.b:packages/core/src/tokens.ts}  {g:+3} {r:−1}  {m:1 hunk}','{m:file.patch · call 2 of turn 7}',mw-4),
+  '{m:runs as you · }{y:no sandbox}{m: · a checkpoint is saved before writing (undo with /undo)}',
+  '{d:'+'─'.repeat(mw-4)+'}',
+  '{m:  39 │}   export function slice(buf, start, len) {',
+  '{m:  40 │}     if (len <= 0) return []',
+  '{m:  41 │}     const end = start + len',
+  fit('{del:- 42 │     if (end > buf.length - 1) return null}',mw-4,'del'),
+  fit('{add:+ 42 │     if (end > buf.length) return null}',mw-4,'add'),
+  fit('{add:+ 43 │     // end is exclusive: a slice ending at the last byte is valid}',mw-4,'add'),
+  fit('{add:+ 44 │     // (regression: tokens.test.ts "last byte")}',mw-4,'add'),
+  '{m:  45 │}     return buf.subarray(start, end)',
+  '{d:'+'─'.repeat(mw-4)+'}',
+  '{m:asked because: mode is }{p:ask}{m: and no allow rule covers file.patch}','',
+  '{a.b:1} Apply once',
+  '{a.b:2} Apply, and allow patches under {w:packages/core/} for this session',
+  '{a.b:3} Reject',
+  '{a.b:4} Reject, and tell the agent why…','',
+  '{a.b:e} open in $EDITOR first     {a.b:d} side by side     {a.b:↑↓} scroll the diff'];
+ const modal=box({w:mw,h:L.length+2,focus:true,title:'permission · file.patch',badge:'{y:waiting 6s}',lines:L});
+ S.H=overlay(dim(S.A),modal,Math.floor((W-mw)/2),3);}
+
+document.querySelectorAll('pre[data-screen]').forEach(p=>{p.innerHTML=render(S[p.dataset.screen])});
+</script>
