@@ -21,7 +21,7 @@
 import { useState } from 'react'
 import { AlertCircle, Check } from 'lucide-react'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
-import { splitApprovalFrame } from '../../lib/approvalQuestion'
+import { approvalIdentity, splitApprovalFrame } from '../../lib/approvalQuestion'
 
 export interface ApprovalCardProps {
   row: FleetRow
@@ -62,10 +62,17 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
   const approve = row.verbs.find(v => v.action === 'approve')
 
   /**
-   * WHICH DIALOG THIS IS. Its options, as text — the only thing on the row that changes when the
-   * question does, and stays the same while it is still being asked.
+   * WHICH DIALOG THIS IS — the QUESTION plus its options, not the options alone.
+   *
+   * claude's permission prompt is a FIXED TEMPLATE (captured in `dialog-choice.ts`) — `1. Yes / 2. Yes, allow
+   * all edits… / 3. No` — on every Bash/Edit/Write call, so comparing options alone made the FIRST
+   * permission prompt answered from here equal to EVERY LATER ONE for a completely different
+   * command — `answeredShape` never changed back, the buttons went inert and stayed inert, and a
+   * disabled button both refuses every further click in silence ("sometimes it doesn't send at
+   * all") and leaves the (new) question sitting on screen looking ignored ("sometimes it just keeps
+   * showing the interactive question"). See `approvalIdentity`.
    */
-  const shape = options.map(o => `${o.number}:${o.label}`).join('\n')
+  const shape = approvalIdentity(row.approvalLines ?? [], options)
   /** The dialog that has already been answered from here. */
   const [answeredShape, setAnsweredShape] = useState<string | null>(null)
 

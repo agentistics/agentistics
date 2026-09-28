@@ -34,6 +34,8 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
 import { ApprovalCard } from './ApprovalCard'
+import { approvalIdentity } from '../../lib/approvalQuestion'
+import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { useTerminalStream } from '../../hooks/useTerminalStream'
@@ -1237,16 +1239,41 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * answer to a question nobody asked.
    */
   const [answering, setAnswering] = useState<{ number: number; label: string; shape: string } | null>(null)
-  /** The dialog's identity — the same string `ApprovalCard` compares, for the same reason. */
+  /**
+   * The dialog's identity — the same `approvalIdentity` `ApprovalCard` compares, for the same
+   * reason (see that module's header): options ALONE are not an identity, because claude's
+   * permission prompt is a fixed template across every command it asks about.
+   */
   const dialogShape = useMemo(
-    () => (row?.dialogOptions ?? []).map(o => `${o.number}:${o.label}`).join('\n'),
-    [row?.dialogOptions],
+    () => approvalIdentity(row?.approvalLines ?? [], row?.dialogOptions ?? []),
+    [row?.approvalLines, row?.dialogOptions],
   )
   useEffect(() => {
     // The question went away, or became a different question. Either way this is no longer an
     // answer to it, and the composer goes back to being a composer.
     setAnswering(a => (a === null || (blocked && a.shape === dialogShape) ? a : null))
   }, [blocked, dialogShape])
+
+  /**
+   * FREE-TEXT DIALOG ANSWERS WAITING FOR THEIR ECHO TO RETIRE — see `dialogAnswerEcho.ts`.
+   *
+   * Keyed by the exact text sent, valued by `dialogShape` AT THE MOMENT it was sent: the one thing
+   * that tells this echo apart from an ordinary prompt's, whose transcript containment check
+   * (`pendingEchoes`, below) can never match it — the answer lands as a `tool_result`, never a user
+   * turn. A ref, not state: it is bookkeeping for the effect below and must never itself trigger a
+   * render.
+   */
+  const dialogAnswerEchoes = useRef(new Map<string, string>())
+  useEffect(() => {
+    const pending = dialogAnswerEchoes.current
+    if (pending.size === 0) return
+    // No dialog on screen at all reads exactly like a dialog that moved on to a different one: in
+    // both cases the harness has necessarily consumed whatever it was sitting on.
+    const done = dialogAnswersToRetire(pending, blocked ? dialogShape : null)
+    if (done.length === 0) return
+    for (const text of done) pending.delete(text)
+    editEcho(list => list.filter(t => !done.includes(t)))
+  }, [blocked, dialogShape, editEcho])
 
   /**
    * Hand the artifact list to whoever is drawing the panel.
@@ -1534,6 +1561,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
      * their paths are part of the answer's text. And the optimistic clear above covers this path
      * unchanged: `restore` puts back the words, the files AND the reply target if it does not go.
      */
+    // Captured BEFORE the await: `answering` is cleared on a successful send below, and this is
+    // what the echo has to be retired AGAINST — see `dialogAnswerEcho.ts`.
+    const answeringShape = answeringNow && answering ? answering.shape : null
     const out = answeringNow && answering
       ? await act({ id: session.id, action: 'approve', choice: answering.number, text: full })
       : await act({ id: session.id, action: 'prompt', text: full })
@@ -1543,6 +1573,10 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       // message, and the next scheduled read is up to `CHAT_POLL_MS` away — three seconds in which
       // the echo sits there labelled as undelivered when it has in fact already landed.
       nudgeChat.current()
+      // THIS ECHO WILL NEVER BE RETIRED BY THE TRANSCRIPT. A free-text dialog answer lands as a
+      // `tool_result`, never a user turn, so `pendingEchoes`'s containment check has nothing to
+      // ever match it against — without this it queued on screen forever. See `dialogAnswerEcho.ts`.
+      if (answeringShape !== null) dialogAnswerEchoes.current.set(full, answeringShape)
       // The question has been answered; the composer stops being an answer field. The card itself
       // goes when the row stops reporting the dialog, which is the server's answer and not ours.
       // Everything else was already cleared on the keystroke — see the optimistic clear above.
