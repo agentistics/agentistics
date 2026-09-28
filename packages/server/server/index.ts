@@ -1668,6 +1668,45 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE NATIVE RUNTIME'S SESSION ROUTES (B4.3, §28 subset) — `/api/runtime/sessions`,
+    // `/api/runtime/sessions/:id/messages`, `/api/runtime/sessions/:id/stream`,
+    // `/api/runtime/tools/:execId/approve` and `/api/runtime/runs/:id/cancel`, all matched inside
+    // `runtime-sessions-web.ts`. `capability-guard.ts` has already required `localShell` on all
+    // three prefixes (`/api/runtime/sessions`, `/api/runtime/runs`, `/api/runtime/tools`); the
+    // handler refuses a central on its own too. The stream route answers with a raw SSE body
+    // instead of JSON, so it is handled before the `json()` wrap.
+    if (
+      url.pathname === '/api/runtime/sessions' || url.pathname.startsWith('/api/runtime/sessions/') ||
+      url.pathname.startsWith('/api/runtime/tools/') || url.pathname.startsWith('/api/runtime/runs/')
+    ) {
+      try {
+        const { handleRuntimeSessionsRequest } = await import('./runtime-sessions-web')
+        const out = await handleRuntimeSessionsRequest(req, url)
+        if (out !== null) {
+          if (out.kind === 'stream') {
+            return new Response(out.stream, {
+              status: 200,
+              headers: {
+                ...CORS_HEADERS,
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+              },
+            })
+          }
+          return json(out.body, out.status)
+        }
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json({
+          code: safe.body.error,
+          sentence: `an unexpected error occurred — see the server log (ref ${safe.body.ref}).`,
+          ref: safe.body.ref,
+        }, 500)
+      }
+    }
+
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

@@ -114,6 +114,13 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // `/api/runtime/metrics` rather than all of `/api/runtime`, whose other routes (§28) spawn and
   // drive sessions and need their own, stronger decision.
   ['/api/runtime/metrics', 'localTranscripts'],
+  // The native runtime's SESSION routes (B4, §28): creating a session, sending it a message and
+  // answering its policy asks drive a model that runs tools — shell included — on this host. That is
+  // the chat's power and more, so it rides `localShell`, like `/api/fleet` and `/api/provider`.
+  // Three PREFIXES, one per §28 resource, so the next sub-route is guarded by having been added.
+  ['/api/runtime/sessions', 'localShell'],
+  ['/api/runtime/runs', 'localShell'],
+  ['/api/runtime/tools', 'localShell'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */

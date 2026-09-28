@@ -165,10 +165,27 @@ export interface ToolLoopOptions<R extends ProviderAppendResult = ProviderAppend
   }
   /** Live events of each streamed attempt, for a reader watching. A throw is ignored. */
   onStreamEvent?: (e: ProviderStreamEvent) => void
+  /**
+   * Called every time the loop pushes to `messages` — the assistant turn BEFORE its tools run, and
+   * the `tool_result` message after them (session/runtime.ts §B4.1). Awaited; a throw is caught and
+   * never breaks the run, same as every other emitter in this module.
+   */
+  onHistory?: (appended: ProviderMessage[]) => Promise<void> | void
+  /**
+   * Around each call the gate would make, AND around a call this loop answers itself without ever
+   * reaching the gate (a bound, a malformed call, an unknown tool) — those are still a call's whole
+   * life and session/runtime.ts persists them the same way. Awaited; a throw is caught.
+   */
+  onToolCall?: (e: ToolCallHookEvent) => Promise<void> | void
   now?: () => Date
   monotonicNow?: () => number
   mintInvocationId?: () => string
 }
+
+/** One tool call's life, as `onToolCall` reports it. */
+export type ToolCallHookEvent =
+  | { phase: 'started'; toolExecutionId: string; toolUseId: string; name: string }
+  | { phase: 'settled'; toolExecutionId: string; toolUseId: string; name: string; text: string; isError: boolean }
 
 // ── Sentences (the model and the person read these; nothing here is journaled) ──────────────────
 
@@ -417,6 +434,25 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
   const collect: { current: AttemptCollect } = { current: { calls: [], failures: [] } }
   const turnClient = journaledClient(opts.client, providerEmitter, scope, streaming, now, opts.onStreamEvent, collect)
 
+  /** A host that never registered a hook pays nothing; one that throws never breaks the run. */
+  const emitHistory = async (msg: ProviderMessage): Promise<void> => {
+    if (!opts.onHistory) return
+    try { await opts.onHistory([msg]) } catch { /* a host's persistence hook never fails a run */ }
+  }
+  const emitToolCall = async (
+    phase: 'started' | 'settled', toolExecutionId: string, toolUseId: string, name: string,
+    settled?: { text: string; isError: boolean },
+  ): Promise<void> => {
+    if (!opts.onToolCall) return
+    try {
+      await opts.onToolCall(
+        phase === 'started'
+          ? { phase, toolExecutionId, toolUseId, name }
+          : { phase, toolExecutionId, toolUseId, name, text: settled!.text, isError: settled!.isError },
+      )
+    } catch { /* a host's persistence hook never fails a run */ }
+  }
+
   /** A call the loop answers without the gate: journaled as requested + failed, content stored. */
   const answerWithoutGate = async (
     toolExecutionId: string, toolName: string, kind: Tool<unknown>['kind'], errorClass: ToolErrorClass,
@@ -463,10 +499,18 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
 
       const plan = planTurn(final, collect.current.calls, collect.current.failures)
       if (plan.calls.length === 0) {
-        if (plan.assistant.length > 0) messages.push({ role: 'assistant', content: plan.assistant })
+        if (plan.assistant.length > 0) {
+          const msg: ProviderMessage = { role: 'assistant', content: plan.assistant }
+          messages.push(msg)
+          await emitHistory(msg)
+        }
         return done('end-turn')
       }
-      messages.push({ role: 'assistant', content: plan.assistant })
+      {
+        const msg: ProviderMessage = { role: 'assistant', content: plan.assistant }
+        messages.push(msg)
+        await emitHistory(msg)
+      }
 
       // A turn that is the last one allowed runs none of its calls (module doc).
       let bound: Bound | null = turns >= limits.maxTurns ? 'max-turns' : null
@@ -479,6 +523,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
         const name = tool?.name ?? wireName
         const toolExecutionId = toolExecutionIdFor(scopeKey, turns, position, toolUseId)
         const reply = (content: string, isError: boolean) => results.push({ type: 'tool_result', toolUseId, content, isError })
+        await emitToolCall('started', toolExecutionId, toolUseId, name)
 
         if (bound === null) bound = hardStop()
         if (bound === null && planned.kind === 'call' && tool && toolCalls >= limits.maxToolCalls) bound = 'max-tool-calls'
@@ -487,6 +532,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           const text = NOT_RUN[bound]
           await answerWithoutGate(toolExecutionId, name, tool?.kind ?? 'other', NOT_RUN_CLASS[bound], 'cancelled', text)
           reply(text, true)
+          await emitToolCall('settled', toolExecutionId, toolUseId, name, { text, isError: true })
           calls.push({ toolExecutionId, toolUseId, name, status: 'not-run', errorClass: NOT_RUN_CLASS[bound] })
           continue
         }
@@ -496,6 +542,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           const cls: ToolErrorClass = planned.failure.reason === 'unknown-tool' ? 'not-found' : 'invalid-input'
           await answerWithoutGate(toolExecutionId, tool ? name : UNKNOWN_TOOL_JOURNAL_NAME, tool?.kind ?? 'other', cls, 'failed', text)
           reply(text, true)
+          await emitToolCall('settled', toolExecutionId, toolUseId, name, { text, isError: true })
           calls.push({ toolExecutionId, toolUseId, name, status: 'malformed', errorClass: cls })
           continue
         }
@@ -504,6 +551,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           const text = unknownToolSentence(wireName, available)
           await answerWithoutGate(toolExecutionId, UNKNOWN_TOOL_JOURNAL_NAME, 'other', 'not-found', 'failed', text)
           reply(text, true)
+          await emitToolCall('settled', toolExecutionId, toolUseId, name, { text, isError: true })
           calls.push({ toolExecutionId, toolUseId, name, status: 'unknown-tool', errorClass: 'not-found' })
           continue
         }
@@ -520,11 +568,16 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           toolExecutionId,
         }, { policy: opts.policy, events: toolEvents, content: opts.content, asker: opts.asker })
         reply(r.outcome.modelText, !r.outcome.ok)
+        await emitToolCall('settled', toolExecutionId, toolUseId, name, { text: r.outcome.modelText, isError: !r.outcome.ok })
         const summary: ToolCallSummary = { toolExecutionId, toolUseId, name, status: r.status }
         if (r.outcome.error) summary.errorClass = r.outcome.error.class
         calls.push(summary)
       }
-      messages.push({ role: 'user', content: results })
+      {
+        const msg: ProviderMessage = { role: 'user', content: results }
+        messages.push(msg)
+        await emitHistory(msg)
+      }
 
       if (bound !== null) return done(bound)
     }

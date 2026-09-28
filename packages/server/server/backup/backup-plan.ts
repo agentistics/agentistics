@@ -243,6 +243,14 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'machine, named by ids the new machine will not have.',
   },
   {
+    pattern: '.agentistics/runtime', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing — native sessions start fresh on the new machine',
+    why: 'The native runtime\'s session store (B4, runtime-host.ts): session and run records, a '
+      + 'lease naming a pid on THIS machine, and message REFERENCES whose bodies live in the content '
+      + 'store — which is excluded above as secret-shaped. Carried alone it would be a list of '
+      + 'references to nothing; a backup layer for native conversations is a later decision.',
+  },
+  {
     pattern: '.agentistics/restore-state.json', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing — `agentop restore --repos` writes its own',
     why: 'The resumable plan of a restore in progress. Carrying one INTO an archive would have a '
