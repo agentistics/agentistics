@@ -1,0 +1,616 @@
+<title>agentop TUI unificada</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Schibsted+Grotesk:wght@400;600;800&display=swap">
+<style>
+/* Layout: the working terminal on the left, the numbered feature map on the right (stacks on narrow). */
+:root{
+  --bg:#f6f5f2;--fg:#1c1b19;--muted:#6b675f;--rule:#dedad2;--card:#ffffff;--accent:#b86504;--hit:#fff3dc;
+  --term-bg:#0c0c0e;--term-fg:#d4d4d8;--term-edge:#2a2a30;
+  --display:"Schibsted Grotesk",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#111113;--fg:#ededee;--muted:#9a9aa3;--rule:#26262b;--card:#18181b;--accent:#f59e0b;--hit:#2a2112;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111113;--fg:#ededee;--muted:#9a9aa3;--rule:#26262b;--card:#18181b;--accent:#f59e0b;--hit:#2a2112;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--display);font-size:15px;line-height:1.5}
+.wrap{max-width:1400px;margin:0 auto;padding-inline:18px;padding-block:28px 60px}
+h1{font-size:clamp(24px,3vw,34px);line-height:1.15;margin:0 0 8px;font-weight:800;text-wrap:balance}
+.lede{color:var(--muted);max-width:90ch;margin:0 0 18px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:22px;align-items:start}
+@media (max-width:1100px){.grid{grid-template-columns:1fr}}
+.termbox{background:var(--term-bg);border:1px solid var(--term-edge);border-radius:10px;padding:12px 14px;overflow-x:auto;outline:none;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.termbox:focus-visible,.termbox.focused{border-color:#f59e0b}
+.term{margin:0;font-family:var(--mono);color:var(--term-fg);font-size:min(12.5px,calc((100vw - 60px)/66));line-height:1.3;white-space:pre;font-variant-ligatures:none;user-select:none;cursor:default}
+.focushint{font:12px var(--mono);color:var(--muted);margin:8px 2px 0}
+.controls{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.controls button,.seg button{font:600 12px var(--mono);background:var(--card);color:var(--fg);border:1px solid var(--rule);border-radius:6px;padding:6px 9px;cursor:pointer}
+.controls button:hover,.seg button:hover{border-color:var(--accent)}
+.controls button kbd{color:var(--accent);font:inherit}
+.seg{display:inline-flex;gap:4px;margin-left:auto}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#111;border-color:var(--accent)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:10px;font-size:13px;color:var(--muted)}
+aside.map{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px 14px 6px;max-height:calc(100vh - 40px);overflow:auto;position:sticky;top:12px}
+aside.map h2{font-size:14px;margin:0 0 2px;font-weight:800}
+aside.map p.s{font-size:12px;color:var(--muted);margin:0 0 10px}
+.fg{margin:0 0 12px}
+.fg h3{font:700 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+.fi{display:grid;grid-template-columns:52px 1fr;gap:6px;padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12.5px;line-height:1.35;border:1px solid transparent}
+.fi:hover{border-color:var(--rule)}
+.fi b{font:700 11px var(--mono);color:var(--muted);padding-top:1px}
+.fi.on{background:var(--hit)}
+.fi.on b{color:var(--accent)}
+.fi span small{display:block;color:var(--muted);font-size:11.5px}
+.legend{font-size:12px;color:var(--muted);margin-top:14px}
+/* terminal palette = packages/tui/src/theme.ts */
+.a{color:#f59e0b}.b{font-weight:700}.g{color:#22c55e}.r{color:#f43f5e}.i{color:#38bdf8}.p{color:#818cf8}
+.m{color:#71717a}.l{color:#a1a1aa}.w{color:#fafafa}.d{color:#3f3f46}.y{color:#fbbf24}.u{text-decoration:underline}
+.sel{background:#232327}.add{background:#0b2e1a;color:#86efac}.del{background:#3b0d16;color:#fda4af}
+.dim{opacity:.26}.inv{background:#f59e0b;color:#111}
+.hn{color:#f59e0b}.hc{color:#D97706}.hx{color:#10a37f}.hg{color:#4285f4}
+@media (prefers-reduced-motion:no-preference){.blink{animation:bl 1.1s steps(1) infinite}@keyframes bl{50%{opacity:0}}}
+</style>
+
+<div class="wrap">
+  <h1>agentop: a TUI unificada</h1>
+  <p class="lede">Um protótipo navegável do app inteiro. Clique no terminal e use o teclado: <b>[</b> e <b>]</b> trocam de aba, <b>ctrl+p</b> abre a paleta e <b>?</b> abre a ajuda. No navegador, <b>alt</b> substitui o <b>ctrl</b> nos atalhos que o browser reserva (alt+t, alt+i, alt+o). Os botões embaixo do terminal enviam as teclas da tela atual. À direita, cada funcionalidade tem um código. Os destaques mostram o que está visível agora, e clicar leva até ela. Os dados são de exemplo.</p>
+  <div class="grid">
+    <div>
+      <div class="bar">
+        <span id="where">home</span>
+        <div class="seg" role="group" aria-label="Largura do terminal">
+          <button id="w108" aria-pressed="true">108 colunas</button>
+          <button id="w80" aria-pressed="false">80 colunas</button>
+        </div>
+      </div>
+      <div class="termbox" id="tb" tabindex="0" aria-label="Terminal simulado. Clique e use o teclado."><pre class="term" id="term"></pre></div>
+      <div class="focushint" id="fh">clique no terminal para dar foco ao teclado</div>
+      <div class="controls" id="ctl"></div>
+    </div>
+    <aside class="map" aria-label="Mapa de funcionalidades">
+      <h2>Mapa de funcionalidades</h2>
+      <p class="s">Cada linha vira uma subtarefa 1-1-1: a funcionalidade, a tela e a implementação verificada. Destacado = visível agora.</p>
+      <div id="map"></div>
+      <p class="legend">As telas <b>dashboard</b> e <b>services</b> já existem no cockpit. Aparecem aqui só para mostrar que moram no mesmo app.</p>
+    </aside>
+  </div>
+</div>
+
+<script>
+let W=108;const H=34,BODY=30;
+const LOGO=["        ▄▄██▄▄        ","     ▄█▀▀    ▀▀█▄▄    ","  ▄█▀▀           ▀█▄  "," ▄█    ▄      ▄    █▄ ","███  ▄█▀█    █▀█▄  ███","███                ███","███                ███","▀▀█▄             ▄▄█▀▀","   ▀█▄        ▄█▀▀    ","    ██▄█▀█▄▄█▀▀       ","    █▀▀               "];
+const WORD=['▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀ █ █▀ ▀█▀ █ █▀▀ █▀','█▀█ █▄█ ██▄ █░▀█ ░█░ █ ▄█ ░█░ █ █▄▄ ▄█'];
+
+/* ---------- tiny terminal renderer ---------- */
+function P(str){const segs=[];const re=/\{([\w.]+):([^}]*)\}/g;let i=0,m;while((m=re.exec(str))){if(m.index>i)segs.push({c:'',t:str.slice(i,m.index)});segs.push({c:m[1].split('.').join(' '),t:m[2]});i=re.lastIndex}if(i<str.length)segs.push({c:'',t:str.slice(i)});return segs}
+const N=l=>Array.isArray(l)?l:P(l==null?'':String(l));
+const cl=t=>[...t].length;
+const len=s=>N(s).reduce((n,x)=>n+cl(x.t),0);
+function fit(s,w,fill=''){s=N(s);const out=[];let n=0;for(const x of s){const ch=[...x.t];if(n+ch.length<=w){out.push(x);n+=ch.length}else{const k=w-n;if(k>0)out.push({c:x.c,t:ch.slice(0,k-1).join('')+'…'});n=w;break}}if(n<w)out.push({c:fill,t:' '.repeat(w-n)});return out}
+function lr(l,r,w){const L=N(l),R=N(r);const g=Math.max(1,w-len(L)-len(R));return [...L,{c:'',t:' '.repeat(g)},...R]}
+const isBlock=x=>Array.isArray(x)&&x.length>0&&Array.isArray(x[0]);
+function box({w,h,title='',badge='',focus=false,lines=[],pad=1}){const bc=focus?'a':'d';const inner=w-2-2*pad;const top=[{c:bc,t:'╭─'}];let used=2;if(title){const t=' '+title+' ';top.push({c:focus?'a b':'l',t});used+=cl(t)}const B=badge?[{c:'',t:' '},...N(badge),{c:'',t:' '}]:[];top.push({c:bc,t:'─'.repeat(Math.max(0,w-used-1-len(B)))});top.push(...B);top.push({c:bc,t:'╮'});const out=[top];for(let i=0;i<h-2;i++)out.push([{c:bc,t:'│'+' '.repeat(pad)},...fit(lines[i]||'',inner),{c:bc,t:' '.repeat(pad)+'│'}]);out.push([{c:bc,t:'╰'+'─'.repeat(w-2)+'╯'}]);return out}
+function flat(items){return items.flatMap(x=>isBlock(x)?x:[x])}
+function column(w,h,top,bottom=[],indent=1){const pre=l=>[{c:'',t:' '.repeat(indent)},...N(l)];const T=flat(top).map(pre),B=flat(bottom).map(pre);const fill=Math.max(0,h-T.length-B.length);return [...T.slice(0,Math.max(0,h-B.length)),...Array(fill).fill(''),...B].slice(0,h).map(l=>fit(l,w))}
+function hcat(cols){const h=Math.max(...cols.map(c=>c.lines.length));const out=[];for(let i=0;i<h;i++){let row=[];for(const c of cols)row=row.concat(fit(c.lines[i]||'',c.w));out.push(row)}return out}
+function chars(l){const a=[];for(const s of N(l))for(const ch of s.t)a.push({c:s.c,ch});return a}
+function group(a){const out=[];for(const x of a){const l=out[out.length-1];if(l&&l.c===x.c)l.t+=x.ch;else out.push({c:x.c,t:x.ch})}return out}
+function overlay(base,top,x,y){return base.map((ln,i)=>{if(i<y||i>=y+top.length)return ln;const a=chars(fit(ln,W));chars(top[i-y]).forEach((v,j)=>{if(x+j<a.length)a[x+j]=v});return group(a)})}
+function dim(lines){return lines.map(l=>N(l).map(s=>({c:(s.c+' dim').trim(),t:s.t})))}
+function hl(lines,w){return lines.map(l=>fit(N(l).map(s=>({c:(s.c+' sel').trim(),t:s.t})),w,'sel'))}
+const gauge=(f,n)=>{const k=Math.max(0,Math.min(n,Math.floor(f*n)));return '{a:'+'▓'.repeat(k)+'}{d:'+'░'.repeat(n-k)+'}'};
+const bar=(done,total,n)=>{const k=Math.floor(done/total*n);return '{g:'+'■'.repeat(k)+'}{d:'+'■'.repeat(n-k)+'}'};
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function render(lines){const L=[...lines];while(L.length<H)L.push('');return L.slice(0,H).map(l=>fit(l,W).map(s=>s.c?`<span class="${s.c}">${esc(s.t)}</span>`:esc(s.t)).join('')).join('\n')}
+function wrap(t,w){const out=[];let cur='';for(const word of t.split(' ')){if(cl(cur)+cl(word)+(cur?1:0)>w){if(cur)out.push(cur);cur=word}else cur=cur?cur+' '+word:word}if(cur)out.push(cur);return out.length?out:['']}
+const tool=(ic,v,t,meta,w)=>lr(`${ic} {l:${v.padEnd(6)}}${t}`,meta,w);
+const pad=(s,n)=>(s+' '.repeat(n)).slice(0,n);
+
+/* ---------- data ---------- */
+const TASKS=[
+ {id:'T-41',title:'Parser: off-by-one on the last byte',status:'in_progress',prio:'high',due:'09-30',repo:'blpsoares/agentistics',prog:[2,4],cost:'$0.38',tok:'86.4k',rounds:7,
+  subs:[['done','Reproduce with a failing test',1],['done','Locate the boundary check',1],['in_progress','Patch and run the core tests',1],['todo','Summarize in the PR',0]],
+  act:['14:03  session 3f5f filed under "Patch and run the core tests"','13:51  subtask "Locate the boundary check" → done','13:40  task created by you']},
+ {id:'T-38',title:'Sessions aside: floating panels',status:'in_progress',prio:'medium',due:'10-02',repo:'blpsoares/agentistics',prog:[3,6],cost:'$1.20',tok:'412k',rounds:19,
+  subs:[['done','Panel geometry',1],['done','Gap resize handles',1],['done','Shortcuts',1],['in_progress','Mobile branch',1],['todo','Verify at 390px',0],['todo','Docs',0]],act:['13:58  session a91c asked for approval','12:10  subtask "Shortcuts" → done']},
+ {id:'T-35',title:'Billing export as CSV',status:'blocked',blocked:'waiting on the pricing-source decision (T-31)',prio:'medium',due:'10-06',repo:'opvibes/embark',prog:[1,3],cost:'$0.64',tok:'201k',rounds:9,
+  subs:[['done','Column spec',1],['blocked','Price per model',1],['todo','Export route',0]],act:['11:20  status → blocked: waiting on the pricing-source decision']},
+ {id:'T-44',title:'Harness TUI: implement the unified design',status:'todo',prio:'high',due:'10-15',repo:'blpsoares/agentistics',prog:null,cost:null,tok:null,rounds:null,subs:[],act:['14:05  task created by the coordinator']},
+ {id:'T-29',title:'Docs pass for the runtime',status:'done',prio:'low',due:'09-25',repo:'blpsoares/agentistics',prog:[2,2],cost:'$0.07',tok:'19.8k',rounds:4,subs:[['done','Write docs/runtime.md',1],['done','Link from README',1]],act:['yesterday  status → done']},
+];
+const STAT={todo:['○','m','to do'],in_progress:['●','i','in progress'],blocked:['●','r','blocked'],done:['✓','g','done']};
+const FLEET=[
+ {id:'3f5f',title:'parser fix',h:'native',model:'claude-sonnet-5',dir:'~/agentistics',task:'T-41',sub:'Patch and run the core tests',state:'approval',cost:'$0.38',ctx:.41,age:'12m',tok:['12.3k','8.9k','61.0k','4.2k'],turns:7},
+ {id:'a91c',title:'ui refactor',h:'claude',model:'claude-opus-5',dir:'~/agentistics/.claude/worktrees/aside',task:'T-38',sub:'Mobile branch',state:'approval',cost:'$1.20',ctx:.77,age:'2h',tok:['31.0k','22.4k','338k','20.6k'],turns:19,
+  ask:{q:'Bash(git push origin feat/floating-aside)',opts:['Yes',"Yes, and don't ask again for git push commands in this project",'No, and tell Claude what to do differently']}},
+ {id:'77b0',title:'billing export',h:'codex',model:'gpt-5.1-codex',dir:'~/embark',task:'T-35',sub:'Price per model',state:'working',cost:'$0.64',ctx:.23,age:'1d',tok:['18.1k','9.7k','170k','0'],turns:9},
+ {id:'c2d8',title:'docs pass',h:'native',model:'openrouter · openai/gpt-5.1',dir:'~/agentistics',task:'T-29',sub:'Write docs/runtime.md',state:'ended',cost:'$0.07',ctx:null,ctxWhy:'no citable context window for this model',age:'1d',tok:['4.1k','2.2k','13.5k','0'],turns:4},
+ {id:'e1b3',title:'gemini · embark',h:'gemini',model:'—',dir:'~/embark',task:null,state:'external',cost:null,ctx:null,ctxWhy:'not started by agentop — nothing about it is capturable',age:'—',tok:null,turns:null,external:true},
+];
+const STATE={approval:['●','y','approve'],waiting:['●','y','needs you'],working:['●','g','working'],ended:['○','m','ended'],external:['◌','m','external']};
+const HC={native:'hn',claude:'hc',codex:'hx',gemini:'hg'};
+const HNAME={native:'native',claude:'claude',codex:'codex',gemini:'gemini'};
+const TURNS={
+ 5:{user:'why does the parser drop the last byte of a buffer?',text:'sliceEnd treats the end as inclusive, so a slice that ends on the last byte is rejected. That is the off-by-one.',tools:[['✓','read','core/src/tokens.ts','212 ln · 40ms'],['✓','read','core/src/tokens.test.ts','88 ln · 22ms']],r:['3.1s','0.62s','8.2k','79%','$0.011'],
+    ins:{time:'13:58:02',dur:'3.1s',stop:'end_turn',ttft:'0.62s · 44 tok/s',req:[['input','0.9k','$0.003'],['cache read','6.9k','$0.002'],['cache write','0.2k','$0.001'],['output','0.2k','$0.003']],total:'$0.011',ctx:.36,tools:[['read','tokens.ts','40ms','{g:ok}'],['read','tokens.test.ts','22ms','{g:ok}']],pol:[['read','{g:allowed · floor}']]}},
+ 6:{user:'add a failing test first',text:'Added a regression test for a slice ending on the last byte. It fails, as expected.',tools:[['✓','patch','core/src/tokens.test.ts','{g:+15} {r:−3}'],['✗','shell','bun test tokens.test.ts','{r:1 fail} {m:· 2.4s}']],r:['4.8s','0.71s','10.1k','82%','$0.016'],
+    ins:{time:'14:00:40',dur:'4.8s',stop:'end_turn',ttft:'0.71s · 39 tok/s',req:[['input','1.0k','$0.003'],['cache read','8.4k','$0.003'],['cache write','0.3k','$0.001'],['output','0.4k','$0.006']],total:'$0.016',ctx:.39,tools:[['patch','tokens.test.ts','14ms','{g:+15}{r:−3}'],['shell','bun test','2.4s','{r:1 fail}']],pol:[['patch','{y:asked} → you: 1'],['shell','{y:asked} → you: 1']]}},
+};
+const T7USER='now fix it and run the core tests';
+const FINAL='Fixed. end is exclusive, so a slice that ends on the last byte is valid. The regression test from turn 6 passes, and so do the other 213 core tests.';
+
+const COMMANDS=[
+ {c:'/new',d:'start a session (a task is required)',k:'n',run:()=>openWizard()},
+ {c:'/code',d:'the native session workspace',k:']',run:()=>go('code')},
+ {c:'/sessions',d:'every session on this machine',k:'ctrl+s',run:()=>go('sessions')},
+ {c:'/tasks',d:'your tasks from the board',k:'',run:()=>go('tasks')},
+ {c:'/resume',d:'reopen an earlier session',k:'1-3 on home',run:()=>go('home')},
+ {c:'/model',d:'switch model or provider',k:'',run:()=>{openSettings(1)}},
+ {c:'/mode',d:'permission mode: ask · edits · plan',k:'shift+tab',run:()=>cycleMode()},
+ {c:'/inspector',d:'the selected turn, in detail',k:'ctrl+i',run:()=>{go('code');st.side='inspector'}},
+ {c:'/timeline',d:'where this run spent time and money',k:'ctrl+t',run:()=>{go('code');st.side='timeline'}},
+ {c:'/undo',d:'revert the last write from its checkpoint',k:'',run:()=>toast(st.stage==='patch'||st.stage==='patchDenied'?'Nothing to undo: no write has happened in this session yet.':'Reverted core/src/tokens.ts from the checkpoint taken before the patch (simulated).')},
+ {c:'/compact',d:'summarize to free context',k:'',run:()=>toast('Compacting would summarize turns 1–6 and free about 60k of context (simulated).')},
+ {c:'/cost',d:'this session, today, by model',k:'',run:()=>{go('code');st.side='session'}},
+ {c:'/providers',d:'keys, models and prices',k:'ctrl+,',run:()=>openSettings(0)},
+ {c:'/permissions',d:'allow / ask / deny rules',k:'',run:()=>openSettings(2)},
+ {c:'/theme',d:'appearance',k:'',run:()=>openSettings(3)},
+ {c:'/lang',d:'english · português',k:'',run:()=>openSettings(5)},
+ {c:'/dashboard',d:'metrics (existing screen)',k:'',run:()=>go('dashboard')},
+ {c:'/services',d:'server, central, logs (existing)',k:'',run:()=>go('services')},
+ {c:'/help',d:'every key, by screen',k:'?',run:()=>{st.ov='help'}},
+];
+
+/* ---------- state ---------- */
+const TABS=['home','code','sessions','tasks','dashboard','services'];
+const st={tab:'home',ov:null,side:'session',turn:7,stage:'patch',reasonFor:null,reason:'',draft:'',home:'',extra:[],final:null,denyReply:null,outOpen:false,mode:'ask',rules:[],
+ ssel:0,stab:0,grp:0,search:'',searching:false,answering:false,tsel:0,pal:{q:'',sel:0},set:0,theme:0,lang:'EN',wiz:null,confirm:null,pane:'left',toast:'',toastAt:0};
+const GROUPS=['task','harness','state'];
+const MODES=['ask','edits','plan'];
+function go(t){st.tab=t;st.ov=null;st.pane='left';st.answering=false}
+function toast(t){st.toast=t;st.toastAt=Date.now()}
+function cycleMode(){st.mode=MODES[(MODES.indexOf(st.mode)+1)%MODES.length];toast({ask:'Mode ask: everything not allowlisted asks first.',edits:'Mode edits: file writes inside the workspace are allowed; shell still asks.',plan:'Mode plan: read-only. Writes and shell are refused until you leave plan.'}[st.mode])}
+const needCount=()=>FLEET.filter(s=>s.state==='approval'||s.state==='waiting').length;
+function syncParser(){const s=FLEET[0];s.state=(st.stage==='patch'||st.stage==='shell')?'approval':st.stage==='running'||(st.final&&st.final.i<st.final.text.length)?'working':'waiting'}
+
+/* ---------- chrome ---------- */
+function header(){const tabs=TABS.map(t=>t===st.tab?`{inv.b: ${t} }`:`{l: ${t} }`).join('');const n=needCount();
+ return lr((st.narrow?'{a:◢◣} ':'{a:◢◣} {w.b:agentistics} ')+tabs,(n?`{y.b:● ${n} need you}`:'{m:nothing waits on you}')+(st.narrow?'':'  {m:v1.24.0}'),W)}
+function subline(){
+ if(st.tab==='code')return lr(`{l:session} {w:parser fix} {m:·} {a:T-41} {l:${st.narrow?'':'Parser: off-by-one… '}}{m:· ~/agentistics}`,`{y.b:▲ no sandbox}  {m:mode} {p.b:${st.mode}}`,W);
+ if(st.tab==='sessions')return lr(`{l:fleet} {w:${FLEET.length} sessions} {m:· grouped by} {w:${GROUPS[st.grp]}}`+(st.search||st.searching?` {m:· search} {w:${st.search}}${st.searching?'{a.blink:▍}':''}`:''),'{m:all harnesses · same actions as the web}',W);
+ if(st.tab==='tasks')return lr(`{l:your tasks} {w:${TASKS.length}} {m:· claimed by you or filed by your sessions}`,'{m:read-only here · edit on the web}',W);
+ if(st.tab==='dashboard'||st.tab==='services')return '{m:existing cockpit screen, unchanged — shown so you can see it lives in the same app}';
+ return '';}
+function hints(){
+ if(st.ov==='palette')return '{a:↑↓} move  {a:enter} run  {a:esc} close';
+ if(st.ov==='help'||st.ov==='diff')return '{a:esc} close';
+ if(st.ov==='settings')return '{a:↑↓} section  {a:enter} change  {a:esc} close';
+ if(st.ov==='wizard')return '{a:↑↓} choose  {a:enter} next  {a:esc} back';
+ if(st.ov==='confirm')return '{a:y} yes  {a:n} no';
+ if(st.reasonFor)return '{a:enter} send the denial with your reason  {a:esc} back to the options';
+ if(st.tab==='home')return '{a:enter} start  {a:1-3} resume  {a:]} next tab  {a:ctrl+p} commands  {a:ctrl+,} settings  {a:?} help';
+ if(st.tab==='code'){const pend=st.stage==='patch'||st.stage==='shell';
+  const side='{a:ctrl+i} inspector  {a:ctrl+t} timeline';
+  if(pend)return `{a:1-4} answer  ${st.stage==='patch'?'{a:d} full diff  ':''}{a:esc} deny  ${side}  {a:shift+tab} mode  {a:ctrl+p} commands`;
+  return `{a:enter} send  {a:/} commands  ${st.side==='inspector'?'{a:↑↓} turn  ':''}${side}  {a:ctrl+o} output  {a:[ ]} tabs  {a:?} help`}
+ if(st.tab==='sessions'){const tp=st.narrow?'{a:tab} pane  ':'';if(st.searching)return '{a:type} filter  {a:enter} keep  {a:esc} clear';if(st.answering)return '{a:1-9} pick an option  {a:esc} cancel';
+  return tp+'{a:↑↓} select  {a:←→} chat/terminal/metrics  {a:enter} open  {a:a} answer  {a:n} new  {a:r} rename  {a:t} task  {a:x} stop  {a:/} search  {a:g} group'}
+ if(st.tab==='tasks')return (st.narrow?'{a:tab} pane  ':'')+'{a:↑↓} select  {a:enter} open its live session  {a:n} new session here  {a:w} open on the web  {a:[ ]} tabs';
+ return '{a:[ ]} tabs  {a:ctrl+p} commands  {a:?} help';}
+function statusLine(){if(st.toast&&Date.now()-st.toastAt<5000)return `{a:›} {w:${st.toast}}`;return ''}
+
+/* ---------- home ---------- */
+function scrHome(){
+ const n=st.narrow;
+ const right=['',...WORD.map(l=>'{a:'+l+'}'),'','{w.b:code} {m:· the agentistics native harness}','{m:anthropic · claude-sonnet-5 · mode }{p:'+st.mode+'}','{y:▲ no sandbox}{m: — tools run as you}','{m:every session is filed under a task}'];
+ const lb=hcat([{w:24,lines:LOGO.map(l=>'{a:'+l+'}')},{w:n?54:62,lines:right}]).map(l=>[{c:'',t:' '.repeat(n?1:10)},...l]);
+ const pw=n?76:80;
+ const prompt=box({w:pw,h:3,focus:true,lines:[lr(st.home?`{w:›} ${st.home}{a.blink:▍}`:'{w:›} {m:what are we building?}{a.blink:▍}','{m:enter asks for the task}',pw-4)]}).map(l=>[{c:'',t:' '.repeat(Math.floor((W-pw)/2))},...l]);
+ const cw=n?38:26,iw=cw-4;
+ const today=box({w:cw,h:9,title:'today',lines:[lr('cost','{w:$4.12}',iw),lr('tokens {m:(all 4)}','{w:1.94M}',iw),lr('sessions','{w:6} {m:· 2 live}',iw),lr('streak','{w:12 days}',iw),lr('{m:14d}','{a:▂▃▁▅▃▆▂▃▅▇▄▃▆▅}',iw),'{m:api-equivalent cost}']});
+ const res=box({w:cw,h:9,title:'resume',lines:FLEET.slice(0,3).flatMap((s,i)=>[lr(`{a:${i+1}} ${s.title}`,s.cost,iw),`  {m:${s.task} · ${s.age}} {${STATE[s.state][1]}:${STATE[s.state][2]}}`])});
+ const tk=box({w:cw,h:9,title:'your tasks',lines:TASKS.slice(0,5).map(t=>{const s=STAT[t.status];return lr(`{${s[1]}:${s[0]}} {a:${t.id}} ${t.title}`,t.prog?`{m:${t.prog[0]}/${t.prog[1]}}`:'',iw)}).concat(['{m:the tasks tab has the detail}'])});
+ const pv=box({w:cw,h:9,title:'providers',lines:[lr('{g:●} anthropic','{m:env}',iw),lr('{g:●} openrouter','{m:stored}',iw),lr('{m:○} google','{m:beta · off}',iw),lr('{r:●} ollama','{m:unreachable}',iw),'',lr('{a:ctrl+,}','{m:manage}',iw)]});
+ const cards=n?hcat([{w:1,lines:[]},{w:cw,lines:res},{w:2,lines:[]},{w:cw,lines:tk}]):hcat([{w:1,lines:[]},{w:cw,lines:today},{w:1,lines:[]},{w:cw,lines:res},{w:1,lines:[]},{w:cw,lines:tk},{w:1,lines:[]},{w:cw,lines:pv}]);
+ const others=FLEET.length-1,need=needCount();
+ return ['',...lb,'',...prompt,'',...cards,'',`  {m:this machine:} ${others} other sessions {m:·} {y:${need} need you} {m:·} {a:ctrl+s}{m: opens the sessions tab}`];}
+
+/* ---------- code ---------- */
+function streamed(msg,w){const t=msg.text.slice(0,msg.i);const ls=wrap(t,w);if(msg.i<msg.text.length)ls[ls.length-1]+='{a.blink:▍}';return ls}
+const receipt=r=>`{m:↳ ${r[0]} · ttft ${r[1]} · ${r[2]} tok · cache ${r[3]} · ${r[4]}}`;
+function turnLines(n,w){const t=TURNS[n];return [lr('{i.b:you}','',w),...wrap(t.user,w),'',lr('{a.b:agentistics} {m:· claude-sonnet-5}','',w),...wrap(t.text,w),...t.tools.map(x=>tool(x[0]==='✓'?'{g:✓}':'{r:✗}',x[1],x[2],x[3].startsWith('{')?x[3]:'{m:'+x[3]+'}',w)),receipt(t.r)]}
+function turn7(w){
+ const s=st.stage;const L=[lr('{i.b:you}','{m:14:02}',w),...wrap(T7USER,w),'',lr('{a.b:agentistics} {m:· claude-sonnet-5}','{m:14:02}',w),...wrap("I'll read the parser, patch the boundary check, then run the core tests.",w),
+  tool('{g:✓}','read','core/src/tokens.ts','{m:212 ln · 40ms}',w),tool('{g:✓}','grep','"sliceEnd" in core','{m:3 hits · 18ms}',w)];
+ if(s==='patch')L.push(tool('{y:◐}','patch','core/src/tokens.ts','{y:needs you}',w));
+ else if(s==='patchDenied')L.push(tool('{r:✗}','patch','core/src/tokens.ts','{r:rejected by you}',w));
+ else{L.push(tool('{g:✓}','patch','core/src/tokens.ts','{g:+3} {r:−1} {m:· 12ms}',w));L.push(fit('{del:  42 - if (end > buf.length - 1) return null}',w,'del'));L.push(fit('{add:  42 + if (end > buf.length) return null}',w,'add'));L.push('{m:  + 2 comment lines}')}
+ if(s==='shell')L.push(tool('{y:◐}','shell','bun test packages/core','{y:needs you}',w));
+ if(s==='running')L.push(tool('{a:◐}','shell','bun test packages/core','{a:running…}',w));
+ if(s==='shellDenied')L.push(tool('{r:✗}','shell','bun test packages/core','{r:denied by you}',w));
+ if(s==='done'){L.push(tool('{g:✓}','shell','bun test packages/core','{g:214 pass} {m:· 0 fail · 3.1s}',w));
+  if(st.outOpen)L.push('{m:  │ bun test v1.3.2}','{m:  │ packages/core/src/tokens.test.ts:}','{m:  │ } {g:✓} slice ending on the last byte {m:[0.21ms]}','{m:  │ } {g:✓} empty buffer {m:[0.04ms]}','{m:  │ … 210 more lines ·} {a:ctrl+o}{m: collapses}');
+  else L.push('{m:  ▸ 216 lines of output ·} {a:ctrl+o}{m: expands}')}
+ const reply=st.final||st.denyReply;
+ if(reply){L.push('');L.push(...streamed(reply,w));if(reply.i>=reply.text.length)L.push(receipt(['9.4s','0.70s','11.9k','83%',s==='done'?'$0.036':'$0.018']))}
+ return L}
+function conversation(w){const L=[];const insp=st.side==='inspector';
+ L.push('{m:· · · turns 1–4 above · pgup scrolls · · ·}','');
+ for(const n of [5,6]){const t=TURNS[n];if(insp&&st.turn===n){L.push(...hl(turnLines(n,w),w))}else {const lim=Math.max(10,w-38);const u=t.user.length>lim?t.user.slice(0,lim)+'…':t.user;L.push(`{m:▸ turn ${n} · ${u} · ${t.tools.length} tools · ${t.r[4]}}`)};L.push('')}
+ const t7=turn7(w);L.push(...(insp&&st.turn===7?hl(t7,w):t7));
+ for(const x of st.extra){L.push('',lr('{i.b:you}','',w),...wrap(x.user,w),'',lr('{a.b:agentistics}','',w),...streamed(x.reply,w))}
+ return L}
+function permCard(w){const kind=st.stage;const iw=w-4;
+ const opts=kind==='patch'?['Apply once','Apply, and allow patches under {w:packages/core/} for this session','Reject','Reject, and tell the agent why…']:['Allow once','Allow {w:bun test *} for this session','Deny','Deny, and tell the agent why…'];
+ const head=kind==='patch'?['{w.b:packages/core/src/tokens.ts}  {g:+3} {r:−1}  {m:1 hunk}',fit('{del:- if (end > buf.length - 1) return null}',iw,'del'),fit('{add:+ if (end > buf.length) return null}',iw,'add'),'{m:+ 2 more lines ·} {a:d}{m: full diff · a checkpoint is saved first}','{m:asked because: mode }{p:'+st.mode+'}{m: and no allow rule covers file.patch}']
+  :['{w.b:bun test packages/core}','{m:cwd ~/agentistics · runs as you · }{y:no sandbox}','{m:asked because: no allow rule matches "bun test"}'];
+ const tail=st.reasonFor?['',`{w:why:} ${st.reason}{a.blink:▍}`,'{m:enter sends the denial and your reason to the agent · esc goes back}']:['',...opts.map((o,i)=>`{a.b:${i+1}} ${o}`)];
+ const lines=[...head,...tail];return box({w,h:lines.length+2,focus:true,title:'permission · '+(kind==='patch'?'file.patch':'shell'),badge:'{y:needs you}',lines})}
+function composer(w){const pend=st.stage==='patch'||st.stage==='shell';
+ const t=pend?'{m:› answer the permission above (1–4) · esc denies it}':st.draft?`{w:›} ${st.draft}{a.blink:▍}`:'{w:›} {m:ask anything · @ file · / command · ! shell}{a.blink:▍}';
+ const pop=st.draft.startsWith('/')?COMMANDS.filter(c=>c.c.startsWith(st.draft)).slice(0,5):[];
+ const popLines=pop.length?box({w,h:pop.length+2,title:'commands',lines:pop.map((c,i)=>lr(`${i===0?'{a:▸}':' '} ${c.c}  {m:${c.d}}`,`{m:${c.k}}`,w-4))}):[];
+ return [...popLines,...box({w,h:3,focus:!pend,badge:`{m:${st.mode}}`,lines:[t]})]}
+function sideSession(iw){const s=st.stage,done=s==='done';const S=FLEET[0];
+ const ctx=done?.43:.41;const plan=[['locate the boundary check',1],['patch the parser',s!=='patch'&&s!=='patchDenied'?1:0],['run the core tests',done?1:0],['summarize',0]];
+ const L=[lr('{w:parser fix}','{m:3f5f}',iw),'{a:T-41} {m:› Patch and run the core tests}',lr('{m:sonnet-5 · turn 7 · 12m}',`{${STATE[S.state][1]}:● ${STATE[S.state][2]}}`,iw),'',
+  lr('{l.b:CONTEXT}','{m:200k window}',iw),gauge(ctx,iw-5)+` {w:${Math.floor(ctx*100)}%}`,lr('{m:sys 6.1k · tools 9.8k}',`{m:chat ${done?'70.1k':'66.5k'}}`,iw),'',
+  lr('{l.b:SPEND}','{m:api-equivalent}',iw),lr('this turn',`{w:${done?'$0.036':'$0.018'}}`,iw),lr('session {a:▁▂▂▃▅▃▆}',`{w:${done?'$0.41':'$0.38'}}`,iw),lr('today · 6 sessions',`{w:${done?'$4.15':'$4.12'}}`,iw),''];
+ if(st.rules.length){L.push('{l.b:SESSION RULES}');st.rules.forEach(r=>L.push('{g:allow} '+r));L.push('')}
+ L.push(lr('{l.b:TOKENS}','{w:86.4k}',iw),lr('in 12.3k','out 8.9k',iw),lr('cache read 61.0k','write 4.2k',iw),lr('{m:cache hit}','{g:81%}',iw),'',
+  lr('{l.b:FILES}',s==='patch'||s==='patchDenied'?'{g:+15} {r:−3}':'{g:+18} {r:−4}',iw),lr('{y:M} tokens.test.ts','{g:+15} {r:−3}',iw));
+ if(s!=='patch'&&s!=='patchDenied')L.push(lr('{y:M} tokens.ts','{g:+3} {r:−1}',iw));
+ L.push('',lr('{l.b:PLAN}',`{m:${plan.filter(p=>p[1]).length}/4}`,iw),...plan.map(p=>p[1]?`{g:✓} ${p[0]}`:`{m:○ ${p[0]}}`),'',lr('{l.b:ALSO OPEN}','{m:web · vs code}',iw));
+ return L}
+function sideInspector(iw){const n=st.turn;const d=n===7?{time:'14:02:31',dur:st.stage==='done'?'9.4s':'4.2s (live)',stop:st.stage==='done'?'end_turn':'tool_use',ttft:'0.70s · 38 tok/s',req:[['input','1.1k','$0.003'],['cache read','9.8k','$0.003'],['cache write','0.4k','$0.002'],['output',st.stage==='done'?'1.0k':'0.6k',st.stage==='done'?'$0.015':'$0.009']],total:st.stage==='done'?'$0.036':'$0.018',ctx:st.stage==='done'?.43:.41,
+  tools:[['read','tokens.ts','40ms','{g:ok}'],['grep','sliceEnd','18ms','{g:ok}'],['patch','tokens.ts',st.stage==='patch'?'—':'12ms',st.stage==='patch'?'{y:waiting}':st.stage==='patchDenied'?'{r:rejected}':'{g:+3}{r:−1}'],...(st.stage==='done'?[['shell','bun test','3.1s','{g:214 ok}']]:[])],
+  pol:[['read, grep','{g:allowed · floor}'],['patch',st.stage==='patch'?'{y:asked · waiting}':st.stage==='patchDenied'?'{r:asked → you: 3}':'{y:asked} → you: 1'],['shell',st.stage==='shell'?'{y:asked · waiting}':st.stage==='done'?'{y:asked} → you: 1':'{m:—}']]}:TURNS[n].ins;
+ return ['{m:↑↓ picks the turn}',lr(`{w.b:TURN ${n}} {m:· ${d.time}}`,`{w:${d.dur}}`,iw),lr('{m:model}','claude-sonnet-5',iw),lr('{m:stop}',d.stop,iw),lr('{m:ttft · rate}',d.ttft,iw),'',
+  lr('{l.b:REQUEST}','{m:tokens · cost}',iw),...d.req.map(r=>lr(pad(r[0],12)+r[1],r[2],iw)),lr('{w:total}',`{w:${d.total}}`,iw),'',
+  lr('{l.b:CONTEXT AFTER}',`{w:${Math.floor(d.ctx*100)}%}`,iw),gauge(d.ctx,iw),'',
+  '{l.b:TOOLS IN THIS TURN}',...d.tools.map(t=>lr(pad(t[0],6)+t[1],`{m:${t[2]}} ${t[3]}`,iw)),'','{l.b:POLICY}',...d.pol.map(p=>lr(p[0],p[1],iw))]}
+function sideTimeline(iw){const s=st.stage;const sc=16/40;
+ const row=(name,a,b,c,ch,meta)=>{const cells=Array.from({length:16},(_,k)=>({c:'d',ch:k%4===0?'┆':' '}));const x=Math.floor(a*sc),y=Math.max(x+1,Math.round(b*sc));for(let k=x;k<y&&k<16;k++)cells[k]={c,ch};return [...fit(name,11),...group(cells),{c:'',t:' '},...N(meta)]};
+ const R=[row('{a:model} 1',0,2.1,'a','█','{m:2.1s}'),row('{i:read}',2.2,2.4,'i','█','{m:40ms}'),row('{i:grep}',2.4,2.6,'i','█','{m:18ms}'),row('{a:model} 2',2.7,6.7,'a','█','{m:4.0s}'),
+  row('{i:patch}',6.8,s==='patch'?40:12.9,'y','░',s==='patch'?'{y:you ▸}':'{y:6.1s}')];
+ if(s!=='patch'&&s!=='patchDenied'){R.push(row('{a:model} 3',13.3,16.3,'a','█','{m:3.0s}'));R.push(row('{i:shell}',16.4,s==='shell'?40:38.2,'y','░',s==='shell'?'{y:you ▸}':'{y:21.8s}'));if(s==='done'){R.push(row('{i:bun test}',38.2,40,'i','█','{m:3.1s}'));R.push(row('{a:model} 4',40,40,'a','█','{m:2.2s}'))}}
+ const wait=s==='patch'?'33.2s':s==='done'?'27.9s':'28.8s';
+ return [lr(`{w.b:RUN 7}`,s==='done'?'{m:43.5s · ended}':'{g:● live}',iw),'{m:           0s  10  20  30  40}',...R,'','{a:█} model  {i:█} tool  {y:░} you','',
+  lr('{l.b:WHERE THE TIME WENT}','',iw),lr('model','{w:9.1s} {m:21%}',iw),lr('tools','{w:3.4s} {m:8%}',iw),lr('{y:waiting on you}',`{y:${wait}} {m:71%}`,iw),'',
+  lr('{l.b:MONEY}','',iw),lr('this run',s==='done'?'{w:$0.036}':'{w:$0.018}',iw),lr('model calls',s==='done'?'4':'2',iw),lr('cache hit','{g:81%}',iw)]}
+function sidePanel(w,h){const modes=['session','inspector','timeline'];const badge=modes.map(m=>m===st.side?`{a.b:${m}}`:`{m:${m}}`).join('{d: · }');
+ const iw=w-4;const lines=st.side==='session'?sideSession(iw):st.side==='inspector'?sideInspector(iw):sideTimeline(iw);
+ return box({w,h,badge,focus:st.side!=='session'||st.pane==='right',lines})}
+function scrCode(){const n=st.narrow;
+ if(n&&st.pane==='right')return sidePanel(W,BODY);
+ const RW=38,LW=n?W:W-RW,lw=LW-2;
+ const top=[...conversation(lw)];const pend=(st.stage==='patch'||st.stage==='shell');if(pend)top.push('',...permCard(lw));
+ const bottom=composer(lw);const h=BODY-(n?1:0);const avail=h-bottom.length;
+ const left=column(LW,h,top.slice(Math.max(0,top.length-avail)),bottom);
+ if(n)return [lr(`ctx {a:41%} · {w:$0.38} · {a:T-41} · mode {p:${st.mode}}`,'{m:ctrl+i panel}',W),...left];
+ return hcat([{w:LW,lines:left},{w:RW,lines:sidePanel(RW,BODY)}])}
+
+/* ---------- sessions ---------- */
+function visibleFleet(){const q=st.search.toLowerCase();return FLEET.filter(s=>!q||s.title.toLowerCase().includes(q)||(s.task||'').toLowerCase().includes(q))}
+function fleetGroups(){const g=GROUPS[st.grp];const out=new Map();for(const s of visibleFleet()){let k;if(g==='task')k=s.task||'∅';else if(g==='harness')k=s.h;else k=s.state==='approval'||s.state==='waiting'?'needs you':s.state;if(!out.has(k))out.set(k,[]);out.get(k).push(s)}
+ const order=g==='state'?['needs you','working','ended','external']:[...out.keys()];return order.filter(k=>out.has(k)).map(k=>[k,out.get(k)])}
+function orderedFleet(){return fleetGroups().flatMap(([,v])=>v)}
+function curSession(){const o=orderedFleet();if(st.ssel>=o.length)st.ssel=Math.max(0,o.length-1);return o[st.ssel]}
+function groupTitle(k){const g=GROUPS[st.grp];if(g==='task'){if(k==='∅')return '{r:not filed under a task} {m:· t files it}';const t=TASKS.find(t=>t.id===k);return `{a.b:${k}} {l:${t?t.title:''}}`}if(g==='harness')return `{${HC[k]}.b:${HNAME[k]}}`;return `{l.b:${k}}`}
+function sessRow(s,iw,sel){const S=STATE[s.state];const row=lr(`{${S[1]}:${S[0]}} ${pad(s.title,15)} {${HC[s.h]}:${pad(HNAME[s.h],7)}} {${S[1]}:${pad(S[2],9)}}`,s.cost?s.cost:'{m:N/A}',iw);return sel?hl([row],iw)[0]:row}
+function sessList(w,h){const iw=w-4;const L=[];const cur=curSession();for(const [k,v] of fleetGroups()){L.push(groupTitle(k));for(const s of v)L.push(sessRow(s,iw,s===cur));L.push('')}
+ if(!L.length)L.push('{m:nothing matches "'+st.search+'" · esc clears the search}');
+ return box({w,h,title:'sessions',focus:!st.narrow||st.pane==='left',badge:`{m:g: ${GROUPS[st.grp]}}`,lines:L})}
+function sessDetail(w,h){const s=curSession();const iw=w-4;if(!s)return box({w,h,title:'session',lines:['{m:no session selected}']});
+ const S=STATE[s.state];const tabs=['chat','terminal','metrics'].map((t,i)=>i===st.stab?`{inv.b: ${t} }`:`{l: ${t} }`).join(' ');
+ const t=s.task?TASKS.find(x=>x.id===s.task):null;
+ const L=[`{${HC[s.h]}:● ${s.h==='native'?'agentistics (native)':s.h==='claude'?'Claude Code':s.h==='codex'?'Codex CLI':'Gemini CLI'}} {m:· ${s.model} · ${s.dir}}`,
+  t?`{l:task} {a:${t.id}} ${t.title} {m:› ${s.sub}}`:'{r:not filed under a task} {m:— it was started outside agentop · t files it}',
+  `{l:state} {${S[1]}:${S[2]}}{m: · ${s.age}}`+(s.ctx!=null?` {m:· ctx} {w:${Math.floor(s.ctx*100)}%}`:' {m:· ctx N/A}')+(s.cost?` {m:·} {w:${s.cost}}`:''),'',tabs,''];
+ let body=[];
+ if(st.answering&&s.state==='approval'){
+  if(s.h==='native'){const kind=st.stage;body=[`{y.b:waiting on you: ${kind==='patch'?'file.patch core/src/tokens.ts (+3 −1)':'shell · bun test packages/core'}}`,'{m:the same options the code tab shows — one policy, two doors}','',...(kind==='patch'?['Apply once','Apply, and allow patches under packages/core/ for this session','Reject','Reject, and tell the agent why… (opens the code tab)']:['Allow once','Allow bun test * for this session','Deny','Deny, and tell the agent why… (opens the code tab)']).map((o,i)=>`{a.b:${i+1}} ${o}`)]}
+  else body=[`{y.b:waiting on you:} ${s.ask.q}`,'{m:options read off the session screen just now — the highlighted one is never chosen for you}','',...s.ask.opts.map((o,i)=>`{a.b:${i+1}} ${o}`)]}
+ else if(st.stab===0){
+  if(s.external)body=['{m:This assistant was not started by agentop.}','{m:Its conversation is not linked, so nothing is shown rather than a guess.}','','{a:t}{m: files it under a task so its cost is tracked from now on.}'];
+  else if(s.h==='native')body=[lr('{i.b:you}','{m:14:02}',iw),...wrap(T7USER,iw),'',lr('{a.b:agentistics}','{m:14:02}',iw),"I'll read the parser, patch the boundary",'check, then run the core tests.',st.stage==='patch'?'{y:◐ patch core/src/tokens.ts · needs you}':'{g:✓ patch core/src/tokens.ts +3 −1}','','{m:enter opens it in the code tab}'];
+  else if(s.h==='claude')body=[lr('{i.b:you}','{m:13:57}',iw),'push the branch when the mobile branch is green','',lr('{hc.b:Claude Code}','{m:13:58}',iw),'All 38 checks pass at 390px. Pushing the branch.','{y:◐ Bash(git push origin feat/floating-aside) · needs you}'];
+  else body=[lr('{i.b:you}','{m:yesterday}',iw),'export a CSV per model with the verified price','',lr('{hx.b:Codex}','{m:now}',iw),'Reading the pricing table and drafting the route…'];}
+ else if(st.stab===1){
+  if(s.h==='claude')body=['{m:captured 2s ago · }{a:enter}{m: attaches (detach: ctrl+b d)}','{d:┌──────────────────────────────────────────────────┐}','{l: ● Bash(git push origin feat/floating-aside)}','{l:   Do you want to proceed?}','{l: ❯ 1. Yes}',"{l:   2. Yes, and don't ask again for git push}","{l:   3. No, and tell Claude what to do differently}",'{l:   Esc to cancel · Tab to amend}','{d:└──────────────────────────────────────────────────┘}'];
+  else if(s.h==='codex')body=['{m:captured 1s ago · the frame is moving}','{d:┌──────────────────────────────────────────────────┐}','{l: • Reading packages/billing/prices.ts}','{l: • Drafting route GET /export.csv}','{l: ◦ Working (41s · esc to interrupt)}','{d:└──────────────────────────────────────────────────┘}'];
+  else if(s.h==='native')body=['{m:A native session has no terminal to capture:}','{m:the conversation is the session, streamed from the runtime.}','{a:enter}{m: opens it in the code tab.}'];
+  else body=['{m:Nothing to capture: agentop did not start this process.}']}
+ else{
+  if(!s.tok)body=['{m:No metrics: '+s.ctxWhy+'.}','{m:They start the moment it is filed and linked.}'];
+  else body=[lr('{l.b:TOKENS}','{m:all 4 counters}',iw),lr('input',s.tok[0],iw),lr('output',s.tok[1],iw),lr('cache read',s.tok[2],iw),lr('cache write',s.tok[3]==='0'&&s.h==='codex'?'{m:N/A · not recorded}':s.tok[3],iw),'',
+   lr('{l.b:COST}',`{w:${s.cost}}`,iw),'{m:api-equivalent estimate}','',lr('{l.b:CONTEXT}',s.ctx!=null?`{w:${Math.floor(s.ctx*100)}%}`:'{m:N/A}',iw),s.ctx!=null?gauge(s.ctx,iw):`{m:${s.ctxWhy}}`,'',lr('turns',String(s.turns),iw)]}
+ const acts=[['enter',s.external?'':'open'],['a',s.state==='approval'?'answer':''],['r','rename'],['t','task'],['x',s.state==='ended'||s.external?'':'stop']].map(([k,v])=>v?`{a:${k}} ${v}`:`{d:${k} —}`).join('  ');
+ const full=[...L,...body];while(full.length<h-3)full.push('');full[h-3]=acts;
+ return box({w,h,title:s.title,badge:`{m:${s.id}}`,focus:!st.narrow||st.pane==='right',lines:full})}
+function scrSessions(){if(st.narrow)return st.pane==='right'?sessDetail(W,BODY):sessList(W,BODY);const LW=50;return hcat([{w:LW,lines:sessList(LW,BODY)},{w:W-LW,lines:sessDetail(W-LW,BODY)}])}
+
+/* ---------- tasks ---------- */
+const TORDER=['in_progress','blocked','todo','done'];
+function orderedTasks(){return [...TASKS].sort((a,b)=>TORDER.indexOf(a.status)-TORDER.indexOf(b.status))}
+function taskList(w,h){const iw=w-4;const L=[];let last=null;const O=orderedTasks();O.forEach((t,i)=>{if(t.status!==last){if(last)L.push('');L.push(`{${STAT[t.status][1]}.b:${STAT[t.status][2].toUpperCase()}}`);last=t.status}
+  const row=lr(`{a:${t.id}} ${pad(t.title,24)}`,(t.prog?bar(t.prog[0],t.prog[1],6)+` {m:${t.prog[0]}/${t.prog[1]}}`:'{m:no subtasks}')+'  '+(t.cost?pad(t.cost,6):'{m:—     }'),iw);L.push(i===st.tsel?hl([row],iw)[0]:(t.status==='done'?dim([row])[0]:row))});
+ return box({w,h,title:'your tasks',focus:!st.narrow||st.pane==='left',badge:'{m:by status}',lines:L})}
+function taskDetail(w,h){const t=orderedTasks()[st.tsel];const iw=w-4;const S=STAT[t.status];
+ const ss=FLEET.filter(s=>s.task===t.id);
+ const L=[...wrap(t.title,iw).map(x=>'{w.b:'+x+'}'),`{${S[1]}:${S[0]} ${S[2]}}  {m:· priority} ${t.prio}  {m:· due} ${t.due}  {m:· ${t.repo}}`];
+ if(t.blocked)L.push(`{r:blocked: ${t.blocked}}`);
+ L.push('');
+ L.push(t.prog?`${bar(t.prog[0],t.prog[1],24)} {w:${Math.floor(t.prog[0]/t.prog[1]*100)}%} {m:(${t.prog[0]} of ${t.prog[1]} subtasks)}`:'{m:no subtasks, so no progress bar — nobody broke this up yet}');
+ L.push(lr(`{l:cost} ${t.cost?'{w:'+t.cost+'}':'{m:N/A}'}   {l:tokens} ${t.tok?'{w:'+t.tok+'}':'{m:N/A}'}   {l:rounds} ${t.rounds!=null?'{w:'+t.rounds+'}':'{m:N/A}'}`,t.cost?'{m:from its sessions}':'{m:no session filed yet}',iw),'');
+ if(t.subs.length){L.push('{l.b:SUBTASKS}');t.subs.forEach(s=>L.push(lr(`{${STAT[s[0]][1]}:${STAT[s[0]][0]}} ${s[1]}`,s[2]?`{m:${s[2]} session}`:'{m:—}',iw)));L.push('')}
+ L.push('{l.b:SESSIONS}');if(ss.length)ss.forEach(s=>{const X=STATE[s.state];L.push(lr(`{${X[1]}:${X[0]}} ${s.title} {${HC[s.h]}:${HNAME[s.h]}}`,`{${X[1]}:${X[2]}} {m:·} ${s.cost||'{m:N/A}'}`,iw))});else L.push('{m:none yet · n starts one filed here}');
+ L.push('','{l.b:ACTIVITY}',...t.act.map(a=>'{m:'+a+'}'),'',`{m:read-only here · edit, comment and move it on the web:} {i.u:localhost:47292/tasks/${t.id}}`);
+ return box({w,h,title:t.id,focus:!st.narrow||st.pane==='right',lines:L})}
+function scrTasks(){if(st.narrow)return st.pane==='right'?taskDetail(W,BODY):taskList(W,BODY);const LW=54;return hcat([{w:LW,lines:taskList(LW,BODY)},{w:W-LW,lines:taskDetail(W-LW,BODY)}])}
+
+/* ---------- existing ---------- */
+function scrDashboard(){const cw=Math.floor((W-2)/4);const k=(t,v,s)=>box({w:cw,h:5,title:t,lines:[`{w.b:${v}}`,`{m:${s}}`]});
+ const kp=hcat([{w:cw,lines:k('cost today','$4.12','api-equivalent')},{w:cw,lines:k('tokens','1.94M','all 4 counters')},{w:cw,lines:k('sessions','6','2 live · 1 external')},{w:cw,lines:k('streak','12 days','since 09-17')}]);
+ const b=(l,v,f,c)=>lr(`${pad(l,14)} {${c}:${'█'.repeat(Math.round(f*40))}}`,v,W-6);
+ return [...kp,'',...box({w:W,h:9,title:'cost by task · today',lines:[b('T-38','$1.20',1,'a'),b('T-35','$0.64',.53,'a'),b('T-41','$0.38',.32,'a'),b('T-29','$0.07',.06,'a'),b('not filed','$1.83',1,'r'),'{m:"not filed" is what started outside agentop; filing it moves it into its task}']}),'',
+  ...box({w:W,h:7,title:'by harness',lines:[b('native','$0.45',.28,'hn'),b('claude','$1.60',1,'hc'),b('codex','$0.64',.4,'hx'),b('gemini','N/A · no tokens recorded',0,'hg')]})]}
+function scrServices(){return [...box({w:W,h:9,title:'services',lines:[lr('{g:●} agentistics        {m:native · pid 4121 · up 3h 12m}','{m:web :47292 · api :47291}',W-4),lr('{m:○} agentistics central {m:stopped}','{m:docker-image available}',W-4),'','{m:start · stop · restart · rebuild · boot — exactly as the cockpit does today}']}),'',...box({w:W,h:8,title:'logs',lines:['{m:14:05:01} runtime  session 3f5f turn 7 started','{m:14:05:03} policy   file.patch → ask (mode ask)','{m:14:05:09} fleet    a91c waiting-approval (claude footer match)','{m:14:05:12} pricing  anthropic official table ok · 3 models']})]}
+
+/* ---------- overlays ---------- */
+function ovPalette(){const pw=Math.min(76,W-4);const q=st.pal.q.toLowerCase();const list=COMMANDS.filter(c=>!q||c.c.includes(q)||c.d.includes(q));st.pal.list=list;if(st.pal.sel>=list.length)st.pal.sel=Math.max(0,list.length-1);
+ const rows=list.slice(0,16).map((c,i)=>{const r=lr(`${i===st.pal.sel?'{a:▸}':' '} ${pad(c.c,13)} ${c.d}`,`{m:${c.k}}`,pw-4);return i===st.pal.sel?hl([r],pw-4)[0]:r});
+ return box({w:pw,h:rows.length+6,focus:true,title:'commands',badge:'{m:ctrl+p}',lines:[`{w:›} ${st.pal.q}{a.blink:▍}`,'',...(rows.length?rows:['{m:no command matches — esc closes}']),'',`{m:${list.length} of ${COMMANDS.length} · the shortcut on the right replaces the palette next time}`]})}
+function ovHelp(){const w=Math.min(96,W-4);return box({w,h:28,focus:true,title:'help · every key',lines:[
+ '{l.b:EVERYWHERE}','{a:[ ]} change tab   {a:ctrl+p} commands   {a:ctrl+,} settings   {a:ctrl+s} sessions   {a:?} this help   {a:ctrl+c} quit','',
+ '{l.b:HOME}','{a:type} the first prompt   {a:enter} choose its task and start   {a:1-3} resume','',
+ '{l.b:CODE}','{a:enter} send   {a:/} command   {a:@} file   {a:!} shell   {a:shift+tab} mode (ask · edits · plan)','{a:1-4} answer a permission   {a:d} full diff   {a:esc} deny / interrupt   {a:ctrl+o} expand output','{a:ctrl+i} inspector   {a:ctrl+t} timeline   {a:ctrl+b} session panel   {a:↑↓} pick a turn (inspector)','',
+ '{l.b:SESSIONS}','{a:↑↓} select   {a:←→} chat · terminal · metrics   {a:enter} open/attach   {a:a} answer   {a:n} new','{a:r} rename   {a:t} file under a task   {a:x} stop   {a:/} search   {a:g} group by task · harness · state','',
+ '{l.b:TASKS}','{a:↑↓} select   {a:enter} open its live session   {a:n} new session in this task   {a:w} open on the web','',
+ '{l.b:NARROW TERMINALS}','{m:below 100 columns one pane is shown at a time; }{a:tab}{m: switches pane, }{a:esc}{m: goes back}','',
+ '{m:In a real terminal ctrl works; in this browser mockup alt+t / alt+i / alt+o stand in for it.}']})}
+const SETS=['Providers','Models & pricing','Permissions','Appearance','Keybindings','Language','Tasks & tracking'];
+function setContent(i,iw){switch(i){
+ case 0:return [lr('{l:provider}','{l:status · credential · default}',iw),lr('{a:▸} anthropic','{g:● ready} · env ANTHROPIC_API_KEY · sonnet-5',iw),lr('  openrouter','{g:● ready} · stored (0600) · gpt-5.1',iw),lr('  google','{m:○ beta, off} · —',iw),lr('  ollama','{r:● unreachable} · none needed',iw),'','{m:k set a key (masked, stored 0600, shown only by its end) · t test · a add}','{m:a key of the wrong vendor (sk-… here, AIza… elsewhere) is refused in words}','',lr('{m:last test}','14:01 · {g:ok} · 212ms',iw)];
+ case 1:return [lr('{l:model}','{l:in / out per 1M · window · source}',iw),lr('{a:▸} claude-sonnet-5','$3 / $15 · 200k · {g:official 09-25}',iw),lr('  claude-opus-5','$5 / $25 · 1M · {g:official 09-25}',iw),lr('  openai/gpt-5.1','$1.25 / $10 · {m:N/A} · {g:community}',iw),lr('  claude-next-preview','{m:N/A · N/A ·} {y:no verified price}',iw),'','{m:no source can price it → N/A everywhere, never a guessed rate}','{m:a window nobody publishes draws no gauge rather than a wrong percentage}'];
+ case 2:return ['{l.b:MODE} ask {m:· shift+tab cycles ask · edits · plan}','',lr('{g:allow}  file.read · fs.glob · fs.grep · git.status','{m:floor}',iw),lr('{g:allow}  shell bun test *','{m:this session}',iw),lr('{y:ask}    shell *','{m:default}',iw),lr('{y:ask}    file.patch · file.write','{m:mode ask}',iw),lr('{r:deny}   ~/.claude/.credentials.json · ~/.codex/auth.json …','{m:floor · never lifted}',iw),'','{m:the floor cannot be widened from here or anywhere else}'];
+ case 3:return [lr('theme',['agentistics dark','agentistics light','high contrast'][st.theme],iw),lr('density','comfortable',iw),lr('side panel','session',iw),'','{m:enter cycles the theme · the palette mirrors the web dashboard}'];
+ case 4:return ['{m:every key, rebindable; conflicts are refused in words}','',lr('commands','ctrl+p',iw),lr('settings','ctrl+,',iw),lr('inspector','ctrl+i',iw),lr('timeline','ctrl+t',iw),lr('stop a session','x  {m:(never k: k moves)}',iw)];
+ case 5:return [lr('language',st.lang==='EN'?'English':'Português (Brasil)',iw),'','{m:enter switches · the whole app follows, including after a detach}'];
+ case 6:return [lr('a task for every new session','{g:required}',iw),lr('file external sessions','{m:asked when first seen}',iw),lr('finish the task when its last session stops','{m:asked}',iw),'','{m:required means the new-session flow cannot finish without a task;}','{m:sessions agentop did not start are listed as "not filed" until you file them}'];}}
+function ovSettings(){const w=W-4,h=24,nw=24;const nav=SETS.map((s,i)=>i===st.set?`{a:▸} {w.b:${s}}`:`  ${s}`);nav.push('','{m:web and terminal edit}','{m:the same preferences}');
+ const inner=hcat([{w:nw,lines:nav},{w:w-4-nw,lines:setContent(st.set,w-6-nw)}]);return box({w,h,focus:true,title:'settings',badge:'{m:ctrl+,}',lines:inner})}
+const HARN=[['native','agentistics (native)','streams here · policy asks · no sandbox'],['claude','Claude Code','tmux · attach to drive'],['codex','Codex CLI','tmux'],['gemini','Gemini CLI','tmux'],['copilot','Copilot CLI','tmux'],['kimi','Kimi Code','tmux'],['antigravity','Antigravity','tmux']];
+const MODELS={native:[['anthropic · claude-sonnet-5','$3 / $15 · 200k'],['anthropic · claude-opus-5','$5 / $25 · 1M'],['openrouter · openai/gpt-5.1','$1.25 / $10 · window N/A'],['google · gemini-3-pro','{m:beta · off — Settings → Providers}']],claude:[['sonnet','claude-sonnet-5'],['opus','claude-opus-5'],['haiku','claude-haiku-4-5']],other:[['the CLI default','its own flag is not read from --help yet']]};
+const DIRS=['~/agentistics  {m:blpsoares/agentistics}','~/agentistics  {m:in a new worktree}','~/embark  {m:opvibes/embark}','~/prontuario  {m:no remote}'];
+function openWizard(taskId,fileSid){const open=TASKS.filter(t=>t.status!=='done');st.wiz={step:0,sel:taskId?Math.max(0,open.findIndex(t=>t.id===taskId)):0,task:taskId||null,newTask:null,harness:0,model:0,dir:0,prompt:st.tab==='home'?st.home:'',file:fileSid||null};if(taskId&&!fileSid)st.wiz.step=1;st.ov='wizard'}
+function wizOptions(){const z=st.wiz;const open=TASKS.filter(t=>t.status!=='done');
+ if(z.step===0)return [...open.map(t=>`{a:${t.id}} ${t.title}`),'{a:＋} new task…'];
+ if(z.step===1)return HARN.map(h=>`{${HC[h[0]]||'l'}:${pad(h[1],22)}} {m:${h[2]}}`);
+ if(z.step===2){const m=MODELS[HARN[z.harness][0]]||MODELS.other;return m.map(x=>`${pad(x[0],30)} {m:${x[1]}}`)}
+ if(z.step===3)return DIRS;return []}
+function ovWizard(){const z=st.wiz;const w=Math.min(84,W-4);const steps=['task','harness','model','folder','prompt','review'];
+ const crumbs=(z.file?['task']:steps).map((s,i)=>i===z.step?`{inv.b: ${i+1} ${s} }`:i<z.step?`{g:✓ ${s}}`:`{m:${i+1} ${s}}`).join(' ');
+ let L=[crumbs,''];
+ if(z.step===0){L.push(z.file?'{w:File this session under which task?}':'{w:Which task is this session for?} {m:(required — every session is tracked)}','');
+  if(z.newTask!=null)L.push('{a:＋} new task title: '+z.newTask+'{a.blink:▍}','','{m:enter creates it as "to do" and files the session there · esc goes back}');
+  else wizOptions().forEach((o,i)=>L.push(i===z.sel?hl([`{a:▸} ${o}`],w-4)[0]:`  ${o}`))}
+ else if(z.step<4){L.push(['','{w:Which assistant?} {m:(only the ones installed here)}','{w:Which model?}','{w:Where does it work?}'][z.step],'');wizOptions().forEach((o,i)=>L.push(i===z.sel?hl([`{a:▸} ${o}`],w-4)[0]:`  ${o}`))}
+ else if(z.step===4){L.push('{w:First message}','',`{w:›} ${z.prompt}{a.blink:▍}`,'','{m:optional · enter continues}')}
+ else{const t=TASKS.find(x=>x.id===z.task);const h=HARN[z.harness];const m=(MODELS[h[0]]||MODELS.other)[z.model];
+  L.push('{w:Review}','',lr('{l:task}',`{a:${t.id}} ${t.title}`,w-4),lr('{l:assistant}',h[1],w-4),lr('{l:model}',m[0],w-4),lr('{l:folder}',DIRS[z.dir].replace(/\{m:[^}]*\}/,'').trim(),w-4),lr('{l:first message}',z.prompt||'{m:none}',w-4),'');
+  if(h[0]==='native')L.push('{y.b:▲ no sandbox:} {m:tools run as you in that folder; everything not allowlisted asks first}');
+  L.push('','{a:enter} {w:start}   {a:esc} back')}
+ return box({w,h:22,focus:true,title:z.file?'file under a task':'new session',lines:L})}
+function ovConfirm(){const c=st.confirm;const w=70;return box({w,h:c.lines.length+5,focus:true,title:c.title,lines:[...c.lines,'','{a:y} yes   {a:n} no']})}
+function ovDiff(){const mw=Math.min(94,W-4);const L=[lr('{w.b:packages/core/src/tokens.ts}  {g:+3} {r:−1}  {m:1 hunk}','{m:file.patch · turn 7}',mw-4),'{m:runs as you · }{y:no sandbox}{m: · a checkpoint is saved before writing (/undo reverts it)}','{d:'+'─'.repeat(mw-4)+'}',
+ '{m:  39 │}   export function slice(buf, start, len) {','{m:  40 │}     if (len <= 0) return []','{m:  41 │}     const end = start + len',fit('{del:- 42 │     if (end > buf.length - 1) return null}',mw-4,'del'),fit('{add:+ 42 │     if (end > buf.length) return null}',mw-4,'add'),fit('{add:+ 43 │     // end is exclusive: a slice ending on the last byte is valid}',mw-4,'add'),fit('{add:+ 44 │     // (regression: tokens.test.ts "last byte")}',mw-4,'add'),'{m:  45 │}     return buf.subarray(start, end)','{d:'+'─'.repeat(mw-4)+'}',
+ '{a.b:1} Apply once','{a.b:2} Apply, and allow patches under {w:packages/core/} for this session','{a.b:3} Reject','{a.b:4} Reject, and tell the agent why…','','{a:esc} back to the conversation   {m:e opens in $EDITOR · s side by side (in the real app)}'];
+ return box({w:mw,h:L.length+2,focus:true,title:'permission · file.patch · full diff',badge:'{y:needs you}',lines:L})}
+
+/* ---------- frame ---------- */
+function frame(){syncParser();
+ let body=st.tab==='home'?scrHome():st.tab==='code'?scrCode():st.tab==='sessions'?scrSessions():st.tab==='tasks'?scrTasks():st.tab==='dashboard'?scrDashboard():scrServices();
+ body=body.slice(0,BODY);while(body.length<BODY)body.push('');
+ let lines=[header(),subline(),...body,statusLine(),hints()];
+ const ov=st.ov==='palette'?ovPalette():st.ov==='help'?ovHelp():st.ov==='settings'?ovSettings():st.ov==='wizard'?ovWizard():st.ov==='confirm'?ovConfirm():st.ov==='diff'?ovDiff():null;
+ if(ov){lines=[...lines.slice(0,H-1).map((l,i)=>i<1?l:dim([l])[0]),hints()];const bw=len(ov[0]);lines=overlay(lines,ov,Math.max(0,Math.floor((W-bw)/2)),Math.max(2,Math.floor((H-ov.length)/2)))}
+ return lines}
+
+/* ---------- actions ---------- */
+function answerPerm(n){const kind=st.stage;if(kind!=='patch'&&kind!=='shell')return;
+ if(n===4){st.reasonFor=kind;st.reason='';go('code');return}
+ if(n===3){st.stage=kind+'Denied';st.denyReply={text:kind==='patch'?'Understood — I left tokens.ts untouched. Do you want me to propose a different fix?':'Understood — I will not run the tests. The patch is applied; run bun test packages/core when you want.',i:0};toast(kind==='patch'?'Rejected. The agent was told, and nothing was written.':'Denied. The agent was told, and nothing ran.');return}
+ if(kind==='patch'){if(n===2)st.rules.push('file.patch under packages/core/');st.stage='shell';toast(n===2?'Applied. Rule added for this session: allow file.patch under packages/core/.':'Applied once. A checkpoint was taken first; /undo reverts it.')}
+ else{if(n===2)st.rules.push('shell bun test *');st.stage='running';toast(n===2?'Running. Rule added for this session: allow shell bun test *.':'Running once.');setTimeout(()=>{st.stage='done';st.final={text:FINAL,i:0};draw()},1500)}}
+function submitReason(){const kind=st.reasonFor;const r=st.reason.trim()||'no reason given';st.reasonFor=null;st.stage=kind+'Denied';st.denyReply={text:`Understood — denied because "${r}". I will take that into account before trying again.`,i:0};toast('Denied, with your reason sent to the agent.')}
+function startSession(){const z=st.wiz;const t=TASKS.find(x=>x.id===z.task);const h=HARN[z.harness];
+ const s={id:Math.random().toString(16).slice(2,6),title:(z.prompt||'new session').split(' ').slice(0,3).join(' '),h:['native','claude','codex','gemini'].includes(h[0])?h[0]:'claude',model:(MODELS[h[0]]||MODELS.other)[z.model][0],dir:DIRS[z.dir].split(' ')[0],task:t.id,sub:'(filed on the task)',state:'working',cost:'$0.00',ctx:.02,age:'now',tok:['0','0','0','0'],turns:0};
+ FLEET.push(s);st.ov=null;st.wiz=null;st.home='';go('sessions');st.grp=0;st.ssel=orderedFleet().indexOf(s);toast(`Started "${s.title}" under ${t.id}. It is on the board already.`)}
+function wizNext(){const z=st.wiz;const open=TASKS.filter(t=>t.status!=='done');
+ if(z.step===0){if(z.newTask!=null){if(!z.newTask.trim()){toast('A task needs a title.');return}const id='T-'+(45+TASKS.length-5);TASKS.push({id,title:z.newTask.trim(),status:'todo',prio:'none',due:'—',repo:'blpsoares/agentistics',prog:null,cost:null,tok:null,rounds:null,subs:[],act:['now  task created from the terminal']});z.task=id;z.newTask=null}
+  else{if(z.sel===open.length){z.newTask='';return}z.task=open[z.sel].id}
+  if(z.file){const s=FLEET.find(x=>x.id===z.file);s.task=z.task;s.sub='(filed on the task)';st.ov=null;st.wiz=null;toast(`Filed "${s.title}" under ${z.task}. Its cost counts there from now on.`);return}
+  z.step=1;z.sel=0;return}
+ if(z.step===1){z.harness=z.sel;z.step=2;z.sel=0;return}
+ if(z.step===2){if(HARN[z.harness][0]==='native'&&z.sel===3){toast('Google is behind the provider BETA switch — Settings → Providers.');return}z.model=z.sel;z.step=3;z.sel=0;return}
+ if(z.step===3){z.dir=z.sel;z.step=4;return}
+ if(z.step===4){z.step=5;return}
+ startSession()}
+function sessAction(k){const s=curSession();if(!s)return false;
+ if(k==='enter'){if(s.external){toast('Not started by agentop: there is no session to open. t files it under a task.');return true}
+  if(s.id==='3f5f'){go('code');return true}
+  if(s.h==='native'){toast(`Reopening "${s.title}" in the code tab (simulated): it resumes from its last turn.`);return true}
+  toast(`Attach hands this terminal to "${s.title}" (tmux). Detach with ctrl+b d and you come back here. (simulated)`);return true}
+ if(k==='a'){if(s.state!=='approval'){toast(s.external?'Nothing to answer: agentop cannot see this session\'s screen.':`"${s.title}" is not waiting on an approval.`);return true}st.answering=true;if(st.narrow)st.pane='right';return true}
+ if(k==='r'){toast(s.external?'Renamed in agentop only: this session was not started here, so its own name cannot change.':s.h==='claude'?'Rename lands in both places: the agentop label and Claude Code\'s own /rename.':'Renamed (opens an input in the real app).');return true}
+ if(k==='t'){openWizard(null,s.id);return true}
+ if(k==='x'){if(s.external||s.state==='ended'){toast(s.external?'Stopping a process agentop did not start is refused: stop it where it runs.':'Already ended.');return true}
+  st.confirm={title:'stop',lines:[`Stop "${s.title}"? The process ends; the conversation stays reopenable.`],yes:()=>{s.state='ended';const others=FLEET.filter(o=>o.task===s.task&&o!==s&&(o.state!=='ended')).length;
+   if(s.task&&!others){st.confirm={title:'finish the task?',lines:[`That was the last live session of ${s.task}.`,`Is "${TASKS.find(t=>t.id===s.task).title}" finished?`],yes:()=>{const t=TASKS.find(t=>t.id===s.task);t.status='done';toast(`${t.id} marked done on the board.`)},no:()=>toast(`Stopped. ${s.task} stays open.`)};st.ov='confirm';return true}
+   toast(`Stopped "${s.title}".`)},no:()=>toast('Nothing stopped.')};st.ov='confirm';return true}
+ return false}
+
+/* ---------- keys ---------- */
+function norm(e){if(['Shift','Control','Alt','Meta'].includes(e.key))return null;let k=e.key;const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',Enter:'enter',Escape:'esc',Backspace:'backspace',Tab:'tab',PageUp:'pgup',PageDown:'pgdn'};
+ if(k==='Tab'&&e.shiftKey)return 'shift+tab';if(map[k])k=map[k];
+ if(e.ctrlKey||e.altKey||e.metaKey){const c=e.code&&e.code.startsWith('Key')?e.code.slice(3).toLowerCase():e.code==='Comma'?',':k.toLowerCase();return 'ctrl+'+c}
+ return k}
+const printable=k=>k.length===1;
+function type(field,k){if(k==='backspace'){field.v=field.v.slice(0,-1);return true}if(printable(k)){field.v+=k;return true}return false}
+function handle(k){
+ if(st.ov==='palette'){const p=st.pal;if(k==='esc'){st.ov=null;return true}if(k==='up'){p.sel=Math.max(0,p.sel-1);return true}if(k==='down'){p.sel=Math.min((p.list||[]).length-1,p.sel+1);return true}if(k==='enter'){const c=(p.list||[])[p.sel];st.ov=null;if(c)c.run();return true}const f={v:p.q};if(type(f,k)){p.q=f.v;p.sel=0;return true}return true}
+ if(st.ov==='help'||st.ov==='diff'){if(k==='esc'||k==='?'||k==='enter'){st.ov=null;return true}if(st.ov==='diff'&&/^[1-4]$/.test(k)){st.ov=null;answerPerm(+k);return true}return true}
+ if(st.ov==='settings'){if(k==='esc'){st.ov=null;return true}if(k==='up'){st.set=(st.set+SETS.length-1)%SETS.length;return true}if(k==='down'){st.set=(st.set+1)%SETS.length;return true}
+  if(k==='enter'){if(st.set===3){st.theme=(st.theme+1)%3;toast('Theme: '+['agentistics dark','agentistics light','high contrast'][st.theme]+' (the mockup keeps the dark one).')}else if(st.set===5){st.lang=st.lang==='EN'?'PT':'EN';toast(st.lang==='PT'?'Idioma: português — o app inteiro troca (o mockup fica em inglês).':'Language: English.')}else if(st.set===6)toast('Required by the owner: the new-session flow cannot finish without a task.');else toast('Opens the editor for this section (simulated).');return true}return true}
+ if(st.ov==='confirm'){const c=st.confirm;if(k==='y'){st.ov=null;c.yes();return true}if(k==='n'||k==='esc'){st.ov=null;c.no&&c.no();return true}return true}
+ if(st.ov==='wizard'){const z=st.wiz;
+  if(k==='esc'){if(z.newTask!=null){z.newTask=null;return true}if(z.step===0||(z.step===1&&z.task&&!z.file&&false)){st.ov=null;st.wiz=null;return true}z.step--;z.sel=0;return true}
+  if(z.step===0&&z.newTask!=null){if(k==='enter'){wizNext();return true}const f={v:z.newTask};if(type(f,k))z.newTask=f.v;return true}
+  if(z.step===4){if(k==='enter'){wizNext();return true}const f={v:z.prompt};if(type(f,k))z.prompt=f.v;return true}
+  if(k==='enter'){wizNext();return true}const n=wizOptions().length;if(k==='up'){z.sel=(z.sel+n-1)%Math.max(1,n);return true}if(k==='down'){z.sel=(z.sel+1)%Math.max(1,n);return true}return true}
+ if(st.reasonFor){if(k==='esc'){st.reasonFor=null;return true}if(k==='enter'){submitReason();return true}const f={v:st.reason};if(type(f,k))st.reason=f.v;return true}
+ if(k==='ctrl+p'){st.ov='palette';st.pal={q:'',sel:0};return true}
+ if(k==='ctrl+,'){openSettings(0);return true}
+ if(k==='ctrl+s'){go('sessions');return true}
+ const tabKeys=()=>{if(k===']'){go(TABS[(TABS.indexOf(st.tab)+1)%TABS.length]);return true}if(k==='['){go(TABS[(TABS.indexOf(st.tab)+TABS.length-1)%TABS.length]);return true}if(k==='?'){st.ov='help';return true}return false};
+ if(st.tab==='home'){if(!st.home){if(tabKeys())return true;if(/^[1-3]$/.test(k)){const s=FLEET[+k-1];if(s.id==='3f5f')go('code');else{go('sessions');st.ssel=orderedFleet().indexOf(s)}return true}}
+  if(k==='enter'){openWizard();return true}const f={v:st.home};if(type(f,k)){st.home=f.v;return true}return false}
+ if(st.tab==='code'){const pend=st.stage==='patch'||st.stage==='shell';
+  if(k==='ctrl+i'){st.side=st.side==='inspector'?'session':'inspector';if(st.narrow)st.pane='right';return true}
+  if(k==='ctrl+t'){st.side=st.side==='timeline'?'session':'timeline';if(st.narrow)st.pane='right';return true}
+  if(k==='ctrl+b'){st.side='session';if(st.narrow)st.pane=st.pane==='right'?'left':'right';return true}
+  if(k==='ctrl+o'){if(st.stage==='done'){st.outOpen=!st.outOpen}else toast('No long output yet: the tests have not run.');return true}
+  if(k==='shift+tab'){cycleMode();return true}
+  if(st.narrow&&st.pane==='right'&&(k==='esc'||k==='tab')){st.pane='left';return true}
+  if(st.side==='inspector'&&(k==='up'||k==='down')){const T=[5,6,7];let i=T.indexOf(st.turn)+(k==='up'?-1:1);st.turn=T[Math.max(0,Math.min(2,i))];return true}
+  if(pend){if(/^[1-4]$/.test(k)){answerPerm(+k);return true}if(k==='d'&&st.stage==='patch'){st.ov='diff';return true}if(k==='esc'){answerPerm(3);toast('A permission left unanswered is a denial: nothing ran, and the agent was told.');return true}if(tabKeys())return true;return true}
+  if(!st.draft&&tabKeys())return true;
+  if(k==='enter'&&st.draft){if(st.draft.startsWith('/')){const c=COMMANDS.find(c=>c.c.startsWith(st.draft));st.draft='';if(c)c.run();else toast('No such command. ctrl+p lists them all.');return true}
+   st.extra.push({user:st.draft,reply:{text:'(Mockup) In the real harness the model answers here, streamed token by token, and every tool it wants goes through the same permission card.',i:0}});st.draft='';return true}
+  const f={v:st.draft};if(type(f,k)){st.draft=f.v;return true}return false}
+ if(st.tab==='sessions'){
+  if(st.searching){if(k==='esc'){st.search='';st.searching=false;return true}if(k==='enter'){st.searching=false;return true}const f={v:st.search};if(type(f,k)){st.search=f.v;st.ssel=0}return true}
+  if(st.answering){const s=curSession();if(k==='esc'){st.answering=false;return true}if(/^[1-9]$/.test(k)){const n=+k;st.answering=false;
+    if(s.h==='native'){if(n===4){answerPerm(4);return true}answerPerm(n);return true}
+    if(n<=s.ask.opts.length){s.state='working';toast(`Sent "${n}. ${s.ask.opts[n-1]}" to "${s.title}" after re-reading its screen. It is working again.`);setTimeout(()=>{s.state='waiting';draw()},4000)}return true}return true}
+  if(k==='esc'&&st.search){st.search='';return true}
+  if(st.narrow&&k==='tab'){st.pane=st.pane==='left'?'right':'left';return true}
+  if(st.narrow&&k==='esc'&&st.pane==='right'){st.pane='left';return true}
+  if(k==='up'){st.ssel=Math.max(0,st.ssel-1);st.answering=false;return true}if(k==='down'){st.ssel=Math.min(orderedFleet().length-1,st.ssel+1);st.answering=false;return true}
+  if(k==='left'){st.stab=(st.stab+2)%3;return true}if(k==='right'){st.stab=(st.stab+1)%3;return true}
+  if(k==='/'){st.searching=true;return true}if(k==='g'){const cur=curSession();st.grp=(st.grp+1)%GROUPS.length;st.ssel=Math.max(0,orderedFleet().indexOf(cur));return true}
+  if(k==='n'){openWizard();return true}
+  if(sessAction(k))return true;return tabKeys()}
+ if(st.tab==='tasks'){const O=orderedTasks();
+  if(st.narrow&&k==='tab'){st.pane=st.pane==='left'?'right':'left';return true}
+  if(k==='up'){st.tsel=Math.max(0,st.tsel-1);return true}if(k==='down'){st.tsel=Math.min(O.length-1,st.tsel+1);return true}
+  if(k==='enter'){const t=O[st.tsel];const live=FLEET.find(s=>s.task===t.id&&s.state!=='ended');if(!live){toast(`${t.id} has no live session. n starts one filed here.`);return true}if(live.id==='3f5f')go('code');else{go('sessions');st.ssel=orderedFleet().indexOf(live)}return true}
+  if(k==='n'){const t=O[st.tsel];if(t.status==='done'){toast(`${t.id} is done. Reopen it on the web before filing new work there.`);return true}openWizard(t.id);return true}
+  if(k==='w'){toast(`Opens localhost:47292/tasks/${O[st.tsel].id} in your browser (read-only here by design).`);return true}
+  return tabKeys()}
+ return tabKeys()}
+function openSettings(i){st.ov='settings';st.set=i}
+
+/* ---------- feature map ---------- */
+const F=[
+ ['Global',[
+  ['GL-01','One app, six tabs','home · code · sessions · tasks · dashboard · services; [ ] switch',()=>true,()=>go('home')],
+  ['GL-02','Attention counter','"● N need you" in the header, on every tab',()=>needCount()>0,()=>go('sessions')],
+  ['GL-03','Command palette','ctrl+p; every command with its shortcut',()=>st.ov==='palette',()=>{st.ov='palette';st.pal={q:'',sel:0}}],
+  ['GL-04','Help overlay','? — every key, by screen',()=>st.ov==='help',()=>{st.ov='help'}],
+  ['GL-05','Footer hints','only the keys that work in the current focus',()=>true,()=>{}],
+  ['GL-06','Status sentences','every action and refusal says what happened',()=>!!st.toast&&Date.now()-st.toastAt<5000,()=>{go('sessions');st.ssel=orderedFleet().findIndex(s=>s.external);sessAction('x')}],
+  ['GL-07','Narrow terminals','below 100 cols, one pane at a time',()=>st.narrow,()=>setWidth(80)],
+ ]],
+ ['Home',[
+  ['HM-01','ANSI logo + wordmark','from the real icon: scale and colour only',()=>st.tab==='home'&&!st.ov,()=>go('home')],
+  ['HM-02','First prompt → task','enter asks which task before starting',()=>st.tab==='home'&&!st.ov,()=>go('home')],
+  ['HM-03','Today card','cost, all-4 tokens, sessions, streak, 14d',()=>st.tab==='home'&&!st.narrow&&!st.ov,()=>{setWidth(108);go('home')}],
+  ['HM-04','Resume card','1–3 reopen the recent sessions',()=>st.tab==='home'&&!st.ov,()=>go('home')],
+  ['HM-05','Your tasks card','status and progress at a glance',()=>st.tab==='home'&&!st.ov,()=>go('home')],
+  ['HM-06','Providers card','ready / off / unreachable',()=>st.tab==='home'&&!st.narrow&&!st.ov,()=>{setWidth(108);go('home')}],
+  ['HM-07','Machine line','other sessions and who needs you',()=>st.tab==='home'&&!st.ov,()=>go('home')],
+ ]],
+ ['Code — native session',[
+  ['CD-01','Session header','title, task, folder, mode, no-sandbox',()=>st.tab==='code',()=>go('code')],
+  ['CD-02','Streaming text','token by token, with a live cursor',()=>st.tab==='code'&&!!(st.final||st.denyReply||st.extra.length),()=>{go('code');if(st.stage==='patch')answerPerm(1);if(st.stage==='shell')answerPerm(1)}],
+  ['CD-03','Tool rows','icon · verb · target · duration/result',()=>st.tab==='code',()=>go('code')],
+  ['CD-04','Inline diff','the lines a patch changed, in the flow',()=>st.tab==='code'&&!['patch','patchDenied'].includes(st.stage),()=>{go('code');if(st.stage==='patch')answerPerm(1)}],
+  ['CD-05','Collapsed turns','older turns fold to one line with their cost',()=>st.tab==='code'&&!st.narrow,()=>go('code')],
+  ['CD-06','Turn receipt','duration · ttft · tokens · cache · cost',()=>st.tab==='code'&&!!(st.final&&st.final.i>=st.final.text.length),()=>{go('code');st.side='inspector';st.turn=6}],
+  ['CD-07','Permission card','numbered options from the policy + why',()=>st.tab==='code'&&(st.stage==='patch'||st.stage==='shell'),()=>go('code')],
+  ['CD-08','Deny with a reason','option 4 sends your words to the agent',()=>!!st.reasonFor,()=>{go('code');if(st.stage==='patch'||st.stage==='shell')answerPerm(4)}],
+  ['CD-09','Full diff view','d — whole hunk, checkpoint, answer there',()=>st.ov==='diff',()=>{go('code');if(st.stage==='patch')st.ov='diff'}],
+  ['CD-10','Long output fold','ctrl+o expands and collapses',()=>st.tab==='code'&&st.stage==='done',()=>{go('code')}],
+  ['CD-11','Composer','@ file · / command popup · ! shell',()=>st.tab==='code',()=>{go('code');st.draft='/'}],
+  ['CD-12','Panel · session','context split, spend, tokens, files, plan',()=>st.tab==='code'&&st.side==='session'&&(!st.narrow||st.pane==='right'),()=>{go('code');st.side='session'}],
+  ['CD-13','Panel · inspector','one turn: counters × cost, tools, policy',()=>st.tab==='code'&&st.side==='inspector'&&(!st.narrow||st.pane==='right'),()=>{go('code');st.side='inspector'}],
+  ['CD-14','Panel · timeline','model vs tools vs waiting on you',()=>st.tab==='code'&&st.side==='timeline'&&(!st.narrow||st.pane==='right'),()=>{go('code');st.side='timeline'}],
+  ['CD-15','Permission mode','shift+tab: ask · edits · plan',()=>st.tab==='code',()=>{go('code');cycleMode()}],
+  ['CD-16','Session rules','an "allow for this session" shows in the panel',()=>st.tab==='code'&&st.rules.length>0,()=>{go('code');if(st.stage==='patch')answerPerm(2)}],
+ ]],
+ ['Sessions — the fleet',[
+  ['SS-01','Whole fleet, grouped','every harness; g: task · harness · state',()=>st.tab==='sessions',()=>go('sessions')],
+  ['SS-02','State in words','approve · needs you · working · ended',()=>st.tab==='sessions',()=>go('sessions')],
+  ['SS-03','Detail · chat','the conversation, when it is linked',()=>st.tab==='sessions'&&st.stab===0,()=>{go('sessions');st.stab=0}],
+  ['SS-04','Detail · terminal','captured screen, or why there is none',()=>st.tab==='sessions'&&st.stab===1,()=>{go('sessions');st.stab=1;st.ssel=orderedFleet().findIndex(s=>s.h==='claude')}],
+  ['SS-05','Detail · metrics','4 counters, cost, context or N/A',()=>st.tab==='sessions'&&st.stab===2,()=>{go('sessions');st.stab=2}],
+  ['SS-06','Answer from the list','a — options read off the screen',()=>st.answering,()=>{go('sessions');st.ssel=orderedFleet().findIndex(s=>s.h==='claude');st.answering=true}],
+  ['SS-07','Open / attach','enter — code tab or tmux attach',()=>st.tab==='sessions',()=>go('sessions')],
+  ['SS-08','Rename','r — lands in agentop and the harness',()=>st.tab==='sessions',()=>go('sessions')],
+  ['SS-09','File under a task','t — the same picker as the wizard',()=>st.ov==='wizard'&&!!st.wiz&&!!st.wiz.file,()=>{go('sessions');st.ssel=orderedFleet().findIndex(s=>s.external);openWizard(null,'e1b3')}],
+  ['SS-10','Stop → finish task?','x, then asks about the task',()=>st.ov==='confirm',()=>{go('sessions');st.ssel=orderedFleet().findIndex(s=>s.id==='77b0');sessAction('x')}],
+  ['SS-11','Search','/ filters by title or task',()=>st.tab==='sessions'&&(st.searching||!!st.search),()=>{go('sessions');st.searching=true}],
+  ['SS-12','External sessions','listed, marked, verbs refuse in words',()=>st.tab==='sessions',()=>{go('sessions');st.ssel=orderedFleet().findIndex(s=>s.external)}],
+ ]],
+ ['Tasks — ALM view',[
+  ['TK-01','Your tasks','by status, progress, cost',()=>st.tab==='tasks',()=>go('tasks')],
+  ['TK-02','Rollup','cost · tokens · rounds from its sessions',()=>st.tab==='tasks'&&(!st.narrow||st.pane==='right'),()=>go('tasks')],
+  ['TK-03','Subtasks','status and sessions per subtask',()=>st.tab==='tasks'&&(!st.narrow||st.pane==='right'),()=>go('tasks')],
+  ['TK-04','Its sessions','enter jumps to the live one',()=>st.tab==='tasks'&&(!st.narrow||st.pane==='right'),()=>go('tasks')],
+  ['TK-05','Blocked reason','the why, in red',()=>st.tab==='tasks'&&orderedTasks()[st.tsel].status==='blocked',()=>{go('tasks');st.tsel=orderedTasks().findIndex(t=>t.status==='blocked')}],
+  ['TK-06','New session here','n — wizard with the task chosen',()=>st.ov==='wizard'&&!!st.wiz&&!st.wiz.file&&st.wiz.step>0,()=>{go('tasks');st.tsel=0;openWizard(orderedTasks()[0].id)}],
+  ['TK-07','Read-only + web link','w opens it on the web',()=>st.tab==='tasks',()=>go('tasks')],
+ ]],
+ ['New session wizard',[
+  ['NW-01','Task (required)','pick one, or create it inline',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===0,()=>openWizard()],
+  ['NW-02','Assistant','native or any installed harness',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===1,()=>{openWizard();st.wiz.task='T-41';st.wiz.step=1}],
+  ['NW-03','Model','with price and window (N/A honest)',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===2,()=>{openWizard();st.wiz.task='T-41';st.wiz.step=2}],
+  ['NW-04','Folder','repo, or a new worktree',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===3,()=>{openWizard();st.wiz.task='T-41';st.wiz.step=3}],
+  ['NW-05','First message','optional',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===4,()=>{openWizard();st.wiz.task='T-41';st.wiz.step=4}],
+  ['NW-06','Review','summary + no-sandbox for native',()=>st.ov==='wizard'&&st.wiz&&st.wiz.step===5,()=>{openWizard();st.wiz.task='T-41';st.wiz.step=5}],
+ ]],
+ ['Settings',[
+  ['ST-01','Providers','status, credential source, test',()=>st.ov==='settings'&&st.set===0,()=>openSettings(0)],
+  ['ST-02','Models & pricing','price source and date; N/A honest',()=>st.ov==='settings'&&st.set===1,()=>openSettings(1)],
+  ['ST-03','Permissions','allow / ask / deny + the floor',()=>st.ov==='settings'&&st.set===2,()=>openSettings(2)],
+  ['ST-04','Appearance','theme and density',()=>st.ov==='settings'&&st.set===3,()=>openSettings(3)],
+  ['ST-05','Keybindings','rebindable, conflicts refused',()=>st.ov==='settings'&&st.set===4,()=>openSettings(4)],
+  ['ST-06','Language','English · Português',()=>st.ov==='settings'&&st.set===5,()=>openSettings(5)],
+  ['ST-07','Tasks & tracking','task required; filing externals',()=>st.ov==='settings'&&st.set===6,()=>openSettings(6)],
+ ]],
+ ['Existing screens',[
+  ['EX-01','Dashboard','+ cost by task (new panel)',()=>st.tab==='dashboard',()=>go('dashboard')],
+  ['EX-02','Services & logs','unchanged cockpit screen',()=>st.tab==='services',()=>go('services')],
+ ]],
+];
+function renderMap(){const m=document.getElementById('map');m.textContent='';
+ for(const [g,items] of F){const d=document.createElement('div');d.className='fg';const h=document.createElement('h3');h.textContent=g;d.appendChild(h);
+  for(const [id,name,desc,on,goF] of items){const it=document.createElement('div');it.className='fi';it.tabIndex=0;it.setAttribute('role','button');let active=false;try{active=!!on()}catch(e){}if(active)it.classList.add('on');
+   const b=document.createElement('b');b.textContent=id;const s=document.createElement('span');s.textContent=name;const sm=document.createElement('small');sm.textContent=desc;s.appendChild(sm);it.append(b,s);
+   const act=()=>{st.ov=null;st.reasonFor=null;st.answering=false;goF();draw();tb.focus()};it.addEventListener('click',act);it.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act()}});d.appendChild(it)}
+  m.appendChild(d)}}
+function renderControls(){const c=document.getElementById('ctl');c.textContent='';const h=hints();const re=/\{a:([^}]*)\}\s*([^{]*)/g;let m;
+ while((m=re.exec(h))){const keyLabel=m[1];const label=m[2].trim();const b=document.createElement('button');const kb=document.createElement('kbd');kb.textContent=keyLabel;b.append(kb,' '+label);
+  b.addEventListener('click',()=>{const map={'1-4':'1','1-3':'1','1-9':'1','↑↓':'down','←→':'right','[ ]':']','type':null};let k=keyLabel in map?map[keyLabel]:keyLabel;if(k==='enter'||k==='esc'||k==='tab'||k==='up'||k==='down'||k==='right')k=k;if(k==null){tb.focus();return}handle(k);draw();tb.focus()});c.appendChild(b)}}
+const tb=document.getElementById('tb'),term=document.getElementById('term');
+function draw(){term.innerHTML=render(frame());renderMap();renderControls();document.getElementById('where').textContent=`aba: ${st.tab}${st.ov?' · camada: '+st.ov:''} · ${W} colunas`}
+function setWidth(w){W=w;st.narrow=w<100;st.pane='left';document.getElementById('w108').setAttribute('aria-pressed',String(w===108));document.getElementById('w80').setAttribute('aria-pressed',String(w===80))}
+document.getElementById('w108').onclick=()=>{setWidth(108);draw()};document.getElementById('w80').onclick=()=>{setWidth(80);draw()};
+tb.addEventListener('keydown',e=>{const k=norm(e);if(!k)return;if(handle(k)){e.preventDefault();draw()}});
+tb.addEventListener('focus',()=>{tb.classList.add('focused');document.getElementById('fh').textContent='teclado ativo no terminal · tab/shift+tab são teclas da TUI aqui'});
+tb.addEventListener('blur',()=>{tb.classList.remove('focused');document.getElementById('fh').textContent='clique no terminal para dar foco ao teclado'});
+tb.addEventListener('click',()=>tb.focus());
+setInterval(()=>{let ch=false;for(const m of [st.final,st.denyReply,...st.extra.map(x=>x.reply)])if(m&&m.i<m.text.length){m.i=Math.min(m.text.length,m.i+2);ch=true}
+ if(st.toast&&Date.now()-st.toastAt>5000&&st.toast!=='_'){st.toast='';ch=true}if(ch)draw()},35);
+draw();
+</script>
