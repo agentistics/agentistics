@@ -104,6 +104,7 @@ import { FiltersSheet } from '../components/sessions/FiltersSheet'
 import {
   arrivalFor, reopenedSessionRoute, sessionPath, stillArriving, type SessionArrival,
 } from '../lib/sessionRoute'
+import { markSessionPending } from '../lib/pendingSessionStore'
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
 import { targetLabel } from '../lib/terminalTarget'
@@ -2786,6 +2787,23 @@ export default function SessionsPage() {
       </div>
       </>
     )
+  } else if (creating || finishing) {
+    // THE DESKTOP HALF OF THE SAME FIX (`isMobile && (creating || finishing)` above is the phone
+    // one) — this branch did not exist at all, so a desktop reader fell straight through every
+    // condition below to the LAST `else`, the plain fleet overview: `panel` is `null` while
+    // `selected` is still `undefined` (the fleet has not polled the new row in yet), so nothing
+    // before this point matched. Worse than a blank screen, that `else` ALSO carries the "that
+    // session is no longer in this machine's list" notice (`sessionId !== undefined && !loading`),
+    // which a moment-old, perfectly healthy spawn made read as already gone — this is the reported
+    // "parece que não criou nada" in full: not merely a missing loader, but an actively wrong one.
+    centre = (
+      <SessionCreating
+        lang={pt ? 'pt' : 'en'}
+        ready={finishing}
+        {...(creatingState?.harness ? { harness: creatingState.harness } : {})}
+        {...(creatingState?.label ? { label: creatingState.label } : {})}
+      />
+    )
   } else if (panel) {
     // THE WRAPPER IS UNCONDITIONAL, and that is a focus bug rather than a style. It used to be
     // `edgeMarker === null ? panel : <div>{edgeMarker}{panel}</div>`: swapping the root between
@@ -3200,7 +3218,10 @@ export default function SessionsPage() {
           initialPreset={presetPrefill}
           onStarted={(id, started) => {
             setPresetPrefill(null)
-            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            if (id) {
+              markSessionPending({ id, ...started })
+              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            }
           }}
         />
       )}

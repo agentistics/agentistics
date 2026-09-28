@@ -11,13 +11,13 @@
  */
 
 import path from 'node:path'
+import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { HOME_DIR } from '../config'
 import type { ChatDriver, ChatDriverModel } from './types'
 import { findCli } from './cli-detect'
 
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..', '..')
 
 // MCP config file path for copilot
 const COPILOT_MCP_CONFIG = path.join(HOME_DIR, '.copilot', 'mcp-config.json')
@@ -58,12 +58,13 @@ function copilotIsAvailable(): boolean {
  */
 async function ensureCopilotMcp(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
+  const launch = agentisticsMcpLaunch()
 
   const entry = {
     type: 'stdio' as const,
-    command: 'bun',
-    args: ['run', mcpScript],
+    command: launch.command,
+    args: launch.args,
     env: { AGENTISTICS_API: apiUrl },
   }
 
@@ -80,11 +81,10 @@ async function ensureCopilotMcp(port: number): Promise<void> {
   }
 
   const servers = config['mcpServers'] as Record<string, unknown>
-  const existing = servers['agentistics'] as { env?: Record<string, string>; args?: string[] } | undefined
+  const existing = servers['agentistics'] as { env?: Record<string, string>; command?: unknown; args?: unknown } | undefined
   const urlOk = existing?.env?.['AGENTISTICS_API'] === apiUrl
-  const pathOk = Array.isArray(existing?.args) && existing.args.some(a => a.includes(mcpScript))
 
-  if (urlOk && pathOk) return // already up to date
+  if (urlOk && sameMcpLaunch(existing, launch)) return // already up to date
 
   servers['agentistics'] = entry
   await mkdir(path.dirname(COPILOT_MCP_CONFIG), { recursive: true })

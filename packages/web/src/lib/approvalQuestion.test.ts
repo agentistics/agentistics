@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { splitApprovalFrame } from './approvalQuestion'
+import { approvalIdentity, splitApprovalFrame } from './approvalQuestion'
 
 // Captured from a live Claude Code `AskUserQuestion` on 2026-09-07 — the shape that was reported.
 const ASK = [
@@ -60,6 +60,42 @@ const BOXED = [
   '     Migrar para a tabela materializada antes do fechamento contábil.',
   '  2. Depois do fechamento',
 ]
+
+// The exact defect: claude's permission prompt is a FIXED TEMPLATE regardless of the command
+// (`approval-spec.ts`), so two prompts for two different commands used to compare EQUAL when only
+// the options were compared — see `approvalIdentity`'s own header.
+describe('approvalIdentity', () => {
+  const PROMPT_OPTIONS = [
+    { number: 1, label: 'Yes' },
+    { number: 2, label: 'Yes, allow all edits during this session (shift+tab)' },
+    { number: 3, label: 'No' },
+  ]
+
+  test('two permission prompts for DIFFERENT commands are DIFFERENT identities', () => {
+    const rm = ['Claude wants to run:', '', '  rm -rf build/', '', '❯ 1. Yes', '  2. Yes, allow all edits during this session (shift+tab)', '  3. No']
+    const git = ['Claude wants to run:', '', '  git push --force', '', '❯ 1. Yes', '  2. Yes, allow all edits during this session (shift+tab)', '  3. No']
+    expect(approvalIdentity(rm, PROMPT_OPTIONS)).not.toBe(approvalIdentity(git, PROMPT_OPTIONS))
+  })
+
+  test('the SAME prompt read twice (only the highlight moved) is the SAME identity', () => {
+    const before = ['Claude wants to run:', '', '  rm -rf build/', '', '❯ 1. Yes', '  2. Yes, allow all edits during this session (shift+tab)', '  3. No']
+    const after = ['Claude wants to run:', '', '  rm -rf build/', '', '  1. Yes', '❯ 2. Yes, allow all edits during this session (shift+tab)', '  3. No']
+    const beforeOptions = [{ number: 1, label: 'Yes' }, { number: 2, label: 'Yes, allow all edits during this session (shift+tab)' }, { number: 3, label: 'No' }]
+    expect(approvalIdentity(before, beforeOptions)).toBe(approvalIdentity(after, beforeOptions))
+  })
+
+  test('a different AskUserQuestion with the same option COUNT is still a different identity', () => {
+    const cache = approvalIdentity(
+      ['Qual estrategia de cache?', '', '❯ 1. Memoria', '  2. Redis'],
+      [{ number: 1, label: 'Memoria' }, { number: 2, label: 'Redis' }],
+    )
+    const deploy = approvalIdentity(
+      ['Qual ambiente de deploy?', '', '❯ 1. Staging', '  2. Producao'],
+      [{ number: 1, label: 'Staging' }, { number: 2, label: 'Producao' }],
+    )
+    expect(cache).not.toBe(deploy)
+  })
+})
 
 describe('the box the harness draws', () => {
   test('the gutter is stripped and the terminal wrap is undone', () => {

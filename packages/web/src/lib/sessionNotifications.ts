@@ -6,6 +6,7 @@ import { versionedAsset } from './brand'
 import type { SessionMeta } from '@agentistics/core'
 import { sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
+import { clampVolume } from './soundVolume'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
 export type SoundPreset = 'chime' | 'soft' | 'alert' | 'ping'
@@ -158,7 +159,7 @@ export function playNotificationSound(preset: SoundPreset = 'chime', volume: num
 
     const now = ctx.currentTime
     const masterGain = ctx.createGain()
-    masterGain.gain.setValueAtTime(Math.max(0, Math.min(1, volume)), now)
+    masterGain.gain.setValueAtTime(clampVolume(volume, 0.8), now)
     masterGain.connect(ctx.destination)
 
     if (preset === 'chime') {
@@ -355,6 +356,11 @@ export function triggerSessionNotification(options: {
     icon: versionedAsset('/icons/icon-192.png'),
     badge: versionedAsset('/icons/icon-192-maskable.png'),
     ...(options.tag ? { tag: options.tag } : {}),
+    // SILENT, ALWAYS. The OS plays its OWN chime for a notification unless told not to, and that
+    // chime answers to neither the volume slider nor the sound switch above — so lowering the
+    // volume, or turning sound off, left a loud system sound on every toast (the Windows one in
+    // particular). The app's synthesized sound, which both controls DO govern, is the only audio.
+    silent: true,
   }
 
   // THE SERVICE WORKER IS THE PATH, NOT A FALLBACK. `new Notification()` is unimplemented in an

@@ -13,20 +13,38 @@ The MCP server runs as a stdio process. It is **not** a separate HTTP server —
 ```bash
 # agentistics must be running first (provides /api/data)
 agentop server
-
-# Then register the MCP (done automatically on first server start, but you can do it manually):
-claude mcp add -s user agentistics \
-  -e AGENTISTICS_API=http://localhost:47291 \
-  -- bun run /path/to/agentistics/packages/mcp/agentistics-mcp.ts
 ```
 
-The agentistics server registers the MCP automatically at startup via `claude mcp add -s user`. If the registration already exists with the correct URL, it is skipped.
+**You do not register it by hand.** Every time `agentop server` starts it registers the MCP for
+every assistant installed on the machine (Claude Code, Codex, Gemini, Copilot), launching the
+installed binary itself:
+
+```bash
+# what the server runs for you — the binary serves the MCP over stdio
+claude mcp add -s user agentistics -e AGENTISTICS_API=http://localhost:47291 -- /path/to/agentop mcp
+```
+
+`agentop mcp` is the MCP server, built into the binary, so the tools an assistant sees always match
+the version installed — an `agentop upgrade` updates them with nothing else to do. (A clone of this
+repository registers `bun run <repo>/packages/mcp/agentistics-mcp.ts` instead, so a developer runs
+the source they are editing.) An up-to-date registration is left alone; a stale one is replaced.
+
+On each boot the server also **removes any other copy of the agentistics MCP** from
+`~/.claude.json` — one registered under another name (for example an older `@agentistics/mcp`
+installed by hand), or in a project's local scope, which Claude Code prefers over user scope and
+which would otherwise keep serving the old tools. Only entries that launch the agentistics MCP are
+touched, and each removal is written to the server log. Sessions that were already open keep the
+MCP they started with until they are restarted.
+
+The registration runs the assistant CLIs (`claude mcp add`, …) on the **server's** PATH. If
+`agentop server` runs as a systemd service whose unit predates the PATH fix, run
+`agentop restart server` from a terminal where those CLIs work — the unit is repaired on the way.
 
 ### Verify registration
 
 ```bash
 claude mcp list
-# Should show: agentistics  bun run .../mcp/agentistics-mcp.ts
+# Should show: agentistics  /path/to/agentop mcp
 ```
 
 ## Environment variables

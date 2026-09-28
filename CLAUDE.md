@@ -3218,6 +3218,21 @@ harness must not break.
     directly on macOS rather than through `detectionUnavailable`'s darwin branch, which now
     describes `live-sessions.ts`'s own `ps`/`lsof` reader and would otherwise claim a tool this
     reader never runs failed.
+- **An MCP registration launches `agentop mcp` unless a checkout is present** (`server/mcp-launch.ts`).
+  Every assistant used to be registered with `bun run <repo>/packages/mcp/agentistics-mcp.ts`, a file
+  only a clone has — on an installed binary the path resolved inside `/$bunfs/root` and the MCP never
+  started on anyone else's machine while the banner printed `mcp ●`. Never write a registration that
+  names a repository path directly; go through `agentisticsMcpLaunch()`. `agentop mcp` is dispatched
+  FIRST in `cli.ts` because stdout is the protocol there. Every `agentop server` boot re-registers it
+  for every installed assistant, and removes any OTHER copy of the agentistics MCP in `~/.claude.json`
+  (another name, or a project's local scope, which outranks user scope) — `staleAgentisticsMcps`
+  lists only entries it can prove are ours, so a hand-installed older npm copy cannot keep serving
+  stale tools across restarts.
+- **A spawn from the browser/cockpit/VS Code is checked like one from the CLI.** `spawnManaged` refuses
+  a harness whose binary is not on the server's PATH and kills a pane that died at launch
+  (`sessions/spawn-check.ts`, `LAUNCH_SETTLE_MS`) BEFORE any registry row is written; a unit that
+  predates `Environment=PATH` is repaired on `agentop restart`/`upgrade` by `migrateUnitPath`, and the
+  line is written QUOTED (`systemdPathLine`) because systemd splits a bare value at the first space.
 - **`packages/server/server/embedded-dist.generated.ts`** is in `.gitignore` — auto-generated, never commit it
 - **`packages/server/` modules** are server-only — never import them from `packages/web/src/` (Vite would try to bundle them and fail on Node/Bun APIs)
 - **`@agentistics/core`** is the shared package — import types, pricing, and formatters from there; never duplicate them inline
