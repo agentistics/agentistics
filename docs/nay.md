@@ -129,7 +129,7 @@ On every server start, `ensureNayChat()` writes two files to `~/.agentistics/nay
 | `CLAUDE.md` | Instructions for Nay: identity, tool call protocol, PDF generation flow, "talking to me" context, response format, navigation buttons |
 | `.claude/settings.json` | MCP server registration + permissions (allows all 13 agentistics tools without prompting) |
 
-It also registers the agentistics MCP at user scope via `claude mcp add -s user` so that `claude --print` mode can find the tools. This registration is idempotent — it skips if the URL is already correct.
+It also registers the agentistics MCP at user scope via `claude mcp add -s user` so that `claude --print` mode can find the tools, launching the installed binary's own `agentop mcp` (see [mcp.md](mcp.md#starting-the-mcp-server)). This registration is idempotent — it skips when the URL and the launch are already correct, and replaces a stale one.
 
 ## Behavior rules (enforced via CLAUDE.md)
 

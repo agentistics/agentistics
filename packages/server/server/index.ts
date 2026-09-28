@@ -336,6 +336,19 @@ try { startVersionRecheck() } catch (err) { console.warn('[version] recheck fail
 // report, not to every boot.
 ensureNayChat(PORT).catch(err => console.warn('[nay-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
 ensureClaudeChat().catch(err => console.warn('[claude-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
+// THE MCP COMES UP WITH THE SERVER, for every assistant installed here — not only Claude (which
+// `ensureNayChat` registers) and not only once somebody opens a chat with that driver, which is when
+// codex/gemini/copilot used to be registered. Each registration launches THIS binary's own
+// `agentop mcp` (see `mcp-launch.ts`), so the tools an assistant sees always match the version
+// installed, and each is idempotent: an up-to-date entry is left alone.
+void (async () => {
+  const { ALL_DRIVERS } = await import('./chat-drivers')
+  for (const driver of ALL_DRIVERS) {
+    if (driver.id === 'claude' || !driver.isAvailable()) continue
+    await driver.ensureMcp(PORT).catch(err =>
+      console.warn(`[mcp] could not register for ${driver.id}:`, err instanceof Error ? err.message : String(err)))
+  }
+})()
 
 
 // ---------------------------------------------------------------------------
