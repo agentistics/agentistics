@@ -39,6 +39,16 @@ export const SYSTEM_PATH = [
 ]
 
 /**
+ * Directories a distribution's systemd ALSO puts on a user service's default PATH (Ubuntu adds
+ * these three). They are not appended — nothing agentop spawns lives there — but they must count as
+ * "system" when deciding whether a caller's PATH says anything new: a PATH read from INSIDE a
+ * service is exactly `SYSTEM_PATH` plus these, and recording it in a unit would write the very
+ * minimal PATH the unit exists to replace, and then block every later migration because a PATH
+ * line is already there.
+ */
+export const SYSTEMD_EXTRA_PATH = ['/usr/games', '/usr/local/games', '/snap/bin']
+
+/**
  * The `Environment=PATH=` value for a unit, from the PATH of the shell installing it.
  *
  * Returns `null` when there is nothing to add — the caller then writes NO `Environment=` line at
@@ -62,6 +72,6 @@ export function servicePath(callerPath: string | undefined): string | null {
   for (const dir of SYSTEM_PATH) add(dir)
   // Nothing the service would not already have had.
   if (userDirs === 0) return null
-  const onlySystem = out.every(d => SYSTEM_PATH.includes(d))
+  const onlySystem = out.every(d => SYSTEM_PATH.includes(d) || SYSTEMD_EXTRA_PATH.includes(d))
   return onlySystem ? null : out.join(':')
 }

@@ -286,6 +286,13 @@ export interface CliStrings {
   sessStarted: (name: string) => string
   sessStartedBg: (name: string) => string
   sessSpawnFailed: (reason: string) => string
+  /** A session whose pane died at birth, in the harness's own words or its exit status. */
+  sessDiedAtSpawn: (reason: string) => string
+  sessDiedAtSpawnStatus: (status: number | undefined) => string
+  /** The harness binary could not be executed — almost always the server's PATH. */
+  sessNotOnPath: (bin: string, path: string) => string
+  /** No harness CLI at all on the server's PATH — a broken PATH, not "unknown". */
+  sessNoHarnessOnPath: (path: string) => string
   sessSpawnUnsupported: (harness: string) => string
   sessSpawnNoResume: (harness: string) => string
   sessSpawnNoModel: (harness: string) => string
@@ -696,6 +703,15 @@ const EN: CliStrings = {
   sessStarted: (name: string) => `started ${name}.`,
   sessStartedBg: (name: string) => `started ${name} in the background.`,
   sessSpawnFailed: (reason: string) => `could not start the session: ${reason}`,
+  sessDiedAtSpawn: (reason: string) => `the session exited as soon as it started: ${reason}`,
+  sessDiedAtSpawnStatus: (status: number | undefined) =>
+    `the session exited as soon as it started${status !== undefined ? ` (status ${status})` : ''}`,
+  sessNotOnPath: (bin: string, path: string) =>
+    `\`${bin}\` could not be executed — is it on the agentop server's PATH? The server sees: ${path || '(empty)'}. ` +
+    'If agentop runs as a service, run `agentop restart server` from a terminal that can run it.',
+  sessNoHarnessOnPath: (path: string) =>
+    `The agentop server cannot see any coding assistant on its PATH (${path || 'empty'}). ` +
+    'If it runs as a service, run `agentop restart server` from a terminal where the assistants work.',
   sessSpawnUnsupported: (harness: string) => `agentop cannot start ${harness} yet.`,
   sessSpawnNoResume: (harness: string) => `${harness} cannot reopen a conversation by id.`,
   sessSpawnNoModel: (harness: string) => `${harness} has no model flag, so a model cannot be set.`,
@@ -1031,6 +1047,15 @@ const PT: CliStrings = {
   sessStarted: (name: string) => `${name} iniciada.`,
   sessStartedBg: (name: string) => `${name} iniciada em background.`,
   sessSpawnFailed: (reason: string) => `não deu para iniciar a sessão: ${reason}`,
+  sessDiedAtSpawn: (reason: string) => `a sessão terminou assim que começou: ${reason}`,
+  sessDiedAtSpawnStatus: (status: number | undefined) =>
+    `a sessão terminou assim que começou${status !== undefined ? ` (status ${status})` : ''}`,
+  sessNotOnPath: (bin: string, path: string) =>
+    `não deu para executar \`${bin}\` — ele está no PATH do servidor agentop? O servidor enxerga: ${path || '(vazio)'}. ` +
+    'Se o agentop roda como serviço, rode `agentop restart server` num terminal onde ele funciona.',
+  sessNoHarnessOnPath: (path: string) =>
+    `O servidor agentop não enxerga nenhum assistente no PATH dele (${path || 'vazio'}). ` +
+    'Se ele roda como serviço, rode `agentop restart server` num terminal onde os assistentes funcionam.',
   sessSpawnUnsupported: (harness: string) => `o agentop ainda não inicia ${harness}.`,
   sessSpawnNoResume: (harness: string) => `${harness} não reabre conversa por id.`,
   sessSpawnNoModel: (harness: string) => `${harness} não tem flag de modelo, então não dá para definir um.`,

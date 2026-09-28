@@ -67,6 +67,16 @@ describe('newSessionArgs', () => {
     expect(args.indexOf('-y')).toBeLessThan(args.indexOf('--'))
   })
 
+  it('hands the pane the CALLER\'s PATH, so a repaired service PATH reaches the next spawn', () => {
+    // A tmux server outlives the agentop that started it and may still carry systemd's minimal
+    // PATH globally; stating the caller's PATH per pane makes a repaired PATH reach the next spawn
+    // whatever tmux's own inheritance rule is on the version installed.
+    const args = newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude'], path: '/home/u/.local/bin:/usr/bin' })
+    expect(args[args.indexOf('PATH=/home/u/.local/bin:/usr/bin') - 1]).toBe('-e')
+    expect(args.indexOf('PATH=/home/u/.local/bin:/usr/bin')).toBeLessThan(args.indexOf('--'))
+    expect(newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude'] }).some(a => a.startsWith('PATH='))).toBe(false)
+  })
+
   it('adds nothing when the invoker is not truecolor', () => {
     const args = newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude'], truecolor: false })
     expect(args).not.toContain('-e')

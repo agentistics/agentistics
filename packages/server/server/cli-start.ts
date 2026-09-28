@@ -119,6 +119,8 @@ import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
+import { spawnDeath } from './sessions/spawn-check'
+import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
@@ -1725,6 +1727,16 @@ async function spawnManaged(req: {
   })
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
 
+  // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
+  // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
+  // server whose PATH cannot reach the harness (a systemd unit that predates `Environment=PATH`)
+  // otherwise spawns a pane that dies in the same second, silently, since a failed `execvp` inside
+  // tmux prints nothing. Refused here, before any row exists, with the PATH named.
+  const bin = planned.plan.argv[0]
+  if (bin && !Bun.which(bin, { PATH: process.env.PATH ?? '' })) {
+    return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
+  }
+
   const id = newSessionId()
   // Stamped BEFORE the launch, for the reason `cli-session.ts` records at its own two spawn sites:
   // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and a timestamp
@@ -1743,6 +1755,24 @@ async function spawnManaged(req: {
     })
   } catch (e) {
     return { ok: false, message: s.sessSpawnFailed(e instanceof Error ? e.message : String(e)) }
+  }
+
+  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
+  // session". The CLI's spawn sites have always checked; this one, which the browser, the cockpit
+  // and the VS Code extension all use, did not, and so wrote a row for a pane that was already
+  // dead: `off` under Inactive, "transcript not found", no Reopen, and the dialog reporting success.
+  // A dead pane is killed and NO row is written, so the failure is the answer the caller gets.
+  //
+  // The window is `LAUNCH_SETTLE_MS`, not the CLI's `SETTLE_MS`: an exec that fails dies at once,
+  // and every healthy session pays the whole window — five seconds on every "new session" in the
+  // browser, and per row in the serial `reopenEntries` loop, was the wrong price for it.
+  const died = await spawnDeath(backend, id, LAUNCH_SETTLE_MS)
+  if (died) {
+    await backend.kill(id).catch(() => {})
+    const message = bin && execFailed(died, bin)
+      ? s.sessNotOnPath(bin, process.env.PATH ?? '')
+      : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
+    return { ok: false, message }
   }
 
   await addSession({
@@ -3865,13 +3895,22 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * A harness with no spec is ABSENT from the wizard rather than offered and failing — the same
      * rule `agentop session`'s `STARTABLE` already follows, and the reason the two can never drift.
      */
+    harnessNotice(): string | undefined {
+      return availableHarnesses().blind ? S().sessNoHarnessOnPath(process.env.PATH ?? '') : undefined
+    },
+
     async startableHarnesses(): Promise<SessionHarnessOption[]> {
       // Narrowed to the CLIs actually ON THIS MACHINE, through the one helper `cli-hooks.ts` also
       // asks — a spec says how to run `codex`, not that codex exists here, and offering the other
       // five started a tmux session that died on `command not found` behind a screen nobody was
       // watching. `availableHarnesses` answers with ALL of them when it cannot tell, because an
       // empty wizard is indistinguishable from a broken one.
-      const { ids } = availableHarnesses()
+      //
+      // BLIND is the exception: not one CLI resolved, which is a broken PATH rather than "cannot
+      // tell", and offering all six there made every pick a pane that died at once. The wizard gets
+      // nothing to offer and `harnessNotice` says why.
+      const { ids, blind } = availableHarnesses()
+      if (blind) return []
       return ids.flatMap(id => {
         const spec = SPAWN_SPECS[id]
         if (!spec) return []
