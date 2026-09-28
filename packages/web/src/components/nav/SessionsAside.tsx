@@ -16,8 +16,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, MoreVertical, Pin, PinOff, Plus,
-  RotateCcw, Search, Send, X,
+  ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  PinOff, Plus, RotateCcw, Search, Send, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -39,6 +39,8 @@ import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
 import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
+import { PendingSessionCard } from '../sessions/PendingSessionCard'
+import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
 import { buildPickRows } from '../../lib/sessionPick'
 import { rowMenuEntries, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -55,15 +57,17 @@ import { fellGroupDismissed, readDismissedFell, writeDismissedFell } from '../..
 import { endDispatch, tryBeginDispatch } from '../../lib/dispatchGuard'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import {
-  type SessionUserGroup,
-  createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup, removeSessionFromGroup,
-  renameSessionGroup, reorderSessionGroups, reorderSessionInGroup, resolveGroupRows,
-  sessionGroupsServerSnapshot, stepSessionGroup, subscribeSessionGroups,
+  type NestRefusal, type SessionUserGroup,
+  canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
+  nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
+  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup,
+  subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
 import {
-  hasDragPayload, hasGroupDragPayload, readDragPayload, readGroupDragPayload, setDragPayload,
-  setGroupDragPayload,
+  hasDragPayload, hasGroupDragPayload, hasGroupNestDragPayload, readDragPayload, readGroupDragPayload,
+  readGroupNestDragPayload, setDragPayload, setGroupDragPayload, setGroupNestDragPayload,
 } from '../../lib/dragReorder'
+import { groupDropOutcome } from '../../lib/sessionGroupDrag'
 import { ConfirmModal } from '../../pages/settings/primitives'
 // The SAME visual language the subtask board already uses for a group and its members reading as
 // one unit (continuous left accent bar + shared tint, header down through the last row) — reused
@@ -230,6 +234,18 @@ export function SessionsAside({
   // next time it asks, the dot is back.
   const [dismissedAttn, setDismissedAttn] = useState<ReadonlySet<string>>(new Set())
   useEffect(() => { setDismissedAttn(prev => pruneDismissed(prev, rows)) }, [rows])
+  // A session the aside is watching for RESOLVES the moment its id (or its conversation id — a
+  // spawn can hand back either) appears in this very poll. Run from BOTH mounts of this component:
+  // it is the same pure reconcile over the same store, so two mounts converge to one answer rather
+  // than disagreeing about it. See `pendingSessionStore.ts`'s own header.
+  useEffect(() => {
+    const present = new Set<string>()
+    for (const r of rows) {
+      present.add(r.id)
+      if (r.conversationId) present.add(r.conversationId)
+    }
+    reconcilePendingSessionsNow(present)
+  }, [rows])
   const dismissAttn = (ids: readonly string[]) => setDismissedAttn(prev => new Set([...prev, ...ids]))
   const toggleGroupFold = (key: string) => {
     const next = new Set(foldedGroups)
@@ -354,6 +370,21 @@ export function SessionsAside({
     setFoldedUserGroupsState(next)
     writeAsideGroupPrefs({ collapsedUserGroups: [...next] })
   }
+  /** The "Fixadas" and "Grupos" SECTIONS themselves — distinct from any one row/folder's own fold.
+   *  The owner asked that EVERYTHING in this list be collapsible, and these two headings were the
+   *  two things that could not fold at all. */
+  const [foldedPinned, setFoldedPinnedState] = useState(storedGroupPrefs.foldedPinned)
+  const toggleFoldedPinned = () => {
+    const next = !foldedPinned
+    setFoldedPinnedState(next)
+    writeAsideGroupPrefs({ foldedPinned: next })
+  }
+  const [foldedGroupsSection, setFoldedGroupsSectionState] = useState(storedGroupPrefs.foldedGroupsSection)
+  const toggleFoldedGroupsSection = () => {
+    const next = !foldedGroupsSection
+    setFoldedGroupsSectionState(next)
+    writeAsideGroupPrefs({ foldedGroupsSection: next })
+  }
   /** The create-group dialog. `forKey` carries a session identity when opened from that row's
    *  "Novo grupo…" path, so submitting both creates the group AND files the session in one step. */
   const [creatingGroup, setCreatingGroup] = useState<{ forKey?: string } | null>(null)
@@ -388,6 +419,36 @@ export function SessionsAside({
    *  payload (`GROUP_DRAG_KEY_TYPE`, see `dragReorder.ts`'s own header) from a session being
    *  dropped into a group, so the two never get read as one another. */
   const [groupReorderOver, setGroupReorderOver] = useState<string | null>(null)
+  /**
+   * NESTING (folder inside a folder, one level max). Two independent drag zones on a folder's own
+   * header decide the gesture (`sessionGroupDrag.ts`'s own header): the grip (⋮⋮) reorders — see
+   * `groupReorderOver` above, unchanged — and the folder's BODY nests it into whatever it lands on.
+   *
+   * `draggingGroupId` is the id of the folder CURRENTLY being dragged, by either handle, tracked in
+   * React state rather than read off the native event: `dataTransfer.getData()` only returns real
+   * values on `drop`, never on `dragover`, so a hover preview that needs to know WHICH folder is
+   * being dragged (to call `canNestGroup` before the drop happens) has nowhere else to read it from.
+   *
+   * `nestOverGroupId` is which folder is the live NEST drop target and whether landing there right
+   * now would succeed — that `ok` is what paints it orange (whole, allowed) or red (whole, the
+   * one-level rule refuses it) while the drag is over it.
+   */
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
+  const [nestOverGroupId, setNestOverGroupId] = useState<{ id: string; ok: boolean } | null>(null)
+  /** "Mover para pasta…" — the menu path for nesting, for a phone or a keyboard that cannot drag
+   *  one heading's body onto another's. Lists every OTHER top-level folder; a folder that is
+   *  itself nested is never offered as a target (it would always fail `target_is_nested`). */
+  const [groupParentPicker, setGroupParentPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** The refusal shown after a blocked nest — from a drop, or from "Mover para pasta…" on a folder
+   *  that already has a child of its own, where EVERY target would fail the same way. Never a
+   *  silent no-op: the owner asked for a clear warning naming which rule stopped it. */
+  const [nestWarning, setNestWarning] = useState<NestRefusal | null>(null)
+  /** A nest a drop (or the menu) is ABOUT to make, held for confirmation before it is applied —
+   *  reported after a whole afternoon's worth of folders landing inside each other by accident
+   *  ("eu movi um monte de pasta uma pra dentro da outra sem querer"). Only a VALID nest reaches
+   *  this state (an invalid one goes straight to `nestWarning`, above); nothing is written to the
+   *  store until the confirm button is pressed. */
+  const [pendingNest, setPendingNest] = useState<{ childId: string; childName: string; parentId: string; parentName: string } | null>(null)
   /** Which pinned row is being dragged, and which one it is hovering over — by the row's own pin
    *  KEY, never its position in this (filtered) list. See `pinnedSessions.ts`'s `planPinMoveTo` for
    *  why a filtered-list index was the actual §6 bug: `pinnedRows` is the RESOLVED, filtered view,
@@ -402,6 +463,27 @@ export function SessionsAside({
   const [linking, setLinking] = useState<{ id: string; x: number; y: number } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+  /**
+   * AUTO-SCROLL WHILE DRAGGING. Native HTML5 drag-and-drop does not scroll a container on its own —
+   * dragging a folder or session near the top/bottom edge of this list, with the actual drop target
+   * (another folder, the "Grupos" heading) scrolled out of view, could not physically reach it at
+   * all. Reported as "não consigo mover pra cima" / "não tá tirando ela de dentro" on a machine
+   * whose folder list runs into the thousands of pixels once a busy folder is expanded — the drag
+   * itself was correct; there was nothing wrong to fix there. `onDragOverCapture` (not `onDragOver`)
+   * so this runs on the way DOWN to whatever specific row or folder is under the pointer, before
+   * that element's own handler can `stopPropagation()` on the way back up — auto-scroll must not
+   * depend on which particular child the drag happens to be hovering.
+   */
+  const asideScrollRef = useRef<HTMLDivElement>(null)
+  const autoScrollDuringDrag = (e: { clientY: number }) => {
+    const el = asideScrollRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const EDGE = 56
+    const SPEED = 18
+    if (e.clientY < rect.top + EDGE) el.scrollTop -= SPEED
+    else if (e.clientY > rect.bottom - EDGE) el.scrollTop += SPEED
+  }
 
   const openMenu = (session: ControlSession, x: number, y: number, verbs: RowVerb[]) => {
     setMenu({ x, y, id: session.id, state: session.state, verbs })
@@ -527,6 +609,36 @@ export function SessionsAside({
     ]
   }, [matched, pinned, groupedKeys, active, activeOnly, pt, lang, groupBy, groupOrder, sortOrder])
 
+  /**
+   * "Recolher tudo" / "Expandir tudo" — every fold this list has, at once: the Fixadas section,
+   * the Grupos section, every individual folder (parent and child alike), and every automatic
+   * project/task/status sub-group currently on screen. Nothing here is a NEW kind of fold; this
+   * only sets every EXISTING one together, which is why it can stay two functions instead of a
+   * fifth piece of persisted state to keep in sync with the other four.
+   */
+  const collapseAll = () => {
+    setFoldedPinnedState(true)
+    writeAsideGroupPrefs({ foldedPinned: true })
+    setFoldedGroupsSectionState(true)
+    writeAsideGroupPrefs({ foldedGroupsSection: true })
+    const allUserGroups = new Set(groupsValue.groups.map(g => g.id))
+    setFoldedUserGroupsState(allUserGroups)
+    writeAsideGroupPrefs({ collapsedUserGroups: [...allUserGroups] })
+    const allAutoKeys = new Set(bands.flatMap(b => b.groups.map(g => collapseKey(b.id, groupBy, g.key))))
+    setFoldedGroupsState(allAutoKeys)
+    writeAsideGroupPrefs({ collapsed: [...allAutoKeys] })
+  }
+  const expandAll = () => {
+    setFoldedPinnedState(false)
+    writeAsideGroupPrefs({ foldedPinned: false })
+    setFoldedGroupsSectionState(false)
+    writeAsideGroupPrefs({ foldedGroupsSection: false })
+    setFoldedUserGroupsState(new Set())
+    writeAsideGroupPrefs({ collapsedUserGroups: [] })
+    setFoldedGroupsState(new Set())
+    writeAsideGroupPrefs({ collapsed: [] })
+  }
+
   /** The current dimension's groups, across both bands, deduped by key, in their effective
    *  order — what the popover's reorder list edits. */
   const groupOrderCandidates = useMemo(() => {
@@ -542,6 +654,326 @@ export function SessionsAside({
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
+  /**
+   * Validate a nest before anything is asked or written: an invalid move goes straight to the
+   * warning (there is nothing to confirm — it cannot happen), a valid one is held in
+   * `pendingNest` for the confirmation dialog. Shared by the drag-drop path and the "Mover para
+   * pasta…" menu path, so the two can never drift on when a confirmation is owed.
+   */
+  /** Is the folder being dragged a NESTED one, and is `target` its own parent or one of its siblings —
+   *  i.e. is the pointer still inside the folder it lives in? */
+  const draggedIsInsideFolderOf = (target: SessionUserGroup) => {
+    const dragged = groupsValue.groups.find(g => g.id === draggingGroupId)
+    return dragged?.parentId !== undefined && (dragged.parentId === target.id || dragged.parentId === target.parentId)
+  }
+
+  const requestNest = (childId: string, parentId: string) => {
+    const check = canNestGroup(groupsValue, childId, parentId)
+    if (!check.ok) { setNestWarning(check.code); return }
+    const childName = groupsValue.groups.find(g => g.id === childId)?.name ?? ''
+    const parentName = groupsValue.groups.find(g => g.id === parentId)?.name ?? ''
+    setPendingNest({ childId, childName, parentId, parentName })
+  }
+
+  /**
+   * Renders one user folder — and, at `depth === 0`, its children indented directly beneath it
+   * (max depth 1: a child never has children of its own, so this never recurses past `depth 1`).
+   * A closure rather than a component: every drag/menu handler below already lives in this
+   * component's own state, and threading fifteen props through a separate component for a shape
+   * that recurses exactly one level deep would be the same code, worse to read.
+   *
+   * COUNTING: a folder's header shows its OWN direct sessions only (`gRows.length`) — a parent's
+   * count never rolls up its children's sessions, so nesting a busy folder never makes an unrelated
+   * parent's number jump.
+   */
+  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
+    const { group, rows: gRows } = entry
+    const folded = foldedUserGroups.has(group.id)
+    const isDropTarget = dragOverGroupId === group.id
+    const isReorderTarget = groupReorderOver === group.id
+    const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
+    const children = depth === 0 ? groupRowsResolved.filter(g => g.group.parentId === group.id) : []
+    // A folded group hides its rows (and, for a parent, its children too): its own left edge says
+    // when one of them is waiting.
+    const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
+    return (
+      <div
+        key={group.id}
+        style={{ marginLeft: depth * 14 }}
+      >
+        <div
+          // Suppressed for the WHOLE list while ANY folder is being dragged, not only for the one
+          // currently under the pointer — as the pointer sweeps across the list toward its target,
+          // every folder it passes near briefly becomes (and stops being) a drop target, and a CSS
+          // animation RESTARTS every time its class is removed and reapplied. Toggling this class
+          // once per folder per hover-frame turned the pulse into a strobe ("linhas piscando
+          // parecendo uma rave"). One flag for the whole drag, not a per-target one.
+          {...(attn > 0 && !isDropTarget && !isReorderTarget && !nestHover && draggingGroupId === null
+            ? { className: ATTN_BAR_CLASS } : {})}
+          // The drop target is the WHOLE group container now, not only the header line — an
+          // empty group's own "drag sessions here" hint sits below the header, and a hint
+          // that cannot itself be dropped on is not really a drop target. A member row's own
+          // onDragOver/onDrop (below) still `stopPropagation`, so hovering a specific row for
+          // reordering does not also light up this outer highlight.
+          //
+          // THREE DISTINCT PAYLOADS can land here: a SESSION key (add it to this group), a GROUP
+          // id dragged by its GRIP (reorder — `GROUP_DRAG_KEY_TYPE`), and a GROUP id dragged by its
+          // BODY (nest — `GROUP_NEST_DRAG_KEY_TYPE`, see `dragReorder.ts`'s own header). They are
+          // DIFFERENT MIME types on the same native event, checked nest-first because it is the
+          // most specific of the three.
+          onDragOver={e => {
+            if (hasGroupNestDragPayload(e)) {
+              e.preventDefault()
+              if (!draggingGroupId || draggingGroupId === group.id || draggedIsInsideFolderOf(group)) {
+                if (nestOverGroupId) setNestOverGroupId(null)
+                return
+              }
+              const outcome = groupDropOutcome(groupsValue, 'body', draggingGroupId, group.id)
+              if (outcome.action !== 'nest') return
+              // Always 'move', even on the RED (refused) target: a real mouse-driven drag treats
+              // `dropEffect = 'none'` as an instruction to CANCEL the drop outright — no `drop`
+              // event reaches this element at all, which is exactly "fica vermelho e não aparece
+              // nenhum aviso". The red background + border ALONE says "this will be refused"; the
+              // warning dialog explains WHY once the drop is actually let through.
+              e.dataTransfer.dropEffect = 'move'
+              if (nestOverGroupId?.id !== group.id || nestOverGroupId.ok !== outcome.ok) {
+                setNestOverGroupId({ id: group.id, ok: outcome.ok })
+              }
+              return
+            }
+            if (hasGroupDragPayload(e)) {
+              e.preventDefault()
+              if (groupReorderOver !== group.id) setGroupReorderOver(group.id)
+              return
+            }
+            if (!hasDragPayload(e)) return
+            e.preventDefault()
+            if (dragOverGroupId !== group.id) setDragOverGroupId(group.id)
+          }}
+          onDragLeave={e => {
+            // `dragleave` bubbles up from every CHILD the pointer crosses inside this container, and
+            // each one fires it on the container too — clearing the highlight for a frame before the
+            // next `dragover` sets it again. That flicker is the "linhas laranjas piscando parecendo
+            // uma rave". Only a leave that actually exits the container counts.
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return
+            setDragOverGroupId(cur => (cur === group.id ? null : cur))
+            setGroupReorderOver(cur => (cur === group.id ? null : cur))
+            setNestOverGroupId(cur => (cur?.id === group.id ? null : cur))
+          }}
+          onDrop={e => {
+            e.preventDefault()
+            // Stops here, or the automatic-bands wrapper below would ALSO see this drop
+            // bubble past it and read it as "un-group me" the instant it is filed.
+            e.stopPropagation()
+            if (hasGroupNestDragPayload(e)) {
+              const dragId = readGroupNestDragPayload(e) ?? draggingGroupId
+              // A nested folder dropped anywhere INSIDE its own parent stays where it is (pinned first
+              // there); only leaving that folder takes it out.
+              if (dragId && dragId !== group.id && !draggedIsInsideFolderOf(group)) requestNest(dragId, group.id)
+              setNestOverGroupId(null)
+              setDraggingGroupId(null)
+              return
+            }
+            if (hasGroupDragPayload(e)) {
+              const dragId = readGroupDragPayload(e)
+              if (dragId) reorderSessionGroups(dragId, group.id)
+              setGroupReorderOver(null)
+              return
+            }
+            const key = readDragPayload(e)
+            // A pinned row is a valid drop source here too — the drop UNPINS it into the
+            // group in one gesture (see `moveSessionToGroup`'s own header for the write
+            // order and why).
+            if (key) moveSessionToGroup(group.id, key)
+            setDragOverGroupId(null)
+          }}
+          style={{
+            marginBottom: 8, borderRadius: 8, paddingBottom: 4,
+            // A group and its members read as ONE container, header down through the last
+            // row — the same continuous left bar + shared tint the subtask board's own
+            // clustered groups use (`CLUSTER_ACCENT`/`CLUSTER_TINT`), so an EMPTY group still
+            // reads as a container (its quiet hint below) rather than as a heading floating
+            // with nothing under it. Dragging a SESSION over it, or a folder's BODY when the
+            // move is ALLOWED, swaps both for the orange "this is about to receive it" state;
+            // a folder's body when the one-level rule REFUSES it instead turns red, cursor
+            // `not-allowed` (via `dataTransfer.dropEffect`, set above); dragging a folder by
+            // its GRIP instead draws a top edge (an insertion line, the same edge indicator
+            // the pinned band's own drag uses) — three different gestures landing in the same
+            // place get three visibly different answers.
+            background: isDropTarget || nestHover?.ok
+              ? 'color-mix(in srgb, var(--anthropic-orange) 10%, transparent)'
+              : nestHover && !nestHover.ok
+                ? 'color-mix(in srgb, #ef4444 10%, transparent)'
+                : CLUSTER_TINT,
+            boxShadow: isDropTarget || nestHover?.ok
+              ? `inset 3px 0 0 0 var(--anthropic-orange), inset 0 0 0 1px var(--anthropic-orange)`
+              : nestHover && !nestHover.ok
+                ? `inset 3px 0 0 0 #ef4444, inset 0 0 0 1px #ef4444`
+                : isReorderTarget
+                  ? `inset 3px 0 0 0 ${CLUSTER_ACCENT}, inset 0 2px 0 0 var(--anthropic-orange)`
+                  : `inset 3px 0 0 0 ${CLUSTER_ACCENT}`,
+          }}
+        >
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7,
+            padding: '4px 4px 4px 5px', minHeight: tap,
+          }}>
+            {/* The grip — the ONLY drag source that reorders, and only TOP-LEVEL folders have one. A
+                nested folder is pinned first under its parent and has no order of its own to change;
+                dragging it out of its parent is what un-nests it. Esc cancels a native drag exactly
+                like any other; nothing here needs to handle that itself. */}
+            {depth === 0 && (
+              <span
+                draggable
+                onDragStart={e => { e.stopPropagation(); setGroupDragPayload(e, group.id); setDraggingGroupId(group.id) }}
+                onDragEnd={() => { setGroupReorderOver(null); setDraggingGroupId(null) }}
+                aria-hidden="true"
+                title={pt ? 'Arrastar para reordenar' : 'Drag to reorder'}
+                style={{
+                  display: 'flex', alignItems: 'center', flexShrink: 0, cursor: 'grab',
+                  color: 'var(--text-tertiary)', padding: '0 2px', minHeight: tap,
+                  ...(tap ? { touchAction: 'none' as const } : {}),
+                }}
+              >
+                <GripVertical size={13} />
+              </span>
+            )}
+            {/* The body — everything else on the row. Dragging THIS nests the folder into
+                whatever it lands on; it never reorders. */}
+            <div
+              draggable
+              onDragStart={e => { setGroupNestDragPayload(e, group.id); setDraggingGroupId(group.id) }}
+              onDragEnd={() => { setNestOverGroupId(null); setDraggingGroupId(null) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, cursor: 'grab' }}
+            >
+              <button
+                onClick={() => toggleUserGroupFold(group.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
+                  background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                  padding: 0, textAlign: 'left', minHeight: tap,
+                  // A `<button>` with no `color` of its own falls back to the UA `buttontext`
+                  // default, which `index.html`'s `color-scheme: dark` pins to WHITE regardless
+                  // of this app's own light/dark toggle — so the chevron (bare `currentColor`,
+                  // no style of its own) and the count span below (same) rendered invisible on
+                  // the light theme's white background. Same tertiary tone the automatic
+                  // section sub-headings use (`SessionBand`'s own folding button, a few hundred
+                  // lines below) so a user group's heading reads like every other one.
+                  color: 'var(--text-tertiary)',
+                }}
+              >
+                {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+                {/* Hidden: the name stays in the layout (so the block is exactly as long as it) and
+                    a grey block is painted over it. `role="img"` makes a reader announce the
+                    label instead of reading the text out. */}
+                <span
+                  {...(hiddenGroups.has(group.id)
+                    ? { className: 'ag-name-mask', role: 'img', 'aria-label': pt ? 'Nome oculto' : 'Name hidden' }
+                    : {})}
+                  style={{
+                    fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
+                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {group.name}
+                </span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{gRows.length}</span>
+              </button>
+              <button
+                onClick={e => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setGroupMenu({ id: group.id, x: r.left, y: r.bottom + 4 })
+                }}
+                aria-label={pt ? 'Opções do grupo' : 'Group options'}
+                title={pt ? 'Opções do grupo' : 'Group options'}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: tap ?? 24, height: tap ?? 24, flexShrink: 0, borderRadius: 6,
+                  border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
+                }}
+              >
+                <MoreVertical size={13} />
+              </button>
+            </div>
+          </div>
+          {!folded && (
+            <>
+              {/* Subfolders read BEFORE the parent's own sessions — the same "folders before files"
+                  order a file explorer uses, and the reason a freshly nested folder becoming the
+                  FIRST child (`moveToFrontAmongSiblings`, core) actually reads as "first" on screen
+                  instead of sitting after every session the parent already held. */}
+              {children.map(c => renderGroupBand(c, 1))}
+              {gRows.length === 0 && children.length === 0 ? (
+                <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
+                  {pt
+                    ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
+                    : 'Drag a session here, or use "Move to group" on its menu.'}
+                </p>
+              ) : gRows.length > 0 && (
+                // Indented under the header — a MEMBER, not another top-level row — the same
+                // modest offset the empty-group hint above already lines up with.
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
+                  {gRows.map(s => {
+                    const key = pinKeyOf(s)
+                    return (
+                      <div
+                        key={`grp-${group.id}-${s.id}`}
+                        draggable
+                        onDragStart={e => setDragPayload(e, key)}
+                        onDragOver={e => {
+                          if (!hasDragPayload(e)) return
+                          e.preventDefault()
+                          e.stopPropagation()
+                          if (groupRowDragOver !== key) setGroupRowDragOver(key)
+                        }}
+                        onDragEnd={() => setGroupRowDragOver(null)}
+                        onDrop={e => {
+                          // Only a SESSION drop is this row's to handle. A FOLDER dropped over a member
+                          // row must reach the folder's own container (nest / reorder / pop out), so it
+                          // is neither prevented nor stopped here — this used to swallow every drop
+                          // unconditionally, which is why nothing at all happened whenever the target
+                          // folder had a session under the pointer ("nada aparece"), while empty
+                          // folders (the only ones the earlier checks used) worked.
+                          if (!hasDragPayload(e)) return
+                          e.preventDefault()
+                          e.stopPropagation()
+                          const dragKey = readDragPayload(e)
+                          if (dragKey && dragKey !== key) {
+                            if (groupOfKey.get(dragKey) === group.id) reorderSessionInGroup(group.id, dragKey, key)
+                            else moveSessionToGroup(group.id, dragKey)
+                          }
+                          setGroupRowDragOver(null)
+                        }}
+                        style={{
+                          boxShadow: groupRowDragOver === key ? 'inset 0 2px 0 var(--anthropic-orange)' : undefined,
+                          ...(tap ? { touchAction: 'none' as const } : {}),
+                        }}
+                      >
+                        <SessionRow
+                          session={s}
+                          selected={rowSelected(s, sessionId)}
+                          {...(tap ? { tap } : {})}
+                          onPin={() => flip(s)}
+                          onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                          {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
+                          onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
+                          onFile={(x, y) => setLinking({ id: s.id, x, y })}
+                          lang={lang}
+                          cardColor={cardColor}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
@@ -550,6 +982,9 @@ export function SessionsAside({
           is a notice about the list rather than an item in it. See `IdleReviewCard.tsx` for why
           mounting it in this component covers the desktop aside and the mobile list at once. */}
       <IdleReviewCard lang={lang} tap={tap} />
+      {/* A session just started but not yet in `rows` — see `PendingSessionCard.tsx`. Right under
+          the idle card, for the same reason: a notice about the list, not an item in it. */}
+      <PendingSessionCard lang={lang} tap={tap} />
       {/*
         * THE SEARCH, on its own row.
         *
@@ -699,6 +1134,8 @@ export function SessionsAside({
           onReorder={keys => setGroupOrder(groupBy, keys)}
           cardColor={cardColor}
           onCardColor={setCardColor}
+          onCollapseAll={collapseAll}
+          onExpandAll={expandAll}
         />
       </div>
 
@@ -786,7 +1223,14 @@ export function SessionsAside({
             // for exactly as long as it takes a poll to land. The state says "this id is on its
             // way", so the page shows the creation loader instead of answering a question nobody
             // asked. Router state and not a prop: the modal that knows this is unmounting.
-            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            //
+            // `markSessionPending` is the LIST's own copy of that same fact — the placeholder row
+            // right above, drawn from the store rather than this navigation's state, since the
+            // aside is visible before and after this navigation settles.
+            if (id) {
+              markSessionPending({ id, ...started })
+              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            }
           }}
         />
       )}
@@ -837,20 +1281,52 @@ export function SessionsAside({
         </p>
       )}
 
-      <div className="ag-noscroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div
+        ref={asideScrollRef}
+        className="ag-noscroll"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}
+        onDragOverCapture={autoScrollDuringDrag}
+        // LEAVING A FOLDER: a nested folder dragged by its body and dropped ANYWHERE that is not a
+        // folder (blank space, a heading, the pinned band, the automatic sections) comes back out
+        // to the top level. Drops that land on a folder never get here — that folder's own
+        // container stops them — so "on another folder" still means "move it into that one".
+        onDragOver={e => {
+          if (!hasGroupNestDragPayload(e)) return
+          if (groupsValue.groups.find(g => g.id === draggingGroupId)?.parentId === undefined) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={e => {
+          if (!hasGroupNestDragPayload(e)) return
+          const dragId = readGroupNestDragPayload(e) ?? draggingGroupId
+          if (dragId && groupsValue.groups.find(g => g.id === dragId)?.parentId !== undefined) {
+            e.preventDefault()
+            nestSessionGroup(dragId, null)
+          }
+          setNestOverGroupId(null)
+          setDraggingGroupId(null)
+        }}
+      >
         {/* The pinned band, above everything — that is what pinning is for: the two or three
             sessions that must not move when the arrangement changes. */}
         {pinnedRows.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 9px 7px', fontSize: 10.5, fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--anthropic-orange)',
-            }}>
+            <button
+              onClick={toggleFoldedPinned}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                padding: '6px 9px 7px', fontSize: 10.5, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--anthropic-orange)',
+                background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                minHeight: tap,
+              }}
+            >
+              {foldedPinned ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               <Pin size={11} />
               <span>{pt ? 'Fixadas' : 'Pinned'}</span>
               <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{pinnedRows.length}</span>
-            </div>
+            </button>
+            {!foldedPinned && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {pinnedRows.map((s, i) => {
                 const key = pinKeyOf(s)
@@ -865,9 +1341,15 @@ export function SessionsAside({
                     // like a row from anywhere else in this aside — see the group bands below.
                     setDragPayload(e, key)
                   }}
-                  onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(key) }}
+                  onDragOver={e => {
+                    // A FOLDER dragged across the pinned band is not a pinned-row reorder: leave it to
+                    // bubble to the list's own drop handling (a nested folder dropped here leaves its parent).
+                    if (hasGroupNestDragPayload(e) || hasGroupDragPayload(e)) return
+                    e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(key)
+                  }}
                   onDragEnd={() => { setDragFrom(null); setDragOver(null) }}
                   onDrop={e => {
+                    if (hasGroupNestDragPayload(e) || hasGroupDragPayload(e)) return
                     e.preventDefault()
                     // Never lets a group's own drop handler ALSO see this drop bubble past it — not
                     // load-bearing here (the pinned band is a sibling of the groups block, not a
@@ -909,6 +1391,7 @@ export function SessionsAside({
                 )
               })}
             </div>
+            )}
           </div>
         )}
 
@@ -919,13 +1402,25 @@ export function SessionsAside({
           * something has already been filed.
           */}
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 2px 6px 9px', minHeight: tap }}>
-            <span style={{
-              fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '0.06em', color: 'var(--text-tertiary)',
-            }}>
-              {pt ? 'Grupos' : 'Groups'}
-            </span>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 2px 6px 9px', minHeight: tap,
+            borderRadius: 8,
+          }}>
+            <button
+              onClick={toggleFoldedGroupsSection}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+                cursor: 'pointer', fontFamily: 'inherit', padding: 0, minHeight: tap,
+                color: 'var(--text-tertiary)',
+              }}
+            >
+              {foldedGroupsSection ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+              <span style={{
+                fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+              }}>
+                {pt ? 'Grupos' : 'Groups'}
+              </span>
+            </button>
             <button
               onClick={() => { setNewGroupName(''); setCreatingGroup({}) }}
               style={{
@@ -949,198 +1444,7 @@ export function SessionsAside({
             </button>
           </div>
 
-          {groupRowsResolved.map(({ group, rows: gRows }) => {
-            const folded = foldedUserGroups.has(group.id)
-            const isDropTarget = dragOverGroupId === group.id
-            const isReorderTarget = groupReorderOver === group.id
-            // A folded group hides its rows: its own left edge says when one of them is waiting.
-            const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
-            return (
-              <div
-                key={group.id}
-                // Not while a drag is over it: those states draw their own edge with the same shadow.
-                {...(attn > 0 && !isDropTarget && !isReorderTarget ? { className: ATTN_BAR_CLASS } : {})}
-                // The drop target is the WHOLE group container now, not only the header line — an
-                // empty group's own "drag sessions here" hint sits below the header, and a hint
-                // that cannot itself be dropped on is not really a drop target. A member row's own
-                // onDragOver/onDrop (below) still `stopPropagation`, so hovering a specific row for
-                // reordering does not also light up this outer highlight.
-                //
-                // TWO DISTINCT PAYLOADS can land here: a SESSION key (add it to this group) and a
-                // GROUP id (reorder — drag another group's header onto this one). They are checked
-                // in that order (`hasGroupDragPayload` first) because the two are DIFFERENT MIME
-                // types on the same native event (see `dragReorder.ts`'s header) — never confusable,
-                // but a drop handler still has to ask "which one is this" before acting.
-                onDragOver={e => {
-                  if (hasGroupDragPayload(e)) {
-                    e.preventDefault()
-                    if (groupReorderOver !== group.id) setGroupReorderOver(group.id)
-                    return
-                  }
-                  if (!hasDragPayload(e)) return
-                  e.preventDefault()
-                  if (dragOverGroupId !== group.id) setDragOverGroupId(group.id)
-                }}
-                onDragLeave={() => {
-                  setDragOverGroupId(cur => (cur === group.id ? null : cur))
-                  setGroupReorderOver(cur => (cur === group.id ? null : cur))
-                }}
-                onDrop={e => {
-                  e.preventDefault()
-                  // Stops here, or the automatic-bands wrapper below would ALSO see this drop
-                  // bubble past it and read it as "un-group me" the instant it is filed.
-                  e.stopPropagation()
-                  if (hasGroupDragPayload(e)) {
-                    const dragId = readGroupDragPayload(e)
-                    if (dragId) reorderSessionGroups(dragId, group.id)
-                    setGroupReorderOver(null)
-                    return
-                  }
-                  const key = readDragPayload(e)
-                  // A pinned row is a valid drop source here too — the drop UNPINS it into the
-                  // group in one gesture (see `moveSessionToGroup`'s own header for the write
-                  // order and why).
-                  if (key) moveSessionToGroup(group.id, key)
-                  setDragOverGroupId(null)
-                }}
-                style={{
-                  marginBottom: 8, borderRadius: 8, paddingBottom: 4,
-                  // A group and its members read as ONE container, header down through the last
-                  // row — the same continuous left bar + shared tint the subtask board's own
-                  // clustered groups use (`CLUSTER_ACCENT`/`CLUSTER_TINT`), so an EMPTY group still
-                  // reads as a container (its quiet hint below) rather than as a heading floating
-                  // with nothing under it. Dragging a SESSION over it swaps both for the orange
-                  // "this is about to receive it" state; dragging ANOTHER GROUP over it instead
-                  // draws a top edge (the same edge indicator the pinned band's own drag uses) —
-                  // a different gesture landing in the same place gets a visibly different answer.
-                  background: isDropTarget ? 'color-mix(in srgb, var(--anthropic-orange) 10%, transparent)' : CLUSTER_TINT,
-                  boxShadow: isDropTarget
-                    ? `inset 3px 0 0 0 var(--anthropic-orange), inset 0 0 0 1px var(--anthropic-orange)`
-                    : isReorderTarget
-                      ? `inset 3px 0 0 0 ${CLUSTER_ACCENT}, inset 0 2px 0 0 var(--anthropic-orange)`
-                      : `inset 3px 0 0 0 ${CLUSTER_ACCENT}`,
-                }}
-              >
-                <div
-                  draggable
-                  onDragStart={e => setGroupDragPayload(e, group.id)}
-                  onDragEnd={() => setGroupReorderOver(null)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, borderRadius: 7,
-                    padding: '4px 4px 4px 9px', minHeight: tap, cursor: 'grab',
-                  }}
-                >
-                  <button
-                    onClick={() => toggleUserGroupFold(group.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
-                      background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                      padding: 0, textAlign: 'left', minHeight: tap,
-                      // A `<button>` with no `color` of its own falls back to the UA `buttontext`
-                      // default, which `index.html`'s `color-scheme: dark` pins to WHITE regardless
-                      // of this app's own light/dark toggle — so the chevron (bare `currentColor`,
-                      // no style of its own) and the count span below (same) rendered invisible on
-                      // the light theme's white background. Same tertiary tone the automatic
-                      // section sub-headings use (`SessionBand`'s own folding button, a few hundred
-                      // lines below) so a user group's heading reads like every other one.
-                      color: 'var(--text-tertiary)',
-                    }}
-                  >
-                    {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                    <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
-                    {/* Hidden: the name stays in the layout (so the block is exactly as long as it) and
-                        a grey block is painted over it. `role="img"` makes a reader announce the
-                        label instead of reading the text out. */}
-                    <span
-                      {...(hiddenGroups.has(group.id)
-                        ? { className: 'ag-name-mask', role: 'img', 'aria-label': pt ? 'Nome oculto' : 'Name hidden' }
-                        : {})}
-                      style={{
-                        fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {group.name}
-                    </span>
-                    <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{gRows.length}</span>
-                  </button>
-                  <button
-                    onClick={e => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      setGroupMenu({ id: group.id, x: r.left, y: r.bottom + 4 })
-                    }}
-                    aria-label={pt ? 'Opções do grupo' : 'Group options'}
-                    title={pt ? 'Opções do grupo' : 'Group options'}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: tap ?? 24, height: tap ?? 24, flexShrink: 0, borderRadius: 6,
-                      border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
-                    }}
-                  >
-                    <MoreVertical size={13} />
-                  </button>
-                </div>
-                {!folded && (
-                  gRows.length === 0 ? (
-                    <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                      {pt
-                        ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
-                        : 'Drag a session here, or use "Move to group" on its menu.'}
-                    </p>
-                  ) : (
-                    // Indented under the header — a MEMBER, not another top-level row — the same
-                    // modest offset the empty-group hint above already lines up with.
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
-                      {gRows.map(s => {
-                        const key = pinKeyOf(s)
-                        return (
-                          <div
-                            key={`grp-${group.id}-${s.id}`}
-                            draggable
-                            onDragStart={e => setDragPayload(e, key)}
-                            onDragOver={e => {
-                              if (!hasDragPayload(e)) return
-                              e.preventDefault()
-                              e.stopPropagation()
-                              if (groupRowDragOver !== key) setGroupRowDragOver(key)
-                            }}
-                            onDragEnd={() => setGroupRowDragOver(null)}
-                            onDrop={e => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              const dragKey = readDragPayload(e)
-                              if (dragKey && dragKey !== key) {
-                                if (groupOfKey.get(dragKey) === group.id) reorderSessionInGroup(group.id, dragKey, key)
-                                else moveSessionToGroup(group.id, dragKey)
-                              }
-                              setGroupRowDragOver(null)
-                            }}
-                            style={{
-                              boxShadow: groupRowDragOver === key ? 'inset 0 2px 0 var(--anthropic-orange)' : undefined,
-                              ...(tap ? { touchAction: 'none' as const } : {}),
-                            }}
-                          >
-                            <SessionRow
-                              session={s}
-                              selected={rowSelected(s, sessionId)}
-                              {...(tap ? { tap } : {})}
-                              onPin={() => flip(s)}
-                              onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
-                              {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
-                              onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
-                              onFile={(x, y) => setLinking({ id: s.id, x, y })}
-                              lang={lang}
-                              cardColor={cardColor}
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )
-                )}
-              </div>
-            )
-          })}
+          {!foldedGroupsSection && groupRowsResolved.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (
@@ -1253,7 +1557,16 @@ export function SessionsAside({
           "Mover para cima"/"Mover para baixo" are the non-drag path for a phone or a keyboard,
           which cannot drag one header onto another — disabled at either end, same as the pinned
           band's own up/down chevrons refuse past their ends. */}
-      {groupMenu && (
+      {groupMenu && (() => {
+        const menuGroup = groupsValue.groups.find(x => x.id === groupMenu.id)
+        const isChild = menuGroup?.parentId !== undefined
+        // "Move up"/"move down" step within the SAME sibling list a drag would (top-level, or one
+        // parent's children) — never the raw storage array, which can interleave a child of some
+        // OTHER folder between two siblings and make the button look like it did nothing.
+        const siblingIds = groupsValue.groups.filter(g => g.parentId === menuGroup?.parentId).map(g => g.id)
+        const menuIndex = siblingIds.indexOf(groupMenu.id)
+        const hasChildren = groupsValue.groups.some(g => g.parentId === groupMenu.id)
+        return (
         <SessionRowMenu
           x={groupMenu.x} y={groupMenu.y}
           entries={[
@@ -1263,14 +1576,20 @@ export function SessionsAside({
               label: hiddenGroups.has(groupMenu.id) ? (pt ? 'Mostrar nome' : 'Show name') : (pt ? 'Ocultar nome' : 'Hide name'),
               enabled: true,
             },
-            {
-              action: 'move-up', label: pt ? 'Mover para cima' : 'Move up',
-              enabled: groupsValue.groups.findIndex(g => g.id === groupMenu.id) > 0,
-            },
-            {
-              action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
-              enabled: groupsValue.groups.findIndex(g => g.id === groupMenu.id) < groupsValue.groups.length - 1,
-            },
+            // A nested folder has no order of its own to change (pinned first under its parent).
+            ...(isChild ? [] : [
+              { action: 'move-up', label: pt ? 'Mover para cima' : 'Move up', enabled: menuIndex > 0 },
+              {
+                action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
+                enabled: menuIndex !== -1 && menuIndex < siblingIds.length - 1,
+              },
+            ]),
+            // NESTING (one level max): a folder already nested only offers "take it out"; a
+            // top-level one only offers "move it into" — the two are never both meaningful for the
+            // same folder, since a child cannot itself hold a folder.
+            isChild
+              ? { action: 'unnest', label: pt ? 'Tirar da pasta' : 'Take out of folder', enabled: true }
+              : { action: 'nest', label: pt ? 'Mover para pasta…' : 'Move to folder…', enabled: true },
             ...(menuGroupAttn > 0
               // Only offered while the group is actually signalling: a verb with nothing to act on
               // is the dead control this product refuses everywhere.
@@ -1287,12 +1606,144 @@ export function SessionsAside({
             if (action === 'toggle-hide-name') toggleGroupNameHidden(groupMenu.id)
             if (action === 'move-up') stepSessionGroup(groupMenu.id, -1)
             if (action === 'move-down') stepSessionGroup(groupMenu.id, 1)
+            if (action === 'unnest') nestSessionGroup(groupMenu.id, null)
+            if (action === 'nest') {
+              // Every OTHER target would fail the SAME way when this folder already has a child of
+              // its own — show the warning once, right away, instead of opening a picker whose
+              // every option is doomed.
+              if (hasChildren) setNestWarning('source_has_children')
+              else setGroupParentPicker({ id: groupMenu.id, x: groupMenu.x, y: groupMenu.y })
+            }
             if (action === 'delete' && g) setDeletingGroup(g)
             if (action === 'dismiss-attn') dismissAttn(menuGroupAttnIds)
             setGroupMenu(null)
           }}
           onClose={() => setGroupMenu(null)}
         />
+        )
+      })()}
+
+      {/* "Mover para pasta…" — the menu path for nesting. Lists every OTHER top-level folder; one
+          already nested is never offered (it would always fail `target_is_nested`). */}
+      {groupParentPicker && (
+        <SessionRowMenu
+          x={groupParentPicker.x} y={groupParentPicker.y}
+          entries={groupsValue.groups
+            .filter(g => !g.parentId && g.id !== groupParentPicker.id)
+            .map(g => ({ action: g.id, label: displayName(g.name, hiddenGroups.has(g.id)), enabled: true }))}
+          onPick={action => {
+            requestNest(groupParentPicker.id, action)
+            setGroupParentPicker(null)
+          }}
+          onClose={() => setGroupParentPicker(null)}
+        />
+      )}
+
+      {/* The one-level-deep refusal, drag or menu — never a silent no-op. A plain notice, not
+          `ConfirmModal`: nothing here is destructive, and that component's confirm button is
+          always red, which would read as a second "are you sure" over a move that simply cannot
+          happen. */}
+      {nestWarning !== null && (
+        <div
+          role="alertdialog"
+          aria-label={pt ? 'Não é possível' : 'Not possible'}
+          style={{ position: 'fixed', inset: 0, zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={() => setNestWarning(null)}
+            style={{ position: 'absolute', inset: 0, background: 'var(--ag-scrim, rgba(0,0,0,0.4))' }}
+          />
+          <div style={{
+            position: 'relative', zIndex: 1, minWidth: 260, maxWidth: 340,
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
+            boxShadow: 'var(--ag-shadow-menu)',
+          }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {pt ? 'Não é possível' : 'Not possible'}
+            </span>
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+              {nestWarning === 'target_is_nested'
+                ? (pt
+                  ? 'Não é possível: essa pasta já está dentro de outra pasta.'
+                  : 'Not possible: that folder is already inside another folder.')
+                : (pt
+                  ? 'Não é possível: esta pasta já tem outra pasta dentro.'
+                  : 'Not possible: this folder already has another folder inside it.')}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button" autoFocus onClick={() => setNestWarning(null)}
+                style={{
+                  padding: '6px 12px', borderRadius: 8, border: 'none',
+                  background: 'var(--anthropic-orange)', color: '#fff',
+                  fontFamily: 'inherit', fontSize: 12, fontWeight: 650, cursor: 'pointer',
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm before a folder actually moves into another — a drag lands on its target the
+          instant the mouse is released, with no "are you sure" the way a keyboard action would
+          have. Reported after several folders were dropped into each other by accident in one
+          sitting; nothing is written to the store until this is confirmed. */}
+      {pendingNest && (
+        <div
+          role="dialog"
+          aria-label={pt ? 'Mover pasta' : 'Move folder'}
+          style={{ position: 'fixed', inset: 0, zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={() => setPendingNest(null)}
+            style={{ position: 'absolute', inset: 0, background: 'var(--ag-scrim, rgba(0,0,0,0.4))' }}
+          />
+          <div style={{
+            position: 'relative', zIndex: 1, minWidth: 260, maxWidth: 360,
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
+            boxShadow: 'var(--ag-shadow-menu)',
+          }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {pt ? 'Mover pasta' : 'Move folder'}
+            </span>
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+              {pt
+                ? <>Mover a pasta <strong>{pendingNest.childName}</strong> para dentro de <strong>{pendingNest.parentName}</strong>?</>
+                : <>Move the folder <strong>{pendingNest.childName}</strong> inside <strong>{pendingNest.parentName}</strong>?</>}
+            </p>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button
+                type="button" onClick={() => setPendingNest(null)}
+                style={{
+                  padding: '6px 11px', borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid var(--border-subtle)', background: 'transparent',
+                  color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12,
+                }}
+              >
+                {pt ? 'Cancelar' : 'Cancel'}
+              </button>
+              <button
+                type="button" autoFocus
+                onClick={() => {
+                  const result = nestSessionGroup(pendingNest.childId, pendingNest.parentId)
+                  if (!result.ok) setNestWarning(result.code)
+                  setPendingNest(null)
+                }}
+                style={{
+                  padding: '6px 12px', borderRadius: 8, border: 'none',
+                  background: 'var(--anthropic-orange)', color: '#fff',
+                  fontFamily: 'inherit', fontSize: 12, fontWeight: 650, cursor: 'pointer',
+                }}
+              >
+                {pt ? 'Mover' : 'Move'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* A tiny rename prompt, seeded with the row's current title — the same shape the panel's own

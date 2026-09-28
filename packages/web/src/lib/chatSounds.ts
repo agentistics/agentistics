@@ -1,25 +1,38 @@
 // Chat notification sounds
 // All sounds are synthesized via Web Audio API — no audio files needed.
+//
+// VOLUME: every preset ran its individual tones straight into `ctx.destination` at a hardcoded
+// peak gain, so there was nowhere for a volume preference to apply — the one volume slider in the
+// app (Settings -> Notifications -> Sound Effects) never touched this file. Each preset now builds
+// a single master `GainNode`, scaled by the caller's `volume` (via `clampVolume`), that every tone
+// routes through before reaching the destination — the same gain-staging `sessionNotifications.ts`'s
+// `playNotificationSound` already used. Gain nodes chained this way MULTIPLY, so the relative
+// balance between a preset's own tones/overtones is preserved and only the overall loudness scales.
+
+import { clampVolume } from './soundVolume'
 
 export interface ChatSound {
   id: string
   label: { en: string; pt: string }
-  play(ctx: AudioContext): void
+  play(ctx: AudioContext, volume: number): void
 }
 
 export const CHAT_SOUNDS: ChatSound[] = [
   {
     id: 'ping',
     label: { en: 'Ping', pt: 'Ping' },
-    play(ctx) {
+    play(ctx, volume) {
       // Short high sine wave — the original default
       ctx.resume().then(() => {
         const now = ctx.currentTime
+        const masterGain = ctx.createGain()
+        masterGain.gain.setValueAtTime(clampVolume(volume, 1), now)
+        masterGain.connect(ctx.destination)
         const playTone = (freq: number, start: number, dur: number) => {
           const osc = ctx.createOscillator()
           const gain = ctx.createGain()
           osc.connect(gain)
-          gain.connect(ctx.destination)
+          gain.connect(masterGain)
           osc.type = 'sine'
           osc.frequency.value = freq
           gain.gain.setValueAtTime(0, start)
@@ -36,15 +49,18 @@ export const CHAT_SOUNDS: ChatSound[] = [
   {
     id: 'chime',
     label: { en: 'Chime', pt: 'Chime' },
-    play(ctx) {
+    play(ctx, volume) {
       // Two-tone ascending ding
       ctx.resume().then(() => {
         const now = ctx.currentTime
+        const masterGain = ctx.createGain()
+        masterGain.gain.setValueAtTime(clampVolume(volume, 1), now)
+        masterGain.connect(ctx.destination)
         const playTone = (freq: number, start: number, dur: number, vol = 0.2) => {
           const osc = ctx.createOscillator()
           const gain = ctx.createGain()
           osc.connect(gain)
-          gain.connect(ctx.destination)
+          gain.connect(masterGain)
           osc.type = 'sine'
           osc.frequency.value = freq
           gain.gain.setValueAtTime(0, start)
@@ -63,14 +79,17 @@ export const CHAT_SOUNDS: ChatSound[] = [
   {
     id: 'soft',
     label: { en: 'Soft', pt: 'Suave' },
-    play(ctx) {
+    play(ctx, volume) {
       // Gentle low-frequency warm tone
       ctx.resume().then(() => {
         const now = ctx.currentTime
+        const masterGain = ctx.createGain()
+        masterGain.gain.setValueAtTime(clampVolume(volume, 1), now)
+        masterGain.connect(ctx.destination)
         const osc = ctx.createOscillator()
         const gain = ctx.createGain()
         osc.connect(gain)
-        gain.connect(ctx.destination)
+        gain.connect(masterGain)
         osc.type = 'sine'
         osc.frequency.value = 330
         gain.gain.setValueAtTime(0, now)
@@ -85,15 +104,18 @@ export const CHAT_SOUNDS: ChatSound[] = [
   {
     id: 'bell',
     label: { en: 'Bell', pt: 'Sino' },
-    play(ctx) {
+    play(ctx, volume) {
       // Decaying bell-like tone using two oscillators (fundamental + overtone)
       ctx.resume().then(() => {
         const now = ctx.currentTime
+        const masterGain = ctx.createGain()
+        masterGain.gain.setValueAtTime(clampVolume(volume, 1), now)
+        masterGain.connect(ctx.destination)
         const playPartial = (freq: number, vol: number, decay: number) => {
           const osc = ctx.createOscillator()
           const gain = ctx.createGain()
           osc.connect(gain)
-          gain.connect(ctx.destination)
+          gain.connect(masterGain)
           osc.type = 'sine'
           osc.frequency.value = freq
           gain.gain.setValueAtTime(vol, now)
@@ -110,10 +132,13 @@ export const CHAT_SOUNDS: ChatSound[] = [
   {
     id: 'pop',
     label: { en: 'Pop', pt: 'Pop' },
-    play(ctx) {
+    play(ctx, volume) {
       // Short click/pop sound via noise burst
       ctx.resume().then(() => {
         const now = ctx.currentTime
+        const masterGain = ctx.createGain()
+        masterGain.gain.setValueAtTime(clampVolume(volume, 1), now)
+        masterGain.connect(ctx.destination)
         const bufSize = ctx.sampleRate * 0.05
         const buffer = ctx.createBuffer(1, bufSize, ctx.sampleRate)
         const data = buffer.getChannelData(0)
@@ -124,7 +149,7 @@ export const CHAT_SOUNDS: ChatSound[] = [
         source.buffer = buffer
         const gain = ctx.createGain()
         source.connect(gain)
-        gain.connect(ctx.destination)
+        gain.connect(masterGain)
         gain.gain.setValueAtTime(0.35, now)
         source.start(now)
       }).catch(() => { /* ignore */ })

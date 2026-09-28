@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { SESSION_SORTS, type SessionOrder, type SessionSort } from '@agentistics/tui/control/session-order'
 import { createPortal } from 'react-dom'
-import { ArrowUpDown, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
+import { ArrowUpDown, ChevronDown, ChevronsDownUp, ChevronsUpDown, ChevronUp, GripVertical } from 'lucide-react'
 import { reorderByDrag, stepOrder } from '../../lib/dragReorder'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -52,6 +52,10 @@ export interface SessionsGroupMenuProps {
   /** What the sessions inside each group are ordered by, and how to change it. */
   sort: SessionOrder
   onSort: (next: SessionOrder) => void
+  /** Fold, or unfold, EVERYTHING this list can fold — Fixadas, Grupos, every folder and every
+   *  automatic sub-group — in one action ("recolher tudo" / "desrecolher"). */
+  onCollapseAll: () => void
+  onExpandAll: () => void
 }
 
 /** The words for each ordering. `state` is first and the default: it puts what is waiting on you on
@@ -148,6 +152,16 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
             background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
             boxShadow: 'var(--ag-shadow-menu)', maxHeight: 420, overflowY: 'auto',
           }}>
+            <div style={sectionLabel}>{pt ? 'Recolher / expandir' : 'Collapse / expand'}</div>
+            <button onClick={() => { p.onCollapseAll(); setOpen(false) }} style={rowStyle(false)}>
+              <ChevronsDownUp size={13} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
+              {pt ? 'Recolher tudo' : 'Collapse all'}
+            </button>
+            <button onClick={() => { p.onExpandAll(); setOpen(false) }} style={rowStyle(false)}>
+              <ChevronsUpDown size={13} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
+              {pt ? 'Expandir tudo' : 'Expand all'}
+            </button>
+
             <div style={sectionLabel}>{pt ? 'Agrupamento por' : 'Group by'}</div>
             {ASIDE_GROUP_BY_VALUES.map(v => (
               <button key={v} onClick={() => p.onGroupBy(v)} style={rowStyle(p.groupBy === v)}>

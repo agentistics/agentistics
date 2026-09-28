@@ -136,9 +136,17 @@ export const PANE_COLS = 120
 export const PANE_ROWS = 50
 
 export function newSessionArgs(
-  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string },
+  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string; path?: string },
 ): string[] {
   const env = o.truecolor ? ['-e', 'COLORTERM=truecolor'] : []
+  // THE PANE GETS THE CALLER'S PATH, stated explicitly rather than left to tmux. A tmux server
+  // outlives the agentop that started it, so after a service's PATH is repaired the fleet's tmux
+  // server may still carry systemd's minimal one as its global environment. Measured on tmux 3.2a,
+  // `new-session` already hands the pane the CLIENT's PATH (a server started with `/usr/bin:/bin`
+  // spawned a pane seeing the client's `/good/bin`), but that is tmux's behaviour to change, not
+  // ours; with `-e` the next spawn after a PATH fix finds the harness on any version, and no live
+  // session has to be killed to get there.
+  if (o.path) env.push('-e', `PATH=${o.path}`)
   return sock([
     'new-session', '-d', '-s', tmuxName(o.id),
     '-x', String(PANE_COLS), '-y', String(PANE_ROWS),
@@ -371,14 +379,17 @@ export function serverOptionsArgs(profile: TerminalProfile): string[][] {
  */
 export function spawnArgs(
   profile: TerminalProfile,
-  o: { id: string; cwd: string; argv: string[] },
+  o: { id: string; cwd: string; argv: string[]; path?: string },
 ): string[] {
   // ONE profile drives both halves of truecolor: the client-side capability
   // (`terminal-features` in serverOptionsArgs) and the pane-side `COLORTERM` here. Deriving the
   // pane env from the profile — rather than a separate flag — is what keeps them from disagreeing.
   const commands: string[][] = [
     ...serverOptionsArgs(profile),
-    newSessionArgs({ id: o.id, cwd: o.cwd, argv: o.argv, truecolor: profile.truecolorTerm !== null }),
+    newSessionArgs({
+      id: o.id, cwd: o.cwd, argv: o.argv, truecolor: profile.truecolorTerm !== null,
+      ...(o.path ? { path: o.path } : {}),
+    }),
   ]
   const chained: string[] = []
   commands.forEach((cmd, i) => {

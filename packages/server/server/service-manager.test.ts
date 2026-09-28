@@ -12,6 +12,8 @@ import {
   serviceManagerOptions,
   systemdUnit,
   migrateUnitKillMode,
+  migrateUnitPath,
+  systemdPathLine,
   type ServiceManagerFacts,
   type ServiceSpec,
 } from './service-manager'
@@ -162,4 +164,84 @@ test('migration declines anything it was not asked to decide', () => {
   // Nothing to anchor on.
   expect(migrateUnitKillMode('[Service]\nType=simple\n')).toBeNull()
   expect(migrateUnitKillMode('not a unit file at all')).toBeNull()
+})
+
+// ── Environment=PATH: quoted, and migrated onto units that predate it ──────────────────────────
+
+const OLD_SERVER_UNIT = [
+  '[Unit]', 'Description=agentop server', '',
+  '[Service]',
+  'Type=simple',
+  'ExecStart=/home/u/.local/bin/agentop server',
+  '# A session is not part of the service — see systemdUnit().',
+  'KillMode=process',
+  'Restart=on-failure', 'RestartSec=5', '',
+  '[Install]', 'WantedBy=default.target', '',
+].join('\n')
+
+const WSL_PATH = '/home/u/.local/bin:/usr/bin:/mnt/c/Program Files/nodejs:/mnt/c/Users/u/AppData/Local/agy/bin'
+
+test('the PATH line is QUOTED — systemd splits a bare value at the first space', () => {
+  // On WSL the interactive PATH always carries `/mnt/c/Program Files/...`; written bare, systemd
+  // kept `/mnt/c/Program` and dropped every directory after it, Windows-installed harnesses included.
+  expect(systemdPathLine('/a:/mnt/c/Program Files/x')).toBe('Environment="PATH=/a:/mnt/c/Program Files/x"')
+  expect(systemdUnit(FOREGROUND, WSL_PATH)).toContain(`Environment="PATH=${WSL_PATH}:`)
+  expect(systemdUnit(FOREGROUND, WSL_PATH)).not.toMatch(/^Environment=PATH=/m)
+})
+
+test('the PATH line escapes what systemd would otherwise interpret', () => {
+  expect(systemdPathLine('/a"b')).toBe('Environment="PATH=/a\\"b"')
+  expect(systemdPathLine('/a\\b')).toBe('Environment="PATH=/a\\\\b"')
+  // `%` is a unit specifier: `%h` would silently become the home directory.
+  expect(systemdPathLine('/a%hb')).toBe('Environment="PATH=/a%%hb"')
+})
+
+test('migrateUnitPath gives a unit with no PATH the INTERACTIVE caller\'s PATH', () => {
+  // The reported machine: a unit from before the PATH fix, only ever migrated for KillMode, so
+  // every session the browser started died in the second it was spawned.
+  const next = migrateUnitPath(OLD_SERVER_UNIT, '/home/u/.local/bin:/home/u/.bun/bin:/usr/bin')
+  expect(next).not.toBeNull()
+  expect(next).toContain('Environment="PATH=/home/u/.local/bin:/home/u/.bun/bin:/usr/bin:')
+  // Every line the user had is still there.
+  for (const line of OLD_SERVER_UNIT.split('\n').filter(Boolean)) expect(next).toContain(line)
+  // And it lands in [Service], before the command it is for.
+  expect(next!.indexOf('Environment=')).toBeGreaterThan(next!.indexOf('[Service]'))
+  expect(next!.indexOf('Environment=')).toBeLessThan(next!.indexOf('ExecStart='))
+  // Idempotent.
+  expect(migrateUnitPath(next!, '/home/u/other/bin')).toBeNull()
+})
+
+test('migrateUnitPath never records systemd\'s own minimal PATH', () => {
+  // A restart driven from INSIDE the service reads this PATH. Writing it would record the very
+  // thing the line exists to replace, and then block the real repair forever — a PATH line exists.
+  const systemdDefault = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'
+  expect(migrateUnitPath(OLD_SERVER_UNIT, systemdDefault)).toBeNull()
+  expect(migrateUnitPath(OLD_SERVER_UNIT, undefined)).toBeNull()
+})
+
+test('migrateUnitPath re-quotes the bare line an older agentop wrote, keeping its value', () => {
+  const bare = OLD_SERVER_UNIT.replace('[Service]\n', `[Service]\nEnvironment=PATH=${WSL_PATH}\n`)
+  const next = migrateUnitPath(bare, '/somewhere/else')
+  expect(next).toContain(`Environment="PATH=${WSL_PATH}"`)
+  expect(next).not.toContain('/somewhere/else')
+  expect(migrateUnitPath(next!, '/somewhere/else')).toBeNull()
+})
+
+test('migrateUnitPath leaves a PATH somebody else set, and units it does not own', () => {
+  const bareNoSpace = OLD_SERVER_UNIT.replace('[Service]\n', '[Service]\nEnvironment=PATH=/opt/bin:/usr/bin\n')
+  expect(migrateUnitPath(bareNoSpace, '/home/u/.local/bin')).toBeNull()
+  const quoted = OLD_SERVER_UNIT.replace('[Service]\n', '[Service]\nEnvironment="PATH=/opt/my bin"\n')
+  expect(migrateUnitPath(quoted, '/home/u/.local/bin')).toBeNull()
+  // A oneshot's command has returned; it spawns nothing.
+  expect(migrateUnitPath(systemdUnit(RETURNS, '/usr/bin'), '/home/u/.local/bin')).toBeNull()
+  expect(migrateUnitPath('not a unit file at all', '/home/u/.local/bin')).toBeNull()
+})
+
+test('both migrations compose on the same pre-fix unit', () => {
+  const ancient = OLD_SERVER_UNIT.replace('# A session is not part of the service — see systemdUnit().\nKillMode=process\n', '')
+  const once = migrateUnitPath(migrateUnitKillMode(ancient)!, '/home/u/.local/bin')!
+  expect(once).toContain('KillMode=process')
+  expect(once).toContain('Environment="PATH=/home/u/.local/bin:')
+  expect(migrateUnitKillMode(once)).toBeNull()
+  expect(migrateUnitPath(once, '/home/u/.local/bin')).toBeNull()
 })

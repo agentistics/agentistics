@@ -94,6 +94,74 @@ describe('groupOp — rename, remove, delete', () => {
   })
 })
 
+describe('groupOp — nest (folder inside a folder, one level)', () => {
+  test('nests a folder under another, resolved by name on both sides', async () => {
+    const { deps, get } = fakeDeps({
+      sessionGroups: { groups: [{ id: 'a', name: 'Work', sessionKeys: [] }, { id: 'b', name: 'Sub', sessionKeys: [] }] },
+    })
+    const out = await groupOp({ op: 'nest', group: 'sub', parent: 'work' }, deps)
+    expect(out).toMatchObject({ ok: true, message: 'Folder nested.' })
+    expect(get().sessionGroups!.groups.find(g => g.id === 'b')).toMatchObject({ parentId: 'a' })
+  })
+
+  test('parent: null moves a folder back to the top level', async () => {
+    const { deps, get } = fakeDeps({
+      sessionGroups: { groups: [{ id: 'a', name: 'Work', sessionKeys: [] }, { id: 'b', name: 'Sub', sessionKeys: [], parentId: 'a' }] },
+    })
+    const out = await groupOp({ op: 'nest', group: 'b', parent: null }, deps)
+    expect(out).toMatchObject({ ok: true, message: 'Folder moved to the top level.' })
+    expect(get().sessionGroups!.groups.find(g => g.id === 'b')!.parentId).toBeUndefined()
+  })
+
+  test('a folder that already has a child cannot be tucked inside another', async () => {
+    const { deps, get } = fakeDeps({
+      sessionGroups: {
+        groups: [
+          { id: 'a', name: 'Work', sessionKeys: [] },
+          { id: 'b', name: 'Other', sessionKeys: [] },
+          { id: 'c', name: 'Sub', sessionKeys: [], parentId: 'a' },
+        ],
+      },
+    })
+    const out = await groupOp({ op: 'nest', group: 'a', parent: 'b' }, deps)
+    expect(out).toMatchObject({ ok: false, code: 'source_has_children' })
+    expect(groupStatus(out)).toBe(400)
+    // Refused writes nothing.
+    expect(get().sessionGroups!.groups.find(g => g.id === 'a')!.parentId).toBeUndefined()
+  })
+
+  test('a folder already nested cannot become a parent', async () => {
+    const { deps } = fakeDeps({
+      sessionGroups: {
+        groups: [
+          { id: 'a', name: 'Work', sessionKeys: [] },
+          { id: 'b', name: 'Sub', sessionKeys: [], parentId: 'a' },
+          { id: 'c', name: 'Other', sessionKeys: [] },
+        ],
+      },
+    })
+    expect(await groupOp({ op: 'nest', group: 'c', parent: 'b' }, deps)).toMatchObject({ ok: false, code: 'target_is_nested' })
+  })
+
+  test('the parent key must be present, even as null — omitting it is a missing argument', async () => {
+    const { deps } = fakeDeps({ sessionGroups: { groups: [{ id: 'a', name: 'Work', sessionKeys: [] }] } })
+    expect(await groupOp({ op: 'nest', group: 'a' }, deps)).toMatchObject({ ok: false, code: 'missing_argument' })
+  })
+
+  test('deleting a parent promotes its child to the top level', async () => {
+    const { deps, get } = fakeDeps({
+      sessionGroups: {
+        groups: [
+          { id: 'a', name: 'Work', sessionKeys: [] },
+          { id: 'b', name: 'Sub', sessionKeys: ['conv-1'], parentId: 'a' },
+        ],
+      },
+    })
+    expect(await groupOp({ op: 'delete', group: 'work' }, deps)).toMatchObject({ ok: true, deleted: true })
+    expect(get().sessionGroups!.groups).toEqual([{ id: 'b', name: 'Sub', sessionKeys: ['conv-1'] }])
+  })
+})
+
 describe('listGroups', () => {
   test('names the members that are on the fleet and leaves the ones that are gone as bare keys', async () => {
     const { deps } = fakeDeps({ sessionGroups: { groups: [{ id: 'a', name: 'A', sessionKeys: ['conv-1', 'gone'] }] } })

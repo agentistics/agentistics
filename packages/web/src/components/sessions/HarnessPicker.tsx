@@ -25,9 +25,16 @@ export interface HarnessPickerProps {
   /** The chosen harness's id, or `''` for "none chosen yet". */
   value: string
   onChange: (id: string) => void
+  /**
+   * The server's own sentence for WHY the list is empty, when that is a fault rather than a fact —
+   * e.g. a service whose PATH reaches no assistant at all, which names the PATH it sees. Shown in
+   * place of the generic "nothing was found", which would send someone to reinstall a tool that is
+   * installed.
+   */
+  notice?: string
 }
 
-export function HarnessPicker({ lang, harnesses, value, onChange }: HarnessPickerProps) {
+export function HarnessPicker({ lang, harnesses, value, onChange, notice }: HarnessPickerProps) {
   const pt = lang === 'pt'
 
   if (harnesses === null) {
@@ -35,6 +42,7 @@ export function HarnessPicker({ lang, harnesses, value, onChange }: HarnessPicke
   }
   if (harnesses.length === 0) {
     // Not an empty picker: the machine looked and found nothing it knows how to start.
+    if (notice) return <Muted text={notice} />
     return <Muted text={pt
       ? 'Nenhum assistente que o agentop saiba iniciar foi encontrado nesta máquina.'
       : 'No assistant agentop knows how to start was found on this machine.'} />

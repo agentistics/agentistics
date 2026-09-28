@@ -40,6 +40,9 @@ import {
   planAddToGroup,
   planRemoveFromGroup,
   planMoveToGroup,
+  canNestGroup,
+  planNestGroup,
+  type NestRefusal,
   type SessionUserGroup,
   type SessionUserGroupsValue,
 } from '@agentistics/core'
@@ -55,8 +58,10 @@ export {
   planAddToGroup,
   planRemoveFromGroup,
   planMoveToGroup,
+  canNestGroup,
+  planNestGroup,
 }
-export type { SessionUserGroup, SessionUserGroupsValue }
+export type { SessionUserGroup, SessionUserGroupsValue, NestRefusal }
 
 /** PURE: reorder the sessions WITHIN one group — by key, never index (see `dragReorder.ts`'s own
  *  header for why an index into a list that can hold unresolvable entries is unsafe). */
@@ -83,28 +88,66 @@ function groupsInOrder(current: SessionUserGroupsValue, ids: readonly string[]):
 }
 
 /**
+ * PURE: the ids `id` reorders AMONG — its top-level siblings if it has no parent, or the other
+ * children of the SAME parent if it does. Nesting changes which list a group scrolls through,
+ * never whether "reorder" is a meaningful thing to ask of it.
+ */
+function siblingIdsOf(current: SessionUserGroupsValue, id: string): string[] {
+  const parentId = current.groups.find(g => g.id === id)?.parentId
+  return current.groups.filter(g => g.parentId === parentId).map(g => g.id)
+}
+
+/**
+ * PURE: replace the relative order of the ids in `subset` within `order`, leaving every id NOT in
+ * `subset` exactly where it sits — the same "never reorder by index into a filtered view" rule
+ * `dragReorder.ts`'s own header states, applied here because a folder's children can sit
+ * interleaved in the raw array with an unrelated top-level folder (nesting sets `parentId` in
+ * place; it never moves anyone). Reordering the raw array by a naive `reorderByDrag` moved a
+ * dragged CHILD past whatever raw-array neighbor it happened to have — often a DIFFERENT folder's
+ * child — with no visible effect on the rendered list at all, which is the "não moveu" the owner
+ * reported. `newSubsetOrder` must be a permutation of `subset`.
+ */
+function spliceSubsetOrder(order: readonly string[], subset: ReadonlySet<string>, newSubsetOrder: readonly string[]): string[] {
+  const queue = [...newSubsetOrder]
+  return order.map(id => (subset.has(id) ? (queue.shift() as string) : id))
+}
+
+/**
  * PURE: reorder the GROUPS themselves — by id, never index (§F.1, same reasoning as every other
  * reorder in this file and in `pinnedSessions.ts`'s `planPinMoveTo`: a picker only ever holds a
  * key, not a raw array position). Dropping a group onto itself, or a `dropId` this value does not
- * hold, is a no-op via `reorderByDrag`'s own rule.
+ * hold, is a no-op via `reorderByDrag`'s own rule. Scoped to SIBLINGS (`siblingIdsOf`): a drag onto
+ * a group with a DIFFERENT parent has no shared order to move within. In the UI only TOP-LEVEL
+ * folders carry a grip — a nested folder is pinned first under its parent and leaves its parent by
+ * being dragged out (`nestSessionGroup(id, null)`), never by being reordered.
  */
 export function planReorderGroups(
   current: SessionUserGroupsValue,
   dragId: string,
   dropId: string,
 ): SessionUserGroupsValue {
-  return groupsInOrder(current, reorderByDrag(current.groups.map(g => g.id), dragId, dropId))
+  const dragGroup = current.groups.find(g => g.id === dragId)
+  const dropGroup = current.groups.find(g => g.id === dropId)
+  if (!dragGroup || !dropGroup) return current
+  if (dragGroup.parentId !== dropGroup.parentId) return current
+  const siblings = siblingIdsOf(current, dragId)
+  const reordered = reorderByDrag(siblings, dragId, dropId)
+  return groupsInOrder(current, spliceSubsetOrder(current.groups.map(g => g.id), new Set(siblings), reordered))
 }
 
-/** PURE: step one group one place earlier/later — the "Mover para cima"/"Mover para baixo" menu
- *  entries, for a phone or a keyboard, which cannot drag a header onto another header. A step past
- *  either end is a no-op, exactly like `stepOrder` itself. */
+/** PURE: step one group one place earlier/later, among its SIBLINGS (`siblingIdsOf`) — the "Mover
+ *  para cima"/"Mover para baixo" menu entries, for a phone or a keyboard, which cannot drag a
+ *  header onto another header. A step past either end of ITS OWN sibling list is a no-op, exactly
+ *  like `stepOrder` itself; a top-level folder never steps past — or into — a nested one, and a
+ *  nested one never steps out of its parent's children this way (see "Tirar da pasta" for that). */
 export function planStepGroup(
   current: SessionUserGroupsValue,
   id: string,
   by: 1 | -1,
 ): SessionUserGroupsValue {
-  return groupsInOrder(current, stepOrder(current.groups.map(g => g.id), id, by))
+  const siblings = siblingIdsOf(current, id)
+  const stepped = stepOrder(siblings, id, by)
+  return groupsInOrder(current, spliceSubsetOrder(current.groups.map(g => g.id), new Set(siblings), stepped))
 }
 
 /**
@@ -131,6 +174,8 @@ function isSessionUserGroup(v: unknown): v is SessionUserGroup {
   const g = v as Record<string, unknown>
   return typeof g.id === 'string' && typeof g.name === 'string'
     && Array.isArray(g.sessionKeys) && g.sessionKeys.every(k => typeof k === 'string')
+    // A legacy document has no `parentId` on any group at all — absent reads as top-level.
+    && (g.parentId === undefined || typeof g.parentId === 'string')
 }
 
 const store = createSharedPref<SessionUserGroupsValue>({
@@ -209,4 +254,17 @@ export function reorderSessionGroups(dragId: string, dropId: string): void {
 /** Step one group up/down — the menu's "Mover para cima"/"Mover para baixo". */
 export function stepSessionGroup(id: string, by: 1 | -1): void {
   store.set(planStepGroup(store.get(), id, by))
+}
+
+/**
+ * Nest `id` under `parentId`, or — passing `null` — move it back to the top level ("Tirar da
+ * pasta"). Applies and persists the write only on success; a refusal writes nothing and hands the
+ * caller the reason (`NestRefusal`) so the UI can show the exact warning the owner asked for
+ * ("Não é possível: esta pasta já tem outra pasta dentro.") instead of silently doing nothing.
+ */
+export function nestSessionGroup(id: string, parentId: string | null): { ok: true } | { ok: false; code: NestRefusal } {
+  const planned = planNestGroup(store.get(), id, parentId)
+  if (!planned.ok) return planned
+  store.set(planned.next)
+  return { ok: true }
 }

@@ -23,6 +23,7 @@ import { Bot, Volume2, VolumeX, Zap } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, type ChatModelId } from '../../lib/chatModels'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
+import { getNotificationSettings } from '../../lib/sessionNotifications'
 import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
 
 const BADGE_COLORS: Record<string, string> = {
@@ -48,7 +49,9 @@ export default function ChatSettings() {
     if (!previewCtxRef.current) {
       try { previewCtxRef.current = new AudioContext() } catch { return }
     }
-    findChatSound(id).play(previewCtxRef.current)
+    // Preview at the SAME volume a real reply would use, read fresh — so picking a sound here shows
+    // exactly what the Notifications screen's volume slider will make it sound like, immediately.
+    findChatSound(id).play(previewCtxRef.current, getNotificationSettings().soundVolume)
   }, [])
 
   useEffect(() => {
@@ -166,7 +169,9 @@ export default function ChatSettings() {
 
           <PrefRow
             label={pt ? 'Som de notificação' : 'Notification sound'}
-            sub={pt ? 'Toca quando uma resposta chega com o chat minimizado' : 'Plays when a reply arrives while chat is minimized'}
+            sub={pt
+              ? 'Toca quando uma resposta chega com o chat minimizado. Volume e chave geral em Configurações → Notificações → Efeitos Sonoros; esta chave só pode silenciar, nunca reativar aquela.'
+              : 'Plays when a reply arrives while chat is minimized. Volume and the master switch live in Settings → Notifications → Sound Effects; this switch can only silence it further, never override that one.'}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {chatSoundEnabled ? <Volume2 size={14} color="var(--anthropic-orange)" /> : <VolumeX size={14} color="var(--text-tertiary)" />}

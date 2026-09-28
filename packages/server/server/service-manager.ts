@@ -142,7 +142,7 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
   if (path) {
     lines.push("# systemd's own PATH reaches none of the per-user bin directories the coding")
     lines.push('# assistants are installed in — see sessions/service-path.ts.')
-    lines.push(`Environment=PATH=${path}`)
+    lines.push(systemdPathLine(path))
   }
   if (spec.keepsRunning) {
     lines.push('Type=simple', `ExecStart=${spec.command}`)
@@ -191,6 +191,68 @@ export function migrateUnitKillMode(text: string): string | null {
   const at = lines.findIndex(l => /^\s*ExecStart\s*=/.test(l))
   if (at < 0) return null
   lines.splice(at + 1, 0, '# A session is not part of the service — see systemdUnit().', 'KillMode=process')
+  return lines.join('\n')
+}
+
+/**
+ * The `Environment=` line that sets PATH, QUOTED.
+ *
+ * systemd splits an unquoted `Environment=` value on whitespace, and on WSL the interactive PATH
+ * always carries Windows directories with spaces in them (`/mnt/c/Program Files/nodejs`). Written
+ * bare, the PATH ended at the first `/mnt/c/Program` and every directory after it — including
+ * Windows-installed harnesses — was silently dropped. Inside double quotes systemd honours C-style
+ * `\\` and `\"`, and `%` is a specifier everywhere, so all three are escaped.
+ */
+export function systemdPathLine(path: string): string {
+  const escaped = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%')
+  return `Environment="PATH=${escaped}"`
+}
+
+/** An `Environment=` line that sets PATH, in any of the shapes a unit may hold it. */
+const PATH_ENV_LINE = /^\s*Environment\s*=\s*"?PATH=/
+/** The UNQUOTED shape an older agentop wrote — broken the moment the value holds a space. */
+const BARE_PATH_ENV_LINE = /^\s*Environment\s*=\s*PATH=(.*)$/
+
+/**
+ * Bring an ALREADY INSTALLED long-running unit up to the `Environment=PATH` rule in `systemdUnit`.
+ *
+ * The rule reached only NEW units, and the migration that runs on restart inserted `KillMode` and
+ * nothing else — so a unit written before it kept systemd's minimal PATH forever, across every
+ * `agentop upgrade` and `agentop restart`, and every session started from the browser died in the
+ * second it was spawned (`claude` was not on the service's PATH; see `sessions/service-path.ts`).
+ *
+ * Two repairs, both a MERGE in the `migrateUnitKillMode` sense:
+ *
+ * - NO PATH LINE: insert one from `callerPath`, which must be the PATH of the INTERACTIVE shell
+ *   running the restart. `servicePath` returns null for a PATH that adds nothing to systemd's own,
+ *   so a restart driven from inside the service itself (whose PATH is the minimal one) is a no-op
+ *   rather than a unit that records the very PATH it exists to replace.
+ * - AN UNQUOTED PATH LINE WHOSE VALUE HOLDS WHITESPACE: re-quoted as it stands. That line is only
+ *   ever agentop's own (systemd truncates it, so nobody wrote it that way on purpose), and the value
+ *   on disk is the whole PATH — only systemd's reading of it was cut.
+ *
+ * Any other PATH line is somebody's decision and is left alone. Returns `null` when there is
+ * nothing to do.
+ */
+export function migrateUnitPath(text: string, callerPath: string | undefined): string | null {
+  if (!/^\s*\[Service\]\s*$/m.test(text)) return null
+  if (!/^\s*Type\s*=\s*simple\s*$/m.test(text)) return null
+  const lines = text.split('\n')
+  const existing = lines.findIndex(l => PATH_ENV_LINE.test(l))
+  if (existing >= 0) {
+    const bare = BARE_PATH_ENV_LINE.exec(lines[existing]!)
+    if (!bare || !/\s/.test(bare[1]!.trim())) return null
+    lines[existing] = systemdPathLine(bare[1]!.trim())
+    return lines.join('\n')
+  }
+  const path = servicePath(callerPath)
+  if (!path) return null
+  const at = lines.findIndex(l => /^\s*\[Service\]\s*$/.test(l))
+  lines.splice(at + 1, 0,
+    "# systemd's own PATH reaches none of the per-user bin directories the coding",
+    '# assistants are installed in — see sessions/service-path.ts.',
+    systemdPathLine(path),
+  )
   return lines.join('\n')
 }
 

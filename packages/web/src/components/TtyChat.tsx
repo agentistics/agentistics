@@ -1,6 +1,8 @@
 import { versionedAsset } from '../lib/brand'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { findChatSound } from '../lib/chatSounds'
+import { getNotificationSettings } from '../lib/sessionNotifications'
+import { chatSoundActive } from '../lib/soundVolume'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -159,33 +161,6 @@ const BADGE_COLORS: Record<string, string> = {
   Fast:     'var(--accent-green)',
   Balanced: 'var(--anthropic-orange)',
   Powerful: 'var(--accent-purple)',
-}
-
-// Audio
-
-function createPlayFn(ctxRef: React.MutableRefObject<AudioContext | null>) {
-  return function playNotification() {
-    const ctx = ctxRef.current
-    if (!ctx) return
-    ctx.resume().then(() => {
-      const now = ctx.currentTime
-      const playTone = (freq: number, start: number, dur: number) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        gain.gain.setValueAtTime(0, start)
-        gain.gain.linearRampToValueAtTime(0.18, start + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.001, start + dur)
-        osc.start(start)
-        osc.stop(start + dur)
-      }
-      playTone(880,  now,        0.25)
-      playTone(1100, now + 0.12, 0.25)
-    }).catch(() => {/* ignore */})
-  }
 }
 
 // Markdown renderer
@@ -1026,7 +1001,15 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
   const playNotification = useCallback(() => {
     const ctx = audioCtxRef.current
     if (!ctx) return
-    findChatSound(soundIdRef.current).play(ctx)
+    // Read the shared Notifications settings FRESH on every call — never a value captured at
+    // mount or held in a ref — so turning the global "Efeitos Sonoros Globais" switch off, or
+    // dragging its volume slider, is heard on the very next reply with no reload. `chatSoundEnabled`
+    // (this widget's own switch) can only ever NARROW what that global switch allows; it cannot
+    // re-enable a sound the user turned off there. See `lib/soundVolume.ts`'s header for the defect
+    // this replaced: this sound used to ignore both the global switch and the volume entirely.
+    const settings = getNotificationSettings()
+    if (!chatSoundActive({ globalSoundEnabled: settings.soundEnabled, chatSoundEnabled: soundRef.current })) return
+    findChatSound(soundIdRef.current).play(ctx, settings.soundVolume)
   }, [])
 
   useEffect(() => { openRef.current = open }, [open])
@@ -1494,7 +1477,9 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
               setStreaming(false)
               if (!openRef.current) {
                 setHasUnread(true)
-                if (soundRef.current) playNotification()
+                // `playNotification` decides for itself whether to actually sound anything — see
+                // its own comment — so the unread badge above is unconditional but the ding is not.
+                playNotification()
               }
               return
             }

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import type { AgentInvocation, SessionMeta } from '@agentistics/core'
 import {
   EXPLANATIONS, compareSession, compareTokens, compareTime, compareTools, fileUsageById, globalDedupPerModel,
-  metaChainMembers, pairInvocations, recountUsage, renderReport, runDifferential, summarize,
+  metaChainMembers, pairInvocations, recountUsage, renderReport, runDifferential, stillBeingWritten, summarize,
   type UsageEvidence,
 } from './differential'
 import { fallbackSubagentAgentId } from '../integrations/claude/replay-agents'
@@ -423,5 +423,18 @@ describe('the fixture row (A2.2\'s redacted transcripts)', () => {
     const f = r.fields.find(x => x.field === 'agentMetrics.totalTokens')!
     expect(f.counts.explained).toBe(0)
     expect(f.counts.bug).toBe(0)
+  })
+})
+
+describe('stillBeingWritten — the settle rule every differential shares', () => {
+  test('a zero window never waits, even for an mtime "from the future"', () => {
+    // The flake that failed a release build: a file written and read in the same millisecond can
+    // carry an mtime a fraction AFTER Date.now(), and `now - mtime < 0` skipped it as live.
+    expect(stillBeingWritten(1_000, 1_000.4, 0)).toBe(false)
+    expect(stillBeingWritten(1_000, 1_000, 0)).toBe(false)
+  })
+  test('a positive window keeps its meaning', () => {
+    expect(stillBeingWritten(1_000, 990, 60_000)).toBe(true)
+    expect(stillBeingWritten(100_000, 1_000, 60_000)).toBe(false)
   })
 })

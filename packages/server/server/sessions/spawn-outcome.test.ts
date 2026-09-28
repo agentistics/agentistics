@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { spawnOutcome } from './spawn-outcome'
+import { execFailed, spawnOutcome } from './spawn-outcome'
 
 describe('spawnOutcome', () => {
   it('reads the refusal that produced three dead rows called MAIN', () => {
@@ -55,5 +55,36 @@ describe('spawnOutcome', () => {
   it('takes the LAST notice, and carries no words when there were none', () => {
     expect(spawnOutcome(['Pane is dead (status 1)']).message).toBe('')
     expect(spawnOutcome(['Pane is dead (status 1)', 'x', 'Pane is dead (status 7)']).status).toBe(7)
+  })
+})
+
+describe('execFailed — the binary never ran', () => {
+  it('reads tmux\'s silent execvp failure as one', () => {
+    // A multi-word argv is exec'd by tmux itself, and a failed exec `_exit(1)`s printing nothing —
+    // captured verbatim from a service whose PATH could not reach `claude`.
+    const out = spawnOutcome(['Pane is dead (status 1, Mon Sep 28 13:22:23 2026)'])
+    expect(execFailed(out, 'claude')).toBe(true)
+  })
+
+  it('reads the shell\'s "command not found" as one', () => {
+    const out = spawnOutcome([
+      'bash: line 1: codex: command not found',
+      'Pane is dead (status 127, Mon Sep 28 13:31:03 2026)',
+    ])
+    expect(execFailed(out, 'codex')).toBe(true)
+  })
+
+  it('never reinterprets a harness that ran and REFUSED', () => {
+    const out = spawnOutcome([
+      'Session 581deab7 is currently running as a background agent (bg).',
+      'Pane is dead (status 1, Sat Aug 15 01:31:03 2026)',
+    ])
+    expect(execFailed(out, 'claude')).toBe(false)
+    // Nor another binary's missing file.
+    expect(execFailed(spawnOutcome(['git: No such file or directory', 'Pane is dead (status 1)']), 'claude')).toBe(false)
+  })
+
+  it('is false for a pane that is alive', () => {
+    expect(execFailed(spawnOutcome(['> ']), 'claude')).toBe(false)
   })
 })

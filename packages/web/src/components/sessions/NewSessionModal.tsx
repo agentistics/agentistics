@@ -120,7 +120,7 @@ export function NewSessionModal({
   // The wizard's own data source — harnesses, matching projects, and the search that drives them
   // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
   // see `useFleetNewOptions`'s own header.
-  const { harnesses, projects, projectTotals, query, setQuery, searching } = useFleetNewOptions(lang)
+  const { harnesses, projects, projectTotals, query, setQuery, searching, unavailable } = useFleetNewOptions(lang)
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
@@ -694,6 +694,7 @@ export function NewSessionModal({
               harnesses={harnesses}
               value={harness?.id ?? ''}
               onChange={id => setHarness(harnesses?.find(h => h.id === id) ?? null)}
+              {...(unavailable ? { notice: unavailable } : {})}
             />
           </Field>
 

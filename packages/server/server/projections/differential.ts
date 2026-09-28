@@ -837,6 +837,22 @@ async function evidenceFor(loc: Located): Promise<UsageEvidence> {
   return { main, mainBytes: Buffer.byteLength(text), roots }
 }
 
+/**
+ * Whether a transcript is still being written, judged by its mtime — PURE, and the ONE rule every
+ * differential uses.
+ *
+ * `settledMs <= 0` means "do not wait at all", and must mean exactly that. Written as
+ * `now - mtime < settledMs`, a zero window still skipped a file whose mtime landed a fraction of a
+ * millisecond AFTER `Date.now()` — the filesystem stamps with a finer (and differently rounded)
+ * clock than `Date.now()`, so a file written and read back within the same millisecond can read as
+ * "from the future", `now - mtime` goes negative, and `< 0` is true. That made the differential
+ * tests (which pass `settledMs: 0`) intermittently report a session as live and skip it; it failed
+ * a release build once. A positive window keeps its meaning unchanged.
+ */
+export function stillBeingWritten(nowMs: number, mtimeMs: number, settledMs: number): boolean {
+  return settledMs > 0 && nowMs - mtimeMs < settledMs
+}
+
 export async function runDifferential(opts: DifferentialOptions): Promise<DifferentialReport & { diffs?: SessionDiff[] }> {
   const now = opts.now ?? Date.now
   const settledMs = opts.settledMs ?? 60_000
@@ -849,7 +865,7 @@ export async function runDifferential(opts: DifferentialOptions): Promise<Differ
   for (const loc of await locate(opts.projectsDir, only)) {
     const st = await fsStat(loc.path).catch(() => null)
     if (!st) { skipped.unreadable++; continue }
-    if (now() - st.mtimeMs < settledMs) { skipped.live++; continue }
+    if (stillBeingWritten(now(), st.mtimeMs, settledMs)) { skipped.live++; continue }
     let diff: SessionDiff
     try {
       const batch = await replay.replay({ sessionId: loc.conversationId, sourceRef: `claude:${loc.conversationId}` }, null)

@@ -22,6 +22,22 @@ const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
 /**
+ * `agentop mcp` — the agentistics MCP server over stdio, served from inside the binary.
+ *
+ * Dispatched FIRST and before anything else runs, because stdout is the protocol here: one banner,
+ * update notice or help line written to it is a malformed message to the assistant on the other end.
+ * It exists because the assistants were registered to run `bun run <repo>/packages/mcp/…ts`, a
+ * file only a clone has — so on every installed machine the MCP never started (see
+ * `server/mcp-launch.ts`). The await that follows never settles: the transport keeps the process up
+ * for as long as the assistant holds stdin, and this file must not fall through to the dispatch
+ * below, whose default for an unknown command prints the help to stdout.
+ */
+if (command === 'mcp') {
+  await import('../../mcp/agentistics-mcp.ts')
+  await new Promise<never>(() => {})
+}
+
+/**
  * Load a central env file (KEY=VALUE) into process.env for keys not already set, so a NATIVE
  * central (no Docker) picks up MONGO_URL + the AGENTISTICS_TEAM_* secrets the same way the Docker
  * central reads central.env. Search order: $AGENTISTICS_CENTRAL_ENV, ./central.env,
@@ -90,6 +106,8 @@ Commands:
   code          BETA — the terminal front door onto a native session: runs a conversation
                 against your stored Anthropic key, asking you here for anything not
                 allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')
+  mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
+                for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)

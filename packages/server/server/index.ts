@@ -336,6 +336,19 @@ try { startVersionRecheck() } catch (err) { console.warn('[version] recheck fail
 // report, not to every boot.
 ensureNayChat(PORT).catch(err => console.warn('[nay-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
 ensureClaudeChat().catch(err => console.warn('[claude-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
+// THE MCP COMES UP WITH THE SERVER, for every assistant installed here — not only Claude (which
+// `ensureNayChat` registers) and not only once somebody opens a chat with that driver, which is when
+// codex/gemini/copilot used to be registered. Each registration launches THIS binary's own
+// `agentop mcp` (see `mcp-launch.ts`), so the tools an assistant sees always match the version
+// installed, and each is idempotent: an up-to-date entry is left alone.
+void (async () => {
+  const { ALL_DRIVERS } = await import('./chat-drivers')
+  for (const driver of ALL_DRIVERS) {
+    if (driver.id === 'claude' || !driver.isAvailable()) continue
+    await driver.ensureMcp(PORT).catch(err =>
+      console.warn(`[mcp] could not register for ${driver.id}:`, err instanceof Error ? err.message : String(err)))
+  }
+})()
 
 
 // ---------------------------------------------------------------------------
@@ -1731,12 +1744,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
       const rest = url.pathname.slice('/api/session-groups/'.length).split('/')
       const group = decodeURIComponent(rest[0] ?? '')
-      const body = await req.json().catch(() => ({})) as { name?: string; session?: string }
+      const body = await req.json().catch(() => ({})) as { name?: string; session?: string; parent?: string | null }
       const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
-      // `/:group/sessions` files a session into the group; `/:group` renames it.
+      // `/:group/sessions` files a session into the group; `/:group/parent` nests it (or, with
+      // `parent: null`, moves it back to the top level — "Tirar da pasta"); `/:group` renames it.
       const out = rest[1] === 'sessions'
         ? await groupOp({ op: 'add', group, session: String(body.session ?? '') })
-        : await groupOp({ op: 'rename', group, name: String(body.name ?? '') })
+        : rest[1] === 'parent'
+          ? await groupOp({ op: 'nest', group, parent: body.parent === null ? null : String(body.parent ?? '') })
+          : await groupOp({ op: 'rename', group, name: String(body.name ?? '') })
       return json(out, groupStatus(out))
     }
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'DELETE') {

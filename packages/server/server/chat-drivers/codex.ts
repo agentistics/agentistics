@@ -23,6 +23,7 @@
  */
 
 import path from 'node:path'
+import { agentisticsMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
 import { HOME_DIR } from '../config'
 import type { ChatDriver } from './types'
@@ -30,7 +31,6 @@ import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
 
 // chat-drivers/ is one level deeper than chat-tty.ts, so 4 levels up to reach the repo root
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..', '..')
 const CODEX_CONFIG_PATH = path.join(HOME_DIR, '.codex', 'config.toml')
 const CODEX_AUTH_PATH = path.join(HOME_DIR, '.codex', 'auth.json')
 const MCP_SERVER_NAME = 'agentistics'
@@ -88,14 +88,21 @@ async function readCodexConfig(): Promise<string> {
  */
 async function ensureCodexMcp(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
+  const launch = agentisticsMcpLaunch()
 
-  // Quick idempotency check: if both the URL and script path already appear in
-  // the config, skip re-registration (same approach as registerMcpGlobally for Claude).
+  // Quick idempotency check: if the URL and every piece of the launch already appear in the
+  // config, skip re-registration (same approach as registerMcpGlobally for Claude).
   const rawConfig = await readCodexConfig()
   const urlOk = rawConfig.includes(apiUrl)
-  const pathOk = rawConfig.includes(mcpScript)
-  if (urlOk && pathOk) return
+  const launchOk = [launch.command, ...launch.args].every(part => rawConfig.includes(part))
+    && !(launch.command !== 'bun' && rawConfig.includes('agentistics-mcp.ts'))
+  if (urlOk && launchOk) return
+
+  // A stale entry (the old script path) is removed first, so the add below cannot collide with it.
+  if (rawConfig.includes(`mcp_servers.${MCP_SERVER_NAME}`)) {
+    await Bun.spawn(['codex', 'mcp', 'remove', MCP_SERVER_NAME], { stdout: 'pipe', stderr: 'pipe' }).exited
+  }
 
   // Use the Codex CLI to add at user scope
   const proc = Bun.spawn(
@@ -103,7 +110,7 @@ async function ensureCodexMcp(port: number): Promise<void> {
       'codex', 'mcp', 'add',
       '--env', `AGENTISTICS_API=${apiUrl}`,
       MCP_SERVER_NAME,
-      '--', 'bun', 'run', mcpScript,
+      '--', launch.command, ...launch.args,
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   )

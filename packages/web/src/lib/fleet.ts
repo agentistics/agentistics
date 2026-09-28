@@ -501,9 +501,29 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // it did not — the second is a statement about the CHANNEL, not about the verb.
       const raw = await res.json().catch(() => null)
       const out = machineId ? parseRelayActResult(raw, lang) : parseActResult(raw, lang)
-      // Re-read immediately: the verb changed the machine, and waiting up to five seconds to show
-      // it is how a control that worked looks like one that did nothing.
-      await pollOnce()
+      /*
+       * RE-READ SOON, BUT DO NOT MAKE THE CALLER WAIT FOR IT.
+       *
+       * This used to be `await pollOnce()`, on the reasoning quoted below — right about WHY a
+       * refresh belongs here, wrong about WHO should pay for it. `pollOnce` is a FULL `/api/fleet`
+       * read: `readFleet` -> `host.sessions()` walks every session on the machine and captures its
+       * pane (`sessions-host.ts`'s own `poll()`), and that walk is measured, in this very codebase,
+       * at up to ~3s under load ("measured individually in a bare process, none of them exceeded
+       * 415ms; measured here inside this Promise.all, the group took 2961ms" — `sessions-host.ts`).
+       * Every caller of `act` (`ApprovalCard.answer`, the composer's `send`) keeps its OWN spinner
+       * lit until the promise this function returns settles, so the poll's cost was being billed
+       * to the CLICK: on a machine running several sessions answering a dialog held its spinner for
+       * as long as that walk took, reported as "demora MUITO pra enviar" — and the send itself (a keystroke
+       * into one pane) is done in a few hundred ms.
+       *
+       * The refresh is still worth having SOON — "the verb changed the machine, and waiting up to
+       * five seconds to show it is how a control that worked looks like one that did nothing" — it
+       * just does not have to be THIS call that waits for it. `pollOnce` mutates the shared
+       * `snapshot` and calls `emit()` when it settles regardless of who kicked it off, so every
+       * mounted `useFleet` still redraws the instant it lands; only the caller's own busy state
+       * stops being held hostage to a walk of every OTHER session on the machine.
+       */
+      void pollOnce()
       return out
     } catch (err) {
       // A poll settles what actually happened — see the note above. It runs even here.

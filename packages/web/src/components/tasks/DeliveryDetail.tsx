@@ -36,6 +36,7 @@ import { sessionPath } from '../../lib/sessionRoute'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import { NewSessionModal } from '../sessions/NewSessionModal'
+import { markSessionPending } from '../../lib/pendingSessionStore'
 import {
   bodyWithAttachments, looksLikeImage, looksLikeVideo, parseCommentBody,
   type CommentAttachment, type CommentPart,
@@ -1692,7 +1693,14 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             label: firePrefillFor.subtask.title,
           }}
           onClose={() => setFirePrefillFor(null)}
-          onStarted={() => { setFirePrefillFor(null); void reload() }}
+          onStarted={(sessionId, started) => {
+            // Stays on the delivery — the reload picks the new session up in the subtask's own
+            // rows. `markSessionPending` still fires: the aside is the persistent sidebar beside
+            // this page too, and it should show the same placeholder every other caller publishes.
+            if (sessionId) markSessionPending({ id: sessionId, ...started })
+            setFirePrefillFor(null)
+            void reload()
+          }}
         />
       )}
     </>

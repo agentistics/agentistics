@@ -1703,6 +1703,14 @@ export interface ControlHost {
   startableHarnesses?(): Promise<SessionHarnessOption[]>
 
   /**
+   * Why `startableHarnesses` came back EMPTY, when that is a fault rather than a fact — already
+   * localized. Set when not one assistant CLI resolves on the host's PATH, which is the signature of
+   * a broken PATH (a service unit that predates `Environment=PATH`), not of a machine with nothing
+   * installed. `undefined` whenever the list is trustworthy.
+   */
+  harnessNotice?(): string | undefined
+
+  /**
    * Places a new session could start, ranked — with HOW MANY of each kind matched.
    *
    * The two travel together because they come from one search. `options` is what fits on screen

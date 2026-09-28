@@ -111,3 +111,31 @@ export const SETTLE_MS = 5_000
 
 /** How often to re-read the pane while waiting. */
 export const POLL_MS = 250
+
+/**
+ * Whether a death at spawn reads as "the binary could not be EXECUTED" — PURE.
+ *
+ * With a multi-word argv tmux calls `execvp` itself, and a failed exec `_exit(1)`s WITHOUT printing
+ * anything, so a harness missing from the PATH leaves exactly `Pane is dead (status 1)` and no
+ * words. A single-word argv goes through the shell instead, which answers `bash: codex: command
+ * not found` and 127. Both were rendered as "the session exited immediately (status 1)" — true, and
+ * useless, since the one thing that fixes it is the PATH nobody was shown.
+ *
+ * Status 1 with WORDS is the harness refusing (the conversation is open elsewhere, a bad flag), and
+ * is never reinterpreted: those words are the actionable part.
+ */
+export function execFailed(outcome: SpawnOutcome, bin: string): boolean {
+  if (!outcome.died) return false
+  if (outcome.message === '') return outcome.status === 1 || outcome.status === 127
+  const escaped = bin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\b${escaped}: (?:command not found|not found|No such file or directory)`).test(outcome.message)
+}
+
+/**
+ * The shorter window `spawnManaged` waits — milliseconds.
+ *
+ * What it exists to catch is an exec that FAILED, which kills the pane before tmux has returned;
+ * four polls see it. The harness's own slower refusal (`SETTLE_MS`) stays the CLI's check: on the
+ * browser's path every healthy session pays the whole window, and `reopenEntries` pays it per row.
+ */
+export const LAUNCH_SETTLE_MS = 1_000

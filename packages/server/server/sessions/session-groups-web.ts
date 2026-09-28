@@ -54,7 +54,7 @@ export interface GroupMember {
   harness?: string
 }
 
-export interface GroupView { id: string; name: string; sessions: GroupMember[] }
+export interface GroupView { id: string; name: string; sessions: GroupMember[]; parentId?: string }
 
 export type GroupsReply =
   | { ok: true; groups: GroupView[] }
@@ -67,6 +67,7 @@ function viewOf(g: SessionUserGroup, rows: readonly FleetRowForGroups[]): GroupV
   return {
     id: g.id,
     name: g.name,
+    ...(g.parentId ? { parentId: g.parentId } : {}),
     sessions: g.sessionKeys.map(key => {
       const r = byKey.get(key)
       return r
@@ -82,7 +83,7 @@ export async function listGroups(deps: GroupsDeps = defaultDeps): Promise<Groups
 }
 
 export interface GroupOpRequest {
-  op: 'create' | 'rename' | 'delete' | 'add' | 'remove'
+  op: 'create' | 'rename' | 'delete' | 'add' | 'remove' | 'nest'
   /** A group id, or its name. */
   group?: string
   /** The new name (create, rename). */
@@ -91,6 +92,10 @@ export interface GroupOpRequest {
   session?: string
   /** Sessions to file into a NEW group as it is created. */
   sessions?: readonly string[]
+  /** `nest` only: the parent group (id or name), or `null` to move `group` back to the top level.
+   *  `undefined` (the key left out entirely) is a missing argument, never read as "un-nest" —
+   *  an assistant that forgot the field must be told, not guessed at. */
+  parent?: string | null
 }
 
 const MESSAGES: Record<string, string> = {
@@ -100,6 +105,9 @@ const MESSAGES: Record<string, string> = {
   no_such_session: 'No session on this machine matches that reference.',
   ambiguous_session: 'More than one session matches that reference; use its id.',
   missing_argument: 'A required argument is missing.',
+  self: 'A folder cannot be moved into itself.',
+  source_has_children: 'That folder already has a folder inside it; folders can only nest one level deep.',
+  target_is_nested: 'That folder is already inside another folder; folders can only nest one level deep.',
 }
 
 const fail = (code: string, matches?: string[]): GroupOpReply => ({
@@ -152,6 +160,11 @@ export async function groupOp(req: GroupOpRequest, deps: GroupsDeps = defaultDep
       op = { type: 'remove', key: k.ok ? k.key : req.session.trim() }
       break
     }
+    case 'nest': {
+      if (!req.group || req.parent === undefined) return fail('missing_argument')
+      op = { type: 'nest', group: req.group, parent: req.parent }
+      break
+    }
     default:
       return fail('missing_argument')
   }
@@ -171,6 +184,7 @@ export async function groupOp(req: GroupOpRequest, deps: GroupsDeps = defaultDep
   const message = {
     create: 'Group created.', rename: 'Group renamed.', delete: 'Group deleted; its sessions are untouched.',
     add: 'Session filed under the group.', remove: 'Session taken out of its group.',
+    nest: op.type === 'nest' && op.parent === null ? 'Folder moved to the top level.' : 'Folder nested.',
   }[req.op]
   return {
     ok: true, message,
