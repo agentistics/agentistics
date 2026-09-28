@@ -419,7 +419,9 @@ export default function NotificationsSettings() {
 
       <PrefRow
         label={pt ? 'Tocar Som nas Notificações' : 'Play Sound on Notifications'}
-        sub={pt ? 'Efeito sonoro sintetizado via Web Audio API sem arquivos externos' : 'Synthesized audio chime via Web Audio API without external downloads'}
+        sub={pt
+          ? 'Efeito sonoro sintetizado via Web Audio API sem arquivos externos. É a chave e o volume GERAIS — também controlam o som de resposta do chat (Configurações → Chat), que só pode ser silenciado por aqui, nunca reativado de lá.'
+          : 'Synthesized audio chime via Web Audio API without external downloads. This is the GLOBAL switch and volume — it also governs the chat reply sound (Settings → Chat), which can only be silenced from here, never re-enabled from there.'}
       >
         <Toggle on={settings.soundEnabled} onToggle={() => update({ soundEnabled: !settings.soundEnabled })} />
       </PrefRow>
