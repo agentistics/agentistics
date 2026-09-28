@@ -84,6 +84,8 @@ describe('writeAsideGroupPrefs', () => {
       collapsedUserGroups: ['g1'],
       sort: { by: 'recent', dir: 'asc' },
       hiddenUserGroups: ['g2'],
+      foldedPinned: false,
+      foldedGroupsSection: false,
     })
   })
 
@@ -127,4 +129,24 @@ test('hiddenUserGroups: absent reads as none hidden, and junk entries are droppe
   expect(readAsideGroupPrefs().hiddenUserGroups).toEqual([])
   localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ hiddenUserGroups: ['a', 3, null, 'b'] }))
   expect(readAsideGroupPrefs().hiddenUserGroups).toEqual(['a', 'b'])
+})
+
+describe('foldedPinned / foldedGroupsSection', () => {
+  test('absent reads as not folded — a legacy document opens exactly as it always did', () => {
+    localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ groupBy: 'task' }))
+    expect(readAsideGroupPrefs().foldedPinned).toBe(false)
+    expect(readAsideGroupPrefs().foldedGroupsSection).toBe(false)
+  })
+
+  test('round-trips true', () => {
+    writeAsideGroupPrefs({ foldedPinned: true, foldedGroupsSection: true })
+    expect(readAsideGroupPrefs().foldedPinned).toBe(true)
+    expect(readAsideGroupPrefs().foldedGroupsSection).toBe(true)
+  })
+
+  test('anything other than a literal true reads as false', () => {
+    localStorage.setItem('agentistics-sessions-aside-v1', JSON.stringify({ foldedPinned: 'yes', foldedGroupsSection: 1 }))
+    expect(readAsideGroupPrefs().foldedPinned).toBe(false)
+    expect(readAsideGroupPrefs().foldedGroupsSection).toBe(false)
+  })
 })

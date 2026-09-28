@@ -14,6 +14,14 @@
  * A SESSION BELONGS TO AT MOST ONE GROUP. Adding it to a second MOVES it out of the first.
  * DUPLICATE NAMES ARE ALLOWED: groups are addressed by id, and refusing a duplicate would need a
  * global lock for a name somebody picked because it was obvious.
+ *
+ * NESTING: a group may hold at most one level of children, via `parentId`. Two rules keep the tree
+ * from growing a second level: a group already carrying a `parentId` cannot itself become a parent
+ * (`canNestGroup`'s `target_is_nested`), and a group that already has children cannot be tucked
+ * inside another one (`source_has_children`) — either would leave a session two folders deep, which
+ * `groupOfSession`/the aside would then have to walk to find. Deleting a parent PROMOTES its
+ * children back to the top level rather than deleting them or their sessions (`planDeleteGroup`).
+ * A legacy document with no `parentId` on any group reads exactly as before — every group top-level.
  */
 
 export interface SessionUserGroup {
@@ -21,6 +29,9 @@ export interface SessionUserGroup {
   name: string
   /** Member session identity keys, in this group's own display order. */
   sessionKeys: string[]
+  /** The group this one is nested inside, if any. Absent (or on a legacy document, always absent)
+   *  means top-level. See the module header for the one-level-deep rule. */
+  parentId?: string
 }
 
 export interface SessionUserGroupsValue {
@@ -69,9 +80,94 @@ export function planRenameGroup(
  * PURE: delete a group. NEVER touches a session — the group stops existing, its sessions are
  * untouched and simply fall back into the automatic sections, exactly the guarantee the owner
  * asked for ("as sessões não são apagadas, só saem do grupo").
+ *
+ * A child of the deleted group is PROMOTED to the top level, its own sessions untouched — the
+ * safe reading of "delete a folder that has a folder inside it": nothing else in this file ever
+ * deletes a group as a side effect of another write, and a child silently disappearing with its
+ * parent would be exactly that.
  */
 export function planDeleteGroup(current: SessionUserGroupsValue, id: string): SessionUserGroupsValue {
-  return { groups: current.groups.filter(g => g.id !== id) }
+  return {
+    groups: current.groups
+      .filter(g => g.id !== id)
+      .map(g => (g.parentId === id ? withoutParent(g) : g)),
+  }
+}
+
+/** Drop `parentId` cleanly rather than setting it to `undefined` — keeps a promoted group
+ *  indistinguishable from one that was never nested, for callers that check `'parentId' in g`. */
+function withoutParent(g: SessionUserGroup): SessionUserGroup {
+  const { parentId: _parentId, ...rest } = g
+  return rest
+}
+
+/** Why a nest attempt was refused — see the module header for the one-level rule these enforce. */
+export type NestRefusal = 'self' | 'no_such_group' | 'source_has_children' | 'target_is_nested'
+
+/**
+ * PURE: may `childId` become a child of `parentId` right now? Both must already exist and be
+ * distinct; the target must itself be top-level (nesting under a child would make a grandchild);
+ * and the group being moved must not already be a parent of some other group (turning it into a
+ * child would strand ITS children a level too deep, since a child cannot have children).
+ */
+export function canNestGroup(
+  current: SessionUserGroupsValue,
+  childId: string,
+  parentId: string,
+): { ok: true } | { ok: false; code: NestRefusal } {
+  if (childId === parentId) return { ok: false, code: 'self' }
+  const child = current.groups.find(g => g.id === childId)
+  const parent = current.groups.find(g => g.id === parentId)
+  if (!child || !parent) return { ok: false, code: 'no_such_group' }
+  if (parent.parentId !== undefined) return { ok: false, code: 'target_is_nested' }
+  if (current.groups.some(g => g.parentId === childId)) return { ok: false, code: 'source_has_children' }
+  return { ok: true }
+}
+
+/**
+ * PURE: move `childId` to be the FIRST group whose `parentId` is `parentId` — the default a person
+ * expects right after filing something into a folder, not wherever it happened to sit before.
+ * Every other group's relative order is untouched, including the OTHER siblings, which keep the
+ * order they already had. Total: a missing `childId` is a no-op.
+ */
+function moveToFrontAmongSiblings(
+  groups: readonly SessionUserGroup[],
+  childId: string,
+  parentId: string,
+): SessionUserGroup[] {
+  const child = groups.find(g => g.id === childId)
+  if (!child) return [...groups]
+  const rest = groups.filter(g => g.id !== childId)
+  const firstSiblingIdx = rest.findIndex(g => g.parentId === parentId)
+  if (firstSiblingIdx !== -1) return [...rest.slice(0, firstSiblingIdx), child, ...rest.slice(firstSiblingIdx)]
+  // No sibling yet — the first-ever child of this parent. Insert it right after the parent itself
+  // (so it reads as freshly filed under that heading) rather than at the array's tail, which on a
+  // machine with many folders could land it visually far from the parent it was just moved into.
+  const parentIdx = rest.findIndex(g => g.id === parentId)
+  if (parentIdx === -1) return [...rest, child]
+  return [...rest.slice(0, parentIdx + 1), child, ...rest.slice(parentIdx + 1)]
+}
+
+/**
+ * PURE: nest `childId` under `parentId`, or — passing `null` — move it back to the top level
+ * ("Tirar da pasta"). Un-nesting is always allowed and a no-op for an unknown id or one already at
+ * the top level, exactly like every other planner here; nesting is refused per `canNestGroup`,
+ * and the refusal is returned rather than applied, so the caller can show it as a warning instead
+ * of guessing what the owner meant. A group that IS nested becomes the FIRST child of its new
+ * parent — see `moveToFrontAmongSiblings`.
+ */
+export function planNestGroup(
+  current: SessionUserGroupsValue,
+  childId: string,
+  parentId: string | null,
+): { ok: true; next: SessionUserGroupsValue } | { ok: false; code: NestRefusal } {
+  if (parentId === null) {
+    return { ok: true, next: { groups: current.groups.map(g => (g.id === childId ? withoutParent(g) : g)) } }
+  }
+  const check = canNestGroup(current, childId, parentId)
+  if (!check.ok) return check
+  const nested = current.groups.map(g => (g.id === childId ? { ...g, parentId } : g))
+  return { ok: true, next: { groups: moveToFrontAmongSiblings(nested, childId, parentId) } }
 }
 
 /** PURE: which group (if any) currently holds this session key. */
@@ -205,10 +301,13 @@ export type GroupOp =
   | { type: 'delete'; group: string }
   | { type: 'add'; group: string; key: string }
   | { type: 'remove'; key: string }
+  /** `parent: null` moves `group` back to the top level ("Tirar da pasta"); a ref nests it under
+   *  whatever group that ref names. Both sides resolve by id or name, like every other op here. */
+  | { type: 'nest'; group: string; parent: string | null }
 
 export type GroupOpResult =
   | { ok: true; groups: SessionUserGroupsValue; pins: string[]; id?: string; changed: boolean }
-  | { ok: false; code: 'blank_name' | 'no_such_group' | 'ambiguous_group'; matches?: string[] }
+  | { ok: false; code: 'blank_name' | 'no_such_group' | 'ambiguous_group' | NestRefusal; matches?: string[] }
 
 /**
  * Apply one operation. The single place the rules combine, so the server route and any other caller
@@ -257,5 +356,20 @@ export function planGroupOp(
     }
     case 'remove':
       return same(planRemoveFromGroup(groups, op.key), [...pins])
+    case 'nest': {
+      const g = resolveGroupRef(groups, op.group)
+      if (!g.ok) return { ok: false, code: g.code, matches: g.matches }
+      if (op.parent === null) {
+        const planned = planNestGroup(groups, g.group.id, null)
+        // Un-nesting never fails (see `planNestGroup`'s own header) — the branch only exists so
+        // TypeScript sees the `ok: true` shape without an unreachable `if (!planned.ok)`.
+        return planned.ok ? same(planned.next, [...pins], { id: g.group.id }) : { ok: false, code: planned.code }
+      }
+      const p = resolveGroupRef(groups, op.parent)
+      if (!p.ok) return { ok: false, code: p.code, matches: p.matches }
+      const planned = planNestGroup(groups, g.group.id, p.group.id)
+      if (!planned.ok) return { ok: false, code: planned.code }
+      return same(planned.next, [...pins], { id: g.group.id })
+    }
   }
 }

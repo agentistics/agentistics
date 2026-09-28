@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   type SessionUserGroupsValue,
-  groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planMoveToGroup, planRemoveFromGroup,
-  planReorderGroups, planReorderInGroup, planRenameGroup, planStepGroup, resolveGroupRows,
+  canNestGroup, groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planMoveToGroup,
+  planNestGroup, planRemoveFromGroup, planReorderGroups, planReorderInGroup, planRenameGroup,
+  planStepGroup, resolveGroupRows,
 } from './sessionUserGroups'
 
 const empty: SessionUserGroupsValue = { groups: [] }
@@ -68,6 +69,45 @@ describe('planDeleteGroup', () => {
 
   it('a missing id is a no-op', () => {
     expect(planDeleteGroup(withOne, 'ghost')).toEqual(withOne)
+  })
+
+  it('promotes a child of the deleted group to the top level, sessions untouched', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [{ id: 'a', name: 'Parent', sessionKeys: [] }, { id: 'b', name: 'Child', sessionKeys: ['k'], parentId: 'a' }],
+    }
+    expect(planDeleteGroup(nested, 'a')).toEqual({ groups: [{ id: 'b', name: 'Child', sessionKeys: ['k'] }] })
+  })
+})
+
+describe('canNestGroup / planNestGroup', () => {
+  const twoTop: SessionUserGroupsValue = {
+    groups: [{ id: 'a', name: 'A', sessionKeys: [] }, { id: 'b', name: 'B', sessionKeys: [] }],
+  }
+
+  it('nests one top-level group under another', () => {
+    expect(canNestGroup(twoTop, 'b', 'a')).toEqual({ ok: true })
+    const planned = planNestGroup(twoTop, 'b', 'a')
+    expect(planned.ok && planned.next.groups.find(g => g.id === 'b')).toMatchObject({ parentId: 'a' })
+  })
+
+  it('refuses one level deeper, in both directions', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [{ id: 'a', name: 'A', sessionKeys: [] }, { id: 'b', name: 'B', sessionKeys: [], parentId: 'a' }, { id: 'c', name: 'C', sessionKeys: [] }],
+    }
+    // b already has a parent — it cannot also become one (c under b would be a grandchild of a).
+    expect(canNestGroup(nested, 'c', 'b')).toEqual({ ok: false, code: 'target_is_nested' })
+    // a already has a child (b) — a cannot itself be tucked under c.
+    expect(canNestGroup(nested, 'a', 'c')).toEqual({ ok: false, code: 'source_has_children' })
+  })
+
+  it('`parentId: null` always un-nests, a no-op when already top-level', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [{ id: 'a', name: 'A', sessionKeys: [] }, { id: 'b', name: 'B', sessionKeys: [], parentId: 'a' }],
+    }
+    const unnested = planNestGroup(nested, 'b', null)
+    expect(unnested.ok && unnested.next.groups.find(g => g.id === 'b')!.parentId).toBeUndefined()
+    const alreadyTop = planNestGroup(twoTop, 'a', null)
+    expect(alreadyTop.ok && alreadyTop.next).toEqual(twoTop)
   })
 })
 
@@ -159,6 +199,36 @@ describe('planReorderGroups', () => {
   it('an unknown dragId is refused unchanged', () => {
     expect(planReorderGroups(three, 'ghost', 'g1').groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
   })
+
+  it('reorders a NESTED folder among its own siblings, leaving an interleaved unrelated top-level folder untouched', () => {
+    // p is a top-level folder sitting BETWEEN two of P's own children in the raw array — exactly the
+    // shape a real document reaches once folders have been nested and created over time. Dragging
+    // child c2 before c1 must move only the two children, never p.
+    const nested: SessionUserGroupsValue = {
+      groups: [
+        { id: 'P', name: 'Parent', sessionKeys: [] },
+        { id: 'c1', name: 'Child 1', sessionKeys: [], parentId: 'P' },
+        { id: 'p', name: 'Unrelated top-level', sessionKeys: [] },
+        { id: 'c2', name: 'Child 2', sessionKeys: [], parentId: 'P' },
+      ],
+    }
+    const next = planReorderGroups(nested, 'c2', 'c1')
+    // c1 and c2 swap relative order (c2 now first); 'p' stays exactly where it was — the operation
+    // never touched an id outside the sibling subset it was scoped to.
+    expect(next.groups.map(g => g.id)).toEqual(['P', 'c2', 'p', 'c1'])
+  })
+
+  it('a drag between folders of DIFFERENT parents is refused unchanged, in both directions', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [
+        { id: 'P', name: 'Parent', sessionKeys: [] },
+        { id: 'child', name: 'Child', sessionKeys: [], parentId: 'P' },
+        { id: 'other', name: 'Other top-level', sessionKeys: [] },
+      ],
+    }
+    expect(planReorderGroups(nested, 'other', 'child')).toEqual(nested)
+    expect(planReorderGroups(nested, 'child', 'other')).toEqual(nested)
+  })
 })
 
 describe('planStepGroup', () => {
@@ -184,6 +254,29 @@ describe('planStepGroup', () => {
 
   it('stepping the last group down (past the end) is a no-op', () => {
     expect(planStepGroup(three, 'g3', 1).groups.map(g => g.id)).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('steps a NESTED folder among its own siblings only, past an interleaved unrelated top-level one', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [
+        { id: 'P', name: 'Parent', sessionKeys: [] },
+        { id: 'c1', name: 'Child 1', sessionKeys: [], parentId: 'P' },
+        { id: 'p', name: 'Unrelated top-level', sessionKeys: [] },
+        { id: 'c2', name: 'Child 2', sessionKeys: [], parentId: 'P' },
+      ],
+    }
+    expect(planStepGroup(nested, 'c1', 1).groups.map(g => g.id)).toEqual(['P', 'c2', 'p', 'c1'])
+  })
+
+  it('a top-level folder\'s own step is scoped to top-level siblings, unaffected by a nested folder\'s child count', () => {
+    const nested: SessionUserGroupsValue = {
+      groups: [
+        { id: 'P', name: 'Parent', sessionKeys: [] },
+        { id: 'child', name: 'Child', sessionKeys: [], parentId: 'P' },
+        { id: 'other', name: 'Other', sessionKeys: [] },
+      ],
+    }
+    expect(planStepGroup(nested, 'P', 1).groups.map(g => g.id)).toEqual(['other', 'child', 'P'])
   })
 })
 
