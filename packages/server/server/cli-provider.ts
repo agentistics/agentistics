@@ -1,6 +1,6 @@
 /**
  * cli-provider.ts — `agentop provider key <set|status|remove>` and `agentop provider try`, for the
- * Anthropic key (B1) and the six OpenAI-compatible ENDPOINTS (B5a: openai, openrouter, deepseek,
+ * Anthropic key (B1), the Google Gemini key (B5b) and the six OpenAI-compatible ENDPOINTS (B5a: openai, openrouter, deepseek,
  * litellm, 9router, ollama — each a stored base URL plus, usually, a key).
  *
  * Spec: docs/superpowers/specs/2026-09-25-runtime-b1-provider.md §6 (entry §6.1, storage §6.2,
@@ -22,6 +22,7 @@ import {
   CONTENT_DIR,
   ENDPOINT_PRESETS,
   isKeyedProvider,
+  isKeyVendor,
   isOpenAICompatibleEndpoint,
   KEYED_PROVIDERS,
   OPENAI_COMPATIBLE_ENDPOINTS,
@@ -29,6 +30,7 @@ import {
   providerFlagOn,
   TEAM_CENTRAL,
   type KeyedProviderId,
+  type KeyVendorId,
   type OpenAICompatibleEndpointId,
 } from './config.ts'
 import { confirm as defaultConfirm, maskedInput as defaultMaskedInput } from './cli-ui.ts'
@@ -54,6 +56,7 @@ import { runProviderModels, type ProviderModelsCliDeps } from './cli-provider-mo
 import type {
   AnthropicClientDeps,
   CredentialResolver,
+  GoogleClientDeps,
   InvocationResult,
   OpenAICompatibleClientDeps,
   ProviderClient,
@@ -152,6 +155,22 @@ export function hostAnthropicClientDeps(opts: { dir?: string; captureDir?: strin
   return { resolver: hostCredentialResolver(opts.dir), captureDir: opts.captureDir ?? CONTENT_DIR }
 }
 
+/** The Google client's host-owned dependencies (B5b): the same two seams as Anthropic's — the key
+ *  store's resolver and the content store. There is no host to configure: the runtime's client talks to
+ *  Google's own address only, and reads no environment. */
+export function hostGoogleClientDeps(opts: { dir?: string; captureDir?: string } = {}): GoogleClientDeps {
+  return { resolver: hostCredentialResolver(opts.dir), captureDir: opts.captureDir ?? CONTENT_DIR }
+}
+
+/** What a key VENDOR is called in a prompt and a sentence. Total over `KeyVendorId`, so a third vendor
+ *  fails the build until it is named. */
+const VENDOR_LABEL: Readonly<Record<KeyVendorId, string>> = { anthropic: 'Anthropic', google: 'Google Gemini' }
+/** Where the person checks what a call cost or revokes a key — named in the messages that send them there. */
+const VENDOR_CONSOLE: Readonly<Record<KeyVendorId, string>> = {
+  anthropic: 'the Anthropic console',
+  google: 'Google AI Studio (aistudio.google.com) and its billing page',
+}
+
 async function defaultIsCentral(): Promise<boolean> {
   if (TEAM_CENTRAL) return true
   try {
@@ -206,9 +225,9 @@ function unknownProviderMessage(): string {
   return `unknown provider — supported: ${KEYED_PROVIDERS.join(', ')}`
 }
 
-/** What a stored record is called in a sentence: `anthropic`, or `openrouter (openai-compatible)`. */
+/** What a stored record is called in a sentence: `anthropic`, `google`, or `openrouter (openai-compatible)`. */
 function nameOf(provider: KeyedProviderId): string {
-  return provider === 'anthropic' ? provider : `${provider} (openai-compatible)`
+  return isKeyVendor(provider) ? provider : `${provider} (openai-compatible)`
 }
 
 const ARGV_KEY_MESSAGE =
@@ -272,7 +291,7 @@ async function runSet(rest: string[], d: ProviderCliDeps): Promise<number> {
   const { provider: providerArg, stdin, replace } = parsed
   if (!isKeyedProvider(providerArg)) { d.stderr(unknownProviderMessage()); return 2 }
   if (isOpenAICompatibleEndpoint(providerArg)) return runSetEndpoint(providerArg, parsed, d)
-  // `--base-url` / `--no-key` mean nothing for Anthropic, whose base URL is the client's own constant.
+  // `--base-url` / `--no-key` mean nothing for a key vendor, whose base URL is the client's own constant.
   if (parsed.baseUrl !== undefined || parsed.noKey) {
     d.stderr('unknown flag — see `agentop provider key --help`')
     return 2
@@ -289,11 +308,11 @@ async function runSet(rest: string[], d: ProviderCliDeps): Promise<number> {
     value = await d.readStdinLine()
   } else {
     if (!d.stdinIsTTY) { d.stderr(NO_TTY_MESSAGE); return 2 }
-    value = await d.maskedInput('Anthropic API key (never echoed)')
+    value = await d.maskedInput(`${VENDOR_LABEL[provider]} API key (never echoed)`)
   }
 
-  const shape = validateKeyShape(value)
-  if (!shape.ok) { d.stderr(keyShapeSentence(shape.reason)); return 1 }
+  const shape = validateKeyShape(value, provider)
+  if (!shape.ok) { d.stderr(keyShapeSentence(shape.reason, provider)); return 1 }
 
   // First attempt never forces a replace — an existing key is discovered through
   // `storeCredential`'s own `'exists'` refusal, which is also what carries the old fingerprint
@@ -311,7 +330,7 @@ async function runSet(rest: string[], d: ProviderCliDeps): Promise<number> {
   }
 
   if (!res.ok) {
-    if (res.reason === 'invalid-shape') { d.stderr(keyShapeSentence(res.shape)); return 1 }
+    if (res.reason === 'invalid-shape') { d.stderr(keyShapeSentence(res.shape, provider)); return 1 }
     if (res.reason === 'exists') { d.stderr(`a key is already stored (${res.previous}).`); return 1 }
     d.stderr(`could not store the key (${res.reason}).`)
     return 1
@@ -402,7 +421,7 @@ async function runSetEndpoint(
 // `status`
 // ---------------------------------------------------------------------------
 
-const STATUS_USAGE = 'usage: agentop provider key status [anthropic|<endpoint>]'
+const STATUS_USAGE = 'usage: agentop provider key status [anthropic|google|<endpoint>]'
 
 function stateLine(res: CredentialStatusResult): string {
   const hint = res.state === 'permissions-too-open' ? ` — fix with: chmod 600 ${res.path}` : ''
@@ -464,7 +483,7 @@ async function runRemove(rest: string[], d: ProviderCliDeps): Promise<number> {
   if (!res.removed) { d.stdout(`${nameOf(provider)}: no key stored.`); return 0 }
 
   d.stdout(`${nameOf(provider)}: removed ${res.fingerprint ?? '(no fingerprint)'}.`)
-  const where = provider === 'anthropic' ? 'Anthropic' : ENDPOINT_PRESETS[provider].label
+  const where = isKeyVendor(provider) ? VENDOR_LABEL[provider] : ENDPOINT_PRESETS[provider].label
   d.stdout(
     `The key is still valid at ${where} until you revoke it there — deleting the `
     + 'local copy is not revocation.',
@@ -481,12 +500,17 @@ async function runRemove(rest: string[], d: ProviderCliDeps): Promise<number> {
 /** The cheapest current Anthropic model in the price table — the first call should cost as little
  *  as it can while still being a real one. `--model` overrides it. */
 export const TRY_DEFAULT_MODEL = 'claude-haiku-4-5-20251001'
+/** Google's counterpart (B5b): the cheapest Gemini that is BOTH priced in `MODEL_PRICING` and listed on
+ *  Google's own pricing page (ai.google.dev/gemini-api/docs/pricing, read 2026-09-28: $0.30 in / $2.50
+ *  out per 1M) — an unpriced default would print a cost line of "N/A" on the very first call. `--model`
+ *  overrides it. */
+export const TRY_DEFAULT_MODEL_GOOGLE = 'gemini-3.5-flash-lite'
 /** Fixed on purpose: not a flag, so no invocation of this verb can ask for a large answer.
  *  Spec §6.6 — the first-call verb uses a fixed tiny prompt with `max_tokens ≤ 64`. */
 export const TRY_PROMPT = 'Reply with the single word: ok'
 export const TRY_MAX_TOKENS = 16
 
-const TRY_USAGE = 'usage: agentop provider try anthropic [--model <id>] [--stream]\n'
+const TRY_USAGE = 'usage: agentop provider try <anthropic|google> [--model <id>] [--stream]\n'
   + '       agentop provider try <endpoint> --model <id>'
 
 type TryParse =
@@ -623,24 +647,30 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     return runTryEndpoint(parsed.provider, parsed.model, parsed.stream, d)
   }
 
+  // Not an endpoint, so a key vendor (`isKeyedProvider` above). The model default is the vendor's own.
+  const vendor: KeyVendorId = parsed.provider
+  const model = parsed.modelGiven ? parsed.model : vendor === 'google' ? TRY_DEFAULT_MODEL_GOOGLE : TRY_DEFAULT_MODEL
+
   if (!d.flagOn()) { d.stderr(refusalSentence('flag-off')); return 1 }
   if (await d.isCentral()) { d.stderr(refusalSentence('central')); return 1 }
 
   // Refuse BEFORE anything is journaled: a call that cannot be made must not leave a
   // `model.invoked` claiming a billable request was outstanding.
-  const cred = await resolveCredential('anthropic', { dir: d.dir })
+  const cred = await resolveCredential(vendor, { dir: d.dir })
   if (!cred.ok) {
     d.stderr(
       cred.reason === 'absent'
-        ? 'no key stored — run `agentop provider key set anthropic` first.'
-        : `the stored key cannot be used (${cred.reason}) — see \`agentop provider key status anthropic\`.`,
+        ? `no key stored — run \`agentop provider key set ${vendor}\` first.`
+        : `the stored key cannot be used (${cred.reason}) — see \`agentop provider key status ${vendor}\`.`,
     )
     return 1
   }
 
   // Lazy: `key set|status|remove` never load the AI SDK the runtime carries.
-  const { createAnthropicClient, createProviderEmitter, invokedEvent, terminalEvent } = await import('@agentistics/runtime')
-  const client = d.client ?? createAnthropicClient(hostAnthropicClientDeps({ dir: d.dir, captureDir: d.captureDir }))
+  const { createAnthropicClient, createGoogleClient, createProviderEmitter, invokedEvent, terminalEvent } = await import('@agentistics/runtime')
+  const client = d.client ?? (vendor === 'google'
+    ? createGoogleClient(hostGoogleClientDeps({ dir: d.dir, captureDir: d.captureDir }))
+    : createAnthropicClient(hostAnthropicClientDeps({ dir: d.dir, captureDir: d.captureDir })))
 
   let journal: Journal | null = null
   try { journal = await (d.openJournal ?? defaultOpenJournal)() } catch { journal = null }
@@ -662,16 +692,16 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
   const attempt = 1
   const startedAt = new Date().toISOString()
 
-  const start = { invocationId, attempt, provider: 'anthropic' as const, requestedModel: parsed.model, startedAt }
-  d.stdout(`anthropic: one call to ${parsed.model} (max_tokens ${TRY_MAX_TOKENS}) — this is billed to your account.`)
+  const start = { invocationId, attempt, provider: vendor, requestedModel: model, startedAt }
+  d.stdout(`${vendor}: one call to ${model} (max_tokens ${TRY_MAX_TOKENS}) — this is billed to your account.`)
   await emitter.invoked(start)
 
   const request: ProviderRequest = {
-    model: parsed.model,
+    model,
     messages: [{ role: 'user', content: TRY_PROMPT }],
     maxTokens: TRY_MAX_TOKENS,
     correlation: { invocationId },
-    credential: { provider: 'anthropic', id: 'default' },
+    credential: { provider: vendor, id: 'default' },
   }
   const result = parsed.stream
     ? await streamToTerminal(client, request, attempt, d, (e) => emitter.started({
@@ -682,7 +712,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     : await client.invokeOnce(request, attempt)
   if (result === null) {
     d.stderr('the stream ended without a result — the outcome of this call is unknown.')
-    d.stderr(`  model.invoked was recorded for ${invocationId} and is left outstanding: check the Anthropic console before retrying.`)
+    d.stderr(`  model.invoked was recorded for ${invocationId} and is left outstanding: check ${VENDOR_CONSOLE[vendor]} before retrying.`)
     return 1
   }
 
@@ -721,6 +751,12 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
   d.stdout(`  message id: ${result.messageId === '' ? '(none stated)' : result.messageId}`)
   d.stdout(`  request-id: ${result.requestId ?? '(none stated)'}`)
   for (const c of COUNTERS) d.stdout(`  ${c}: ${missing.has(c) ? 'not reported by the provider' : u[c]}`)
+  // What a vendor states BESIDE the four counters — each printed only when the client carries it, and
+  // each with its billing reading, because a bare number here would invite adding it to a total.
+  if (u.reasoning) d.stdout(`  thoughts: ${u.reasoning.tokens} (${u.reasoning.billing} — never folded into output above)`)
+  if (result.toolUsePrompt) d.stdout(`  tool-use prompt: ${result.toolUsePrompt.tokens} (billing ${result.toolUsePrompt.billing} — in no counter above)`)
+  if (result.usageNotes !== undefined && result.usageNotes.length > 0) d.stdout(`  usage notes: ${result.usageNotes.join(', ')}`)
+  if (result.correlationBasis === 'inferred') d.stdout('  identity: inferred — this provider states no request or message id')
   d.stdout(`  stop: ${result.stopReason.kind}`)
   d.stdout(`  latency: ${Math.round(result.latencyMs)} ms`)
   if (result.capture) d.stdout(`  raw capture: sha256:${result.capture.sha256} (${result.capture.bytes} bytes)`)
@@ -850,7 +886,7 @@ export function costLine(cost: CompletedResult['cost']): string {
 
 const HELP = `
 Usage: agentop provider key <set|status|remove> [options]
-       agentop provider try anthropic [--model <id>] [--stream]
+       agentop provider try <anthropic|google> [--model <id>] [--stream]
        agentop provider try <endpoint> --model <id>
        agentop provider models …     (see its own --help)
 
@@ -862,10 +898,17 @@ Endpoints (OpenAI-compatible): openai, openrouter, deepseek, litellm, 9router, o
   A base URL must be https://, or http:// to this machine only; it may carry no user, password,
   query or fragment.
 
+  agentop provider key set google               Google Gemini API key, the same way (a key from Google AI
+                                                Studio; there is no base URL and no login/subscription path)
+  agentop provider try google [--model <id>]    ONE real, billed call to the Gemini API (default model
+                                                gemini-3.5-flash-lite); --stream streams it. Prints the
+                                                thoughts figure (billed on top of output) and the tool-use
+                                                prompt figure beside the four counters, never summed in.
+
   agentop provider key set anthropic            Hidden prompt (default) — nothing is echoed
   agentop provider key set anthropic --stdin    Read ONE line from a pipe; no prompt
   agentop provider key set anthropic --replace  With --stdin, allow overwriting a stored key
-  agentop provider key status [anthropic]       Presence + fingerprint + last 4 characters
+  agentop provider key status [anthropic|google] Presence + fingerprint + last 4 characters
   agentop provider key remove anthropic         Delete the stored key (does not revoke it)
   agentop provider try anthropic [--model <id>] ONE real, billed call with a fixed tiny prompt
                                                 (max_tokens 16); records it in the journal and

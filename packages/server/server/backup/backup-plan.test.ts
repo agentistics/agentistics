@@ -194,7 +194,7 @@ test('no credential filename can pass the filter — asserted over the source it
 // prefix rule covers them today, and this is what notices the day it stops. The list is written out
 // (a probe derived from the same table it checks would pass on an empty table) and then held equal
 // to KEYED_PROVIDERS, so a provider added to config.ts without a probe here fails by name.
-const PROVIDER_KEY_PROBES = ['anthropic', 'openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
+const PROVIDER_KEY_PROBES = ['anthropic', 'google', 'openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
 
 test('every provider key file is excluded as a secret, probed by name', () => {
   expect([...PROVIDER_KEY_PROBES].sort()).toEqual([...KEYED_PROVIDERS].sort())

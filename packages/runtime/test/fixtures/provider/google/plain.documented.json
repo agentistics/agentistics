@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "plain",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello there.\"}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":12,\"candidatesTokenCount\":4,\"totalTokenCount\":16,\"promptTokensDetails\":[{\"modality\":\"TEXT\",\"tokenCount\":12}]},\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-plain-0001\"}"
+}

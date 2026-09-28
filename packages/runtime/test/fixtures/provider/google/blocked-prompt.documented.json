@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "blocked-prompt",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28 (PromptFeedback.blockReason: the prompt was blocked, no candidate). Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"promptFeedback\":{\"blockReason\":\"PROHIBITED_CONTENT\"},\"usageMetadata\":{\"promptTokenCount\":9,\"totalTokenCount\":9},\"modelVersion\":\"gemini-2.5-flash\"}"
+}

@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "stream-usage-every-chunk",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28. The docs are SILENT on whether usageMetadata repeats per chunk; this fixture pins the reader's rule under the cumulative reading: the LAST chunk's usage wins and nothing is summed. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "text/event-stream",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"One \"}]},\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":50,\"candidatesTokenCount\":1,\"totalTokenCount\":51},\"modelVersion\":\"gemini-2.5-flash\"}\r\n\r\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"two \"}]},\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":50,\"candidatesTokenCount\":2,\"totalTokenCount\":52},\"modelVersion\":\"gemini-2.5-flash\"}\r\n\r\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"three.\"}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":50,\"candidatesTokenCount\":3,\"totalTokenCount\":53},\"modelVersion\":\"gemini-2.5-flash\"}\r\n\r\n"
+}

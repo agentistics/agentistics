@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "tool-use",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28 (FunctionCall: id optional, args a Struct object). toolUsePromptTokenCount is defined as \"Number of tokens present in tool-use prompt(s)\"; its billing relationship is NOT stated, so the fixture only pins that it is carried. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Let me look.\"},{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Lisbon\"}}}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":300,\"candidatesTokenCount\":20,\"toolUsePromptTokenCount\":45,\"totalTokenCount\":320},\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-tooluse-0001\"}"
+}

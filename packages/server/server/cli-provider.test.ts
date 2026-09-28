@@ -620,3 +620,255 @@ describe('runProvider — try <endpoint> --stream (B2 × B5a)', () => {
     await cleanup(h)
   })
 })
+
+// ── B5b — Google's Gemini key ───────────────────────────────────────────────────────────────────
+
+// Built at runtime, never a literal key in source.
+const FAKE_G_KEY = 'AIza' + 'Test' + 'g'.repeat(31)
+const FAKE_G_KEY_2 = 'AIza' + 'Test' + 'h'.repeat(31)
+
+describe('runProvider — google key set/status/remove', () => {
+  test('set google via --stdin stores a 0600 record and prints only a fingerprint', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_G_KEY })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], h.deps)).toBe(0)
+    expect(h.all()).not.toContain(FAKE_G_KEY)
+    expect(h.all()).toMatch(/google: stored sha256:[0-9a-f]{8}/)
+    await cleanup(h)
+  })
+
+  test('the tty prompt names Google Gemini, and rotation asks, shows old -> new, never the keys', async () => {
+    const prompts: string[] = []
+    const h = await makeHarness({ maskedInput: async (m) => { prompts.push(m); return FAKE_G_KEY } })
+    expect(await runProvider(['key', 'set', 'google'], h.deps)).toBe(0)
+    expect(prompts).toEqual(['Google Gemini API key (never echoed)'])
+
+    h.deps.maskedInput = async () => FAKE_G_KEY_2
+    h.deps.confirm = async () => true
+    expect(await runProvider(['key', 'set', 'google'], h.deps)).toBe(0)
+    expect(h.all()).toMatch(/sha256:[0-9a-f]{8}\s*→\s*sha256:[0-9a-f]{8}/)
+    expect(h.all()).not.toContain(FAKE_G_KEY)
+    expect(h.all()).not.toContain(FAKE_G_KEY_2)
+    await cleanup(h)
+  })
+
+  test('an Anthropic key is refused for google (never sent to another host), without echoing it', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_KEY })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], h.deps)).toBe(1)
+    expect(h.all()).not.toContain(FAKE_KEY)
+    expect(h.all().toLowerCase()).toContain('anthropic key')
+    await cleanup(h)
+  })
+
+  test('--base-url / --no-key mean nothing for google (it has one fixed address and always a key)', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['key', 'set', 'google', '--base-url', 'https://example.com'], h.deps)).toBe(2)
+    expect(await runProvider(['key', 'set', 'google', '--no-key'], h.deps)).toBe(2)
+    await cleanup(h)
+  })
+
+  test('a key typed on argv is refused for google too', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['key', 'set', 'google', FAKE_G_KEY], h.deps)).toBe(2)
+    expect(h.all()).not.toContain(FAKE_G_KEY)
+    await cleanup(h)
+  })
+
+  test('status names google, shows fingerprint and last 4 — and the no-provider status lists it', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_G_KEY })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], h.deps)).toBe(0)
+    h.out.length = 0
+    expect(await runProvider(['key', 'status', 'google'], h.deps)).toBe(0)
+    expect(h.all()).toContain('google:')
+    expect(h.all()).toContain('state: present')
+    expect(h.all()).toContain(`ends with: …${FAKE_G_KEY.slice(-4)}`)
+    expect(h.all()).not.toContain(FAKE_G_KEY)
+    expect(h.all()).not.toContain('base url') // a key vendor has none
+
+    h.out.length = 0
+    expect(await runProvider(['key', 'status'], h.deps)).toBe(0)
+    expect(h.all()).toContain('anthropic:')
+    expect(h.all()).toContain('google:')
+    await cleanup(h)
+  })
+
+  test('remove prints the fingerprint and the revocation caveat naming Google, never the key', async () => {
+    const h = await makeHarness({ readStdinLine: async () => FAKE_G_KEY })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], h.deps)).toBe(0)
+    h.out.length = 0
+    expect(await runProvider(['key', 'remove', 'google'], h.deps)).toBe(0)
+    expect(h.all()).toMatch(/google: removed sha256:[0-9a-f]{8}/)
+    expect(h.all()).toContain('still valid at Google Gemini')
+    expect(h.all()).not.toContain(FAKE_G_KEY)
+    await cleanup(h)
+  })
+
+  test('central and flag-off refuse `set google` before any prompt, exactly like the other providers', async () => {
+    const off = await makeHarness({ flagOn: () => false })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], off.deps)).toBe(1)
+    expect(off.err.join('\n')).toBe(refusalSentence('flag-off'))
+    const central = await makeHarness({ isCentral: async () => true })
+    expect(await runProvider(['key', 'set', 'google', '--stdin'], central.deps)).toBe(1)
+    expect(central.err.join('\n')).toBe(refusalSentence('central'))
+    await cleanup(off)
+    await cleanup(central)
+  })
+
+  test('the help names google and the API-key-only rule', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['--help'], h.deps)).toBe(0)
+    expect(h.out.join('\n')).toContain('agentop provider key set google')
+    expect(h.out.join('\n')).toContain('agentop provider try google')
+    await cleanup(h)
+  })
+})
+
+describe('runProvider — try google (fake client, no network)', () => {
+  async function setup(client: import('@agentistics/runtime').ProviderClient, opts: { storeKey?: boolean } = {}) {
+    const { openJournal } = await import('./journal/journal')
+    const { storeCredential } = await import('./provider/credentials.ts')
+    const h = await makeHarness()
+    if (opts.storeKey !== false) expect((await storeCredential('google', FAKE_G_KEY, { dir: h.dir })).ok).toBe(true)
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    const written: string[] = []
+    h.deps.client = client
+    h.deps.openJournal = async () => journal
+    h.deps.write = (c) => written.push(c)
+    return { h, journal, written }
+  }
+
+  function googleResult(
+    req: import('@agentistics/runtime').ProviderRequest,
+    attempt: number,
+  ): import('@agentistics/runtime').InvocationResult {
+    return {
+      invocationId: req.correlation.invocationId, attempt, provider: 'google', requestedModel: req.model,
+      startedAt: new Date().toISOString(), latencyMs: 9, status: 'completed', correlationBasis: 'inferred',
+      messageId: '', servedModel: req.model,
+      usage: { input: 200, output: 6, cacheRead: 800, cacheWrite: 0, missing: ['cacheWrite'], reasoning: { tokens: 300, billing: 'additive' }, contextTokens: 1000 },
+      usageAnomalies: [], stopReason: { kind: 'end-turn' }, content: [{ type: 'text', text: 'ok' }],
+      usageCertainty: 'provider-stated', cost: { kind: 'unavailable', reason: 'no-verified-price' },
+      usageNotes: ['total-excludes-tool-use-prompt'], toolUsePrompt: { tokens: 45, billing: 'unknown' },
+    }
+  }
+
+  test('one call to the vendor default model, with the vendor\'s own credential ref; prints what Google states beside the counters', async () => {
+    let seen: import('@agentistics/runtime').ProviderRequest | undefined
+    const { h, journal } = await setup({
+      provider: 'google', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { seen = req; return googleResult(req, a) },
+    })
+    expect(await runProvider(['try', 'google'], h.deps)).toBe(0)
+    expect(seen?.model).toBe('gemini-3.5-flash-lite')
+    expect(seen?.credential).toEqual({ provider: 'google', id: 'default' })
+    expect(seen?.maxTokens).toBe(16)
+    const out = h.out.join('\n')
+    expect(out).toContain('google: one call to gemini-3.5-flash-lite')
+    expect(out).toContain('message id: (none stated)')
+    expect(out).toContain('request-id: (none stated)')
+    expect(out).toContain('input: 200')
+    expect(out).toContain('cacheWrite: not reported by the provider')
+    expect(out).toContain('thoughts: 300 (additive — never folded into output above)')
+    expect(out).toContain('tool-use prompt: 45 (billing unknown — in no counter above)')
+    expect(out).toContain('identity: inferred')
+    expect(out).toContain('usage notes: total-excludes-tool-use-prompt')
+    expect(out).toContain('journaled: yes')
+    const events = (await journal.readFrom(0, 100)).events
+    expect(events.map(e => e.type)).toEqual(['model.invoked', 'model.completed'])
+    const completed = events[1]!.data as { provider: string; reasoning?: unknown; usage: Record<string, number> }
+    expect(completed.provider).toBe('google')
+    expect(completed.reasoning).toEqual({ tokens: 300, billing: 'additive' })
+    expect(completed.usage).toEqual({ input: 200, output: 6, cacheRead: 800 }) // cacheWrite ABSENT (D21), never 0
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('--model overrides the default; --stream goes through the client\'s stream and prints deltas', async () => {
+    let model = ''
+    const { h, journal, written } = await setup({
+      provider: 'google', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return googleResult(req, a) },
+      async *stream(req, a) {
+        model = req.model
+        yield { type: 'started', servedModel: req.model }
+        yield { type: 'text-delta', index: 0, text: 'o' }
+        yield { type: 'text-delta', index: 0, text: 'k' }
+        yield { type: 'end', result: googleResult(req, a) }
+      },
+    })
+    expect(await runProvider(['try', 'google', '--model', 'gemini-2.5-flash', '--stream'], h.deps)).toBe(0)
+    expect(model).toBe('gemini-2.5-flash')
+    expect(written).toEqual(['o', 'k', '\n'])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('no stored key: refused in words BEFORE anything is journaled, naming the right verb', async () => {
+    const { h, journal } = await setup({
+      provider: 'google', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) { return googleResult(req, a) },
+    }, { storeKey: false })
+    expect(await runProvider(['try', 'google'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('agentop provider key set google')
+    expect((await journal.readFrom(0, 100)).events).toEqual([])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('a failed call prints the kind and says the attempt is recorded', async () => {
+    const { h, journal } = await setup({
+      provider: 'google', adapterVersion: 'fake-1', capabilities: { streaming: true, editPolicy: 'none' as never },
+      async invokeOnce(req, a) {
+        return {
+          invocationId: req.correlation.invocationId, attempt: a, provider: 'google', requestedModel: req.model,
+          startedAt: new Date().toISOString(), latencyMs: 3, status: 'failed', correlationBasis: 'inferred',
+          error: { kind: 'rate-limited', retryable: true, usageOutcome: 'none-reported', userCode: 'provider.rate_limited' },
+        }
+      },
+    })
+    expect(await runProvider(['try', 'google'], h.deps)).toBe(1)
+    expect(h.err.join('\n')).toContain('the call failed: rate-limited')
+    expect((await journal.readFrom(0, 100)).events.map(e => e.type)).toEqual(['model.invoked', 'model.failed'])
+    journal.close()
+    await cleanup(h)
+  })
+
+  test('the usage string names google', async () => {
+    const h = await makeHarness()
+    expect(await runProvider(['try', '--help'], h.deps)).toBe(0)
+    expect(h.out.join('\n')).toContain('<anthropic|google>')
+    await cleanup(h)
+  })
+})
+
+describe('the host seam for google — the REAL client over the REAL key store, a stub fetch', () => {
+  test('hostGoogleClientDeps + a stored key: the stored key reaches the request header, the ref for another provider does not', async () => {
+    const { hostGoogleClientDeps } = await import('./cli-provider.ts')
+    const { storeCredential } = await import('./provider/credentials.ts')
+    const { createGoogleClient } = await import('@agentistics/runtime')
+    const h = await makeHarness()
+    expect((await storeCredential('google', FAKE_G_KEY, { dir: h.dir })).ok).toBe(true)
+    await storeCredential('anthropic', FAKE_KEY, { dir: h.dir })
+
+    const seen: Array<{ url: string; key: string | null }> = []
+    const stub = (async (input: unknown, init?: RequestInit) => {
+      seen.push({ url: String(input), key: new Headers(init?.headers).get('x-goog-api-key') })
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 5, cachedContentTokenCount: 0, candidatesTokenCount: 1 },
+        modelVersion: 'gemini-3.5-flash-lite',
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+    const client = createGoogleClient({ ...hostGoogleClientDeps({ dir: h.dir, captureDir: join(h.dir, 'content') }), fetch: stub })
+    const base = { model: 'gemini-3.5-flash-lite', messages: [{ role: 'user' as const, content: 'hi' }], maxTokens: 16, correlation: { invocationId: 'inv_seam' } }
+
+    const ok = await client.invokeOnce({ ...base, credential: { provider: 'google', id: 'default' } }, 1)
+    expect(ok.status).toBe('completed')
+    expect(seen).toEqual([{ url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', key: FAKE_G_KEY }])
+
+    // Asking for the ANTHROPIC ref through the Google client is refused before any request leaves.
+    const wrong = await client.invokeOnce({ ...base, credential: { provider: 'anthropic', id: 'default' } }, 1)
+    expect(wrong.status).toBe('failed')
+    expect(seen).toHaveLength(1)
+    await cleanup(h)
+  })
+})

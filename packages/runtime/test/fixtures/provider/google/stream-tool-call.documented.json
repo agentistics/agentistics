@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "stream-tool-call",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28 + research 12 \u00a73.3 (streamGenerateContent?alt=sse: each data line is a whole GenerateContentResponse). usageMetadata on the FINAL chunk only in this fixture; whether real streams repeat it per chunk is UNVERIFIED without a live call. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "text/event-stream",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Checking \"}]},\"index\":0}],\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-stream-0001\"}\r\n\r\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"the weather.\"}]},\"index\":0}],\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-stream-0001\"}\r\n\r\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Lisbon\"}}}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":300,\"candidatesTokenCount\":25,\"thoughtsTokenCount\":40,\"totalTokenCount\":365},\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-stream-0001\"}\r\n\r\n"
+}

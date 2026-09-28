@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "cached",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28. promptTokenCount \"includes the number of tokens in the cached content\". Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Cached answer.\"}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1000,\"cachedContentTokenCount\":800,\"candidatesTokenCount\":5,\"totalTokenCount\":1005,\"cacheTokensDetails\":[{\"modality\":\"TEXT\",\"tokenCount\":800}]},\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-cached-0001\"}"
+}

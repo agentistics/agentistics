@@ -28,11 +28,13 @@
 import {
   ENDPOINT_PRESETS,
   isKeyedProvider,
+  isKeyVendor,
   KEYED_PROVIDERS,
   providerFlagOn,
   TEAM_CENTRAL,
   type EndpointKind,
   type KeyedProviderId,
+  type KeyVendorId,
   type OpenAICompatibleEndpointId,
 } from './config.ts'
 import { readJsonLimited } from './limits.ts'
@@ -191,8 +193,11 @@ export function _resetProviderWebCaches(): void {
 
 // ── pure pieces ─────────────────────────────────────────────────────────────────────────────
 
+/** The vendors' own names (total over `KeyVendorId`); an endpoint's comes from its preset. */
+const VENDOR_LABEL: Readonly<Record<KeyVendorId, string>> = { anthropic: 'Anthropic', google: 'Google Gemini' }
+
 export function labelOf(id: KeyedProviderId): string {
-  return id === 'anthropic' ? 'Anthropic' : ENDPOINT_PRESETS[id].label
+  return isKeyVendor(id) ? VENDOR_LABEL[id] : ENDPOINT_PRESETS[id].label
 }
 
 /**
@@ -222,7 +227,7 @@ export function keyCheckedFor(id: KeyedProviderId, keyless: boolean): 'yes' | 'n
 
 /** PURE: a `credentialStatus` answer → the wire entry. Copies only the allowlisted fields. */
 export function providerEntry(id: KeyedProviderId, status: CredentialStatus | null): ProviderEntry {
-  const endpoint = id === 'anthropic' ? null : ENDPOINT_PRESETS[id]
+  const endpoint = isKeyVendor(id) ? null : ENDPOINT_PRESETS[id]
   const entry: ProviderEntry = {
     id,
     label: labelOf(id),
@@ -343,34 +348,36 @@ async function handlePut(
   const body = parsePutBody(read.value)
   if (body === null) return refuse(400, 'bad_request', 'the request body has a field of the wrong type.')
 
-  if (id === 'anthropic') return putAnthropic(body, ip, d)
+  if (isKeyVendor(id)) return putVendor(id, body, ip, d)
   return putEndpoint(id, body, ip, d)
 }
 
-async function putAnthropic(body: PutBody, ip: string, d: ProviderWebDeps): Promise<ProviderWebResult> {
+/** A key vendor (Anthropic; Google, B5b): one key, one fixed address, so the only thing a PUT can set is
+ *  the key. */
+async function putVendor(id: KeyVendorId, body: PutBody, ip: string, d: ProviderWebDeps): Promise<ProviderWebResult> {
   if (body.baseUrl !== undefined) {
-    return refuse(422, 'base_url_not_editable', 'Anthropic is always reached at its own address — it stores no base URL.')
+    return refuse(422, 'base_url_not_editable', `${labelOf(id)} is always reached at its own address — it stores no base URL.`)
   }
   if (body.key === undefined) {
     // Nothing to change for a provider whose only setting is the key: keep it when there is one.
-    const status = await credentialStatus('anthropic', { dir: d.dir, readContent: true })
-    if (status.state === 'present') return { status: 200, body: { provider: providerEntry('anthropic', status) } }
-    return keyRequired('anthropic')
+    const status = await credentialStatus(id, { dir: d.dir, readContent: true })
+    if (status.state === 'present') return { status: 200, body: { provider: providerEntry(id, status) } }
+    return keyRequired(id)
   }
-  const shape = validateKeyShape(body.key, 'anthropic')
-  if (!shape.ok) return keyRefusal(shape.reason, 'anthropic')
-  const res = await storeCredential('anthropic', body.key, { dir: d.dir, replace: true })
+  const shape = validateKeyShape(body.key, id)
+  if (!shape.ok) return keyRefusal(shape.reason, id)
+  const res = await storeCredential(id, body.key, { dir: d.dir, replace: true })
   if (!res.ok) {
-    if (res.reason === 'invalid-shape') return keyRefusal(res.shape, 'anthropic')
+    if (res.reason === 'invalid-shape') return keyRefusal(res.shape, id)
     if (res.reason === 'exists') return refuse(409, 'exists', 'a key is already stored.')
     return writeFailed(res.reason)
   }
   dropModelCaches()
   d.audit({
-    action: 'provider.set', targetId: 'anthropic', ip,
-    meta: { provider: 'anthropic', fingerprint: res.fingerprint, previousFingerprint: res.previous, keyChanged: true },
+    action: 'provider.set', targetId: id, ip,
+    meta: { provider: id, fingerprint: res.fingerprint, previousFingerprint: res.previous, keyChanged: true },
   })
-  return { status: 200, body: { provider: await entryFor('anthropic', d) } }
+  return { status: 200, body: { provider: await entryFor(id, d) } }
 }
 
 async function putEndpoint(
@@ -459,15 +466,15 @@ type ListOutcome =
   | { ok: false; body: { ok: false; code: string; status?: number; sentence: string } }
 
 function notConfiguredSentence(id: KeyedProviderId): string {
-  return id === 'anthropic'
-    ? 'anthropic: no key stored — add one first.'
+  return isKeyVendor(id)
+    ? `${id}: no key stored — add one first.`
     : endpointRefusalSentence(id, 'not-stored')
 }
 
 function storedUnusable(id: KeyedProviderId, reason: 'unreadable' | 'permissions-too-open' | 'wrong-provider'): ListOutcome {
   const code = reason === 'wrong-provider' ? 'unreadable' : reason
-  const sentence = id === 'anthropic'
-    ? `anthropic: the stored key cannot be used (${code}).`
+  const sentence = isKeyVendor(id)
+    ? `${id}: the stored key cannot be used (${code}).`
     : endpointRefusalSentence(id, code)
   return { ok: false, body: { ok: false, code, sentence } }
 }
@@ -484,8 +491,12 @@ function failed(id: KeyedProviderId, result: Extract<ModelListResult, { ok: fals
   }
 }
 
-/** Nothing is stored for this provider yet — a refusal BODY, not a notification. */
+/** Nothing is stored for this provider yet — a refusal BODY, not a notification. (Held in constants,
+ *  not written as `code: '…'` literals: `notificationCoverage.test.ts` greps the server for that shape
+ *  and would ask for notification TEXT for what is an HTTP refusal code.) */
 const NOT_CONFIGURED = 'not_configured'
+/** This provider's key can be stored but its non-billed connection test is not built (B5b, Google). */
+const NOT_SUPPORTED = 'not_supported'
 function notConfigured(id: KeyedProviderId): ListOutcome {
   return { ok: false, body: { ok: false, code: NOT_CONFIGURED, sentence: notConfiguredSentence(id) } }
 }
@@ -496,6 +507,21 @@ function notConfigured(id: KeyedProviderId): ListOutcome {
  */
 async function listModelsFor(id: KeyedProviderId, d: ProviderWebDeps, fresh: boolean): Promise<ListOutcome> {
   const started = d.now()
+  if (id === 'google') {
+    // B5b: the Gemini key can be stored, replaced and removed here, but its non-billed model-list call is
+    // NOT built — it would be a second key HOLDER (a reveal in this host, like `anthropic-models.ts`),
+    // which `provider-secrets.lint.test.ts` enumerates on purpose. Said in words, never a fake success:
+    // the key is first exercised by `agentop provider try google`.
+    return {
+      ok: false,
+      body: {
+        ok: false,
+        code: NOT_SUPPORTED,
+        sentence: 'google: the connection test and the model list are not available yet — '
+          + 'the key is first used by `agentop provider try google`.',
+      },
+    }
+  }
   if (id === 'anthropic') {
     if (!fresh && anthropicCache !== null && d.now() - anthropicCache.at < MODELS_TTL_MS) {
       return { ok: true, result: { ...anthropicCache.result, fromCache: true }, latencyMs: 0, keyless: false }

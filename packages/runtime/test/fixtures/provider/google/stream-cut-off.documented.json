@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "stream-cut-off",
+    "source": "A stream whose body ends with no finishReason: the connection dropped. Built from the SSE framing rules (WHATWG server-sent events) and research 12 \u00a73.3."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "text/event-stream",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Half an answer\"}]},\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":3},\"modelVersion\":\"gemini-2.5-flash\"}\r\n\r\n"
+}

@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "stream-midstream-error",
+    "source": "Master \u00a722 \"recorded once\": a mid-stream failure arrives on HTTP 200 and must be recorded as a failure, never a success (OpenRouter documents the in-band form; the same reader rule protects a Google stream whose body carries an error object). Google error shape {error:{code,message,status}}: research 12 \u00a73.7. Message text illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "text/event-stream",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Partial answer that \"}]},\"index\":0}],\"modelVersion\":\"gemini-2.5-flash\"}\r\n\r\ndata: {\"error\":{\"code\":503,\"message\":\"The model is overloaded.\",\"status\":\"UNAVAILABLE\"}}\r\n\r\n"
+}

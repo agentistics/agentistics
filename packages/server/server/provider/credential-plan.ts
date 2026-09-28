@@ -14,8 +14,10 @@
 import { createHash } from 'node:crypto'
 import {
   ENDPOINT_PRESETS,
+  isKeyVendor,
   PROVIDER_FLAG_ENV,
   type KeyedProviderId,
+  type KeyVendorId,
   type OpenAICompatibleEndpointId,
 } from '../config.ts'
 import type { CredentialHandle, CredentialResolution } from '@agentistics/runtime'
@@ -47,13 +49,14 @@ export type { CredentialHandle, CredentialResolution }
 const INSPECT = Symbol.for('nodejs.util.inspect.custom')
 
 /** Wraps a value that has ALREADY been validated. The label is what every stringification yields.
- *  An ENDPOINT's handle names the PROTOCOL as its provider (`openai-compatible`, core's `ProviderId`)
- *  and the endpoint only in its label — `openai` the endpoint is not `openai` the vendor. */
+ *  A key VENDOR's handle names that vendor (`anthropic`, `google` — core's `ProviderId`). An ENDPOINT's
+ *  handle names the PROTOCOL as its provider (`openai-compatible`) and the endpoint only in its label —
+ *  `openai` the endpoint is not `openai` the vendor. */
 export function createCredentialHandle(provider: KeyedProviderId, value: string): CredentialHandle {
   const fingerprint = fingerprintOf(value)
-  const handleProvider = provider === 'anthropic' ? 'anthropic' as const : 'openai-compatible' as const
-  const label = provider === 'anthropic'
-    ? `[credential anthropic ${fingerprint}]`
+  const handleProvider = isKeyVendor(provider) ? provider : 'openai-compatible' as const
+  const label = isKeyVendor(provider)
+    ? `[credential ${provider} ${fingerprint}]`
     : `[credential openai-compatible/${provider} ${fingerprint}]`
   const handle = Object.create(null) as CredentialHandle
   Object.defineProperties(handle, {
@@ -84,6 +87,11 @@ const MIN_KEY_LENGTH = 20
 const MAX_KEY_LENGTH = 512
 
 const ANTHROPIC_KEY_PREFIX = 'sk-ant-'
+
+/** Same guard-rail reading as `MIN_KEY_LENGTH`: a truncated-paste bound, not a claim about Google's real
+ *  key format (its keys begin `AIza…` today, and that is deliberately NOT enforced — a prefix rule that
+ *  is wrong rejects a genuine key). */
+const GOOGLE_KEY_MIN_LENGTH = 20
 
 /** Ordinary whitespace — space, tab, newline, CR, form feed, vertical tab. Checked separately from
  *  `CONTROL_CHARS` below so the two refusals can name what is actually wrong. */
@@ -143,8 +151,11 @@ export function validateKeyShape(value: string, provider: KeyedProviderId = 'ant
     if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
     return { ok: true }
   }
+  // An Anthropic key stored under any other provider would be sent, in a header, to a host that is not
+  // Anthropic — refused for Google exactly as for every endpoint.
   if (value.startsWith(ANTHROPIC_KEY_PREFIX)) return { ok: false, reason: 'foreign-prefix' }
-  if (value.length < ENDPOINT_KEY_MIN_LENGTH[provider]) return { ok: false, reason: 'too-short' }
+  const min = provider === 'google' ? GOOGLE_KEY_MIN_LENGTH : ENDPOINT_KEY_MIN_LENGTH[provider]
+  if (value.length < min) return { ok: false, reason: 'too-short' }
   if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
   return { ok: true }
 }
@@ -156,7 +167,9 @@ export function keyShapeSentence(reason: KeyShapeRefusal, provider: KeyedProvide
   const endpoint = typeof provider === 'string' && Object.hasOwn(ENDPOINT_PRESETS, provider)
     ? provider as OpenAICompatibleEndpointId
     : null
-  const whose = endpoint === null ? 'an Anthropic API key' : `a key for ${ENDPOINT_PRESETS[endpoint].label}`
+  const whose = provider === 'google'
+    ? 'a Google Gemini API key'
+    : endpoint === null ? 'an Anthropic API key' : `a key for ${ENDPOINT_PRESETS[endpoint].label}`
   switch (reason) {
     case 'empty':
       return 'a key is required — nothing was entered.'
@@ -173,7 +186,9 @@ export function keyShapeSentence(reason: KeyShapeRefusal, provider: KeyedProvide
       return 'that looks like an Anthropic key — it is never sent to another endpoint. Store it with '
         + '`agentop provider key set anthropic`.'
     case 'too-short': {
-      const min = endpoint === null ? MIN_KEY_LENGTH : ENDPOINT_KEY_MIN_LENGTH[endpoint]
+      const min = provider === 'google'
+        ? GOOGLE_KEY_MIN_LENGTH
+        : endpoint === null ? MIN_KEY_LENGTH : ENDPOINT_KEY_MIN_LENGTH[endpoint]
       return `a key this short (under ${min} characters) is not a valid ${whose.replace(/^an? /, '')}.`
     }
     case 'too-long':
@@ -318,7 +333,7 @@ export type StoredCredentialResult =
  * validation reads as `'unreadable'` — a corrupt credential is exactly as unusable as corrupt JSON,
  * and giving it a different code would tempt a caller to treat it as "present but wrong provider".
  */
-export function parseStoredCredential(text: string, provider: 'anthropic'): StoredCredentialResult {
+export function parseStoredCredential(text: string, provider: KeyVendorId): StoredCredentialResult {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -333,13 +348,13 @@ export function parseStoredCredential(text: string, provider: 'anthropic'): Stor
     return { ok: false, reason: 'unreadable' }
   }
   if (o.provider !== provider) return { ok: false, reason: 'wrong-provider' }
-  if (!validateKeyShape(o.value).ok) return { ok: false, reason: 'unreadable' }
+  if (!validateKeyShape(o.value, provider).ok) return { ok: false, reason: 'unreadable' }
   return { ok: true, value: o.value, storedAt: o.storedAt }
 }
 
 /** The inverse of `parseStoredCredential` — what `credentials.ts` writes to disk. `value` is
  *  assumed already shape-validated by the caller (`storeCredential` validates before calling). */
-export function serializeCredential(provider: 'anthropic', value: string, storedAt: string): string {
+export function serializeCredential(provider: KeyVendorId, value: string, storedAt: string): string {
   return JSON.stringify({ v: 1, provider, value, storedAt })
 }
 

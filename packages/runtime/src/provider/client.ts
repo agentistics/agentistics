@@ -26,6 +26,7 @@ import type {
 } from '@agentistics/core'
 import type { CredentialRef } from './credential.ts'
 import type { CostStatement, UsageCertainty } from './openai-compatible/usage.ts'
+import type { ToolUsePromptUsage } from './google/usage.ts'
 
 export type { CredentialHandle, CredentialRef, CredentialResolution, CredentialResolver } from './credential.ts'
 
@@ -124,6 +125,13 @@ export interface InvocationCommon {
   requestId?: string
   /** absent when the capture could not be written (or there was no response to capture) */
   capture?: CaptureRef
+  /**
+   * B5b — present (`'inferred'`) when the provider documents NO request or response id this client
+   * adopts (Google), so a cross-layer join can only correlate on `(agentId, startedAt, model)` and
+   * must say the match is inferred (master §22.1 "Identity", §13.3). Absent = the attempt carries a
+   * provider id (`messageId` / `requestId`) and the correlation is exact.
+   */
+  correlationBasis?: 'inferred'
 }
 
 export type InvocationResult =
@@ -150,6 +158,10 @@ export type InvocationResult =
       /** B5a — runtime-local divergence codes met while reading the usage (e.g.
        *  `cached-exceeds-prompt`). Absent on a client that does not produce them. */
       usageNotes?: string[]
+      /** B5b — Google's `toolUsePromptTokenCount`, carried BESIDE the four counters with its billing
+       *  reading (`unknown` until a doc or a bill settles it) and never summed into any of them.
+       *  Absent when the provider stated none. Not journaled: the canonical event has no field for it. */
+      toolUsePrompt?: ToolUsePromptUsage
     })
   | (InvocationCommon & {
       status: 'failed'
@@ -228,7 +240,9 @@ export interface ProviderClient {
 /** Why a provider has no client — a sentence code, rendered by the caller. */
 export const PROVIDER_CLIENT_ABSENT: Record<Exclude<ProviderId, 'anthropic'>, string> = {
   openai: 'provider.not_in_b1',
-  google: 'provider.not_in_b1',
+  // B5b — the client exists, but only when the host injected a resolver and a capture directory
+  // (`createProviderClients` given `google`), the same shape as `openai-compatible` below.
+  google: 'provider.not_configured',
   moonshot: 'provider.not_in_b1',
   // B5a — the client exists, but only when the host configured an endpoint (`createProviderClients`
   // given `openaiCompatible`). Absent deps = nothing to call, said in words rather than a null.

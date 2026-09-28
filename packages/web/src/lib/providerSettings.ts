@@ -13,8 +13,8 @@
 // The closed set of runtime provider ids (server `config.ts` KEYED_PROVIDERS). Kept here as a
 // literal union rather than imported — the web bundle never imports server modules — and the UI
 // still never needs to enumerate it by hand: the options offered anywhere in this feature come
-// from the GET response, which always lists all seven, in this same order.
-export type AiProviderId = 'anthropic' | 'openai' | 'openrouter' | 'deepseek' | 'litellm' | '9router' | 'ollama'
+// from the GET response, which always lists all eight, in this same order (the key vendors first).
+export type AiProviderId = 'anthropic' | 'google' | 'openai' | 'openrouter' | 'deepseek' | 'litellm' | '9router' | 'ollama'
 
 export type ProviderState = 'absent' | 'present' | 'unreadable' | 'permissions-too-open'
 
@@ -153,6 +153,12 @@ const REFUSAL_TEXT: Record<string, { en: string; pt: string }> = {
   unknown_provider: {
     en: 'Unknown provider.',
     pt: 'Provedor desconhecido.',
+  },
+  // B5b: the Google key can be saved, replaced and removed, but its non-billed connection test / model
+  // list is not built — said in words instead of a fake "Connected".
+  not_supported: {
+    en: 'The connection test is not available for this provider yet — the key is first used on a real call.',
+    pt: 'O teste de conexão ainda não está disponível para este provedor — a chave é usada pela primeira vez em uma chamada real.',
   },
   // /test and /models can also answer with the row's own STATE as the refusal — the stored record
   // exists but cannot be trusted, which is a fact about the file, not about the network call.

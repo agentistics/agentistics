@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "thoughts",
+    "source": "https://ai.google.dev/api/generate-content (GenerateContentResponse, UsageMetadata, Candidate, FinishReason, FunctionCall), read 2026-09-28 + https://ai.google.dev/gemini-api/docs/pricing (output price \"including thinking tokens\"). totalTokenCount = prompt + thoughts + candidates per the UsageMetadata definition. Counters illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Because 17 is prime.\",\"thought\":false}]},\"index\":0,\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":20,\"candidatesTokenCount\":6,\"thoughtsTokenCount\":300,\"totalTokenCount\":326},\"modelVersion\":\"gemini-2.5-flash\",\"responseId\":\"resp-documented-thoughts-0001\"}"
+}

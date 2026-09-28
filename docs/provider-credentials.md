@@ -61,10 +61,45 @@ and not silently substituted. This verb is for your own pay-as-you-go Anthropic 
 whichever console account issued it. Delegating a turn to the official `claude` CLI is the route for
 a subscription.
 
+## Google Gemini (B5b)
+
+```
+agentop provider key set google [--stdin] [--replace]
+agentop provider key status [google]
+agentop provider key remove google
+agentop provider try google [--model <id>] [--stream]
+```
+
+The same verb, the same hidden prompt, the same `0600` file (`provider-keys/google.json`), the same
+never-on-argv rule. Differences worth knowing:
+
+- **An API key only.** Use a key from Google AI Studio (`aistudio.google.com`). A Google AI
+  Pro/Ultra **subscription** cannot be used through this loop, and there is no login, token-exchange
+  or application-default path in the client at all: Google's terms, as quoted in master spec §22.4
+  (geminicli.com/docs/resources/tos-privacy), say driving the services behind Gemini CLI with
+  third-party software "may be grounds for suspension or termination of your account". Delegating a turn to the
+  official `gemini` CLI is the route for a subscription.
+- **Never read from the environment.** `GEMINI_API_KEY`, `GOOGLE_API_KEY`, a Vertex switch or a
+  service-account file are not consulted, and the client only ever talks to Google's own address
+  (`generativelanguage.googleapis.com`) — there is no base URL to configure, so no variable can
+  redirect a request that carries the key.
+- **An Anthropic key is refused for Google** (it would be sent, in a header, to another vendor's host).
+- **`try google`** makes ONE real, billed call (default model `gemini-3.5-flash-lite`,
+  `max_tokens` 16 — a thinking model may spend all sixteen on thoughts and stop at `max-tokens`,
+  which is still a valid, billed answer). It prints Google's counters as the runtime records them:
+  `input` is Google's prompt count **minus** its cached part (Google's prompt count includes the cache),
+  `cacheWrite` is *not reported* (Gemini states none), `thoughts` are billed **on top of** output and
+  never folded into it, and the `tool-use prompt` figure is shown beside the counters with its billing
+  marked `unknown` — Google's reference defines the field and does not say how it is billed.
+- **No request id.** Google documents no request or message id, so the call carries none and the
+  record says its correlation is `inferred` (agent, start time, model).
+- **The web screen** can save, replace and remove the key. Its connection test and model list are not
+  available for Google yet and say so in words; the key is first used by `try google`.
+
 ## Storage
 
-- **Path:** `~/.agentistics/provider-keys/anthropic.json` (one file per provider; `anthropic` is the
-  only one B1 supports). Overridable with `AGENTISTICS_DIR`, the same variable that relocates every
+- **Path:** `~/.agentistics/provider-keys/anthropic.json` (one file per provider — `anthropic.json`,
+  `google.json`, and one per configured endpoint). Overridable with `AGENTISTICS_DIR`, the same variable that relocates every
   other agentistics data path — never `~/.claude`, which can be a container's read-only mount.
 - **Modes:** the directory is `0700`, the file `0600`, both re-asserted with an explicit `chmod`
   after every write (a filesystem's own umask can otherwise widen either at creation time).

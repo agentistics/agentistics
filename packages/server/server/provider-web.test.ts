@@ -644,3 +644,69 @@ describe('UI.4 — browser provenance (CSRF) is refused by the SERVER, not only 
     expect(allowed!.status).toBe(200)
   })
 })
+
+// ── B5b — Google's Gemini key over the same routes ──────────────────────────────────────────────
+
+const GOOGLE_KEY = 'AIzaSyFAKEg00gleK3yQQQQzzzz1111PPPPyyyy2'
+
+describe('google (B5b) — a second key vendor on the same routes', () => {
+  test('listed right after anthropic, as a key vendor: fixed address, always a key', async () => {
+    const r = await call('GET', '/api/provider')
+    expect(r.body.providers.map((p: any) => p.id).slice(0, 2)).toEqual(['anthropic', 'google'])
+    expect(r.body.providers[1]).toEqual({
+      id: 'google', label: 'Google Gemini', kind: 'direct', defaultBaseUrl: null,
+      baseUrlEditable: false, keyOptional: false, state: 'absent',
+    })
+  })
+
+  test('PUT stores the key, answers only a fingerprint and last 4, and audits without the key', async () => {
+    const r = await call('PUT', '/api/provider/google', { key: GOOGLE_KEY })
+    expect(r.status).toBe(200)
+    expect(r.body.provider).toMatchObject({ id: 'google', state: 'present', last4: GOOGLE_KEY.slice(-4) })
+    expect(r.body.provider.fingerprint).toMatch(/^sha256:[0-9a-f]{8}$/)
+    expect(leaks(r.body, GOOGLE_KEY)).toEqual([])
+    expect(audits).toHaveLength(1)
+    expect(audits[0]).toMatchObject({ action: 'provider.set', targetId: 'google' })
+    expect(leaks(audits, GOOGLE_KEY)).toEqual([])
+    expect((await stat(join(dir, 'google.json'))).mode & 0o777).toBe(0o600)
+  })
+
+  test('PUT with no key keeps the stored one; with none stored it says a key is required', async () => {
+    expect((await call('PUT', '/api/provider/google', {})).body.code).toBe('key_required')
+    await call('PUT', '/api/provider/google', { key: GOOGLE_KEY })
+    const kept = await call('PUT', '/api/provider/google', {})
+    expect(kept.status).toBe(200)
+    expect(kept.body.provider.state).toBe('present')
+  })
+
+  test('a base URL is refused (the address is fixed) and an Anthropic key is refused for it, never echoed', async () => {
+    const base = await call('PUT', '/api/provider/google', { key: GOOGLE_KEY, baseUrl: 'https://example.com' })
+    expect(base.status).toBe(422)
+    expect(base.body.code).toBe('base_url_not_editable')
+    const foreign = await call('PUT', '/api/provider/google', { key: ANTHROPIC_KEY })
+    expect(foreign.status).toBe(422)
+    expect(foreign.body.code).toBe('key_foreign_prefix')
+    expect(leaks(foreign.body, ANTHROPIC_KEY)).toEqual([])
+    await expect(stat(join(dir, 'google.json'))).rejects.toThrow()
+  })
+
+  test('DELETE removes only the google record', async () => {
+    await call('PUT', '/api/provider/anthropic', { key: ANTHROPIC_KEY })
+    await call('PUT', '/api/provider/google', { key: GOOGLE_KEY })
+    const r = await call('DELETE', '/api/provider/google')
+    expect(r.body.provider.state).toBe('absent')
+    expect((await call('GET', '/api/provider')).body.providers[0].state).toBe('present')
+  })
+
+  test('test and models answer "not supported" in words — no request leaves, no fake success', async () => {
+    await call('PUT', '/api/provider/google', { key: GOOGLE_KEY })
+    for (const [m, p] of [['POST', '/api/provider/google/test'], ['GET', '/api/provider/google/models']] as const) {
+      const r = await call(m, p)
+      expect(r.status).toBe(200)
+      expect(r.body.ok).toBe(false)
+      expect(r.body.code).toBe('not_supported')
+      expect(typeof r.body.sentence).toBe('string')
+    }
+    expect(calls).toEqual([])
+  })
+})

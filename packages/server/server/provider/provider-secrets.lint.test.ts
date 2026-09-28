@@ -37,6 +37,9 @@
  *                                             header — the one place that endpoint's key is unwrapped)
  *   - runtime src/provider/openai-compatible/models.ts  (B5a.3: its `list()` receives the key as a
  *                                             STRING by contract D5 and builds the same header)
+ *   - runtime src/provider/google/client.ts  (B5b.1: builds the Gemini key header — the one place a
+ *                                             Google key is unwrapped; `google/usage.ts`, `raw.ts` and
+ *                                             `raw-stream.ts` beside it are non-holders and are walked)
  * `cli-provider.ts` receives the typed value from the prompt and hands it to `credentials.ts`; it
  * is not a HOLDER (Guard 1 does not apply to it — its `PROVIDER_KEYS_DIR` doc mention is fine
  * precisely because Guard 1 never scans it), but it is host-facing provider code, so Guards 2 and
@@ -143,6 +146,8 @@ const HOLDERS = [
   join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'),
   // B5a.3 — the model lister reveals the endpoint's handle inline into its one request's header.
   join(RUNTIME_SRC_DIR, 'provider/openai-compatible/models.ts'),
+  // B5b.1 — unwraps the Google handle into the one key header of each Gemini request, once per call.
+  join(RUNTIME_SRC_DIR, 'provider/google/client.ts'),
   // NEW, C1.2 — types-only, but spells `reveal(` as its handle interface's method name. See the
   // "HOLDERS" doc block above for why it is listed rather than exempted.
   join(RUNTIME_SRC_DIR, 'provider/credential.ts'),
@@ -268,6 +273,13 @@ const CREDENTIAL_ENV_NAMES: readonly string[] = [
   'OPENAI_BASE' + '_URL',
   'OPENROUTER_API' + '_KEY',
   'DEEPSEEK_API' + '_KEY',
+  // B5b — what Google's SDKs fall back to: the two key variables, the base URL (redirecting the host a
+  // key is sent to is as good as reading it), and the service-account file that would be a second,
+  // non-key credential kind (a Google subscription/login inside our loop is prohibited, master §22.4).
+  'GEMINI_API' + '_KEY',
+  'GOOGLE_API' + '_KEY',
+  'GOOGLE_GEMINI_BASE' + '_URL',
+  'GOOGLE_APPLICATION' + '_CREDENTIALS',
 ]
 
 // ── a clean fixture the self-tests can measure against ─────────────────────────────────────────
@@ -304,6 +316,14 @@ describe('provider-secrets.lint — a provider API key never leaves its holders'
     expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'))
     expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/raw.ts'))
     expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/openai-compatible/client.ts'))
+  })
+
+  test('non-vacuity: the B5b Google client is walked AND listed as a holder; its readers are walked as non-holders', () => {
+    for (const f of ['client.ts', 'raw.ts', 'raw-stream.ts', 'usage.ts']) {
+      expect(WALKED).toContain(join(RUNTIME_SRC_DIR, 'provider/google', f))
+    }
+    expect(HOLDERS).toContain(join(RUNTIME_SRC_DIR, 'provider/google/client.ts'))
+    expect(HOLDERS).not.toContain(join(RUNTIME_SRC_DIR, 'provider/google/raw.ts'))
   })
 
   test('non-vacuity: the walk also reaches the moved runtime modules, not only this directory', () => {

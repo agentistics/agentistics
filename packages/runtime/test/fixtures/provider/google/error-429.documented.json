@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "error-429",
+    "source": "ai.google.dev/gemini-api/docs/api-errors, as fetched by docs/superpowers/research/12-provider-apis.md \u00a73.7 on 2026-09-20 (error shape {error:{code,message,status}}; retry on 429/5xx). Message text illustrative."
+  },
+  "status": 429,
+  "headers": {
+    "content-type": "application/json; charset=UTF-8",
+    "retry-after": "7",
+    "date": "Mon, 28 Sep 2026 12:00:00 GMT"
+  },
+  "body": "{\"error\":{\"code\":429,\"message\":\"Resource has been exhausted (e.g. check quota).\",\"status\":\"RESOURCE_EXHAUSTED\"}}"
+}

@@ -16,12 +16,16 @@ import {
   createOpenAICompatibleClient,
   type OpenAICompatibleClientDeps,
 } from './openai-compatible/client.ts'
+import { createGoogleClient, type GoogleClientDeps } from './google/client.ts'
 
 export interface ProviderClientsDeps {
   anthropic: AnthropicClientDeps
   /** B5a — ONE configured Chat Completions endpoint. Absent: the slot is a declared `null`
    *  (`PROVIDER_CLIENT_ABSENT['openai-compatible']`), never a client pointed at a guessed URL. */
   openaiCompatible?: OpenAICompatibleClientDeps
+  /** B5b — Google's Gemini API, over the user's own key. Absent: the slot is a declared `null`
+   *  (`PROVIDER_CLIENT_ABSENT.google`), never a client that guesses where a key might be. */
+  google?: GoogleClientDeps
 }
 
 export function createProviderClients(deps: ProviderClientsDeps): Record<ProviderId, ProviderClient | null> {
@@ -29,8 +33,8 @@ export function createProviderClients(deps: ProviderClientsDeps): Record<Provide
     anthropic: createAnthropicClient(deps.anthropic),
     // B5 — the OpenAI Responses / Chat Completions usage map is not verified yet (spec §5.2).
     openai: null,
-    // B5 — Gemini `generateContent` usage map not verified yet (spec §5.2).
-    google: null,
+    // B5b.1 — a client only when the host injected a resolver and a capture directory (no ambient key).
+    google: deps.google ? createGoogleClient(deps.google) : null,
     // B5 — Moonshot/Kimi routing is not a direct provider call B1 makes.
     moonshot: null,
     // B5a — a client only when the host configured an endpoint; the runtime has no default one.

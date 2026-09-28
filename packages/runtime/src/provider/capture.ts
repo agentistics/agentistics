@@ -132,7 +132,13 @@ export interface StreamingCapturingFetch {
  * never inspected. Only the first call is teed; a second call (which one attempt must never make)
  * is passed through as-is and only counted, so the caller can refuse the attempt on the count.
  */
-export function createStreamingCapturingFetch(inner: typeof fetch = fetch): StreamingCapturingFetch {
+export function createStreamingCapturingFetch(
+  inner: typeof fetch = fetch,
+  /** Which response headers survive into the observation — each client passes ITS OWN allowlist
+   *  (`google/raw.ts`), the same parameter `createCapturingFetch` takes; the default is Anthropic's, so
+   *  every existing caller is unchanged. Always an allowlist, never a denylist (spec §6.3.3). */
+  keepHeaders: (headers: Headers) => Record<string, string> = allowlistHeaders,
+): StreamingCapturingFetch {
   let sent = false
   let count = 0
   let settle!: (o: ObservedStream | null) => void
@@ -149,7 +155,7 @@ export function createStreamingCapturingFetch(inner: typeof fetch = fetch): Stre
       settle(null)
       throw err
     }
-    const headers = allowlistHeaders(response.headers)
+    const headers = keepHeaders(response.headers)
     if (response.body === null) {
       settle({ status: response.status, headers, body: null })
       return response

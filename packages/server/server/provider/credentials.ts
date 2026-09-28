@@ -26,10 +26,12 @@ import { join } from 'node:path'
 import type { Stats } from 'node:fs'
 import {
   ENDPOINT_PRESETS,
+  isKeyVendor,
   isOpenAICompatibleEndpoint,
   providerKeyFile,
   PROVIDER_KEYS_DIR,
   type KeyedProviderId,
+  type KeyVendorId,
   type OpenAICompatibleEndpointId,
 } from '../config.ts'
 import {
@@ -88,7 +90,7 @@ export type StoreCredentialResult =
  * if any — untouched).
  */
 export async function storeCredential(
-  provider: 'anthropic',
+  provider: KeyVendorId,
   value: string,
   opts: CredentialIoOpts & {
     replace?: boolean
@@ -96,7 +98,7 @@ export async function storeCredential(
     beforeRename?: () => Promise<void> | void
   } = {},
 ): Promise<StoreCredentialResult> {
-  const shape = validateKeyShape(value)
+  const shape = validateKeyShape(value, provider)
   if (!shape.ok) return { ok: false, reason: 'invalid-shape', shape: shape.reason }
 
   const dir = opts.dir ?? PROVIDER_KEYS_DIR
@@ -197,7 +199,7 @@ async function writeRecordAtomic(
  * refuses a world-readable private key, without ever reading what it contains.
  */
 export async function resolveCredential(
-  provider: 'anthropic',
+  provider: KeyVendorId,
   opts: CredentialIoOpts = {},
 ): Promise<CredentialResolution> {
   const dir = opts.dir ?? PROVIDER_KEYS_DIR
@@ -234,7 +236,7 @@ export interface CredentialStatus {
   fingerprint?: string
   /** The last 4 characters of the key — never more (`lastFourOf`). */
   last4?: string
-  /** B5a — an endpoint's stored base URL (configuration, not a secret). Absent for Anthropic. */
+  /** B5a — an endpoint's stored base URL (configuration, not a secret). Absent for a key vendor. */
   baseUrl?: string
   /** B5a — true when an endpoint (Ollama) was stored with NO key (`--no-key`). */
   keyless?: boolean
@@ -278,7 +280,7 @@ export async function credentialStatus(
     return { provider, path, state: 'unreadable', mode }
   }
 
-  if (provider === 'anthropic') {
+  if (isKeyVendor(provider)) {
     const parsed = parseStoredCredential(text, provider)
     if (!parsed.ok) return { provider, path, state: 'unreadable', mode }
     return {
@@ -450,7 +452,8 @@ export async function readEndpointCredential(
 
 /**
  * The host's answer to a runtime `CredentialRef` (D23) — the one mapping every resolver in this
- * binary goes through. `{anthropic, *}` → the Anthropic key. `{openai-compatible, <endpoint id>}` →
+ * binary goes through. `{anthropic, *}` → the Anthropic key; `{google, *}` → the Google key (B5b — the
+ * same one-key-per-vendor shape). `{openai-compatible, <endpoint id>}` →
  * that endpoint's key; a KEYLESS endpoint answers `absent` (there is no key to hand over — the client
  * decides whether its endpoint may proceed without one). Any other pair — an unknown endpoint id, a
  * vendor `ProviderId` like `openai` that this store never keys by, `openai-compatible` naming
@@ -461,6 +464,7 @@ export async function resolveCredentialRef(
   opts: CredentialIoOpts = {},
 ): Promise<CredentialResolution> {
   if (ref.provider === 'anthropic') return resolveCredential('anthropic', opts)
+  if (ref.provider === 'google') return resolveCredential('google', opts)
   if (ref.provider === 'openai-compatible' && isOpenAICompatibleEndpoint(ref.id)) {
     const read = await readEndpointCredential(ref.id, opts)
     if (!read.ok) return { ok: false, reason: read.reason }
@@ -490,7 +494,7 @@ export async function removeCredential(
   let fingerprint: string | null = null
   try {
     const text = await readFile(path, 'utf-8')
-    if (provider === 'anthropic') {
+    if (isKeyVendor(provider)) {
       const parsed = parseStoredCredential(text, provider)
       if (parsed.ok) fingerprint = fingerprintOf(parsed.value)
     } else {

@@ -23,6 +23,18 @@ export * from './provider/openai-compatible/client.ts'
 export * from './provider/openai-compatible/raw.ts'
 export * from './provider/openai-compatible/usage.ts'
 export * from './provider/openai-compatible/models.ts'
+// B5b.1 — Google's Gemini API. `raw-stream.ts` is not exported (the Anthropic one is not either); the
+// pure readers a host or a test may want are named explicitly, so the barrel never carries a helper.
+export * from './provider/google/client.ts'
+export * from './provider/google/usage.ts'
+export {
+  GOOGLE_HEADER_ALLOWLIST,
+  allowlistGoogleHeaders,
+  classifyGoogleInBandError,
+  fromGoogleFinishReason,
+  readGoogleExchange,
+  toGoogleContent,
+} from './provider/google/raw.ts'
 // ── B3: the tool loop, the policy, the tools and the sandbox ────────────────────────────────────
 // `tools/grant.ts` is deliberately NOT exported: minting a grant is the gate's alone
 // (`tools-gate.lint.test.ts`), and a public `mintGrant` would be a door around the policy for any

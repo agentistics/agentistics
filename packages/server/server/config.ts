@@ -390,11 +390,22 @@ export const ENDPOINT_PRESETS: Readonly<Record<OpenAICompatibleEndpointId, Endpo
   ollama: { kind: 'local', defaultBaseUrl: 'http://localhost:11434/v1', keyOptional: true, label: 'Ollama' },
 }
 
+/** The VENDORS a key may be stored for: one API key, one fixed host of the vendor's own (no base URL to
+ *  configure). Anthropic (B1, owner decision D3) and Google's Gemini API (B5b). An API key ONLY — a
+ *  Google AI Pro/Ultra subscription inside our loop is prohibited (master §22.4). */
+export type KeyVendorId = 'anthropic' | 'google'
+export const KEY_VENDORS: readonly KeyVendorId[] = ['anthropic', 'google']
+
+export function isKeyVendor(id: unknown): id is KeyVendorId {
+  return typeof id === 'string' && (KEY_VENDORS as readonly string[]).includes(id)
+}
+
 /** The providers a key may be STORED for. Closed, and deliberately narrower than core's
- *  `ProviderId`: Anthropic (B1, owner decision D3) plus the six OpenAI-compatible endpoints (B5a).
- *  An endpoint is keyed by its ENDPOINT id, never by `'openai-compatible'` — one protocol, six files. */
-export type KeyedProviderId = 'anthropic' | OpenAICompatibleEndpointId
-export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic', ...OPENAI_COMPATIBLE_ENDPOINTS]
+ *  `ProviderId`: the key vendors (Anthropic, B1; Google, B5b) plus the six OpenAI-compatible endpoints
+ *  (B5a). An endpoint is keyed by its ENDPOINT id, never by `'openai-compatible'` — one protocol, six
+ *  files. */
+export type KeyedProviderId = KeyVendorId | OpenAICompatibleEndpointId
+export const KEYED_PROVIDERS: readonly KeyedProviderId[] = [...KEY_VENDORS, ...OPENAI_COMPATIBLE_ENDPOINTS]
 
 export function isKeyedProvider(id: unknown): id is KeyedProviderId {
   return typeof id === 'string' && (KEYED_PROVIDERS as readonly string[]).includes(id)

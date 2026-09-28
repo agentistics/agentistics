@@ -386,10 +386,99 @@ describe('resolveCredentialRef — the one ref mapping', () => {
         { provider: 'openai' as const, id: 'openrouter' },
         { provider: 'openai-compatible' as const, id: 'anthropic' },
         { provider: 'openai-compatible' as const, id: '../anthropic' },
-        { provider: 'google' as const, id: 'default' },
+        // a vendor `ProviderId` this store still never keys by (google IS keyed now — see below)
+        { provider: 'moonshot' as const, id: 'default' },
       ]) {
         expect(await resolveCredentialRef(ref, { dir })).toEqual({ ok: false, reason: 'wrong-provider' })
       }
+    })
+  })
+})
+
+// B5b — Google's Gemini key: the same one-key-per-vendor record as Anthropic's, under its own file.
+const FAKE_GOOGLE_KEY = 'AIza' + 'Test' + 'x'.repeat(31)
+
+describe('the Google key (B5b) — a second key vendor over the same store', () => {
+  test('stored 0600 in provider-keys/google.json, resolved to a handle that names google and hides the key', async () => {
+    await withTempDir(async (dir) => {
+      const stored = await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
+      if (!stored.ok) throw new Error('unreachable')
+      expect(stored.path).toBe(providerKeyFile('google', dir))
+      expect(await modeOf(stored.path)).toBe(0o600)
+      expect(await modeOf(dir)).toBe(0o700)
+
+      const resolved = await resolveCredential('google', { dir })
+      if (!resolved.ok) throw new Error('unreachable')
+      expect(resolved.handle.provider).toBe('google')
+      expect(resolved.handle.reveal()).toBe(FAKE_GOOGLE_KEY)
+      expect(String(resolved.handle)).toBe(`[credential google ${fingerprintOf(FAKE_GOOGLE_KEY)}]`)
+      expect(JSON.stringify(resolved.handle)).not.toContain(FAKE_GOOGLE_KEY)
+    })
+  })
+
+  test('the two vendors never read each other\'s record, and never collide on disk', async () => {
+    await withTempDir(async (dir) => {
+      await storeCredential('anthropic', FAKE_KEY, { dir })
+      await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
+      expect((await readdir(dir)).sort()).toEqual(['anthropic.json', 'google.json'])
+      const a = await resolveCredential('anthropic', { dir })
+      const g = await resolveCredential('google', { dir })
+      expect(a.ok && a.handle.reveal()).toBe(FAKE_KEY)
+      expect(g.ok && g.handle.reveal()).toBe(FAKE_GOOGLE_KEY)
+
+      // a record copied under the wrong name is `wrong-provider`, never handed to the other vendor
+      await writeFile(providerKeyFile('google', dir), await readFile(providerKeyFile('anthropic', dir), 'utf8'), { mode: 0o600 })
+      expect(await resolveCredential('google', { dir })).toEqual({ ok: false, reason: 'wrong-provider' })
+    })
+  })
+
+  test('shape: an Anthropic key is refused for Google (it would be sent to another host), and a Google key for Anthropic', async () => {
+    await withTempDir(async (dir) => {
+      expect(await storeCredential('google', FAKE_KEY, { dir })).toEqual({ ok: false, reason: 'invalid-shape', shape: 'foreign-prefix' })
+      expect(await storeCredential('anthropic', FAKE_GOOGLE_KEY, { dir })).toEqual({ ok: false, reason: 'invalid-shape', shape: 'prefix' })
+      expect(await storeCredential('google', 'AIza short', { dir })).toEqual({ ok: false, reason: 'invalid-shape', shape: 'whitespace' })
+      expect(await storeCredential('google', 'AIzaShort', { dir })).toEqual({ ok: false, reason: 'invalid-shape', shape: 'too-short' })
+      await expect(readdir(dir)).resolves.toEqual([])
+    })
+  })
+
+  test('a second write without replace refuses; rotation reports old -> new; status shows fingerprint and last 4 only', async () => {
+    await withTempDir(async (dir) => {
+      const first = await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
+      if (!first.ok) throw new Error('unreachable')
+      expect(await storeCredential('google', FAKE_GOOGLE_KEY + 'z', { dir })).toEqual({ ok: false, reason: 'exists', previous: first.fingerprint })
+      const rotated = await storeCredential('google', FAKE_GOOGLE_KEY + 'z', { dir, replace: true })
+      expect(rotated.ok && rotated.previous).toBe(first.fingerprint)
+
+      const st = await credentialStatus('google', { dir })
+      expect(st).toMatchObject({ provider: 'google', state: 'present', fingerprint: fingerprintOf(FAKE_GOOGLE_KEY + 'z'), last4: (FAKE_GOOGLE_KEY + 'z').slice(-4) })
+      expect(st.baseUrl).toBeUndefined() // a vendor has no base URL to configure
+      expect(JSON.stringify(st)).not.toContain(FAKE_GOOGLE_KEY)
+
+      const removed = await removeCredential('google', { dir })
+      expect(removed).toMatchObject({ removed: true, fingerprint: fingerprintOf(FAKE_GOOGLE_KEY + 'z') })
+      expect((await credentialStatus('google', { dir })).state).toBe('absent')
+    })
+  })
+
+  test('a too-open google file is refused on the stat alone', async () => {
+    await withTempDir(async (dir) => {
+      await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
+      await chmod(providerKeyFile('google', dir), 0o644)
+      expect(await resolveCredential('google', { dir })).toEqual({ ok: false, reason: 'permissions-too-open' })
+    })
+  })
+
+  test('resolveCredentialRef maps {google, *} to the Google key, and only that ref', async () => {
+    await withTempDir(async (dir) => {
+      expect(await resolveCredentialRef({ provider: 'google', id: 'default' }, { dir })).toEqual({ ok: false, reason: 'absent' })
+      await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
+      await storeCredential('anthropic', FAKE_KEY, { dir })
+      const g = await resolveCredentialRef({ provider: 'google', id: 'default' }, { dir })
+      expect(g.ok && g.handle.provider).toBe('google')
+      expect(g.ok && g.handle.reveal()).toBe(FAKE_GOOGLE_KEY)
+      const a = await resolveCredentialRef({ provider: 'anthropic', id: 'default' }, { dir })
+      expect(a.ok && a.handle.reveal()).toBe(FAKE_KEY)
     })
   })
 })
