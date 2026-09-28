@@ -287,3 +287,81 @@ provenance and sessions are stricter than the references'. It is thin at its sea
 - openclaude was not read (§0).
 - The size estimates are this document's, on the board's ruler. The briefing session of each item
   should re-estimate against the code it actually touches.
+
+---
+
+## 7. Addendum (2026-09-28, evening) — what became an item, and where
+
+The leader (7b1095709e) reconciled this matrix and the B8 spec
+(`2026-09-28-runtime-b8-catalogue.md`) into board items on task `t-e1dea7cd6f`. The table below
+points each proposal at its item, so this document can serve as the source for them. The item on
+the board is authoritative: its title, group and status can change after this was written.
+
+### 7.1 The H-list of §4
+
+| Proposal | Item | Group |
+|---|---|---|
+| H1 system prompt | **B4.5 H1-lean** `s-f75a63e390` (M1, host facts only, pending the owner's yes) + **H1-full** `s-26960c3c0f` | B4 / B8 |
+| H2 `AGENTS.md` | H2 `s-007e34c62c` | B8 |
+| H3 command registry | B8.5 `s-54fd1ee14b` (`/review` is an acceptance criterion there, not an item) | B8 |
+| H4 undo | H4 `s-762c0abe92` | B8 |
+| H5 context floor | H5 `s-b66d4d5649` (replaced by B4-CTX) | B8 |
+| H6 per-run line + gauge | H6 `s-b3484437e4` | B8 |
+| H7 title | H7 `s-b4c1f3882e` | B8 |
+| H8 audit | H8 `s-15bea06f05` | B8 |
+| H9 terminal as client / server hosts native sessions | **B4.6** `s-e50398b96f` (needs its own spec before implementation) | B4 |
+| H10 config loader + folder trust | B8.2 `s-0ced5a6168`, B8.3 `s-915d3dcc37`, B8.4 `s-a7a41142ee` | B8 |
+| H11 permission profiles | B8.4 `s-a7a41142ee`; the three built-ins alone, with no catalogue, as **B4.7** `s-8f04a093b5` (unblocks the TUI's CD-15) | B8 / B4 |
+| H12 skills | B8.6 `s-87d93c00a7` | B8 |
+| H13 agent profiles | B8.7 `s-f3f422e2e2` (the contract handed to B6.1) | B8 |
+| H14 MCP declarations/OAuth/verbs | B8.8 `s-7277bad6e1` (extends B6.3) | B8 |
+| H15 git write verbs (D-T6) | H15 `s-7003396f13` | B8 |
+| H16 headless `--json` | H16 `s-21c914b57b` | B8 |
+| H17 desktop notification when a native session waits | H17 `s-c4ce49fa17` | B8 |
+| H18 loop guard | H18 `s-e8f3cbc626` | B8 |
+| H19 custom commands + `/init` | B8.5 `s-54fd1ee14b` | B8 |
+| H20 `/add-dir` (and opencode-style references) | H20 `s-ab5b74028a` | B8 |
+| H21 fork / export | H21 `s-1660f1f61a` | B8 |
+| H22 VS Code native sessions | H22 `s-fa9f017edd` (depends on B4.6) | B8 |
+| H23 ACP server | H23 `s-00565da376` | B8 |
+| H24 model change mid-session (same provider) | H24 `s-e6225d7312` | B8 |
+| LSP diagnostics (§2.9, no H-number) | H25 `s-dffd7446d2` | B8 |
+| installer / lockfile (B8 spec §7) | B8.10 `s-2e646461c8` (source still the owner's C8) | B8 |
+| after-edit steps | B8.9 `s-ac0172c6e9` | B8 |
+
+### 7.2 Second research round — gaps found after §2, verified in code the same day
+
+| Finding | Evidence at `origin/feat/runtime-sessions` | Item |
+|---|---|---|
+| No way to request extended reasoning or an effort level; thinking blocks are only carried raw | `loop/loop.ts:265`, `provider/client.ts:92` | **B9.1** `s-a087dff5c1` |
+| No image part in the provider message shape; a pasted screenshot cannot be sent | `provider/client.ts` (no image part type) | **B9.2** `s-19c106fe17` |
+| Rate-limit headers ARE captured (`anthropic-ratelimit-*`, `x-ratelimit-*`) and shown to nobody | `provider/anthropic/raw.ts:40`, `provider/openai-compatible/raw.ts:62` | **B9.3** `s-602094a20b` |
+| The group | B9 · provider capabilities | `s-35ed99c910` |
+| Code review mode (`/review`, Codex and Claude Code) | — | acceptance criterion of B8.5, no item |
+| External editor for a long prompt, prompt-history search, `/copy` of the last reply | not in `2026-09-28-harness-tui-design.md` | passed to the TUI design session by the leader; no item here |
+| A machine/administrator policy layer (managed settings in the references); `rules.ts` models it and nothing reads it | `policy/rules.ts` (machine → user → project) | recorded on B8.4 as a known gap; probably an Enterprise conversation |
+
+### 7.3 Two dependencies the board did not show, now items
+
+- **The server hosting native sessions** (the B4 spec §8 stated limit) had no owner, and the TUI's
+  sessions parity (P3), the VS Code view (H22), the web watching a terminal-driven session, and
+  native sessions in `/api/fleet` all depend on it. It is now **B4.6**.
+- **The TUI's CD-15 (permission mode, P2)** depended on B8.4, which is post-M1. **B4.7** is the
+  deliberate slice (the three built-in profiles, no catalogue) that unblocks it without pulling B8.4
+  forward.
+
+### 7.4 Not an item yet
+
+- **The owner's idea: suggest filing a session under an ALM task.** Checked against the references:
+  it is not on opencode's surface (config, agents, skills, plugins, read from its binary), nor in the
+  public documentation of Claude Code, Codex or Gemini as known to this session. It is a genuine
+  differentiator. Two notes for its scope, not a decision:
+  - For NATIVE sessions the signal is exact and cheap. The journal already holds the tools, the
+    files touched, the duration and every `task.plan` call; a multi-step `task.plan` in a session
+    with no `taskId` is the strongest sign of a delivery.
+  - For external sessions the same signal comes from the `SessionMeta` the product already computes.
+
+  The offer must be a FACT on the event channel ("this session looks like a delivery; file it?"),
+  never an automatic creation. Waiting for the leader's timing.
+- **The owner questions** C8 (where installable entries come from) and C9 (system-prompt content and
+  language) stay open. The leader is taking them to the owner.
