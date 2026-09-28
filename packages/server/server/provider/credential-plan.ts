@@ -88,10 +88,15 @@ const MAX_KEY_LENGTH = 512
 
 const ANTHROPIC_KEY_PREFIX = 'sk-ant-'
 
-/** Same guard-rail reading as `MIN_KEY_LENGTH`: a truncated-paste bound, not a claim about Google's real
- *  key format (its keys begin `AIza…` today, and that is deliberately NOT enforced — a prefix rule that
- *  is wrong rejects a genuine key). */
-const GOOGLE_KEY_MIN_LENGTH = 20
+/** A Gemini API key is `AIza` + 35 characters: 39 in all (B5b.1-SEC G-2). Enforced EXACTLY, because the
+ *  value goes out as a header to one fixed host and a wrong-vendor key stored here is a credential
+ *  sent to a third party; a genuine key that ever changes shape is refused with a sentence naming the
+ *  rule, which is cheaper than a leak. */
+const GOOGLE_KEY_PREFIX = 'AIza'
+const GOOGLE_KEY_LENGTH = 39
+/** The `sk-` family — Anthropic (`sk-ant-`), OpenAI (`sk-proj-`), OpenRouter (`sk-or-`), LiteLLM's own
+ *  examples (`sk-1234`). None is a Google key, and each would be sent to Google's host. */
+const SK_FAMILY_PREFIX = 'sk-'
 
 /** Ordinary whitespace — space, tab, newline, CR, form feed, vertical tab. Checked separately from
  *  `CONTROL_CHARS` below so the two refusals can name what is actually wrong. */
@@ -115,8 +120,9 @@ export type KeyShapeResult = { ok: true } | { ok: false; reason: KeyShapeRefusal
  * The per-endpoint key rules — deliberately LOOSE (B5a). No endpoint's prefix is enforced: OpenRouter
  * says `sk-or-…`, a LiteLLM proxy key is whatever its operator minted (its own docs use `sk-1234`), and
  * a prefix rule that is wrong rejects a genuine key. What IS refused, everywhere: whitespace, control
- * characters, bracketed-paste residue, absurd lengths — and an ANTHROPIC key (`foreign-prefix`), because
- * storing one here would send it, in a bearer header, to a host that is not Anthropic.
+ * characters, bracketed-paste residue, absurd lengths — and an ANTHROPIC or GOOGLE key (`foreign-prefix`,
+ * `sk-ant-` / `AIza`), because storing one here would send it, in a bearer header, to a host that is
+ * neither's vendor.
  * `minLength` is a truncated-paste guard, never a claim about the vendor's real minimum.
  */
 const ENDPOINT_KEY_MIN_LENGTH: Readonly<Record<OpenAICompatibleEndpointId, number>> = {
@@ -151,10 +157,21 @@ export function validateKeyShape(value: string, provider: KeyedProviderId = 'ant
     if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
     return { ok: true }
   }
-  // An Anthropic key stored under any other provider would be sent, in a header, to a host that is not
-  // Anthropic — refused for Google exactly as for every endpoint.
-  if (value.startsWith(ANTHROPIC_KEY_PREFIX)) return { ok: false, reason: 'foreign-prefix' }
-  const min = provider === 'google' ? GOOGLE_KEY_MIN_LENGTH : ENDPOINT_KEY_MIN_LENGTH[provider]
+  if (provider === 'google') {
+    // Refuse the whole `sk-` family, and require the real shape: a key for another vendor stored here
+    // would be sent, in a header, to a host that is not its vendor's.
+    if (value.startsWith(SK_FAMILY_PREFIX)) return { ok: false, reason: 'foreign-prefix' }
+    if (!value.startsWith(GOOGLE_KEY_PREFIX)) return { ok: false, reason: 'prefix' }
+    if (value.length < GOOGLE_KEY_LENGTH) return { ok: false, reason: 'too-short' }
+    if (value.length > GOOGLE_KEY_LENGTH) return { ok: false, reason: 'too-long' }
+    return { ok: true }
+  }
+  // An Anthropic key, or a Google key, stored under any endpoint would be sent, in a bearer header, to a
+  // host that is neither's vendor.
+  if (value.startsWith(ANTHROPIC_KEY_PREFIX) || value.startsWith(GOOGLE_KEY_PREFIX)) {
+    return { ok: false, reason: 'foreign-prefix' }
+  }
+  const min = ENDPOINT_KEY_MIN_LENGTH[provider]
   if (value.length < min) return { ok: false, reason: 'too-short' }
   if (value.length > MAX_KEY_LENGTH) return { ok: false, reason: 'too-long' }
   return { ok: true }
@@ -181,17 +198,24 @@ export function keyShapeSentence(reason: KeyShapeRefusal, provider: KeyedProvide
       return 'that looks like bracketed-paste markers around the key ("[" or "~") rather than the '
         + 'key itself — paste it again, or type it.'
     case 'prefix':
-      return `an Anthropic API key begins with "${ANTHROPIC_KEY_PREFIX}" — this value does not.`
+      return provider === 'google'
+        ? `a Google Gemini API key begins with "${GOOGLE_KEY_PREFIX}" — this value does not.`
+        : `an Anthropic API key begins with "${ANTHROPIC_KEY_PREFIX}" — this value does not.`
     case 'foreign-prefix':
-      return 'that looks like an Anthropic key — it is never sent to another endpoint. Store it with '
-        + '`agentop provider key set anthropic`.'
+      if (provider === 'google') {
+        return 'that looks like a key for another vendor — Anthropic keys (`sk-ant-…`) are never sent to '
+          + 'Google. Store an Anthropic key with `agentop provider key set anthropic`.'
+      }
+      return 'that looks like a key for another vendor — it is never sent to another endpoint. Store an '
+        + 'Anthropic key with `agentop provider key set anthropic` and a Google key with '
+        + '`agentop provider key set google`.'
     case 'too-short': {
-      const min = provider === 'google'
-        ? GOOGLE_KEY_MIN_LENGTH
-        : endpoint === null ? MIN_KEY_LENGTH : ENDPOINT_KEY_MIN_LENGTH[endpoint]
+      if (provider === 'google') return `a Google Gemini API key is ${GOOGLE_KEY_LENGTH} characters — this one is shorter.`
+      const min = endpoint === null ? MIN_KEY_LENGTH : ENDPOINT_KEY_MIN_LENGTH[endpoint]
       return `a key this short (under ${min} characters) is not a valid ${whose.replace(/^an? /, '')}.`
     }
     case 'too-long':
+      if (provider === 'google') return `a Google Gemini API key is ${GOOGLE_KEY_LENGTH} characters — this one is longer.`
       return `a value this long (over ${MAX_KEY_LENGTH} characters) is not a valid ${whose.replace(/^an? /, '')}.`
   }
 }

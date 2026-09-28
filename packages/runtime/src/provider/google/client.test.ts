@@ -126,6 +126,9 @@ describe('google/client.ts — invokeOnce against a stub fetch (no network)', ()
       }))
       expect(result.status).toBe('completed')
       expect(seen).toHaveLength(1)
+      // G-4: the key rides in the header only — a `?key=` regression would put it in the URL (logs, proxies, Referer).
+      expect(seen[0]!.url).not.toContain(FAKE_KEY)
+      expect(seen[0]!.url).not.toContain('key=')
       expect(seen[0]!.url).toBe(`${GOOGLE_BASE_URL_CONSTANT}/models/gemini-2.5-flash:generateContent`)
       expect(seen[0]!.headers['x-goog-api-key']).toBe(FAKE_KEY)
 
@@ -143,6 +146,8 @@ describe('google/client.ts — invokeOnce against a stub fetch (no network)', ()
         fetch: recordingFetch(() => sseResponse([data(genBody())]), seenStream),
         writeCapture: async (ex) => { writes.push(JSON.stringify(ex)); return undefined },
       })))
+      expect(seenStream[0]!.url).not.toContain(FAKE_KEY)
+      expect(seenStream[0]!.url).not.toContain('key=')
       expect(seenStream[0]!.url).toBe(`${GOOGLE_BASE_URL_CONSTANT}/models/gemini-2.5-flash:streamGenerateContent?alt=sse`)
       expect(seenStream[0]!.headers['x-goog-api-key']).toBe(FAKE_KEY)
       const failed = await invokeGoogleOnce(req(), 1, deps({
@@ -470,5 +475,89 @@ describe('google/ — registry and the two things a key must never be', () => {
       const hits = needles.filter(n => src.includes(n.toLowerCase()))
       expect({ file: f, hits }).toEqual({ file: f, hits: [] })
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// G-1 — a redirect must never carry the key to another origin. Bun forwards custom headers across a
+// cross-origin redirect (same class as UI.4 N-1), so the request itself must say `redirect: 'error'`.
+// Real `fetch` and two REAL local servers: a stub cannot prove what the runtime does with `init`.
+// ---------------------------------------------------------------------------
+
+describe('google/client.ts — G-1: a redirect never carries the key to a second origin', () => {
+  interface Hit { headers: Record<string, string> }
+
+  function listen(handler: (req: Request) => Response) {
+    const hits: Hit[] = []
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch(r) {
+        const headers: Record<string, string> = {}
+        r.headers.forEach((v, k) => { headers[k] = v })
+        hits.push({ headers })
+        return handler(r)
+      },
+    })
+    return { server, hits, origin: `http://127.0.0.1:${server.port}` }
+  }
+
+  /** The client's host is a fixed constant; the ONLY seam is `deps.fetch`, so this one re-points the
+   *  request at the local "Google" and otherwise hands `init` to the real `fetch` untouched. */
+  function pointedAt(origin: string): typeof fetch {
+    // `Bun.fetch`, never the bare `fetch` identifier: an unrelated test file elsewhere in this shared
+    // process replaces `globalThis.fetch` with a stub in a `beforeEach` and never restores it, so a
+    // full-suite run would otherwise have this test's "real network" silently become that stub,
+    // depending on file execution order — reported as `first.hits` staying empty. `Bun.fetch` is a
+    // distinct function object Bun exposes precisely for this: verified `Bun.fetch !== globalThis.fetch`.
+    return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const u = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
+      return Bun.fetch(`${origin}${u.pathname}${u.search}`, init)
+    }) as typeof fetch
+  }
+
+  async function withRedirect(run: (fetchImpl: typeof fetch) => Promise<void>) {
+    const second = listen(() => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
+    const first = listen(() => new Response(null, { status: 302, headers: { location: `${second.origin}/stolen` } }))
+    try {
+      await run(pointedAt(first.origin))
+      expect(first.hits).toHaveLength(1) // asked once, never retried
+      expect(second.hits).toHaveLength(0) // the second origin received NOTHING — no request, so no header
+    } finally {
+      first.server.stop(true)
+      second.server.stop(true)
+    }
+  }
+
+  test('invoke: a 302 to another origin fails in words and the second origin never sees the request', async () => {
+    await withRedirect(async (fetchImpl) => {
+      const result = await invokeGoogleOnce(req(), 1, deps({ fetch: fetchImpl }))
+      expect(result.status).toBe('failed')
+      if (result.status !== 'failed') throw new Error('unreachable')
+      expect(result.error.retryable).toBe(false)
+      expect(result.error.userCode.length).toBeGreaterThan(0)
+      expect(JSON.stringify(result)).not.toContain(FAKE_KEY)
+    })
+  })
+
+  test('stream: a 302 to another origin ends failed and the second origin never sees the request', async () => {
+    await withRedirect(async (fetchImpl) => {
+      const events = await collect(streamGoogleOnce(req(), 1, deps({ fetch: fetchImpl })))
+      const end = events[events.length - 1]!
+      expect(end.type).toBe('end')
+      if (end.type !== 'end') throw new Error('unreachable')
+      expect(end.result.status).toBe('failed')
+      expect(JSON.stringify(events)).not.toContain(FAKE_KEY)
+    })
+  })
+
+  test('the request init says redirect: error on invoke AND stream', async () => {
+    const inits: Array<RequestInit | undefined> = []
+    const spy = ((_i: unknown, init?: RequestInit) => { inits.push(init); return Promise.resolve(json(genBody())) }) as typeof fetch
+    await invokeGoogleOnce(req(), 1, deps({ fetch: spy }))
+    const spyStream = ((_i: unknown, init?: RequestInit) => { inits.push(init); return Promise.resolve(sseResponse([data(genBody())])) }) as typeof fetch
+    await collect(streamGoogleOnce(req(), 1, deps({ fetch: spyStream })))
+    expect(inits).toHaveLength(2)
+    for (const init of inits) expect(init?.redirect).toBe('error')
   })
 })

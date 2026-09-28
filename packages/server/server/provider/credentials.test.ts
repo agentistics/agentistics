@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test'
 import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { providerKeyFile } from '../config.ts'
+import { OPENAI_COMPATIBLE_ENDPOINTS, providerKeyFile } from '../config.ts'
 import { fingerprintOf } from './credential-plan.ts'
 import {
   credentialStatus,
@@ -397,6 +397,8 @@ describe('resolveCredentialRef — the one ref mapping', () => {
 
 // B5b — Google's Gemini key: the same one-key-per-vendor record as Anthropic's, under its own file.
 const FAKE_GOOGLE_KEY = 'AIza' + 'Test' + 'x'.repeat(31)
+// A second, DIFFERENT, still-valid key (AIza + 35 = 39 characters) for a rotation.
+const FAKE_GOOGLE_KEY_2 = 'AIza' + 'Test' + 'y'.repeat(31)
 
 describe('the Google key (B5b) — a second key vendor over the same store', () => {
   test('stored 0600 in provider-keys/google.json, resolved to a handle that names google and hides the key', async () => {
@@ -442,21 +444,34 @@ describe('the Google key (B5b) — a second key vendor over the same store', () 
     })
   })
 
+  test('G-2: an OpenAI/OpenRouter key is refused for Google, and a Google key for every endpoint — nothing reaches disk', async () => {
+    await withTempDir(async (dir) => {
+      for (const key of ['sk-proj-' + 'p'.repeat(31), 'sk-or-' + 'o'.repeat(33), 'sk-' + 'n'.repeat(36)]) {
+        expect(await storeCredential('google', key, { dir })).toEqual({ ok: false, reason: 'invalid-shape', shape: 'foreign-prefix' })
+      }
+      for (const endpoint of OPENAI_COMPATIBLE_ENDPOINTS) {
+        const res = await storeEndpointCredential(endpoint, { baseUrl: 'http://localhost:11434/v1', key: FAKE_GOOGLE_KEY }, { dir })
+        expect(res).toEqual({ ok: false, reason: 'invalid-shape', shape: 'foreign-prefix' })
+      }
+      await expect(readdir(dir)).resolves.toEqual([])
+    })
+  })
+
   test('a second write without replace refuses; rotation reports old -> new; status shows fingerprint and last 4 only', async () => {
     await withTempDir(async (dir) => {
       const first = await storeCredential('google', FAKE_GOOGLE_KEY, { dir })
       if (!first.ok) throw new Error('unreachable')
-      expect(await storeCredential('google', FAKE_GOOGLE_KEY + 'z', { dir })).toEqual({ ok: false, reason: 'exists', previous: first.fingerprint })
-      const rotated = await storeCredential('google', FAKE_GOOGLE_KEY + 'z', { dir, replace: true })
+      expect(await storeCredential('google', FAKE_GOOGLE_KEY_2, { dir })).toEqual({ ok: false, reason: 'exists', previous: first.fingerprint })
+      const rotated = await storeCredential('google', FAKE_GOOGLE_KEY_2, { dir, replace: true })
       expect(rotated.ok && rotated.previous).toBe(first.fingerprint)
 
       const st = await credentialStatus('google', { dir })
-      expect(st).toMatchObject({ provider: 'google', state: 'present', fingerprint: fingerprintOf(FAKE_GOOGLE_KEY + 'z'), last4: (FAKE_GOOGLE_KEY + 'z').slice(-4) })
+      expect(st).toMatchObject({ provider: 'google', state: 'present', fingerprint: fingerprintOf(FAKE_GOOGLE_KEY_2), last4: (FAKE_GOOGLE_KEY_2).slice(-4) })
       expect(st.baseUrl).toBeUndefined() // a vendor has no base URL to configure
       expect(JSON.stringify(st)).not.toContain(FAKE_GOOGLE_KEY)
 
       const removed = await removeCredential('google', { dir })
-      expect(removed).toMatchObject({ removed: true, fingerprint: fingerprintOf(FAKE_GOOGLE_KEY + 'z') })
+      expect(removed).toMatchObject({ removed: true, fingerprint: fingerprintOf(FAKE_GOOGLE_KEY_2) })
       expect((await credentialStatus('google', { dir })).state).toBe('absent')
     })
   })

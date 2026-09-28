@@ -647,7 +647,7 @@ describe('UI.4 — browser provenance (CSRF) is refused by the SERVER, not only 
 
 // ── B5b — Google's Gemini key over the same routes ──────────────────────────────────────────────
 
-const GOOGLE_KEY = 'AIzaSyFAKEg00gleK3yQQQQzzzz1111PPPPyyyy2'
+const GOOGLE_KEY = 'AIzaSyFAKEg00gleK3yQQQQzzzz1111PPPPyyyy' // B5b.1-SEC G-2: trimmed to the real 39-char shape
 
 describe('google (B5b) — a second key vendor on the same routes', () => {
   test('listed right after anthropic, as a key vendor: fixed address, always a key', async () => {

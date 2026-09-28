@@ -298,6 +298,9 @@ async function send(
       },
       body: JSON.stringify(body),
       signal,
+      // A redirect is never followed: Bun forwards custom headers (the key among them) across a
+      // cross-origin redirect, and Google's API has no reason to redirect a POST. The call fails instead.
+      redirect: 'error',
     })
     // The capturing fetch already holds its own copy of the body; release this one. NOT awaited: on
     // the streaming path this is one branch of a `tee()`, and the WHATWG streams spec settles a

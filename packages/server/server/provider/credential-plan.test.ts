@@ -319,3 +319,87 @@ describe('createCredentialHandle — an endpoint handle names the PROTOCOL, neve
     expect(h.reveal()).toBe(FAKE_EP_KEY)
   })
 })
+
+// ── B5b.1-SEC G-2 — a key is only ever stored for the vendor whose host will receive it ─────────
+//
+// The endpoint list is read from the SAME tables the code uses (`KEYED_PROVIDERS` /
+// `OPENAI_COMPATIBLE_ENDPOINTS`), so a new endpoint is covered by construction. Every value is built
+// at runtime — nothing here is a real-looking literal.
+
+import { KEYED_PROVIDERS, OPENAI_COMPATIBLE_ENDPOINTS } from '../config.ts'
+
+/** A Google-shaped key: `AIza` + 35 characters = 39. */
+const GOOGLE_SHAPED = 'AIza' + 'Sy' + 'g'.repeat(33)
+/** The `sk-` family, each padded to 39 so the refusal is about the PREFIX, never the length. */
+const SK_FAMILY = ['sk-ant-', 'sk-proj-', 'sk-or-', 'sk-'].map(prefix => prefix + 'k'.repeat(39 - prefix.length))
+
+describe('validateKeyShape — Google (G-2): AIza + 39 characters, and never the sk- family', () => {
+  test('the well-formed Google key is accepted', () => {
+    expect(GOOGLE_SHAPED).toHaveLength(39)
+    expect(validateKeyShape(GOOGLE_SHAPED, 'google')).toEqual({ ok: true })
+  })
+
+  for (const value of SK_FAMILY) {
+    test(`refuses the sk- family (${value.slice(0, 8)}…) as foreign-prefix`, () => {
+      expect(value).toHaveLength(39)
+      expect(validateKeyShape(value, 'google')).toEqual({ ok: false, reason: 'foreign-prefix' })
+    })
+  }
+
+  test('requires the AIza prefix', () => {
+    expect(validateKeyShape('B' + GOOGLE_SHAPED.slice(1), 'google')).toEqual({ ok: false, reason: 'prefix' })
+    expect(validateKeyShape('aiza' + GOOGLE_SHAPED.slice(4), 'google')).toEqual({ ok: false, reason: 'prefix' })
+  })
+
+  test('requires the total length to be exactly 39', () => {
+    expect(validateKeyShape(GOOGLE_SHAPED.slice(0, 38), 'google')).toEqual({ ok: false, reason: 'too-short' })
+    expect(validateKeyShape(GOOGLE_SHAPED + 'g', 'google')).toEqual({ ok: false, reason: 'too-long' })
+  })
+})
+
+describe('validateKeyShape — every OTHER keyed provider refuses a Google key (G-2)', () => {
+  const others = KEYED_PROVIDERS.filter(p => p !== 'google')
+
+  test('the enumeration is not empty and covers every OpenAI-compatible endpoint', () => {
+    expect(others.length).toBeGreaterThan(0)
+    for (const endpoint of OPENAI_COMPATIBLE_ENDPOINTS) expect(others).toContain(endpoint)
+  })
+
+  for (const provider of KEYED_PROVIDERS.filter(p => p !== 'google')) {
+    test(`${provider}: an AIza… key is refused`, () => {
+      const result = validateKeyShape(GOOGLE_SHAPED, provider)
+      expect(result.ok).toBe(false)
+      // An endpoint answers `foreign-prefix`; Anthropic's own prefix rule already answers `prefix`.
+      if (provider !== 'anthropic') expect(result).toEqual({ ok: false, reason: 'foreign-prefix' })
+    })
+  }
+})
+
+describe('keyShapeSentence — G-2 refusals speak in words and never echo a key', () => {
+  const reasons: KeyShapeRefusal[] = ['prefix', 'foreign-prefix', 'too-short', 'too-long']
+  const probes = [GOOGLE_SHAPED, ...SK_FAMILY]
+
+  for (const provider of KEYED_PROVIDERS) {
+    test(`${provider}: no sentence contains any probe key`, () => {
+      for (const reason of reasons) {
+        const sentence = keyShapeSentence(reason, provider)
+        expect(sentence.length).toBeGreaterThan(0)
+        for (const key of probes) expect(sentence).not.toContain(key)
+      }
+    })
+  }
+
+  test('the Google sentences name the real rule, not the Anthropic one', () => {
+    expect(keyShapeSentence('prefix', 'google')).toContain('AIza')
+    expect(keyShapeSentence('prefix', 'google')).not.toContain('sk-ant-')
+    expect(keyShapeSentence('too-short', 'google')).toContain('39')
+    expect(keyShapeSentence('too-long', 'google')).toContain('39')
+    expect(keyShapeSentence('foreign-prefix', 'google')).toContain('never sent to Google')
+  })
+
+  test('a foreign-prefix sentence on an endpoint names both places the key can belong', () => {
+    const s = keyShapeSentence('foreign-prefix', 'openai')
+    expect(s).toContain('agentop provider key set anthropic')
+    expect(s).toContain('agentop provider key set google')
+  })
+})
