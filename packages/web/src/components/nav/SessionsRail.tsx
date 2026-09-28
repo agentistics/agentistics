@@ -23,6 +23,7 @@ import { HarnessMark } from '../sessions/HarnessMark'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { sessionPath } from '../../lib/sessionRoute'
 import { NewSessionModal } from '../sessions/NewSessionModal'
+import { markSessionPending } from '../../lib/pendingSessionStore'
 import { Filter, Plus } from 'lucide-react'
 
 /**
@@ -174,8 +175,12 @@ export function SessionsRail({
             setCreating(false)
             // Same hand-off as the open aside: the row is not in this browser's fleet yet, so the
             // router state says "this id is on its way" instead of letting the page fall back to
-            // the overview for a poll.
-            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            // the overview for a poll. `markSessionPending` reaches the expanded aside's own
+            // placeholder too, even though this collapsed rail draws none of its own.
+            if (id) {
+              markSessionPending({ id, ...started })
+              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            }
           }}
         />
       )}

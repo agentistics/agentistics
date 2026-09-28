@@ -39,6 +39,8 @@ import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
 import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
+import { PendingSessionCard } from '../sessions/PendingSessionCard'
+import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
 import { buildPickRows } from '../../lib/sessionPick'
 import { rowMenuEntries, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -232,6 +234,18 @@ export function SessionsAside({
   // next time it asks, the dot is back.
   const [dismissedAttn, setDismissedAttn] = useState<ReadonlySet<string>>(new Set())
   useEffect(() => { setDismissedAttn(prev => pruneDismissed(prev, rows)) }, [rows])
+  // A session the aside is watching for RESOLVES the moment its id (or its conversation id — a
+  // spawn can hand back either) appears in this very poll. Run from BOTH mounts of this component:
+  // it is the same pure reconcile over the same store, so two mounts converge to one answer rather
+  // than disagreeing about it. See `pendingSessionStore.ts`'s own header.
+  useEffect(() => {
+    const present = new Set<string>()
+    for (const r of rows) {
+      present.add(r.id)
+      if (r.conversationId) present.add(r.conversationId)
+    }
+    reconcilePendingSessionsNow(present)
+  }, [rows])
   const dismissAttn = (ids: readonly string[]) => setDismissedAttn(prev => new Set([...prev, ...ids]))
   const toggleGroupFold = (key: string) => {
     const next = new Set(foldedGroups)
@@ -968,6 +982,9 @@ export function SessionsAside({
           is a notice about the list rather than an item in it. See `IdleReviewCard.tsx` for why
           mounting it in this component covers the desktop aside and the mobile list at once. */}
       <IdleReviewCard lang={lang} tap={tap} />
+      {/* A session just started but not yet in `rows` — see `PendingSessionCard.tsx`. Right under
+          the idle card, for the same reason: a notice about the list, not an item in it. */}
+      <PendingSessionCard lang={lang} tap={tap} />
       {/*
         * THE SEARCH, on its own row.
         *
@@ -1206,7 +1223,14 @@ export function SessionsAside({
             // for exactly as long as it takes a poll to land. The state says "this id is on its
             // way", so the page shows the creation loader instead of answering a question nobody
             // asked. Router state and not a prop: the modal that knows this is unmounting.
-            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            //
+            // `markSessionPending` is the LIST's own copy of that same fact — the placeholder row
+            // right above, drawn from the store rather than this navigation's state, since the
+            // aside is visible before and after this navigation settles.
+            if (id) {
+              markSessionPending({ id, ...started })
+              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            }
           }}
         />
       )}
