@@ -1,7 +1,10 @@
 import { test, expect } from 'bun:test'
+import { PROVIDER_FLAG_ENV as SERVER_FLAG_ENV, providerFlagOn } from '../../../server/server/config'
+import { unitName } from '../../../server/server/autostart'
 import {
   providerStateLabel, providerStateDot, providerCredentialMask, refusalMessage, testResultSentence,
   validateProviderForm, buildProviderPutBody, filterModels, modelsFetchedSentence, clearTestState,
+  providerOffGuide, SYSTEMD_BUS_CAVEAT, PROVIDER_FLAG_ENV, PROVIDER_FLAG_VALUE, PROVIDER_SERVICE_UNIT,
   type ProviderEntry, type ProviderModel, type TestStateMap,
 } from './providerSettings'
 
@@ -347,4 +350,88 @@ test('UI.4: the key never enters state, storage, the console or a controlled inp
   expect(submit.indexOf("inputEl.value = ''")).toBeLessThan(submit.indexOf('fetch('))
   // No setter anywhere is handed the typed key.
   expect(code).not.toMatch(/set[A-Z]\w*\(\s*keyTyped/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// The "runtime is off" guide (UI.5) — Settings → Providers must say HOW to turn it on.
+// ---------------------------------------------------------------------------------------------
+
+const allCommands = (pt: boolean): string[] =>
+  providerOffGuide(pt).sections.flatMap(s => s.steps.map(st => st.command))
+
+test('off guide: the variable name is the server\'s own constant and the value is the one that turns it on', () => {
+  expect(PROVIDER_FLAG_ENV).toBe(SERVER_FLAG_ENV)
+  // The value must actually be what the server reads as ON, not merely a string that looks right.
+  expect(providerFlagOn({ [SERVER_FLAG_ENV]: PROVIDER_FLAG_VALUE })).toBe(true)
+  expect(providerFlagOn({})).toBe(false)
+})
+
+test('off guide: the unit named is the one `agentop autostart server` installs', () => {
+  expect(PROVIDER_SERVICE_UNIT).toBe(unitName('server'))
+})
+
+test('off guide: both languages carry the assignment in every place the switch is mentioned', () => {
+  const assignment = `${SERVER_FLAG_ENV}=1`
+  for (const pt of [false, true]) {
+    const g = providerOffGuide(pt)
+    expect(g.lead).toContain(assignment)
+    expect(refusalMessage({ code: 'flag-off', sentence: '' }, pt)).toContain(assignment)
+    const cmds = allCommands(pt)
+    expect(cmds.some(c => c.includes(`Environment=${assignment}`))).toBe(true)
+    expect(cmds.some(c => c.startsWith(`${assignment} `))).toBe(true)
+  }
+})
+
+test('off guide: the FOREGROUND path leads and systemd comes second (WSL: systemctl --user may have no bus)', () => {
+  for (const pt of [false, true]) {
+    const g = providerOffGuide(pt)
+    expect(g.sections).toHaveLength(2)
+    expect(g.sections[0]!.steps.map(s => s.command)).toEqual([
+      `${SERVER_FLAG_ENV}=1 agentop server`,
+      `${SERVER_FLAG_ENV}=1 bun run dev`,
+    ])
+    expect(g.sections[0]!.note).toBeUndefined()
+  }
+})
+
+test('off guide: the systemd option is edit -> drop-in -> systemctl restart, with the one-sentence bus caveat', () => {
+  for (const pt of [false, true]) {
+    const sec = providerOffGuide(pt).sections[1]!
+    expect(sec.steps.map(s => s.command)).toEqual([
+      `systemctl --user edit ${unitName('server')}`,
+      `[Service]\nEnvironment=${SERVER_FLAG_ENV}=1`,
+      `systemctl --user restart ${unitName('server')}`,
+    ])
+    // Only offered where `systemctl --user status <unit>` answers, and it says what to do otherwise.
+    expect(sec.note).toContain(`systemctl --user status ${unitName('server')}`)
+    expect(sec.note).toContain(pt ? SYSTEMD_BUS_CAVEAT.pt : SYSTEMD_BUS_CAVEAT.en)
+  }
+  expect(SYSTEMD_BUS_CAVEAT.en).toBe('if systemctl says Failed to connect to bus, use the foreground command.')
+  expect(SYSTEMD_BUS_CAVEAT.pt).toBe('se o systemctl disser Failed to connect to bus, use o comando em primeiro plano.')
+})
+
+test('off guide: `agentop restart server` appears nowhere (it reported success while changing nothing)', () => {
+  for (const pt of [false, true]) {
+    expect(JSON.stringify(providerOffGuide(pt))).not.toContain('agentop restart')
+  }
+})
+
+test('off guide: EN and PT are the same shape and the commands are language-free', () => {
+  const en = providerOffGuide(false)
+  const pt = providerOffGuide(true)
+  expect(pt.sections.map(s => s.steps.length)).toEqual(en.sections.map(s => s.steps.length))
+  expect(allCommands(true)).toEqual(allCommands(false))
+  expect(pt.title).not.toBe(en.title)
+  expect(pt.after).not.toBe(en.after)
+  for (const g of [en, pt]) {
+    for (const s of g.sections) {
+      expect(s.heading.length).toBeGreaterThan(0)
+      for (const st of s.steps) expect(st.text.length).toBeGreaterThan(0)
+    }
+  }
+})
+
+test('off guide: the old one-line dead end is gone from the flag-off refusal', () => {
+  expect(refusalMessage({ code: 'flag-off', sentence: '' }, false)).not.toBe('Runtime providers are turned off on this machine.')
+  expect(refusalMessage({ code: 'flag-off', sentence: '' }, true)).not.toBe('Os provedores de runtime estão desligados nesta máquina.')
 })
