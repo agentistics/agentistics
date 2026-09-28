@@ -24,6 +24,9 @@ import type { TakeoverRefusal } from './sessions/takeover'
 
 export type CliLang = 'en' | 'pt'
 
+/** A subject that opens a sentence (`the server on :47291` → `The server on :47291`). */
+const cap = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
+
 export interface CliStrings {
   tagline: string
   configSolo: string
@@ -412,6 +415,15 @@ export interface CliStrings {
   /** A local (native) restart/rebuild whose health check never came back — the old process is
    *  gone but the new one never bound the port (crash on boot, port already taken, …). */
   localStartFailed: string
+  /** The restart verbs. Each is the ONE sentence a person reads, so each names the cause and what to
+   *  run — a restart is only claimed once the pid serving CHANGED (see `awaitReplacement`). */
+  restartManagerUnreachable: (unit: string, detail: string) => string
+  restartNotManaged: (subject: string, pid: number, unit: string, unitState: string) => string
+  restartUnchanged: (unit: string, subject: string, pid: number) => string
+  restartSilent: (unit: string, subject: string) => string
+  restartRestarted: (unit: string, before: number, after: number) => string
+  restartStarted: (unit: string, pid: number) => string
+  restartNotStopped: (pid: number) => string
   centralStarted: string
   centralFailed: string
   centralInitDone: string
@@ -779,6 +791,24 @@ const EN: CliStrings = {
   archiveUnsetHint: 'history preservation is still unset — the config pane can set it',
   dockerStartFailed: 'the machine container did not start.',
   localStartFailed: 'the local server did not come back up.',
+  restartManagerUnreachable: (unit, detail) =>
+    `Could not restart ${unit}: systemctl --user cannot reach the service manager (${detail}). Nothing was changed. ` +
+    'Start a user session (or run `loginctl enable-linger $USER`), or stop the server and start it again with `agentop server`.',
+  restartNotManaged: (subject, pid, unit, unitState) =>
+    `${cap(subject)} (pid ${pid}) is not managed by systemd here — ${unit} is ${unitState} — so restarting the unit would leave it serving the old code. Nothing was changed. ` +
+    `Stop it (\`kill ${pid}\`) and run \`agentop restart server\` again, or start it again with \`agentop server\`.`,
+  restartUnchanged: (unit, subject, pid) =>
+    `systemctl reported ${unit} restarted, but ${subject} is still pid ${pid} — nothing was replaced, so the code and config are unchanged. ` +
+    `Check \`systemctl --user status ${unit}\`.`,
+  restartSilent: (unit, subject) =>
+    `${unit} was restarted, but ${subject} did not come back within the check window — it may have failed to start. ` +
+    `Recent logs: \`journalctl --user -u ${unit} -n 50\`.`,
+  restartRestarted: (unit, before, after) =>
+    `Restarted ${unit} — pid ${before} → ${after}, it now runs the current code and config.`,
+  restartStarted: (unit, pid) => `Started ${unit} (pid ${pid}) — it was not running.`,
+  restartNotStopped: (pid) =>
+    `The old server (pid ${pid}) is still running — it did not stop, so nothing was restarted. ` +
+    `Stop it yourself (\`kill ${pid}\`) and start it again with \`agentop server\`.`,
   centralStarted: 'agentistics central is up.',
   centralFailed: 'the central did not start.',
   centralInitDone: 'central configured.',
@@ -1123,6 +1153,24 @@ const PT: CliStrings = {
   archiveUnsetHint: 'a preservação do histórico ainda não foi definida — o painel de config define',
   dockerStartFailed: 'o container da máquina não subiu.',
   localStartFailed: 'o server local não voltou a rodar.',
+  restartManagerUnreachable: (unit, detail) =>
+    `Não deu para reiniciar ${unit}: o systemctl --user não alcança o gerenciador de serviços (${detail}). Nada foi alterado. ` +
+    'Abra uma sessão de usuário (ou rode `loginctl enable-linger $USER`), ou pare o server e inicie de novo com `agentop server`.',
+  restartNotManaged: (subject, pid, unit, unitState) =>
+    `${cap(subject)} (pid ${pid}) não é gerenciado pelo systemd aqui — ${unit} está ${unitState} — então reiniciar a unit o deixaria servindo o código antigo. Nada foi alterado. ` +
+    `Pare-o (\`kill ${pid}\`) e rode \`agentop restart server\` de novo, ou inicie-o outra vez com \`agentop server\`.`,
+  restartUnchanged: (unit, subject, pid) =>
+    `o systemctl disse que ${unit} reiniciou, mas ${subject} continua sendo o pid ${pid} — nada foi substituído, então o código e a config seguem os mesmos. ` +
+    `Veja \`systemctl --user status ${unit}\`.`,
+  restartSilent: (unit, subject) =>
+    `${unit} foi reiniciado, mas ${subject} não voltou dentro da janela de verificação — pode ter falhado ao subir. ` +
+    `Logs recentes: \`journalctl --user -u ${unit} -n 50\`.`,
+  restartRestarted: (unit, before, after) =>
+    `${unit} reiniciado — pid ${before} → ${after}, agora roda o código e a config atuais.`,
+  restartStarted: (unit, pid) => `${unit} iniciado (pid ${pid}) — não estava rodando.`,
+  restartNotStopped: (pid) =>
+    `O server antigo (pid ${pid}) continua rodando — não parou, então nada foi reiniciado. ` +
+    `Pare-o você mesmo (\`kill ${pid}\`) e inicie de novo com \`agentop server\`.`,
   centralStarted: 'agentistics central está no ar.',
   centralFailed: 'a central não subiu.',
   centralInitDone: 'central configurada.',
