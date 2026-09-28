@@ -56,6 +56,7 @@ import { CentralTaskBoard } from '../components/tasks/CentralTaskBoard'
 import { NewTaskWizard } from '../components/tasks/NewTaskWizard'
 import { ManageStatusesModal } from '../components/tasks/ManageStatusesModal'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
+import { markSessionPending } from '../lib/pendingSessionStore'
 import {
   NA, PRIORITY, SESSION_STATE, button, claimLeft, field, fmtInt, fmtTokens, harnessColor,
   liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus,
@@ -299,9 +300,13 @@ function TaskList() {
           initialTask={starting.title}
           initialTaskId={starting.taskId}
           onClose={() => setStarting(null)}
-          onStarted={async () => {
+          onStarted={async (id, started) => {
             const to = starting.taskId
             setStarting(null)
+            // This page navigates to the TASK, not the session — but the sessions aside is the
+            // same persistent sidebar the reader may open next, so it gets the same placeholder
+            // row every other `NewSessionModal` caller publishes.
+            if (id) markSessionPending({ id, ...started })
             await reload()
             navigate(`/tasks/${encodeURIComponent(to)}`)
           }}
