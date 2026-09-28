@@ -291,8 +291,10 @@ describe('workspace boundary', () => {
   })
 
   test('a .env INSIDE the workspace is the project\'s own and is not the floor', async () => {
+    // Not the floor — but since the B3 security review (F4, D-T3.S4) a secret-SHAPED file inside the
+    // workspace ASKS: the model reading a secret into its context is the leak. No person → denied.
     const v = await policy().evaluate(req([read(`${WS}/.env`)], { permission: 'auto', tool: 'file.read' }).r)
-    expect(v.decision).toBe('allow')
+    expect(v).toMatchObject({ decision: 'deny', policy: 'default:secret-file' })
   })
 
   test('writes into .git/ are the floor, whatever the rules', async () => {

@@ -6,8 +6,8 @@
  *
  * | name                     | what it refuses                                                      | why |
  * |--------------------------|----------------------------------------------------------------------|-----|
- * | `git-internals`          | a WRITE into any `.git/` directory (or a `.git` file)                | the object store and refs are the undo history; a write there corrupts what every recovery relies on |
- * | `credential-store`       | reading OR writing `~/.ssh/**`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.agentistics/credentials*`, `~/.netrc`, `~/.git-credentials`, and `.env`/`.env.*` files OUTSIDE the workspace | a credential read into a model's context has left the machine; the last two rows are additions beyond the spec's list, same class |
+ * | `git-internals`          | a WRITE into any `.git/` directory (or a `.git` file) — a file tool's write, a redirection, a path a shell command NAMES unless the command only reads it (F2), a recursive `rm`/`chmod` there, and `git config --file` into one | the object store and refs are the undo history, and `hooks/` + `config` are code git will EXECUTE |
+ * | `credential-store`       | reading OR writing `~/.ssh/**`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.netrc`, `~/.git-credentials`, `*.key` under `~/.claude`, the WHOLE agentistics data directory (`~/.agentistics/**` and a host-relocated `agentisticsDir` — the runtime's own key store, the envelope keypair, tokens, captures), and `.env`/`.env.*` files OUTSIDE the workspace | a credential read into a model's context has left the machine |
  * | `protected-path`         | reading or writing a glob the host passed as `protectedPaths`         | the host's own list of the same kind |
  * | `rm-recursive`           | a recursive `rm` (any spelling: `-rf`, `-fr`, `-r -f`, `-R`, `--recursive`, with or without force) whose target is `/`, the home directory, the workspace root, anything outside the workspace (`..` climbing out included), or a glob that empties one of those; and any `--no-preserve-root` | irreversible, and the classic one-token accident |
  * | `mkfs`                   | `mkfs*`, `mke2fs`                                                     | formats a device |
@@ -31,6 +31,11 @@ import type { ShellSegment, ShellWord } from './shell-parse.ts'
 export interface FloorEnv extends RuleEnv {
   /** Extra globs (absolute, `~/`, or workspace-relative) that no command may read or write. */
   protectedPaths: readonly string[]
+  /**
+   * The agentistics data directory when the HOST relocated it (`AGENTISTICS_DIR`). `~/.agentistics`
+   * is always floor; this adds the relocated copy.
+   */
+  agentisticsDir?: string
 }
 
 export interface FloorHit {
@@ -48,22 +53,76 @@ function under(root: string, p: string): boolean {
   return isInside(root, p)
 }
 
+// ── The secret set (B3 security review F1, spec §8.1 D-T3.S1) ──────────────────────────────────
+
+/**
+ * Credential files under the HOME directory, as prefixes of the path relative to it. `*.key` is a
+ * control-socket token under `~/.claude` (the session manager's and the daemon's).
+ *
+ * The agentistics data directory is NOT listed file by file: the WHOLE directory is floor
+ * (`AGENTISTICS_DATA_DIRS`). It holds the runtime's own provider key store, the sealed-envelope
+ * private key, the member tokens, the backup token, a central's env file and the raw provider
+ * captures. A list of names would be one more place a new secret has to be remembered, and
+ * `provider-secrets.lint` forbids this package from spelling the key store's name at all. Nothing
+ * a model is asked to do needs to read or write agentop's own state through a tool.
+ *
+ * Harness credential files (each assistant's own OAuth/token file) are deliberately NOT here: that
+ * same lint forbids the runtime to name them, and they are the HOST's to pass as `protectedPaths`,
+ * which is floor exactly like this list.
+ */
+export const HOME_SECRET_PREFIXES: readonly string[] = [
+  '.ssh',
+  '.aws/credentials',
+  '.config/gh/hosts.yml',
+  '.netrc',
+  '.git-credentials',
+  '*.key',
+]
+
+/** The agentistics data directory's default name under HOME. A host that relocated it passes `agentisticsDir`. */
+export const AGENTISTICS_DATA_DIRS: readonly string[] = ['.agentistics']
+
+function relUnder(root: string, p: string): string | null {
+  const r = root.replace(/\/$/, '')
+  return p === r ? '' : p.startsWith(r + '/') ? p.slice(r.length + 1) : null
+}
+
+function isSecretPath(path: string, env: FloorEnv): boolean {
+  const h = env.home.replace(/\/$/, '')
+  const fromHome = relUnder(h, path)
+  if (fromHome !== null) {
+    for (const pre of HOME_SECRET_PREFIXES) if (pre !== '*.key' && fromHome.startsWith(pre)) return true
+  }
+  const dataDirs = [...AGENTISTICS_DATA_DIRS.map(d => `${h}/${d}`), ...(env.agentisticsDir ? [env.agentisticsDir.replace(/\/$/, '')] : [])]
+  if (dataDirs.some(d => relUnder(d, path) !== null)) return true
+  if (path.endsWith('.key') && relUnder(`${h}/.claude`, path)) return true
+  return false
+}
+
+/**
+ * A file INSIDE the workspace whose NAME says it holds a secret (F4, spec §8 D-T3.S4): `.env*`
+ * (`.envrc` included), `*.pem`, and an ssh-key-shaped `id_<name>` with no extension (`id_rsa`,
+ * `id_ed25519`; not `id_rsa.pub`, not `id_utils.ts`). Not floor — the policy ASKS, and a rule whose
+ * `pathGlob` itself names such a file lifts it. Outside the workspace `.env*` stays floor.
+ */
+export function secretShaped(path: string): boolean {
+  const b = basename(path)
+  return /^\.env/.test(b) || /\.pem$/.test(b) || /^id_[^.]+$/.test(b)
+}
+
 // ── Paths ───────────────────────────────────────────────────────────────────────────────────────
+
+/** A `.git` directory (or file) anywhere on the path. */
+export function inGitDir(path: string): boolean {
+  return /(^|\/)\.git(\/|$)/.test(path)
+}
 
 /** A path no read or write may touch (credentials), or no write may touch (`.git`). */
 export function floorForPath(path: string, access: 'read' | 'write', env: FloorEnv): FloorHit | null {
-  if (access === 'write' && /(^|\/)\.git(\/|$)/.test(path)) {
+  if (access === 'write' && inGitDir(path)) {
     return { name: 'git-internals', sentence: `Writing inside a .git directory (${path}) is refused by the policy floor (git-internals): it would corrupt the repository's history.` }
   }
-  const h = env.home.replace(/\/$/, '')
-  const cred =
-    under(`${h}/.ssh`, path)
-    || path === `${h}/.aws/credentials`
-    || path === `${h}/.config/gh/hosts.yml`
-    || (path === `${h}/.agentistics/${basename(path)}` && basename(path).startsWith('credentials'))
-    || path === `${h}/.netrc`
-    || path === `${h}/.git-credentials`
-    || (/^\.env(\..*)?$/.test(basename(path)) && !under(env.workspaceRoot, path))
+  const cred = isSecretPath(path, env) || (/^\.env(\..*)?$/.test(basename(path)) && !under(env.workspaceRoot, path))
   if (cred) {
     return { name: 'credential-store', sentence: `${path} holds credentials, and reading or writing it is refused by the policy floor (credential-store).` }
   }
@@ -169,7 +228,7 @@ export function floorForSegment(seg: ShellSegment): FloorHit | null {
 }
 
 /** Global git options that take a value in the NEXT word. */
-const GIT_GLOBAL_WITH_ARG = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path', '--list-cmds'])
+export const GIT_GLOBAL_WITH_ARG = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path', '--list-cmds'])
 
 export function gitForcePush(argv: readonly string[]): boolean {
   let i = 1

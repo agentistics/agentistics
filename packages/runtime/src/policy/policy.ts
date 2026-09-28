@@ -67,13 +67,16 @@ import {
   floorForPath,
   floorForRaw,
   floorForSegment,
+  inGitDir,
   isHarmlessDevice,
   protectedTreeTarget,
   recursiveChmod,
   recursiveRm,
+  secretShaped,
   type FloorEnv,
   type FloorHit,
 } from './floor.ts'
+import { gitConfigPlan, resolutionChange } from './resolution.ts'
 import { decideByRules, type PolicyLayer, type RuleHit, type RuleTarget } from './rules.ts'
 import { commandName, parseShell, type ShellSegment, type ShellWord } from './shell-parse.ts'
 
@@ -88,6 +91,12 @@ export interface PolicyOptions {
   defaults?: Partial<Record<ToolPermission, ClassDefault>>
   /** Extra globs no call may read or write (the floor's `protected-path`). */
   protectedPaths?: readonly string[]
+  /**
+   * The agentistics data directory when the host RELOCATED it (`AGENTISTICS_DIR`). The whole
+   * directory is floor there as well as under `~/.agentistics`. The runtime holds no path of its
+   * own (D23), so only the host can say where it moved.
+   */
+  agentisticsDir?: string
   now?: () => Date
   /** The home directory `~` and `$HOME` mean. Default: the process's. */
   home?: string
@@ -144,6 +153,49 @@ const INLINE_CODE_FLAGS = new Set(['-c', '-e', '--eval', '-r', '--command', '-p'
 const NO_MENTION = new Set(['echo', 'printf', 'cd', 'pushd', 'popd', 'export', 'set', 'unset'])
 
 const PLAIN_TOKEN = /^[A-Za-z0-9][\w.:@+-]*$/
+
+/**
+ * Commands that only READ the paths they name (B3 review F2). Any other command that names a path
+ * inside a `.git` directory is judged as WRITING it — `cp`, `mv`, `tee`, `sed -i`, `chmod`,
+ * `install`, `ln`, `touch`, `truncate`, `rsync`, and every command nobody listed — because a hook
+ * or `config` written there is code git will execute. `git` itself manages its own directory and is
+ * judged by `gitConfigPlan` instead; `find` and `sed` are readers only without their writing flags.
+ */
+const READ_ONLY_VIEWERS = new Set([
+  'cat', 'less', 'more', 'head', 'tail', 'ls', 'stat', 'file', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'ag',
+  'diff', 'cmp', 'md5sum', 'sha1sum', 'sha256sum', 'sha512sum', 'du', 'tree', 'bat', 'realpath', 'readlink',
+  'basename', 'dirname', 'od', 'xxd', 'hexdump', 'strings', 'jq', 'git',
+])
+
+function readsOnly(seg: ShellSegment, wordIndex: number): boolean {
+  const name = commandName(seg.argv[0] ?? '')
+  if (READ_ONLY_VIEWERS.has(name)) return true
+  const args = seg.argv.slice(1)
+  if (name === 'find') return !args.some(a => /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(a))
+  if (name === 'sed') return !args.some(a => /^-[A-Za-z]*i/.test(a) || a.startsWith('--in-place'))
+  if (name === 'cp') {
+    // A SOURCE of `cp` is read; its target (the last operand, or the `-t` directory) is written.
+    const hasT = args.some(a => a === '-t' || a.startsWith('--target-directory'))
+    const operands: number[] = []
+    for (let i = 1; i < seg.argv.length; i++) {
+      const t = seg.argv[i] ?? ''
+      const prev = seg.argv[i - 1] ?? ''
+      if (t.startsWith('-') || prev === '-t' || prev === '-S' || prev === '--target-directory' || prev === '--suffix') continue
+      operands.push(i)
+    }
+    return operands.includes(wordIndex) && (hasT || wordIndex !== operands[operands.length - 1])
+  }
+  return false
+}
+
+/** The value of a `--option=value` word, as a word of its own, when it looks like a path. */
+function optionValue(w: ShellWord): ShellWord | null {
+  if (w.dynamic || w.home) return null
+  const m = /^--[A-Za-z][\w-]*=(.+)$/.exec(w.text)
+  if (!m) return null
+  const v: ShellWord = { text: m[1] ?? '', dynamic: false, glob: /[*?[]/.test(m[1] ?? ''), home: false }
+  return isPathLike(v) ? v : null
+}
 
 function shorten(s: string, max = 160): string {
   const one = s.replace(/\s+/g, ' ').trim()
@@ -232,7 +284,7 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
 
   async function decide(req: PolicyRequest): Promise<PolicyVerdict> {
     const root = req.workspaceRoot
-    const env: FloorEnv = { home, workspaceRoot: root, protectedPaths: opts.protectedPaths ?? [] }
+    const env: FloorEnv = { home, workspaceRoot: root, protectedPaths: opts.protectedPaths ?? [], agentisticsDir: opts.agentisticsDir }
     const tool = req.call.toolName
     const cls = classDefaults[req.permission]
     const parts: PartVerdict[] = []
@@ -266,6 +318,20 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
       return { kind: 'ask', policy: `default:${req.permission}`, what, key }
     }
 
+    /**
+     * A secret-SHAPED file inside the workspace (`.env*`, `*.pem`, `id_*` — B3 review F4): ASK, and
+     * only a rule whose `pathGlob` itself names such a file lifts it — a rule allowing every read, or
+     * every path under `~`, does not count as someone having decided about THIS file.
+     */
+    const secretPart = (action: 'read' | 'write' | 'git-read', path: string, what: string): PartVerdict | null => {
+      if (!secretShaped(path)) return null
+      const explicit = decideByRules(layers, { action, tool, path }, env, { requirePathGlob: true })
+      if (explicit && (explicit.rule.effect !== 'allow' || secretShaped(explicit.rule.match.pathGlob ?? ''))) {
+        return fromRule(explicit, `${what} ${path}`)
+      }
+      return { kind: 'ask', policy: 'default:secret-file', what: `${what} ${rel(root, path)}, whose name says it holds a secret`, key: null }
+    }
+
     /** A path read or written (subject paths are resolved; shell paths are resolved by the caller). */
     const pathPart = (action: 'read' | 'write' | 'git-read', path: string, access: 'read' | 'write', what: string, onInside: () => PartVerdict | null): PartVerdict | null => {
       const floor = floorForPath(path, access, env)
@@ -277,6 +343,8 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
         const explicit = decideByRules(layers, target, env, { requirePathGlob: true })
         return explicit ? fromRule(explicit, `${what} ${path}`) : outsideDeny(path, what)
       }
+      const secret = secretPart(action, path, what)
+      if (secret) return secret
       if (hit) return fromRule(hit, `${what} ${path}`)
       return onInside()
     }
@@ -321,7 +389,9 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
 
       for (const seg of segs) {
         const cwd = cwdOf(seg.scope)
-        const label = seg.argv.length > 0 ? `\`${shorten(shellQuote(seg.argv), 100)}\`` : 'a redirection'
+        const label = seg.argv.length > 0
+          ? `\`${shorten(shellQuote(seg.argv), 100)}\``
+          : seg.assignments.length > 0 ? `\`${shorten(seg.assignments.join(' '), 100)}\`` : 'a redirection'
         const where = cwd === null ? '' : cwd === startCwd ? '' : ` (in ${rel(root, cwd)})`
 
         // Floor: device/format/force-push.
@@ -345,6 +415,7 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
             const t = wordTarget(w, cwd, home)
             if (!t) { unknown = true; continue }
             const p = await real(cwd, t.path)
+            if (inGitDir(p)) { hitFloor = floorForPath(p, 'write', env); break }
             if (protectedTreeTarget(p, t.wipes, env)) {
               hitFloor = { name: floorName, sentence: `${label} would recursively ${verb} ${p === '/' ? '/' : p}${t.wipes ? '' : ' (its contents)'}, which is ${p === root ? 'the workspace itself' : isInside(root, p) ? 'protected' : 'outside the workspace'}; the policy floor refuses it (${floorName}).` }
               break
@@ -389,6 +460,24 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
         }
         parts.push(segVerdict)
 
+        // What changes command resolution for LATER calls in this long-lived shell, or what git runs
+        // (B3 review F3 / F2): an ask no allow rule and no session approval lifts.
+        if (segVerdict.kind !== 'deny') {
+          const change = resolutionChange(seg)
+          if (change) parts.push({ kind: 'ask', policy: 'default:resolution-change', what: `${label}${where} ${change}`, key: null })
+          const git = gitConfigPlan(seg)
+          let gitFloored = false
+          if (git?.file) {
+            const fw: ShellWord = { text: git.file, dynamic: false, glob: false, home: false }
+            const t = wordTarget(fw, cwd, home)
+            if (t) {
+              const f = floorForPath(await real(cwd, t.path), 'write', env)
+              if (f) { parts.push(fromFloor(f)); gitFloored = true }
+            }
+          }
+          if (git?.sentence && !gitFloored) parts.push({ kind: 'ask', policy: 'default:git-config', what: `${label}${where}: ${git.sentence}`, key: null })
+        }
+
         // Redirections.
         for (const r of seg.redirects) {
           if (!r.target || r.access === 'none') continue
@@ -430,15 +519,26 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
         // Paths the command names.
         const name = commandName(seg.argv[0] ?? '')
         if (!seg.opaque && !NO_MENTION.has(name) && !rm && !chmodTargets) {
-          for (const w of seg.words.slice(1)) {
-            if (!isPathLike(w)) continue
+          for (let wi = 1; wi < seg.words.length; wi++) {
+            const raw = seg.words[wi]
+            if (!raw) continue
+            // Bare names count too when they are what the floor or F4 is about: `cat .env`, `mv x .git`.
+            const bare = !raw.dynamic && !raw.home && !raw.text.startsWith('-') && (secretShaped(raw.text) || raw.text === '.git')
+            const w = isPathLike(raw) || bare ? raw : optionValue(raw)
+            if (!w) continue
             const t = wordTarget(w, cwd, home)
             if (!t) continue
             if (isHarmlessDevice(t.path)) continue
             const p = await real(cwd, t.path)
-            const floor = floorForPath(p, 'read', env)
+            // A named path inside `.git` is a WRITE unless the command provably only reads it (F2).
+            const access = inGitDir(p) && (w !== raw || !readsOnly(seg, wi)) ? 'write' : 'read'
+            const floor = floorForPath(p, access, env)
             if (floor) { parts.push(fromFloor(floor)); continue }
-            if (isInside(root, p)) continue
+            if (isInside(root, p)) {
+              const secret = secretPart('read', p, `${label}${where} names`)
+              if (secret) parts.push(secret)
+              continue
+            }
             const target: RuleTarget = { action: 'read', tool, path: p }
             const hit = decideByRules(layers, target, env)
             if (hit && hit.rule.effect === 'deny') { parts.push(fromRule(hit, `${label} naming ${p}`)); continue }
