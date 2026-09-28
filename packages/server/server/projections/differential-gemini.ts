@@ -63,6 +63,7 @@ import { createGeminiReplay } from '../integrations/gemini'
 import {
   compareTokens, compareTime, compareTools, summarize, renderReport,
   type DifferentialReport, type FieldRow, type SessionDiff,
+  stillBeingWritten,
 } from './differential'
 import { sessionMetaProjection, type SessionMetaProjection } from './session-meta'
 
@@ -319,7 +320,7 @@ export async function runGeminiDifferential(opts: GeminiDifferentialOptions): Pr
     // written", exactly as it does for an append-only transcript.
     const st = await fsStat(f.file).catch(() => null)
     if (!st) { skipped.unreadable++; continue }
-    if (now() - st.mtimeMs < settledMs) { skipped.live++; continue }
+    if (stillBeingWritten(now(), st.mtimeMs, settledMs)) { skipped.live++; continue }
 
     const shape = shapeOf(content)
     shapes[shape]++
