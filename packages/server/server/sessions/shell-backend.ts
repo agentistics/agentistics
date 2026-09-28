@@ -96,7 +96,7 @@ export async function openShell(o: {
   if (!plan.ok) return plan
 
   const id = randomUUID()
-  const r = await tmux(newSessionArgs({ id, cwd: plan.cwd, argv: plan.argv, socket: SHELL_SOCKET }))
+  const r = await tmux(newSessionArgs({ id, cwd: plan.cwd, argv: plan.argv, socket: SHELL_SOCKET, path: process.env.PATH }))
   // tmux would not start it. `no-tmux` is the honest code: nothing the caller named went wrong with
   // the request, and the alternative is inventing a reason for a failure we cannot attribute.
   if (r.code !== 0) {

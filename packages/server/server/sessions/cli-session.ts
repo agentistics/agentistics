@@ -45,7 +45,8 @@ import { TASKS_FILE } from '../config'
 import { createTaskStore } from './task-store'
 import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
-import { POLL_MS, SETTLE_MS, spawnOutcome } from './spawn-outcome'
+import { execFailed } from './spawn-outcome'
+import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
@@ -202,19 +203,14 @@ export async function runSession(argv: string[]): Promise<number> {
  * between 1.5s and 3s, so that check would have reported "started" for the very session it exists
  * to catch.
  */
-async function spawnFailure(backend: SessionBackend, id: string): Promise<string | undefined> {
-  // POLLED, not slept. Measured: the refusal lands between 1.5s and 3s — the harness loads and
-  // resolves the conversation before deciding — so a fixed short wait reports "started" for a
-  // session that is about to die. Polling ends the moment it dies, so a refusal costs what it
-  // costs and only a healthy session waits out the deadline.
-  const deadline = Date.now() + SETTLE_MS
-  let outcome = spawnOutcome([])
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, POLL_MS))
-    outcome = spawnOutcome(await backend.capture(id, 40).catch(() => [] as string[]))
-    if (outcome.died) break
+async function spawnFailure(backend: SessionBackend, id: string, bin?: string): Promise<string | undefined> {
+  const outcome = await spawnDeath(backend, id)
+  if (!outcome) return undefined
+  // A binary that could not be EXECUTED says nothing on the way out (see `execFailed`), and the
+  // only thing that fixes it is the PATH — so name it rather than print a bare status.
+  if (bin && execFailed(outcome, bin)) {
+    return `\`${bin}\` could not be executed — is it on PATH? PATH: ${process.env.PATH ?? '(empty)'}`
   }
-  if (!outcome.died) return undefined
   // The harness's own words, because they are the only actionable part. A status with no message is
   // still better than "it did not start".
   return outcome.message
@@ -266,7 +262,7 @@ async function start(
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
   // session". A harness that refuses its arguments has already exited by now, and registering a row
   // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id)
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
   if (failed) {
     console.error(failed)
     await backend.kill(id).catch(() => {})
@@ -457,7 +453,7 @@ async function batch(
     // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
     // reports N started when N exited is worse than one that reports the refusal — the whole point
     // of a batch is that nobody is watching each one come up.
-    const died = await spawnFailure(backend, id)
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
     if (died) {
       failed.push({ harness: spec.harness, reason: died })
       await backend.kill(id).catch(() => {})
@@ -572,7 +568,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     // as a background agent, and the refusal is instant — so this reopen wrote a row for a process
     // that no longer existed, and pressing it again wrote another. The old row must NOT be retired
     // either: retiring it on a reopen that failed would lose the only row that still names the work.
-    const died = await spawnFailure(backend, id)
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
     if (died) {
       skipped.push(m.id)
       await backend.kill(id).catch(() => {})
@@ -920,7 +916,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
     return 1
   }
-  const died = await spawnFailure(backend, id)
+  const died = await spawnFailure(backend, id, planned.plan.argv[0])
   if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
 
   const record: ManagedSession = {

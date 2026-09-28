@@ -30,6 +30,7 @@ import {
   pm2StartArgs,
   systemdUnit,
   migrateUnitKillMode,
+  migrateUnitPath,
   type ServiceManagerFacts,
   type ServiceManagerId,
   type ServiceSpec,
@@ -673,13 +674,23 @@ export async function restartAutostart(mode: AutostartMode): Promise<AutostartRe
   // event that loses the sessions, and migrating afterwards would fix the machine one crash too
   // late. `daemon-reload` first means the stop that follows already runs under the new rule, so
   // even THIS restart spares them.
+  //
+  // The PATH repair rides the same write. It reads THIS process's PATH, which is the interactive
+  // shell's for `agentop restart` / `agentop upgrade` / the cockpit — and is skipped outright when
+  // this process is itself a systemd service (`INVOCATION_ID`), whose PATH is the minimal one the
+  // repair exists to replace. See `migrateUnitPath`.
   const notes: string[] = []
-  const migrated = migrateUnitKillMode(unitText)
-  if (migrated) {
+  const done: string[] = []
+  let next = unitText
+  const killMode = migrateUnitKillMode(next)
+  if (killMode) { next = killMode; done.push('a restart no longer stops your sessions') }
+  const pathFixed = process.env.INVOCATION_ID ? null : migrateUnitPath(next, process.env.PATH)
+  if (pathFixed) { next = pathFixed; done.push('sessions it starts can find the coding assistants on your PATH') }
+  if (next !== unitText) {
     try {
-      await writeFile(unitPath(mode), migrated, 'utf8')
+      await writeFile(unitPath(mode), next, 'utf8')
       const reload = await run(['systemctl', '--user', 'daemon-reload'])
-      if (reload.code === 0) notes.push('Updated the unit so a restart no longer stops your sessions.')
+      if (reload.code === 0) notes.push(`Updated the unit so ${done.join(', and ')}.`)
       else notes.push(`Updated the unit, but systemctl --user daemon-reload failed: ${reload.stderr || `exit ${reload.code}`}`)
     } catch (err: any) {
       notes.push(`Could not update ${unitPath(mode)}: ${err?.message ?? err}`)

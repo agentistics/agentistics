@@ -727,7 +727,10 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
     const configured = new Map(await Promise.all(harnesses.map(async h =>
       [h.id, await readHarnessDefaults(h.id as HarnessId).catch(() => ({} as Defaults))] as const,
     )))
+    // An EMPTY list with a reason is a fault the wizard must say out loud — see `harnessNotice`.
+    const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
     return {
+      ...(notice ? { unavailable: notice } : {}),
       harnesses: harnesses.map(h => {
         const here = configured.get(h.id) ?? {}
         // The tool's own published default outranks the machine's, on the rare day one publishes
@@ -830,6 +833,10 @@ export async function runFleetSpawn(
   if (!host.spawnSession || !host.startableHarnesses) return { ok: false, message: s.sessionsNoHost }
 
   const decision = planFleetSpawn(body, await host.startableHarnesses())
+  // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
+  // fault, and "no spawn spec for it here" would send someone looking for a bug in agentop.
+  const blindNotice = !decision.ok && decision.reason === 'unknown_harness' ? host.harnessNotice?.() : undefined
+  if (blindNotice) return { ok: false, message: blindNotice }
   if (!decision.ok) {
     const detail = decision.detail ?? ''
     const message =

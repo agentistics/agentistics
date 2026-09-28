@@ -267,7 +267,7 @@ export const tmuxBackend: SessionBackend = {
     // does not start a server — see `spawnArgs`.
     const profile = await terminalProfile()
     const { code, out } = await tmux(
-      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv }),
+      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: process.env.PATH }),
     )
     if (code !== 0) throw new Error(out.trim() || `tmux new-session failed (code ${code})`)
     if (req.initialPrompt) {
