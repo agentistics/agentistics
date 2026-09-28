@@ -63,6 +63,7 @@ import { KIMI_DIR } from '../config'
 import { createKimiReplay } from '../integrations/kimi'
 import {
   compareSession, summarize, type DifferentialReport, type FieldRow, type SessionDiff,
+  stillBeingWritten,
 } from './differential'
 import { sessionMetaProjection } from './session-meta'
 
@@ -256,7 +257,7 @@ export async function runKimiDifferential(
       const st = await fsStat(join(dir, 'agents', agentId, 'wire.jsonl')).catch(() => null)
       if (st) latestMtimeMs = Math.max(latestMtimeMs, st.mtimeMs)
     }
-    if (latestMtimeMs > 0 && now() - latestMtimeMs < settledMs) { skipped.live++; continue }
+    if (latestMtimeMs > 0 && stillBeingWritten(now(), latestMtimeMs, settledMs)) { skipped.live++; continue }
 
     let diff: SessionDiff
     try {

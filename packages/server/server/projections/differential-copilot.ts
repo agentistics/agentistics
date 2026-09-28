@@ -74,6 +74,7 @@ import { createCopilotReplay } from '../integrations/copilot'
 import {
   compareTokens, compareTime, compareTools, summarize, renderReport,
   type DifferentialReport, type FieldRow, type SessionDiff,
+  stillBeingWritten,
 } from './differential'
 import { sessionMetaProjection, type SessionMetaProjection } from './session-meta'
 
@@ -291,7 +292,7 @@ export async function runCopilotDifferential(
   for (const loc of await locate(opts.sessionStateDir, only)) {
     const st = await fsStat(loc.path).catch(() => null)
     if (!st) { skipped.unreadable++; continue }
-    if (now() - st.mtimeMs < settledMs) { skipped.live++; continue }
+    if (stillBeingWritten(now(), st.mtimeMs, settledMs)) { skipped.live++; continue }
     let diff: SessionDiff
     try {
       const content = await readFile(loc.path, 'utf-8')

@@ -30,6 +30,7 @@ import { replayCodexRollout } from '../integrations/codex/replay'
 import {
   compareTime, compareTokens, compareTools, summarize,
   type DifferentialReport, type FieldRow, type SessionDiff,
+  stillBeingWritten,
 } from './differential'
 import { sessionMetaProjection, type SessionMetaProjection } from './session-meta'
 
@@ -248,7 +249,7 @@ export async function runCodexDifferential(opts: CodexDifferentialOptions): Prom
   for (const path of await collectRollouts(opts.sessionsDir)) {
     const st = await fsStat(path).catch(() => null)
     if (!st) { skipped.unreadable++; continue }
-    if (now() - st.mtimeMs < settledMs) { skipped.live++; continue }
+    if (stillBeingWritten(now(), st.mtimeMs, settledMs)) { skipped.live++; continue }
     let diff: SessionDiff
     try {
       const text = await readFile(path, 'utf-8')
