@@ -3,21 +3,16 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { handleEditorTreeRoute } from './editor-web'
 import { securityHeaders } from '../security-headers'
 import type { StartHost } from '../cli-start'
 
 // Same reason repo-probe.test.ts / editor-fs.test.ts strip these: a pre-commit hook running from a
 // linked worktree exports GIT_DIR / GIT_INDEX_FILE pointing at the OUTER checkout, and `-C`/`cwd`
-// do not override GIT_DIR for repository discovery.
-const git = (cwd: string, ...args: string[]) => {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-  delete env.GIT_DIR
-  delete env.GIT_WORK_TREE
-  delete env.GIT_INDEX_FILE
-  delete env.GIT_PREFIX
-  return execFileSync('git', args, { cwd, encoding: 'utf8', env })
-}
+// do not override GIT_DIR for repository discovery. `gitTestEnv()` (`@agentistics/core/gitTestEnv`)
+// is the canonical, repo-wide answer — see its header for the full, cited variable list.
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitTestEnv() })
 
 let root = ''
 let repo = ''

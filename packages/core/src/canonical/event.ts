@@ -363,11 +363,25 @@ export interface ToolProgressData extends ToolRef {
   summary?: string
 }
 
+/**
+ * Where a tool's RESULT text lives in the content store: `{sha256, bytes}` of what the model read
+ * back. The text itself never enters an event (it is conversation content and can quote a file or a
+ * line of output); a reader with access to the store resolves it by hash.
+ */
+export interface ToolResultRef {
+  sha256: string
+  bytes: number
+}
+
 export interface ToolCompletedData extends ToolRef {
   filesTouched?: string[]
   linesAdded?: number
   linesRemoved?: number
   durationMs?: number
+  /** A process's exit status, when the tool ran one (a shell that exited 0 completes). */
+  exitCode?: number
+  /** The content-store copy of the result (native runtime only). Absent: not stored. */
+  result?: ToolResultRef
 }
 
 export interface ToolFailedData extends ToolRef {
@@ -375,6 +389,9 @@ export interface ToolFailedData extends ToolRef {
   status: Extract<ToolStatus, 'failed' | 'cancelled' | 'unknown'>
   errorClass?: string
   exitCode?: number
+  durationMs?: number
+  /** The content-store copy of the error text the model read (native runtime only). */
+  result?: ToolResultRef
 }
 
 export interface McpRequestedData extends ToolRef {
@@ -447,6 +464,8 @@ export interface PolicyDecidedData {
   policy: string
   toolExecutionId?: Id
   decidedBy: 'user' | 'policy'
+  /** A denial's stable code (`policy.denied.outside-workspace`, …) — never the refusal sentence. */
+  code?: string
 }
 
 export interface AlmTaskCreatedData {

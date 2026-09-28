@@ -4,6 +4,7 @@ import { createHash } from 'crypto'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { runBackup } from './backup'
 import { readManifestOf, restoreMetrics, restoreRepos, verifyArchive, verifyStaged } from './restore'
 import { createBundle } from './repo-probe'
@@ -212,13 +213,9 @@ test('an archive carrying repos assets restores — the digest covers the same s
 // overrides an inherited GIT_DIR. Run under husky from a linked worktree, `makeOrigin`'s `git init`
 // and `git config user.email` below executed against the REAL SHARED repository: they rewrote this
 // fleet's git identity and committed a fixture file onto the branch. `repo-probe.test.ts` carries
-// the same guard for the same reason; GIT_COMMON_DIR is here too because it redirects
-// --git-common-dir on its own (measured).
-const git = (cwd: string, ...args: string[]) => {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR']) delete env[k]
-  return execFileSync('git', args, { cwd, encoding: 'utf8', env })
-}
+// the same guard for the same reason. `gitTestEnv()` (`@agentistics/core/gitTestEnv`) is the
+// canonical, repo-wide answer now — see its header for the full, cited variable list.
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitTestEnv() })
 
 /** A real repository to clone FROM. */
 function makeOrigin(at: string): string {

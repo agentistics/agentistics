@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  DRAG_KEY_TYPE, hasDragPayload, readDragPayload, reorderByDrag, setDragPayload, stepOrder,
+  DRAG_KEY_TYPE, hasDragPayload, hasGroupDragPayload, hasGroupNestDragPayload, readDragPayload,
+  readGroupDragPayload, readGroupNestDragPayload, reorderByDrag, setDragPayload, setGroupDragPayload,
+  setGroupNestDragPayload, stepOrder,
 } from './dragReorder'
 
 // ---------------------------------------------------------------------------------------------
@@ -164,6 +166,36 @@ describe('hasDragPayload — readable on dragover, before getData would be legal
   test('false for an entirely empty DataTransfer', () => {
     const dt = new FakeDataTransfer()
     expect(hasDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// setGroupDragPayload (grip, reorder) vs setGroupNestDragPayload (body, nest) — the two folder-drag
+// gestures must be readable independently, on the SAME native event, without colliding.
+// ---------------------------------------------------------------------------------------------
+
+describe('the reorder and nest group-drag payloads never collide', () => {
+  test('a grip drag (reorder payload) is not read as a body drag (nest payload)', () => {
+    const dt = new FakeDataTransfer()
+    setGroupDragPayload({ dataTransfer: dt as unknown as DataTransfer }, 'g1')
+    expect(hasGroupDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(true)
+    expect(hasGroupNestDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(false)
+    expect(readGroupDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe('g1')
+  })
+
+  test('a body drag (nest payload) is not read as a grip drag (reorder payload)', () => {
+    const dt = new FakeDataTransfer()
+    setGroupNestDragPayload({ dataTransfer: dt as unknown as DataTransfer }, 'g2')
+    expect(hasGroupNestDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(true)
+    expect(hasGroupDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(false)
+    expect(readGroupNestDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe('g2')
+  })
+
+  test('neither is set for an ordinary session drag', () => {
+    const dt = new FakeDataTransfer()
+    setDragPayload({ dataTransfer: dt as unknown as DataTransfer }, 'session-1')
+    expect(hasGroupDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(false)
+    expect(hasGroupNestDragPayload({ dataTransfer: dt as unknown as DataTransfer })).toBe(false)
   })
 })
 
