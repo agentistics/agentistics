@@ -15,6 +15,7 @@
  */
 
 import path from 'node:path'
+import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
 import { HOME_DIR } from '../config'
 import type { ChatDriver } from './types'
@@ -22,7 +23,6 @@ import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
 
 // chat-drivers/ is one level deeper than chat-tty.ts, so 4 levels up to reach the repo root
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..', '..')
 const GEMINI_SETTINGS_PATH = path.join(HOME_DIR, '.gemini', 'settings.json')
 const GEMINI_OAUTH_PATH = path.join(HOME_DIR, '.gemini', 'oauth_creds.json')
 const MCP_SERVER_NAME = 'agentistics'
@@ -78,7 +78,8 @@ async function writeGeminiSettings(settings: Record<string, unknown>): Promise<v
  */
 async function ensureGeminiMcp(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
+  const launch = agentisticsMcpLaunch()
 
   const settings = await readGeminiSettings()
   const servers = (settings['mcpServers'] ?? {}) as Record<string, {
@@ -89,8 +90,13 @@ async function ensureGeminiMcp(port: number): Promise<void> {
 
   const existing = servers[MCP_SERVER_NAME]
   const urlOk = existing?.env?.['AGENTISTICS_API'] === apiUrl
-  const pathOk = Array.isArray(existing?.args) && existing.args.some(a => a.includes(mcpScript))
-  if (urlOk && pathOk) return // already up to date
+  if (urlOk && sameMcpLaunch(existing, launch)) return // already up to date
+
+  // A stale entry (the old script path) is removed first, so the add below replaces it rather
+  // than colliding with it.
+  if (existing) {
+    await Bun.spawn(['gemini', 'mcp', 'remove', '-s', 'user', MCP_SERVER_NAME], { stdout: 'pipe', stderr: 'pipe' }).exited
+  }
 
   // Use the CLI to add at user scope — this is the canonical way and handles
   // the trust / settings merge correctly.
@@ -99,7 +105,7 @@ async function ensureGeminiMcp(port: number): Promise<void> {
       'gemini', 'mcp', 'add', '-s', 'user', '--trust',
       '-e', `AGENTISTICS_API=${apiUrl}`,
       MCP_SERVER_NAME,
-      'bun', 'run', mcpScript,
+      launch.command, ...launch.args,
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   )
