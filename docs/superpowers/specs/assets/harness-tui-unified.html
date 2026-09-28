@@ -50,7 +50,7 @@ aside.map p.s{font-size:12px;color:var(--muted);margin:0 0 10px}
 
 <div class="wrap">
   <h1>agentop: a TUI unificada</h1>
-  <p class="lede">Um protótipo navegável do app inteiro. Clique no terminal e use o teclado: <b>[</b> e <b>]</b> trocam de aba, <b>ctrl+p</b> abre a paleta e <b>?</b> abre a ajuda. No navegador, <b>alt</b> substitui o <b>ctrl</b> nos atalhos que o browser reserva (alt+t, alt+i, alt+o). Os botões embaixo do terminal enviam as teclas da tela atual. À direita, cada funcionalidade tem um código. Os destaques mostram o que está visível agora, e clicar leva até ela. Os dados são de exemplo.</p>
+  <p class="lede">Um protótipo navegável do app inteiro. Clique no terminal e use o teclado: <b>[</b> e <b>]</b> trocam de aba, <b>ctrl+p</b> abre a paleta e <b>?</b> abre a ajuda. No navegador, <b>alt</b> substitui o <b>ctrl</b> nos atalhos que o browser reserva (alt+t, alt+i, alt+o, alt+r, alt+g). Os botões embaixo do terminal enviam as teclas da tela atual. À direita, cada funcionalidade tem um código. Os destaques mostram o que está visível agora, e clicar leva até ela. Os dados são de exemplo.</p>
   <div class="grid">
     <div>
       <div class="bar">
@@ -147,6 +147,9 @@ const COMMANDS=[
  {c:'/inspector',d:'the selected turn, in detail',k:'ctrl+i',run:()=>{go('code');st.side='inspector'}},
  {c:'/timeline',d:'where this run spent time and money',k:'ctrl+t',run:()=>{go('code');st.side='timeline'}},
  {c:'/undo',d:'revert the last write from its checkpoint',k:'',run:()=>toast(st.stage==='patch'||st.stage==='patchDenied'?'Nothing to undo: no write has happened in this session yet.':'Reverted core/src/tokens.ts from the checkpoint taken before the patch (simulated).')},
+ {c:'/editor',d:'compose the prompt in $EDITOR',k:'ctrl+g',run:()=>openEditor()},
+ {c:'/history',d:'search your earlier prompts',k:'ctrl+r',run:()=>{go('code');openHist()}},
+ {c:'/copy',d:'copy the last answer (OSC 52, works over SSH)',k:'',run:()=>copyLast()},
  {c:'/compact',d:'summarize to free context',k:'',run:()=>toast('Compacting would summarize turns 1–6 and free about 60k of context (simulated).')},
  {c:'/cost',d:'this session, today, by model',k:'',run:()=>{go('code');st.side='session'}},
  {c:'/providers',d:'keys, models and prices',k:'ctrl+,',run:()=>openSettings(0)},
@@ -167,6 +170,10 @@ const MODES=['ask','edits','plan'];
 function go(t){st.tab=t;st.ov=null;st.pane='left';st.answering=false}
 function toast(t){st.toast=t;st.toastAt=Date.now()}
 function cycleMode(){st.mode=MODES[(MODES.indexOf(st.mode)+1)%MODES.length];toast({ask:'Mode ask: everything not allowlisted asks first.',edits:'Mode edits: file writes inside the workspace are allowed; shell still asks.',plan:'Mode plan: read-only. Writes and shell are refused until you leave plan.'}[st.mode])}
+const HIST=['now fix it and run the core tests','add a failing test first','why does the parser drop the last byte of a buffer?','summarize the diff for the PR description','run bun test packages/core and show only failures'];
+function openHist(){st.ov='hist';st.hist={q:'',sel:0}}
+function openEditor(){go('code');if(st.stage==='patch'||st.stage==='shell'){toast('Answer the permission first: the composer is locked while it waits.');return}toast('Opened $EDITOR (nvim) on the draft. Save and quit and the text lands in the composer (simulated).');st.draft=st.draft||'refactor sliceEnd to take an exclusive end everywhere'}
+function copyLast(){const m=[...st.extra.map(x=>x.reply),st.final,st.denyReply].filter(x=>x&&x.i>=x.text.length).pop();toast(m?`Copied the last answer (${m.text.length} chars) to your clipboard via OSC 52 — works over SSH and inside tmux.`:'Nothing to copy yet: no answer has finished in this session.')}
 const needCount=()=>FLEET.filter(s=>s.state==='approval'||s.state==='waiting').length;
 function syncParser(){const s=FLEET[0];s.state=(st.stage==='patch'||st.stage==='shell')?'approval':st.stage==='running'||(st.final&&st.final.i<st.final.text.length)?'working':'waiting'}
 
@@ -181,6 +188,7 @@ function subline(){
  return '';}
 function hints(){
  if(st.ov==='palette')return '{a:↑↓} move  {a:enter} run  {a:esc} close';
+ if(st.ov==='hist')return '{a:type} filter  {a:↑↓} move  {a:enter} use it  {a:esc} close';
  if(st.ov==='help'||st.ov==='diff')return '{a:esc} close';
  if(st.ov==='settings')return '{a:↑↓} section  {a:enter} change  {a:esc} close';
  if(st.ov==='wizard')return '{a:↑↓} choose  {a:enter} next  {a:esc} back';
@@ -245,7 +253,7 @@ function permCard(w){const kind=st.stage;const iw=w-4;
  const tail=st.reasonFor?['',`{w:why:} ${st.reason}{a.blink:▍}`,'{m:enter sends the denial and your reason to the agent · esc goes back}']:['',...opts.map((o,i)=>`{a.b:${i+1}} ${o}`)];
  const lines=[...head,...tail];return box({w,h:lines.length+2,focus:true,title:'permission · '+(kind==='patch'?'file.patch':'shell'),badge:'{y:needs you}',lines})}
 function composer(w){const pend=st.stage==='patch'||st.stage==='shell';
- const t=pend?'{m:› answer the permission above (1–4) · esc denies it}':st.draft?`{w:›} ${st.draft}{a.blink:▍}`:'{w:›} {m:ask anything · @ file · / command · ! shell}{a.blink:▍}';
+ const t=pend?'{m:› answer the permission above (1–4) · esc denies it}':st.draft?`{w:›} ${st.draft}{a.blink:▍}`:'{w:›} {m:ask anything · @ file · / command · ! shell · ctrl+g editor · ctrl+r history}{a.blink:▍}';
  const pop=st.draft.startsWith('/')?COMMANDS.filter(c=>c.c.startsWith(st.draft)).slice(0,5):[];
  const popLines=pop.length?box({w,h:pop.length+2,title:'commands',lines:pop.map((c,i)=>lr(`${i===0?'{a:▸}':' '} ${c.c}  {m:${c.d}}`,`{m:${c.k}}`,w-4))}):[];
  return [...popLines,...box({w,h:3,focus:!pend,badge:`{m:${st.mode}}`,lines:[t]})]}
@@ -359,14 +367,14 @@ function scrServices(){return [...box({w:W,h:9,title:'services',lines:[lr('{g:�
 function ovPalette(){const pw=Math.min(76,W-4);const q=st.pal.q.toLowerCase();const list=COMMANDS.filter(c=>!q||c.c.includes(q)||c.d.includes(q));st.pal.list=list;if(st.pal.sel>=list.length)st.pal.sel=Math.max(0,list.length-1);
  const rows=list.slice(0,16).map((c,i)=>{const r=lr(`${i===st.pal.sel?'{a:▸}':' '} ${pad(c.c,13)} ${c.d}`,`{m:${c.k}}`,pw-4);return i===st.pal.sel?hl([r],pw-4)[0]:r});
  return box({w:pw,h:rows.length+6,focus:true,title:'commands',badge:'{m:ctrl+p}',lines:[`{w:›} ${st.pal.q}{a.blink:▍}`,'',...(rows.length?rows:['{m:no command matches — esc closes}']),'',`{m:${list.length} of ${COMMANDS.length} · the shortcut on the right replaces the palette next time}`]})}
-function ovHelp(){const w=Math.min(96,W-4);return box({w,h:28,focus:true,title:'help · every key',lines:[
+function ovHelp(){const w=Math.min(96,W-4);return box({w,h:29,focus:true,title:'help · every key',lines:[
  '{l.b:EVERYWHERE}','{a:[ ]} change tab   {a:ctrl+p} commands   {a:ctrl+,} settings   {a:ctrl+s} sessions   {a:?} this help   {a:ctrl+c} quit','',
  '{l.b:HOME}','{a:type} the first prompt   {a:enter} choose its task and start   {a:1-3} resume','',
- '{l.b:CODE}','{a:enter} send   {a:/} command   {a:@} file   {a:!} shell   {a:shift+tab} mode (ask · edits · plan)','{a:1-4} answer a permission   {a:d} full diff   {a:esc} deny / interrupt   {a:ctrl+o} expand output','{a:ctrl+i} inspector   {a:ctrl+t} timeline   {a:ctrl+b} session panel   {a:↑↓} pick a turn (inspector)','',
+ '{l.b:CODE}','{a:enter} send   {a:/} command   {a:@} file   {a:!} shell   {a:shift+tab} mode (ask · edits · plan)','{a:1-4} answer a permission   {a:d} full diff   {a:esc} deny / interrupt   {a:ctrl+o} expand output','{a:ctrl+i} inspector   {a:ctrl+t} timeline   {a:ctrl+b} session panel   {a:↑↓} pick a turn (inspector)','{a:ctrl+g} compose in $EDITOR   {a:ctrl+r} search earlier prompts   {a:/copy} copy the last answer (OSC 52)','',
  '{l.b:SESSIONS}','{a:↑↓} select   {a:←→} chat · terminal · metrics   {a:enter} open/attach   {a:a} answer   {a:n} new','{a:r} rename   {a:t} file under a task   {a:x} stop   {a:/} search   {a:g} group by task · harness · state','',
  '{l.b:TASKS}','{a:↑↓} select   {a:enter} open its live session   {a:n} new session in this task   {a:w} open on the web','',
  '{l.b:NARROW TERMINALS}','{m:below 100 columns one pane is shown at a time; }{a:tab}{m: switches pane, }{a:esc}{m: goes back}','',
- '{m:In a real terminal ctrl works; in this browser mockup alt+t / alt+i / alt+o stand in for it.}']})}
+ '{m:In a real terminal ctrl works; in this browser mockup alt+t / alt+i / alt+o / alt+r / alt+g stand in for it.}']})}
 const SETS=['Providers','Models & pricing','Permissions','Appearance','Keybindings','Language','Tasks & tracking'];
 function setContent(i,iw){switch(i){
  case 0:return [lr('{l:provider}','{l:status · credential · default}',iw),lr('{a:▸} anthropic','{g:● ready} · env ANTHROPIC_API_KEY · sonnet-5',iw),lr('  openrouter','{g:● ready} · stored (0600) · gpt-5.1',iw),lr('  google','{m:○ beta, off} · —',iw),lr('  ollama','{r:● unreachable} · none needed',iw),'','{m:k set a key (masked, stored 0600, shown only by its end) · t test · a add}','{m:a key of the wrong vendor (sk-… here, AIza… elsewhere) is refused in words}','',lr('{m:last test}','14:01 · {g:ok} · 212ms',iw)];
@@ -400,6 +408,9 @@ function ovWizard(){const z=st.wiz;const w=Math.min(84,W-4);const steps=['task',
   if(h[0]==='native')L.push('{y.b:▲ no sandbox:} {m:tools run as you in that folder; everything not allowlisted asks first}');
   L.push('','{a:enter} {w:start}   {a:esc} back')}
  return box({w,h:22,focus:true,title:z.file?'file under a task':'new session',lines:L})}
+function ovHist(){const w=Math.min(76,W-4);const q=st.hist.q.toLowerCase();const list=HIST.filter(h=>h.includes(q));st.hist.list=list;if(st.hist.sel>=list.length)st.hist.sel=Math.max(0,list.length-1);
+ const rows=list.map((h,i)=>{const r=`${i===st.hist.sel?'{a:▸}':' '} ${h}`;return i===st.hist.sel?hl([r],w-4)[0]:r});
+ return box({w,h:rows.length+6,focus:true,title:'prompt history',badge:'{m:ctrl+r}',lines:[`{w:›} ${st.hist.q}{a.blink:▍}`,'',...(rows.length?rows:['{m:no earlier prompt matches}']),'','{m:newest first · enter puts it in the composer · esc closes}']})}
 function ovConfirm(){const c=st.confirm;const w=70;return box({w,h:c.lines.length+5,focus:true,title:c.title,lines:[...c.lines,'','{a:y} yes   {a:n} no']})}
 function ovDiff(){const mw=Math.min(94,W-4);const L=[lr('{w.b:packages/core/src/tokens.ts}  {g:+3} {r:−1}  {m:1 hunk}','{m:file.patch · turn 7}',mw-4),'{m:runs as you · }{y:no sandbox}{m: · a checkpoint is saved before writing (/undo reverts it)}','{d:'+'─'.repeat(mw-4)+'}',
  '{m:  39 │}   export function slice(buf, start, len) {','{m:  40 │}     if (len <= 0) return []','{m:  41 │}     const end = start + len',fit('{del:- 42 │     if (end > buf.length - 1) return null}',mw-4,'del'),fit('{add:+ 42 │     if (end > buf.length) return null}',mw-4,'add'),fit('{add:+ 43 │     // end is exclusive: a slice ending on the last byte is valid}',mw-4,'add'),fit('{add:+ 44 │     // (regression: tokens.test.ts "last byte")}',mw-4,'add'),'{m:  45 │}     return buf.subarray(start, end)','{d:'+'─'.repeat(mw-4)+'}',
@@ -411,7 +422,7 @@ function frame(){syncParser();
  let body=st.tab==='home'?scrHome():st.tab==='code'?scrCode():st.tab==='sessions'?scrSessions():st.tab==='tasks'?scrTasks():st.tab==='dashboard'?scrDashboard():scrServices();
  body=body.slice(0,BODY);while(body.length<BODY)body.push('');
  let lines=[header(),subline(),...body,statusLine(),hints()];
- const ov=st.ov==='palette'?ovPalette():st.ov==='help'?ovHelp():st.ov==='settings'?ovSettings():st.ov==='wizard'?ovWizard():st.ov==='confirm'?ovConfirm():st.ov==='diff'?ovDiff():null;
+ const ov=st.ov==='palette'?ovPalette():st.ov==='help'?ovHelp():st.ov==='settings'?ovSettings():st.ov==='wizard'?ovWizard():st.ov==='confirm'?ovConfirm():st.ov==='diff'?ovDiff():st.ov==='hist'?ovHist():null;
  if(ov){lines=[...lines.slice(0,H-1).map((l,i)=>i<1?l:dim([l])[0]),hints()];const bw=len(ov[0]);lines=overlay(lines,ov,Math.max(0,Math.floor((W-bw)/2)),Math.max(2,Math.floor((H-ov.length)/2)))}
  return lines}
 
@@ -458,6 +469,7 @@ const printable=k=>k.length===1;
 function type(field,k){if(k==='backspace'){field.v=field.v.slice(0,-1);return true}if(printable(k)){field.v+=k;return true}return false}
 function handle(k){
  if(st.ov==='palette'){const p=st.pal;if(k==='esc'){st.ov=null;return true}if(k==='up'){p.sel=Math.max(0,p.sel-1);return true}if(k==='down'){p.sel=Math.min((p.list||[]).length-1,p.sel+1);return true}if(k==='enter'){const c=(p.list||[])[p.sel];st.ov=null;if(c)c.run();return true}const f={v:p.q};if(type(f,k)){p.q=f.v;p.sel=0;return true}return true}
+ if(st.ov==='hist'){const p=st.hist;if(k==='esc'){st.ov=null;return true}if(k==='up'){p.sel=Math.max(0,p.sel-1);return true}if(k==='down'){p.sel=Math.min((p.list||[]).length-1,p.sel+1);return true}if(k==='enter'){const h=(p.list||[])[p.sel];st.ov=null;if(h){st.draft=h;toast('Put back in the composer: edit it, then enter sends.')}return true}const f={v:p.q};if(type(f,k)){p.q=f.v;p.sel=0}return true}
  if(st.ov==='help'||st.ov==='diff'){if(k==='esc'||k==='?'||k==='enter'){st.ov=null;return true}if(st.ov==='diff'&&/^[1-4]$/.test(k)){st.ov=null;answerPerm(+k);return true}return true}
  if(st.ov==='settings'){if(k==='esc'){st.ov=null;return true}if(k==='up'){st.set=(st.set+SETS.length-1)%SETS.length;return true}if(k==='down'){st.set=(st.set+1)%SETS.length;return true}
   if(k==='enter'){if(st.set===3){st.theme=(st.theme+1)%3;toast('Theme: '+['agentistics dark','agentistics light','high contrast'][st.theme]+' (the mockup keeps the dark one).')}else if(st.set===5){st.lang=st.lang==='EN'?'PT':'EN';toast(st.lang==='PT'?'Idioma: português — o app inteiro troca (o mockup fica em inglês).':'Language: English.')}else if(st.set===6)toast('Required by the owner: the new-session flow cannot finish without a task.');else toast('Opens the editor for this section (simulated).');return true}return true}
@@ -480,6 +492,8 @@ function handle(k){
   if(k==='ctrl+b'){st.side='session';if(st.narrow)st.pane=st.pane==='right'?'left':'right';return true}
   if(k==='ctrl+o'){if(st.stage==='done'){st.outOpen=!st.outOpen}else toast('No long output yet: the tests have not run.');return true}
   if(k==='shift+tab'){cycleMode();return true}
+  if(k==='ctrl+r'){if(pend){toast('Answer the permission first: the composer is locked while it waits.');return true}openHist();return true}
+  if(k==='ctrl+g'){openEditor();return true}
   if(st.narrow&&st.pane==='right'&&(k==='esc'||k==='tab')){st.pane='left';return true}
   if(st.side==='inspector'&&(k==='up'||k==='down')){const T=[5,6,7];let i=T.indexOf(st.turn)+(k==='up'?-1:1);st.turn=T[Math.max(0,Math.min(2,i))];return true}
   if(pend){if(/^[1-4]$/.test(k)){answerPerm(+k);return true}if(k==='d'&&st.stage==='patch'){st.ov='diff';return true}if(k==='esc'){answerPerm(3);toast('A permission left unanswered is a denial: nothing ran, and the agent was told.');return true}if(tabKeys())return true;return true}
@@ -547,6 +561,9 @@ const F=[
   ['CD-14','Panel · timeline','model vs tools vs waiting on you',()=>st.tab==='code'&&st.side==='timeline'&&(!st.narrow||st.pane==='right'),()=>{go('code');st.side='timeline'}],
   ['CD-15','Permission mode','shift+tab: ask · edits · plan',()=>st.tab==='code',()=>{go('code');cycleMode()}],
   ['CD-16','Session rules','an "allow for this session" shows in the panel',()=>st.tab==='code'&&st.rules.length>0,()=>{go('code');if(st.stage==='patch')answerPerm(2)}],
+  ['CD-17','External editor','ctrl+g composes the prompt in $EDITOR',()=>st.tab==='code'&&!!st.toast&&st.toast.startsWith('Opened $EDITOR'),()=>{if(st.stage==='patch')answerPerm(1);if(st.stage==='shell')answerPerm(1);openEditor()}],
+  ['CD-18','Prompt history','ctrl+r searches earlier prompts',()=>st.ov==='hist',()=>{go('code');if(st.stage==='patch')answerPerm(1);if(st.stage==='shell')answerPerm(1);openHist()}],
+  ['CD-19','Copy last answer','/copy via OSC 52 (works over SSH)',()=>!!st.toast&&(st.toast.startsWith('Copied the last')||st.toast.startsWith('Nothing to copy')),()=>{go('code');copyLast()}],
  ]],
  ['Sessions — the fleet',[
   ['SS-01','Whole fleet, grouped','every harness; g: task · harness · state',()=>st.tab==='sessions',()=>go('sessions')],

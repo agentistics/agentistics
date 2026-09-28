@@ -30,7 +30,7 @@ Terminal UI rules).
 | D-TUI-9 | **"no sandbox" is always on screen in `code`** (header) and in the wizard's review step for a native session. | M1 runs without a sandbox (B3-SEC F5). | A one-time notice. |
 | D-TUI-10 | **Narrow terminals (< 100 columns) show one pane at a time**; `tab` switches pane, `esc` goes back. In `code` the panel collapses to a one-line status (ctx · cost · task · mode) and `ctrl+i`/`ctrl+t`/`ctrl+b` open it full-width. Nothing may wrap or overflow the height (Terminal UI rules). | 80 columns is common. | Squeezing three columns into 80. |
 | D-TUI-11 | **Logo**: the icon rendered in half-blocks (▀▄) from the real SVG — scale and colour ONLY — beside the existing `WORDMARK_ART`. | Brand rule: never alter the logo's geometry. | A redrawn ASCII logo. |
-| D-TUI-12 | **Keys**: `[` `]` tabs (always) · `ctrl+p` palette · `ctrl+,` settings · `ctrl+s` sessions · `?` help · `ctrl+i` inspector · `ctrl+t` timeline · `ctrl+b` session panel · `ctrl+o` expand output · `shift+tab` permission mode · `1-4` answer · `d` full diff · `x` stop (never `k`) · `r` rename · `t` file under a task · `a` answer · `n` new · `/` search or command · `g` group. The palette and the `/` popup are ONE command list. Keys are rebindable; conflicts are refused in words. | Continuity with the cockpit; discoverability. | Digit shortcuts for screens (removed from the cockpit for a reason). |
+| D-TUI-12 | **Keys**: `[` `]` tabs (always) · `ctrl+p` palette · `ctrl+,` settings · `ctrl+s` sessions · `?` help · `ctrl+i` inspector · `ctrl+t` timeline · `ctrl+b` session panel · `ctrl+o` expand output · `ctrl+g` external editor · `ctrl+r` prompt history · `shift+tab` permission mode · `1-4` answer · `d` full diff · `x` stop (never `k`) · `r` rename · `t` file under a task · `a` answer · `n` new · `/` search or command · `g` group. The palette and the `/` popup are ONE command list. Keys are rebindable; conflicts are refused in words. | Continuity with the cockpit; discoverability. | Digit shortcuts for screens (removed from the cockpit for a reason). |
 | D-TUI-13 | **English by default, pt-BR toggle**, whole app, persisted by the host (the cockpit's `host.lang` rule). | House rule. | — |
 | D-TUI-14 | **Delivery is 1-1-1**: one ALM subtask per feature ID in §3, closed only with the three checks in the header. | Owner: every feature in the prototype is covered, progressively and verifiably. | One big "implement the TUI" task. |
 
@@ -93,6 +93,9 @@ absent, never invented). Everything else is buildable on what `dev` already has.
 | CD-14 | Panel · timeline | the run as bars: model calls, tools, waiting on you; totals of time and money. | ask/answer timestamps |
 | CD-15 | Permission mode | `shift+tab` cycles the modes; the header and card say which. | runtime: modes defined (see §5) |
 | CD-16 | Session rules | an "allow for this session" answer appears in the panel until the session ends. | — |
+| CD-17 | External editor | `ctrl+g` (and `/editor`) opens `$EDITOR` on the draft through the control center's `suspend`; saving and quitting puts the text back in the composer; locked while a permission is pending. | — |
+| CD-18 | Prompt history | `ctrl+r` (and `/history`) opens a filterable list of this machine's earlier prompts, newest first; enter puts one back in the composer for editing, never sends it. | — |
+| CD-19 | Copy last answer | `/copy` writes the last finished answer to the clipboard via OSC 52 (works over SSH and inside tmux) and says how many characters; with no finished answer it says so. | — |
 
 ### Sessions — the fleet
 | ID | Feature | Accepted when | Depends |
@@ -153,10 +156,14 @@ absent, never invented). Everything else is buildable on what `dev` already has.
 1. **P1 — B4.4, the terminal that works:** GL-01, GL-05, GL-06, CD-01–04, CD-07, CD-09, CD-11,
    CD-12 (without the context split and "also open"), NW-01, NW-06 (the minimal path to start a
    filed native session).
-2. **P2 — the rest of `code` + home:** CD-05, CD-06, CD-08, CD-10, CD-13–16, HM-01–07, GL-02–04, GL-07.
+2. **P2 — the rest of `code` + home:** CD-05, CD-06, CD-08, CD-10, CD-13–19, HM-01–07, GL-02–04, GL-07.
 3. **P3 — sessions parity:** SS-01–12.
 4. **P4 — tasks + full wizard:** TK-01–07, NW-02–05.
 5. **P5 — settings + dashboard panel:** ST-01–07, EX-01, EX-02, GL-07 re-check.
+
+**Added 2026-09-28 after approval** (CD-17–19, relayed by the leader from the feature research, round 2:
+Gemini CLI's `/editor`, Claude Code's `ctrl+g`, a prompt-history search, OSC 52 copy). Small, beside
+CD-11; added to the prototype and to the ALM task so the 1-1-1 mapping stays complete — 67 features.
 
 ## 5. Open questions (for the leader / owner)
 
