@@ -1,7 +1,7 @@
 # MCP coverage — every Agentistics capability reachable by Nay, behind gates
 
 **Board task:** t-086a67beb0 · **Related:** t-3648b62bee (Jarvis), t-35a89395fe / t-e1dea7cd6f
-(the open-core split and the runtime) · **Status:** design, nothing implemented · **Date:** 2026-09-29
+(the open-core split and the runtime) · **Status:** design, nothing implemented; technical decisions recorded 2026-09-29 (§7) · **Date:** 2026-09-29
 
 The owner wants Nay (the dashboard chat) and later Jarvis (voice) to be able to do everything a
 person does in Agentistics through the MCP. This spec covers five things:
@@ -33,15 +33,14 @@ person does in Agentistics through the MCP. This spec covers five things:
   first call. There is no risk classification, no audit and no notion of who called.
 - **There is no fleet control at all.** No tool reads the live fleet, prompts a session, starts one,
   or kills one. The web workspace, the cockpit, the VS Code extension and the CLI all can.
-- **There is no closed engine in this repository yet.**
-  - Everything is FSL-1.1-ALv2 (`LICENSING.md`).
-  - `packages/runtime` is FSL too.
-  - No "engine interface" type exists.
-  - What this means for the constraint "tools that drive the closed engine go through the engine
-    interface" is in §3.13 and decision **O-1**.
+- **The engine boundary is decided (D-1, §7), though the code has not moved yet.**
+  - Today every package is FSL-1.1-ALv2 (`LICENSING.md`), and no "engine interface" type exists.
+  - **CLOSED:** `packages/runtime`, `server/integrations` and live ingestion.
+  - **PUBLIC:** the journal, projections, `core/canonical` and the device-side E2E crypto.
+  - MCP tools that drive the engine go through the engine interface (§3.13).
 - **Against a central, the MCP cannot authenticate.** The auth gate requires an account session
   on every `/api/*` outside `AUTH_PUBLIC`, and the MCP sends no credential. Today it is
-  effectively useless there (decision **O-6**).
+  effectively useless there (decision **D-6**: an agent token, P4.1).
 
 ## 2. Capability map
 
@@ -90,7 +89,7 @@ Legend:
 | Native runtime: journal, provider try | `agentop journal`, `agentop provider try` (CLI only) | ✗ |
 | Version | `GET /api/version` | ✗ |
 | Upgrade | `POST /api/upgrade` | ✗ |
-| Lifecycle (server, central up/down, restart, autostart, hooks install) | CLI only | **N** in v1 (**O-5**) |
+| Lifecycle (server, central up/down, restart, autostart, hooks install) | CLI only | **N** in v1 (**D-5**) |
 | Arbitrary exec, chat spawn | `/api/exec`, `/api/chat-tty`, `/api/claude-chat` | **N** forever |
 
 ## 3. Proposed tools
@@ -227,7 +226,7 @@ the server already refuses to remove a protected status.
 - Adding a connection carries a token, so it is **N**.
 - Everything under central administration is **N** (§3.14).
 - The **central relay** tools, `agentistics_machine_fleet` (R) and
-  `agentistics_machine_session_act` (D), are specified but parked behind decision **O-6**.
+  `agentistics_machine_session_act` (D), land in P4 (**D-6**).
 
 ### 3.8 Backup
 
@@ -290,20 +289,29 @@ Install and replace are **N**: they run new code.
 
 | Tool | Class | Route |
 |---|---|---|
-| `agentistics_journal_status` | R | **new** `GET /api/runtime/journal` (the `agentop journal status` reader) |
-| `agentistics_runtime_metrics` | R (flagged) | `GET /api/runtime/metrics` |
-| `agentistics_provider_try` | **D** | **new** route over `agentop provider try` |
-| native session run / subagents | **D**, deferred | through the **engine route** (below) |
+| `agentistics_journal_status` | R | **new** `GET /api/runtime/journal` (the `agentop journal status` reader). The journal is PUBLIC, so this is an ordinary route. |
+| `agentistics_runtime_metrics` | R (flagged) | `GET /api/runtime/metrics`. Projections are PUBLIC. |
+| `agentistics_provider_try` | **D** | through the engine interface: `POST /api/engine/provider/try`. `packages/runtime` is CLOSED. |
+| native session run / subagents | **D** | through the engine interface under `/api/engine/*` (below) |
 
-**The engine boundary.** The MCP only ever speaks HTTP to `/api/*`. So whether a route is served by
-FSL code or by a closed engine changes nothing in the MCP. The MCP stays a public, thin client of a
-route contract, and no engine type is ever imported into `packages/mcp`.
+**The engine boundary (D-1).** `packages/runtime`, `server/integrations` and live ingestion are
+CLOSED. The journal, projections, `core/canonical` and device-side E2E crypto are PUBLIC. The MCP is
+public FSL code, so the rules are:
 
-When the closed engine exists, its routes live under one prefix, `/api/engine/*`. That prefix is
-registered once in `capability-guard.ts` (the way `/api/fleet` is), so a new engine route is guarded
-by having been added. The MCP's engine tools are generated from a manifest the engine serves. This
-is what "go through the engine interface" becomes on the MCP side. Where the boundary itself lies is
-decision **O-1**.
+- **The MCP never imports engine code.** It only ever speaks HTTP. No engine type is ever imported
+  into `packages/mcp`, and a lint test asserts that.
+- **Engine routes live under one prefix, `/api/engine/*`.**
+  - The public server mounts them from the engine interface.
+  - The prefix is registered once in `capability-guard.ts` under `localShell`, the way
+    `/api/fleet` is, so a new engine route is guarded by having been added.
+  - When no engine is present, the prefix answers `engine_absent` in words.
+- **The engine's tools come from a manifest.** `GET /api/engine/manifest` returns each tool's name,
+  input schema, route and risk class. The MCP builds those tools at listing time.
+  - A manifest row still has to fit the public policy table: the classes, the intent gate and the
+    `NEVER_ROUTES` list. An engine tool declaring `R` for a route under the D rules is refused, so
+    closed code cannot relax a public gate.
+  - The engine's D tools go through `POST /api/agent/intents` like every other D tool.
+- **Journal and projection reads are ordinary public routes**, not engine routes.
 
 ### 3.14 Never through the MCP (a closed list, with reasons)
 
@@ -317,7 +325,7 @@ decision **O-1**.
 | the security switches in preferences, `/api/config*` | an agent must never widen its own gates |
 | `/api/mcp/{install,replace}`, `agentop hooks install`, `autostart` | installs code or writes outside our directories (a CLAUDE.md rule: an explicit act of the user) |
 | restore, `events emit/test` | overwrites history or fabricates facts |
-| lifecycle (`server`, `central up/down`, `restart`) | v1: see **O-5** |
+| lifecycle (`server`, `central up/down`, `restart`) | out of v1 (**D-5**) |
 
 `POST /api/upgrade` is **D**, not N. It is a single, well-understood act that a person may want to
 trigger by voice. The readback must say that the server, and so this conversation's MCP, will
@@ -458,8 +466,9 @@ owns the whole path. The brain never produces the approval.
    The brain learns the outcome through `agentistics_intent`, like any caller.
 
 **Stated limit.** Nothing verifies the speaker, so anyone in the room can say "confirmo". The web
-card remains the strong channel. Decision **O-3** asks whether cloud voice (the phone through the
-hub) should be allowed to decide D intents, or only allowance intents.
+card remains the strong channel. Decision **O-3** (still open, for the owner) asks whether voice
+from the phone, through the hub, may decide D intents. Until it is decided, a D intent arriving that
+way is refused `needs_screen`.
 
 ### 4.6 Audit
 
@@ -491,7 +500,7 @@ Logging rules by class:
   expired, executed.
 
 Attribution is best-effort and says so. One registered MCP serves every Claude session on the
-machine, and `clientInfo` alone cannot tell two of them apart. Decision **O-4** covers per-session
+machine, and `clientInfo` alone cannot tell two of them apart. Decision **D-4** adds per-session
 identity.
 
 ### 4.7 Exposure profile and central
@@ -511,7 +520,7 @@ identity.
 - **Central.**
   - Host tools are refused. `/api/fleet*` is already a 404 there, and the intent routes refuse as
     well.
-  - The member-relay tools stay parked (**O-6**).
+  - The member-relay tools land in P4 (**D-6**).
 
 ### 4.8 Untrusted output
 
@@ -602,43 +611,58 @@ item with its mobile version.
 - P3.2 **M** — The Jarvis confirmation path in the public shell: readback TTS, post-readback
   capture, the deterministic matcher plus challenge, barge-in cancels. Depends on t-3648b62bee's
   shell.
-- P3.3 **S** — The runtime reads: journal status route plus tool, runtime metrics tool,
-  provider-try (D).
+- P3.3 **S** — The public runtime reads: the journal status route plus tool, and the runtime
+  metrics tool.
+- P3.4 **M** — The engine interface on the MCP side:
+  - mount `/api/engine/*` plus its guard prefix, and the `engine_absent` answer;
+  - build tools from `GET /api/engine/manifest`, validating each row against the policy table;
+  - the lint test that `packages/mcp` imports no engine code;
+  - `agentistics_provider_try` (D) as the first engine tool.
 
-**P4 — parked behind decisions**
+**P4 — the central (D-6)**
 
-- P4.1 — The central relay tools (**O-6**).
-- P4.2 — Engine tools from an engine-served manifest under `/api/engine/*` (**O-1**).
-- P4.3 — Lifecycle tools (**O-5**).
+- P4.1 **M** — The agent token: a per-account, read-scoped token minted in Settings and stored
+  hashed like ingest tokens. The MCP sends it as a Bearer. Read-only tools work on a central.
+- P4.2 **S** — The member-relay tools: `agentistics_machine_fleet` (R), and
+  `agentistics_machine_session_act` (D, and it also requires the member's own consent switches).
+- P4.3 **S** — Per-session actor identity (D-4): agentop injects `AGENTISTICS_ACTOR=<managedId>`
+  at spawn, and the MCP forwards it into the audit.
 
-## 7. Owner decisions (open)
+Lifecycle tools are **out of v1** (D-5).
 
-- **O-1 · The engine boundary.** No closed engine exists in this repository today. Everything,
-  `packages/runtime` included, is FSL.
-  - **Recommendation:** the MCP stays a public thin client of `/api/*`. Engine capabilities are
-    reached only through routes under `/api/engine/*`, one guard prefix, and a manifest the engine
-    serves.
-  - **To confirm:** that the closed engine will expose HTTP routes, rather than being linked into
-    the MCP.
-- **O-2 · Is a prompt to a running session D?** It spends money, so this spec says D, but
-  allowance-eligible.
-  - **Alternative:** W with a per-hour spend ceiling.
-  - **Recommendation:** D plus allowances. The allowance is the moment the person says how much
-    autonomy they are handing over.
-- **O-3 · Can cloud voice (phone via the hub) decide D intents?**
-  - **Recommendation:** it decides only allowance intents and W. D needs the local voice path or a
-    card.
-- **O-4 · Per-session actor identity.** One registered MCP serves every session.
-  - **Option:** each managed session gets `AGENTISTICS_ACTOR=<managedId>` in its environment at
-    spawn, which the MCP forwards.
-  - **Recommendation:** yes, for sessions agentop starts. Everything else stays best-effort.
-- **O-5 · Lifecycle by agent** (restart, central up/down, autostart).
-  - **Recommendation:** not in v1. Revisit after allowances have run for a while.
-- **O-6 · The MCP on a central.** It needs a credential: a per-account, read-scoped **agent token**
-  minted in Settings and stored hashed like ingest tokens.
-  - **Recommendation:** read-only tools first. The member-relay act tool stays D and also requires
-    the member's own consent switches.
-- **O-7 · Allowance ceiling.** The spec says 60 min and a spawn budget set per allowance.
-  - **To confirm:** the maximum duration, and whether an allowance may also cover `kill` of
-    sessions the same allowance spawned (for "fan out, collect, clean up"). The recommendation is
-    no for v1.
+## 7. Decisions
+
+Recorded 2026-09-29. The technical ones were decided by the leader, to whom the owner delegated
+them. One stays with the owner.
+
+- **D-1 · The engine boundary (was O-1). Decided.**
+  - CLOSED: `packages/runtime`, `server/integrations` and live ingestion.
+  - PUBLIC: the journal, projections, `core/canonical` and device-side E2E crypto.
+  - MCP tools that drive the engine go through the engine interface: the `/api/engine/*` routes
+    and the engine manifest (§3.13), never an import.
+- **D-2 · A prompt to a running session is class D (was O-2). Decided.** Standing allowances cover
+  it (§4.4).
+- **D-4 · Per-session actor identity (was O-4). Decided, as recommended.**
+  - Each session agentop starts gets `AGENTISTICS_ACTOR=<managedId>` in its environment, and the MCP
+    forwards it.
+  - Everything else stays best-effort (P4.3).
+- **D-5 · Lifecycle by agent (was O-5). Decided: not in v1.** No service restart, no central up or
+  down, no autostart. These stay on the §3.14 N list.
+- **D-6 · The MCP on a central (was O-6). Decided, as recommended.**
+  - A per-account, read-scoped agent token, stored hashed.
+  - Read-only tools first.
+  - The member-relay act tool is D and also requires the member's own consent switches (P4).
+- **D-7 · Allowance ceiling (was O-7). Decided, as recommended.**
+  - At most 60 minutes, with a spawn budget set per allowance.
+  - In v1 an allowance never covers `kill`, including the kill of sessions that the same allowance
+    spawned.
+
+### Open, for the owner
+
+- **O-3 · Can phone voice (through the hub) approve D actions?**
+  - The leader leans NO for v1: a destructive action needs an on-screen confirmation.
+  - The spec's recommendation is compatible with that. Voice from the phone may approve only
+    allowance intents and W. D intents need the local voice path or a card, and under the leader's
+    reading, a card only.
+  - Until the owner decides, P3.2 builds the voice matcher for local calls only, and a D intent
+    arriving from `channel:'voice'` through the hub is refused `needs_screen`.
