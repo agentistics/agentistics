@@ -121,6 +121,7 @@ import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
+import { recordRewind } from './sessions/rewind-pending'
 import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
@@ -3301,6 +3302,52 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // so the answer names the act rather than claiming an outcome it has not read.
       return (await backend.sendKey(id, spec.cycleKey))
         ? { ok: true, message: s.sessModeCycled }
+        : { ok: false, message: s.sessSendFailed(id) }
+    },
+
+    async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      // claude's menu is the only one measured (`claude-rewind.ts`). Anything else is refused by
+      // NAME rather than driven blind — a guessed key sequence in someone's session is the defect.
+      if (managed.harness !== 'claude' || !backend.rewindTo) {
+        return { ok: false, message: s.sessRewindUnsupported(managed.harness) }
+      }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      // Never on an open dialog: Esc Esc there answers the dialog, it does not open the menu.
+      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      const rules = rulesFor(managed.harness)
+      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+        return { ok: false, message: s.sessPromptBlocked }
+      }
+      const out = await backend.rewindTo(id, prompt, occurrence)
+      if (out === 'done') {
+        // The chat cuts at this point until the transcript catches up — see `rewind-pending.ts`.
+        if (managed.conversationId) recordRewind(managed.conversationId, { prompt, occurrence, atMs: Date.now() })
+        return { ok: true, message: s.sessRewound }
+      }
+      return { ok: false, message: s.sessRewindFailed(out) }
+    },
+
+    async sendQueuedNow(id: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      if (managed.harness !== 'claude' || !backend.sendQueuedNow) {
+        return { ok: false, message: s.sessSendNowUnsupported(managed.harness) }
+      }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      return (await backend.sendQueuedNow(id))
+        ? { ok: true, message: s.sessSentNow }
         : { ok: false, message: s.sessSendFailed(id) }
     },
 

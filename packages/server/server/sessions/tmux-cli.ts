@@ -249,6 +249,15 @@ export function sendKeysNamedArgs(id: string, key: string, socket?: string): str
   return sock(['send-keys', '-t', tmuxName(id), key], socket)
 }
 
+/**
+ * Several named keys in ONE `send-keys` — one burst, which is what a harness reads as a chord.
+ * claude's rewind menu opens on Esc Esc sent together; the same two keys as two calls 300 ms apart
+ * did not open it (measured, claude 2.1.284).
+ */
+export function sendKeysNamedSequenceArgs(id: string, keys: readonly string[], socket?: string): string[] {
+  return sock(['send-keys', '-t', tmuxName(id), ...keys], socket)
+}
+
 export function sendKeysEnterArgs(id: string, socket?: string): string[] {
   return sendKeysNamedArgs(id, 'Enter', socket)
 }

@@ -39,6 +39,15 @@ export type FleetActionId =
    * see `FleetActionRequest.ids`.
    */
   | 'reopenFell' | 'broadcast'
+  /**
+   * Claude Code's own REWIND: restore the conversation to just before a given prompt. Carries the
+   * exact prompt `text` and its `occurrence` (0 = the most recent appearance of that text). Sent by
+   * the recent-prompts panel; deliberately NOT in `PERFORMABLE`, which is for verbs a server row
+   * offers — this one is asked for by a control that only exists on a claude session.
+   */
+  | 'rewind'
+  /** Submit every message claude is holding in its OWN queue right now, in order (claude only). */
+  | 'sendNow'
 
 /** The verbs this page can PERFORM. The rest are shown, dimmed, with their reason. */
 export const PERFORMABLE: ReadonlySet<FleetActionId> = new Set<FleetActionId>([
@@ -169,6 +178,8 @@ export interface FleetState {
     action: FleetActionId
     text?: string
     choice?: number
+    /** `rewind` only: which appearance of `text` — counting from the latest, 0 first. */
+    occurrence?: number
     /**
      * The rows a GROUP verb acts on — `reopenFell` and `broadcast`. It can only ever NARROW the
      * group the server already resolved: absent means "all of it", and an empty array means

@@ -33,8 +33,8 @@ export interface SentTurn {
 /**
  * Where the recalled message is: a committed transcript turn, or an echo still waiting to land.
  *
- * `index` is the position within its own list, which is what the anchor id is built from — the two
- * lists are rendered as two runs of bubbles and their indexes are not interchangeable.
+ * `index` is the position within its own list. It is NOT what "go to message" anchors on — a
+ * position shifts on every re-fetch — see `promptHistory.ts`'s anchors.
  */
 export interface SentMessage {
   kind: 'turn' | 'echo'
@@ -69,15 +69,4 @@ export function lastSentMessage(
     if (turn && isPersonMessage(turn)) return { kind: 'turn', index: i, text: turn.text }
   }
   return null
-}
-
-/**
- * The DOM id of one rendered bubble.
- *
- * One rule, used by both the renderer and the scroller, so "go to message" can never be looking for
- * an id nothing wrote. The two runs are namespaced apart because their indexes overlap: turn 0 and
- * echo 0 are both the first of their own list.
- */
-export function turnAnchorId(kind: 'turn' | 'echo', index: number): string {
-  return `ag-chat-${kind}-${index}`
 }
