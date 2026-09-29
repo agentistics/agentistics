@@ -107,10 +107,22 @@ export function providerCredentialMask(entry: Pick<ProviderEntry, 'fingerprint' 
 // Refusal codes → localized sentence, falling back to the server's own English sentence
 // ---------------------------------------------------------------------------------------------
 
+// Mirrors packages/server/server/config.ts (the web bundle never imports server code);
+// providerSettings.test.ts pins the name against the server's own constant, so a rename there
+// breaks the build here instead of leaving these instructions naming a switch that does nothing.
+export const PROVIDER_FLAG_ENV = 'AGENTISTICS_PROVIDER'
+/** Only `'1'` turns the runtime on (`providerFlagOn` in the server's config.ts). */
+export const PROVIDER_FLAG_VALUE = '1'
+/** The systemd user unit `agentop autostart server` installs (`unitName('server')` in autostart.ts). */
+export const PROVIDER_SERVICE_UNIT = 'agentop-server.service'
+
+const FLAG_ASSIGNMENT = `${PROVIDER_FLAG_ENV}=${PROVIDER_FLAG_VALUE}`
+
 const REFUSAL_TEXT: Record<string, { en: string; pt: string }> = {
+  // Same facts as the server's own `refusalSentence('flag-off')`: the runtime is off, and the switch.
   'flag-off': {
-    en: 'Runtime providers are turned off on this machine.',
-    pt: 'Os provedores de runtime estão desligados nesta máquina.',
+    en: `The native provider runtime is off on this machine — set ${FLAG_ASSIGNMENT} to turn it on.`,
+    pt: `O runtime nativo de provedores está desligado nesta máquina — defina ${FLAG_ASSIGNMENT} para ligá-lo.`,
   },
   central: {
     en: 'A central has no local runtime, so there is nothing here to configure.',
@@ -188,6 +200,99 @@ export function refusalMessage(refusal: Refusal, pt: boolean): string {
   const generic = genericFieldRefusal(refusal.code)
   if (generic) return pt ? generic.pt : generic.en
   return refusal.sentence || refusal.code
+}
+
+// ---------------------------------------------------------------------------------------------
+// The "runtime is off" guide — what Settings → Providers shows instead of a dead end when
+// AGENTISTICS_PROVIDER is unset.
+//
+// ORDER IS THE POINT: the foreground command leads. Measured on WSL (defect t-039fe4c886): with no
+// user session / linger `systemctl --user` fails with "Failed to connect to bus", the running
+// server is not under the unit at all, and `agentop restart server` printed "Restarted…" while
+// changing nothing (same PID, variable absent). So `agentop restart server` is deliberately NOT a
+// step anywhere below — the systemd option restarts through systemctl itself — and the systemd
+// option is offered only where `systemctl --user status` answers.
+// ---------------------------------------------------------------------------------------------
+
+export interface ProviderOffStep {
+  /** One sentence saying what the block below it is for. */
+  text: string
+  /** Shown in a copyable block; a multi-line value is copied whole. */
+  command: string
+}
+
+export interface ProviderOffSection {
+  heading: string
+  /** One sentence of condition/caveat, shown under the heading before the steps. */
+  note?: string
+  steps: ProviderOffStep[]
+}
+
+export interface ProviderOffGuide {
+  title: string
+  lead: string
+  sections: ProviderOffSection[]
+  after: string
+}
+
+/** The one caveat sentence of the systemd option (exact wording, pinned by a test). */
+export const SYSTEMD_BUS_CAVEAT = {
+  en: 'if systemctl says Failed to connect to bus, use the foreground command.',
+  pt: 'se o systemctl disser Failed to connect to bus, use o comando em primeiro plano.',
+}
+
+/** Only ever shown for a solo/member machine: a central is refused (403 `central`) before the
+ *  flag is looked at, and the Providers section is hidden there. */
+export function providerOffGuide(pt: boolean): ProviderOffGuide {
+  const dropIn = `[Service]\nEnvironment=${FLAG_ASSIGNMENT}`
+  const status = `systemctl --user status ${PROVIDER_SERVICE_UNIT}`
+  return pt
+    ? {
+        title: 'O runtime nativo está desligado nesta máquina',
+        lead: `Ele só liga quando o servidor inicia com ${FLAG_ASSIGNMENT}.`,
+        sections: [
+          {
+            heading: 'Em primeiro plano (funciona em qualquer máquina)',
+            steps: [
+              { text: 'Pare o servidor que está rodando e inicie-o com a variável na frente:', command: `${FLAG_ASSIGNMENT} agentop server` },
+              { text: 'No repositório, ao rodar o modo de desenvolvimento:', command: `${FLAG_ASSIGNMENT} bun run dev` },
+            ],
+          },
+          {
+            heading: 'Como serviço (systemd do usuário)',
+            note: `Só para máquinas em que ${status} responde — ${SYSTEMD_BUS_CAVEAT.pt}`,
+            steps: [
+              { text: '1. Abra o override do serviço:', command: `systemctl --user edit ${PROVIDER_SERVICE_UNIT}` },
+              { text: '2. No editor, escreva estas duas linhas e salve:', command: dropIn },
+              { text: '3. Reinicie o serviço:', command: `systemctl --user restart ${PROVIDER_SERVICE_UNIT}` },
+            ],
+          },
+        ],
+        after: 'Depois de reiniciar, recarregue esta página.',
+      }
+    : {
+        title: 'The native runtime is off on this machine',
+        lead: `It only turns on when the server starts with ${FLAG_ASSIGNMENT}.`,
+        sections: [
+          {
+            heading: 'In the foreground (works on any machine)',
+            steps: [
+              { text: 'Stop the running server first, then start it with the variable in front:', command: `${FLAG_ASSIGNMENT} agentop server` },
+              { text: 'In the repository, when running the dev mode:', command: `${FLAG_ASSIGNMENT} bun run dev` },
+            ],
+          },
+          {
+            heading: 'As a service (systemd user unit)',
+            note: `Only for machines where ${status} answers — ${SYSTEMD_BUS_CAVEAT.en}`,
+            steps: [
+              { text: '1. Open the service override:', command: `systemctl --user edit ${PROVIDER_SERVICE_UNIT}` },
+              { text: '2. In the editor, write these two lines and save:', command: dropIn },
+              { text: '3. Restart the service:', command: `systemctl --user restart ${PROVIDER_SERVICE_UNIT}` },
+            ],
+          },
+        ],
+        after: 'After it restarts, reload this page.',
+      }
 }
 
 export function testResultSentence(result: TestResult, pt: boolean): string {

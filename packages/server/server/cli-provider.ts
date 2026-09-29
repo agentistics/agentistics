@@ -62,6 +62,8 @@ import type {
   StreamDelivery,
 } from '@agentistics/runtime'
 import type { Journal } from './journal/types'
+import { cliStrings, resolveLang, type CliLang } from './cli-i18n.ts'
+import type { RateLimitReading } from '@agentistics/runtime'
 
 /** Inferred from the function itself rather than a separately named exported type — this module
  *  depends only on `credentials.ts`'s function SIGNATURES, never on how it happens to name its
@@ -116,6 +118,11 @@ export interface ProviderCliDeps {
    * Absent: the verb refuses in a sentence rather than doing nothing.
    */
   runModels?: (args: string[]) => Promise<number>
+  /** `try` only: the language of the rate-limit line. Absent = `resolveLang()` (`--lang`, then
+   *  `preferences.lang`). */
+  lang?: CliLang
+  /** `try` only: the IANA zone the reset time is printed in. Absent = the machine's own zone. */
+  timeZone?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -712,6 +719,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
     d.stderr(`the call failed: ${result.error.kind} (${result.error.retryable ? 'retryable' : 'not retryable'}).`)
     if (result.requestId !== undefined) d.stderr(`  request-id: ${result.requestId}`)
     d.stderr(`  recorded as ${terminal.type}: ${terminal.eventId}${journaled ? '' : ' (NOT journaled)'}`)
+    await printRateLimit(result, d.stderr, d)
     return 1
   }
 
@@ -723,6 +731,7 @@ async function runTry(rest: string[], d: ProviderCliDeps): Promise<number> {
   for (const c of COUNTERS) d.stdout(`  ${c}: ${missing.has(c) ? 'not reported by the provider' : u[c]}`)
   d.stdout(`  stop: ${result.stopReason.kind}`)
   d.stdout(`  latency: ${Math.round(result.latencyMs)} ms`)
+  await printRateLimit(result, d.stdout, d)
   if (result.capture) d.stdout(`  raw capture: sha256:${result.capture.sha256} (${result.capture.bytes} bytes)`)
   d.stdout(`  ${invokedEvent(start, {}, ctx).type}: ${invokedId}`)
   d.stdout(`  ${terminal.type}: ${terminal.eventId}`)
@@ -812,6 +821,7 @@ async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: strin
     d.stderr(`the call failed: ${result.error.kind} (${result.error.retryable ? 'retryable' : 'not retryable'}).`)
     if (result.requestId !== undefined) d.stderr(`  request-id: ${result.requestId}`)
     d.stderr(`  recorded as ${terminal.type}: ${terminal.eventId}${journaled ? '' : ' (NOT journaled)'}`)
+    await printRateLimit(result, d.stderr, d)
     return 1
   }
 
@@ -826,6 +836,7 @@ async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: strin
   if (result.usageNotes !== undefined && result.usageNotes.length > 0) d.stdout(`  usage notes: ${result.usageNotes.join(', ')}`)
   d.stdout(`  stop: ${result.stopReason.kind}`)
   d.stdout(`  latency: ${Math.round(result.latencyMs)} ms`)
+  await printRateLimit(result, d.stdout, d)
   if (result.capture) d.stdout(`  raw capture: sha256:${result.capture.sha256} (${result.capture.bytes} bytes)`)
   d.stdout(`  ${invokedEvent(start, {}, ctx).type}: ${invokedId}`)
   d.stdout(`  ${terminal.type}: ${terminal.eventId}`)
@@ -834,6 +845,51 @@ async function runTryEndpoint(endpoint: OpenAICompatibleEndpointId, model: strin
 }
 
 type CompletedResult = Extract<InvocationResult, { status: 'completed' }>
+
+/**
+ * B9.3 — the rate-limit reading as ONE line: `requests 49/50 left until 14:32 · tokens …`. Reset
+ * instants are printed in the machine's local zone (or the injected one), with the date added only
+ * when it is not the same local day as `now`. An absent counter is SAID, never printed as 0 (D21).
+ */
+export function rateLimitSentence(
+  reading: RateLimitReading,
+  lang: CliLang,
+  opts: { now: Date; timeZone?: string },
+): string {
+  const t = cliStrings(lang)
+  if ('absent' in reading) return `${t.rateLimitLabel}: ${t.rateLimitAbsent(reading.absent, reading.dropped)}`
+
+  const num = new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US')
+  const zone = { timeZone: opts.timeZone }
+  const dayOf = (d: Date) => new Intl.DateTimeFormat('en-CA', { ...zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+  const clock = (d: Date) => new Intl.DateTimeFormat('en-GB', { ...zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d)
+  const when = (iso: string) => {
+    const d = new Date(iso)
+    return dayOf(d) === dayOf(opts.now) ? clock(d) : `${dayOf(d)} ${clock(d)}`
+  }
+
+  const parts: string[] = []
+  for (const r of reading.resources) {
+    let text = t.rateLimitKind[r.kind]
+    if (r.remaining !== undefined) {
+      text += ` ${t.rateLimitLeft(num.format(r.remaining), r.limit === undefined ? undefined : num.format(r.limit))}`
+    } else if (r.limit !== undefined) {
+      text += ` ${t.rateLimitLimitOnly(num.format(r.limit))}`
+    }
+    if (r.resetsAt !== undefined) text += ` ${t.rateLimitUntil(when(r.resetsAt))}`
+    parts.push(text)
+  }
+  if (reading.retryAfterMs !== undefined) parts.push(t.rateLimitRetryAfter(num.format(reading.retryAfterMs / 1000)))
+  if (reading.dropped > 0) parts.push(t.rateLimitDropped(reading.dropped))
+  return `${t.rateLimitLabel}: ${parts.join(' · ')}`
+}
+
+/** Prints the rate-limit line of a `try` result, when the client attached one. */
+async function printRateLimit(result: InvocationResult, print: (line: string) => void, d: ProviderCliDeps): Promise<void> {
+  if (result.rateLimit === undefined) return
+  const lang = d.lang ?? await resolveLang()
+  print(`  ${rateLimitSentence(result.rateLimit, lang, { now: new Date(), ...(d.timeZone === undefined ? {} : { timeZone: d.timeZone }) })}`)
+}
 
 /** The cost line: the endpoint's OWN figure with the field it came from, or `N/A` and why. There is
  *  no third branch — this verb never prices from a table and never uses the fallback rate. */

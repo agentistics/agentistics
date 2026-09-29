@@ -14,7 +14,7 @@ const rollup = (o: { used: number; cost: number | null; tokens: number | null; c
 const view = (id: string, r: SubtaskView['rollup']): SubtaskView => ({ id, rollup: r }) as unknown as SubtaskView
 const sess = (id: string, subtaskId: string | null): TaskSessionRow => ({
   id, harness: 'claude', cwd: '/', attemptId: null, subtaskId, createdAt: '2026-01-01',
-  tokens: null, costUSD: null, rounds: null,
+  model: null, tokens: null, costUSD: null, rounds: null,
 })
 
 describe('measureOfSubtask', () => {

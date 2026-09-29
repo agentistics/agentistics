@@ -24,7 +24,7 @@ import type {
 import type { ProviderJournalSink } from '../provider/emit.ts'
 import type { Tool } from '../tools/contract.ts'
 import { defineTool } from '../tools/define.ts'
-import { memoryContent, scriptedPolicy } from '../tools/testing.ts'
+import { memoryContent, scriptedAsker, scriptedPolicy } from '../tools/testing.ts'
 import { runToolLoop, type ToolLoopOptions } from './loop.ts'
 import { buildWireTable, toWireName } from './wire.ts'
 
@@ -506,5 +506,123 @@ describe('wire names', () => {
     expect(r.status).toBe('invalid-catalogue')
     expect(r.sentence).toContain('same name "a__b"')
     expect(client.requests).toHaveLength(0)
+  })
+})
+
+// ── H18: the doom-loop guard ────────────────────────────────────────────────────────────────────
+
+describe('repeat guard (H18)', () => {
+  const same = (n: number, input: unknown = { text: 'loop' }): Turn[] => [
+    ...Array.from({ length: n }, (_, i) => ({ content: [use(`tu_${i + 1}`, 'probe__echo', input)], stop: 'tool_use' as const })),
+    { content: [text('giving up')], stop: 'end_turn' as const },
+  ]
+
+  for (const streaming of [false, true]) {
+    test(`${streaming ? 'streaming' : 'invokeOnce'}: the 3rd identical call asks; denied → not run, the model is told in words`, async () => {
+      const p = probes()
+      const journal = memoryJournal()
+      const asker = scriptedAsker([{ answered: true, choice: 1 }])
+      const client = scriptedClient(same(3), streaming)
+      const r = await runToolLoop(baseOpts(client, p.tools, { journal, asker }))
+      expect(r.status).toBe('end-turn')
+      expect(p.ran).toEqual(['loop', 'loop'])
+      expect(asker.asked).toHaveLength(1)
+      expect(asker.asked[0]!.kind).toBe('permission')
+      expect(asker.asked[0]!.text).toContain('the same `probe.echo` with the same input 3 times in a row')
+      expect(r.calls.map(c => c.status)).toEqual(['completed', 'completed', 'denied'])
+      const third = lastResults(client.requests[3]!.messages)[0]!
+      expect(third.isError).toBe(true)
+      expect(third.content).toContain('Not run: you asked to run the same `probe.echo` with the same input 3 times in a row')
+      expect(third.content).toContain('A person declined')
+      const denied = journal.events.filter(e => e.type === 'policy.denied')
+      expect(denied).toHaveLength(1)
+      expect(denied[0]!.data).toMatchObject({ policy: 'repeat-guard', code: 'policy.denied.repeat-guard', decidedBy: 'user' })
+      expectPaired(r.messages)
+    })
+  }
+
+  test('with no person present the repeat is refused in words, and every further repeat too', async () => {
+    const p = probes()
+    const client = scriptedClient(same(5), false)
+    const r = await runToolLoop(baseOpts(client, p.tools))
+    expect(p.ran).toEqual(['loop', 'loop'])
+    expect(r.calls.map(c => c.status)).toEqual(['completed', 'completed', 'denied', 'denied', 'denied'])
+    const refusal = lastResults(client.requests[3]!.messages)[0]!.content
+    expect(refusal).toContain('no person was available')
+  })
+
+  test('allowed → it runs, and the count restarts from that call', async () => {
+    const p = probes()
+    const asker = scriptedAsker([{ answered: true, choice: 0 }, { answered: true, choice: 0 }])
+    const client = scriptedClient(same(5), false)
+    const r = await runToolLoop(baseOpts(client, p.tools, { asker }))
+    // calls 1,2 silent; 3 asked + allowed; 4 silent (count 2); 5 asked again.
+    expect(p.ran).toHaveLength(5)
+    expect(asker.asked).toHaveLength(2)
+    expect(r.calls.map(c => c.status)).toEqual(['completed', 'completed', 'completed', 'completed', 'completed'])
+  })
+
+  test('a deny from the run\'s policy is never turned into a question', async () => {
+    const p = probes()
+    const asker = scriptedAsker([])
+    const client = scriptedClient(same(4), false)
+    const r = await runToolLoop(baseOpts(client, p.tools, { asker, policy: scriptedPolicy('deny') }))
+    expect(asker.asked).toHaveLength(0)
+    expect(r.calls.every(c => c.status === 'denied')).toBe(true)
+    expect(lastResults(client.requests[4]!.messages)[0]!.content).toBe('Refused by the test policy.')
+  })
+
+  test('a call whose result keeps changing is polling, not a loop — nobody is asked', async () => {
+    let n = 0
+    const tick = defineTool<Record<string, never>>({
+      name: 'probe.tick', description: 'tick', kind: 'other', permission: 'auto', inputSchema: { type: 'object' },
+      parse: () => ({}), subjects: async () => [{ action: 'plan' }],
+      run: async () => ({ ok: true, modelText: `tick ${++n}` }),
+    }) as Tool<unknown>
+    const asker = scriptedAsker([])
+    const turns: Turn[] = [
+      ...Array.from({ length: 5 }, (_, i) => ({ content: [use(`tu_${i}`, 'probe__tick', {})], stop: 'tool_use' as const })),
+      { content: [text('done')], stop: 'end_turn' },
+    ]
+    const r = await runToolLoop(baseOpts(scriptedClient(turns, false), [tick], { asker }))
+    expect(n).toBe(5)
+    expect(asker.asked).toHaveLength(0)
+    expect(r.status).toBe('end-turn')
+  })
+
+  test('reordered keys are the same call; a different input in between resets', async () => {
+    const p = probes()
+    const asker = scriptedAsker([])
+    const turns: Turn[] = [
+      { content: [use('a', 'probe__echo', { text: 'x', delayMs: 0 })], stop: 'tool_use' },
+      { content: [use('b', 'probe__echo', { delayMs: 0, text: 'x' })], stop: 'tool_use' },
+      { content: [use('c', 'probe__echo', { text: 'y' })], stop: 'tool_use' },
+      { content: [use('d', 'probe__echo', { text: 'x', delayMs: 0 })], stop: 'tool_use' },
+      { content: [use('e', 'probe__echo', { delayMs: 0, text: 'x' })], stop: 'tool_use' },
+      { content: [use('f', 'probe__echo', { text: 'x', delayMs: 0 })], stop: 'tool_use' },
+      { content: [text('done')], stop: 'end_turn' },
+    ]
+    const r = await runToolLoop(baseOpts(scriptedClient(turns, false), p.tools, { asker }))
+    expect(p.ran).toEqual(['x', 'x', 'y', 'x', 'x'])
+    expect(asker.asked).toHaveLength(1)
+    expect(r.calls[5]!.status).toBe('denied')
+  })
+
+  test('when the policy itself asked about the call, the person is not asked twice', async () => {
+    const p = probes()
+    const asker = scriptedAsker([{ answered: true, choice: 0 }])
+    let calls = 0
+    const policy = {
+      async evaluate(req: Parameters<ReturnType<typeof scriptedPolicy>['evaluate']>[0]) {
+        calls += 1
+        if (calls < 3) return { decision: 'allow' as const, by: 'policy' as const, policy: 'test:allow' }
+        await req.asker!.ask({ id: 'q', kind: 'permission', text: 'ok?', options: [{ label: 'Allow once' }] })
+        return { decision: 'allow' as const, by: 'user' as const, policy: 'test:ask' }
+      },
+    }
+    const r = await runToolLoop(baseOpts(scriptedClient(same(3), false), p.tools, { asker, policy }))
+    expect(asker.asked).toHaveLength(1)
+    expect(p.ran).toHaveLength(3)
+    expect(r.calls[2]!.status).toBe('completed')
   })
 })
