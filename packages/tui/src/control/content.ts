@@ -409,7 +409,7 @@ const CONTRIBUTE_EN: ContentSection[] = [
     title: 'Repository',
     rows: [
       { cmd: REPO_URL, text: '' },
-      { text: 'MIT licensed, © 2026 blpsoares — see LICENSE in the repository root.' },
+      { text: 'Licensed under FSL-1.1-ALv2, © 2026 blpsoares — see LICENSE in the repository root.' },
     ],
   },
   {
@@ -450,7 +450,7 @@ const CONTRIBUTE_PT: ContentSection[] = [
     title: 'Repositório',
     rows: [
       { cmd: REPO_URL, text: '' },
-      { text: 'Licença MIT, © 2026 blpsoares — veja o LICENSE na raiz do repositório.' },
+      { text: 'Licença FSL-1.1-ALv2, © 2026 blpsoares — veja o LICENSE na raiz do repositório.' },
     ],
   },
   {
