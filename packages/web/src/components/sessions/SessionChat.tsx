@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
 import { AlertTriangle, ArrowDown, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -73,10 +74,13 @@ import { commandToken, knownCommands } from '../../lib/commandToken'
 import { draftSegments, needsMirror } from '../../lib/commandMirror'
 import { knownServers, mentionTokens } from '../../lib/mentionTokens'
 import { commandNotFoundNotice } from '../../lib/commandNotice'
-import { lastSentMessage, turnAnchorId } from '../../lib/lastSent'
+import {
+  anchorIsLoaded, buildPromptList, echoAnchorId, sendNowHint, sendNowLabel, sendNowShown,
+  tailFollows, turnAnchorIds, type PromptEntry,
+} from '../../lib/promptHistory'
+import { RecentPromptsPanel } from './RecentPromptsPanel'
 import { goToTurn } from '../../lib/turnScroll'
-import { attachmentName, isImageAttachment, splitMessage } from '../../lib/messageAttachments'
-import { overlayPadding } from '../../lib/mobileOverlay'
+import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { handleComposerDrop } from '../../lib/mentionInsert'
@@ -137,7 +141,7 @@ export interface SessionChatProps {
   /** The shaped row, which carries the parsed dialog and what may be done about it. */
   row?: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number })
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number })
     => Promise<{ ok: boolean; message: string; id?: string }>
   /**
    * The files this session has touched, reported up as the conversation is read.
@@ -312,6 +316,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * broken, which is exactly what was reported.
    */
   const [heard, setHeard] = useState('')
+  /**
+   * THIS DRAFT HOLDS DICTATED TEXT — set when the recogniser settles on words, cleared when the
+   * message goes or the draft is emptied. The send then tells the model the message was transcribed
+   * (`dictationMark.ts`), so a misheard name reads as a mishearing, not as what was meant.
+   */
+  const dictatedRef = useRef(false)
+  // A draft emptied by hand no longer holds anything dictated.
+  useEffect(() => { if (draft === '') dictatedRef.current = false }, [draft])
   const recognitionRef = useRef<{ stop: () => void; abort?: () => void; onresult: unknown } | null>(null)
   const dictation = useMemo(
     () => dictationSupport(typeof window === 'undefined' ? undefined : (window as never), pt ? 'pt' : 'en'),
@@ -355,7 +367,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       rec.onresult = e => {
         const { final, interim } = splitDictation(e)
         // Only the settled half is kept. The rest is shown and thrown away on the next event.
-        if (final !== '') editDraft(d => appendDictation(d, final))
+        if (final !== '') { dictatedRef.current = true; editDraft(d => appendDictation(d, final)) }
         setHeard(interim)
       }
       // Both end the same way. A recogniser that stopped on its own (a timeout, a denied
@@ -668,20 +680,20 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const [notice, setNotice] = useState<string | null>(null)
   const [atTail, setAtTail] = useState(true)
   /**
-   * THE LAST MESSAGE YOU SENT — the modal, and which of its two faces is showing.
-   *
-   * `null` is closed. `'ask'` is the three options; `'text'` is the message itself, read inside the
-   * modal rather than by hunting for it in the conversation.
+   * THE RECENT-PROMPTS PANEL — open or not. It replaced the single-message recall dialog; its own
+   * views (list, full message, restore confirmation) and its Escape handling live in the panel.
+   * The History button is held so focus goes back to it when the panel closes: a dialog that drops
+   * the keyboard on the page body is one a keyboard user has to find their way back from.
    */
-  const [recall, setRecall] = useState<'ask' | 'text' | null>(null)
-  // Escape closes it. A dialog that can only be dismissed with the mouse is one a keyboard cannot
-  // leave — the same rule the composer's "more options" menu already follows.
-  useEffect(() => {
-    if (recall === null) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRecall(null) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [recall])
+  const [promptsOpen, setPromptsOpen] = useState(false)
+  const historyBtnRef = useRef<HTMLButtonElement>(null)
+  /**
+   * Until when the conversation must NOT follow its tail. A jump to an older message clears
+   * `atTail`, but the smooth scroll that follows fires scroll events that can set it straight back
+   * while the view is still near the bottom, and the next poll would then yank the reader off the
+   * message they asked for. See `tailFollows`.
+   */
+  const holdTailUntil = useRef(0)
   /** Messages sent from here and not yet seen in the transcript. See the header. */
   const [echo, setEcho] = useState<string[]>(() => sessionScratch.readEchoes(scratchId))
 
@@ -996,14 +1008,11 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const turns = useMemo(() => payload?.turns ?? [], [payload])
 
   /**
-   * The last message the PERSON sent, echoes included. Every exclusion is in `lastSent.ts` — the
-   * transcript files things nobody typed under the user's own role, and recalling one of those as
-   * "your last message" is the defect `chat-envelope.ts` already exists to have fixed once.
-   *
-   * `null` means they have not sent one, and the control is then ABSENT rather than inert: a button
-   * whose only outcome is a modal saying "nothing" is a control that exists to refuse.
+   * Stable, session-namespaced DOM ids for every turn — derived from identity (who, when, a hash of
+   * what), never from position, so "go to message" still finds the bubble after the window slides.
+   * See `promptHistory.ts`.
    */
-  const lastSent = useMemo(() => lastSentMessage(turns, echo), [turns, echo])
+  const turnAnchors = useMemo(() => turnAnchorIds(session.id, turns), [session.id, turns])
 
 
 
@@ -1114,26 +1123,6 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   }, [])
 
-  /**
-   * Take the reader to the recalled message and MARK it.
-   *
-   * A scroll on its own answers nothing on a column of similar-looking bubbles — "it moved, to
-   * which one?" — so the bubble flashes and the class is removed afterwards, leaving nothing on the
-   * page marked. If the element is not there (the transcript was re-fetched between opening the
-   * modal and pressing the button, and the turn is no longer rendered) the modal SAYS so instead of
-   * a button that silently does nothing.
-   */
-  const goToMessage = useCallback(() => {
-    if (!lastSent) return
-    setAtTail(false)
-    // `goToTurn` is the ONE implementation of this gesture — the gallery's right-click menu offers
-    // it too, and two copies would be two chances to disagree about which element they look for.
-    if (!goToTurn(lastSent.kind, lastSent.index)) {
-      setNotice(pt
-        ? 'Essa mensagem não está mais na conversa carregada.'
-        : 'That message is no longer in the loaded conversation.')
-    }
-  }, [lastSent, pt])
 
   /**
    * A line the PANEL asked this composer to hold — the skills tab's "use this skill".
@@ -1216,13 +1205,17 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     const el = scrollRef.current
     if (!el || payload === null) return
     if (!landedRef.current) { el.scrollTop = el.scrollHeight; landedRef.current = true; return }
-    if (atTail) el.scrollTop = el.scrollHeight
+    if (tailFollows(atTail, holdTailUntil.current, Date.now())) el.scrollTop = el.scrollHeight
   }, [turns.length, live, payload, atTail, echo.length])
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    setAtTail(el.scrollHeight - el.scrollTop - el.clientHeight < TAIL_SLACK)
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < TAIL_SLACK
+    // Right after a jump the view can still be near the bottom while it scrolls away; reading that
+    // as "at the tail" would re-arm the follow and pull the reader back. See `holdTailUntil`.
+    if (near && Date.now() < holdTailUntil.current) return
+    setAtTail(near)
   }, [])
 
   /**
@@ -1324,6 +1317,78 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    */
   const answeringNow = blocked && answering !== null
   const canPrompt = !loading && session.actionable && (!blocked || answeringNow) && payload.live !== false
+
+  /** Everything the person sent, newest first — the recent-prompts panel's rows. */
+  const promptList = useMemo(() => buildPromptList(session.id, turns, queued), [session.id, turns, queued])
+
+  const closePrompts = useCallback(() => {
+    setPromptsOpen(false)
+    // Back to the control that opened the panel, once the dialog has unmounted.
+    requestAnimationFrame(() => historyBtnRef.current?.focus())
+  }, [])
+
+  /**
+   * Take the reader to one of their messages and MARK it.
+   *
+   * RESOLVED AT CLICK TIME against the turns as they are NOW: the entry carries an identity-based
+   * anchor, and if it is no longer among the loaded turns (the window slid past it) the reader is
+   * told so instead of being scrolled somewhere else. `goToTurn` is the ONE implementation of the
+   * gesture — the gallery's menu uses it too.
+   */
+  const goToPrompt = useCallback((entry: PromptEntry) => {
+    const loadedNow = anchorIsLoaded(entry.anchor, session.id, turns, queued)
+    // Hold the tail off so the follow-the-tail effect cannot pull the view back after the jump.
+    holdTailUntil.current = Date.now() + 4000
+    setAtTail(false)
+    if (!loadedNow || !goToTurn(entry.anchor)) {
+      setNotice(pt
+        ? 'Essa mensagem não está mais na conversa carregada.'
+        : 'That message is no longer in the loaded conversation.')
+    }
+  }, [session.id, turns, queued, pt])
+
+  /**
+   * RESTORE the conversation from just before a prompt (claude's own rewind), then hand the message
+   * back to the composer to edit and resend. The server clears the terminal input and its chat view
+   * hides the undone turns at once; on failure its own sentence is shown and nothing here changes.
+   */
+  const restoreFrom = useCallback(async (entry: PromptEntry) => {
+    const out = await act({
+      id: session.id, action: 'rewind', text: entry.text, occurrence: entry.occurrence ?? 0,
+    })
+    if (out.ok) {
+      const parts = splitMessage(stripDictatedMark(entry.text).text)
+      editDraft(d => applyDraftRequest(d, parts.text))
+      if (parts.attachments.length > 0) {
+        editAttached(a => [
+          ...a,
+          ...parts.attachments
+            .filter(path => !a.some(x => x.path === path))
+            .map(path => ({ name: attachmentName(path), path })),
+        ])
+      }
+      setNotice(out.message)
+      setPromptsOpen(false)
+      nudgeChat.current()
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    return { ok: out.ok, message: out.message }
+  }, [act, session.id, editDraft, editAttached])
+
+  /**
+   * SEND NOW — submit everything claude is holding in ITS OWN queue. It is for the WHOLE queue (a
+   * queued message 1 goes out with message 2), and the button says so when there is more than one.
+   */
+  const [sendingNow, setSendingNow] = useState(false)
+  const showSendNow = sendNowShown({
+    harness: session.harness, working, queuedCount: queued.length, dialogOpen: blocked,
+  })
+  const sendNow = useCallback(async () => {
+    setSendingNow(true)
+    const out = await act({ id: session.id, action: 'sendNow' })
+    setSendingNow(false)
+    if (out.ok) { setNotice(null); nudgeChat.current() } else setNotice(out.message)
+  }, [act, session.id])
   /**
    * The `/` picker is open.
    *
@@ -1540,7 +1605,11 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
     // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
     // the person's own words render inside the grey bar as if the session had said them.
-    const full = composeReply({ quote, paths: attached.map(a => a.path), text })
+    const composed = composeReply({ quote, paths: attached.map(a => a.path), text })
+    // Dictated? The model is told in one short trailing line — see `dictationMark.ts`. Taken and
+    // cleared here, so the NEXT message starts undictated unless the microphone is used again.
+    const full = dictatedRef.current ? markDictated(composed) : composed
+    dictatedRef.current = false
     /**
      * THE COMPOSER EMPTIES ON THE KEYSTROKE, NOT ON THE ANSWER.
      *
@@ -1709,7 +1778,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
               {...(payload?.attachmentMessages
                 ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
                 : {})}
-              anchorId={turnAnchorId('turn', i)}
+              {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
               {...(canPrompt ? { onReply: onReplyToTurn } : {})}
               {
                 // Only on the assistant's side: quoting a fragment of your OWN message back at the
@@ -1730,12 +1799,40 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
-              anchorId={turnAnchorId('echo', i)}
+              anchorId={echoAnchorId(session.id, q.text)}
               awaiting
               awaitingWorking={working}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
           ))}
+
+          {/* SEND NOW, under the LAST queued bubble: the queue is one group and this acts on the
+              whole of it. Only while claude is working with something held (`sendNowShown`) — idle,
+              nothing is held, and elsewhere the keystroke does not exist. */}
+          {showSendNow && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => void sendNow()}
+                disabled={sendingNow}
+                // A pill keeps its natural height; `.ag-tap` projects the 44px touch target around
+                // it on a phone instead of painting it (see index.css).
+                className="ag-tap"
+                title={sendNowHint(queued.length, pt)}
+                aria-label={sendNowHint(queued.length, pt)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  minHeight: 28, padding: '0 12px',
+                  borderRadius: 999, border: '1px solid var(--anthropic-orange)',
+                  background: 'transparent', color: 'var(--anthropic-orange)',
+                  fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                  cursor: sendingNow ? 'default' : 'pointer', opacity: sendingNow ? 0.6 : 1,
+                }}
+              >
+                <Send size={12} style={{ flexShrink: 0 }} />
+                {sendingNow ? (pt ? 'Enviando…' : 'Sending…') : sendNowLabel(queued.length, pt)}
+              </button>
+            </div>
+          )}
 
           {/* `live` (the screen read off the terminal frame) is deliberately NOT rendered here any
               more — it used to show as a full-size bubble, and a CLI's own screen carries its own
@@ -2753,17 +2850,19 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                   </button>
                 )}
 
-                {/* THE LAST MESSAGE YOU SENT. ABSENT until there is one — `lastSent` is null on a
-                    conversation nobody has written into yet, and a control whose only outcome is a
-                    modal saying "nothing" is one that exists to refuse. It sits with the acting
-                    group because it is about what you have already sent, not about composing.
+                {/* THE PANEL OF EVERYTHING YOU SENT, its first row being the last message. ABSENT until
+                    there is one — a control whose only outcome is a panel saying "nothing" is one
+                    that exists to refuse. It sits with the acting group because it is about what
+                    you have already sent, not about composing.
                     NOT WHILE ANSWERING A QUESTION, with the mode chip and the model: all three are
                     about the next TURN, and this is an answer to a dialog already open. */}
-                {lastSent && !answeringNow && (
+                {promptList.length > 0 && !answeringNow && (
                   <button
-                    onClick={() => setRecall('ask')}
-                    aria-label={pt ? 'Sua última mensagem' : 'Your last message'}
-                    title={pt ? 'Sua última mensagem' : 'Your last message'}
+                    ref={historyBtnRef}
+                    onClick={() => setPromptsOpen(true)}
+                    aria-label={pt ? 'Suas mensagens' : 'Your messages'}
+                    aria-haspopup="dialog"
+                    title={pt ? 'Suas mensagens' : 'Your messages'}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
@@ -3008,132 +3107,21 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         </div>
       </div>
 
-      {/* THE RECALL MODAL. Exactly three options, because there are exactly three things somebody
-          asking "what did I send?" wants: to be taken to it, to read it here, or to have asked
-          nothing. Full-screen on a phone — a centred fixed-width dialog is pushed off-screen by
-          iOS Safari the moment the page overflows horizontally. */}
-      {recall && lastSent && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={pt ? 'Sua última mensagem' : 'Your last message'}
-          onClick={() => setRecall(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 200,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            // The status bar's inset on a full-screen phone dialog — see `mobileOverlay.ts`.
-            padding: overlayPadding(isMobile, 24), background: 'rgba(0,0,0,0.55)',
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0,
-              width: isMobile ? '100%' : 'min(520px, 100%)',
-              height: isMobile ? '100%' : 'auto',
-              maxHeight: isMobile ? '100%' : '80vh',
-              padding: isMobile ? '18px 16px' : 20,
-              borderRadius: isMobile ? 0 : 16,
-              background: 'var(--bg-card)', border: '1px solid var(--border)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <History size={15} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />
-              <h3 style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 650, color: 'var(--text-primary)' }}>
-                {pt ? 'Sua última mensagem' : 'Your last message'}
-              </h3>
-              {/* Said plainly: a message this session has not read yet is a different fact from one
-                  already in its transcript, and the reader is about to be sent to a faded bubble. */}
-              {lastSent.kind === 'echo' && (
-                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
-                  {pt ? 'ainda não lida' : 'not read yet'}
-                </span>
-              )}
-            </div>
-
-            {recall === 'ask' ? (
-              <p style={{
-                margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--text-tertiary)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {replyPreview(lastSent.text)}
-              </p>
-            ) : (
-              // The WHOLE message, wrapped and scrolling inside its own box: a prompt here is
-              // routinely forty lines, and a modal that grows with it would run off the screen.
-              <pre style={{
-                margin: 0, flex: isMobile ? 1 : '0 1 auto', minHeight: 0,
-                maxHeight: isMobile ? 'none' : '46vh', overflow: 'auto',
-                padding: 12, borderRadius: 10,
-                background: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
-                fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.6,
-                color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-              }}>
-                {splitMessage(lastSent.text).text}
-              </pre>
-            )}
-
-            {/* THE IMAGES IT CARRIED. A sent message is paths plus words joined by newlines, so
-                showing it raw rendered the paths as the first lines of the prose — a message with
-                an image in it read as one that began with a filename. Split by the SAME rule the
-                chat bubbles use (`splitImageAttachments`), never a second one: the two are reading
-                the identical text, and two rules over one string is how they come to disagree. */}
-            {/* THE FILES IT CARRIED, split by PROVENANCE rather than by looks: `splitMessage`
-                answers "which leading lines did the composer send", which is the question a recall
-                is asking, while `splitImageAttachments` answers "which lines can I preview". An
-                image is shown; anything else is named. */}
-            {splitMessage(lastSent.text).attachments.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                {splitMessage(lastSent.text).attachments.map(a => isImageAttachment(a) ? (
-                  <img
-                    key={a}
-                    src={attachmentUrl(a)}
-                    alt={attachmentName(a)}
-                    title={a}
-                    style={{
-                      height: 72, width: 'auto', maxWidth: 160, objectFit: 'cover',
-                      borderRadius: 8, border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-base)',
-                    }}
-                  />
-                ) : (
-                  <span key={a} title={a} style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
-                    borderRadius: 8, background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-subtle)', fontSize: 11.5,
-                    maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    <Paperclip size={11} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-                    {attachmentName(a)}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setRecall(null); goToMessage() }}
-                style={recallButton(isMobile, 'primary')}
-              >
-                {pt ? 'Ir para a mensagem' : 'Go to message'}
-              </button>
-              {/* Once the text is on screen, offering "view" again would be a button that does
-                  nothing — so it becomes the way back to the three options. */}
-              <button
-                onClick={() => setRecall(recall === 'text' ? 'ask' : 'text')}
-                style={recallButton(isMobile, 'plain')}
-              >
-                {recall === 'text'
-                  ? (pt ? 'Voltar' : 'Back')
-                  : (pt ? 'Ver mensagem' : 'View message')}
-              </button>
-              <button onClick={() => setRecall(null)} style={recallButton(isMobile, 'plain')}>
-                {pt ? 'Cancelar' : 'Cancel'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* THE RECENT-PROMPTS PANEL: a list of everything the person sent, with search, "go to",
+          "view" and — on claude — "restore from here". Full-screen sheet on a phone, a centred
+          dialog with its own scrolling list elsewhere (see the component). */}
+      {promptsOpen && (
+        <RecentPromptsPanel
+          entries={promptList}
+          lang={lang}
+          isMobile={isMobile}
+          harness={session.harness}
+          state={session.state}
+          dialogOpen={blocked}
+          onClose={closePrompts}
+          onGoTo={goToPrompt}
+          onRestore={restoreFrom}
+        />
       )}
 
       {/* THE ATTACHED PICTURE, full size. The same component a sent message opens, over the images
@@ -3152,19 +3140,6 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
 
     </div>
   )
-}
-
-/** The recall modal's buttons. 44px of finger on a phone, and nowhere else. */
-function recallButton(isMobile: boolean, kind: 'primary' | 'plain'): React.CSSProperties {
-  return {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    minHeight: isMobile ? 44 : 34, padding: '0 14px', borderRadius: 9,
-    border: kind === 'primary' ? 'none' : '1px solid var(--border)',
-    background: kind === 'primary' ? 'var(--anthropic-orange)' : 'transparent',
-    color: kind === 'primary' ? '#fff' : 'var(--text-secondary)',
-    fontFamily: 'inherit', fontSize: 12.5, fontWeight: kind === 'primary' ? 650 : 500,
-    cursor: 'pointer', flexGrow: isMobile ? 1 : 0,
-  }
 }
 
 /** Whitespace-insensitive, because the harness re-wraps what it stores. */
