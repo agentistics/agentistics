@@ -1364,7 +1364,7 @@ function SideNav({
           }}>
             {collapsed ? (
               <SessionsRail
-                rows={railRows} lang={pt ? 'pt' : 'en'}
+                rows={railRows} allRows={fleet.rows} lang={pt ? 'pt' : 'en'}
                 {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})}
                 filtersOpen={filtersOpen} filtersCount={filtersCount}
                 onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
