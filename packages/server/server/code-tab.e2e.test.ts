@@ -1,5 +1,5 @@
 /**
- * code-tab.e2e.test.ts — the M1-style run for the `code` tab (Harness TUI P1), fully offline.
+ * code-tab.e2e.test.ts — the M1-style run for the `code` tab (Harness TUI P1 + P2), fully offline.
  *
  * The WHOLE control center is mounted on the `code` tab (the one Ink app, D-TUI-3) with the REAL
  * server `CodeHost` behind it: a real sqlite session store, content store, native tools and policy
@@ -8,9 +8,15 @@
  *
  *   n → the wizard's task step → enter (the task) → enter (review: start) → type a prompt → enter
  *   → the model asks for a file.patch → the permission card shows the patch's real -/+ lines and the
- *     POLICY's options → d opens the full diff → 1 applies it → the file on disk changed
+ *     POLICY's options → d opens the full diff → "allow for this session" applies it → the file on
+ *     disk changed, and the answer carries its receipt (CD-06)
  *   → a second prompt → the model asks for a shell command → esc denies it (the policy's own Deny)
  *     → the row says it was denied by you, and the command never ran.
+ *
+ * P2 then walks the same session: the first turn folded to one line (CD-05), the session rule in the
+ * panel (CD-16), shift+tab through ask → edits → plan → ask with the dropped rule SAID (CD-15), the
+ * inspector and the timeline (CD-13/14), /copy (CD-19), ctrl+r putting a prompt back without sending
+ * it (CD-18), and `?` (GL-04).
  *
  * Frames are written to `AGENTISTICS_CODE_FRAMES` when set, at 108 and 80 columns, so the handback
  * can attach exactly what this run drew.
@@ -214,9 +220,16 @@ async function runAt(cols: number, rows: number) {
   await press('d')
   await until(frame, 'end is exclusive')
   keep('05-full-diff')
-  await press('1')
+  // CD-16: answer with the policy's "allow for this session" option, so a rule stands in the panel.
+  const session = /(\d) Allow for this session/.exec(frame())
+  expect(session).not.toBeNull()
+  await press(session![1]!)
   await until(frame, 'The slice now accepts the last byte.')
   keep('06-applied')
+  // CD-06: a finished answer carries its receipt; the scripted client streams nothing, so the ttft
+  // reads N/A rather than a confident zero.
+  expect(frame()).toMatch(/↳ [^\n]*ttft N\/A/)
+  expect(frame()).not.toMatch(/ttft 0ms/)
   // CD-12: the runtime journals no money, the host prices through calcCost — labelled api-equivalent.
   if (cols >= 100) expect(frame()).toMatch(/this turn\s+USD \d/)
   expect(await readFile(join(workspace, 'slice.ts'), 'utf8')).toContain('if (end > buf.length) return null')
@@ -234,12 +247,68 @@ async function runAt(cols: number, rows: number) {
   keep('08-denied')
   expect(frame()).toContain('denied by you')
   expect(frame()).not.toContain('esc cancel run')
+  // CD-05: with a later turn on screen, the first folds to one line — question · tools · cost.
+  // At 80x24 the conversation scrolls it above the fold, so the line is asserted where it is on screen.
+  if (cols >= 100) expect(frame()).toMatch(/▸ turn 1 · fix the off-by-one/)
+
+  // CD-16: the "allow for this session" answer stands in the session panel until the session ends.
+  if (cols < 100) await press('\x02')
+  await until(frame, 'SESSION RULES')
+  keep('09-session-rule')
+  if (cols < 100) { await press(ESC); await tick(120) }
+
+  // CD-15: shift+tab cycles the permission mode, and the chrome says which. ask → edits is LOOSER,
+  // and B4.7 drops the session's approvals on a looser switch — the sentence says so.
+  await press(`${ESC}[Z`)
+  await until(frame, 'mode edits')
+  await until(frame, '1 session rule dropped. Mode: edits')
+  keep('10-mode-edits')
+  await press(`${ESC}[Z`)
+  await until(frame, 'mode plan')
+  await press(`${ESC}[Z`)
+  await until(frame, 'mode ask')
+
+  // CD-13 / CD-14: the panel swaps to the inspector (tab) and the timeline (ctrl+t).
+  await press('\t')
+  await until(frame, '↑↓ picks the turn')
+  keep('11-inspector')
+  await press('\x14')
+  await until(frame, 'WHERE THE TIME WENT')
+  keep('12-timeline')
+  // Wide, ctrl+t swaps the side panel back to the session; narrow, the panel owns the screen and esc
+  // returns to the conversation.
+  await press(cols >= 100 ? '\x14' : ESC)
+  await tick(120)
+
+  // CD-19: /copy says how many characters it copied — the last answer is the whole turn's text
+  // ("Running the build." + a blank line + "Understood, I will not run it.").
+  for (const ch of '/copy') app.stdin.write(ch)
+  await tick()
+  await press('\r')
+  await until(frame, 'Copied 50 characters (OSC 52)')
+
+  // CD-18: ctrl+r lists earlier prompts newest first; enter puts one back, never sends it.
+  await press('\x12')
+  const hist = await until(frame, 'prompt history')
+  keep('13-history')
+  expect(hist.indexOf('now build it')).toBeLessThan(hist.indexOf('fix the off-by-one'))
+  await press('\r')
+  await until(frame, 'Put back in the composer')
+  expect(frame()).toContain('now build it')
+  await press('\x15')
+
+  // GL-04: `?` on an empty draft opens every key by screen, including this tab's.
+  await press('?')
+  await until(frame, 'CODE — THE NATIVE SESSION')
+  keep('14-help')
+  await press(ESC)
+  await until(frame, 'I will not run it.')
   return frames
 }
 
 describe('the code tab, driven by keys against the real host and a scripted model', () => {
   for (const [cols, rows] of [[108, 36], [80, 24]] as const) {
-    test(`start filed under a task, full diff, apply, deny — ${cols}x${rows}`, async () => {
+    test(`start filed under a task, full diff, apply, deny, then the P2 panels, mode, history, copy and help — ${cols}x${rows}`, async () => {
       const frames = await runAt(cols, rows)
       for (const [name, f] of Object.entries(frames)) {
         for (const line of f.split('\n')) expect([...line].length).toBeLessThanOrEqual(cols)
@@ -250,6 +319,6 @@ describe('the code tab, driven by keys against the real host and a scripted mode
           writeFileSync(join(out, `${cols}x${rows}-${name}.txt`), f + '\n')
         }
       }
-    }, 30_000)
+    }, 60_000)
   }
 })

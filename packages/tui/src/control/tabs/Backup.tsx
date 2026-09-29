@@ -18,7 +18,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { truncate } from '../../components/Primitives'
 import { COLORS } from '../../theme'
-import { ConfigLine } from '../Chrome'
+import { ConfigLine, PaneStrip } from '../Chrome'
 import { Pane, paneBody, paneRows } from '../Pane'
 import {
   backupConfigRows,
@@ -36,8 +36,12 @@ import {
   layerEditorRows,
   nextBackupSchedule,
   paginateHistory,
+  resolveBackupKey,
+  resolveHistoryKey,
+  resolveLayerEditorKey,
   scheduleReposNote,
   toggleBackupLayer,
+  type BackupFocus,
   type GithubFitVerdict,
   type GithubSection,
   type HarnessCells,
@@ -52,13 +56,14 @@ import {
   configCells,
   detailPlan,
   fitDetailLines,
+  narrowTerminal,
   SERVICE_MARKER,
   type CockpitContent,
   type DetailLine,
 } from '../chrome.ts'
 import { windowLabel } from '../surface.ts'
 import { OutputView } from '../Output'
-import { resolveListKey, resolveTailKey, windowOffset, type NavKey, type TailState } from '../nav'
+import { resolveListKey, resolveOutputKey, windowOffset, type NavKey, type TailState } from '../nav'
 import type { ControlStrings } from '../i18n'
 import type { BackupLayer, ControlBackupStatus, ControlHost } from '../types'
 import type { RunAction, TabChrome, TaskView } from '../ControlCenter'
@@ -89,13 +94,19 @@ export interface BackupProps {
   nonce: number
 }
 
-type Focus = 'harnesses' | 'config'
+type Focus = BackupFocus
 
 export function Backup({
   host, strings: s, width, height, isActive, run, task, onDismissTask, onChrome, nonce,
 }: BackupProps) {
   const [status, setStatus] = useState<ControlBackupStatus | null>(null)
   const [focus, setFocus] = useState<Focus>('harnesses')
+  /**
+   * Which LIST the detail pane describes. On a wide terminal that is the focused pane; on a narrow
+   * one the detail is a pane of its own, so it describes whichever list was focused last.
+   */
+  const [subject, setSubject] = useState<'harnesses' | 'config'>('harnesses')
+  const detailSubject = focus === 'detail' ? subject : focus
   const [selection, setSelection] = useState(0)
   const [configIndex, setConfigIndex] = useState(0)
   const [now, setNow] = useState(() => Date.now())
@@ -167,10 +178,10 @@ export function Backup({
    * short form (`harnessLastShort`), or one long sentence would force the whole band's width.
    */
   const detailLines = useMemo(
-    () => (focus === 'harnesses'
+    () => (detailSubject === 'harnesses'
       ? harnessDetailLines(selected, s)
       : status ? backupDetailLines(status.config, now, s, historyCount, github) : []),
-    [focus, selected, status, now, s, historyCount, github],
+    [detailSubject, selected, status, now, s, historyCount, github],
   )
 
   // -------------------------------------------------------------------------
@@ -273,9 +284,16 @@ export function Backup({
     }
   }, [rows, configRows, configLabelWidth, detailLines.length])
 
+  // A NARROW terminal shows one pane at a time (D-TUI-10): the focused one, under a strip naming all
+  // three. `detail` is a focus only there; on a wide terminal it collapses back onto the harnesses.
+  const narrow = narrowTerminal(width)
+  const shownFocus: Focus = !narrow && focus === 'detail' ? 'harnesses' : focus
   const layout = useMemo(
-    () => cockpitLayout(width, height, content, { question: taskOpen || editingLayers !== null || historyOpen }),
-    [width, height, content, taskOpen, editingLayers, historyOpen],
+    () => cockpitLayout(width, height, content, {
+      question: taskOpen || editingLayers !== null || historyOpen,
+      ...(narrow ? { single: shownFocus === 'harnesses' ? 'services' as const : shownFocus } : {}),
+    }),
+    [width, height, content, taskOpen, editingLayers, historyOpen, narrow, shownFocus],
   )
   const { heights } = layout
 
@@ -327,37 +345,51 @@ export function Backup({
       upArrow: key.upArrow,
       downArrow: key.downArrow,
       return: key.return,
+      escape: key.escape,
       tab: key.tab,
       shift: key.shift,
     }
 
-    if (key.tab) { setFocus(f => (f === 'harnesses' ? 'config' : 'harnesses')); return }
-
-    if (focus === 'harnesses') {
-      const next = resolveListKey(nav, selection, rows.length)
-      if (next !== selection) { setSelection(next); return }
-      if (input === ' ') return toggleSelected()
-    } else {
-      const next = resolveListKey(nav, configIndex, configRows.length)
-      if (next !== configIndex) { setConfigIndex(next); return }
-      if (key.return && configSelected?.key === 'schedule') return cycleSchedule()
-      if (key.return && (configSelected?.key === 'layers' || configSelected?.key === 'scheduleLayers')) {
-        return openLayerEditor(configSelected.key)
+    // WHICH key means WHAT is the pure `resolveBackupKey` — what the help overlay's table is tested
+    // against. Only the index arithmetic and the effects live here.
+    const intent = resolveBackupKey({ ...nav, ctrl: key.ctrl }, { focus: shownFocus, narrow })
+    if (!intent) return
+    switch (intent.kind) {
+      case 'focus':
+        if (intent.focus !== 'detail') setSubject(intent.focus)
+        return setFocus(intent.focus)
+      case 'move': {
+        if (shownFocus === 'harnesses') {
+          const next = resolveListKey(nav, selection, rows.length)
+          if (next !== selection) setSelection(next)
+        } else {
+          const next = resolveListKey(nav, configIndex, configRows.length)
+          if (next !== configIndex) setConfigIndex(next)
+        }
+        return
       }
-      if (key.return && configSelected?.key === 'history') return openHistory()
+      case 'toggle': return toggleSelected()
+      case 'configRun':
+        if (configSelected?.key === 'schedule') return cycleSchedule()
+        if (configSelected?.key === 'layers' || configSelected?.key === 'scheduleLayers') {
+          return openLayerEditor(configSelected.key)
+        }
+        if (configSelected?.key === 'history') return openHistory()
+        return
+      case 'runNow': return runNow()
+      case 'schedule': return cycleSchedule()
     }
-
-    if (input === 'b') return runNow()
-    if (input === 's') return cycleSchedule()
   }, { isActive: isActive && !capturing })
 
   /** The layers editor's own keys, while it holds the detail pane — a QUESTION, so the global keys
    *  stand down exactly like they do for a running task, per `capturing` above. */
   useInput((input, key) => {
-    if (key.escape) return cancelLayerEditor()
-    if (key.return) return saveLayerEditor()
-    if (input === ' ') return toggleDraftRow()
-    const nav: NavKey = { input, upArrow: key.upArrow, downArrow: key.downArrow, return: false, tab: false, shift: false }
+    const nav: NavKey = { input, upArrow: key.upArrow, downArrow: key.downArrow, return: key.return, escape: key.escape }
+    const intent = resolveLayerEditorKey({ ...nav, ctrl: key.ctrl })
+    if (!intent) return
+    if (intent.kind === 'cancel') return cancelLayerEditor()
+    if (intent.kind === 'save') return saveLayerEditor()
+    if (intent.kind === 'toggle') return toggleDraftRow()
     const next = resolveListKey(nav, layerCursor, toggleRows.length)
     if (next !== layerCursor) setLayerCursor(next)
   }, { isActive: isActive && layersEditorOpen })
@@ -366,31 +398,36 @@ export function Backup({
    *  closes it, and page up/down (plus left/right, for a soft keyboard with no page keys) move
    *  between pages. `paginateHistory` clamps, so overshooting either end is a no-op rather than a
    *  wrap — a page position is not a ring. */
-  useInput((_input, key) => {
-    if (key.escape) return closeHistory()
-    if (key.pageDown || key.rightArrow) return setHistoryPage(p => p + 1)
-    if (key.pageUp || key.leftArrow) return setHistoryPage(p => Math.max(0, p - 1))
+  useInput((input, key) => {
+    const intent = resolveHistoryKey({
+      input, escape: key.escape, pageUp: key.pageUp, pageDown: key.pageDown,
+      leftArrow: key.leftArrow, rightArrow: key.rightArrow,
+    })
+    if (!intent) return
+    if (intent.kind === 'close') return closeHistory()
+    setHistoryPage(p => Math.max(0, p + intent.step))
   }, { isActive: isActive && historyOpen })
 
   /** The output pane's own keys, exactly like the Services tab's second `useInput`. */
   useInput((input, key) => {
-    if (key.escape) return onDismissTask()
-    const next = resolveTailKey(
-      { input, upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, home: key.home, end: key.end },
+    const intent = resolveOutputKey(
+      { input, upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, home: key.home, end: key.end, escape: key.escape, ctrl: key.ctrl },
       { index: outputAnchor, follow: outputView.follow },
       outputLen,
       detailRows,
     )
-    if (next) setOutputView(next)
+    if (!intent) return
+    if (intent.kind === 'close') return onDismissTask()
+    setOutputView(intent.state)
   }, { isActive: isActive && taskOpen && !layersEditorOpen && !historyOpen })
 
   useEffect(() => {
     if (!isActive) return
     onChrome({
       capture: capturing,
-      hints: backupHints(focus, s, { task: taskOpen, editing: layersEditorOpen, history: historyOpen }),
+      hints: backupHints(shownFocus, s, { task: taskOpen, editing: layersEditorOpen, history: historyOpen, narrow }),
     })
-  }, [isActive, capturing, focus, s, taskOpen, layersEditorOpen, historyOpen, onChrome])
+  }, [isActive, capturing, shownFocus, s, taskOpen, layersEditorOpen, historyOpen, onChrome, narrow])
 
   // -------------------------------------------------------------------------
   // drawing
@@ -405,7 +442,7 @@ export function Backup({
   }
 
   const harnessesPane = (
-    <Pane title={s.paneHarnesses} focused={focus === 'harnesses'} width={layout.leftWidth} height={heights.services}>
+    <Pane title={s.paneHarnesses} focused={shownFocus === 'harnesses'} width={layout.leftWidth} height={heights.services}>
       {rows.slice(harnessOffset, harnessOffset + harnessesBody).map((row, i) => (
         <HarnessLine
           key={row.id}
@@ -415,7 +452,7 @@ export function Backup({
           size={row.size}
           last={row.last}
           selected={harnessOffset + i === selection}
-          focused={focus === 'harnesses'}
+          focused={shownFocus === 'harnesses'}
           cells={cells}
         />
       ))}
@@ -423,7 +460,7 @@ export function Backup({
   )
 
   const configPane = heights.config > 0 ? (
-    <Pane title={s.paneConfig} focused={focus === 'config'} width={layout.rightWidth} height={heights.config}>
+    <Pane title={s.paneConfig} focused={shownFocus === 'config'} width={layout.rightWidth} height={heights.config}>
       {configRows.slice(configOffset, configOffset + configBody).map((row, i) => (
         <ConfigLine
           key={row.key}
@@ -432,7 +469,7 @@ export function Backup({
           verb={row.action}
           cells={configCellWidths}
           selected={configOffset + i === configIndex}
-          focused={focus === 'config'}
+          focused={shownFocus === 'config'}
         />
       ))}
     </Pane>
@@ -441,7 +478,7 @@ export function Backup({
   const detailTitle = layersEditorOpen
     ? (editingLayers === 'layers' ? s.backupLayersLabel : s.backupScheduleLayersLabel)
     : historyOpen ? s.paneHistory
-    : focus === 'harnesses' ? (selected?.label ?? s.paneHarnesses) : s.tabsShort.backup
+    : detailSubject === 'harnesses' ? (selected?.label ?? s.paneHarnesses) : s.tabsShort.backup
   const detailPane = heights.detail > 0 ? (
     <Pane title={detailTitle} width={detailWidthPx} height={heights.detail}>
       {layersEditorOpen ? (
@@ -461,6 +498,21 @@ export function Backup({
       )}
     </Pane>
   ) : null
+
+  // NARROW: one pane, under the strip naming all three — the layers editor, the history and a
+  // running backup all live in the detail pane, so `cockpitLayout` shows the detail while one is up.
+  if (layout.kind === 'single') {
+    const shown = layout.shown ?? 'services'
+    const order = ['services', 'config', 'detail'] as const
+    return (
+      <Box flexDirection="column" width={width} height={height} flexShrink={0}>
+        {layout.strip ? (
+          <PaneStrip labels={[s.paneHarnesses, s.paneConfig, s.paneDetail]} active={order.indexOf(shown)} width={width} />
+        ) : null}
+        {shown === 'services' ? harnessesPane : shown === 'config' ? configPane : detailPane}
+      </Box>
+    )
+  }
 
   if (layout.kind === 'stacked') {
     return (

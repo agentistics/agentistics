@@ -39,7 +39,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { truncate } from '../../components/Primitives'
 import { COLORS } from '../../theme'
-import { ActionRow, ConfigLine, CONFLICT_GLYPH, ServiceLine, STATE_GLYPH, stateWord } from '../Chrome'
+import { ActionRow, ConfigLine, CONFLICT_GLYPH, PaneStrip, ServiceLine, STATE_GLYPH, stateWord } from '../Chrome'
 import { Question, questionRows, SectionHeader } from '../Surface'
 // The same position label the log viewer wears, from the same pure helper: two screens showing a
 // window into a longer list must not describe it differently.
@@ -56,6 +56,7 @@ import {
   fitActionRow,
   fitDetailLines,
   fitValue,
+  narrowTerminal,
   serviceCells,
   SERVICE_MARKER,
   stripScheme,
@@ -68,9 +69,9 @@ import { isActivation, wheelDelta } from '../mouse'
 import { usePointer } from '../pointer'
 import {
   clampFocus,
-  resolveFocusKey,
   resolveListKey,
-  resolveTailKey,
+  resolveOutputKey,
+  resolveServicesKey,
   scrollBy,
   scrollTailBy,
   windowOffset,
@@ -768,9 +769,22 @@ export function Services({
   // A question — or a task's output — owns the detail region, which is everything under the band, so
   // the band gives up rows to it only when the body is too short to hold both. It used to be handed
   // the whole body, which left the config pane a fourteen-row frame around three facts.
+  /**
+   * A NARROW terminal shows ONE pane at a time (D-TUI-10), and the pane shown IS the focused one:
+   * `tab` walks services → config → detail, and the strip above names all three. Every pane exists
+   * there — the detail included, even for a service with no verbs, since it is the only place the
+   * runtimes and addresses are stated — so the pane list does not depend on the heights.
+   */
+  const narrow = narrowTerminal(width)
+  const narrowPanes: PaneId[] = ['services', 'config', 'actions']
+  const narrowFocus = clampFocus(wantFocus, narrowPanes)
+
   const layout = useMemo(
-    () => cockpitLayout(width, height, content, { question: view.kind !== 'cockpit' || taskOpen }),
-    [width, height, content, view.kind, taskOpen],
+    () => cockpitLayout(width, height, content, {
+      question: view.kind !== 'cockpit' || taskOpen,
+      ...(narrow ? { single: narrowFocus === 'actions' ? 'detail' as const : narrowFocus } : {}),
+    }),
+    [width, height, content, view.kind, taskOpen, narrow, narrowFocus],
   )
   const { heights } = layout
 
@@ -781,11 +795,13 @@ export function Services({
    * appear to do nothing, so the reducers are told what exists rather than assuming the full set.
    */
   const panes = useMemo<PaneId[]>(() => {
+    if (narrow) return narrowPanes
     const out: PaneId[] = ['services']
     if (heights.config > 0) out.push('config')
     if (heights.detail > 0 && actions.length > 0) out.push('actions')
     return out
-  }, [heights.config, heights.detail, actions.length])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrow, heights.config, heights.detail, actions.length])
 
   // Derived rather than corrected in an effect: a resize that drops a pane must not leave one
   // render where focus points at nothing.
@@ -839,7 +855,7 @@ export function Services({
    * offset then comes from `windowOffset`, which is what keeps the newest line ON SCREEN — slicing
    * from zero would leave a build's live edge below the fold, which is the whole reason to watch it.
    */
-  const outputRows = paneRows(layout.kind === 'columns' ? heights.detail : height)
+  const outputRows = paneRows(layout.kind === 'stacked' ? height : heights.detail)
   const outputLen = taskLines.length
   const outputAnchor = outputView.follow
     ? Math.max(0, outputLen - 1)
@@ -901,41 +917,35 @@ export function Services({
       shift: key.shift,
     }
 
-    if (key.tab) {
-      const next = resolveFocusKey(nav, focus, panes)
-      if (next) setWantFocus(next)
-      return
+    // WHICH key means WHAT is decided by the pure `resolveServicesKey` — the same function the help
+    // overlay's key table is tested against — and only the index arithmetic is done here.
+    const intent = resolveServicesKey({ ...nav, ctrl: key.ctrl }, {
+      focus, panes, narrow, hasActions: actions.length > 0,
+    })
+    if (!intent) return
+    switch (intent.kind) {
+      case 'focus': return setWantFocus(intent.pane)
+      case 'configRun': return configRows[configSelection]?.action?.run()
+      case 'configMove': {
+        const next = resolveListKey(nav, configSelection, configRows.length)
+        if (next !== configSelection) setConfigIndex(next)
+        return
+      }
+      case 'actionRun': return actions[Math.min(actionIndex, actions.length - 1)]?.run()
+      case 'actionMove':
+        return setActionIndex(i => (i + intent.step + actions.length) % actions.length)
+      case 'openActions':
+        setActionIndex(0)
+        return setWantFocus('actions')
+      case 'stop': return stopSelected()
+      case 'restart': return restartSelected()
+      case 'open': return openSelected()
+      case 'move': {
+        const next = resolveListKey(nav, selection, services.length)
+        if (next !== selection) { setServiceIndex(next); setActionIndex(0) }
+        return
+      }
     }
-
-    if (focus === 'config') {
-      if (key.return) return configRows[configSelection]?.action?.run()
-      const next = resolveListKey(nav, configSelection, configRows.length)
-      if (next !== configSelection) setConfigIndex(next)
-      return
-    }
-
-    if (focus === 'actions') {
-      // esc returns to the list rather than leaving the screen: the action row is a step INTO the
-      // selection, so stepping back out of it is what esc means everywhere else in this app.
-      if (key.escape) return setWantFocus('services')
-      if (actions.length === 0) return
-      if (key.return) return actions[Math.min(actionIndex, actions.length - 1)]?.run()
-      if (key.leftArrow) return setActionIndex(i => (i - 1 + actions.length) % actions.length)
-      if (key.rightArrow) return setActionIndex(i => (i + 1) % actions.length)
-      return
-    }
-
-    // services
-    if (key.return) {
-      if (actions.length === 0) return
-      setActionIndex(0)
-      return setWantFocus('actions')
-    }
-    if (input === 's') return stopSelected()
-    if (input === 'R') return restartSelected()
-    if (input === 'o') return openSelected()
-    const next = resolveListKey(nav, selection, services.length)
-    if (next !== selection) { setServiceIndex(next); setActionIndex(0) }
   }, { isActive: isActive && !capturing })
 
   /**
@@ -948,8 +958,7 @@ export function Services({
    * what the footer says. Ctrl-C remains live in the shell, as it is in every capturing state.
    */
   useInput((input, key) => {
-    if (key.escape) return onDismissTask()
-    const next = resolveTailKey(
+    const intent = resolveOutputKey(
       {
         input,
         upArrow: key.upArrow,
@@ -958,12 +967,16 @@ export function Services({
         pageDown: key.pageDown,
         home: key.home,
         end: key.end,
+        escape: key.escape,
+        ctrl: key.ctrl,
       },
       { index: outputAnchor, follow: outputView.follow },
       outputLen,
       outputRows,
     )
-    if (next) setOutputView(next)
+    if (!intent) return
+    if (intent.kind === 'close') return onDismissTask()
+    setOutputView(intent.state)
   }, { isActive: isActive && taskOpen })
 
   /**
@@ -1077,11 +1090,12 @@ export function Services({
             // A short terminal keeps the services pane alone, and `tab` there cycles a list of one.
             panes: panes.length,
             task: taskOpen,
+            narrow,
           }),
     })
   }, [
     isActive, capturing, focus, s, selected, conflicted, host,
-    actions.length, panes.length, onChrome, view.kind, taskOpen,
+    actions.length, panes.length, onChrome, view.kind, taskOpen, narrow,
   ])
 
   // -------------------------------------------------------------------------
@@ -1168,6 +1182,28 @@ export function Services({
     </Pane>
   ) : null
 
+  // NARROW: one pane over the whole body, under the strip that names all three. The overlay (a
+  // question, or a task's output) owns the detail region, so while one is up it is what is drawn —
+  // `cockpitLayout` has already made `detail` the shown pane for exactly that reason.
+  if (layout.kind === 'single') {
+    const shown = layout.shown ?? 'services'
+    const order = ['services', 'config', 'detail'] as const
+    return (
+      <Box flexDirection="column" width={width} height={height} flexShrink={0}>
+        {layout.strip ? (
+          <PaneStrip labels={[s.paneServices, s.paneConfig, s.paneDetail]} active={order.indexOf(shown)} width={width} />
+        ) : null}
+        {overlay
+          ? (
+            <Pane title={overlay.title} badge={overlay.badge} focused width={width} height={heights.detail}>
+              {overlay.node}
+            </Pane>
+          )
+          : shown === 'services' ? servicesPane : shown === 'config' ? configPane : detailPane}
+      </Box>
+    )
+  }
+
   // The overlay owns the detail region, so the services and config panes stay standing: choosing
   // "how should it run?" must never cost sight of what is already running. Stacked, there is no
   // band to keep, and the question takes the body — a prompt squeezed under a list it cannot fit
@@ -1252,11 +1288,11 @@ export function Services({
     // go on answering keys from behind it: `esc` there belongs to the pane the user can see.
     const questionsLive = isActive && !taskOpen
     const body = paneBody(width)
-    const rows = paneRows(layout.kind === 'columns' ? heights.detail : height)
+    const rows = paneRows(layout.kind === 'stacked' ? height : heights.detail)
     // Where the overlay's pane puts its first content cell, in body coordinates — the two places it
     // can be drawn (see the returns above) and the frame that pane spends on itself. Handed to the
     // question so it can resolve a click against its OWN rows and learn nothing about the frame.
-    const frame: Rect = layout.kind === 'columns' && rects.detail
+    const frame: Rect = layout.kind !== 'stacked' && rects.detail
       ? rects.detail
       : { x: 0, y: 0, width, height }
     const pad = paneOrigin(frame.height)

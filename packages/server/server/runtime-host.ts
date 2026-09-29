@@ -189,6 +189,17 @@ export interface RuntimeHost {
   runtimeVersion: string
   /** This process, as a lease holder. */
   holder: LeaseHolder
+  /** The session store's file — a host journal that belongs beside the store derives its path from it. */
+  dbPath: string
+  /**
+   * The ONE policy object of a session (CD-15). The runtime builds a session's policy through
+   * `policyFactory` and caches it while the session is open; the factory here keeps its own map and
+   * returns the object it already built, so what a host switches through `policyOf(id)` is exactly
+   * the policy the next run judges with. Created on demand with the same options, so switching a
+   * profile BEFORE the first run works too. Evicted when the runtime evicts its own copy
+   * (`finish`/`fail`), so a finished session never hands its approvals to a later one.
+   */
+  policyOf(sessionId: string): SessionPolicy
   /** Take (or refresh) the right to DRIVE a session. Watching needs none. */
   acquire(sessionId: string): Promise<LeaseAcquireResult>
   release(sessionId: string): Promise<void>
@@ -244,16 +255,27 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
     return made
   })
 
-  const runtime = createSessionRuntime({
+  // One policy per session, shared by the runtime's factory and `policyOf` (see the interface doc).
+  // Bounded like the runtime's own cache: an entry is dropped when the runtime drops its copy.
+  const policies = new Map<string, SessionPolicy>()
+  const policyOf = (sessionId: string): SessionPolicy => {
+    const known = policies.get(sessionId)
+    if (known) return known
+    const made = hostPolicy({
+      home: opts.home, dataDir: opts.dataDir,
+      ...(opts.protectedPaths ? { protectedPaths: opts.protectedPaths } : {}),
+    })
+    policies.set(sessionId, made)
+    return made
+  }
+
+  const inner = createSessionRuntime({
     store,
     content,
     journal,
     clientFor,
     tools: tools.tools,
-    policyFactory: () => hostPolicy({
-      home: opts.home, dataDir: opts.dataDir,
-      ...(opts.protectedPaths ? { protectedPaths: opts.protectedPaths } : {}),
-    }),
+    policyFactory: (session) => policyOf(session.sessionId),
     askerFor,
     runtimeVersion,
     scheduler: createRunScheduler({ ceiling: opts.ceiling ?? NATIVE_RUN_CEILING }),
@@ -265,6 +287,14 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
       if (text !== null) hub.publish(scope.sessionId, { kind: 'delta', runId: scope.runId, text })
     },
   })
+
+  // `finish`/`fail` evict the runtime's cached policy; ours goes with it, or the factory would hand
+  // the finished session's approvals back the next time the runtime asked.
+  const runtime: SessionRuntime = {
+    ...inner,
+    async finish(sessionId) { try { await inner.finish(sessionId) } finally { policies.delete(sessionId) } },
+    async fail(sessionId) { try { await inner.fail(sessionId) } finally { policies.delete(sessionId) } },
+  }
 
   const publishing: ProviderJournalSink | null = journal === null ? null : {
     async append(events) {
@@ -283,7 +313,7 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
     if (t) { clearInterval(t); refreshers.delete(sessionId) }
   }
   return {
-    runtime, store, hub, holder, content, journal: publishing, runtimeVersion,
+    runtime, store, hub, holder, content, journal: publishing, runtimeVersion, dbPath, policyOf,
     async acquire(sessionId) {
       const r = await store.acquireLease(sessionId, holder, LEASE_TTL_MS)
       if (r.ok && !refreshers.has(sessionId)) {

@@ -11,6 +11,7 @@
 import type { ControlService, TabId } from './types'
 import type { PaneId } from './nav'
 import type { ControlStrings } from './i18n'
+import type { CliLang } from './lang'
 // Type-only, and therefore erased: `hit.ts` imports this module's values, so a runtime import back
 // would be a cycle. The rectangle is a hit-testing concept and belongs there; what belongs HERE is
 // the function that turns a `CockpitLayout` into one, beside the function that produced the layout.
@@ -188,6 +189,11 @@ export interface HeaderMetaInput {
    */
   attention?: number
   /**
+   * Which language the counter's WORDS are in (`● 2 need you` / `● 2 precisam de você`). Absent reads
+   * as English, the CLI's default — the counter is the one piece of the tag that is a sentence.
+   */
+  lang?: CliLang
+  /**
    * How many assistants are up out of how many this MACHINE can hold, when it could be measured.
    *
    * Absent means nobody could read the memory (not Linux, no `/proc`) and the gauge is simply not
@@ -235,7 +241,7 @@ export type CentralLinkState = 'ok' | 'stale' | 'offline' | 'unauthorized'
  */
 export interface HeaderMeta {
   text: string
-  /** The waiting-sessions counter, e.g. `⏳ 2`. */
+  /** The waiting-sessions counter, e.g. `● 2 need you` — or `● 2` once the row is too tight. */
   alert: string
   update: string
   /**
@@ -315,6 +321,33 @@ export function headerMetaWidth(meta: HeaderMeta): number {
 }
 
 /**
+ * The attention counter's words — `● 2 need you`, `● 1 needs you`, `● 2 precisam de você` — PURE.
+ *
+ * It counts every row that needs a PERSON (an approval and a plain "needs you" alike) across the
+ * fleet plus the native session's open questions, and it is a SENTENCE rather than a glyph and a
+ * digit because it is the one thing on the header a user is meant to act on: `⏳ 2` had to be taught
+ * before it could be read. Plural-correct in both languages. Empty at zero — a counter that says
+ * "0 need you" on every tab of a quiet machine is a light nobody looks at, and absence is the calm
+ * state. `compact` is the form it degrades to under width pressure: the number keeps its dot.
+ */
+export function attentionCell(n: number, lang: CliLang, compact = false): string {
+  if (!(n > 0)) return ''
+  if (compact) return `● ${n}`
+  if (lang === 'pt') return `● ${n} ${n === 1 ? 'precisa' : 'precisam'} de você`
+  return `● ${n} ${n === 1 ? 'needs' : 'need'} you`
+}
+
+/**
+ * Whether a change in a waiting count RINGS — PURE (GL-02). The bell is for the TRANSITION from
+ * nothing waiting to something waiting, never for the level: a count that stays at 1 while a
+ * question goes unanswered would otherwise beep on every report, and one that goes 2 → 1 is a
+ * person having answered, not a new thing to answer.
+ */
+export function attentionRings(prev: number, next: number): boolean {
+  return prev <= 0 && next > 0
+}
+
+/**
  * The header's right-hand tag: mode, version, and the update dot.
  *
  * The mode SENTENCE used to live here and blew the row apart in member mode — "member — sends
@@ -338,7 +371,10 @@ export function headerMeta(input: HeaderMetaInput): HeaderMeta {
 
   const outdated = Boolean(latestVersion && latestVersion !== version)
   const text = version ? `${mode}${SEP}v${version}` : mode
-  const alert = attention && attention > 0 ? `⏳ ${attention}` : ''
+  const n = attention && attention > 0 ? attention : 0
+  const alert = attentionCell(n, input.lang ?? 'en')
+  // The same count without its words — what the counter degrades to before it is given up at all.
+  const alertShort = attentionCell(n, input.lang ?? 'en', true)
   const update = outdated ? `● ${latestVersion}` : ''
   // Absent memory renders nothing at all — a machine whose `/proc` cannot be read shows no gauge
   // rather than a zero, the same rule the boot row and the harness capabilities follow.
@@ -413,6 +449,11 @@ export function headerMeta(input: HeaderMetaInput): HeaderMeta {
 
   const modeAndAlert = { text: mode, machine: '', alert, update: '', memory: '' }
   if (headerMetaWidth(modeAndAlert) <= width) return modeAndAlert
+
+  // The WORDS go before the number: `● 2` still says that two things need you, and it is the last
+  // form the counter takes before the mode token is all that is left.
+  const modeAndCount = { text: mode, machine: '', alert: alertShort, update: '', memory: '' }
+  if (headerMetaWidth(modeAndCount) <= width) return modeAndCount
 
   if (mode.length <= width) return { text: mode, machine: '', alert: '', update: '', memory: '' }
   return { text: truncate(mode, width), machine: '', alert: '', update: '', memory: '' }
@@ -630,8 +671,16 @@ export interface CockpitHeights {
 }
 
 export interface CockpitLayout {
-  /** `columns` is the cockpit proper; `stacked` is the narrow fallback, one pane per row band. */
-  kind: 'columns' | 'stacked'
+  /**
+   * `columns` is the cockpit proper; `stacked` is the short-and-narrow fallback, one pane per row
+   * band; `single` is a NARROW terminal (D-TUI-10) — one pane over the whole body, under a one-line
+   * strip naming the panes, and `tab` walks between them.
+   */
+  kind: 'columns' | 'stacked' | 'single'
+  /** `single` only: which pane is drawn. */
+  shown?: SinglePane
+  /** `single` only: rows the pane strip takes above the pane — 1, or 0 on a one-row body. */
+  strip?: number
   /** The services pane's width — the left half of the BAND. */
   leftWidth: number
   /** The config pane's width — the right half of the band. Equal to `leftWidth` when stacked. */
@@ -656,6 +705,70 @@ export interface CockpitOptions {
    * that, so it reserves the tallest thing that can land there.
    */
   question?: boolean
+  /**
+   * The terminal is NARROW (`narrowTerminal`): draw ONE pane, this one, over the whole body. A
+   * question or a task still owns the detail region, so `question` wins and the detail is drawn.
+   */
+  single?: SinglePane
+}
+
+/**
+ * Below this many columns of body the cockpits show ONE pane at a time (D-TUI-10).
+ *
+ * Measured against the SAME width the `code` tab measures its own narrow mode against (the shell's
+ * body width, `CODE_WIDE_AT`), so every screen of the app changes shape at one terminal width rather
+ * than each at its own. Three panes squeezed into 80 columns is two columns of stubs and a detail
+ * pane truncating every URL it exists to state; one pane at the full width says all of it, and the
+ * strip above it says what else there is and `tab` reaches it.
+ */
+export const NARROW_WIDTH = 100
+
+export function narrowTerminal(width: number): boolean {
+  return width < NARROW_WIDTH
+}
+
+/** The panes a narrow cockpit walks between, in reading order. */
+export type SinglePane = 'services' | 'config' | 'detail'
+
+/** Rows the pane strip costs — the one line that names the panes a narrow cockpit is not showing. */
+export const STRIP_ROWS = 1
+
+/** One name on the pane strip, and where it starts (for the pointer). */
+export interface StripCell {
+  label: string
+  active: boolean
+  x: number
+}
+
+export const STRIP_SEP = ' · '
+
+/**
+ * The narrow cockpit's pane strip — `services · config · detail` with the shown one marked — PURE.
+ *
+ * It is what keeps a one-pane screen from being a screen that hides two thirds of itself: the panes
+ * that are not drawn are still NAMED, in the order `tab` walks them. It starts one column in so it
+ * lines up with the pane titles under it. When the names cannot all fit, only the shown one is kept
+ * — the one fact that has to survive is which pane this is.
+ */
+export function paneStrip(labels: readonly string[], active: number, width: number): StripCell[] {
+  const cells: StripCell[] = []
+  let x = 1
+  labels.forEach((label, i) => {
+    if (i > 0) x += STRIP_SEP.length
+    cells.push({ label, active: i === active, x })
+    x += label.length
+  })
+  if (x <= width) return cells
+  const only = labels[active] ?? ''
+  return [{ label: truncate(only, Math.max(0, width - 1)), active: true, x: 1 }]
+}
+
+/** Which strip name a column lands on, or `-1`. */
+export function stripAt(cells: readonly StripCell[], labels: readonly string[], x: number): number {
+  for (const c of cells) {
+    if (x >= c.x && x < c.x + c.label.length) return labels.indexOf(c.label)
+  }
+  return -1
 }
 
 /**
@@ -743,6 +856,16 @@ export function cockpitLayout(
   content: CockpitContent,
   opts: CockpitOptions = {},
 ): CockpitLayout {
+  if (opts.single) {
+    // NARROW: one pane at the full width. A question or a running task owns the detail region, so
+    // it is the detail that is drawn while one is up — the keys are going there.
+    const strip = height > STRIP_ROWS ? STRIP_ROWS : 0
+    const shown: SinglePane = opts.question ? 'detail' : opts.single
+    const heights: CockpitHeights = { services: 0, config: 0, detail: 0 }
+    heights[shown] = Math.max(1, height - strip)
+    return { kind: 'single', shown, strip, leftWidth: width, rightWidth: width, heights }
+  }
+
   const wantServices = content.serviceRows + PANE_FRAME_Y
   const wantConfig = content.configRows + PANE_FRAME_Y
   const wantDetail = content.detailRows + PANE_FRAME_Y
@@ -819,6 +942,18 @@ export interface CockpitRects {
  */
 export function cockpitRects(layout: CockpitLayout): CockpitRects {
   const { heights, leftWidth, rightWidth } = layout
+
+  if (layout.kind === 'single') {
+    // The one drawn pane, under the strip; the others have no rectangle at all, so no click can
+    // land on a pane nobody can see. `services` cannot be null, so it is an EMPTY rect instead.
+    const shown = layout.shown ?? 'services'
+    const full = { x: 0, y: layout.strip ?? 0, width: leftWidth, height: heights[shown] }
+    return {
+      services: shown === 'services' ? full : { x: 0, y: 0, width: 0, height: 0 },
+      config: shown === 'config' ? full : null,
+      detail: shown === 'detail' ? full : null,
+    }
+  }
 
   if (layout.kind === 'columns') {
     // Equal by construction — `cockpitLayout` sizes the band to the taller of the two — so either
@@ -1428,6 +1563,11 @@ export interface HintContext {
    * set because the layout is the only thing that knows what survived the height.
    */
   panes: number
+  /**
+   * The cockpit is showing ONE pane (a narrow terminal). `esc` then walks back to the first pane
+   * from the config pane, so the config pane's footer names it.
+   */
+  narrow?: boolean
 }
 
 /**
@@ -1453,9 +1593,12 @@ export function cockpitHints(focus: PaneId, s: ControlStrings, ctx: HintContext)
     case 'actions':
       // `←→` belong to the action row here, so `←→ screens` is the one hint on this screen that
       // would be false — it is not said, and the way back out of the row leads instead.
+      // A narrow terminal can show the detail pane of a service with no verbs at all; then the row
+      // has nothing to move over or run, and only the way back and the pane key are true.
+      if (!ctx.canAct) return [s.keyBack, ...pane]
       return [s.keyBack, s.keyActionMove, s.keyRun, ...pane]
     case 'config':
-      return [s.keyQuit, s.keyTabs, ...pane, s.keyMove, s.keySelect, s.keyRefresh]
+      return [s.keyQuit, s.keyTabs, ...pane, ...(ctx.narrow ? [s.keyBack] : []), s.keyMove, s.keySelect, s.keyRefresh]
     default:
       return [
         s.keyQuit,

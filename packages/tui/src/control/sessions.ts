@@ -25,6 +25,7 @@ import { buildSessionTree } from './session-tree'
 // `.ts` explicitly: `Surface.tsx` sits beside `surface.ts` and a bare specifier resolves to the
 // component on a case-insensitive path, exactly as `chrome.ts` is imported above.
 import { wrapText } from './surface.ts'
+import type { KeyPress } from './nav'
 import type { ControlSession, SessionState } from './types'
 
 // The SEMANTICS moved to `session-fleet.ts` and `session-verbs.ts` so the web bundle can import
@@ -271,7 +272,7 @@ export interface SessionColumns {
  * The NOTIFICATION cell: a dot at the head of a row that is waiting on a person.
  *
  * The state word already says it and is four columns in from the left, among five other words; what
- * a fleet needs is something readable without reading — the same job the header's `⏳ 2` does for
+ * a fleet needs is something readable without reading — the same job the header's `● 2 need you` does for
  * the whole machine, done per row. It is a dot AND a word, never a dot alone: a distinction
  * announced only in a glyph has to be taught before the screen can be read.
  *
@@ -484,6 +485,25 @@ export interface CockpitLayout {
   header: boolean
   /** Rows for session rows inside the list pane, frame and summary already paid for. */
   listRows: number
+  /**
+   * A NARROW terminal (D-TUI-10): which ONE pane is drawn over the body, under a strip of
+   * `strip` rows that names all three. Absent on a wide terminal, where all three are drawn.
+   */
+  single?: SessionsPane
+  strip?: number
+}
+
+/** The sessions cockpit's three panes, in the order `tab` walks them on a narrow terminal. */
+export type SessionsPane = 'menu' | 'sessions' | 'detail'
+
+export const SESSIONS_PANES: readonly SessionsPane[] = ['menu', 'sessions', 'detail'] as const
+
+/**
+ * `tab` on a narrow sessions cockpit — PURE. Wraps, and `shift+tab` walks it backwards.
+ */
+export function nextSessionsPane(current: SessionsPane, back = false): SessionsPane {
+  const i = SESSIONS_PANES.indexOf(current)
+  return SESSIONS_PANES[(i + (back ? -1 : 1) + SESSIONS_PANES.length) % SESSIONS_PANES.length]!
 }
 
 /** The aside's natural width: wide enough for its longest label, within bounds. */
@@ -521,9 +541,35 @@ export function sessionsCockpit(o: {
   detailWanted: number
   /** Folded away by the user — the list takes the whole width, whatever it would have fitted. */
   hideAside?: boolean
+  /**
+   * A NARROW terminal: draw only this pane, at the full width, under a one-row strip. Three panes
+   * squeezed into 80 columns left the list twenty columns to name a session in; one at a time, the
+   * list is the whole width and the other two are one `tab` away.
+   */
+  single?: SessionsPane
 }): CockpitLayout {
   const width = Math.max(1, o.width)
   const height = Math.max(1, o.height)
+
+  if (o.single) {
+    const strip = height > 1 ? 1 : 0
+    const body = Math.max(1, height - strip)
+    const band = o.single === 'detail' ? 0 : body
+    const inner = Math.max(0, band - PANE_FRAME_Y)
+    const summary = inner >= 5
+    const header = inner >= 4
+    return {
+      aside: o.single === 'menu' ? width : 0,
+      list: width,
+      band,
+      detail: o.single === 'detail' ? body : 0,
+      summary,
+      header,
+      listRows: Math.max(1, inner - (summary ? 1 : 0) - (header ? 1 : 0)),
+      single: o.single,
+      strip,
+    }
+  }
 
   const aside = o.hideAside ? 0 : width >= ASIDE_NEEDS
     // `+ 4` rather than `+ 2`: the rows carry a cursor, a state dot and — for a task or a project —
@@ -1276,12 +1322,132 @@ export function sessionKeyHelp(w: {
     { keys: 'b / ctrl+b', what: w.menuFold },
     { keys: 'ctrl+r', what: w.reset },
     { keys: '[ ]', what: w.tabs },
-    // `h` leads, because it is the letter a person tries first and it was free. `?` stays: it is
-    // what every list-shaped TUI already answers, and a reference nobody can open is not a
-    // reference. Both are listed, so the screen never teaches only the harder one.
-    { keys: 'h / ?', what: w.help },
+    // `h` is this screen's own reference. `?` is the SHELL's now, on every screen: it opens the
+    // help overlay, which lists these keys among every other screen's.
+    { keys: 'h', what: w.help },
     { keys: 'q', what: w.quit },
   ]
+}
+
+/**
+ * What a keypress means on the sessions cockpit — the classification half of its keyboard.
+ *
+ * The screen used to decide this in one long if-chain inside the component, where nothing could
+ * check it against `sessionKeyHelp` or against the help overlay's table. It is decided HERE now, and
+ * the component does only the effects: which verb runs, which cursor moves.
+ */
+export type SessionsIntent =
+  | { kind: 'tab' }
+  | { kind: 'section'; n: number }
+  | { kind: 'bulk' }
+  | { kind: 'asideBack' }
+  | { kind: 'asideRun' }
+  | { kind: 'asideDeleteTask' }
+  | { kind: 'asideSection'; step: 1 | -1 }
+  | { kind: 'asideMove'; step: 1 | -1 }
+  | { kind: 'actionsBack' }
+  | { kind: 'actionsRun' }
+  | { kind: 'actionsMove'; step: 1 | -1 }
+  /** A narrow terminal showing the DETAIL pane: `esc` walks back to the list. */
+  | { kind: 'paneBack' }
+  | { kind: 'enter' }
+  | { kind: 'esc' }
+  | { kind: 'reset' }
+  | { kind: 'active' }
+  | { kind: 'fold' }
+  | { kind: 'keys' }
+  | { kind: 'recent' }
+  | { kind: 'closed' }
+  | { kind: 'detail' }
+  | { kind: 'layout' }
+  | { kind: 'pin' }
+  | { kind: 'verb'; action: SessionAction }
+  | { kind: 'move' }
+
+/**
+ * The sessions cockpit's keys, by where the keyboard is — PURE.
+ *
+ * `?` is not here: it is the SHELL's, on every screen, and opens the help overlay that lists this
+ * screen's keys among everybody else's. `h` (and `ctrl+h`, where the terminal can tell it from
+ * backspace) still opens this screen's own reference. A `ctrl` chord that is not one of the chords
+ * below is answered by nothing — before this, `ctrl+n` fell through to the plain `n` and started a
+ * session.
+ */
+export function resolveSessionsKey(key: KeyPress, ctx: {
+  focus: 'list' | 'aside'
+  /** The menu is on screen (a wide terminal with it unfolded, or a narrow one showing it). */
+  aside: boolean
+  actionsFocused: boolean
+  /** The list is drawn as a grid of cards, whose arrows move in two dimensions. */
+  grid: boolean
+  /** A narrow terminal is showing the detail pane. */
+  detailPane?: boolean
+}): SessionsIntent | null {
+  const input = key.input
+  if (key.tab) return { kind: 'tab' }
+  if (!key.ctrl && input.length === 1 && input >= '1' && input <= '9') return { kind: 'section', n: Number(input) - 1 }
+  if (key.ctrl && input === 'x') return { kind: 'bulk' }
+
+  if (ctx.focus === 'aside' && ctx.aside) {
+    if (key.escape) return { kind: 'asideBack' }
+    if (key.return) return { kind: 'asideRun' }
+    if (!key.ctrl && input === 'x') return { kind: 'asideDeleteTask' }
+    if (key.leftArrow) return { kind: 'asideSection', step: -1 }
+    if (key.rightArrow) return { kind: 'asideSection', step: 1 }
+    if (key.upArrow || (!key.ctrl && input === 'k')) return { kind: 'asideMove', step: -1 }
+    if (key.downArrow || (!key.ctrl && input === 'j')) return { kind: 'asideMove', step: 1 }
+    return null
+  }
+
+  if (ctx.actionsFocused) {
+    if (key.escape) return { kind: 'actionsBack' }
+    if (key.return) return { kind: 'actionsRun' }
+    if (key.leftArrow) return { kind: 'actionsMove', step: -1 }
+    if (key.rightArrow) return { kind: 'actionsMove', step: 1 }
+    return null
+  }
+
+  if (ctx.detailPane && key.escape) return { kind: 'paneBack' }
+  if (key.return) return { kind: 'enter' }
+  if (key.escape) return { kind: 'esc' }
+
+  if (key.ctrl) {
+    if (input === 'r') return { kind: 'reset' }
+    if (input === 'a') return { kind: 'active' }
+    if (input === 'b') return { kind: 'fold' }
+    if (input === 'h') return { kind: 'keys' }
+    if (input === 'g') return { kind: 'layout' }
+    if (input === 'f') return { kind: 'verb', action: 'search' }
+    return null
+  }
+
+  switch (input) {
+    case 'b': return { kind: 'fold' }
+    case 'h': return { kind: 'keys' }
+    case 'v': return { kind: 'verb', action: 'group' }
+    case 'C': return { kind: 'recent' }
+    case 'c': case 'l': case 'e': return { kind: 'closed' }
+    case 'd': return { kind: 'detail' }
+    case ' ': return { kind: 'pin' }
+    case 'n': return { kind: 'verb', action: 'new' }
+    case 'r': return { kind: 'verb', action: 'rename' }
+    case 'm': return { kind: 'verb', action: 'note' }
+    case 't': return { kind: 'verb', action: 'task' }
+    case 'o': return { kind: 'verb', action: 'attach' }
+    case '/': return { kind: 'verb', action: 'search' }
+    case 'x': return { kind: 'verb', action: 'kill' }
+    case 'a': case 'y': return { kind: 'verb', action: 'approve' }
+    case 'p': return { kind: 'verb', action: 'prompt' }
+    case 'R': return { kind: 'verb', action: 'reopenFell' }
+  }
+
+  if (key.upArrow || key.downArrow || input === 'j' || input === 'k' || input === 'g' || input === 'G') {
+    return { kind: 'move' }
+  }
+  if (ctx.grid && (key.leftArrow || key.rightArrow || key.pageUp || key.pageDown || key.home || key.end)) {
+    return { kind: 'move' }
+  }
+  return null
 }
 
 /** The width the keystroke column needs, so the descriptions line up — PURE. */

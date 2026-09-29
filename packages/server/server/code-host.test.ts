@@ -5,15 +5,16 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fromAnthropicStopReason, fromAnthropicUsage, classifyProviderError } from '@agentistics/core'
 import type { CodeEvent, CodeAsk } from '@agentistics/tui/control/code-types'
 import type { InvocationResult, ProviderClient, ProviderContent, ProviderMessage, ProviderRequest } from '@agentistics/runtime'
 import {
-  catalogueName, createCodeHost, denyIndexOf, diffOfPatch, diffOfWrite, historyOf, shortSessionId, shortTaskRef, targetOf, verbOf, whyOf,
-  type CodeTasksApi, type ServerCodeHost,
+  catalogueName, costsOf, createCodeHost, denyIndexOf, diffOfPatch, diffOfWrite, historyOf, nextMode, outputOf, shortSessionId, shortTaskRef,
+  stopReasonText, targetOf, verbOf, whyOf,
+  type CodeHostOptions, type CodeTasksApi, type ServerCodeHost,
 } from './code-host'
 import { createRuntimeHost, type RuntimeHost } from './runtime-host'
 
@@ -115,7 +116,7 @@ interface Rig {
   runtime: () => Promise<RuntimeHost>
 }
 
-async function rig(client: ProviderClient, over: { model?: string; flagOn?: boolean; central?: boolean; paths?: { dbPath: string; contentDir: string; workspace: string } } = {}): Promise<Rig> {
+async function rig(client: ProviderClient, over: { model?: string; flagOn?: boolean; central?: boolean; paths?: { dbPath: string; contentDir: string; workspace: string }; host?: Partial<CodeHostOptions> } = {}): Promise<Rig> {
   const workspace = over.paths?.workspace ?? await tempDir('agt-code-ws-')
   const data = over.paths ? null : await tempDir('agt-code-data-')
   const dbPath = over.paths?.dbPath ?? join(data!, 'sessions.db')
@@ -138,6 +139,7 @@ async function rig(client: ProviderClient, over: { model?: string; flagOn?: bool
     flagOn: () => over.flagOn ?? true,
     central: () => over.central ?? false,
     tasks: b.api,
+    ...(over.host ?? {}),
   })
   hosts.push(host)
   return { host, board: b, workspace, dbPath, contentDir, runtime: () => (runtimeP ??= runtime()) }
@@ -236,7 +238,7 @@ describe('start', () => {
     const res = await started(r, 'say hello')
     expect(r.board.filed).toEqual([{ taskId: 't-0001abcdef', sessionId: res.facts.sessionId }])
     expect(res.facts.task).toMatchObject({ id: 't-0001abcdef', ref: 't-0001', title: 'Fix the login' })
-    expect(res.facts.mode).toBe('ask')
+    expect(res.facts.mode).toBe('default')
     expect(res.facts.shortId).toBe(shortSessionId(res.facts.sessionId))
     expect(res.sentence).toContain('t-0001')
 
@@ -435,5 +437,302 @@ describe('pure translation helpers', () => {
     expect(turns).toHaveLength(2)
     expect(turns[1]!.tools).toEqual([{ name: 'fs.glob', verb: 'glob', target: '*.ts' }])
     expect(JSON.stringify(turns)).not.toContain('SECRET')
+  })
+})
+
+// ── P2 ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** A STREAMING client: `started`, a text delta after a short pause, then `end`. All four counters. */
+function streamingText(text: string, delayMs = 15): ProviderClient {
+  let n = 0
+  const result = (req: ProviderRequest, attempt: number): InvocationResult => {
+    n += 1
+    return {
+      invocationId: req.correlation.invocationId, attempt, provider: 'anthropic', requestedModel: req.model,
+      startedAt: '2026-09-28T12:00:00.000Z', latencyMs: 42, status: 'completed', messageId: `msg_s${n}`,
+      servedModel: req.model,
+      usage: fromAnthropicUsage({ input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 5000, cache_creation_input_tokens: 300 }).usage,
+      usageAnomalies: [], content: [{ type: 'text', text }], stopReason: fromAnthropicStopReason('end_turn'),
+    }
+  }
+  return {
+    provider: 'anthropic',
+    adapterVersion: 'stub-stream@1',
+    capabilities: { streaming: true, editPolicy: 'verbatim' as never },
+    async invokeOnce(req, attempt) { return result(req, attempt) },
+    async *stream(req, attempt) {
+      yield { type: 'started', messageId: 'msg_s' }
+      await new Promise(r => setTimeout(r, delayMs))
+      yield { type: 'text-delta', index: 0, text }
+      yield { type: 'end', result: result(req, attempt) }
+    },
+  }
+}
+
+const isUsage = (e: CodeEvent): e is Extract<CodeEvent, { kind: 'usage' }> => e.kind === 'usage'
+const isRules = (e: CodeEvent): e is Extract<CodeEvent, { kind: 'rules' }> => e.kind === 'rules'
+const isMode = (e: CodeEvent): e is Extract<CodeEvent, { kind: 'mode' }> => e.kind === 'mode'
+
+describe('CD-06/CD-13: per-call model facts on usage', () => {
+  test('a streamed response carries ttft, times, latency, stop reason and per-counter costs that sum to the total', async () => {
+    const r = await rig(streamingText('hi there'))
+    const res = await r.host.start({ taskId: 't-0001abcdef', model: 'claude-sonnet-4-6', cwd: r.workspace, firstMessage: 'hello' })
+    if (!res.ok) throw new Error(res.sentence)
+    const w = watch(r.host, res.facts.sessionId)
+    const u = (await w.waitFor(isUsage)).usage
+    expect(u.attemptId).toMatch(/^inv_/)
+    expect(typeof u.startedAt).toBe('string')
+    expect(typeof u.endedAt).toBe('string')
+    expect(u.ttftMs).toBeGreaterThanOrEqual(0)
+    expect(u.latencyMs).toBe(42)
+    expect(u.stopReason).toBe('end_turn')
+    expect(u.costs).toBeDefined()
+    const sum = u.costs!.input + u.costs!.output + u.costs!.cacheRead + u.costs!.cacheWrite
+    expect(Math.abs(sum - u.costUSD!)).toBeLessThan(1e-12)
+    expect(u.costs!.input).toBeCloseTo(1000 / 1e6 * 3, 12)
+    await w.waitFor(isRunEnded)
+    w.off()
+  })
+
+  test('a non-streaming client yields no ttft (absent, never 0); an unpriced model has neither cost nor costs', async () => {
+    const r = await rig(scripted([[use('tu_1', 'fs__glob', { pattern: '*.none' })], [{ type: 'text', text: 'ok' }]]))
+    const res = await started(r, 'glob')
+    const w = watch(r.host, res.facts.sessionId)
+    await w.waitFor(isRunEnded)
+    const usages = w.events.filter(isUsage).map(e => e.usage)
+    expect(usages.length).toBe(2)
+    for (const u of usages) {
+      expect('ttftMs' in u).toBe(false)
+      expect('costUSD' in u).toBe(false)
+      expect('costs' in u).toBe(false)
+      expect(typeof u.startedAt).toBe('string')
+    }
+    expect(usages[0]!.stopReason).toBe('tool_use')
+    expect(usages[1]!.stopReason).toBe('end_turn')
+    w.off()
+  })
+})
+
+describe('CD-13/CD-14/CD-10: per-tool facts', () => {
+  test('an asked-and-allowed call carries its times, the question span and the policy decision', async () => {
+    const r = await rig(scripted([[use('tu_1', 'file__patch', { patch: PATCH_ADD })], [{ type: 'text', text: 'done' }]]))
+    const res = await started(r, 'add notes')
+    const w = watch(r.host, res.facts.sessionId)
+    const ask = (await w.waitFor(isAsk)).ask
+    const asking = (await w.waitFor(toolIn('asking'))).call
+    expect(typeof asking.requestedAt).toBe('string')
+    expect(asking.waited?.openedAt).toBeDefined()
+    expect(asking.waited?.closedAt).toBeUndefined()
+    r.host.answer(res.facts.sessionId, ask.id, 0)
+    const done = (await w.waitFor(toolIn('done'))).call
+    expect(done.policy).toMatchObject({ decision: 'allowed', by: 'user', asked: true })
+    expect(typeof done.policy!.rule).toBe('string')
+    expect(done.waited?.closedAt).toBeDefined()
+    expect(typeof done.endedAt).toBe('string')
+    await w.waitFor(isRunEnded)
+    w.off()
+  })
+
+  test('a denial names its code; an auto-allowed read was never asked and returns its text', async () => {
+    const r = await rig(scripted([
+      [use('tu_1', 'file__read', { path: 'a.txt' })],
+      [use('tu_2', 'file__patch', { patch: PATCH_ADD })],
+      [{ type: 'text', text: 'ok' }],
+    ]))
+    await writeFile(join(r.workspace, 'a.txt'), 'alpha\nbeta\n')
+    const res = await started(r, 'read then patch')
+    const w = watch(r.host, res.facts.sessionId)
+    const read = (await w.waitFor((e): e is Extract<CodeEvent, { kind: 'tool' }> => e.kind === 'tool' && e.call.name === 'file.read' && e.call.state === 'done')).call
+    expect(read.policy).toMatchObject({ decision: 'allowed', by: 'policy', asked: false })
+    expect(read.waited).toBeUndefined()
+    expect(read.output?.lines.join('\n')).toContain('beta')
+    expect(read.output!.total).toBeGreaterThanOrEqual(2)
+    const ask = (await w.waitFor(isAsk)).ask
+    r.host.answer(res.facts.sessionId, ask.id, ask.denyIndex!)
+    const denied = (await w.waitFor(toolIn('denied'))).call
+    expect(denied.policy).toMatchObject({ decision: 'denied', by: 'user', asked: true, code: 'policy.denied.by-person' })
+    expect(typeof denied.endedAt).toBe('string')
+    await w.waitFor(isRunEnded)
+    w.off()
+  })
+})
+
+describe('CD-15/CD-16: modes and session rules', () => {
+  test('an "allow for this session" answer becomes a rule; a looser mode drops it, journaled as counts', async () => {
+    const data = await tempDir('agt-code-journal-')
+    const journalPath = join(data, 'profile-switches.jsonl')
+    const r = await rig(scripted([
+      [use('tu_1', 'file__patch', { patch: PATCH_ADD })],
+      [{ type: 'text', text: 'ok' }],
+    ]), { host: { modeJournalPath: journalPath } })
+    const res = await started(r, 'add notes')
+    const w = watch(r.host, res.facts.sessionId)
+    const ask = (await w.waitFor(isAsk)).ask
+    const sessionIdx = ask.options.findIndex(o => o.label.startsWith('Allow for this session'))
+    expect(sessionIdx).toBeGreaterThan(0)
+    r.host.answer(res.facts.sessionId, ask.id, sessionIdx)
+    const rules = await w.waitFor((e): e is Extract<CodeEvent, { kind: 'rules' }> => isRules(e) && e.rules.length === 1)
+    expect(rules.rules[0]!.label.length).toBeGreaterThan(0)
+    expect(typeof rules.rules[0]!.at).toBe('string')
+    await w.waitFor(isRunEnded)
+    // Emitted only when changed: one list with the rule, not one per event.
+    expect(w.events.filter(isRules).filter(e => e.rules.length === 1)).toHaveLength(1)
+
+    const out = r.host.cycleMode(res.facts.sessionId)
+    expect(out).toMatchObject({ ok: true, mode: 'accept-edits' })
+    if (out.ok) {
+      expect(out.sentence).toContain('edits')
+      expect(out.sentence).toStartWith('1 session rule dropped.')
+    }
+    expect(w.events.find(isMode)).toEqual({ kind: 'mode', mode: 'accept-edits', direction: 'looser', dropped: 1 })
+    expect(w.events.filter(isRules).at(-1)!.rules).toEqual([])
+
+    const lines = (await readFile(journalPath, 'utf-8')).trim().split('\n').map(l => JSON.parse(l))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ sessionId: res.facts.sessionId, code: 'policy.profile.switched', from: 'default', to: 'accept-edits', direction: 'looser', kept: 0, dropped: 1 })
+    expect(JSON.stringify(lines[0])).not.toContain(rules.rules[0]!.label)
+
+    expect(r.host.cycleMode(res.facts.sessionId)).toMatchObject({ ok: true, mode: 'plan' })
+    expect(r.host.cycleMode(res.facts.sessionId)).toMatchObject({ ok: true, mode: 'default' })
+    w.off()
+  })
+
+  test('plan refuses a write WITHOUT asking — the switch reached the policy the run judges with', async () => {
+    const data = await tempDir('agt-code-journal-')
+    const r = await rig(scripted([
+      [use('tu_1', 'file__patch', { patch: PATCH_ADD })],
+      [{ type: 'text', text: 'ok' }],
+    ]), { host: { modeJournalPath: join(data, 'j.jsonl') } })
+    const res = await started(r)
+    expect(r.host.cycleMode(res.facts.sessionId)).toMatchObject({ ok: true, mode: 'accept-edits' })
+    const plan = r.host.cycleMode(res.facts.sessionId)
+    expect(plan).toMatchObject({ ok: true, mode: 'plan' })
+    if (plan.ok) expect(plan.sentence).toContain('read-only')
+    const w = watch(r.host, res.facts.sessionId)
+    expect(r.host.submit(res.facts.sessionId, 'add notes').ok).toBe(true)
+    const denied = (await w.waitFor(toolIn('denied'))).call
+    expect(denied.policy).toMatchObject({ decision: 'denied', by: 'policy', asked: false })
+    expect(denied.policy!.rule).toContain('plan')
+    await w.waitFor(isRunEnded)
+    expect(w.events.some(isAsk)).toBe(false)
+    expect(existsSync(join(r.workspace, 'notes.txt'))).toBe(false)
+    w.off()
+  })
+
+  test('an unknown session is refused in words; a failed journal write costs the line, not the switch', async () => {
+    const r = await rig(scripted([]), { host: { modeJournalPath: '/proc/definitely/not/writable/j.jsonl' } })
+    const none = r.host.cycleMode('ses_nope')
+    expect(none.ok).toBe(false)
+    const res = await started(r)
+    const out = r.host.cycleMode(res.facts.sessionId)
+    expect(out).toMatchObject({ ok: true, mode: 'accept-edits' })
+    if (out.ok) expect(out.sentence).toContain('could not be written')
+    // An ended session is no longer one this host may switch.
+    await r.host.end(res.facts.sessionId)
+    expect(r.host.cycleMode(res.facts.sessionId).ok).toBe(false)
+  })
+
+  test('policyOf is the SAME object the runtime judges with, created before the first run; finish evicts it', async () => {
+    const data = await tempDir('agt-code-data-')
+    const ws = await tempDir('agt-code-ws-')
+    const rt = await createRuntimeHost({
+      dbPath: join(data, 's.db'), contentDir: join(data, 'c'), journal: null, pid: process.pid, isAlive: () => true,
+      clientFor: () => scripted([[use('tu_1', 'file__write', { path: 'x.txt', content: 'x' })], [{ type: 'text', text: 'ok' }]]),
+    })
+    runtimes.push(rt)
+    const s = await rt.runtime.create({ workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'claude-test-1', credential: { provider: 'anthropic', id: 'default' } })
+    const p = rt.policyOf(s.sessionId)
+    expect(rt.policyOf(s.sessionId)).toBe(p)
+    p.switchProfile('plan')
+    const watcher = rt.hub.watch(s.sessionId)
+    const denials: { policy: string; decidedBy: string }[] = []
+    const reading = (async () => {
+      for await (const f of watcher) {
+        if (f.kind === 'event' && f.event.type === 'policy.denied') denials.push(f.event.data as { policy: string; decidedBy: string })
+      }
+    })()
+    const out = await rt.runtime.run(s.sessionId, 'write it')
+    expect(out.ok).toBe(true)
+    await new Promise(res => setTimeout(res, 20))
+    watcher.close()
+    await reading
+    // Under `default` the write would have ASKED (and been denied as unanswered, by `default:*`);
+    // under `plan` the profile's own rule refuses it — the verdict names that rule.
+    expect(denials).toHaveLength(1)
+    expect(denials[0]).toMatchObject({ decidedBy: 'policy' })
+    expect(denials[0]!.policy).toContain('profile.plan')
+    expect(existsSync(join(ws, 'x.txt'))).toBe(false)
+    expect(rt.policyOf(s.sessionId)).toBe(p)
+    expect(p.profile()).toBe('plan')
+    await rt.runtime.finish(s.sessionId)
+    expect(rt.policyOf(s.sessionId)).not.toBe(p)
+    expect(rt.policyOf(s.sessionId).profile()).toBe('default')
+  })
+})
+
+describe('CD-18: prompt history', () => {
+  test('user prompts across sessions, newest first, identical texts once (the newest kept)', async () => {
+    const r = await rig(scripted([
+      [{ type: 'text', text: 'a1' }], [{ type: 'text', text: 'a2' }], [{ type: 'text', text: 'b1' }],
+    ]))
+    const a = await started(r, 'alpha')
+    const wa = watch(r.host, a.facts.sessionId)
+    await wa.waitFor(isRunEnded)
+    wa.events.length = 0
+    r.host.submit(a.facts.sessionId, 'beta')
+    await wa.waitFor(isRunEnded)
+    wa.off()
+    await new Promise(res => setTimeout(res, 5))
+    const b = await started(r, 'alpha')
+    const wb = watch(r.host, b.facts.sessionId)
+    await wb.waitFor(isRunEnded)
+    wb.off()
+
+    const h = await r.host.promptHistory()
+    expect(h.ok).toBe(true)
+    if (!h.ok) return
+    expect(h.prompts.map(p => p.text)).toEqual(['alpha', 'beta'])
+    expect(h.prompts[0]!.sessionId).toBe(b.facts.sessionId)
+    expect(h.prompts[1]!.sessionId).toBe(a.facts.sessionId)
+    // The ANSWERS are never history. Asserted on the texts, not the JSON: a random session id can
+    // itself contain "a1", which made this flaky.
+    expect(h.prompts.some(p => /\b(a1|a2|b1)\b/.test(p.text))).toBe(false)
+  })
+})
+
+describe('CD-17: editDraft', () => {
+  test('without an editor it refuses in words; with one it answers what the editor saved', async () => {
+    const bare = await rig(scripted([]))
+    const r0 = await bare.host.editDraft('x')
+    expect(r0.ok).toBe(false)
+    if (!r0.ok) expect(r0.sentence).toContain('editor')
+    const withEd = await rig(scripted([]), { host: { editor: async d => ({ ok: true, text: `${d}!`, sentence: 'ok' }) } })
+    expect(await withEd.host.editDraft('draft')).toEqual({ ok: true, text: 'draft!', sentence: 'ok' })
+    const throwing = await rig(scripted([]), { host: { editor: async () => { throw new Error('boom') } } })
+    expect((await throwing.host.editDraft('d')).ok).toBe(false)
+  })
+})
+
+describe('P2 pure helpers', () => {
+  test('nextMode cycles; stopReasonText speaks the provider spelling; outputOf keeps the head and the count', () => {
+    expect(nextMode('default')).toBe('accept-edits')
+    expect(nextMode('accept-edits')).toBe('plan')
+    expect(nextMode('plan')).toBe('default')
+    expect(stopReasonText({ normalised: { kind: 'max-tokens' } })).toBe('max_tokens')
+    expect(stopReasonText({ normalised: { kind: 'other', raw: 'weird_stop' } })).toBe('weird_stop')
+    expect(stopReasonText(undefined)).toBeUndefined()
+    expect(outputOf('')).toBeUndefined()
+    expect(outputOf('a\nb\n')).toEqual({ lines: ['a', 'b'], total: 2 })
+    const big = Array.from({ length: 1000 }, (_, i) => `l${i}`).join('\n')
+    const o = outputOf(big)!
+    expect(o.total).toBe(1000)
+    expect(o.lines).toHaveLength(400)
+    expect(o.lines[0]).toBe('l0')
+  })
+
+  test('costsOf refuses a missing counter and an unpriced model', () => {
+    expect(costsOf('claude-sonnet-4-6', { input: 1, output: 1, cacheRead: 1 })).toBeUndefined()
+    expect(costsOf('claude-test-1', { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 })).toBeUndefined()
+    expect(costsOf('claude-sonnet-4-6', { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })).toEqual({ input: 3, output: 0, cacheRead: 0, cacheWrite: 0 })
   })
 })

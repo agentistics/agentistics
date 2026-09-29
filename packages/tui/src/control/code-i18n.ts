@@ -13,6 +13,7 @@
  */
 
 import type { CliLang } from './lang'
+import type { CodeModeId } from './code-types'
 
 export interface CodeStrings {
   // ── empty states, in words (GL-06: nothing silently inert) ─────────────────────────────────
@@ -95,6 +96,80 @@ export interface CodeStrings {
   /** The narrow terminal's one-line stand-in for the panel (D-TUI-10). */
   statusCtx: string
 
+  // ── CD-15 / CD-16: mode and session rules ───────────────────────────────────────────────
+  /** The prototype's words for the runtime's profile ids. */
+  modeWords: Record<CodeModeId, string>
+  modeChangeHint: string
+  sessionRules: string
+  untilSessionEnds: string
+  allowWord: string
+
+  // ── CD-05 / CD-06 / CD-10: turns, receipts, long output ─────────────────────────────────
+  toolsCount: (n: number) => string
+  ttft: string
+  tokWord: string
+  cacheWord: string
+  outputFolded: (total: number) => string
+  outputExpands: string
+  outputCollapses: string
+  moreOutputLines: (n: number) => string
+
+  // ── the swapping panel: CD-13 inspector, CD-14 timeline ─────────────────────────────────
+  panelSides: Record<'session' | 'inspector' | 'timeline', string>
+  inspectorEmpty: string
+  inspectorPick: string
+  inspTurn: (n: number) => string
+  inspModel: string
+  inspStop: string
+  inspTtftRate: string
+  inspLive: string
+  inspHistoric: string
+  tokPerSec: (n: number) => string
+  request: string
+  tokensCost: string
+  reqInput: string
+  reqCacheRead: string
+  reqCacheWrite: string
+  reqOutput: string
+  total: string
+  contextAfter: string
+  toolsInTurn: string
+  noTools: string
+  outcomeOk: string
+  outcomeWaiting: string
+  policy: string
+  polNone: string
+  polAllowed: (rule: string) => string
+  polAsked: (choice?: string) => string
+  polWaiting: string
+  polDenied: (by: string, code?: string) => string
+  byYou: string
+  byPolicy: string
+  timelineEmpty: string
+  timelineNoRun: string
+  runN: (n: number) => string
+  runEnded: string
+  modelN: (n: number) => string
+  youRow: string
+  legendModel: string
+  legendTool: string
+  legendYou: string
+  whereTime: string
+  timeModel: string
+  timeTools: string
+  timeWaiting: string
+  money: string
+  thisRun: string
+  modelCalls: string
+
+  // ── CD-17 / CD-18 / CD-19 ───────────────────────────────────────────────────────────────
+  editorOpen: string
+  histTitle: string
+  histLoading: string
+  histNone: string
+  histNoMatch: string
+  histFoot: string
+
   // ── NW-01 / NW-06 wizard ─────────────────────────────────────────────────────────────────
   wizardTitle: string
   stepTask: string
@@ -130,6 +205,13 @@ export interface CodeStrings {
   sayTaskCreated: (ref: string, title: string) => string
   sayLoadingDefaults: string
   sayNoSessionForCommand: string
+  sayLocked: string
+  sayNoSessionForMode: string
+  sayNoLongOutput: string
+  sayHistoryUsed: string
+  sayCopied: (chars: number, inTmux: boolean) => string
+  sayNothingToCopy: string
+  sayCopyTooLong: (chars: number, max: number) => string
 
   // ── footer hints (GL-05) ─────────────────────────────────────────────────────────────────
   keySend: string
@@ -155,10 +237,26 @@ export interface CodeStrings {
   keyClose: string
   keyCreate: string
   keyStart: string
+  keyMode: string
+  keyInspector: string
+  keyTimeline: string
+  keyInspectorBack: string
+  keyTimelineBack: string
+  keyTurn: string
+  keyOutput: string
+  keyPromptHistory: string
+  keyEditor: string
+  keyHelp: string
+  keyFilter: string
+  keyPanelScroll: string
+  keyPanelPage: string
+  panelAbove: (n: number) => string
+  panelBelow: (n: number, full: boolean) => string
+  keyUse: string
 }
 
 /** Mirrors `CodeCommandId` in `code.ts` — declared here too so this file stays import-free. */
-export type CodeCommandIdForStrings = 'new' | 'diff' | 'cancel' | 'panel'
+export type CodeCommandIdForStrings = 'new' | 'diff' | 'cancel' | 'panel' | 'mode' | 'inspector' | 'timeline' | 'editor' | 'history' | 'copy'
 
 const EN: CodeStrings = {
   unavailableBuild: 'The native runtime is not available in this build.',
@@ -209,6 +307,12 @@ const EN: CodeStrings = {
     diff: 'the full diff of the open permission',
     cancel: 'cancel the run in progress',
     panel: 'show or hide the session panel',
+    mode: 'permission mode: ask · edits · plan',
+    inspector: 'the selected turn, in detail',
+    timeline: 'where this run spent time and money',
+    editor: 'compose the prompt in $EDITOR',
+    history: 'search your earlier prompts',
+    copy: 'copy the last answer (OSC 52)',
   },
 
   panelTitle: 'session',
@@ -236,6 +340,75 @@ const EN: CodeStrings = {
   stateEnded: 'ended',
   na: 'N/A',
   statusCtx: 'ctx',
+
+  modeWords: { default: 'ask', 'accept-edits': 'edits', plan: 'plan' },
+  modeChangeHint: 'shift+tab changes it',
+  sessionRules: 'SESSION RULES',
+  untilSessionEnds: 'until the session ends',
+  allowWord: 'allow',
+
+  toolsCount: n => `${n} tool${n === 1 ? '' : 's'}`,
+  ttft: 'ttft',
+  tokWord: 'tok',
+  cacheWord: 'cache',
+  outputFolded: n => `${n} lines of output`,
+  outputExpands: 'expands',
+  outputCollapses: 'collapses',
+  moreOutputLines: n => `${n} more line${n === 1 ? '' : 's'}`,
+
+  panelSides: { session: 'session', inspector: 'inspector', timeline: 'timeline' },
+  inspectorEmpty: 'Nothing to inspect yet — no turn has happened in this session.',
+  inspectorPick: '↑↓ picks the turn',
+  inspTurn: n => `TURN ${n}`,
+  inspModel: 'model',
+  inspStop: 'stop',
+  inspTtftRate: 'ttft · rate',
+  inspLive: 'live',
+  inspHistoric: 'A turn read from the stored history: nothing about its time, tokens or cost was recorded here.',
+  tokPerSec: n => `${n} tok/s`,
+  request: 'REQUEST',
+  tokensCost: 'tokens · cost',
+  reqInput: 'input',
+  reqCacheRead: 'cache read',
+  reqCacheWrite: 'cache write',
+  reqOutput: 'output',
+  total: 'total',
+  contextAfter: 'CONTEXT AFTER',
+  toolsInTurn: 'TOOLS IN THIS TURN',
+  noTools: 'no tool ran in this turn',
+  outcomeOk: 'ok',
+  outcomeWaiting: 'waiting',
+  policy: 'POLICY',
+  polNone: 'no decision recorded',
+  polAllowed: rule => `allowed · ${rule}`,
+  polAsked: choice => (choice ? `asked → you: ${choice}` : 'asked → you'),
+  polWaiting: 'asked · waiting',
+  polDenied: (by, code) => `denied by ${by}${code ? ` (${code})` : ''}`,
+  byYou: 'you',
+  byPolicy: 'policy',
+  timelineEmpty: 'No run to draw yet — nothing has run in this session.',
+  timelineNoRun: 'No run was recorded for this turn, so there is nothing to draw.',
+  runN: n => `RUN ${n}`,
+  runEnded: 'ended',
+  modelN: n => `model ${n}`,
+  youRow: 'you',
+  legendModel: 'model',
+  legendTool: 'tool',
+  legendYou: 'you',
+  whereTime: 'WHERE THE TIME WENT',
+  timeModel: 'model',
+  timeTools: 'tools',
+  timeWaiting: 'waiting on you',
+  money: 'MONEY',
+  thisRun: 'this run',
+  modelCalls: 'model calls',
+
+  editorOpen: 'editing the draft in $EDITOR — save and quit to bring it back',
+  histTitle: 'prompt history',
+  histLoading: 'reading your earlier prompts…',
+  histNone: 'No earlier prompts on this machine yet.',
+  histNoMatch: 'No earlier prompt matches that.',
+  histFoot: 'newest first · enter puts it in the composer · esc closes',
 
   wizardTitle: 'new session',
   stepTask: 'task',
@@ -269,6 +442,13 @@ const EN: CodeStrings = {
   sayTaskCreated: (ref, title) => `Created ${ref} "${title}" as to do.`,
   sayLoadingDefaults: 'Still reading the model and folder — press enter again in a moment.',
   sayNoSessionForCommand: 'No native session is open.',
+  sayLocked: 'Answer the permission first: the composer is locked while it waits.',
+  sayNoSessionForMode: 'No native session is open — the permission mode belongs to a session.',
+  sayNoLongOutput: 'No long output on screen — nothing to expand.',
+  sayHistoryUsed: 'Put back in the composer: edit it, then enter sends.',
+  sayCopied: (n, tmux) => `Copied ${n} character${n === 1 ? '' : 's'} (OSC 52). Some terminals ignore OSC 52 (e.g. GNOME Terminal/VTE)${tmux ? '; inside tmux it reaches your clipboard only with `set -g set-clipboard on`' : ''}.`,
+  sayNothingToCopy: 'Nothing to copy yet — no answer has finished.',
+  sayCopyTooLong: (n, max) => `The last answer is ${n} characters; terminals cap OSC 52 far below that, so nothing was copied (the limit here is ${max}).`,
 
   keySend: 'enter send',
   keyStartWith: 'enter start a session with this',
@@ -293,6 +473,22 @@ const EN: CodeStrings = {
   keyClose: 'esc close',
   keyCreate: 'enter create',
   keyStart: 'enter start',
+  keyMode: 'shift+tab mode',
+  keyInspector: 'ctrl+i/tab inspector',
+  keyTimeline: 'ctrl+t timeline',
+  keyInspectorBack: 'ctrl+i/tab session',
+  keyTimelineBack: 'ctrl+t session',
+  keyTurn: '↑↓ turn',
+  keyOutput: 'ctrl+o output',
+  keyPromptHistory: 'ctrl+r prompts',
+  keyEditor: 'ctrl+g editor',
+  keyHelp: '? help',
+  keyFilter: 'type to filter',
+  keyPanelScroll: 'shift+↑↓ panel',
+  keyPanelPage: 'pgup/pgdn scroll',
+  panelAbove: n => `▲ ${n} more above · shift+↑`,
+  panelBelow: (n, full) => `▼ ${n} more below · ${full ? 'pgdn' : 'shift+↓'}`,
+  keyUse: 'enter use it',
 }
 
 const PT: CodeStrings = {
@@ -344,6 +540,12 @@ const PT: CodeStrings = {
     diff: 'o diff completo da permissão aberta',
     cancel: 'cancelar a execução em andamento',
     panel: 'mostrar ou esconder o painel da sessão',
+    mode: 'modo de permissão: perguntar · edições · plano',
+    inspector: 'o turno selecionado, em detalhe',
+    timeline: 'onde esta execução gastou tempo e dinheiro',
+    editor: 'escrever o prompt no $EDITOR',
+    history: 'buscar seus prompts anteriores',
+    copy: 'copiar a última resposta (OSC 52)',
   },
 
   panelTitle: 'sessão',
@@ -371,6 +573,75 @@ const PT: CodeStrings = {
   stateEnded: 'encerrada',
   na: 'N/A',
   statusCtx: 'ctx',
+
+  modeWords: { default: 'perguntar', 'accept-edits': 'edições', plan: 'plano' },
+  modeChangeHint: 'shift+tab troca',
+  sessionRules: 'REGRAS DA SESSÃO',
+  untilSessionEnds: 'até a sessão terminar',
+  allowWord: 'permitir',
+
+  toolsCount: n => `${n} ferramenta${n === 1 ? '' : 's'}`,
+  ttft: 'ttft',
+  tokWord: 'tok',
+  cacheWord: 'cache',
+  outputFolded: n => `${n} linhas de saída`,
+  outputExpands: 'expande',
+  outputCollapses: 'recolhe',
+  moreOutputLines: n => `mais ${n} linha${n === 1 ? '' : 's'}`,
+
+  panelSides: { session: 'sessão', inspector: 'inspetor', timeline: 'cronologia' },
+  inspectorEmpty: 'Nada a inspecionar ainda — nenhum turno aconteceu nesta sessão.',
+  inspectorPick: '↑↓ escolhe o turno',
+  inspTurn: n => `TURNO ${n}`,
+  inspModel: 'modelo',
+  inspStop: 'parada',
+  inspTtftRate: 'ttft · taxa',
+  inspLive: 'ao vivo',
+  inspHistoric: 'Turno lido do histórico salvo: nada sobre o tempo, os tokens ou o custo dele foi registrado aqui.',
+  tokPerSec: n => `${n} tok/s`,
+  request: 'REQUISIÇÃO',
+  tokensCost: 'tokens · custo',
+  reqInput: 'entrada',
+  reqCacheRead: 'cache lido',
+  reqCacheWrite: 'cache escrito',
+  reqOutput: 'saída',
+  total: 'total',
+  contextAfter: 'CONTEXTO DEPOIS',
+  toolsInTurn: 'FERRAMENTAS NESTE TURNO',
+  noTools: 'nenhuma ferramenta rodou neste turno',
+  outcomeOk: 'ok',
+  outcomeWaiting: 'esperando',
+  policy: 'POLÍTICA',
+  polNone: 'nenhuma decisão registrada',
+  polAllowed: rule => `permitida · ${rule}`,
+  polAsked: choice => (choice ? `perguntou → você: ${choice}` : 'perguntou → você'),
+  polWaiting: 'perguntou · esperando',
+  polDenied: (by, code) => `negada por ${by}${code ? ` (${code})` : ''}`,
+  byYou: 'você',
+  byPolicy: 'política',
+  timelineEmpty: 'Nenhuma execução para desenhar ainda — nada rodou nesta sessão.',
+  timelineNoRun: 'Nenhuma execução foi registrada para este turno, então não há o que desenhar.',
+  runN: n => `EXECUÇÃO ${n}`,
+  runEnded: 'encerrada',
+  modelN: n => `modelo ${n}`,
+  youRow: 'você',
+  legendModel: 'modelo',
+  legendTool: 'ferramenta',
+  legendYou: 'você',
+  whereTime: 'ONDE O TEMPO FOI',
+  timeModel: 'modelo',
+  timeTools: 'ferramentas',
+  timeWaiting: 'esperando você',
+  money: 'DINHEIRO',
+  thisRun: 'esta execução',
+  modelCalls: 'chamadas ao modelo',
+
+  editorOpen: 'editando o rascunho no $EDITOR — salve e saia para trazê-lo de volta',
+  histTitle: 'histórico de prompts',
+  histLoading: 'lendo seus prompts anteriores…',
+  histNone: 'Nenhum prompt anterior nesta máquina ainda.',
+  histNoMatch: 'Nenhum prompt anterior corresponde a isso.',
+  histFoot: 'mais novos primeiro · enter coloca no compositor · esc fecha',
 
   wizardTitle: 'nova sessão',
   stepTask: 'task',
@@ -404,6 +675,13 @@ const PT: CodeStrings = {
   sayTaskCreated: (ref, title) => `Criei ${ref} "${title}" como a fazer.`,
   sayLoadingDefaults: 'Ainda lendo o modelo e a pasta — aperte enter de novo em instantes.',
   sayNoSessionForCommand: 'Nenhuma sessão nativa está aberta.',
+  sayLocked: 'Responda a permissão primeiro: o compositor fica travado enquanto ela espera.',
+  sayNoSessionForMode: 'Nenhuma sessão nativa aberta — o modo de permissão pertence a uma sessão.',
+  sayNoLongOutput: 'Nenhuma saída longa na tela — nada a expandir.',
+  sayHistoryUsed: 'De volta no compositor: edite, depois enter envia.',
+  sayCopied: (n, tmux) => `Copiei ${n} caractere${n === 1 ? '' : 's'} (OSC 52). Alguns terminais ignoram OSC 52 (ex.: GNOME Terminal/VTE)${tmux ? '; dentro do tmux só chega ao seu clipboard com `set -g set-clipboard on`' : ''}.`,
+  sayNothingToCopy: 'Nada para copiar ainda — nenhuma resposta terminou.',
+  sayCopyTooLong: (n, max) => `A última resposta tem ${n} caracteres; os terminais limitam o OSC 52 bem abaixo disso, então nada foi copiado (o limite aqui é ${max}).`,
 
   keySend: 'enter enviar',
   keyStartWith: 'enter iniciar sessão com isto',
@@ -428,6 +706,22 @@ const PT: CodeStrings = {
   keyClose: 'esc fechar',
   keyCreate: 'enter criar',
   keyStart: 'enter iniciar',
+  keyMode: 'shift+tab modo',
+  keyInspector: 'ctrl+i/tab inspetor',
+  keyTimeline: 'ctrl+t cronologia',
+  keyInspectorBack: 'ctrl+i/tab sessão',
+  keyTimelineBack: 'ctrl+t sessão',
+  keyTurn: '↑↓ turno',
+  keyOutput: 'ctrl+o saída',
+  keyPromptHistory: 'ctrl+r prompts',
+  keyEditor: 'ctrl+g editor',
+  keyHelp: '? ajuda',
+  keyFilter: 'digite para filtrar',
+  keyPanelScroll: 'shift+↑↓ painel',
+  keyPanelPage: 'pgup/pgdn rolar',
+  panelAbove: n => `▲ mais ${n} acima · shift+↑`,
+  panelBelow: (n, full) => `▼ mais ${n} abaixo · ${full ? 'pgdn' : 'shift+↓'}`,
+  keyUse: 'enter usar',
 }
 
 const TABLE: Record<CliLang, CodeStrings> = { en: EN, pt: PT }

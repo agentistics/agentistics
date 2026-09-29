@@ -20,7 +20,7 @@ const tick = (ms = 80) => new Promise(r => setTimeout(r, ms))
 const FACTS: CodeSessionFacts = {
   sessionId: 'ses_abcd', shortId: 'abcd', title: 'parser fix',
   task: { id: 'task-1', ref: 't-0539', title: 'Parser fix' },
-  cwd: '/repo', workspaceRoot: '/repo', model: 'claude-sonnet-5', provider: 'anthropic', mode: 'ask',
+  cwd: '/repo', workspaceRoot: '/repo', model: 'claude-sonnet-5', provider: 'anthropic', mode: 'default',
 }
 
 const ASK: CodeAsk = {
@@ -46,6 +46,15 @@ function fakeHost(script: CodeEvent[] = []): { host: CodeHost; calls: Calls } {
     answer: (id, q, choice) => { log('answer', id, q, choice); return { ok: true, sentence: `answered ${choice}` } },
     cancel: id => { log('cancel', id); return { ok: true, sentence: 'cancelled' } },
     end: async id => { log('end', id) },
+    cycleMode: id => { log('cycleMode', id); return { ok: true, mode: 'accept-edits', sentence: 'Mode edits: file writes inside the workspace are allowed; the shell still asks.' } },
+    promptHistory: async () => {
+      log('promptHistory')
+      return { ok: true, prompts: [
+        { text: 'run the core tests', at: '2026-09-28T14:00:00Z', sessionId: 'ses_1' },
+        { text: 'fix the parser', at: '2026-09-28T12:00:00Z', sessionId: 'ses_2' },
+      ] }
+    },
+    editDraft: async draft => { log('editDraft', draft); return { ok: true, text: `${draft} (edited)`, sentence: 'Brought the draft back from $EDITOR.' } },
   }
   return { host, calls }
 }
@@ -53,6 +62,9 @@ function fakeHost(script: CodeEvent[] = []): { host: CodeHost; calls: Calls } {
 function mount(host: CodeHost | undefined, launch?: CodeLaunch) {
   const said: ActionResult[] = []
   const tabs: number[] = []
+  const written: string[] = []
+  const attention: number[] = []
+  let helps = 0
   const app = render(
     <Code
       code={host}
@@ -65,9 +77,13 @@ function mount(host: CodeHost | undefined, launch?: CodeLaunch) {
       onChrome={() => {}}
       onSay={r => said.push(r)}
       onTab={s => tabs.push(s)}
+      onAttention={n => attention.push(n)}
+      onHelp={() => { helps++ }}
+      writeTerminal={b => written.push(b)}
+      inTmux={false}
     />,
   )
-  return { app, said, tabs }
+  return { app, said, tabs, written, attention, helps: () => helps }
 }
 
 describe('Code tab — wiring', () => {
@@ -159,6 +175,118 @@ describe('Code tab — wiring', () => {
     app.stdin.write('\r')
     await tick()
     expect(said.some(r => !r.ok && r.message.includes('/nope'))).toBe(true)
+    app.unmount()
+  })
+
+  test('shift+tab asks the host for the next mode; its sentence is said and the header follows', async () => {
+    const { host, calls } = fakeHost()
+    const { app, said } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    expect(plain(app.lastFrame())).toContain('mode ask')
+    app.stdin.write(`${ESC}[Z`)
+    await tick()
+    expect(calls.cycleMode).toEqual([['ses_abcd']])
+    expect(said.some(r => r.ok && r.message.startsWith('Mode edits'))).toBe(true)
+    expect(plain(app.lastFrame())).toContain('mode edits')
+    app.unmount()
+  })
+
+  test('tab (= ctrl+i) swaps the panel to the inspector, ctrl+t to the timeline', async () => {
+    const { host } = fakeHost([
+      { kind: 'user', text: 'hi', at: '2026-09-28T14:00:00Z' },
+      { kind: 'run-started', runId: 'r', at: '2026-09-28T14:00:00Z' },
+      { kind: 'usage', usage: { runId: 'r', model: 'claude-sonnet-5', input: 10, output: 5, cacheRead: 0, cacheWrite: 0, costUSD: 0.001 } },
+      { kind: 'run-ended', runId: 'r', status: 'completed', sentence: '', at: '2026-09-28T14:00:03Z' },
+    ])
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('\t')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('▸inspector')
+    expect(plain(app.lastFrame())).toContain('TURN 1')
+    app.stdin.write('\x14')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('▸timeline')
+    expect(plain(app.lastFrame())).toContain('WHERE THE TIME WENT')
+    app.unmount()
+  })
+
+  test('ctrl+r opens the prompt history; enter puts the pick in the composer and sends NOTHING', async () => {
+    const { host, calls } = fakeHost()
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('\x12')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('prompt history')
+    app.stdin.write('parser')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(calls.submit).toBeUndefined()
+    expect(plain(app.lastFrame())).toContain('› fix the parser')
+    app.unmount()
+  })
+
+  test('ctrl+g hands the draft to $EDITOR and puts back what was saved — never sent', async () => {
+    const { host, calls } = fakeHost()
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('draft')
+    await tick()
+    app.stdin.write('\x07')
+    await tick()
+    expect(calls.editDraft).toEqual([['draft']])
+    expect(calls.submit).toBeUndefined()
+    expect(plain(app.lastFrame())).toContain('› draft (edited)')
+    app.unmount()
+  })
+
+  test('with a permission open, ctrl+g and ctrl+r refuse in words and GL-02 counts the question', async () => {
+    const { host, calls } = fakeHost([{ kind: 'ask', ask: ASK }])
+    const { app, said, attention } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('\x07')
+    await tick()
+    app.stdin.write('\x12')
+    await tick()
+    expect(calls.editDraft).toBeUndefined()
+    expect(calls.promptHistory).toBeUndefined()
+    expect(said.filter(r => !r.ok && r.message.startsWith('Answer the permission first'))).toHaveLength(2)
+    expect(attention[attention.length - 1]).toBe(1)
+    app.unmount()
+  })
+
+  test('/copy writes the last finished answer as OSC 52 through the frame gate, and says how much', async () => {
+    const { host } = fakeHost([
+      { kind: 'user', text: 'hi', at: 'x' },
+      { kind: 'run-started', runId: 'r', at: 'x' },
+      { kind: 'delta', runId: 'r', text: 'hello there' },
+      { kind: 'run-ended', runId: 'r', status: 'completed', sentence: '', at: 'x' },
+    ])
+    const { app, said, written } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('/copy')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(written).toEqual([`\x1b]52;c;${btoa('hello there')}\x07`])
+    expect(said.some(r => r.ok && r.message.startsWith('Copied 11 characters (OSC 52).'))).toBe(true)
+    app.unmount()
+  })
+
+  test('/copy with no finished answer says so; ? on an empty draft opens help', async () => {
+    const { host } = fakeHost()
+    const { app, said, written, helps } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('/copy')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(written).toEqual([])
+    expect(said.some(r => !r.ok && r.message === 'Nothing to copy yet — no answer has finished.')).toBe(true)
+    app.stdin.write('?')
+    await tick()
+    expect(helps()).toBe(1)
     app.unmount()
   })
 })

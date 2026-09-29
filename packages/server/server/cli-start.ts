@@ -1393,6 +1393,29 @@ function makeSuspend(altScreen: Suspendable, strings: () => CliStrings): Suspend
   }
 }
 
+/**
+ * The suspend an EDITOR gets (CD-17, `code-editor.ts`): `makeSuspend` without the pause. An editor
+ * is interactive and returns on its own when the person saves and quits, so a "press Enter" after it
+ * would be one keypress too many; everything else — Ink's stdin listeners detached, raw mode off,
+ * the alternate screen left, JS-level stdout muted so Ink frames cannot land on the editor's screen —
+ * is the same, and restored in `finally`.
+ */
+function makeEditorSuspend(altScreen: Suspendable): Suspend {
+  return async function suspend<T>(fn: () => Promise<T>): Promise<T> {
+    const stdin = process.stdin
+    const listeners = stdin.rawListeners('data') as Array<(chunk: Buffer) => void>
+    stdin.removeAllListeners('data')
+    const wasRaw = stdin.isRaw === true
+    if (wasRaw) stdin.setRawMode(false)
+    try {
+      return await altScreen.suspend(() => muteStdout(fn))
+    } finally {
+      if (wasRaw) stdin.setRawMode(true)
+      for (const listener of listeners) stdin.on('data', listener)
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ControlHost — every action the control center can ask for
 // ---------------------------------------------------------------------------
@@ -4014,8 +4037,10 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
   // for the many runs of `agentop` that never open the `code` tab. It reads `host.lang` on every
   // sentence — the language is a closure variable the in-app toggle reassigns.
   const { createCodeHost } = await import('./code-host')
+  const { createDraftEditor } = await import('./code-editor')
   const code = createCodeHost({
     lang: () => host.lang,
+    editor: createDraftEditor({ suspend: makeEditorSuspend(altScreen), lang: () => host.lang }),
     ...(codeLaunch?.model ? { model: codeLaunch.model } : {}),
     cwd: resolvePath(codeLaunch?.cwd ?? process.cwd()),
   })

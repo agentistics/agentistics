@@ -46,13 +46,14 @@
  * the flag stays `false` until the runtime grows a seam.
  */
 
-import { existsSync } from 'node:fs'
-import { resolve as resolvePath } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import type {
   CodeAsk, CodeAvailability, CodeDefaults, CodeDiff, CodeDiffFile, CodeDiffHunk, CodeEvent, CodeHistoryTurn,
-  CodeHost, CodePlanItem, CodeResult, CodeSessionFacts, CodeStartInput, CodeTaskOption, CodeToolCall,
+  CodeHost, CodeModeId, CodePlanItem, CodePolicyDecision, CodePromptRecord, CodeResult, CodeSessionFacts,
+  CodeSessionRule, CodeStartInput, CodeTaskOption, CodeToolCall, CodeUsage,
 } from '@agentistics/tui/control/code-types'
-import type { AgentisticsEvent } from '@agentistics/core'
+import type { AgentisticsEvent, ModelStopReason } from '@agentistics/core'
 import { calcCost, getModelPrice, MODEL_PRICING, resolveContextWindow } from '@agentistics/core'
 import {
   openSession,
@@ -186,6 +187,47 @@ const T = {
     en: (s: string) => s,
     pt: (s: string) => s,
   },
+  // CD-15 — the prototype's word for each mode, and what it means, in one sentence.
+  modeDefault: {
+    en: 'Mode: ask — everything not allowlisted asks first.',
+    pt: 'Modo: perguntar — tudo o que não está na lista permitida pergunta antes.',
+  },
+  modeAcceptEdits: {
+    en: 'Mode: edits — file writes inside the workspace are allowed; the shell still asks.',
+    pt: 'Modo: edições — gravações de arquivo dentro do workspace são permitidas; o shell ainda pergunta.',
+  },
+  modePlan: {
+    en: 'Mode: plan — read-only: writes and changing commands are refused.',
+    pt: 'Modo: plano — somente leitura: gravações e comandos que alteram algo são recusados.',
+  },
+  rulesDropped: {
+    en: (n: number) => `${n} session rule${n === 1 ? '' : 's'} dropped.`,
+    pt: (n: number) => `${n} regra${n === 1 ? '' : 's'} da sessão descartada${n === 1 ? '' : 's'}.`,
+  },
+  modeJournalFailed: {
+    en: 'The switch could not be written to the journal (the mode did change).',
+    pt: 'A troca não pôde ser gravada no diário (o modo mudou mesmo assim).',
+  },
+  modeNoSession: {
+    en: 'No session is open here to change the mode of.',
+    pt: 'Nenhuma sessão aberta aqui para trocar o modo.',
+  },
+  modeFailed: {
+    en: 'The permission mode could not be changed; it is as it was.',
+    pt: 'Não foi possível trocar o modo de permissão; ele continua como estava.',
+  },
+  historyFailed: {
+    en: 'The earlier prompts could not be read.',
+    pt: 'Não foi possível ler os prompts anteriores.',
+  },
+  noEditor: {
+    en: 'There is no terminal to hand to an editor here.',
+    pt: 'Não há terminal para entregar a um editor aqui.',
+  },
+  editorFailed: {
+    en: 'The editor could not be opened; your draft is unchanged.',
+    pt: 'Não foi possível abrir o editor; seu rascunho não mudou.',
+  },
 } as const
 
 // ── Options ─────────────────────────────────────────────────────────────────────────────────────
@@ -215,6 +257,13 @@ export interface CodeHostOptions {
   central?: () => boolean
   tasks?: CodeTasksApi
   now?: () => Date
+  /**
+   * CD-17: opens the person's editor on a draft through the control center's suspend
+   * (`code-editor.ts`, wired in cli-start.ts). Absent: there is no terminal to hand over, said in words.
+   */
+  editor?: (draft: string) => Promise<CodeResult<{ text: string; sentence: string }>>
+  /** CD-15: where profile switches are journaled. Default: `profile-switches.jsonl` beside the runtime's session store. */
+  modeJournalPath?: string
 }
 
 export type ServerCodeHost = CodeHost & { dispose(): Promise<void> }
@@ -384,6 +433,65 @@ export function historyOf(messages: readonly { message: ProviderMessage }[]): Co
   return out
 }
 
+/** CD-15: the cycle `shift+tab` walks — ask → edits → plan → ask. */
+export function nextMode(m: CodeModeId): CodeModeId {
+  return m === 'default' ? 'accept-edits' : m === 'accept-edits' ? 'plan' : 'default'
+}
+
+/**
+ * Why the model stopped, in the provider's own spelling (`end_turn`, `tool_use`, `max_tokens`, …):
+ * the normalised kind with its hyphens as underscores; an `other` reads its raw value (or the
+ * verbatim one), never a guessed kind.
+ */
+export function stopReasonText(sr: ModelStopReason | undefined): string | undefined {
+  if (!sr) return undefined
+  const n = sr.normalised
+  if (n.kind === 'other') return n.raw ?? sr.verbatim ?? 'other'
+  return n.kind.replace(/-/g, '_')
+}
+
+/** How many lines of a tool's output the host keeps (the head); `total` still counts them all. */
+export const OUTPUT_KEEP_LINES = 400
+
+/**
+ * CD-10: a tool's returned text as lines — the head kept, the true count beside it. One trailing
+ * newline ends the last line rather than adding an empty one. Empty text is "nothing readable".
+ */
+export function outputOf(text: string, keep = OUTPUT_KEEP_LINES): { lines: string[]; total: number } | undefined {
+  if (text === '') return undefined
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text
+  const all = body.split('\n')
+  return { lines: all.slice(0, keep), total: all.length }
+}
+
+/**
+ * CD-13: each counter at the model's own rate (USD per 1M tokens). The same two refusals as the
+ * total: every counter must be reported, and the table must price the model EXACTLY — a fallback
+ * rate split four ways is four wrong figures instead of one.
+ */
+export function costsOf(model: string, u: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }): CodeUsage['costs'] {
+  if (u.input === undefined || u.output === undefined || u.cacheRead === undefined || u.cacheWrite === undefined) return undefined
+  const price = getModelPrice(model)
+  if (!Object.values(MODEL_PRICING).includes(price)) return undefined
+  return {
+    input: (u.input / 1_000_000) * price.input,
+    output: (u.output / 1_000_000) * price.output,
+    cacheRead: (u.cacheRead / 1_000_000) * price.cacheRead,
+    cacheWrite: (u.cacheWrite / 1_000_000) * price.cacheWrite,
+  }
+}
+
+/** The user text of one stored message: a string, or its text parts. `''` for a tool-result-only turn. */
+function userTextOf(m: ProviderMessage): string {
+  if (typeof m.content === 'string') return m.content
+  return m.content.flatMap(p => (p.type === 'text' ? [p.text] : [])).join('\n')
+}
+
+/** CD-18 bounds: how many prompts are returned, how many sessions and messages are read to find them. */
+export const PROMPT_HISTORY_CAP = 500
+export const PROMPT_HISTORY_SESSIONS = 200
+export const PROMPT_HISTORY_READS = 2000
+
 // ── The default board (task-web / task-source), loaded only when used ───────────────────────────
 
 function defaultTasks(): CodeTasksApi {
@@ -428,6 +536,8 @@ interface Active {
   backlog?: CodeEvent[]
   /** The run in flight, exactly — from `run.started`, so an input is looked up in THIS run. */
   runId?: string
+  /** CD-16: the session-rule list last emitted (JSON), so an unchanged list is not re-sent. */
+  lastRules?: string
 }
 
 export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
@@ -453,6 +563,8 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
   const runtimeIfOpen = async (): Promise<RuntimeHost | null> => (runtimeP ? runtimeP.catch(() => null) : null)
 
   const sessions = new Map<string, Active>()
+  /** Sessions this host started or resumed and has not ended — the ones a mode switch may act on. */
+  const driven = new Set<string>()
   const active = (sessionId: string): Active => {
     let a = sessions.get(sessionId)
     if (!a) { a = { controller: null, listeners: new Set() }; sessions.set(sessionId, a) }
@@ -497,9 +609,33 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
       workspaceRoot: s.workspaceRoot,
       model: s.model,
       provider: s.provider,
-      // The runtime policy has no named modes yet (spec §5): what it does is ask first.
-      mode: 'ask',
+      // The policy object the runtime judges with (runtime-host `policyOf`): a new or resumed session
+      // is a fresh policy, so this reads `default` until somebody switches.
+      mode: modeOf(rt, sessionId),
     }
+  }
+
+  function modeOf(rt: RuntimeHost, sessionId: string): CodeModeId {
+    try { return rt.policyOf(sessionId).profile() } catch { return 'default' }
+  }
+
+  /**
+   * CD-16: the WHOLE list of "allow for this session" answers the policy holds, sent only when it
+   * changed. Read after a question closes AND after the policy's verdict event: the hub publishes
+   * `ask-closed` the moment the answer lands, which can be before the policy has recorded it.
+   */
+  function emitRulesIfChanged(rt: RuntimeHost, sessionId: string): void {
+    let rules: CodeSessionRule[]
+    try { rules = rt.policyOf(sessionId).approvals().map(a => ({ label: a.label, at: a.approvedAt })) } catch { return }
+    const a = active(sessionId)
+    const json = JSON.stringify(rules)
+    if (json === (a.lastRules ?? '[]')) return
+    a.lastRules = json
+    emitLocal(sessionId, { kind: 'rules', rules })
+  }
+
+  function modeSentence(m: CodeModeId): string {
+    return m === 'accept-edits' ? tr('modeAcceptEdits') : m === 'plan' ? tr('modePlan') : tr('modeDefault')
   }
 
   function attachDriver(rt: RuntimeHost, sessionId: string): void {
@@ -550,12 +686,10 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
     return undefined
   }
 
-  async function failureWords(rt: RuntimeHost, d: { status: string; errorClass?: string; result?: { sha256: string } }): Promise<string> {
+  /** A failure in words: the first line of what the tool returned (`text`, already read), else its status. */
+  function failureWordsOf(d: { status: string; errorClass?: string }, text: string | null): string {
     let first = ''
-    if (d.result) {
-      const text = await rt.content.get(d.result.sha256).catch(() => null)
-      if (text) first = oneLine(text.split('\n').find(l => l.trim() !== '') ?? '', 160)
-    }
+    if (text) first = oneLine(text.split('\n').find(l => l.trim() !== '') ?? '', 160)
     if (first) return tr('toolFailed')(first)
     if (d.status === 'cancelled') return tr('toolCancelled')
     if (d.status === 'unknown') return tr('toolUnknown')
@@ -595,6 +729,17 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
     textPending: boolean
     /** The newest assistant message whose text was filled in, so none is emitted twice. */
     filledSeq: number
+    /**
+     * CD-06/CD-13: each provider attempt seen invoked, by `attemptId#attempt` — when it was sent
+     * (`model.invoked.occurredAt`) and when this host saw its first streamed text. Dropped at its
+     * terminal event, so it holds at most the attempts in flight.
+     */
+    attempts: Map<string, { startedAt: string; firstDeltaAt?: string }>
+    /** The attempt the next streamed text belongs to: the newest one invoked. */
+    currentAttempt?: string
+    /** CD-13/14: calls a person was asked about, and the span of that question. */
+    asked: Set<string>
+    waited: Map<string, { openedAt: string; closedAt?: string }>
   }
 
   /** The text parts of the newest assistant message not filled in yet — `null` when there is none. */
@@ -661,6 +806,10 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
     switch (frame.kind) {
       case 'hello': return
       case 'delta':
+        if (st.currentAttempt) {
+          const at = st.attempts.get(st.currentAttempt)
+          if (at && at.firstDeltaAt === undefined) at.firstDeltaAt = now().toISOString()
+        }
         st.streamed = true
         emit({ kind: 'delta', ...(frame.runId ? { runId: frame.runId } : {}), text: frame.text })
         return
@@ -674,6 +823,18 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         lastChoice.delete(frame.questionId)
         askOptions.delete(frame.questionId)
         emit({ kind: 'ask-closed', id: frame.questionId, outcome: frame.outcome, ...(label ? { choiceLabel: label } : {}) })
+        const execId = frame.questionId.endsWith(':permission') ? frame.questionId.slice(0, -':permission'.length) : ''
+        const span = st.waited.get(execId)
+        const call = st.calls.get(execId)
+        if (span && span.closedAt === undefined) {
+          span.closedAt = now().toISOString()
+          if (call) {
+            const closed: CodeToolCall = { ...call, waited: { ...span } }
+            st.calls.set(closed.id, closed)
+            emit({ kind: 'tool', call: closed })
+          }
+        }
+        if (frame.outcome === 'answered') emitRulesIfChanged(rt, sessionId)
         return
       }
       case 'ask': {
@@ -692,7 +853,11 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         }
         const ask = permissionAsk(q, call, input)
         if (call) {
-          const asking: CodeToolCall = { ...call, state: 'asking', ...(ask.diff && !call.diff ? { diff: ask.diff } : {}) }
+          // CD-14: the question's span, on the host's clock — opened now, closed at its `ask-closed`.
+          const span = { openedAt: now().toISOString() }
+          st.asked.add(call.id)
+          st.waited.set(call.id, span)
+          const asking: CodeToolCall = { ...call, state: 'asking', waited: { ...span }, ...(ask.diff && !call.diff ? { diff: ask.diff } : {}) }
           st.calls.set(call.id, asking)
           emit({ kind: 'tool', call: asking })
         }
@@ -744,19 +909,45 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
           verb: verbOf(d.name),
           target: input === undefined ? '' : targetOf(d.name, input),
           state: 'running',
+          requestedAt: at,
           ...(diff ? { diff } : {}),
         }
         st.calls.set(call.id, call)
         emit({ kind: 'tool', call })
         return
       }
+      case 'policy.approved':
+      case 'policy.denied': {
+        const d = ev.data as { policy: string; toolExecutionId?: string; decidedBy: 'user' | 'policy'; code?: string }
+        const prev = d.toolExecutionId ? st.calls.get(d.toolExecutionId) : undefined
+        if (prev) {
+          const policy: CodePolicyDecision = {
+            decision: ev.type === 'policy.approved' ? 'allowed' : 'denied',
+            by: d.decidedBy,
+            rule: d.policy,
+            asked: st.asked.has(prev.id),
+            ...(ev.type === 'policy.denied' && d.code ? { code: d.code } : {}),
+          }
+          const decided: CodeToolCall = { ...prev, policy }
+          st.calls.set(decided.id, decided)
+          emit({ kind: 'tool', call: decided })
+        }
+        // The verdict is returned AFTER the policy recorded any "for this session" answer.
+        emitRulesIfChanged(rt, sessionId)
+        return
+      }
       case 'tool.completed': {
-        const d = ev.data as { toolExecutionId: string; filesTouched?: string[]; linesAdded?: number; linesRemoved?: number; durationMs?: number; exitCode?: number }
+        const d = ev.data as { toolExecutionId: string; filesTouched?: string[]; linesAdded?: number; linesRemoved?: number; durationMs?: number; exitCode?: number; result?: { sha256: string } }
         const prev = st.calls.get(d.toolExecutionId)
         if (!prev) return
+        // CD-10: the returned text, by its digest — one read, and an unreadable one is simply absent.
+        const text = d.result ? await rt.content.get(d.result.sha256).catch(() => null) : null
+        const output = text === null ? undefined : outputOf(text)
         const done: CodeToolCall = {
           ...prev,
           state: 'done',
+          endedAt: at,
+          ...(output ? { output } : {}),
           ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
           ...(d.linesAdded !== undefined ? { linesAdded: d.linesAdded } : {}),
           ...(d.linesRemoved !== undefined ? { linesRemoved: d.linesRemoved } : {}),
@@ -775,11 +966,15 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         const d = ev.data as { toolExecutionId: string; status: string; errorClass?: string; durationMs?: number; result?: { sha256: string } }
         const prev = st.calls.get(d.toolExecutionId)
         if (!prev) return
+        const text = d.result ? await rt.content.get(d.result.sha256).catch(() => null) : null
+        const output = text === null ? undefined : outputOf(text)
         const failed: CodeToolCall = {
           ...prev,
           state: 'failed',
-          failure: await failureWords(rt, d),
+          endedAt: at,
+          failure: failureWordsOf(d, text),
           ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
+          ...(output ? { output } : {}),
         }
         st.calls.set(failed.id, failed)
         emit({ kind: 'tool', call: failed })
@@ -789,9 +984,22 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         const d = ev.data as { toolExecutionId: string; by: 'user' | 'policy' }
         const prev = st.calls.get(d.toolExecutionId)
         if (!prev) return
-        const denied: CodeToolCall = { ...prev, state: 'denied', failure: d.by === 'user' ? tr('deniedByYou') : tr('deniedByPolicy') }
+        const denied: CodeToolCall = { ...prev, state: 'denied', endedAt: at, failure: d.by === 'user' ? tr('deniedByYou') : tr('deniedByPolicy') }
         st.calls.set(denied.id, denied)
         emit({ kind: 'tool', call: denied })
+        return
+      }
+      case 'model.invoked': {
+        const d = ev.data as { attemptId?: string; attempt?: number }
+        if (d.attemptId === undefined) return
+        const key = `${d.attemptId}#${d.attempt ?? 1}`
+        st.attempts.set(key, { startedAt: at })
+        st.currentAttempt = key
+        return
+      }
+      case 'model.failed': {
+        const d = ev.data as { attemptId?: string; attempt?: number }
+        if (d.attemptId !== undefined) st.attempts.delete(`${d.attemptId}#${d.attempt ?? 1}`)
         return
       }
       case 'model.completed': {
@@ -810,8 +1018,23 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         const d = ev.data as {
           model: string; usage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
           costUSD?: number; contextTokens?: number; contextWindow?: number
+          attemptId?: string; attempt?: number; latencyMs?: number; stopReason?: ModelStopReason
         }
-        const cost = d.costUSD ?? apiEquivalentCost(d.model, d.usage)
+        // A figure the SOURCE stated has no per-counter split to show, so `costs` is only ever the
+        // host's own pricing (the runtime journals no money today, so this is every response).
+        const priced = d.costUSD === undefined ? apiEquivalentCost(d.model, d.usage) : undefined
+        const cost = d.costUSD ?? priced
+        const costs = priced !== undefined ? costsOf(d.model, d.usage) : undefined
+        const key = d.attemptId === undefined ? undefined : `${d.attemptId}#${d.attempt ?? 1}`
+        const attempt = key ? st.attempts.get(key) : undefined
+        if (key) st.attempts.delete(key)
+        let ttftMs: number | undefined
+        if (attempt?.firstDeltaAt !== undefined) {
+          const ms = Date.parse(attempt.firstDeltaAt) - Date.parse(attempt.startedAt)
+          // A negative or unreadable span is two clocks disagreeing, not a measurement — absent.
+          if (Number.isFinite(ms) && ms >= 0) ttftMs = Math.round(ms)
+        }
+        const stopReason = stopReasonText(d.stopReason)
         // A window the source stated outranks the table; the table's own entries carry provenance,
         // and a model it does not know draws no gauge (contextWindows.ts).
         const windowTokens = d.contextWindow ?? resolveContextWindow(d.model)?.tokens
@@ -828,6 +1051,13 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
             ...(cost !== undefined ? { costUSD: cost } : {}),
             ...(d.contextTokens !== undefined ? { contextTokens: d.contextTokens } : {}),
             ...(windowTokens !== undefined ? { contextWindow: windowTokens } : {}),
+            ...(d.attemptId !== undefined ? { attemptId: d.attemptId } : {}),
+            ...(attempt ? { startedAt: attempt.startedAt } : {}),
+            endedAt: at,
+            ...(ttftMs !== undefined ? { ttftMs } : {}),
+            ...(d.latencyMs !== undefined ? { latencyMs: d.latencyMs } : {}),
+            ...(stopReason !== undefined ? { stopReason } : {}),
+            ...(costs ? { costs } : {}),
           },
         })
         return
@@ -910,6 +1140,7 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
       const undo = async (): Promise<void> => {
         if (sessionId === undefined) return
         rt.hub.detachDriver(sessionId)
+        driven.delete(sessionId)
         if (leased) await rt.release(sessionId).catch(() => {})
         // ENDED, not left open: a session with no board record and no reader is one nobody can find.
         await rt.runtime.finish(sessionId).catch(() => {})
@@ -937,6 +1168,7 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         }
 
         attachDriver(rt, sessionId)
+        driven.add(sessionId)
         if (input.firstMessage && input.firstMessage.trim()) active(sessionId).pendingFirst = input.firstMessage
         const facts = await factsOf(rt, sessionId)
         if (!facts) { await undo(); return { ok: false, sentence: tr('fileFailed') } }
@@ -965,15 +1197,17 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         const opened = await openSession({ store: rt.store, content: rt.content }, sessionId)
         if (!opened) { await rt.release(sessionId).catch(() => {}); return { ok: false, sentence: tr('noSuchSession') } }
         attachDriver(rt, sessionId)
+        driven.add(sessionId)
         const a = active(sessionId)
         const backlog: CodeEvent[] = []
         if (repair.repaired) backlog.push({ kind: 'notice', tone: 'info', sentence: `${tr('repaired')} ${repair.sentence}` })
         backlog.push({ kind: 'history', turns: historyOf(opened.messages) })
         a.backlog = backlog
         const facts = await factsOf(rt, sessionId)
-        if (!facts) { await rt.release(sessionId).catch(() => {}); return { ok: false, sentence: tr('noSuchSession') } }
+        if (!facts) { driven.delete(sessionId); await rt.release(sessionId).catch(() => {}); return { ok: false, sentence: tr('noSuchSession') } }
         return { ok: true, facts, sentence: tr('resumed')(facts.shortId) }
       } catch {
+        driven.delete(sessionId)
         if (leased) await rt.release(sessionId).catch(() => {})
         return { ok: false, sentence: tr('hostFailed') }
       }
@@ -984,7 +1218,10 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
       a.listeners.add(listener)
       let closed = false
       let watcherClose: (() => void) | null = null
-      const st: SubState = { calls: new Map(), inputs: new Map(), runByCall: new Map(), streamed: false, textPending: false, filledSeq: 0 }
+      const st: SubState = {
+        calls: new Map(), inputs: new Map(), runByCall: new Map(), streamed: false, textPending: false, filledSeq: 0,
+        attempts: new Map(), asked: new Set(), waited: new Map(),
+      }
 
       void (async () => {
         let rt: RuntimeHost | null
@@ -1061,6 +1298,84 @@ export function createCodeHost(opts: CodeHostOptions): ServerCodeHost {
         await rt.release(sessionId).catch(() => {})
       }
       sessions.delete(sessionId)
+      driven.delete(sessionId)
+    },
+
+    cycleMode(sessionId) {
+      if (!driven.has(sessionId)) return { ok: false, sentence: tr('modeNoSession') }
+      const rt = runtimeIfOpenSync()
+      if (!rt) return { ok: false, sentence: tr('hostFailed') }
+      let from: CodeModeId
+      let record: ReturnType<ReturnType<RuntimeHost['policyOf']>['switchProfile']>
+      try {
+        const policy = rt.policyOf(sessionId)
+        from = policy.profile()
+        record = policy.switchProfile(nextMode(from))
+      } catch {
+        return { ok: false, sentence: tr('modeFailed') }
+      }
+      // B4.7 added no event type for this on purpose (runtime-b3-tool-catalogue D-T3.P4: "the switch
+      // record carries its own code"), so the host journals the record as a line of its own. COUNTS
+      // only, never the approvals' labels: a label is the question's own words ("commands starting
+      // with `deploy --prod`"), i.e. conversation content, and a journal holds facts, not content (D5).
+      let journaled = true
+      try {
+        const path = opts.modeJournalPath ?? join(dirname(rt.dbPath), 'profile-switches.jsonl')
+        mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+        const line = { at: now().toISOString(), sessionId, ...record, kept: record.kept.length, dropped: record.dropped.length }
+        appendFileSync(path, `${JSON.stringify(line)}\n`, { encoding: 'utf-8', mode: 0o600 })
+      } catch {
+        // A failed write costs the journal line, never the switch — and the sentence says so.
+        journaled = false
+      }
+      const mode = record.to
+      emitLocal(sessionId, { kind: 'mode', mode, direction: record.direction, dropped: record.dropped.length })
+      emitRulesIfChanged(rt, sessionId)
+      // The LOSS leads: the status line truncates from the right, and at 80 columns the mode sentence
+      // alone fills it — while the mode is also in the header, the dropped rules are said nowhere else.
+      const parts = [modeSentence(mode)]
+      if (record.dropped.length > 0) parts.unshift(tr('rulesDropped')(record.dropped.length))
+      if (!journaled) parts.push(tr('modeJournalFailed'))
+      return { ok: true, mode, sentence: parts.join(' ') }
+    },
+
+    async promptHistory() {
+      let rt: RuntimeHost
+      try { rt = await getRuntime() } catch { return { ok: false, sentence: tr('historyFailed') } }
+      try {
+        // Candidates first (refs only, no bodies): the newest window of each of the newest sessions.
+        const page = await rt.store.listSessions({ limit: PROMPT_HISTORY_SESSIONS })
+        const refs: { sessionId: string; at: string; seq: number; sha: string }[] = []
+        for (const s of page.sessions) {
+          const msgs = await rt.store.listMessages(s.sessionId, { limit: 200 })
+          for (const m of msgs.messages) if (m.role === 'user') refs.push({ sessionId: s.sessionId, at: m.createdAt, seq: m.seq, sha: m.content.sha256 })
+        }
+        // Newest first; a total order (time, then session, then seq) so equal timestamps never reshuffle.
+        refs.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.sessionId < b.sessionId ? 1 : a.sessionId > b.sessionId ? -1 : b.seq - a.seq))
+        const seen = new Set<string>()
+        const prompts: CodePromptRecord[] = []
+        let reads = 0
+        for (const r of refs) {
+          if (prompts.length >= PROMPT_HISTORY_CAP || reads >= PROMPT_HISTORY_READS) break
+          reads += 1
+          const body = await rt.content.get(r.sha).catch(() => null)
+          if (body === null) continue
+          let msg: ProviderMessage
+          try { msg = JSON.parse(body) as ProviderMessage } catch { continue }
+          const text = userTextOf(msg).trim()
+          if (!text || seen.has(text)) continue
+          seen.add(text)
+          prompts.push({ text, at: r.at, sessionId: r.sessionId })
+        }
+        return { ok: true, prompts }
+      } catch {
+        return { ok: false, sentence: tr('historyFailed') }
+      }
+    },
+
+    async editDraft(draft) {
+      if (!opts.editor) return { ok: false, sentence: tr('noEditor') }
+      try { return await opts.editor(draft) } catch { return { ok: false, sentence: tr('editorFailed') } }
     },
 
     async dispose() {

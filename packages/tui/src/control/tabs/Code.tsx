@@ -1,10 +1,11 @@
 /**
- * Code — the native session, in the terminal (the `code` tab; spec items CD-01…04, CD-07, CD-09,
- * CD-11, CD-12 P1, NW-01, NW-06, GL-05, GL-06).
+ * Code — the native session, in the terminal (the `code` tab; spec items CD-01…19, NW-01, NW-06,
+ * GL-02/04/05/06).
  *
- * Everything that decides what a frame SAYS is in `../code.ts` and `../code-wizard.ts` (pure,
- * tested): the fold of the host's events, the layout, every line, what each key means and which keys
- * the footer names. This file holds React state, talks to `host.code`, and draws.
+ * Everything that decides what a frame SAYS is in `../code.ts`, `../code-panels.ts`,
+ * `../prompt-history.ts`, `../clipboard.ts` and `../code-wizard.ts` (pure, tested): the fold of the
+ * host's events, the layout, every line, what each key means and which keys the footer names. This
+ * file holds React state, talks to `host.code`, and draws.
  *
  * It owns no rule about a session either — the "control center owns no logic" rule. The host decides
  * whether a native session can run here, what a permission's options are and in which order, what
@@ -27,6 +28,12 @@ import {
   EMPTY_VIEW,
   FOLLOW,
   STREAM_FLUSH_MS,
+  effectiveMode,
+  lastFinishedAnswer,
+  longOutputShown,
+  modeWord,
+  nextPanel,
+  panelTitle,
   codeHints,
   codeKeyIntent,
   codeLayout,
@@ -52,8 +59,13 @@ import {
   type CodeIntent,
   type CodeView,
   type Line,
+  type PanelSide,
   type TailScroll,
 } from '../code'
+import { clampPanelTop, inspectorLines, panelWindow, resolveTurn, timelineLines } from '../code-panels'
+import { historyKey, historyLines, openHistory, type HistoryState } from '../prompt-history'
+import { OSC52_MAX_CHARS, charCount, osc52 } from '../clipboard'
+import { writeFrame } from '../altScreen'
 import {
   openWizard,
   taskCreated,
@@ -85,6 +97,21 @@ export interface CodeProps {
   onSay: (result: ActionResult) => void
   /** Change tab — the shell's own keys stand down while this screen captures. */
   onTab: (step: 1 | -1) => void
+  /**
+   * GL-02: how many things on this tab wait on a person — 1 while a question is open, 0 otherwise.
+   * Reported whether or not the tab is on screen: the question is asked while it is hidden too.
+   */
+  onAttention?: (count: number) => void
+  /** GL-04: `?` on an empty draft opens the shell's help overlay. Absent: `?` is typed. */
+  onHelp?: () => void
+  /**
+   * CD-19: where a terminal control sequence goes. Default `writeFrame` — the gate Ink draws through,
+   * never `process.stdout.write`, which would land in the buffer Ink is repainting. A test passes a
+   * recorder.
+   */
+  writeTerminal?: (bytes: string) => void
+  /** Whether this process runs inside tmux (the OSC 52 caveat). Default: `$TMUX` is set. */
+  inTmux?: boolean
 }
 
 type ViewAction = { type: 'events'; events: CodeEvent[] } | { type: 'reset' }
@@ -140,7 +167,12 @@ function useLatestState<T>(initial: T): [T, (next: T | ((prev: T) => T)) => void
   return [value, set, ref]
 }
 
-export function Code({ code, launch, lang, strings: s, width, height, isActive, onChrome, onSay, onTab }: CodeProps) {
+const defaultWrite = (bytes: string): void => { writeFrame(bytes) }
+
+export function Code({
+  code, launch, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
+  onAttention, onHelp, writeTerminal = defaultWrite, inTmux = Boolean(process.env.TMUX),
+}: CodeProps) {
   const t = codeStrings(lang)
   const availability = useMemo(() => (code ? code.availability() : null), [code])
   const available = Boolean(code && availability?.ok)
@@ -158,6 +190,20 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   // flip its meaning when the terminal is resized across the threshold.
   const [wideHidden, setWideHidden] = useState(false)
   const [narrowShown, setNarrowShown] = useState(false)
+  /** What the panel shows (D-TUI-2): the session, the picked turn, or the run's timeline. */
+  const [side, setSide] = useState<PanelSide>('session')
+  /** The turn the inspector has picked; `null` follows the newest one as turns arrive. */
+  const [selTurn, setSelTurn] = useState<number | null>(null)
+  /** CD-10: long tool output expanded (`ctrl+o`), for the whole tab. */
+  const [outputOpen, setOutputOpen] = useState(false)
+  /** CD-18: the prompt-history overlay. */
+  const [hist, setHist, histRef] = useLatestState<HistoryState | null>(null)
+  /** CD-17: `$EDITOR` holds the draft; keys are ignored until it gives it back. */
+  const [editing, setEditing, editingRef] = useLatestState(false)
+  /** A clock tick for the live figures (a running turn's duration, an open wait's bar). */
+  const [, setTick] = useState(0)
+  /** The panel's own scroll (its content can outgrow its rows). */
+  const [panelTop, setPanelTop] = useState(0)
 
   /** A prompt to send once the session's events are being read — see the subscribe effect. */
   const pendingSend = useRef<string | null>(null)
@@ -182,6 +228,8 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
     setScroll(FOLLOW)
     setDiffOpen(false)
     setDraft('')
+    setSelTurn(null)
+    setOutputOpen(false)
     setFacts(next)
   }, [code])
 
@@ -281,13 +329,34 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   const closed = view.closed !== null
   const running = view.runId !== null
   const sessionOpen = facts !== null
+  const mode = effectiveMode(view, facts)
+  const shownFacts = facts && mode ? { ...facts, mode } : facts
+  const inspecting = panelOpen && side === 'inspector'
+  const pickedTurn = resolveTurn(view, selTurn)
+  const convOptions = { expand: inspecting ? pickedTurn : null, highlight: inspecting, outputOpen }
+  const longOutput = longOutputShown(view, convOptions.expand)
+  const now = Date.now()
+
+  // The panel's lines are built here, not inside its pane, because the footer has to know whether
+  // they overflow before it can name the key that scrolls them.
+  const panelInner = paneBody(layout.panelWidth)
+  const panelRows = paneRows(layout.bodyRows)
+  const panelAll: Line[] = layout.panel === 'hidden'
+    ? []
+    : side === 'inspector'
+      ? inspectorLines(view, selTurn, shownFacts, t, panelInner, now)
+      : side === 'timeline'
+        ? timelineLines(view, selTurn, t, panelInner, now)
+        : sessionPanelLines(view, shownFacts, t, panelInner)
+  const panelOverflow = panelAll.length > panelRows
+  const panelStart = clampPanelTop(panelAll.length, panelRows, panelTop)
 
   const mainInner = paneBody(layout.mainWidth)
   const convWidth = Math.max(1, layout.mainWidth - 2)
   const matches = ask ? [] : matchCommands(draft)
   const popupIndex = matches.length > 0 ? Math.min(popup, matches.length - 1) : null
   const hint = ask ? null : composerHint(draft, t, convWidth)
-  const cardWant = ask ? permissionCardLines(ask, t, mainInner).length + 2 : 0
+  const cardWant = ask ? permissionCardLines(ask, t, mainInner, undefined, mode).length + 2 : 0
   const rows = columnRows(layout.bodyRows, {
     card: cardWant,
     popup: matches.length > 0 ? matches.length + 2 : 0,
@@ -295,7 +364,7 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   })
 
   const convAll: Line[] = facts
-    ? conversationLines(view, facts, t, convWidth)
+    ? conversationLines(view, shownFacts, t, convWidth, convOptions)
     : wrapText(t.noSession, convWidth).map(l => [seg(l, { color: COLORS.muted })])
   const convStart = tailStart(convAll.length, rows.conversation, scroll)
   let convShown = convAll.slice(convStart, convStart + rows.conversation)
@@ -314,6 +383,27 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   // A diff whose question closed (answered elsewhere, timed out) has nothing left to show.
   useEffect(() => { if (diffOpen && !ask) setDiffOpen(false) }, [diffOpen, ask])
   useEffect(() => { setPopup(0) }, [draft])
+  // A different side or a different turn is a different document: it opens at its top.
+  useEffect(() => { setPanelTop(0) }, [side, pickedTurn])
+
+  // GL-02: a question waits on a person whether or not this tab is showing — the shell counts it.
+  const asking = ask !== null
+  useEffect(() => { onAttention?.(asking ? 1 : 0) }, [asking, onAttention])
+
+  // The live figures move while nothing arrives: a running turn's duration, a wait that is still
+  // open. One tick a second, only while the panel shows one of them and something is live.
+  const liveFigures = panelOpen && side !== 'session' && (running || asking)
+  useEffect(() => {
+    if (!liveFigures) return
+    const h = setInterval(() => setTick(n => n + 1), 1000)
+    return () => clearInterval(h)
+  }, [liveFigures])
+
+  const applyPanel = (next: { side: PanelSide; open: boolean }) => {
+    setSide(next.side)
+    if (narrowNow) setNarrowShown(next.open)
+    else setWideHidden(!next.open)
+  }
 
   // ── keys ─────────────────────────────────────────────────────────────────────────────────
 
@@ -323,16 +413,67 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       case 'none': return
       case 'draft': setDraft(intent.draft); return
       case 'tab': onTab(intent.step); return
-      case 'toggle-panel':
-        if (narrowNow) setNarrowShown(v => !v)
-        else setWideHidden(v => !v)
+      case 'toggle-panel': applyPanel(nextPanel({ side, open: panelOpen }, 'toggle')); return
+      case 'panel-side': applyPanel(nextPanel({ side, open: panelOpen }, intent.side)); return
+      case 'turn-move': {
+        if (pickedTurn === null) return
+        const last = view.turnStats.length - 1
+        const next = Math.min(Math.max(0, pickedTurn + intent.delta), last)
+        setSelTurn(next === last ? null : next)
         return
+      }
+      case 'panel-scroll': {
+        const step = intent.page ? Math.max(1, panelRows - 2) : 1
+        setPanelTop(clampPanelTop(panelAll.length, panelRows, panelStart + intent.dir * step))
+        return
+      }
+      case 'cycle-mode': {
+        if (!code || !sid || closed) { say(false, t.sayNoSessionForMode); return }
+        const r = code.cycleMode(sid)
+        if (r.ok) dispatch({ type: 'events', events: [{ kind: 'mode', mode: r.mode, direction: 'same', dropped: 0 }] })
+        say(r.ok, r.sentence)
+        return
+      }
+      case 'toggle-output':
+        if (!outputOpen && !longOutput) { say(false, t.sayNoLongOutput); return }
+        setOutputOpen(v => !v)
+        return
+      case 'open-editor': {
+        if (ask) { say(false, t.sayLocked); return }
+        if (!code) return
+        setEditing(true)
+        void code.editDraft(draftRef.current).then(r => {
+          setEditing(false)
+          if (r.ok) setDraft(r.text)
+          say(r.ok, r.sentence)
+        })
+        return
+      }
+      case 'open-history': {
+        if (ask) { say(false, t.sayLocked); return }
+        if (!code) return
+        setHist(openHistory())
+        void code.promptHistory().then(r => setHist(h => (h
+          ? (r.ok ? { ...h, prompts: r.prompts, error: null } : { ...h, error: r.sentence })
+          : h)))
+        return
+      }
+      case 'copy': {
+        const text = lastFinishedAnswer(view)
+        if (text === null) { say(false, t.sayNothingToCopy); return }
+        const n = charCount(text)
+        if (n > OSC52_MAX_CHARS) { say(false, t.sayCopyTooLong(n, OSC52_MAX_CHARS)); return }
+        writeTerminal(osc52(text))
+        say(true, t.sayCopied(n, inTmux))
+        return
+      }
+      case 'help': onHelp?.(); return
       case 'scroll': setScroll(sc => scrollTail(convAll.length, rows.conversation, sc, intent.dir)); return
       case 'popup-move':
         setPopup(p => Math.min(Math.max(0, p + intent.delta), Math.max(0, matches.length - 1)))
         return
       case 'unknown-command': say(false, t.sayNoSuchCommand(intent.text)); setDraft(''); return
-      case 'say': say(false, intent.code === 'no-diff' ? t.sayNoDiff : t.sayAnswerFirst); return
+      case 'say': say(false, intent.code === 'no-diff' ? t.sayNoDiff : intent.code === 'locked' ? t.sayLocked : t.sayAnswerFirst); return
       case 'open-wizard': setDraft(''); startWizard(intent.firstMessage); return
       case 'close-diff': setDiffOpen(false); return
       case 'diff-scroll': setDiffTop(v => Math.min(Math.max(0, v + intent.delta), diffMax)); return
@@ -379,6 +520,25 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   }
 
   useInput((input, key) => {
+    // `$EDITOR` holds the draft: what is typed now belongs to it, not to this screen.
+    if (editingRef.current) return
+    const hist = histRef.current
+    if (hist) {
+      const r = historyKey(hist, {
+        input, return: key.return, escape: key.escape, backspace: key.backspace, delete: key.delete,
+        ctrl: key.ctrl, meta: key.meta, tab: key.tab, upArrow: key.upArrow, downArrow: key.downArrow,
+      })
+      if (r.effect.kind === 'close') { setHist(null); return }
+      if (r.effect.kind === 'use') {
+        // CD-18: back in the composer to be edited — never sent from here.
+        setHist(null)
+        setDraft(r.effect.text)
+        say(true, t.sayHistoryUsed)
+        return
+      }
+      setHist(r.state)
+      return
+    }
     // Read the LATEST draft and wizard, never the render's closure: keys that arrive between two
     // renders (fast typing, key repeat, a slow terminal) were each computed against the same stale
     // value, and every one but the last was lost — measured by the e2e, where a typed prompt
@@ -402,7 +562,7 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       performWizard(r.effect)
       return
     }
-    perform(codeKeyIntent({
+    const intent = codeKeyIntent({
       draft,
       sessionOpen,
       closed,
@@ -411,6 +571,9 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       panelFull: layout.panel === 'full',
       running,
       popup: popupIndex,
+      panelSide: side,
+      panelVisible: panelOpen,
+      help: Boolean(onHelp),
     }, {
       input,
       return: key.return,
@@ -419,6 +582,7 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       delete: key.delete,
       ctrl: key.ctrl,
       meta: key.meta,
+      shift: key.shift,
       tab: key.tab,
       upArrow: key.upArrow,
       downArrow: key.downArrow,
@@ -426,7 +590,11 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       rightArrow: key.rightArrow,
       pageUp: key.pageUp,
       pageDown: key.pageDown,
-    }))
+    })
+    // A command run from the composer (`/timeline` + enter) leaves the composer empty, whatever it
+    // did — the typed `/word` was the request, not a draft.
+    if (key.return && draft.startsWith('/') && intent.kind !== 'unknown-command' && intent.kind !== 'draft') setDraft('')
+    perform(intent)
   }, { isActive: isActive && available })
 
   // ── the footer ───────────────────────────────────────────────────────────────────────────
@@ -434,20 +602,29 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
   const hints = !available
     // Nothing to type, so nothing is captured: the shell's own keys work, and it is those that are named.
     ? [s.keyQuit, s.keyTabs]
-    : wizard
-      ? wizardHints(wizard, t)
-      : codeHints({
-        draft,
-        sessionOpen,
-        closed,
-        ask,
-        diffOpen: Boolean(diff),
-        panelFull: layout.panel === 'full',
-        running,
-        popup: popupIndex,
-        canScroll,
-        narrow: layout.narrow,
-      }, t)
+    : editing
+      ? [t.editorOpen]
+      : hist
+        ? [t.keyFilter, t.keyChoose, t.keyUse, t.keyClose]
+        : wizard
+          ? wizardHints(wizard, t)
+          : codeHints({
+            draft,
+            sessionOpen,
+            closed,
+            ask,
+            diffOpen: Boolean(diff),
+            panelFull: layout.panel === 'full',
+            running,
+            popup: popupIndex,
+            panelSide: side,
+            panelVisible: panelOpen,
+            help: Boolean(onHelp),
+            canScroll,
+            narrow: layout.narrow,
+            longOutput,
+            panelOverflow,
+          }, t)
 
   useEffect(() => {
     if (!isActive) return
@@ -456,7 +633,7 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
 
   // ── drawing ──────────────────────────────────────────────────────────────────────────────
 
-  const headerRow = <Lines lines={[headerLine(facts, t, width)]} rows={CODE_HEADER_ROWS} width={width} />
+  const headerRow = <Lines lines={[headerLine(shownFacts, t, width)]} rows={CODE_HEADER_ROWS} width={width} />
 
   const frame = (body: React.ReactNode) => (
     <Box flexDirection="column" width={width} height={height} flexShrink={0} overflowY="hidden">
@@ -471,6 +648,23 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
     return frame(
       <Pane title={s.tabsShort.code} width={width} height={underHeader}>
         <Lines lines={wrapText(sentence, inner).map(l => [seg(l, { color: COLORS.muted })])} rows={paneRows(underHeader)} width={inner} />
+      </Pane>,
+    )
+  }
+
+  if (hist) {
+    const inner = paneBody(width)
+    const h = historyLines(hist, t, inner)
+    const room = paneRows(underHeader)
+    const headRows = Math.min(h.head.length, room)
+    const footRows = Math.min(h.foot.length, Math.max(0, room - headRows - 1))
+    const bodyRows = Math.max(0, room - headRows - footRows)
+    const offset = h.selected === null ? 0 : windowOffset(h.selected, h.body.length, bodyRows)
+    return frame(
+      <Pane title={t.histTitle} badge="ctrl+r" focused width={width} height={underHeader}>
+        <Lines lines={h.head} rows={headRows} width={inner} />
+        <Lines lines={h.body.slice(offset)} rows={bodyRows} width={inner} />
+        <Lines lines={h.foot} rows={footRows} width={inner} />
       </Pane>,
     )
   }
@@ -501,14 +695,11 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
     )
   }
 
-  const panelPane = (w: number, h: number) => {
-    const inner = paneBody(w)
-    return (
-      <Pane title={t.panelTitle} badge={facts?.shortId ?? ''} focused={layout.panel === 'full'} width={w} height={h}>
-        <Lines lines={sessionPanelLines(view, facts, t, inner)} rows={paneRows(h)} width={inner} />
-      </Pane>
-    )
-  }
+  const panelPane = (w: number, h: number) => (
+    <Pane title={panelTitle(side, t, w)} badge={facts?.shortId ?? ''} focused={layout.panel === 'full' || side !== 'session'} width={w} height={h}>
+      <Lines lines={panelWindow(panelAll, panelRows, panelStart, t, panelInner, layout.panel === 'full')} rows={panelRows} width={panelInner} />
+    </Pane>
+  )
 
   if (layout.panel === 'full') return frame(panelPane(width, layout.bodyRows))
 
@@ -526,13 +717,13 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
       {ask && rows.card > 0
         ? (
           <Pane title={permissionTitle(ask, t)} badge={t.needsYou} focused width={layout.mainWidth} height={rows.card}>
-            <Lines lines={permissionCardLines(ask, t, mainInner, paneRows(rows.card))} rows={paneRows(rows.card)} width={mainInner} />
+            <Lines lines={permissionCardLines(ask, t, mainInner, paneRows(rows.card), mode)} rows={paneRows(rows.card)} width={mainInner} />
           </Pane>
         )
         : null}
-      <Pane title={t.composerTitle} badge={facts?.mode ?? ''} focused={!ask} width={layout.mainWidth} height={rows.composer}>
+      <Pane title={t.composerTitle} badge={facts ? modeWord(mode, t) : ''} focused={!ask} width={layout.mainWidth} height={rows.composer}>
         <Lines
-          lines={[composerLine({ draft, ask, closed: view.closed, sessionOpen }, t, mainInner)]}
+          lines={[composerLine({ draft, ask, closed: view.closed, sessionOpen, busy: editing }, t, mainInner)]}
           rows={paneRows(rows.composer)}
           width={mainInner}
         />
@@ -542,7 +733,7 @@ export function Code({ code, launch, lang, strings: s, width, height, isActive, 
 
   return frame(
     <>
-      {layout.statusRows > 0 ? <Lines lines={[narrowStatusLine(view, facts, t, width)]} rows={layout.statusRows} width={width} /> : null}
+      {layout.statusRows > 0 ? <Lines lines={[narrowStatusLine(view, shownFacts, t, width)]} rows={layout.statusRows} width={width} /> : null}
       {layout.panel === 'side'
         ? (
           <Box flexDirection="row" height={layout.bodyRows} flexShrink={0}>
