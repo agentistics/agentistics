@@ -26,8 +26,9 @@ nearly empty, and it is what the product already does.
    crosses only end-to-end encrypted, with device consent, under the sharing rules, on demand.
 4. **Never intermediate a vendor credential** (runtime master spec §22.3). Harness logins stay on the
    machine where the session runs; our runner (form D) uses API keys only.
-5. **Local use never requires an account** (E25, wording pending). Signing in is the easiest path,
-   not a gate.
+5. **The local product never requires an account** (E25), not even for new engine features. The
+   account is offered only when the person chooses a cloud feature; the engine is protected by its
+   EULA and the minified build, never by a login.
 6. **N/A, never a confident zero** — applies to every hub surface exactly as it does locally.
 
 ## 3. The model
@@ -149,7 +150,7 @@ implementation. Today's installer picks ONE source and runs no sessions on Windo
 | Plan | For | Includes | Price (anchor, unvalidated) |
 |---|---|---|---|
 | **Free — local** | any developer | the whole product on one machine: every harness, metrics, cost, sessions, cockpit, ALM, **the native harness engine** (EULA) | free |
-| **Free — account** | anyone who signs in | identity, one connected device, a 14-day Pro trial | free |
+| **Free — account** | anyone who chooses a cloud feature (E25) | identity, one connected device, a 14-day Pro trial | free |
 | **Pro** | a developer with more than one device | several devices and workspaces, remote access from the phone with full parity, push notifications, own-server pairing, GitHub App repositories | ~US$8–12 / month |
 | **Team** | teams using AI | shared workspace, per-person and per-repository cost, roles, shared board, company-provided access with per-person budgets, CI, Slack, real-bill reconciliation (E20) | ~US$20–30 / seat / month |
 | **Enterprise** | large companies | SSO/OIDC, audit, self-hosted with SSO, dedicated database/region, DPA, policies | contract |
@@ -178,11 +179,10 @@ solve this?"); 3–5 design partners on the hosted hub for weekly feedback; publ
 
 ## 11. Open questions
 
-1. **E25 — the login's purpose and flow** (owner asked; being explained by the bridge session).
-2. **Q10 — desktop** (section 8).
-3. **Prices** — anchors only until interviews.
-4. **Engine journal/projections public or private** — project lead's call.
-5. **EULA text** — lawyer.
+1. **Q10 — desktop** (section 8).
+2. **Prices** — anchors only until interviews.
+3. **Engine journal/projections public or private** — project lead's call.
+4. **EULA text** — lawyer.
 
 ## 12. Non-goals
 

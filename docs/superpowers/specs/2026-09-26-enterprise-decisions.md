@@ -224,16 +224,18 @@ contract) · 1 minimal hub (OAuth, workspaces, device pairing, multi-tenant metr
 4 Pro launch (billing, onboarding, central migration) · 5 Team (roles in depth, shared access,
 governance, real cost, Slack) · 6 our runner (form D).
 
-## E25 · Login is optional locally, and the easiest path (2026-09-27)
+## E25 · The local product never requires an account (revised by the owner, 2026-09-29)
 
-**Using agentistics locally never requires an account.** First run (desktop app or web) shows
-"Sign in with Google/GitHub" as the primary action and "continue without an account" as a quiet
-secondary one. Signing in creates a **free cloud account** on the spot (one person, limited), with
-the upgrade one click away. *Reason:* the free product is open source and local (E2); forcing a login
-on a tool that reads `~/.claude` breaks trust, is removed by the first fork, and repels the cautious
-companies that pay — while a prominent optional login still makes an account the common path.
-*Rejected:* mandatory login for everything (the Notion model) — right for a cloud-native product,
-wrong for a local open-source one.
+**Local use never requires a login — not even for new engine features.** The account exists only
+for cloud features (several machines, the phone, a team, billing) and is offered **only when the
+person chooses one of them**; it is not the primary action of the first run. The closed engine is
+protected by its EULA and the minified build, never by an account. *Reason:* the free product runs on
+one machine (E2, E27); an account gate on local features is friction with no protection value, since
+a local binary can be reversed with or without a login. *Rejected:* (1) the original E25 of
+2026-09-27 — "Sign in with Google/GitHub" as the primary first-run action with "continue without an
+account" as a quiet secondary one; (2) the 2026-09-29 proposal to put new engine features behind the
+free account; (3) mandatory login for everything (the Notion model) — right for a cloud-native
+product, wrong for a local one.
 
 ## Revisions of 2026-09-29 (owner, relayed by the Enterprise bridge session)
 
@@ -268,8 +270,9 @@ charging for the engine on one machine — it is the adoption driver and would b
 structural line. *Stated limit:* a local binary can be reversed with effort; a real secret only
 exists in what runs in the cloud.
 
-**E28 · The free cloud account = identity + one connected device + a 14-day Pro trial.** Signing
-in has a reason to exist without giving Pro away.
+**E28 · The free cloud account = identity + one connected device + a 14-day Pro trial.** It is
+offered only when the person chooses a cloud feature (E25), and gives that choice a start without
+giving Pro away.
 
 **E29 · Business.** Bootstrapped (infrastructure ~US$100/month, E10); revisit when form D needs
 capital. Open a Brazilian company (CNPJ) now, with an accountant and Stripe Brazil; a US entity only
@@ -284,6 +287,4 @@ protects the hub for two years. Self-hosted **with SSO and audit** is sold by co
 lives in `agentistics-cloud`. *Reason:* "the hub cannot read your conversation" is a promise nobody
 can verify if the code that encrypts it is closed.
 
-**E25 · PENDING again.** The owner asked what the login is for and how it works. Proposed wording,
-not yet approved: basic local use never requires an account; **new engine features may require the
-free account** (E28), which stays optional for anyone who does not use them.
+**E25 · Revised** — see E25 above: the local product never requires an account.
