@@ -125,8 +125,8 @@ consent; an admin cannot override it.**
 
 | Piece | Repository | Licence |
 |---|---|---|
-| Community product: core, web, TUI/cockpit, CLI, local server, sessions, ALM, self-hosted central, VS Code, MCP, metric readers, **engine interface**, **device side of the tunnel and its crypto** | `agentistics/agentistics` (public) | FSL-1.1-ALv2 |
-| Native harness runtime, canonical integrations, live ingestion (journal/projections: project lead's call) | `agentistics/agentistics-engine` (private) | proprietary EULA, free use |
+| Community product: core, web, TUI/cockpit, CLI, local server, sessions, ALM, self-hosted central, VS Code, MCP, metric readers, **engine interface**, **the journal and projections** (2026-09-29), **device side of the tunnel and its crypto** | `agentistics/agentistics` (public) | FSL-1.1-ALv2 |
+| Native harness runtime, canonical integrations, live ingestion | `agentistics/agentistics-engine` (private) | proprietary EULA, free use |
 | Hub: API, web workspace screens, relay, auth, tenancy, GitHub App broker, hosted MCP, billing | `agentistics/agentistics-cloud` (private) | proprietary |
 | Integration SDKs (generated from the OpenAPI spec) | public, own package | Apache-2.0 |
 | Enterprise decisions, this spec, pricing, go-to-market | `agentistics-cloud/docs` | private |
@@ -181,8 +181,7 @@ solve this?"); 3–5 design partners on the hosted hub for weekly feedback; publ
 
 1. **Q10 — desktop** (section 8).
 2. **Prices** — anchors only until interviews.
-3. **Engine journal/projections public or private** — project lead's call.
-4. **EULA text** — lawyer.
+3. **EULA text** — lawyer.
 
 ## 12. Non-goals
 

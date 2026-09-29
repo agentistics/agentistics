@@ -253,8 +253,8 @@ harness launch.
   local server, sessions, ALM, self-hosted central, VS Code, MCP, legacy metric readers) plus an
   **engine interface**.
 - `agentistics/agentistics-engine` — **private, proprietary (EULA)**: the native harness runtime,
-  the canonical integrations and live ingestion (whether journal/projections stay public is the
-  project lead's call). The official binary embeds it.
+  the canonical integrations and live ingestion. **The journal and the projections stay public**
+  (project lead, 2026-09-29, Q1 option b). The official binary embeds it.
 - `agentistics/agentistics-cloud` — **private, proprietary**: the hub (multi-tenant, relay,
   billing, GitHub App, hosted MCP).
 
