@@ -71,4 +71,4 @@ Full documentation:
 [docs/vscode-extension.md](https://github.com/agentistics/agentistics/blob/main/docs/vscode-extension.md).
 Issues and source: [github.com/agentistics/agentistics](https://github.com/agentistics/agentistics).
 
-MIT.
+FSL-1.1-ALv2.
