@@ -29,14 +29,10 @@ import {
   ChevronDown, ChevronRight, ExternalLink, FileText, FileVideo, Link2, MessageSquare, Paperclip,
   Pencil, Plus, Trash2, X, XCircle,
 } from 'lucide-react'
-import { PRIORITY_ORDER, composePromptWithPaths, type TaskPriorityId } from '@agentistics/core'
+import { PRIORITY_ORDER, type TaskPriorityId } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { sessionPath } from '../../lib/sessionRoute'
-import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
-import { pushNotification } from '../../lib/notifications'
-import { NewSessionModal } from '../sessions/NewSessionModal'
-import { markSessionPending } from '../../lib/pendingSessionStore'
 import {
   bodyWithAttachments, looksLikeImage, looksLikeVideo, parseCommentBody,
   type CommentAttachment, type CommentPart,
@@ -54,13 +50,13 @@ import { RailSection } from './RailSection'
 import { StatusChip } from './StatusChip'
 import { SubtaskTable } from './SubtaskTable'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
-import { StagedSessionLaunchConfirm } from './StagedSessionLaunchConfirm'
+import { useStagedFire } from './useStagedFire'
 import { TaskFiles } from './TaskFiles'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
 import {
   addComment, addLink, addSubtask, attachSession, clearStagedSession, deleteFile,
-  deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration, materializeStagedAttachments,
+  deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration,
   markTask, patchSubtask, removeComment, removeLink, removeSubtask, saveStagedSession, setBlockedBy,
   uploadFile, useTaskActivity, useTaskDetail, useTaskList, useTaskStatuses,
   type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskFieldPatch,
@@ -1231,106 +1227,11 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
   // just above.
   const { statuses } = useTaskStatuses()
 
-  /**
-   * FIRING a staged session (t-918cc82233) — two paths, decided by whether the draft already names
-   * BOTH a harness and a folder, exactly the split `SessionsPage.tsx`'s `selectPreset` draws for a
-   * `SessionPreset`. `firing` is the direct-launch confirm; `firePrefillFor` opens the ordinary
-   * wizard pre-filled with whatever the draft DOES have, seeded to auto-file under this exact
-   * subtask once the session exists (`NewSessionModal`'s `initialTaskId`/`initialSubtaskId`).
-   */
-  const [firing, setFiring] = useState<Subtask | null>(null)
-  const [fireBusy, setFireBusy] = useState(false)
-  const [fireError, setFireError] = useState<string | null>(null)
-  /**
-   * Set exactly when `fireError` came from the machine's memory-budget refusal
-   * (`isAdmissionRefusal`), never for an ordinary spawn error — the only case
-   * `StagedSessionLaunchConfirm` offers its second, deliberate "start anyway" button (re-posts
-   * with `force: true`). Cleared whenever a fresh draft is opened for firing.
-   */
-  const [fireForceable, setFireForceable] = useState(false)
-  const [firePrefillFor, setFirePrefillFor] = useState<{ subtask: Subtask; prompt: string } | null>(null)
-  /** The subtask id whose attachments are being materialized into real paths — a brief round trip
-   *  through `/api/fleet/attach`, shown so the fire button does not look inert while it runs. */
-  const [preparingFire, setPreparingFire] = useState<string | null>(null)
-
-  async function startFire(t: Subtask) {
-    const draft = t.stagedSession
-    if (!draft) return
-    setFireError(null)
-    setFireForceable(false)
-    if (draft.harness && draft.cwd) {
-      setFiring(t)
-      return
-    }
-    // The wizard fallback needs the composed prompt UP FRONT: `initialPreset` seeds its textarea
-    // once, and the wizard itself has no notion of a staged draft's attachments to weave in later.
-    setPreparingFire(t.id)
-    const paths = await materializeStagedAttachments(lang, draft.attachmentIds ?? [], detail.files)
-    setPreparingFire(null)
-    setFirePrefillFor({ subtask: t, prompt: composePromptWithPaths(paths, draft.prompt) })
-  }
-
-  /**
-   * `force` is the deliberate second click on "start anyway" — see
-   * `StagedSessionLaunchConfirm`'s `onForce`. The ordinary "Fire" button never passes it; only a
-   * prior memory-budget refusal on THIS exact request offers the option at all.
-   */
-  async function confirmFire(force = false) {
-    if (!firing) return
-    const t = firing
-    const draft = t.stagedSession!
-    setFireBusy(true)
-    setFireError(null)
-    try {
-      const paths = await materializeStagedAttachments(lang, draft.attachmentIds ?? [], detail.files)
-      const finalPrompt = composePromptWithPaths(paths, draft.prompt)
-      // The SAME route the wizard and the preset shelf call (`fleet-spawn.ts`'s `planFleetSpawn`) —
-      // never a second, unvalidated path.
-      const res = await fetch(`/api/fleet/new?lang=${lang}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          harness: draft.harness,
-          cwd: draft.cwd,
-          ...(draft.model ? { model: draft.model } : {}),
-          ...(draft.effort ? { effort: draft.effort } : {}),
-          prompt: finalPrompt,
-          label: t.title,
-          ...(force ? { force: true as const } : {}),
-        }),
-      })
-      const json = await res.json() as { ok: boolean; message: string; id?: string }
-      if (!json.ok) {
-        setFireError(json.message)
-        setFireForceable(isAdmissionRefusal(json))
-        setFireBusy(false)
-        return
-      }
-      // Forced through despite the budget — surfaced through the persisted notification store
-      // (never silently), the same "already-localized sentence, meta-carried" pattern
-      // `hardware.pressure` uses for its own server-computed sentence.
-      const note = forcedNote(json)
-      if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
-      setFiring(null)
-      setFireBusy(false)
-      setFireForceable(false)
-      if (json.id) {
-        // The session EXISTS now — the true first moment its filing can actually be attempted, the
-        // same reasoning `NewSessionModal`'s own `subtaskTarget` attach applies. A `blocked` refusal
-        // reuses the EXACT dialog the ordinary session-filing flow already opens for this delivery.
-        const attach = await attachSession(id, json.id, t.id)
-        if (!attach.ok && attach.reason === 'blocked') {
-          setSubtaskBlocked({ subtaskId: t.id, sessionId: json.id, blockedBy: attach.blockedBy ?? [] })
-        }
-        await reload()
-        navigate(sessionPath(json.id))
-      }
-    } catch {
-      setFireError(lang === 'pt' ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
-      setFireForceable(false)
-      setFireBusy(false)
-    }
-  }
+  // FIRING a staged session — the one shared implementation (`useStagedFire`); a refused filing
+  // reuses the EXACT dialog the ordinary session-filing flow already opens for this delivery.
+  const fire = useStagedFire(lang, b => setSubtaskBlocked({ subtaskId: b.subtaskId, sessionId: b.sessionId, blockedBy: b.blockedBy }))
+  const startFire = (t: Subtask) => fire.startFire({ taskId: id, subtask: t, files: detail.files, reload })
+  const preparingFire = fire.preparingId
 
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); await fn(); await reload(); setBusy(false) }
   const stats = detail.stats
@@ -1660,49 +1561,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
         />
       )}
 
-      {firing && (
-        <StagedSessionLaunchConfirm
-          lang={lang}
-          subtaskTitle={firing.title}
-          draft={firing.stagedSession!}
-          attachmentNames={(firing.stagedSession!.attachmentIds ?? [])
-            .map(fid => detail.files.find(f => f.id === fid)?.name)
-            .filter((n): n is string => !!n)}
-          busy={fireBusy}
-          error={fireError}
-          forceable={fireForceable}
-          onCancel={() => { setFiring(null); setFireForceable(false) }}
-          onConfirm={() => void confirmFire()}
-          onForce={() => void confirmFire(true)}
-        />
-      )}
-
-      {firePrefillFor && (
-        <NewSessionModal
-          lang={lang}
-          initialTaskId={id}
-          initialSubtaskId={firePrefillFor.subtask.id}
-          initialPreset={{
-            ...(firePrefillFor.subtask.stagedSession?.harness
-              ? { harness: firePrefillFor.subtask.stagedSession.harness } : {}),
-            prompt: firePrefillFor.prompt,
-            ...(firePrefillFor.subtask.stagedSession?.model
-              ? { model: firePrefillFor.subtask.stagedSession.model } : {}),
-            ...(firePrefillFor.subtask.stagedSession?.effort
-              ? { effort: firePrefillFor.subtask.stagedSession.effort } : {}),
-            label: firePrefillFor.subtask.title,
-          }}
-          onClose={() => setFirePrefillFor(null)}
-          onStarted={(sessionId, started) => {
-            // Stays on the delivery — the reload picks the new session up in the subtask's own
-            // rows. `markSessionPending` still fires: the aside is the persistent sidebar beside
-            // this page too, and it should show the same placeholder every other caller publishes.
-            if (sessionId) markSessionPending({ id: sessionId, ...started })
-            setFirePrefillFor(null)
-            void reload()
-          }}
-        />
-      )}
+      {fire.element}
     </>
   )
 }

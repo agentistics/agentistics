@@ -5,7 +5,7 @@ import type { TaskSessionRow } from '../../lib/tasks'
 function session(over: Partial<TaskSessionRow> = {}): TaskSessionRow {
   return {
     id: 's1', harness: 'claude', cwd: '/repo', attemptId: null, subtaskId: 'sub-a',
-    createdAt: '2026-09-11T00:00:00.000Z', tokens: 1000, costUSD: 1, rounds: 1,
+    createdAt: '2026-09-11T00:00:00.000Z', model: null, tokens: 1000, costUSD: 1, rounds: 1,
     ...over,
   }
 }

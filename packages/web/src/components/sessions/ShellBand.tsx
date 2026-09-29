@@ -852,8 +852,15 @@ export function ShellBand({
       setBand({ open: true })
       return
     }
+    // THE OPEN TAB, CLICKED AGAIN: minimize, like the right rail (`resolvePanelBarPick`'s
+    // `'minimize'`). This band keeps its own open state, so it collapses itself here — the same
+    // `setBand({ open: false })` its own chevron runs — rather than leaving it to the shared handler.
+    if ((id === 'cli' || id === 'shell') && id === target && bandOpen && !dedicated) {
+      setBand({ open: false })
+      return
+    }
     onBarPick?.(id)
-  }, [barEntries, onBarPick, chooseTarget, bandOpen, setBand, target, bottomOccupant])
+  }, [barEntries, onBarPick, chooseTarget, bandOpen, setBand, target, bottomOccupant, dedicated])
   /** The bar's OWN measured width (design item 7), never the window's — see `useElementWidth`'s
    *  own header on why. */
   const [barWidthRef, barWidth] = useElementWidth()

@@ -268,3 +268,22 @@ export function nestSessionGroup(id: string, parentId: string | null): { ok: tru
   store.set(planned.next)
   return { ok: true }
 }
+
+/**
+ * PURE: the number a folder's header shows — its OWN sessions PLUS every session in the folders
+ * nested inside it (owner, 2026-09-29: a parent holding only subfolders read `0`, "hoje tá 0, tá
+ * errado"). It used to count direct sessions only, on the reasoning that nesting a busy folder
+ * should not make its parent's number jump; but a folder is a container, and "0" on a container
+ * full of work reads as empty. `resolved` is the same per-folder resolution the list draws from,
+ * so the number can never count a session the list does not show.
+ */
+export function folderSessionCount(
+  groupId: string,
+  resolved: readonly { group: { id: string; parentId?: string }; rows: readonly unknown[] }[],
+): number {
+  let n = 0
+  for (const entry of resolved) {
+    if (entry.group.id === groupId || entry.group.parentId === groupId) n += entry.rows.length
+  }
+  return n
+}

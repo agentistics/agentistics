@@ -120,6 +120,7 @@ import { resolveBackend } from './sessions'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
+import { bornConversationLink } from './sessions/born-link'
 import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
@@ -1775,6 +1776,8 @@ async function spawnManaged(req: {
     return { ok: false, message }
   }
 
+  // Born linked — see `born-link.ts` for the window a patch-afterwards left open.
+  const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession({
     id,
     harness: req.harness,
@@ -1795,9 +1798,7 @@ async function spawnManaged(req: {
     // it to reopen this conversation. Without it a fresh session's link exists only while the
     // harness's own record does (`harness-sessions.ts`, claude alone), so a session started with
     // the cockpit closed had nothing to fall back on but the harness-and-directory guess.
-    ...(planned.plan.conversationId
-      ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const }
-      : {}),
+    ...(bornLink ?? {}),
     // Which repository this directory is in, while the directory is provably there. See
     // `ManagedSession.repo`: a worktree removed later leaves a path that names nothing, and the
     // grouping fell through to its last path segment as though it were a project.
@@ -1806,7 +1807,7 @@ async function spawnManaged(req: {
 
   // Give this harness's one exact-link chance its own several seconds, independent of whichever
   // client happens to be polling — see the header above `linkProcessConversationSoon`.
-  if (needsProcessLinkRetry(req.harness, planned.plan.conversationId)) {
+  if (needsProcessLinkRetry(req.harness, bornLink?.conversationId)) {
     linkProcessConversationSoon(id, req.harness)
   }
 

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import {
-  filtrosPanelInert, sessionsFiltersShouldReturnFocus,
+  filtrosPanelInert, filtrosPanelOverflow, sessionsFiltersShouldReturnFocus,
   filtrosPanelBounds, FILTROS_PANEL_PREFERRED_WIDTH, FILTROS_PANEL_MIN_WIDTH,
   metricsTabBounds, METRICS_PANEL_PREFERRED_WIDTH, METRICS_PANEL_MIN_WIDTH,
   filtrosPanelBoundsRight, metricsTabBoundsRight, VIEWPORT_EDGE_MARGIN,
@@ -203,5 +203,24 @@ describe('metricsTabBoundsRight — the session-metrics tab beside Filtros, anch
     const filtros = filtrosPanelBoundsRight({ left: 0, right: 320 }, null, 1440)
     const bounds = metricsTabBoundsRight(filtros, 0, 0)
     expect(bounds.right).toBeGreaterThanOrEqual(filtros.right)
+  })
+})
+
+describe('filtrosPanelOverflow — a popover inside the panel is never clipped by it', () => {
+  test('settled and fitting is VISIBLE, so the "+ Filtro" menu escapes the panel', () => {
+    // The reported defect: `auto` made the panel a scroll container, and the menu opened inside
+    // it behind two scrollbars.
+    expect(filtrosPanelOverflow({ open: true, animating: false, contentHeight: 120, maxHeight: 600 })).toBe('visible')
+  })
+  test('a card taller than the room scrolls — the lesser evil', () => {
+    expect(filtrosPanelOverflow({ open: true, animating: false, contentHeight: 700, maxHeight: 600 })).toBe('auto')
+  })
+  test('collapsed or mid-animation is hidden, which the grid-rows collapse needs', () => {
+    expect(filtrosPanelOverflow({ open: false, animating: false, contentHeight: 120, maxHeight: 600 })).toBe('hidden')
+    expect(filtrosPanelOverflow({ open: true, animating: true, contentHeight: 120, maxHeight: 600 })).toBe('hidden')
+  })
+  test('not measured yet reads as fitting', () => {
+    expect(filtrosPanelOverflow({ open: true, animating: false, contentHeight: null, maxHeight: 600 })).toBe('visible')
+    expect(filtrosPanelOverflow({ open: true, animating: false, contentHeight: 120, maxHeight: null })).toBe('visible')
   })
 })

@@ -193,6 +193,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão iniciada apesar do aviso de memória', message: '{note}' },
     en: { title: 'Session started despite the memory warning', message: '{note}' },
   },
+  // A staged session fired from the task TABLE started, but its filing under the subtask was
+  // refused because the subtask is blocked. The session runs either way; this says where it is NOT.
+  'tasks.fire_filing_blocked': {
+    pt: { title: 'Sessão iniciada, mas não arquivada', message: 'A subtarefa está bloqueada por {blockedBy} — arquive a sessão quando o bloqueio sair.' },
+    en: { title: 'Session started, but not filed', message: 'The subtask is blocked by {blockedBy} — file the session once the block lifts.' },
+  },
 }
 
 /**

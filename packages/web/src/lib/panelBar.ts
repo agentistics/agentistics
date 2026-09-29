@@ -144,21 +144,24 @@ export function bandBarCompact(width: number): boolean {
 }
 
 /**
- * A TAB CLICK SELECTS, IT NEVER TOGGLES. Narrowed from the pre-rail version: this bar now only ever
- * lists bottom-placed panels, so there is exactly one destination ("restore it at the bottom") for
- * a pick that is not already the active, visible tab.
+ * A TAB CLICK ON THE OPEN TAB MINIMIZES IT — the right rail's own behaviour (owner, 2026-09-29:
+ * "quando eu clico na aba novamente ela nao minimiza (o aside da direita tem essa funcionalidade)").
+ * This used to read "a tab click selects, it never toggles", so the only way to put the band away
+ * was its own chevron, while the rail beside it collapsed on a second click: two strips of the same
+ * panels answering the same gesture differently.
  *
  *  - `'open'` — this panel is not the bottom band's own active tab. Make it so.
  *  - `'restore'` — it already is, but the band is collapsed (`bottomOpen` false). Expand it.
- *  - `'noop'` — already the active, visible tab.
+ *  - `'minimize'` — it is the active tab AND the band is open. Collapse the band; the panel stays
+ *    its occupant, so the next click restores exactly what was there.
  */
-export type PanelBarPickAction = { kind: 'open' } | { kind: 'restore' } | { kind: 'noop' }
+export type PanelBarPickAction = { kind: 'open' } | { kind: 'restore' } | { kind: 'minimize' }
 
 export function resolvePanelBarPick(
   { id, activeBottom, bottomOpen }: { id: PanelBarId; activeBottom: PanelBarId | null; bottomOpen: boolean },
 ): PanelBarPickAction {
   if (activeBottom !== id) return { kind: 'open' }
-  return bottomOpen ? { kind: 'noop' } : { kind: 'restore' }
+  return bottomOpen ? { kind: 'minimize' } : { kind: 'restore' }
 }
 
 /** Every panel id, in the historical reading order (`ArtifactsAside`'s own former tab order, with

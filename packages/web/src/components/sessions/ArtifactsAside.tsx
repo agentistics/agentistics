@@ -200,9 +200,9 @@ export interface ArtifactsAsideProps {
    * only hides the BUTTON, on the ONE mount where it duplicates a control that already sits right
    * above it: the right slot on desktop, where `rightSlotBar`'s own `PanelFixedControls` minimize
    * IS a literal close for every one of these ten panels (`panelMinimizeAction`'s `close-right`) —
-   * calling the exact same `closeSlotPanel(id)` this header's own button called. The bottom band's
-   * own minimize COLLAPSES instead (`collapse-bottom`, the band stays this panel's occupant), so
-   * this button keeps its job there.
+   * calling the exact same `closeSlotPanel(id)` this header's own button called. The bottom band
+   * hides it too on desktop (owner, 2026-09-29): its own bar's minimize sits right above this header,
+   * and the extra button read as a stray "minimize the aside" control inside the bar.
    */
   hideCloseButton?: boolean
   /**
