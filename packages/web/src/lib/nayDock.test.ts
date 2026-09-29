@@ -57,3 +57,22 @@ describe('parseDockState', () => {
     expect(parseDockState('nope')).toEqual({ windows: [] })
   })
 })
+
+import { minimizedBadge, menuPlacement } from './nayDock'
+
+describe('minimized list', () => {
+  test('the badge says nothing at zero and caps past nine', () => {
+    expect(minimizedBadge(0)).toBeNull()
+    expect(minimizedBadge(-1)).toBeNull()
+    expect(minimizedBadge(3)).toBe('3')
+    expect(minimizedBadge(12)).toBe('9+')
+  })
+  test('opens above and leftward from the default bottom-right button', () => {
+    expect(menuPlacement({ top: 800, bottom: 856, left: 1360, right: 1416 }, { w: 1440, h: 900 }, 320))
+      .toEqual({ vertical: 'above', horizontal: 'right' })
+  })
+  test('flips below near the top and rightward near the left edge', () => {
+    expect(menuPlacement({ top: 20, bottom: 76, left: 20, right: 76 }, { w: 1440, h: 900 }, 320))
+      .toEqual({ vertical: 'below', horizontal: 'left' })
+  })
+})
