@@ -3,6 +3,7 @@
  * lives in the pure `tmux-cli.ts` beside it.
  */
 
+import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import {
   attachArgs, capturePaneArgs, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
@@ -133,7 +134,27 @@ async function sendTextTo(id: string, text: string): Promise<boolean> {
   return writeToPane(id, () => typeAndSubmit(id, text))
 }
 
+/**
+ * Bring the keyboard focus back to the input box before typing — see `input-focus.ts`.
+ *
+ * With background agents running, one ↓ in claude's terminal moves the focus into the agents list;
+ * a prompt typed then is lost and its Enter opens an agent's detail view, while this function used
+ * to report it delivered. Esc was measured to return the focus without interrupting a running
+ * turn. Nothing is sent when the focus is already on the input — an Esc there is not harmless.
+ * `false` when the focus could not be brought back, so the caller says "not delivered" instead of
+ * typing into a screen that will swallow it.
+ */
+async function focusInput(id: string): Promise<boolean> {
+  for (let attempt = 0; attempt < FOCUS_ATTEMPTS; attempt++) {
+    if (inputFocusOf(await captureFrame(id)) === 'input') return true
+    if ((await tmux(sendKeysNamedArgs(id, 'Escape'))).code !== 0) return false
+    await sleep(SUBMIT_SETTLE_MS)
+  }
+  return inputFocusOf(await captureFrame(id)) === 'input'
+}
+
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
+  if (!(await focusInput(id))) return false
   const typed = await tmux(sendKeysLiteralArgs(id, text))
   if (typed.code !== 0) return false
 
@@ -172,6 +193,14 @@ async function typeAndSubmit(id: string, text: string): Promise<boolean> {
     // way — so this buys one more return rather than a verdict. An extra return on an emptied input
     // does nothing; a missing one strands the message until somebody opens the terminal.
     await tmux(sendKeysNamedArgs(id, 'Enter'))
+  }
+  // THE ENTER MAY HAVE OPENED A SCREEN INSTEAD OF SENDING. The movement check above cannot tell —
+  // opening a detail view moves the frame too — so the focus is read once more: a detail view open
+  // now is this Enter's doing. It is closed again and the send is reported as NOT delivered, which
+  // is the truth; "delivered" over a message that reached nobody is the defect being fixed.
+  if (inputFocusOf(await captureFrame(id)) === 'overlay') {
+    await tmux(sendKeysNamedArgs(id, 'Escape'))
+    return false
   }
   return true
 }
