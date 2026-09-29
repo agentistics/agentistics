@@ -19,6 +19,7 @@
  */
 
 import type { ColumnId } from './board'
+import type { SubtaskColumnId } from './subtaskColumnDefs'
 
 export type Lang = 'pt' | 'en'
 
@@ -190,6 +191,28 @@ export interface BoardCopy {
    */
   columns: Record<ColumnId, string>
   /**
+   * The subtask grid's own column headers — the SAME record feeds its "Columns" picker's option
+   * labels (t-63b7d3b2b0 #1), the same relationship `columns` above has with the delivery table.
+   * A separate record from `columns`: the two grids show different facts, and `model` in particular
+   * exists only here.
+   */
+  subtaskColumns: Record<SubtaskColumnId, string>
+  /**
+   * The subtask grid's own column filter — status, harness and model (t-63b7d3b2b0 #2). `all` is
+   * the resting option of each dropdown ("no filter on this dimension"), never a real value.
+   */
+  subtaskFilter: {
+    trigger: string
+    title: string
+    status: string
+    harness: string
+    model: string
+    all: string
+    clear: string
+    /** The empty state when the filter, not an empty delivery, is why nothing is on screen. */
+    noMatch: string
+  }
+  /**
    * The lists' own controls: Select mode, the open-the-task button, and sorting by a column title.
    * `{column}` / `{key}` are replaced by the caller — a sentence built by concatenating a translated
    * word onto an English frame is the bug this file exists to end.
@@ -242,6 +265,12 @@ export interface BoardCopy {
     columnsTitle: string
     columnsTrigger: string
     columnsNote: string
+    /** `TaskTable.tsx`'s OWN second picker (t-63b7d3b2b0 #1) — every expanded delivery's inline
+     *  subtask grid shares this one arrangement, distinct wording from `columnsTitle`/`columnsTrigger`
+     *  above (the delivery table's own columns) so the two buttons sitting side by side never read
+     *  as the same control twice. */
+    subtaskColumnsTrigger: string
+    subtaskColumnsNote: string
     boardColumnsTitle: string
     boardColumnsTrigger: string
     boardColumnsNote: string
@@ -356,6 +385,26 @@ const EN: BoardCopy = {
     created: 'Created',
     updated: 'Updated',
   },
+  subtaskColumns: {
+    status: 'Status',
+    started: 'Started',
+    completed: 'Completed',
+    duration: 'Duration',
+    sessions: 'Sessions',
+    model: 'Model',
+    cost: 'Cost',
+    tokens: 'Tokens',
+  },
+  subtaskFilter: {
+    trigger: 'Filter',
+    title: 'Filter subtasks',
+    status: 'Status',
+    harness: 'Assistant',
+    model: 'Model',
+    all: 'All',
+    clear: 'Clear filter',
+    noMatch: 'No subtask matches this filter.',
+  },
   staged: {
     compose: 'Stage a session',
     edit: 'Edit staged session',
@@ -430,6 +479,8 @@ const EN: BoardCopy = {
     columnsTitle: 'Columns',
     columnsTrigger: 'Columns',
     columnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — the table follows this order.',
+    subtaskColumnsTrigger: 'Subtask columns',
+    subtaskColumnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — every expanded delivery\'s subtasks follow this order.',
     boardColumnsTitle: 'Columns on the board',
     boardColumnsTrigger: 'Columns',
     boardColumnsNote:
@@ -547,6 +598,26 @@ const PT: BoardCopy = {
     created: 'Criada em',
     updated: 'Atualizada em',
   },
+  subtaskColumns: {
+    status: 'Status',
+    started: 'Início',
+    completed: 'Concluída',
+    duration: 'Duração',
+    sessions: 'Sessões',
+    model: 'Modelo',
+    cost: 'Custo',
+    tokens: 'Tokens',
+  },
+  subtaskFilter: {
+    trigger: 'Filtro',
+    title: 'Filtrar subtarefas',
+    status: 'Status',
+    harness: 'Assistente',
+    model: 'Modelo',
+    all: 'Todos',
+    clear: 'Limpar filtro',
+    noMatch: 'Nenhuma subtarefa corresponde a este filtro.',
+  },
   staged: {
     compose: 'Preparar sessão',
     edit: 'Editar sessão em espera',
@@ -621,6 +692,8 @@ const PT: BoardCopy = {
     columnsTitle: 'Colunas',
     columnsTrigger: 'Colunas',
     columnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — a tabela segue essa ordem.',
+    subtaskColumnsTrigger: 'Colunas das subtarefas',
+    subtaskColumnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — as subtarefas de toda entrega expandida seguem essa ordem.',
     boardColumnsTitle: 'Colunas do quadro',
     boardColumnsTrigger: 'Colunas',
     boardColumnsNote:

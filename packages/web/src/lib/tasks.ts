@@ -220,6 +220,9 @@ export interface TaskSessionRow {
    * Sessions workspace can open — a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /** Null when the conversation is not in the store, or when its harness never recorded one. Mirror
+   *  of the server's `TaskSessionRow.model` (`task-report.ts`). */
+  model: string | null
   tokens: number | null
   costUSD: number | null
   rounds: number | null
@@ -423,24 +426,39 @@ export function useCentralTasks(enabled: boolean) {
   return { machines, error, reload: load }
 }
 
+export type TaskDetailResult =
+  | { ok: true; detail: TaskDetail }
+  | { ok: false; error: TasksError | 'missing' }
+
+/**
+ * One task's detail, as a plain fetch — the imperative twin of `useTaskDetail` below, for a caller
+ * that needs the answer INSIDE an event handler rather than as hook state (t-63b7d3b2b0 #4: staging
+ * a session from the table view has to know what a task's own subtasks are before it can compose
+ * one, and a row action fires from a click, not a render). `useTaskDetail` is refactored to call this
+ * rather than duplicating the same fetch — two readings of one endpoint is exactly the drift this
+ * file's own header refuses.
+ */
+export async function fetchTaskDetail(ref: string, filters?: Filters): Promise<TaskDetailResult> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}${taskQuery(filters)}`)
+    if (res.status === 404) return { ok: false, error: 'missing' }
+    if (res.status === 403) return { ok: false, error: 'refused' }
+    if (!res.ok) return { ok: false, error: 'down' }
+    const body = await res.json() as { task: TaskDetail }
+    return { ok: true, detail: body.task }
+  } catch {
+    return { ok: false, error: 'down' }
+  }
+}
+
 export function useTaskDetail(ref: string | undefined, filters?: Filters) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [error, setError] = useState<TasksError | 'missing'>(null)
 
   const load = useCallback(async () => {
     if (!ref) return
-    try {
-      const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}${taskQuery(filters)}`)
-      if (res.status === 404) { setError('missing'); setDetail(null); return }
-      if (res.status === 403) { setError('refused'); setDetail(null); return }
-      if (!res.ok) { setError('down'); setDetail(null); return }
-      const body = await res.json() as { task: TaskDetail }
-      setError(null)
-      setDetail(body.task)
-    } catch {
-      setError('down')
-      setDetail(null)
-    }
+    const result = await fetchTaskDetail(ref, filters)
+    if (result.ok) { setError(null); setDetail(result.detail) } else { setError(result.error); setDetail(null) }
   }, [ref, JSON.stringify(filters ?? null)])
 
   useEffect(() => { void load() }, [load])
