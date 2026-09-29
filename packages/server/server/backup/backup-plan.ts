@@ -273,8 +273,9 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
   },
   {
     pattern: '.agentistics/claude-chat', match: 'prefix', reason: 'regenerable',
-    restoreWith: 'nothing — the server recreates it on every start',
-    why: 'See nay-chat: created by `ensureClaudeChat()` at boot.',
+    restoreWith: 'nothing — nothing reads it any more',
+    why: 'LEGACY: the scratch directory of the removed /api/claude-chat route. The server no longer '
+      + 'creates it, but machines that ran an older build still have one, so it stays decided.',
   },
   {
     pattern: '.agentistics/version-cache.json', match: 'prefix', reason: 'regenerable',
