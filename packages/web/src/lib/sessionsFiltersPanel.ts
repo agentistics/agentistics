@@ -208,3 +208,29 @@ export function metricsTabBoundsRight(
   const panelMaxWidth = Math.max(METRICS_PANEL_MIN_WIDTH, Math.min(METRICS_PANEL_PREFERRED_WIDTH, available))
   return { right, panelMaxWidth }
 }
+
+/**
+ * The panel's `overflow`, decided — PURE.
+ *
+ * It was `hidden` while collapsed or animating and `auto` otherwise, while the comment above it
+ * promised `visible` once settled. `auto` makes the box a SCROLL CONTAINER, and a scroll container
+ * clips its absolutely positioned descendants — which is every popover `FiltersBar` draws in flow:
+ * the "+ Filtro" menu, the value pickers, the date calendar. So opening one opened it INSIDE the
+ * panel, behind a vertical and a horizontal scrollbar, reported with a screenshot of exactly that.
+ *
+ * `visible` whenever the card FITS (the ordinary case), so every popover escapes; `auto` only when
+ * the card itself is taller than the room measured for it, where scrolling it is the lesser evil;
+ * `hidden` while collapsed or mid-animation, which the grid-rows collapse needs. `contentHeight` is
+ * the CARD's own height — an absolutely positioned popover does not change it, so opening a menu
+ * can never flip the panel into clipping that very menu. `null` (not measured yet) reads as fitting.
+ */
+export function filtrosPanelOverflow(o: {
+  open: boolean
+  animating: boolean
+  contentHeight: number | null
+  maxHeight: number | null
+}): 'hidden' | 'visible' | 'auto' {
+  if (!o.open || o.animating) return 'hidden'
+  if (o.contentHeight === null || o.maxHeight === null) return 'visible'
+  return o.contentHeight > o.maxHeight ? 'auto' : 'visible'
+}
