@@ -4,7 +4,7 @@
 and Antigravity session your machine is running — what each one is doing, which of them is blocked
 waiting on you, their live screens to type into — without leaving VS Code.
 
-It is a client of [agentistics](https://github.com/blpsoares/agentistics), the local analytics and
+It is a client of [agentistics](https://github.com/agentistics/agentistics), the local analytics and
 session manager for AI coding assistants.
 
 ---
@@ -41,7 +41,7 @@ the transition, never on the level.
 
 ## Requirements
 
-- **[agentistics](https://github.com/blpsoares/agentistics) running locally** — `agentop server`.
+- **[agentistics](https://github.com/agentistics/agentistics) running locally** — `agentop server`.
   The panel says so and offers to start it when nothing is answering.
 - **tmux**, for the session-management half — so Linux and macOS, or **WSL** on Windows. The metrics
   and the status bar work wherever the server runs.
@@ -68,7 +68,7 @@ terminal` · `Open the whole fleet in an editor tab` · `Start the local agentop
 ---
 
 Full documentation:
-[docs/vscode-extension.md](https://github.com/blpsoares/agentistics/blob/main/docs/vscode-extension.md).
-Issues and source: [github.com/blpsoares/agentistics](https://github.com/blpsoares/agentistics).
+[docs/vscode-extension.md](https://github.com/agentistics/agentistics/blob/main/docs/vscode-extension.md).
+Issues and source: [github.com/agentistics/agentistics](https://github.com/agentistics/agentistics).
 
 MIT.

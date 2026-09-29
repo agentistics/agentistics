@@ -66,7 +66,8 @@ test('the scan still sees the old spread-merge write reintroduced', () => {
  */
 describe('this band\'s own `open` state is seeded from the slot, not read cold from storage', () => {
   test('the prefs state is seeded through `seedBandOpen`, not a bare `readBandPrefs()`', () => {
-    expect(SRC).toContain('const [prefs, setPrefs] = useState(() => seedBandOpen(readBandPrefs(), openSeed))')
+    // Read for THIS band's pane of a split view (`bandPane`), still seeded through `seedBandOpen`.
+    expect(SRC).toContain('const [prefs, setPrefs] = useState(() => seedBandOpen(readBandPrefs(undefined, bandPane), openSeed))')
   })
 
   test('the shell-resolution reducer reads the ALREADY-seeded `prefs.open`, never a second cold read', () => {

@@ -4,7 +4,7 @@ MCP server that exposes your [Claude Code](https://claude.ai/code) analytics as 
 
 ## What it does
 
-Reads data from `~/.claude/` (the same data [agentistics](https://github.com/blpsoares/agentistics) visualizes) and exposes it as 13 structured MCP tools.
+Reads data from `~/.claude/` (the same data [agentistics](https://github.com/agentistics/agentistics) visualizes) and exposes it as 13 structured MCP tools.
 
 ## Usage
 
@@ -57,4 +57,4 @@ Requires a running agentistics server (`agentop server` or the Windows desktop a
 
 ## License
 
-MIT — part of the [agentistics](https://github.com/blpsoares/agentistics) project.
+MIT — part of the [agentistics](https://github.com/agentistics/agentistics) project.

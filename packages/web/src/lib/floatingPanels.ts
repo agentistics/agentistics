@@ -38,6 +38,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { isPanelId, type PanelId } from './panelSlots'
+import { getActivePane, usePaneId, type PaneId } from './paneScope'
 
 // ---------------------------------------------------------------------------------------------
 // Geometry — pure.
@@ -245,7 +246,10 @@ function saveBook(book: FloatingBook): void {
 // `isPanelId` back, so nothing here may run during module evaluation.
 let loaded: FloatingBook | null = null
 function bookNow(): FloatingBook { return loaded ??= loadBook() }
-let current: string | null = null
+/** The session whose windows each pane draws right now — `null` on a phone or with nothing selected.
+ *  One per pane (`paneScope.ts`): the two sides of a split show two different sessions, and a
+ *  session's windows are keyed by that session in the book, so the two never write the same entry. */
+const current: Record<PaneId, string | null> = { main: null, split: null }
 const EMPTY_SET: FloatingSet = Object.freeze({}) as FloatingSet
 const listeners = new Set<() => void>()
 
@@ -256,53 +260,64 @@ export function subscribeFloating(cb: () => void): () => void {
   return () => { listeners.delete(cb) }
 }
 
-/** The session whose windows are drawn right now — `null` on a phone or with nothing selected. */
-export function setFloatingSession(key: string | null): void {
-  if (key === current) return
-  current = key
+/** The session whose windows `pane` draws — `null` on a phone or with nothing selected. */
+export function setFloatingSession(key: string | null, pane: PaneId = 'main'): void {
+  if (key === current[pane]) return
+  current[pane] = key
   emit()
 }
 
-/** The CURRENT session's floating windows (a stable object between changes). */
-export function getFloating(): FloatingSet {
-  if (current === null) return EMPTY_SET
-  return bookNow().sessions[current]?.windows ?? EMPTY_SET
+/** A pane's CURRENT session's floating windows (a stable object between changes). */
+export function getFloating(pane: PaneId = getActivePane()): FloatingSet {
+  const key = current[pane]
+  if (key === null) return EMPTY_SET
+  return bookNow().sessions[key]?.windows ?? EMPTY_SET
 }
 
-function commit(windows: FloatingSet): void {
-  if (current === null) return
-  if (windows === getFloating()) return
-  loaded = writeEntry(bookNow(), current, windows, Date.now())
+function commit(windows: FloatingSet, pane: PaneId): void {
+  const key = current[pane]
+  if (key === null) return
+  if (windows === getFloating(pane)) return
+  loaded = writeEntry(bookNow(), key, windows, Date.now())
   saveBook(loaded)
   emit()
 }
 
-/** The session area as the window layer last measured it — what a newly floated window is sized
- *  for. A pin pressed before the layer has ever measured gets a sensible desktop guess, which the
- *  clamp corrects on the first draw anyway. */
-let lastArea: Size = { w: 960, h: 640 }
-export function setFloatingArea(area: Size): void { if (area.w > 0 && area.h > 0) lastArea = area }
+/** The session area as each pane's window layer last measured it — what a newly floated window is
+ *  sized for. A pin pressed before the layer has ever measured gets a sensible desktop guess, which
+ *  the clamp corrects on the first draw anyway. */
+const lastArea: Record<PaneId, Size> = { main: { w: 960, h: 640 }, split: { w: 960, h: 640 } }
+export function setFloatingArea(area: Size, pane: PaneId = 'main'): void {
+  if (area.w > 0 && area.h > 0) lastArea[pane] = area
+}
 
-/** Float `id` in the current session. */
-export function floatPanel(id: PanelId): void { commit(floatIn(getFloating(), id, lastArea)) }
-/** Dock `id` back in the current session. */
-export function dockPanel(id: PanelId): void { commit(dockOut(getFloating(), id)) }
-/** Raise `id` above every other window of the current session. */
-export function raisePanel(id: PanelId): void { commit(bringToFront(getFloating(), id)) }
+/** Float `id` in the pane's current session. */
+export function floatPanel(id: PanelId, pane: PaneId = getActivePane()): void {
+  commit(floatIn(getFloating(pane), id, lastArea[pane]), pane)
+}
+/** Dock `id` back in the pane's current session. */
+export function dockPanel(id: PanelId, pane: PaneId = getActivePane()): void {
+  commit(dockOut(getFloating(pane), id), pane)
+}
+/** Raise `id` above every other window of the pane's current session. */
+export function raisePanel(id: PanelId, pane: PaneId = getActivePane()): void {
+  commit(bringToFront(getFloating(pane), id), pane)
+}
 /** Store a window's new rect (after a drag or a resize), keeping its place in the stack. */
-export function placePanel(id: PanelId, rect: Rect): void {
-  const set = getFloating()
+export function placePanel(id: PanelId, rect: Rect, pane: PaneId = getActivePane()): void {
+  const set = getFloating(pane)
   const win = set[id]
   if (!win) return
   if (win.x === rect.x && win.y === rect.y && win.w === rect.w && win.h === rect.h) return
-  commit({ ...set, [id]: { ...rect, z: win.z } })
+  commit({ ...set, [id]: { ...rect, z: win.z } }, pane)
 }
-/** Is `id` floating in the current session? */
-export function isFloating(id: PanelId): boolean { return getFloating()[id] !== undefined }
+/** Is `id` floating in the pane's current session? */
+export function isFloating(id: PanelId, pane: PaneId = getActivePane()): boolean { return getFloating(pane)[id] !== undefined }
 
 /** For tests: forget everything, storage untouched. */
-export function resetFloating(): void { loaded = EMPTY_BOOK; current = null; emit() }
+export function resetFloating(): void { loaded = EMPTY_BOOK; current.main = null; current.split = null; emit() }
 
 export function useFloatingPanels(): FloatingSet {
-  return useSyncExternalStore(subscribeFloating, getFloating, () => EMPTY_SET)
+  const pane = usePaneId()
+  return useSyncExternalStore(subscribeFloating, () => getFloating(pane), () => EMPTY_SET)
 }

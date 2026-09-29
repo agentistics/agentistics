@@ -98,7 +98,8 @@ export function pressureWatchStep(
   return { prevCritical: next, critical: next, notify }
 }
 
-export function useHardwarePressureWatch(lang: 'pt' | 'en'): { critical: boolean; ramUnderPressure: boolean } {
+/** `notify` is false on the second pane of a split view — one crossing, one notification. */
+export function useHardwarePressureWatch(lang: 'pt' | 'en', notify = true): { critical: boolean; ramUnderPressure: boolean } {
   const { hardware } = useHardwareSnapshot(lang)
   // `null` = no reading exists yet. `pressureTransition`'s own rule refuses to fire off that gap —
   // see that function's own header for why treating it as `false` would be wrong.
@@ -109,8 +110,8 @@ export function useHardwarePressureWatch(lang: 'pt' | 'en'): { critical: boolean
     const step = pressureWatchStep(prevRef.current, hardware, lang)
     prevRef.current = step.prevCritical
     setCritical(step.critical)
-    if (step.notify) pushNotification(step.notify)
-  }, [hardware, lang])
+    if (step.notify && notify) pushNotification(step.notify)
+  }, [hardware, lang, notify])
 
   // Read off the SAME poll `useHardwareSnapshot` above already runs — `useIdleSessions.ts` takes
   // this rather than opening its own hardware interval.

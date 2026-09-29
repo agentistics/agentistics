@@ -13,6 +13,7 @@ import { targetLabel } from '../../lib/terminalTarget'
 import { panelIconFor } from '../../lib/panelIcons'
 import { panelTitle } from '../../lib/panelMeta'
 import { PanelGapDots } from './PanelGap'
+import { paneDomId, usePaneId } from '../../lib/paneScope'
 
 /**
  * bandControls.tsx — ONE height, ONE padding, ONE icon/label size for every control drawn on the
@@ -73,6 +74,7 @@ export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }
   onTouchStart: (e: React.TouchEvent) => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
+  const pane = usePaneId()
   return (
     <div
       role="separator"
@@ -85,7 +87,7 @@ export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }
       // exactly as a genuine press would. Whichever band is docked right now (Studio/Shell/a
       // SimpleDockedBand tab) renders its own `BandResizeHandle`, so this id always names whichever
       // one is actually on screen — never a specific band type's own handle.
-      id="ag-gap-band-height"
+      id={paneDomId('ag-gap-band-height', pane)}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onKeyDown={onKeyDown}

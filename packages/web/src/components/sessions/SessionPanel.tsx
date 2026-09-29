@@ -30,6 +30,7 @@ import { useViewportWidth } from '../../hooks/useViewportWidth'
 import {
   bottomPanels, resolveForViewport, useRailWidth, usePanelSlots, type PanelDropTarget, type PanelId,
 } from '../../lib/panelSlots'
+import { usePaneId } from '../../lib/paneScope'
 import { panelTitle } from '../../lib/panelMeta'
 import { hasDragPayload } from '../../lib/dragReorder'
 import { useLeftAsideEdge } from '../../lib/leftAsideEdge'
@@ -189,6 +190,8 @@ export function SessionPanel({
   studioFullscreen, onStudioFullscreenChange,
   bottomTabPane, bottomTabFullscreen, onBottomTabFullscreenChange,
 }: SessionPanelProps) {
+  /** The side of a split view this band belongs to — its prefs are kept per pane. */
+  const bandPane = usePaneId()
   /**
    * Is this a session of ANOTHER machine, reached through the relay?
    *
@@ -688,6 +691,7 @@ function StudioBand({
    */
   harness?: string
 }) {
+  const bandPane = usePaneId()
   const pt = lang === 'pt'
   /** The bar's OWN measured width (design item 7), never the window's — see `useElementWidth`'s
    *  own header on why. */
@@ -711,12 +715,12 @@ function StudioBand({
   // panel's ('studio') own entry, so a DIFFERENT panel moved into this same bottom band afterward
   // never inherits it. See `BandPrefs.full`'s own header in `shellBand.ts`.
   const [heightPrefs, setHeightPrefs] = useState(() => {
-    const p = readBandPrefs()
+    const p = readBandPrefs(undefined, bandPane)
     return { height: p.height, full: bandPanelFull(p, 'studio') }
   })
   const applyHeight = useCallback((next: { height: number; full: boolean }) => {
     setHeightPrefs(next)
-    writeBandPrefs(withBandPanelFull({ ...readBandPrefs(), height: next.height }, 'studio', next.full))
+    writeBandPrefs(withBandPanelFull({ ...readBandPrefs(undefined, bandPane), height: next.height }, 'studio', next.full), undefined, bandPane)
   }, [])
   const renderedHeight = heightPrefs.full && columnHeight > 0 ? columnHeight : heightPrefs.height
   // THE DRAG — `bandControls.tsx`'s shared `useBandDrag`, the one state machine `StudioBand`,
@@ -942,6 +946,7 @@ function SimpleDockedBand({
   harness?: string
   children: ReactNode
 }) {
+  const bandPane = usePaneId()
   const pt = lang === 'pt'
   const [barWidthRef, barWidth] = useElementWidth()
   const compact = bandBarCompact(barWidth)
@@ -958,12 +963,12 @@ function SimpleDockedBand({
   // into this band never reads full because `hardware` left it that way, or the reverse. See
   // `BandPrefs.full`'s own header in `shellBand.ts`.
   const [heightPrefs, setHeightPrefs] = useState(() => {
-    const p = readBandPrefs()
+    const p = readBandPrefs(undefined, bandPane)
     return { height: p.height, full: bandPanelFull(p, panel) }
   })
   const applyHeight = useCallback((next: { height: number; full: boolean }) => {
     setHeightPrefs(next)
-    writeBandPrefs(withBandPanelFull({ ...readBandPrefs(), height: next.height }, panel, next.full))
+    writeBandPrefs(withBandPanelFull({ ...readBandPrefs(undefined, bandPane), height: next.height }, panel, next.full), undefined, bandPane)
   }, [panel])
   const renderedHeight = heightPrefs.full && columnHeight > 0 ? columnHeight : heightPrefs.height
   // THE DRAG — the SAME shared `useBandDrag` `StudioBand` drives its own handle through; see that

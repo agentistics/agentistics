@@ -165,7 +165,7 @@ export default function InstallSettings() {
             </div>
           </div>
           <button
-            onClick={() => window.open('https://github.com/blpsoares/agentistics/releases/latest', '_blank', 'noopener')}
+            onClick={() => window.open('https://github.com/agentistics/agentistics/releases/latest', '_blank', 'noopener')}
             style={{
               display: 'flex', alignItems: 'center', gap: 5,
               padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, flexShrink: 0,

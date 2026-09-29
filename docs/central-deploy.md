@@ -29,7 +29,7 @@ variations, and the choice is yours rather than inferred:
 
 | Shape | Flag | What it does | Needs |
 |---|---|---|---|
-| **Published image** | `--image` | Pulls `ghcr.io/blpsoares/agentistics` and runs it in Docker | Docker |
+| **Published image** | `--image` | Pulls `ghcr.io/agentistics/agentistics` and runs it in Docker | Docker |
 | **Built from source** | `--build` | Builds the image from a checkout, then recreates the container | Docker + a clone |
 | **Native** | `--native` | The `agentop` binary *is* the server — no Docker, no container | An external `MONGO_URL` |
 
@@ -120,7 +120,7 @@ openssl rand -hex 32      # → AGENTISTICS_TEAM_SESSION_SECRET (or leave it emp
 | `AGENTISTICS_TEAM_INGEST_TOKEN` | *(empty)* | Bearer token for `POST /api/team/ingest`. Empty allows unauthenticated ingestion — only sane on a private instance |
 | `AGENTISTICS_CENTRAL_USER` | *(empty)* | Self-contribution — see [below](#self-contribution) |
 | `AGENTISTICS_CENTRAL_RUNTIME` | *(from the wizard)* | Which shape above. **Read by the CLI only**; no compose passes it into the container |
-| `AGENTISTICS_IMAGE` | *(the CLI's own version)* | Pin the published image, e.g. `ghcr.io/blpsoares/agentistics:latest` |
+| `AGENTISTICS_IMAGE` | *(the CLI's own version)* | Pin the published image, e.g. `ghcr.io/agentistics/agentistics:latest` |
 
 **Every variable that decides what this instance is *allowed to do* lives in
 [`docs/exposure.md`](exposure.md)** — `AGENTISTICS_EXPOSURE`, `_TEAM_TLS`, `_TRUST_PROXY`,
@@ -196,7 +196,7 @@ agentop central reset-password --email you@example.com
 and press the start verb — there is **one verb per shape this box can actually run**:
 
 ```
-Start (docker · published image)   pulls ghcr.io/blpsoares/agentistics — no build, no checkout needed
+Start (docker · published image)   pulls ghcr.io/agentistics/agentistics — no build, no checkout needed
 Start (docker · build from source) builds the image from this checkout, then recreates the container
 Start (native · this terminal)     runs here until you quit — no Docker needed
 Start (native · background)        detaches and keeps running

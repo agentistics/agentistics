@@ -23,8 +23,8 @@ services:
   app:
     # Defaults to :latest for a hand-driven compose run. `agentop central up` overrides it with
     # its OWN version, so the central always matches the CLI that deployed it; pin your own with
-    # AGENTISTICS_IMAGE=ghcr.io/blpsoares/agentistics:<tag>.
-    image: ${AGENTISTICS_IMAGE:-ghcr.io/blpsoares/agentistics:latest}
+    # AGENTISTICS_IMAGE=ghcr.io/agentistics/agentistics:<tag>.
+    image: ${AGENTISTICS_IMAGE:-ghcr.io/agentistics/agentistics:latest}
     environment:
       MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/?replicaSet=rs0}
       MONGO_DB: ${MONGO_DB:-agentistics}
