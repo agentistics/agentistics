@@ -48,10 +48,14 @@
   --text-secondary: rgba(255, 255, 255, 0.55);
   --text-tertiary: rgba(255, 255, 255, 0.3);
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* THE BOARD'S RADIUS FAMILY (owner, 2026-09-27). `lg` is a PANEL — the page panel and every
+     card that stands on it — and `md` is a card NESTED inside one; they mirror `PANEL_RADIUS` and
+     `CARD_RADIUS` in `lib/panelLayout.ts`, and `panelLayout.test.ts` fails if the two drift. The
+     scale used to run 8/12/16/20, which put 16px cards on a 10px board. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
 
   --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.3);
   --shadow-elevated: 0 4px 12px rgba(0,0,0,0.5), 0 20px 60px rgba(0,0,0,0.4);
@@ -928,7 +932,13 @@ button:focus-within .ag-row-pin,
 .ag-composer-ground::before {
   content: '';
   position: absolute;
-  inset: 0;
+  /* Reaches 56px ABOVE the composer: the zone where a line of the conversation passes behind the
+     field is the one that has to fade, and a ground that stopped at the field's own top edge left
+     the text sharp until the instant it vanished under the box. */
+  top: -56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: -1;
   pointer-events: none;
   /* PREFIXED FIRST, STANDARD LAST — the same order `mask-image` already uses three lines down,
@@ -945,16 +955,19 @@ button:focus-within .ag-row-pin,
      that only keeps one. */
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  /* Plain first, so a browser without `color-mix` still gets the fade rather than no ground. */
-  background: linear-gradient(to bottom, transparent 0%, var(--bg-base) 100%);
+  /* Plain first, so a browser without `color-mix` still gets the fade rather than no ground.
+     `--ag-composer-ground` is the surface the conversation sits on — the page's `--bg-base` by
+     default, the Nay panel's `--bg-surface` inside it — so the fade ends in the colour under it
+     rather than in a band of a different one. */
+  background: linear-gradient(to bottom, transparent 0%, var(--ag-composer-ground, var(--bg-base)) 100%);
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    color-mix(in srgb, var(--bg-base) 72%, transparent) 45%,
-    var(--bg-base) 100%
+    color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 72%, transparent) 45%,
+    var(--ag-composer-ground, var(--bg-base)) 100%
   );
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
-  mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
 }
 
 /*
@@ -963,7 +976,8 @@ button:focus-within .ag-row-pin,
  */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ag-composer-ground::before {
-    background: var(--bg-base);
+    top: 0;
+    background: var(--ag-composer-ground, var(--bg-base));
     -webkit-mask-image: none;
     mask-image: none;
   }
@@ -1004,3 +1018,8 @@ button:focus-within .ag-row-pin,
   background: color-mix(in srgb, var(--text-tertiary) 38%, transparent);
   border-radius: 5px; text-decoration: none;
 }
+
+/* The minimized-windows list opened from the Nay button (MinimizedMenu.tsx). */
+@keyframes ag-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.ag-menu-row:hover, .ag-menu-row:focus-visible { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
+@media (prefers-reduced-motion: reduce) { [role="menu"][aria-label] { animation: none !important; } }

@@ -16,7 +16,7 @@
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, X } from 'lucide-react'
 import { isNayCwd, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -31,6 +31,12 @@ import {
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
+import { MinimizedMenu } from './MinimizedMenu'
+import { NayFab } from './NayFab'
+import { DockSettings } from './DockSettings'
+import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
+import { useLocation } from 'react-router-dom'
+import { parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -40,6 +46,8 @@ const ORANGE_DIM = 'var(--anthropic-orange-dim)'
 const SIZE_KEY = 'agentistics-nay-dock-size'
 const WINDOWS_KEY = 'agentistics-nay-dock-windows'
 const TAB_KEY = 'agentistics-nay-dock-tab'
+/** The chat button's place and look — per browser, never the shared preferences file. */
+const FAB_KEY = 'agentistics-nay-fab'
 /** How long a just-started session may be missing from the fleet before we stop saying it is coming. */
 const ARRIVAL_BUDGET_MS = 20_000
 
@@ -59,7 +67,8 @@ const viewport = () => ({ w: window.innerWidth, h: window.innerHeight })
 export interface NayDockProps {
   lang: Lang
   isMobile: boolean
-  ctx: Pick<AppContext, 'data' | 'currency' | 'brlRate' | 'costBasis' | 'planBasis'>
+  ctx: Pick<AppContext, 'data' | 'currency' | 'brlRate' | 'costBasis' | 'planBasis'
+    | 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
   /** The sidebar's own session filters, so the "Sessões" tab lists what the sidebar lists. */
   filters: Filters
   activeOnly: boolean
@@ -84,6 +93,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const [arriving, setArriving] = useState<Record<string, number>>({})
 
   useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
+  const inSession = useLocation().pathname.startsWith('/sessions/')
+  const shownInSession = useNayFabShownInSession()
+  const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
+  const [fabPrefs, setFabPrefs] = useState<NayFabPrefs>(() => readStored(FAB_KEY, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS))
+  useEffect(() => { writeStored(FAB_KEY, fabPrefs) }, [fabPrefs])
   useEffect(() => { writeStored(TAB_KEY, tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
@@ -166,12 +180,21 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     }
     const row = rowIndex.get(s.id)
     return (
-      <SessionChat
-        key={s.id}
-        session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
-        metrics={metricsFor(s)}
-        onReopened={onReopened}
-      />
+      // INNER PADDING, so the conversation and the composer do not run into the window's edges
+      // (owner, 2026-09-29), and the surface the composer's blurred ground fades INTO: this panel is
+      // `--bg-surface`, not the page's `--bg-base` the ground assumes by default.
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+        padding: isMobile ? '4px 6px 0' : '8px 10px 0',
+        ['--ag-composer-ground' as string]: 'var(--bg-surface)',
+      } as CSSProperties}>
+        <SessionChat
+          key={s.id}
+          session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
+          metrics={metricsFor(s)}
+          onReopened={onReopened}
+        />
+      </div>
     )
   }
 
@@ -216,8 +239,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         ? { position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column' }
         : {
             position: 'fixed', right: PANEL_MARGIN.right, bottom: PANEL_MARGIN.bottom, width: size.w, height: size.h,
-            zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
-            boxShadow: '0 16px 48px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+            boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
     >
       {!isMobile && (<>
@@ -250,6 +273,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             {tabButton('sessions', pt ? 'Sessões' : 'Sessions')}
           </div>
         </>)}
+        <DockSettings
+          pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
+          onLeave={() => setDock(d => ({ ...d, open: false }))}
+        />
         <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
           <X size={15} />
         </IconButton>
@@ -315,45 +342,45 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         </NayWindowFrame>
       ))}
 
-      {/* Minimized windows: orange pills to the left of the chat button, one per session. */}
-      {minimized.length > 0 && (
-        <div style={{ position: 'fixed', right: 24 + 56 + 10, bottom: 30, zIndex: 300, display: 'flex', gap: 6, flexDirection: 'row-reverse', maxWidth: '60vw', overflowX: 'auto' }}>
-          {minimized.map(w => (
-            <button
-              key={w.id}
-              onClick={() => setDock(d => openSession(d, w.id))}
-              title={pt ? 'Restaurar a janela' : 'Restore the window'}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, maxWidth: 200, padding: '6px 10px', borderRadius: 999,
-                border: `1px solid ${ORANGE}`, background: ORANGE_DIM, color: ORANGE, cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 12, fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
-              }}
-            >
-              <PictureInPicture2 size={13} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{findSession(w.id)?.title ?? 'Nay'}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* THE chat button — always this one, whatever is detached. */}
-      {!(isMobile && dock.open) && (
-        <button
-          onClick={() => setDock(d => ({ ...d, open: !d.open }))}
-          aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
-          aria-expanded={dock.open}
-          title="Nay"
-          style={{
-            position: 'fixed', right: 24, bottom: isMobile ? 'calc(12px + var(--mobile-nav-h, 0px))' : 24, zIndex: 300,
-            width: 56, height: 56, borderRadius: 16, border: `1.5px solid ${ORANGE}`,
-            background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-          }}
-        >
-          {dock.open
-            ? <X size={20} color="var(--bg-surface)" />
-            : <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 30, height: 30, borderRadius: 8 }} />}
-        </button>
+      {!(isMobile && dock.open) && fabVisible && (
+        <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
+          {fab => (
+            <MinimizedMenu
+              pt={pt}
+              items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
+              onRestore={id => setDock(d => openSession(d, id))}
+              onClose={id => setDock(d => closeWindow(d, id))}
+              anchorStyle={{ position: 'relative', width: '100%', height: '100%' }}
+              suppressed={fab.dragging}
+              renderButton={({ onClickCapture, onKeyDown }) => (
+                <button
+                  ref={fab.bodyRef}
+                  onPointerDown={fab.onPointerDown}
+                  onPointerMove={fab.onPointerMove}
+                  onPointerUp={fab.onPointerUp}
+                  onPointerCancel={fab.onPointerCancel}
+                  onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
+                  onKeyDown={onKeyDown}
+                  onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
+                  aria-expanded={dock.open}
+                  title={pt ? 'Nay — arraste para mover' : 'Nay — drag to move'}
+                  style={{
+                    width: 56, height: 56, borderRadius: 16, border: `1.5px solid ${ORANGE}`,
+                    background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: fab.dragging ? 'grabbing' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                    touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', padding: 0, willChange: 'transform',
+                  }}
+                >
+                  {dock.open
+                    ? <X size={20} color="var(--bg-surface)" />
+                    : <img src={versionedAsset('/minimalistLogo.png')} alt="" draggable={false} style={{ width: 30, height: 30, borderRadius: 8, pointerEvents: 'none' }} />}
+                </button>
+              )}
+            />
+          )}
+        </NayFab>
       )}
     </>
   )
@@ -493,15 +520,20 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
       onPointerDownCapture={onFocus}
       style={{
         position: 'fixed', left: win.x, top: win.y, width: win.w, height: win.h, zIndex: 410 + win.z,
-        background: 'var(--bg-surface)', border: `1px solid ${ORANGE}`, borderRadius: 12,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        // THE SAME DISCREET FRAME the terminal's floating windows wear (`FloatingPanelLayer`) — a
+        // hairline border, a 10px radius and their shadow. It was a loud orange outline, which read
+        // as an alert rather than as a window (owner, 2026-09-29). Their drag bar is NOT borrowed:
+        // this window's own header row below is where it is dragged from.
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}
     >
       <header onPointerDown={startDrag} style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', cursor: 'move', userSelect: 'none',
-        borderBottom: '1px solid var(--border)', background: ORANGE_DIM, flexShrink: 0,
+        borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated, var(--bg-surface))', flexShrink: 0,
       }}>
-        <PictureInPicture2 size={13} color={ORANGE} style={{ flexShrink: 0 }} />
+        <PictureInPicture2 size={13} color="var(--text-tertiary)" style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Acoplar' : 'Dock'}
           title={pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel'} onClick={onDock} />
@@ -513,7 +545,7 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
       </div>
       <div onPointerDown={startResize} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'} style={{
         position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, cursor: 'nwse-resize',
-        background: `linear-gradient(135deg, transparent 50%, ${ORANGE} 50%)`, opacity: 0.6,
+        background: 'linear-gradient(135deg, transparent 50%, var(--border) 50%)',
       }} />
     </div>
   )

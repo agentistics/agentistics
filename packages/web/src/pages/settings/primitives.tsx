@@ -134,7 +134,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
     <div
       onClick={onClick}
       style={{
-        border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg-card)',
+        border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)',
         cursor: onClick ? 'pointer' : 'default', overflow: 'hidden',
       }}
     >

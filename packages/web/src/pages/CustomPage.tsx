@@ -1020,9 +1020,12 @@ export default function CustomPage() {
           className="custom-aside"
           style={{
             width: ASIDE_WIDTH,
+            // Sticks inside the PAGE PANEL, which is what scrolls on the desktop board (App.tsx's
+            // `<main>`), not the window — so it rests just under the panel's top edge, and is as
+            // tall as the panel (window minus the strip, the board's gaps and the page padding).
             position: 'sticky',
-            top: 140,
-            maxHeight: 'calc(100vh - 160px)',
+            top: 16,
+            maxHeight: 'calc(100vh - var(--ag-topbar-h) - 48px)',
             display: 'flex',
             flexDirection: 'column',
             gap: 10,

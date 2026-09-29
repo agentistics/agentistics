@@ -164,7 +164,7 @@ export default function NotificationsSettings() {
         style={{
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: 12,
+          borderRadius: 'var(--radius-lg)',
           padding: '16px 20px',
           marginBottom: 20,
           display: 'flex',
