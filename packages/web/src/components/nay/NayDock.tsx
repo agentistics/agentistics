@@ -16,7 +16,7 @@
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, X } from 'lucide-react'
 import { isNayCwd, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -166,12 +166,21 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     }
     const row = rowIndex.get(s.id)
     return (
-      <SessionChat
-        key={s.id}
-        session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
-        metrics={metricsFor(s)}
-        onReopened={onReopened}
-      />
+      // INNER PADDING, so the conversation and the composer do not run into the window's edges
+      // (owner, 2026-09-29), and the surface the composer's blurred ground fades INTO: this panel is
+      // `--bg-surface`, not the page's `--bg-base` the ground assumes by default.
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+        padding: isMobile ? '4px 6px 0' : '8px 10px 0',
+        ['--ag-composer-ground' as string]: 'var(--bg-surface)',
+      } as CSSProperties}>
+        <SessionChat
+          key={s.id}
+          session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
+          metrics={metricsFor(s)}
+          onReopened={onReopened}
+        />
+      </div>
     )
   }
 
@@ -216,8 +225,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         ? { position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column' }
         : {
             position: 'fixed', right: PANEL_MARGIN.right, bottom: PANEL_MARGIN.bottom, width: size.w, height: size.h,
-            zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
-            boxShadow: '0 16px 48px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+            boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
     >
       {!isMobile && (<>
@@ -493,15 +502,20 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
       onPointerDownCapture={onFocus}
       style={{
         position: 'fixed', left: win.x, top: win.y, width: win.w, height: win.h, zIndex: 410 + win.z,
-        background: 'var(--bg-surface)', border: `1px solid ${ORANGE}`, borderRadius: 12,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        // THE SAME DISCREET FRAME the terminal's floating windows wear (`FloatingPanelLayer`) — a
+        // hairline border, a 10px radius and their shadow. It was a loud orange outline, which read
+        // as an alert rather than as a window (owner, 2026-09-29). Their drag bar is NOT borrowed:
+        // this window's own header row below is where it is dragged from.
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}
     >
       <header onPointerDown={startDrag} style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', cursor: 'move', userSelect: 'none',
-        borderBottom: '1px solid var(--border)', background: ORANGE_DIM, flexShrink: 0,
+        borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated, var(--bg-surface))', flexShrink: 0,
       }}>
-        <PictureInPicture2 size={13} color={ORANGE} style={{ flexShrink: 0 }} />
+        <PictureInPicture2 size={13} color="var(--text-tertiary)" style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Acoplar' : 'Dock'}
           title={pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel'} onClick={onDock} />
@@ -513,7 +527,7 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
       </div>
       <div onPointerDown={startResize} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'} style={{
         position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, cursor: 'nwse-resize',
-        background: `linear-gradient(135deg, transparent 50%, ${ORANGE} 50%)`, opacity: 0.6,
+        background: 'linear-gradient(135deg, transparent 50%, var(--border) 50%)',
       }} />
     </div>
   )
