@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/web",
-  "version": "2.68.6",
+  "version": "2.68.7",
   "private": true,
   "type": "module",
   "scripts": {
