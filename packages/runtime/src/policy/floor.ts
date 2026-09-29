@@ -230,7 +230,12 @@ export function floorForSegment(seg: ShellSegment): FloorHit | null {
 /** Global git options that take a value in the NEXT word. */
 export const GIT_GLOBAL_WITH_ARG = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path', '--list-cmds'])
 
-export function gitForcePush(argv: readonly string[]): boolean {
+/**
+ * Where git's SUB-command starts in `argv`, after its global options (`-C <dir>`, `-c <k=v>`,
+ * `--git-dir[=]…`, `--work-tree[=]…`, `--no-pager`, …). The one reading of git's global options:
+ * the floor, `resolution.ts` and the rule stages (`policy.ts`) all go through it.
+ */
+export function gitSubcommandIndex(argv: readonly string[]): number {
   let i = 1
   while (i < argv.length) {
     const t = argv[i] ?? ''
@@ -238,6 +243,11 @@ export function gitForcePush(argv: readonly string[]): boolean {
     if (t.startsWith('-')) { i++; continue }
     break
   }
+  return i
+}
+
+export function gitForcePush(argv: readonly string[]): boolean {
+  const i = gitSubcommandIndex(argv)
   if (argv[i] !== 'push') return false
   for (const t of argv.slice(i + 1)) {
     if (t === '--force' || t === '-f') return true

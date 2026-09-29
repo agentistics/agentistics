@@ -16,7 +16,7 @@
  * PURE: text in, a sentence (or null) out.
  */
 
-import { GIT_GLOBAL_WITH_ARG } from './floor.ts'
+import { gitSubcommandIndex } from './floor.ts'
 import { commandName, type ShellSegment } from './shell-parse.ts'
 
 /** Exact names whose value changes what a later command finds, loads, or runs. */
@@ -57,14 +57,7 @@ export interface GitConfigPlan {
 
 /** Where the git SUB-command starts, after the global options. */
 function gitSub(argv: readonly string[]): number {
-  let i = 1
-  while (i < argv.length) {
-    const t = argv[i] ?? ''
-    if (GIT_GLOBAL_WITH_ARG.has(t)) { i += 2; continue }
-    if (t.startsWith('-')) { i++; continue }
-    break
-  }
-  return i
+  return gitSubcommandIndex(argv)
 }
 
 /**
