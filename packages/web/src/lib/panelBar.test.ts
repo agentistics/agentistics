@@ -117,8 +117,13 @@ describe('resolvePanelBarPick', () => {
       .toEqual({ kind: 'restore' })
   })
 
-  test('the active tab, expanded band: noop', () => {
+  test('the active tab, expanded band: minimize — the right rail own second-click behaviour', () => {
     expect(resolvePanelBarPick({ id: 'cli', activeBottom: 'cli', bottomOpen: true }))
-      .toEqual({ kind: 'noop' })
+      .toEqual({ kind: 'minimize' })
+  })
+
+  test('minimize then pick again: restore — the round trip lands where it started', () => {
+    expect(resolvePanelBarPick({ id: 'studio', activeBottom: 'studio', bottomOpen: true }).kind).toBe('minimize')
+    expect(resolvePanelBarPick({ id: 'studio', activeBottom: 'studio', bottomOpen: false }).kind).toBe('restore')
   })
 })
