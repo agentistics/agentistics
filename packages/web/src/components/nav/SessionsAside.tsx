@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -60,7 +61,7 @@ import {
   type NestRefusal, type SessionUserGroup,
   canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
   nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
-  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup,
+  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount, folderCountLabel, listNarrowed,
   subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
 import {
@@ -356,10 +357,6 @@ export function SessionsAside({
     })),
     [groupsValue, rows, pinned],
   )
-  const groupedVisibleCount = useMemo(
-    () => groupRowsResolved.reduce((n, g) => n + g.rows.length, 0),
-    [groupRowsResolved],
-  )
   /** Which user-group bands are folded on THIS screen — per viewer, alongside the aside's other
    *  arrangement prefs (see `sessionsAsidePrefs.ts`). Membership itself is shared/server-side. */
   const [foldedUserGroups, setFoldedUserGroupsState] =
@@ -457,6 +454,29 @@ export function SessionsAside({
    *  2 the moment anything ahead of them fails to resolve. Local: a drag is not shared state. */
   const [dragFrom, setDragFrom] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
+  /*
+   * THE END OF ANY DRAG CLEARS EVERY DRAG HIGHLIGHT — see `dragCleanup.ts`. A drop handled by a
+   * member row stops propagation, so the folder it landed in never cleared its own orange; this
+   * does, for every highlight at once. Deferred a tick so the specific drop handler runs first, and
+   * on `drop` as well as `dragend` because a row that MOVED to another folder unmounts, and a
+   * detached node's `dragend` never reaches the window.
+   */
+  useEffect(() => {
+    const done = () => {
+      setTimeout(() => {
+        setDragOverGroupId(null); setGroupRowDragOver(null); setGroupReorderOver(null)
+        setNestOverGroupId(null); setDraggingGroupId(null); setDragFrom(null); setDragOver(null)
+        const el = document.activeElement as HTMLElement | null
+        if (el && el.matches?.(':focus-visible') && blurAfterDrag(el)) el.blur()
+      }, 0)
+    }
+    window.addEventListener('drop', done, true)
+    window.addEventListener('dragend', done, true)
+    return () => {
+      window.removeEventListener('drop', done, true)
+      window.removeEventListener('dragend', done, true)
+    }
+  }, [])
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; state: string; verbs: RowVerb[] } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   /** The task picker, anchored where the menu was — see `pickMenuAction`. */
@@ -559,6 +579,20 @@ export function SessionsAside({
     () => (activeOnly ? searched.filter(r => !active.has(r.state)).length : 0),
     [searched, activeOnly, active],
   )
+  /*
+   * THE FOLDERS FOLLOW THE LIST (owner, 2026-09-29). They were resolved against the raw fleet so a
+   * folder would survive a filter — and so a search for "Líder" left every folder showing everything
+   * while the rest of the list narrowed. Now what a folder DRAWS is cut by the very same pipeline as
+   * the list (value filters → search → active only); `groupRowsResolved` stays whole for the TOTAL
+   * in the header (`3/61`) and for the menu's attention count.
+   */
+  const narrowing = listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
+  const groupRowsShown = useMemo(() => {
+    if (!narrowing) return groupRowsResolved
+    const ids = new Set(matched.map(r => r.id))
+    return groupRowsResolved.map(e => ({ ...e, rows: e.rows.filter(r => ids.has(r.id)) }))
+  }, [narrowing, matched, groupRowsResolved])
+  const searching = query.trim() !== ''
   /** Which SET filter dimensions this fleet cannot answer at all, said in one line — never silent. */
   const ignoredNote = useMemo(() => ignoredDimensions(filters, lang), [filters, lang])
 
@@ -650,7 +684,7 @@ export function SessionsAside({
   const total = bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
-  ) + pinnedRows.length + groupedVisibleCount
+  ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
@@ -682,24 +716,31 @@ export function SessionsAside({
    * component's own state, and threading fifteen props through a separate component for a shape
    * that recurses exactly one level deep would be the same code, worse to read.
    *
-   * COUNTING: a folder's header shows its OWN direct sessions only (`gRows.length`) — a parent's
-   * count never rolls up its children's sessions, so nesting a busy folder never makes an unrelated
-   * parent's number jump.
+   * COUNTING: a folder's header shows everything it CONTAINS — its own sessions plus its nested
+   * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
+   * nothing but subfolders read `0`.
    */
   const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
     const { group, rows: gRows } = entry
-    const folded = foldedUserGroups.has(group.id)
+    // What matches in this folder (its nested folders included) — see `groupRowsShown`.
+    const shownInFolder = folderSessionCount(group.id, groupRowsShown)
+    // A SEARCH opens the folders that hold results, without touching what the person folded: the
+    // stored fold is untouched, it is only overridden while there is text in the search box.
+    // Nothing here matches: kept, and quieter — never removed (see `listNarrowed`) — and shown as its
+    // header alone, since a body that only says "nothing matches" is noise in a filtered list.
+    const noMatches = narrowing && shownInFolder === 0
+    const folded = (foldedUserGroups.has(group.id) || noMatches) && !(searching && shownInFolder > 0)
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
-    const children = depth === 0 ? groupRowsResolved.filter(g => g.group.parentId === group.id) : []
+    const children = depth === 0 ? groupRowsShown.filter(g => g.group.parentId === group.id) : []
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
         key={group.id}
-        style={{ marginLeft: depth * 14 }}
+        style={{ marginLeft: depth * 14, ...(noMatches ? { opacity: 0.5 } : {}) }}
       >
         <div
           // Suppressed for the WHOLE list while ANY folder is being dragged, not only for the one
@@ -878,7 +919,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{gRows.length}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
               </button>
               <button
                 onClick={e => {
@@ -906,7 +947,11 @@ export function SessionsAside({
               {children.map(c => renderGroupBand(c, 1))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                  {pt
+                  {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
+                      sessions into a folder that holds sixty would be wrong. */}
+                  {noMatches && folderSessionCount(group.id, groupRowsResolved) > 0
+                    ? (pt ? 'Nada aqui corresponde aos filtros ou à busca.' : 'Nothing here matches the filters or the search.')
+                    : pt
                     ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                     : 'Drag a session here, or use "Move to group" on its menu.'}
                 </p>
@@ -1444,7 +1489,7 @@ export function SessionsAside({
             </button>
           </div>
 
-          {!foldedGroupsSection && groupRowsResolved.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
+          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (
@@ -1576,14 +1621,14 @@ export function SessionsAside({
               label: hiddenGroups.has(groupMenu.id) ? (pt ? 'Mostrar nome' : 'Show name') : (pt ? 'Ocultar nome' : 'Hide name'),
               enabled: true,
             },
-            // A nested folder has no order of its own to change (pinned first under its parent).
-            ...(isChild ? [] : [
-              { action: 'move-up', label: pt ? 'Mover para cima' : 'Move up', enabled: menuIndex > 0 },
-              {
-                action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
-                enabled: menuIndex !== -1 && menuIndex < siblingIds.length - 1,
-              },
-            ]),
+            // EVERY folder can step, nested ones included (owner, 2026-09-29): a nested folder moves
+            // among its OWN parent's children — `planStepGroup` already scopes the step to that
+            // sibling list, so it can never leave its parent this way ("Tirar da pasta" does that).
+            { action: 'move-up', label: pt ? 'Mover para cima' : 'Move up', enabled: menuIndex > 0 },
+            {
+              action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
+              enabled: menuIndex !== -1 && menuIndex < siblingIds.length - 1,
+            },
             // NESTING (one level max): a folder already nested only offers "take it out"; a
             // top-level one only offers "move it into" — the two are never both meaningful for the
             // same folder, since a child cannot itself hold a folder.

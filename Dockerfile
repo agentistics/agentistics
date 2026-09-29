@@ -39,6 +39,9 @@ RUN bun run build:assets
 # ---- Stage 2: runtime -----------------------------------------------------
 FROM oven/bun:1-slim AS runner
 
+LABEL org.opencontainers.image.licenses="FSL-1.1-ALv2" \
+      org.opencontainers.image.source="https://github.com/blpsoares/agentistics"
+
 WORKDIR /app
 
 # The unprivileged user, created FIRST so this layer caches forever.

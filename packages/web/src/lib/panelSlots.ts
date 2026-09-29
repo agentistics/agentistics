@@ -447,10 +447,9 @@ export function overlayOutsideAction(
  * dnv se eu clicar no icone do item dnv") — the RAIL IS A LAUNCHER, so its icon TOGGLES: clicking
  * the icon of the panel that is already open minimizes it, clicking any other icon opens it (which
  * also RESTORES a panel that is active but currently minimized — there is no third state a rail
- * icon click can express). Deliberately NOT the bottom bar's rule (`panelBar.ts`'s own tab pick,
- * `resolvePanelBarPick`): a TAB STRIP is select-only — clicking an already-open tab there must never
- * close it, since a tab strip's whole point is "here is where you are", not "here is a switch". Two
- * different controls, two different rules, stated once each in the module that owns it.
+ * icon click can express). The bottom bar now follows the same rule (`panelBar.ts`'s
+ * `resolvePanelBarPick`, owner 2026-09-29): it used to be select-only, and two strips of the same
+ * panels answering the same second click differently was reported as the bar being broken.
  */
 export function railClickAction(active: PanelId | null, rightOpen: boolean, panel: PanelId): 'open' | 'minimize' {
   return active === panel && rightOpen ? 'minimize' : 'open'

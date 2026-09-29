@@ -779,7 +779,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   ├── lib/
   │   ├── app-context.ts        → AppContext interface (React context type shared by all pages)
   │   ├── componentCatalog.tsx  → catalog of all components available in the custom layout builder
-  │   ├── chatModels.ts         → web-only model list
+  │   ├── chatModel.ts          → PURE: which model the Nay chat runs + its label, read off `/api/chat-harnesses` (the server's ONE model catalog, `server/model-catalog.ts` — each CLI's own list where it publishes one, the verified `HARNESS_MODELS` table + a typed id where it does not). The old hardcoded `chatModels.ts` is gone
   │   ├── chatSounds.ts         → 5 synthesized notification sounds via Web Audio API (Ping, Chime, Soft, Bell, Pop)
   │   ├── notifications.ts      → notification store (useSyncExternalStore) + render-time pt/en i18n (NOTIFICATION_TEXT keyed by code, interpolates meta)
   │   └── harness.ts            → HARNESS_LABELS, HARNESS_COLORS, capable(harness, metric), HARNESS_INFO (data-source/contains/missing/note metadata for HarnessInfoPanel)
@@ -2758,6 +2758,23 @@ interchangeable.
 
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
+
+### Mentioning and forwarding in the conversation — see docs/sessions-web.md
+
+- **`#` mentions a session, `@` is MCP, `/` is the harness's commands** — never overload one. A chip
+  is `#«Title · shortId»` and carries its own id (`lib/sessionMention.ts`); **`expandSessionMentions`
+  runs in `send()` so the harness never receives a raw `#` from a chip** (Claude Code reads a message
+  opening with `#` as a memory note). A mention is a POINTER; content travels only by Forward.
+- **Forward defaults to the target's DRAFT** (appended through `sessionScratch` under the target's
+  `scratchKey`, never replacing), and "send now" is the existing `broadcast` verb — no second write
+  path. The block carries the origin and nothing else (`lib/chatForward.ts`).
+- **Selection mode is published to the header through `lib/chatSelection.ts`**, not threaded as
+  props, and is keyed on `turnKey`, never on a turn's index (the conversation is a sliding window).
+  `Esc` is checked before the composer's stop verb.
+- **A reply is a LIST of quotes** (`replyQuote.ts`'s `addReply`/`orderReplies`/`quoteAll`): Reply
+  ADDS, selection's `Reply (N)` adds all, and they go out in conversation order through
+  `composeReply`'s blank-line rule. `sessionScratch.readReply` returns an array and still reads the
+  old single-object shape.
 
 ### Idle sessions — the Sessions workspace's bell, review card and review modal
 

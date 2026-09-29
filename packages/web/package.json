@@ -1,6 +1,7 @@
 {
   "name": "@agentistics/web",
-  "version": "2.67.1",
+  "version": "2.70.1",
+  "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
+import { folderCountLabel, folderSessionCount, listNarrowed } from './sessionUserGroups'
 import {
   type SessionUserGroupsValue,
   canNestGroup, groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planMoveToGroup,
@@ -334,5 +335,39 @@ describe('resolveGroupRows', () => {
   it('is empty for an empty group or no rows', () => {
     expect(resolveGroupRows({ id: 'g1', name: 'X', sessionKeys: [] }, [{ id: 'a', state: 'working' }], keyOf)).toEqual([])
     expect(resolveGroupRows({ id: 'g1', name: 'X', sessionKeys: ['a'] }, [], keyOf)).toEqual([])
+  })
+})
+
+describe('folderSessionCount — a container counts what it contains', () => {
+  const resolved = [
+    { group: { id: 'top' }, rows: [] },
+    { group: { id: 'a', parentId: 'top' }, rows: [1, 2, 3, 4] },
+    { group: { id: 'b', parentId: 'top' }, rows: [1, 2] },
+    { group: { id: 'other' }, rows: [1] },
+  ]
+  test('a parent holding only subfolders counts their sessions (was 0)', () => {
+    expect(folderSessionCount('top', resolved)).toBe(6)
+  })
+  test('a nested folder counts its own sessions', () => {
+    expect(folderSessionCount('a', resolved)).toBe(4)
+  })
+  test('an unrelated folder is never counted', () => {
+    expect(folderSessionCount('other', resolved)).toBe(1)
+  })
+})
+
+describe('folders follow the list\'s filters', () => {
+  test('narrowed, the header says how much of the folder matches', () => {
+    expect(folderCountLabel(3, 61, true)).toBe('3/61')
+    expect(folderCountLabel(0, 61, true)).toBe('0/61')
+  })
+  test('not narrowed, just the total', () => {
+    expect(folderCountLabel(61, 61, false)).toBe('61')
+  })
+  test('active-only, a search or a value filter all narrow', () => {
+    expect(listNarrowed({ activeOnly: true, query: '', valueFiltered: 10, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: 'líder', valueFiltered: 10, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: '  ', valueFiltered: 4, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: '', valueFiltered: 10, total: 10 })).toBe(false)
   })
 })

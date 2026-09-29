@@ -77,13 +77,19 @@ export interface GalleryTabProps {
    * how to show the one row that matches.
    */
   focusStep?: string
+  /**
+   * The DOM anchor of the turn at a given position of the turns these groups were built from — the
+   * chat's own identity-based ids (`promptHistory.ts`), computed by whoever holds the turns. Absent
+   * means the jump cannot be resolved, and "go to message" then says so instead of guessing.
+   */
+  anchorOf?: (index: number) => string | undefined
 }
 
 /** How long a touch has to hold to mean "right-click". The same 500ms the session rows use. */
 const LONG_PRESS_MS = 500
 
 export function GalleryTab({
-  sessionId, groups: allGroups, lang, view, onViewChange, scope, onScopeChange, older, focusStep,
+  sessionId, groups: allGroups, lang, view, onViewChange, scope, onScopeChange, older, focusStep, anchorOf,
 }: GalleryTabProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
@@ -173,12 +179,12 @@ export function GalleryTab({
     // The lightbox has to close first, or the reader is taken to a bubble underneath a full-screen
     // black overlay — a scroll they cannot see is a button that appears to do nothing.
     setLightbox(null)
-    if (!goToTurn('turn', group.index)) {
+    if (!goToTurn(anchorOf?.(group.index))) {
       setNotice(pt
         ? 'Essa mensagem não está na conversa carregada — abra a aba de chat da sessão.'
         : 'That message is not in the loaded conversation — open the session\'s chat view.')
     }
-  }, [pt])
+  }, [pt, anchorOf])
 
   if (allGroups.length === 0) {
     // The window outranks the "nothing yet" sentence, which would be FALSE on a long conversation:

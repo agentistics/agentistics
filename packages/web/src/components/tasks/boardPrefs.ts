@@ -17,6 +17,7 @@
  */
 
 import type { BoardStatus, ColumnId } from './board'
+import type { SubtaskColumnId } from './subtaskColumnDefs'
 import { DEFAULT_SORT, type SortSpec } from '@agentistics/core'
 
 const KEY = 'agentistics-task-board-v1'
@@ -38,6 +39,15 @@ export interface BoardPrefs {
   wip: Record<string, number>
   /** Which columns the table shows, in the order they were picked. */
   columns: ColumnId[] | null
+  /**
+   * Which columns the SUBTASK grid shows, in the order they were picked — a SEPARATE slot from
+   * `columns` above (t-63b7d3b2b0 #1): the delivery table and the subtask grid have different
+   * column sets (`ColumnId` vs `SubtaskColumnId`), and the two grids are drawn side by side inside
+   * one expanded row (`TaskTable.tsx`'s own `SubtaskRows`), so reusing one key would make picking a
+   * column for either table silently rewrite the other's arrangement. `null` = every column, the
+   * fixed order the grid shipped with before this picker existed.
+   */
+  subtaskColumns: SubtaskColumnId[] | null
   /** Which status groups the table renders at all. `null` = every one of them. */
   groups: BoardStatus[] | null
   /** Groups the user folded shut. */
@@ -49,7 +59,7 @@ export interface BoardPrefs {
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
   view: 'overview', sort: DEFAULT_SORT, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, groups: null, collapsed: [], rail: {},
+  columns: null, subtaskColumns: null, groups: null, collapsed: [], rail: {},
 }
 
 /**
@@ -128,6 +138,7 @@ export function readBoardPrefs(): BoardPrefs {
       // A stored column id no longer in the table is dropped rather than rendering a blank cell;
       // an EMPTY stored list is a real choice ("show me only the names") and is kept.
       columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
+      subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
       groups: statuses(p.groups),
       collapsed: statuses(p.collapsed) ?? [],
       rail: p.rail && typeof p.rail === 'object'

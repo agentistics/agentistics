@@ -1,0 +1,37 @@
+Agentistics
+Copyright 2026 Bryan Luccas de Paula Soares
+
+This software is licensed under the Functional Source License, Version 1.1, with the Apache License
+2.0 as its future licence (FSL-1.1-ALv2). See LICENSE and LICENSING.md.
+
+Versions up to and including the release tagged `mit-final` were published under the MIT License,
+and remain available under it:
+
+  MIT License
+
+  Copyright (c) 2026 blpsoares
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+  associated documentation files (the "Software"), to deal in the Software without restriction,
+  including without limitation the rights to use, copy, modify, merge, publish, distribute,
+  sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or
+  substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+  OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Portions of this software were contributed under the MIT License by external contributors
+(including Gustavo Gondim and Vinicius Mostaço de Moraes). Their contributions remain subject to
+the MIT notice above.
+
+This software bundles third-party packages under their own licences (MIT, ISC, BSD, Apache-2.0,
+MPL-2.0 and others). Their notices are included in their packages as distributed.
+
+"Agentistics" and the Agentistics logo are trademarks of Bryan Luccas de Paula Soares. See
+TRADEMARKS.md.

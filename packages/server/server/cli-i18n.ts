@@ -13,6 +13,7 @@
  */
 
 import type { TakeoverRefusal } from './sessions/takeover'
+import type { RateLimitAbsentReason, RateLimitResourceKind } from '@agentistics/runtime'
 
 /*
  *
@@ -289,6 +290,11 @@ export interface CliStrings {
   sessStarted: (name: string) => string
   sessStartedBg: (name: string) => string
   sessSpawnFailed: (reason: string) => string
+  sessRewound: string
+  sessRewindFailed: (reason: 'no-menu' | 'not-found' | 'unexpected' | 'failed') => string
+  sessRewindUnsupported: (harness: string) => string
+  sessSentNow: string
+  sessSendNowUnsupported: (harness: string) => string
   /** A session whose pane died at birth, in the harness's own words or its exit status. */
   sessDiedAtSpawn: (reason: string) => string
   sessDiedAtSpawnStatus: (status: number | undefined) => string
@@ -499,6 +505,17 @@ export interface CliStrings {
   backupScheduleLayersSet: (layers: string) => string
   /** The cockpit's `b` key — same shape as the CLI's own report, in one sentence. */
   backupRunOk: (archiveBytesLabel: string) => string
+
+  // `agentop provider try` — the rate-limit line (B9.3). Numbers arrive already formatted.
+  rateLimitLabel: string
+  rateLimitKind: Record<RateLimitResourceKind, string>
+  rateLimitLeft: (remaining: string, limit?: string) => string
+  /** A limit with no remaining stated — said, never rendered as `0 left`. */
+  rateLimitLimitOnly: (limit: string) => string
+  rateLimitUntil: (time: string) => string
+  rateLimitRetryAfter: (seconds: string) => string
+  rateLimitDropped: (n: number) => string
+  rateLimitAbsent: (reason: RateLimitAbsentReason, dropped: number) => string
 }
 
 const EN: CliStrings = {
@@ -715,6 +732,17 @@ const EN: CliStrings = {
   sessStarted: (name: string) => `started ${name}.`,
   sessStartedBg: (name: string) => `started ${name} in the background.`,
   sessSpawnFailed: (reason: string) => `could not start the session: ${reason}`,
+  sessRewound: 'Conversation restored to that point. Your next message continues from there.',
+  sessRewindFailed: reason => reason === 'no-menu'
+    ? 'The session did not open its rewind menu — nothing was changed.'
+    : reason === 'not-found'
+      ? 'That message is not in the session\'s rewind list — nothing was changed.'
+      : reason === 'unexpected'
+        ? 'The session asked something agentop does not know how to answer, so the rewind was cancelled — nothing was changed. Use the terminal for this one.'
+        : 'Could not reach the session to rewind it — nothing was changed.',
+  sessRewindUnsupported: harness => `Restoring the conversation is only available for Claude Code sessions (this one is ${harness}).`,
+  sessSentNow: 'Queued messages sent now.',
+  sessSendNowUnsupported: harness => `"Send now" is only available for Claude Code sessions (this one is ${harness}).`,
   sessDiedAtSpawn: (reason: string) => `the session exited as soon as it started: ${reason}`,
   sessDiedAtSpawnStatus: (status: number | undefined) =>
     `the session exited as soon as it started${status !== undefined ? ` (status ${status})` : ''}`,
@@ -875,6 +903,27 @@ const EN: CliStrings = {
   backupLayersSet: layers => `layers: ${layers}`,
   backupScheduleLayersSet: layers => `schedule layers: ${layers}`,
   backupRunOk: bytes => `backup written — ${bytes}`,
+  rateLimitLabel: 'rate limit',
+  rateLimitKind: {
+    requests: 'requests',
+    tokens: 'tokens',
+    'input-tokens': 'input tokens',
+    'output-tokens': 'output tokens',
+    'project-tokens': 'project tokens',
+  },
+  rateLimitLeft: (remaining, limit) => `${limit === undefined ? remaining : `${remaining}/${limit}`} left`,
+  rateLimitLimitOnly: limit => `limit ${limit} (remaining not stated)`,
+  rateLimitUntil: time => `until ${time}`,
+  rateLimitRetryAfter: seconds => `retry after ${seconds}s`,
+  rateLimitDropped: n => `${n} header${n === 1 ? '' : 's'} unreadable`,
+  rateLimitAbsent: (reason, dropped) => {
+    switch (reason) {
+      case 'not-documented': return 'not stated — this provider documents no rate-limit header'
+      case 'unknown-format': return 'not read — no documented rate-limit header format for this provider'
+      case 'no-headers': return 'not stated — the response carried no rate-limit header'
+      case 'unparseable': return `not read — ${dropped} rate-limit header${dropped === 1 ? ' was' : 's were'} present and none could be parsed`
+    }
+  },
 }
 
 const PT: CliStrings = {
@@ -1077,6 +1126,17 @@ const PT: CliStrings = {
   sessStarted: (name: string) => `${name} iniciada.`,
   sessStartedBg: (name: string) => `${name} iniciada em background.`,
   sessSpawnFailed: (reason: string) => `não deu para iniciar a sessão: ${reason}`,
+  sessRewound: 'Conversa restaurada até aquele ponto. Sua próxima mensagem continua dali.',
+  sessRewindFailed: reason => reason === 'no-menu'
+    ? 'A sessão não abriu o menu de voltar — nada foi alterado.'
+    : reason === 'not-found'
+      ? 'Essa mensagem não está na lista de voltar da sessão — nada foi alterado.'
+      : reason === 'unexpected'
+        ? 'A sessão perguntou algo que o agentop não sabe responder, então a volta foi cancelada — nada foi alterado. Use o terminal para esta.'
+        : 'Não deu para alcançar a sessão para voltar — nada foi alterado.',
+  sessRewindUnsupported: harness => `Restaurar a conversa só está disponível para sessões do Claude Code (esta é ${harness}).`,
+  sessSentNow: 'Mensagens da fila enviadas agora.',
+  sessSendNowUnsupported: harness => `"Enviar agora" só está disponível para sessões do Claude Code (esta é ${harness}).`,
   sessDiedAtSpawn: (reason: string) => `a sessão terminou assim que começou: ${reason}`,
   sessDiedAtSpawnStatus: (status: number | undefined) =>
     `a sessão terminou assim que começou${status !== undefined ? ` (status ${status})` : ''}`,
@@ -1237,6 +1297,27 @@ const PT: CliStrings = {
   backupLayersSet: layers => `camadas: ${layers}`,
   backupScheduleLayersSet: layers => `camadas da agenda: ${layers}`,
   backupRunOk: bytes => `backup gravado — ${bytes}`,
+  rateLimitLabel: 'limite de taxa',
+  rateLimitKind: {
+    requests: 'requisições',
+    tokens: 'tokens',
+    'input-tokens': 'tokens de entrada',
+    'output-tokens': 'tokens de saída',
+    'project-tokens': 'tokens do projeto',
+  },
+  rateLimitLeft: (remaining, limit) => `${limit === undefined ? remaining : `${remaining}/${limit}`} restantes`,
+  rateLimitLimitOnly: limit => `limite ${limit} (restante não informado)`,
+  rateLimitUntil: time => `até ${time}`,
+  rateLimitRetryAfter: seconds => `tentar de novo em ${seconds}s`,
+  rateLimitDropped: n => `${n} ${n === 1 ? 'cabeçalho ilegível' : 'cabeçalhos ilegíveis'}`,
+  rateLimitAbsent: (reason, dropped) => {
+    switch (reason) {
+      case 'not-documented': return 'não informado — este provedor não documenta cabeçalho de limite de taxa'
+      case 'unknown-format': return 'não lido — não há formato documentado de cabeçalho de limite de taxa para este provedor'
+      case 'no-headers': return 'não informado — a resposta não trouxe cabeçalho de limite de taxa'
+      case 'unparseable': return `não lido — ${dropped} ${dropped === 1 ? 'cabeçalho de limite de taxa presente, ilegível' : 'cabeçalhos de limite de taxa presentes, nenhum legível'}`
+    }
+  },
 }
 
 const TABLE: Record<CliLang, CliStrings> = { en: EN, pt: PT }

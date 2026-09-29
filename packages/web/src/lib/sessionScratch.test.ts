@@ -157,25 +157,42 @@ test('storage that throws still keeps echoes across a navigation', () => {
 test('the reply target survives with the draft — it CHANGES what gets sent', () => {
   const s = createSessionScratch(fakeStore())
   s.writeDraft('a', 'about that')
-  s.writeReply('a', { role: 'assistant', text: 'what it said' })
+  s.writeReply('a', [{ role: 'assistant', text: 'what it said' }])
   expect(s.readDraft('a')).toBe('about that')
-  expect(s.readReply('a')).toEqual({ role: 'assistant', text: 'what it said' })
+  expect(s.readReply('a')).toEqual([{ role: 'assistant', text: 'what it said' }])
 })
 
 test('a reply target never leaks between sessions, and clearing it removes it', () => {
   const store = fakeStore()
   const s = createSessionScratch(store)
-  s.writeReply('a', { role: 'user', text: 'mine' })
-  expect(s.readReply('b')).toBeNull()
-  s.writeReply('a', null)
-  expect(s.readReply('a')).toBeNull()
+  s.writeReply('a', [{ role: 'user', text: 'mine' }])
+  expect(s.readReply('b')).toEqual([])
+  s.writeReply('a', [])
+  expect(s.readReply('a')).toEqual([])
   expect([...store.data.keys()].some(k => k.includes('reply'))).toBe(false)
 })
 
 test('storage that throws still keeps the reply target across a navigation', () => {
   for (const throwOn of ['get', 'set', 'remove'] as const) {
     const s = createSessionScratch(fakeStore({ throwOn }))
-    s.writeReply('a', { role: 'user', text: 'x' })
-    expect(s.readReply('a')).toEqual({ role: 'user', text: 'x' })
+    s.writeReply('a', [{ role: 'user', text: 'x' }])
+    expect(s.readReply('a')).toEqual([{ role: 'user', text: 'x' }])
   }
+})
+
+test('a refusal is never remembered as the conversation — the last real one is kept', () => {
+  const s = createSessionScratch(fakeStore())
+  const real: CachedChat = { turns: [{ role: 'user', text: 'oi' }], live: true }
+  s.writeChat('conv:a', real)
+  // The first read of a just-reopened row can land before its link; that answer must not replace
+  // the conversation, or the next open paints "sem conversa vinculada" first.
+  s.writeChat('conv:a', { turns: [], live: true, unavailable: 'Esta sessão ainda não tem uma conversa vinculada' })
+  expect(s.readChat('conv:a')).toEqual(real)
+})
+
+test('migrating a row that only ever held a refusal carries nothing', () => {
+  const s = createSessionScratch(fakeStore())
+  s.writeChat('row:x', { turns: [], live: true, unavailable: 'no link yet' })
+  s.migrate('row:x', 'conv:y')
+  expect(s.readChat('conv:y')).toBeNull()
 })

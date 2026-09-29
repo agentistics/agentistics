@@ -49,3 +49,17 @@ describe('modeLabel', () => {
     expect(modeLabel('sessions', 'pt')).toBe('Sessões')
   })
 })
+
+describe('pathForMode — returning to sessions returns to the session you had open', () => {
+  test('the last session path wins', () => {
+    expect(pathForMode('sessions', '/costs', '/sessions/abc123')).toBe('/sessions/abc123')
+  })
+  test('the overview, when that is where you were', () => {
+    expect(pathForMode('sessions', null, SESSIONS_ROOT)).toBe(SESSIONS_ROOT)
+  })
+  test('nothing remembered, or a dashboard path, falls back to the overview', () => {
+    expect(pathForMode('sessions', null, null)).toBe(SESSIONS_ROOT)
+    expect(pathForMode('sessions', null, '/costs')).toBe(SESSIONS_ROOT)
+    expect(pathForMode('sessions', null, '/sessions-report')).toBe(SESSIONS_ROOT)
+  })
+})
