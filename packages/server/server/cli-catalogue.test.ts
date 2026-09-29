@@ -41,6 +41,8 @@ const catalogue: LoadedCatalogue = {
   notices: [{ scope: 'user', path: '/u/harness/junk.txt', code: 'catalogue.unrecognised-file', en: 'not read.', pt: 'não lido.' }],
   roots: { workspaceRoot: '/w', user: '/u/harness', project: '/w/.agentistics', compat: [] },
   floorEnv: {} as never,
+  trust: { state: 'untrusted', key: '/w', corrupt: false },
+  grants: { hash: '0'.repeat(64), parts: {} },
 }
 
 function harness(over: Partial<CatalogueCliDeps> = {}, lang: CliLang = 'en') {

@@ -186,11 +186,12 @@ function runLs(cat: LoadedCatalogue, p: Parsed, lang: CliLang, t: CatalogueStrin
   if (p.kind) { settings = []; notices = [] }
 
   if (p.json) {
-    out(JSON.stringify({ roots: cat.roots, items: items.map(redactItem), settings, notices }, null, 2))
+    out(JSON.stringify({ roots: cat.roots, trust: cat.trust, items: items.map(redactItem), settings, notices }, null, 2))
     return
   }
 
   out(t.roots(cat.roots.workspaceRoot, cat.roots.user, cat.roots.project, cat.roots.compat))
+  out(cliStrings(lang).trust.trustLine(cat.trust.state, cat.trust.state === 'trusted' ? cat.trust.trustedAt : undefined))
   out('')
   if (items.length === 0 && settings.length === 0 && notices.length === 0) {
     out(cat.items.length === 0 && cat.settings.length === 0 && cat.notices.length === 0 ? t.emptyList : t.emptyFiltered)
@@ -353,5 +354,121 @@ export async function runCatalogue(args: string[], deps: Partial<CatalogueCliDep
     for (const l of showLines(m, lang, t)) emit(l)
   })
   flush()
+  return 0
+}
+
+// ── trust / untrust (B8.3) ──────────────────────────────────────────────────────────────────────
+
+export interface TrustCliDeps {
+  stdout: (line: string) => void
+  stderr: (line: string) => void
+  load: (opts: LoadCatalogueOptions) => Promise<LoadedCatalogue>
+  isCentral: () => Promise<boolean>
+  lang: () => Promise<CliLang>
+  cwd: string
+  /** The data dir grants live under. Default `AGENTISTICS_DATA_DIR`. */
+  dataDir: string
+  now: () => Date
+}
+
+async function defaultTrustDeps(): Promise<TrustCliDeps> {
+  const { AGENTISTICS_DATA_DIR } = await import('./config.ts')
+  const base = defaultDeps()
+  return { ...base, dataDir: AGENTISTICS_DATA_DIR, now: () => new Date() }
+}
+
+/**
+ * `agentop code trust <dir>` / `agentop code untrust <dir>` — the ONLY way a project catalogue
+ * gains power (spec §4): a person naming a folder. Nothing in a repository can ask for it, and a
+ * central refuses it. Trust is recorded for the folder's WORKSPACE ROOT (the same root the loader
+ * reads `.agentistics/` under), for its power-granting subset as it is right now.
+ */
+export async function runTrust(verb: 'trust' | 'untrust', args: string[], deps: Partial<TrustCliDeps> = {}): Promise<number> {
+  const d: TrustCliDeps = { ...(await defaultTrustDeps()), ...deps }
+  const lang = await d.lang()
+  const t = cliStrings(lang).trust
+  const positionals: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string
+    if (a === '--help' || a === '-h') { d.stdout(t.usage); return 0 }
+    if (a === '--lang') { i++; continue }
+    if (a.startsWith('-') && a !== '-') { d.stderr(t.unknownArg(a)); d.stderr(t.usage); return 2 }
+    positionals.push(a)
+  }
+  if (positionals.length !== 1) { d.stderr(t.needsDir(verb)); return 2 }
+  if (await d.isCentral()) { d.stderr(t.refusedCentral); return 1 }
+
+  const { resolve } = await import('node:path')
+  const { stat } = await import('node:fs/promises')
+  const { grantTrust, revokeProject, describePart } = await import('@agentistics/runtime')
+  const { appendGrantsAudit, projectKey, readGrants, writeGrants } = await import('./harness-grants.ts')
+  const { workspaceRootFor } = await import('./runtime-host.ts')
+
+  const dir = resolve(d.cwd, positionals[0] as string)
+  const isDir = await stat(dir).then(s => s.isDirectory()).catch(() => false)
+  if (verb === 'trust' && !isDir) { d.stderr(t.notADir(dir)); return 1 }
+  // An untrust of a folder that is gone must still find the record it left.
+  const root = isDir ? workspaceRootFor(dir) : dir
+  if (resolve(root) !== dir) d.stdout(t.rootNote(dir, root))
+  const now = d.now()
+  const out: string[] = []
+
+  if (verb === 'untrust') {
+    const key = await projectKey(root)
+    const loaded = await readGrants(d.dataDir)
+    const { file, cleared } = revokeProject(loaded.file, key)
+    if (!cleared.trust && cleared.servers.length === 0) {
+      d.stdout(t.wasNotTrusted(key))
+      return 0
+    }
+    try {
+      await writeGrants(d.dataDir, file, { corrupt: loaded.corrupt, now })
+    } catch (err) {
+      d.stderr(t.writeFailed((err as NodeJS.ErrnoException).code ?? 'EIO'))
+      return 1
+    }
+    await appendGrantsAudit(d.dataDir, {
+      action: 'harness.untrust', targetId: key, ip: 'local',
+      meta: { root: key, clearedTrust: cleared.trust, clearedServers: cleared.servers },
+    }, now)
+    out.push(t.untrusted(key))
+    if (cleared.trust) out.push(t.clearedTrust)
+    if (cleared.servers.length > 0) out.push(t.clearedServers(cleared.servers))
+    out.push(t.nextLoadAsks)
+    d.stdout(out.join('\n'))
+    return 0
+  }
+
+  // trust — load first: the loader computes the hash, and drops (and audits) a stale trust itself.
+  const cat = await d.load({ cwd: root, workspaceRoot: root, dataDir: d.dataDir, now })
+  if (cat.roots.project === null || cat.grants === null) { d.stderr(t.projectIsDataDir(root)); return 1 }
+  const key = await projectKey(root)
+  const loaded = await readGrants(d.dataDir)
+  const r = grantTrust(loaded.file, key, cat.grants, now)
+  if (r.already) { d.stdout(t.alreadyTrusted(key)); return 0 }
+  try {
+    await writeGrants(d.dataDir, r.file, { corrupt: loaded.corrupt, now })
+  } catch (err) {
+    d.stderr(t.writeFailed((err as NodeJS.ErrnoException).code ?? 'EIO'))
+    return 1
+  }
+  const parts = Object.keys(cat.grants.parts)
+  await appendGrantsAudit(d.dataDir, {
+    action: 'harness.trust', targetId: key, ip: 'local',
+    meta: {
+      root: key, grants: cat.grants.hash, granted: parts,
+      replacedTrust: r.cleared.trust, clearedServers: r.cleared.servers,
+    },
+  }, now)
+  out.push(t.trusted(key))
+  if (loaded.corrupt) out.push(t.corruptMoved)
+  if (r.cleared.trust) out.push(t.replacedEarlier(r.cleared.servers))
+  if (parts.length === 0) out.push(t.grantsNothing)
+  else {
+    out.push(t.nowAllowed)
+    for (const k of parts) out.push(`  ${describePart(k)[lang]}`)
+  }
+  // Part names come from file content (a rule id, a server name): same redaction as the listing.
+  d.stdout(redactSecrets(out.join('\n')))
   return 0
 }

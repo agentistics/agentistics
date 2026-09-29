@@ -501,6 +501,31 @@ export interface CliStrings {
   rateLimitAbsent: (reason: RateLimitAbsentReason, dropped: number) => string
   /** `agentop catalogue` — the chrome only; every problem/inert/notice sentence arrives bilingual from the loader. */
   catalogue: CatalogueStrings
+  /** `agentop code trust|untrust` (B8.3) — chrome only; part names arrive bilingual from the runtime. */
+  trust: TrustStrings
+}
+
+export interface TrustStrings {
+  usage: string
+  refusedCentral: string
+  needsDir: (verb: string) => string
+  unknownArg: (a: string) => string
+  notADir: (dir: string) => string
+  rootNote: (dir: string, root: string) => string
+  projectIsDataDir: (root: string) => string
+  trusted: (root: string) => string
+  alreadyTrusted: (root: string) => string
+  grantsNothing: string
+  nowAllowed: string
+  replacedEarlier: (servers: string[]) => string
+  untrusted: (root: string) => string
+  wasNotTrusted: (root: string) => string
+  clearedTrust: string
+  clearedServers: (servers: string[]) => string
+  nextLoadAsks: string
+  corruptMoved: string
+  writeFailed: (reason: string) => string
+  trustLine: (state: 'none' | 'untrusted' | 'trusted' | 'dropped', since?: string) => string
 }
 
 export interface CatalogueStrings {
@@ -1012,6 +1037,44 @@ const EN: CliStrings = {
     fieldTimeout: 'timeout (ms)',
     noDef: 'no definition (the file could not be parsed far enough)',
   },
+  trust: {
+    usage: [
+      'Usage:',
+      '  agentop code trust <dir>     Let this folder\'s .agentistics catalogue grant power: its allow rules,',
+      '                               MCP servers, after-edit steps and widening agent profiles.',
+      '  agentop code untrust <dir>   Take that back, and clear everything the trust earned.',
+      '',
+      'Trust is recorded on THIS machine only, for the folder as it is now: if what it grants changes',
+      '(a git pull adds a server), it is untrusted again until you trust it again. It never lifts the',
+      'policy floor or a deny rule of your own.',
+    ].join('\n'),
+    refusedCentral: 'Trust configures the native harness of THIS machine, and a central runs none, so nothing can be trusted here. Run it on a member or solo machine.',
+    needsDir: (verb) => `${verb} needs a folder: agentop code ${verb} <dir> (use . for this one).`,
+    unknownArg: (a) => `Unknown argument "${a}".`,
+    notADir: (dir) => `${dir} is not a folder on this machine.`,
+    rootNote: (dir, root) => `${dir} is inside the workspace ${root}; trust is recorded for the workspace root.`,
+    projectIsDataDir: (root) => `${root}/.agentistics is agentistics' own data directory, not a project catalogue, so there is nothing here to trust.`,
+    trusted: (root) => `Trusted ${root}.`,
+    alreadyTrusted: (root) => `${root} is already trusted as it is now; nothing changed.`,
+    grantsNothing: 'Its catalogue grants nothing today, so nothing changes now — but anything that grants power added later will ask again.',
+    nowAllowed: 'It may now use:',
+    replacedEarlier: (servers) => `The earlier trust was replaced; its remembered approvals were cleared${servers.length > 0 ? ` (MCP servers: ${servers.join(', ')})` : ''}.`,
+    untrusted: (root) => `Untrusted ${root}.`,
+    wasNotTrusted: (root) => `${root} was not trusted; there was nothing to clear.`,
+    clearedTrust: 'Cleared: the folder\'s trust.',
+    clearedServers: (servers) => `Cleared: remembered MCP server approvals (${servers.join(', ')}).`,
+    nextLoadAsks: 'Its allow rules, MCP servers, after-edit steps and widening agent profiles have no effect until it is trusted again, and every server will ask again.',
+    corruptMoved: 'The trust file could not be read as a whole; it was moved aside and a new one written, so every other folder is untrusted until trusted again.',
+    writeFailed: (reason) => `The trust file could not be written (${reason}); nothing changed.`,
+    trustLine: (state, since) => {
+      switch (state) {
+        case 'none': return 'Project trust: no project scope here'
+        case 'untrusted': return 'Project trust: untrusted — its allow rules, MCP servers, after-edit steps and widening profiles have no effect (agentop code trust <dir>)'
+        case 'trusted': return `Project trust: trusted${since ? ` since ${since}` : ''}`
+        case 'dropped': return 'Project trust: DROPPED on this load — what it grants changed since it was trusted (see the notice below)'
+      }
+    },
+  },
 }
 
 const PT: CliStrings = {
@@ -1445,6 +1508,44 @@ const PT: CliStrings = {
     fieldRun: 'executa',
     fieldTimeout: 'timeout (ms)',
     noDef: 'sem definição (o arquivo não pôde ser lido até esse ponto)',
+  },
+  trust: {
+    usage: [
+      'Uso:',
+      '  agentop code trust <dir>     Deixa o catálogo .agentistics desta pasta conceder poder: suas regras',
+      '                               allow, servidores MCP, passos pós-edição e perfis de agente que ampliam.',
+      '  agentop code untrust <dir>   Desfaz isso e limpa tudo que a confiança concedeu.',
+      '',
+      'A confiança fica registrada só NESTA máquina, para a pasta como está agora: se o que ela concede',
+      'mudar (um git pull adiciona um servidor), ela volta a não ser confiável até você confiar de novo.',
+      'Ela nunca levanta o piso da política nem uma regra deny sua.',
+    ].join('\n'),
+    refusedCentral: 'A confiança configura o harness nativo DESTA máquina, e uma central não roda nenhum, então nada pode ser marcado como confiável aqui. Rode em uma máquina member ou solo.',
+    needsDir: (verb) => `${verb} precisa de uma pasta: agentop code ${verb} <dir> (use . para esta).`,
+    unknownArg: (a) => `Argumento desconhecido "${a}".`,
+    notADir: (dir) => `${dir} não é uma pasta nesta máquina.`,
+    rootNote: (dir, root) => `${dir} está dentro do workspace ${root}; a confiança é registrada para a raiz do workspace.`,
+    projectIsDataDir: (root) => `${root}/.agentistics é o próprio diretório de dados do agentistics, não um catálogo de projeto, então não há nada aqui para confiar.`,
+    trusted: (root) => `${root} agora é confiável.`,
+    alreadyTrusted: (root) => `${root} já é confiável como está agora; nada mudou.`,
+    grantsNothing: 'O catálogo dela não concede nada hoje, então nada muda agora — mas qualquer coisa que conceda poder adicionada depois vai perguntar de novo.',
+    nowAllowed: 'Agora ela pode usar:',
+    replacedEarlier: (servers) => `A confiança anterior foi substituída; as aprovações lembradas foram limpas${servers.length > 0 ? ` (servidores MCP: ${servers.join(', ')})` : ''}.`,
+    untrusted: (root) => `${root} deixou de ser confiável.`,
+    wasNotTrusted: (root) => `${root} não era confiável; não havia nada para limpar.`,
+    clearedTrust: 'Limpo: a confiança da pasta.',
+    clearedServers: (servers) => `Limpo: aprovações lembradas de servidores MCP (${servers.join(', ')}).`,
+    nextLoadAsks: 'Suas regras allow, servidores MCP, passos pós-edição e perfis que ampliam não têm efeito até ela ser confiável de novo, e cada servidor vai perguntar de novo.',
+    corruptMoved: 'O arquivo de confiança não pôde ser lido por inteiro; ele foi movido para o lado e um novo foi escrito, então todas as outras pastas ficam não confiáveis até serem confiadas de novo.',
+    writeFailed: (reason) => `O arquivo de confiança não pôde ser escrito (${reason}); nada mudou.`,
+    trustLine: (state, since) => {
+      switch (state) {
+        case 'none': return 'Confiança do projeto: não há escopo de projeto aqui'
+        case 'untrusted': return 'Confiança do projeto: não confiável — suas regras allow, servidores MCP, passos pós-edição e perfis que ampliam não têm efeito (agentop code trust <dir>)'
+        case 'trusted': return `Confiança do projeto: confiável${since ? ` desde ${since}` : ''}`
+        case 'dropped': return 'Confiança do projeto: RETIRADA nesta leitura — o que ela concede mudou desde que foi confiada (veja o aviso abaixo)'
+      }
+    },
   },
 }
 

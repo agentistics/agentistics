@@ -610,6 +610,7 @@ const HELP = `
 Usage: agentop code [--model <id>] [--cwd <dir>] [prompt...]
        agentop code --resume <sessionId> [prompt...]
        agentop code ls [--limit <n>]
+       agentop code trust|untrust <dir>
 
 The terminal front door onto a native Agentistics session (BETA). Runs a conversation against the
 Anthropic API using this machine's own stored key (see \`agentop provider key set\`), with every
@@ -629,6 +630,11 @@ cancels a run in progress, a second Ctrl-C leaves.
 
 agentop code ls        List native sessions (id, status, last update, title/model).
   --limit <n>          At most this many (default 20).
+
+agentop code trust <dir>    Let that folder's .agentistics catalogue grant power (its allow rules,
+                            MCP servers, after-edit steps, widening agent profiles). Recorded on this
+                            machine only; a change to what it grants makes it untrusted again.
+agentop code untrust <dir>  Take it back, and clear everything the trust earned.
 `.trim()
 
 const LS_HELP = 'Usage: agentop code ls [--limit <n>]'
@@ -641,6 +647,12 @@ export async function runCode(args: string[], deps: Partial<CodeCliDeps> = {}): 
     return 0
   }
   if (args[0] === 'ls') return runLs(args.slice(1), d)
+  // Trust is configuration, not a session: it needs no provider flag, no key and no model — and it
+  // is the ONE place a project catalogue gains power, so it answers before anything else (B8.3).
+  if (args[0] === 'trust' || args[0] === 'untrust') {
+    const { runTrust } = await import('./cli-catalogue.ts')
+    return runTrust(args[0], args.slice(1), { stdout: d.stdout, stderr: d.stderr })
+  }
   // Refused BEFORE any session is created: with the flag off the key store answers "off" to every
   // credential lookup, and a session that exists only to fail its first model call is a lie on disk.
   if (!d.flagOn()) {

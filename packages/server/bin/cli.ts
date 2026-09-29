@@ -105,7 +105,8 @@ Commands:
                 'provider try anthropic' makes one real, billed call)
   code          BETA — the terminal front door onto a native session: runs a conversation
                 against your stored Anthropic key, asking you here for anything not
-                allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')
+                allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls';
+                'code trust|untrust <dir>' — a project's catalogue grants power only once trusted)
   catalogue     List the native harness catalogue in force here — commands, skills, agents, MCP
                 servers, profiles, after-edit steps — with each one's status and problems
                 ('catalogue ls [--kind k] [--scope s] [--problems] [--json]'; 'catalogue show <kind> <name>')

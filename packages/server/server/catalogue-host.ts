@@ -22,6 +22,12 @@
  *   repository, `<workspaceRoot>/.agentistics` is `~/.agentistics` itself — agentistics' own data,
  *   not a project catalogue. The scope is skipped and a notice says so.
  *
+ * ## Trust (B8.3)
+ *
+ * The project scope is `untrusted` until a person trusts the folder (`agentop code trust <dir>`).
+ * Each load hashes the project's power-granting subset and compares it with the record in
+ * `harness-grants.ts`; a mismatch CLEARS the record, audits it and says what changed in a notice.
+ *
  * Everything else found in a scope directory and not understood is a NOTICE with a sentence: a file
  * silently ignored is a file its author believes is in force.
  *
@@ -29,10 +35,21 @@
  */
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
-import type { CatalogueEntry, CatalogueScope, FloorEnv } from '@agentistics/runtime'
+import {
+  grantsManifest,
+  revokeProject,
+  trustDecision,
+  type CatalogueEntry,
+  type CatalogueScope,
+  type ClearedGrants,
+  type FloorEnv,
+  type GrantsManifest,
+} from '@agentistics/runtime'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
+import { appendGrantsAudit, grantsPath, projectKey, readGrants, writeGrants } from './harness-grants'
 import {
   planCatalogue,
+  projectGrantsInput,
   settingsOutcome,
   type CatalogueNotice,
   type CatalogueRecord,
@@ -82,6 +99,8 @@ export interface LoadCatalogueOptions {
   compatDirs?: { claudeSkills: string; agentsSkills: string }
   protectedPaths?: readonly string[]
   builtins?: readonly CatalogueEntry[]
+  /** The clock a trust drop is stamped with. Default: now. */
+  now?: Date
 }
 
 export interface LoadedCatalogue extends CatalogueView {
@@ -92,6 +111,10 @@ export interface LoadedCatalogue extends CatalogueView {
     compat: string[]
   }
   floorEnv: FloorEnv
+  /** Whether the project scope is trusted here, and why not (B8.3). */
+  trust: ProjectTrust
+  /** The project's power-granting subset as hashed on this load; null with no project scope. */
+  grants: GrantsManifest | null
 }
 
 function notice(scope: CatalogueScope, path: string, code: string, en: string, pt: string): CatalogueNotice {
@@ -278,11 +301,63 @@ export async function loadCatalogue(opts: LoadCatalogueOptions = {}): Promise<Lo
     await skillDirs(compatDirs[key], { scope: 'compat', containRoot: null }, records, notices)
   }
 
+  const grants = projectDir === null ? null : grantsManifest(projectGrantsInput(records, floorEnv))
+  const trust: ProjectTrust = grants === null
+    ? { state: 'none' }
+    : await decideProjectTrust(workspaceRoot, dataDir, grants, opts.now ?? new Date())
+  if (trust.state === 'dropped') {
+    notices.push(notice('project', projectDir ?? workspaceRoot, 'catalogue.trust-dropped', trust.en, trust.pt))
+  }
+  if (trust.corrupt) {
+    notices.push(notice('project', grantsPath(dataDir), 'catalogue.grants-corrupt',
+      'the trust file could not be read as a whole, so no project is trusted on this machine until a folder is trusted again (the unreadable file is moved aside, not overwritten, when that happens).',
+      'o arquivo de confiança não pôde ser lido por inteiro, então nenhum projeto é confiável nesta máquina até uma pasta ser marcada como confiável de novo (o arquivo ilegível é movido para o lado, não sobrescrito, quando isso acontecer).'))
+  }
+
   const homeRel = relative(home, userDir)
   const userRoot = homeRel !== '' && !homeRel.startsWith('..') ? { abs: userDir, homeRel } : undefined
   const view = planCatalogue({
     records, notices, builtins: opts.builtins ?? HOST_BUILTINS, floorEnv,
     ...(userRoot ? { userRoot } : {}),
+    projectTrusted: trust.state === 'trusted',
   })
-  return { ...view, roots: { workspaceRoot, user: userDir, project: projectDir, compat: compatRead }, floorEnv }
+  return { ...view, roots: { workspaceRoot, user: userDir, project: projectDir, compat: compatRead }, floorEnv, trust, grants }
+}
+
+/** The project scope's trust as this load found it (B8.3). */
+export type ProjectTrust =
+  | { state: 'none'; corrupt?: undefined }
+  | { state: 'untrusted'; key: string; corrupt: boolean }
+  | { state: 'trusted'; key: string; trustedAt: string; corrupt: false }
+  /** Was trusted; the power-granting subset changed, so the record was CLEARED on this load (§4). */
+  | { state: 'dropped'; key: string; corrupt: false; en: string; pt: string; cleared: ClearedGrants }
+
+/**
+ * Reads the grants file and decides. A changed hash is not merely "untrusted for now": the spec
+ * clears everything the trust earned the moment it is detected (§4), so the record is removed and
+ * the event audited HERE — otherwise reverting the change would silently restore a trust (and the
+ * server approvals under it) that was granted for a different set of powers.
+ */
+async function decideProjectTrust(workspaceRoot: string, dataDir: string, manifest: GrantsManifest, now: Date): Promise<ProjectTrust> {
+  const key = await projectKey(workspaceRoot)
+  const loaded = await readGrants(dataDir)
+  const d = trustDecision(loaded.file, key, manifest)
+  if (d.state === 'untrusted') return { state: 'untrusted', key, corrupt: loaded.corrupt }
+  if (d.state === 'trusted') return { state: 'trusted', key, trustedAt: d.record.trustedAt, corrupt: false }
+  const { file, cleared } = revokeProject(loaded.file, key)
+  try {
+    await writeGrants(dataDir, file, { corrupt: false, now })
+  } catch {
+    // Could not persist the drop: this load still treats the project as untrusted, and the next
+    // load finds the same mismatch and tries again. Nothing about the answer depends on the write.
+  }
+  await appendGrantsAudit(dataDir, {
+    action: 'harness.trust_dropped', targetId: key, ip: 'local',
+    meta: {
+      root: key, grantsWas: d.record.grants, grantsNow: manifest.hash,
+      added: d.diff.added, changed: d.diff.changed, removed: d.diff.removed,
+      clearedTrust: cleared.trust, clearedServers: cleared.servers,
+    },
+  }, now)
+  return { state: 'dropped', key, corrupt: false, en: d.en, pt: d.pt, cleared }
 }

@@ -53,6 +53,11 @@ export type AuditAction =
   // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
   // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
   | 'provider.set' | 'provider.remove'
+  // Native harness catalogue TRUST (B8.3, harness-grants.ts): a person trusted or untrusted a
+  // project folder, or a changed grants hash dropped a trusted one back. meta names the root, the
+  // grants digest and WHAT was granted or cleared (part keys, server names) — never a declaration.
+  // Written to the machine-local `runtime/harness-audit.jsonl`: trust never runs on a central.
+  | 'harness.trust' | 'harness.untrust' | 'harness.trust_dropped'
 
 export interface AuditEvent {
   action: AuditAction

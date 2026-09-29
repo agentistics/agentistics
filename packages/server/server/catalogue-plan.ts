@@ -17,8 +17,11 @@
  *
  * ## 2. An untrusted project's power has NO effect (spec §4, criterion 1)
  *
- * Trust itself (grants, the hash, `trust`/`untrust`) is B8.3. Until it exists every project is
- * `untrusted`, and:
+ * Whether the project is trusted is decided by the HOST (B8.3: `harness-grants.ts` plus the grants
+ * hash, `grants.ts` in the runtime) and arrives here as `projectTrusted`. A trusted project's
+ * entries carry `trust: 'trusted'` and its widening applies — still below the deny floor (the
+ * parsers refuse a floor-targeting rule whatever the trust) and below any user deny (a deny is
+ * absolute across layers in `rules.ts`). Absent or false, the project is `untrusted`, and:
  *
  * - its `allow` rules and its `profile` are INERT, listed with the sentence why; `deny`/`ask` apply;
  * - its MCP servers and after-edit steps are INERT and are kept OUT of precedence entirely. Left in,
@@ -47,6 +50,7 @@ import {
   type CatalogueScope,
   type CatalogueSettings,
   type FloorEnv,
+  type GrantsInput,
   type PolicyRule,
 } from '@agentistics/runtime'
 import { excludeFor, type ExcludeReason } from './backup/backup-plan'
@@ -102,6 +106,8 @@ export interface CataloguePlanInput {
    * backup would NOT carry it (spec §3.3, stated limit). Absent: no backup note is computed.
    */
   userRoot?: { abs: string; homeRel: string }
+  /** The host's trust decision for the project scope (B8.3). Absent: untrusted. */
+  projectTrusted?: boolean
 }
 
 // ── What the view says ─────────────────────────────────────────────────────────────────────────
@@ -187,7 +193,7 @@ interface SettingsOutcome {
  * learn whether the person opted into the compat directories — and must learn it AFTER the secret
  * rule, or a file carrying a pasted token could still widen what is read.
  */
-export function settingsOutcome(record: CatalogueRecord, floorEnv: FloorEnv): SettingsOutcome {
+export function settingsOutcome(record: CatalogueRecord, floorEnv: FloorEnv, projectTrusted = false): SettingsOutcome {
   const { scope, path } = record
   if (record.text === null) {
     const r = record.refusal ?? { code: UNREADABLE, en: 'the file could not be read.', pt: 'o arquivo não pôde ser lido.' }
@@ -196,7 +202,7 @@ export function settingsOutcome(record: CatalogueRecord, floorEnv: FloorEnv): Se
   }
   const parsed = parseSettingsFile({ text: record.text, path, scope, floorEnv })
   const secret = hasFileSecret(parsed.problems)
-  const untrusted = initialTrust(scope) === 'untrusted'
+  const untrusted = initialTrust(scope) === 'untrusted' && !projectTrusted
   const inert: InertPart[] = []
   const settings: CatalogueSettings = {}
   const s = parsed.settings
@@ -227,7 +233,7 @@ export function settingsOutcome(record: CatalogueRecord, floorEnv: FloorEnv): Se
   }
   if (s.skills !== undefined) settings.skills = s.skills
 
-  const entries = parsed.entries.map((e) => secret
+  const entries = parsed.entries.map((e) => withTrust(e, projectTrusted)).map((e) => secret
     ? withProblems(e, [{
         code: 'catalogue.file-secret-widening', path, line: 1,
         ...secretSentence(path, e.kind === 'mcpServer'
@@ -240,6 +246,33 @@ export function settingsOutcome(record: CatalogueRecord, floorEnv: FloorEnv): Se
 }
 
 // ── the whole catalogue ─────────────────────────────────────────────────────────────────────────
+
+/** A project entry of a trusted project says so; every other entry is left as parsed. */
+function withTrust(e: CatalogueEntry, projectTrusted: boolean): CatalogueEntry {
+  return projectTrusted && e.trust === 'untrusted' ? { ...e, trust: 'trusted' } : e
+}
+
+/**
+ * The PROJECT scope, parsed, as the trust hash reads it (B8.3): its settings BEFORE any gate and
+ * every entry its files declare. Parsing twice (here and in `planCatalogue`) is deliberate — the
+ * hash must be computed before the trust decision the plan depends on, and parsing is cheap.
+ */
+export function projectGrantsInput(records: readonly CatalogueRecord[], floorEnv: FloorEnv): GrantsInput {
+  const entries: CatalogueEntry[] = []
+  let settings: GrantsInput['settings']
+  for (const record of records) {
+    if (record.scope !== 'project') continue
+    if (record.kind === 'settings') {
+      if (record.text === null) continue
+      const parsed = parseSettingsFile({ text: record.text, path: record.path, scope: 'project', floorEnv })
+      settings = parsed.settings
+      entries.push(...parsed.entries)
+    } else {
+      entries.push(parseRecord(record, floorEnv))
+    }
+  }
+  return settings ? { settings, entries } : { entries }
+}
 
 function refusedEntry(record: CatalogueRecord, kind: CatalogueKind): CatalogueEntry {
   const r = record.refusal ?? { code: UNREADABLE, en: 'the file could not be read.', pt: 'o arquivo não pôde ser lido.' }
@@ -285,13 +318,14 @@ function backupNote(e: CatalogueEntry, userRoot: CataloguePlanInput['userRoot'])
 /** The one entry point: records in, a view out. */
 export function planCatalogue(input: CataloguePlanInput): CatalogueView {
   const { floorEnv } = input
+  const trusted = input.projectTrusted === true
   const settings: ScopeSettingsView[] = []
   const candidates: CatalogueEntry[] = [...input.builtins]
   const inertEntries: CatalogueEntry[] = []
 
   for (const record of input.records) {
     if (record.kind === 'settings') {
-      const out = settingsOutcome(record, floorEnv)
+      const out = settingsOutcome(record, floorEnv, trusted)
       settings.push(out.view)
       for (const e of out.entries) {
         // An untrusted project's process-starting entries never enter precedence (module header).
@@ -299,7 +333,7 @@ export function planCatalogue(input: CataloguePlanInput): CatalogueView {
         else candidates.push(e)
       }
     } else {
-      candidates.push(parseRecord(record, floorEnv))
+      candidates.push(withTrust(parseRecord(record, floorEnv), trusted))
     }
   }
 
