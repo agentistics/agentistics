@@ -11,10 +11,10 @@
     "developer-tools",
     "opentelemetry"
   ],
-  "homepage": "https://github.com/blpsoares/agentistics",
+  "homepage": "https://github.com/agentistics/agentistics",
   "repository": {
     "type": "git",
-    "url": "https://github.com/blpsoares/agentistics.git"
+    "url": "https://github.com/agentistics/agentistics.git"
   },
   "license": "FSL-1.1-ALv2",
   "type": "module",

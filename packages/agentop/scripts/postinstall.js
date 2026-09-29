@@ -73,14 +73,24 @@ async function main() {
   if (!asset.ok) {
     console.error(asset.message);
     console.error(
-      'The agentop CLI is not available for this platform via npm. See https://github.com/blpsoares/agentistics for other install options.'
+      'The agentop CLI is not available for this platform via npm. See https://github.com/agentistics/agentistics for other install options.'
     );
     process.exit(1);
   }
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  console.log(`Downloading agentop from ${asset.url} ...`);
-  await download(asset.url, BIN_PATH, MAX_REDIRECTS);
+  let lastErr = null;
+  for (const url of asset.urls) {
+    console.log(`Downloading agentop from ${url} ...`);
+    try {
+      await download(url, BIN_PATH, MAX_REDIRECTS);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
   fs.chmodSync(BIN_PATH, 0o755);
   console.log(`Installed: ${BIN_PATH}`);
 }

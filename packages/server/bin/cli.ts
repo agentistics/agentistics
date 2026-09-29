@@ -166,7 +166,7 @@ Setup:
 Central:
   agentop central <up|init|down|logs|status|restart|pull|setup-token|reset-password>
     HOW it runs is your choice, and \`up\` takes it as a flag:
-      --image    Docker, published image (ghcr.io/blpsoares/agentistics) — no checkout needed
+      --image    Docker, published image (ghcr.io/agentistics/agentistics) — no checkout needed
       --build    Docker, built from this checkout (central.sh)
       --native   the agentop binary IS the server — no Docker; needs an external MONGO_URL
       --bg       native only: detach instead of holding this terminal

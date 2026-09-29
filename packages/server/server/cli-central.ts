@@ -9,7 +9,7 @@
  *
  *  2. STANDALONE path — the compiled binary run from ANY directory, with no repo present.
  *     We can't build the image from source, so we materialize a small Docker Compose that
- *     PULLS the published central image (ghcr.io/blpsoares/agentistics:<version>) into
+ *     PULLS the published central image (ghcr.io/agentistics/agentistics:<version>) into
  *     ~/.agentistics/central/, generate central.env interactively on first run, and drive
  *     `docker compose` directly — no repo, no clone required.
  *
@@ -60,7 +60,7 @@ export function isCentralAction(value: string): value is CentralAction {
 
 /** Published central image. The tag defaults to this binary's version so the central matches
  *  the CLI; override with AGENTISTICS_IMAGE (e.g. to pin :latest or a specific build). */
-const IMAGE = process.env.AGENTISTICS_IMAGE || `ghcr.io/blpsoares/agentistics:${APP_VERSION}`
+const IMAGE = process.env.AGENTISTICS_IMAGE || `ghcr.io/agentistics/agentistics:${APP_VERSION}`
 const PROJECT = process.env.PROJECT || 'team-mode'
 const STANDALONE_DIR = join(homedir(), '.agentistics', 'central')
 
@@ -384,7 +384,7 @@ name: team-mode
 
 services:
   app:
-    image: \${AGENTISTICS_IMAGE:-ghcr.io/blpsoares/agentistics:latest}
+    image: \${AGENTISTICS_IMAGE:-ghcr.io/agentistics/agentistics:latest}
     environment:
       MONGO_URL: \${MONGO_URL:-mongodb://mongo:27017/?replicaSet=rs0}
       MONGO_DB: \${MONGO_DB:-agentistics}
@@ -603,7 +603,7 @@ async function runCompose(
 /** The human name of each runtime, for the picker and for anything reporting what it will do. */
 export function centralRuntimeLabel(id: CentralRuntimeId): string {
   switch (id) {
-    case 'docker-image': return 'Docker, published image — pulls ghcr.io/blpsoares/agentistics (no checkout needed)'
+    case 'docker-image': return 'Docker, published image — pulls ghcr.io/agentistics/agentistics (no checkout needed)'
     case 'docker-build': return 'Docker, built from this checkout — central.sh, the image is built here'
     case 'native': return 'Native — the agentop binary IS the server (no Docker; needs an external database)'
   }

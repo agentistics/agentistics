@@ -5,7 +5,9 @@
 
 set -euo pipefail
 
-REPO="blpsoares/agentistics"
+# The repository moved from blpsoares/ to agentistics/. Both owners are tried, new first, so this
+# script works on either side of the transfer (and after it, even if GitHub's redirect is gone).
+REPOS=("agentistics/agentistics" "blpsoares/agentistics")
 BINARY="agentop"
 
 # ── Determine install directory ────────────────────────────────────────────
@@ -81,7 +83,6 @@ elif [[ "$IS_MUSL" -eq 1 ]]; then
   fi
 fi
 
-RELEASE_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_ASSET}"
 
 # ── Runtime dependency: tmux ────────────────────────────────────────────────
 #
@@ -143,9 +144,20 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 # ── Download ───────────────────────────────────────────────────────────────
-echo "Downloading ${BINARY_ASSET} from ${RELEASE_URL} …"
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$RELEASE_URL" -o "${INSTALL_DIR}/${BINARY}"
+DOWNLOADED=""
+for REPO in "${REPOS[@]}"; do
+  RELEASE_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_ASSET}"
+  echo "Downloading ${BINARY_ASSET} from ${RELEASE_URL} …"
+  if curl -fsSL "$RELEASE_URL" -o "${INSTALL_DIR}/${BINARY}"; then
+    DOWNLOADED=1
+    break
+  fi
+done
+if [[ -z "$DOWNLOADED" ]]; then
+  echo "Download failed from every known location (${REPOS[*]})." >&2
+  exit 1
+fi
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
 # ── PATH hint ──────────────────────────────────────────────────────────────

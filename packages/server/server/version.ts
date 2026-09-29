@@ -2,10 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { version as CURRENT_VERSION } from '../../../package.json'
 import { AGENTISTICS_DATA_DIR } from './config.ts'
+import { fetchFirstOk, releasesApiUrls } from './release-source.ts'
 
 export { CURRENT_VERSION }
 
-const GITHUB_REPO = 'blpsoares/agentistics'
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour (in-process)
 
 // ---------------------------------------------------------------------------
@@ -317,8 +317,9 @@ export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<Ve
     // /releases/latest because this repo also publishes a rolling "latest"
     // tagged release, which /releases/latest returns (tag_name "latest" is not
     // semver and would never compare as an update).
-    const resp = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=30`,
+    // Both owners, new first — see release-source.ts for why the old one is still asked.
+    const resp = await fetchFirstOk(
+      releasesApiUrls(30),
       {
         headers: {
           'Accept': 'application/vnd.github+json',

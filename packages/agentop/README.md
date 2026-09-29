@@ -1,7 +1,7 @@
 # @agentistics/agentop
 
 npm install for the `agentop` CLI — the same native binary published on
-[GitHub Releases](https://github.com/blpsoares/agentistics/releases) and
+[GitHub Releases](https://github.com/agentistics/agentistics/releases) and
 installed by the project's `curl | bash` script. This package is only an
 **additional** install channel; it downloads and runs the identical binary,
 never a JS reimplementation.
@@ -29,7 +29,7 @@ agentop tui           # terminal TUI
 agentop watch         # daemon only
 ```
 
-See the [main README](https://github.com/blpsoares/agentistics#readme) for
+See the [main README](https://github.com/agentistics/agentistics#readme) for
 full CLI documentation.
 
 ## Alternative install

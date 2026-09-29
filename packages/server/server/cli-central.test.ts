@@ -63,7 +63,7 @@ describe('buildCentralEnv', () => {
 describe('STANDALONE_COMPOSE', () => {
   test('pulls the published image and never builds from source', () => {
     // The whole point of the standalone path: pull, not build (no repo present).
-    expect(STANDALONE_COMPOSE).toContain('ghcr.io/blpsoares/agentistics')
+    expect(STANDALONE_COMPOSE).toContain('ghcr.io/agentistics/agentistics')
     expect(STANDALONE_COMPOSE).toContain('${AGENTISTICS_IMAGE')
     expect(STANDALONE_COMPOSE).not.toContain('build:')
   })
