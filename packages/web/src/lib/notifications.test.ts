@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type { AppNotification } from './notifications'
 
 /**
@@ -11,6 +11,7 @@ import type { AppNotification } from './notifications'
  */
 interface Call { url: string; method: string; body?: unknown }
 
+const realFetch = globalThis.fetch
 let calls: Call[] = []
 let respond: (c: Call) => unknown = () => []
 
@@ -38,6 +39,9 @@ const note = (id: string, over: Partial<AppNotification> = {}): AppNotification 
 })
 
 beforeEach(() => { stubFetch(); respond = () => [] })
+// `bun test` runs every file in ONE process: a stub left in place here is the `fetch` every later
+// file calls, so the real one is put back after each test (globalPatch.lint.test.ts enforces this).
+afterEach(() => { globalThis.fetch = realFetch })
 
 describe('loading from the server', () => {
   test('refresh pulls the history and fills the cache', async () => {
