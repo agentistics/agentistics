@@ -43,11 +43,13 @@ export interface MinimizedMenuProps {
   onClose: (id: string) => void
   /** Where the button sits on the screen. The wrapper is positioned by the caller. */
   anchorStyle: CSSProperties
+  /** True while the button is being dragged: the list closes and nothing may open it. */
+  suppressed?: boolean
   /** The chat button itself; its click is wrapped so a long-press can swallow it. */
   renderButton: (p: { onClickCapture: (e: ReactMouseEvent) => void; onKeyDown: (e: ReactKeyboardEvent) => void }) => ReactNode
 }
 
-export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, renderButton }: MinimizedMenuProps) {
+export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, suppressed = false, renderButton }: MinimizedMenuProps) {
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<MenuPlacement>({ vertical: 'above', horizontal: 'right' })
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -68,8 +70,14 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, rend
     if (closeTimer.current === null) closeTimer.current = window.setTimeout(() => { closeTimer.current = null; setOpen(false) }, HOVER_CLOSE_MS)
   }
 
-  // Nothing left to list closes the list.
+  // Nothing left to list closes the list, and so does picking the button up.
   useEffect(() => { if (count === 0) setOpen(false) }, [count])
+  useEffect(() => {
+    if (!suppressed) return
+    clearTimers()
+    if (press.current) { window.clearTimeout(press.current.timer); press.current = null }
+    setOpen(false)
+  }, [suppressed])
   useEffect(() => () => { clearTimers(); if (press.current) window.clearTimeout(press.current.timer) }, [])
 
   // Which way to open is decided when it opens: above-and-left of the button by default, flipped
@@ -95,7 +103,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, rend
   }, [open])
 
   const onEnter = (e: ReactPointerEvent) => {
-    if (e.pointerType !== 'mouse' || count === 0) return
+    if (e.pointerType !== 'mouse' || count === 0 || suppressed) return
     if (closeTimer.current !== null) { window.clearTimeout(closeTimer.current); closeTimer.current = null }
     if (!open && openTimer.current === null) openTimer.current = window.setTimeout(() => { openTimer.current = null; setOpen(true) }, HOVER_OPEN_MS)
   }

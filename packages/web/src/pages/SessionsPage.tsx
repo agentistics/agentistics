@@ -24,8 +24,9 @@ import {
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon, ArrowRight,
+  X as XIcon, ArrowRight, MessageCircle,
 } from 'lucide-react'
+import { setNayFabShownInSession, useNayFabShownInSession } from '../lib/nayFabVisibility'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
 import { PanelGap, PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
 import { SplitPaneHeader } from '../components/sessions/SplitPaneHeader'
@@ -325,6 +326,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const pt = lang === 'pt'
   const navigate = useNavigate()
   const isMobile = useIsMobile()
+  const nayFabShown = useNayFabShownInSession()
   /**
    * Which of the phone's two screens is showing when no session is open.
    *
@@ -2760,6 +2762,16 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               ),
             } : {})}
             extra={[
+              /* THE FLOATING NAY BUTTON, on a phone. Inside a session it is hidden by default — it
+                 sat on the composer's send button — and this row brings it back (per viewer,
+                 `lib/nayFabVisibility.ts`). Desktop never hides it, so the row is phone-only. */
+              ...(isMobile ? [{
+                id: 'nay-fab',
+                label: pt ? 'Exibir chat flutuante' : 'Show floating chat',
+                icon: <MessageCircle size={15} />,
+                on: nayFabShown,
+                onSelect: () => setNayFabShownInSession(!nayFabShown),
+              }] : []),
               {
                 id: 'filters',
                 label: pt ? 'Filtros' : 'Filters',

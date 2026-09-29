@@ -32,6 +32,11 @@ import {
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
+import { NayFab } from './NayFab'
+import { DockSettings } from './DockSettings'
+import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
+import { useLocation } from 'react-router-dom'
+import { parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -41,6 +46,8 @@ const ORANGE_DIM = 'var(--anthropic-orange-dim)'
 const SIZE_KEY = 'agentistics-nay-dock-size'
 const WINDOWS_KEY = 'agentistics-nay-dock-windows'
 const TAB_KEY = 'agentistics-nay-dock-tab'
+/** The chat button's place and look — per browser, never the shared preferences file. */
+const FAB_KEY = 'agentistics-nay-fab'
 /** How long a just-started session may be missing from the fleet before we stop saying it is coming. */
 const ARRIVAL_BUDGET_MS = 20_000
 
@@ -60,7 +67,8 @@ const viewport = () => ({ w: window.innerWidth, h: window.innerHeight })
 export interface NayDockProps {
   lang: Lang
   isMobile: boolean
-  ctx: Pick<AppContext, 'data' | 'currency' | 'brlRate' | 'costBasis' | 'planBasis'>
+  ctx: Pick<AppContext, 'data' | 'currency' | 'brlRate' | 'costBasis' | 'planBasis'
+    | 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
   /** The sidebar's own session filters, so the "Sessões" tab lists what the sidebar lists. */
   filters: Filters
   activeOnly: boolean
@@ -85,6 +93,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const [arriving, setArriving] = useState<Record<string, number>>({})
 
   useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
+  const inSession = useLocation().pathname.startsWith('/sessions/')
+  const shownInSession = useNayFabShownInSession()
+  const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
+  const [fabPrefs, setFabPrefs] = useState<NayFabPrefs>(() => readStored(FAB_KEY, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS))
+  useEffect(() => { writeStored(FAB_KEY, fabPrefs) }, [fabPrefs])
   useEffect(() => { writeStored(TAB_KEY, tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
@@ -260,6 +273,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             {tabButton('sessions', pt ? 'Sessões' : 'Sessions')}
           </div>
         </>)}
+        <DockSettings
+          pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
+          onLeave={() => setDock(d => ({ ...d, open: false }))}
+        />
         <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
           <X size={15} />
         </IconButton>
@@ -326,33 +343,44 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       ))}
 
       {/* THE chat button — always this one, whatever is detached. */}
-      {!(isMobile && dock.open) && (
-        <MinimizedMenu
-          pt={pt}
-          items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
-          onRestore={id => setDock(d => openSession(d, id))}
-          onClose={id => setDock(d => closeWindow(d, id))}
-          anchorStyle={{ position: 'fixed', right: 24, bottom: isMobile ? 'calc(12px + var(--mobile-nav-h, 0px))' : 24, zIndex: 300 }}
-          renderButton={({ onClickCapture, onKeyDown }) => (
-        <button
-          onClickCapture={onClickCapture}
-          onKeyDown={onKeyDown}
-          onClick={() => setDock(d => ({ ...d, open: !d.open }))}
-          aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
-          aria-expanded={dock.open}
-          title="Nay"
-          style={{
-            width: 56, height: 56, borderRadius: 16, border: `1.5px solid ${ORANGE}`,
-            background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-          }}
-        >
-          {dock.open
-            ? <X size={20} color="var(--bg-surface)" />
-            : <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 30, height: 30, borderRadius: 8 }} />}
-        </button>
+      {!(isMobile && dock.open) && fabVisible && (
+        <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
+          {fab => (
+            <MinimizedMenu
+              pt={pt}
+              items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
+              onRestore={id => setDock(d => openSession(d, id))}
+              onClose={id => setDock(d => closeWindow(d, id))}
+              anchorStyle={{ position: 'relative', width: '100%', height: '100%' }}
+              suppressed={fab.dragging}
+              renderButton={({ onClickCapture, onKeyDown }) => (
+                <button
+                  ref={fab.bodyRef}
+                  onPointerDown={fab.onPointerDown}
+                  onPointerMove={fab.onPointerMove}
+                  onPointerUp={fab.onPointerUp}
+                  onPointerCancel={fab.onPointerCancel}
+                  onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
+                  onKeyDown={onKeyDown}
+                  onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
+                  aria-expanded={dock.open}
+                  title={pt ? 'Nay — arraste para mover' : 'Nay — drag to move'}
+                  style={{
+                    width: 56, height: 56, borderRadius: 16, border: `1.5px solid ${ORANGE}`,
+                    background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: fab.dragging ? 'grabbing' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                    touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', padding: 0, willChange: 'transform',
+                  }}
+                >
+                  {dock.open
+                    ? <X size={20} color="var(--bg-surface)" />
+                    : <img src={versionedAsset('/minimalistLogo.png')} alt="" draggable={false} style={{ width: 30, height: 30, borderRadius: 8, pointerEvents: 'none' }} />}
+                </button>
+              )}
+            />
           )}
-        />
+        </NayFab>
       )}
     </>
   )
