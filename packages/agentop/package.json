@@ -33,7 +33,7 @@
     "agentistics",
     "agentop"
   ],
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/blpsoares/agentistics.git",

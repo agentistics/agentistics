@@ -60,6 +60,7 @@
         "headerImage": "icons/nsis-header.bmp",
         "sidebarImage": "icons/nsis-sidebar.bmp"
       }
-    }
+    },
+    "copyright": "Copyright 2026 Bryan Luccas de Paula Soares"
   }
 }
