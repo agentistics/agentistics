@@ -121,6 +121,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/runtime/sessions', 'localShell'],
   ['/api/runtime/runs', 'localShell'],
   ['/api/runtime/tools', 'localShell'],
+  // The command registry (B8.5): the list the web composer offers is built from the project's
+  // `.agentistics` catalogue and the user scope on this host (`command-registry.ts`), so it reads host
+  // files and rides `localShell` with the rest of the native runtime.
+  ['/api/runtime/commands', 'localShell'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */

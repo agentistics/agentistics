@@ -1681,6 +1681,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE COMMAND REGISTRY (B8.5) — `GET /api/runtime/commands`: the ONE command list, for the web
+    // composer, built by the same `loadCommands` the terminal uses (`command-registry.ts`).
+    // `capability-guard.ts` has already required `localShell`; the handler refuses a central itself.
+    if (url.pathname === '/api/runtime/commands') {
+      try {
+        const { commandsRoute } = await import('./command-registry')
+        const res = await commandsRoute(req, url)
+        for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
+        return res
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json({
+          code: safe.body.error,
+          sentence: `an unexpected error occurred — see the server log (ref ${safe.body.ref}).`,
+          ref: safe.body.ref,
+        }, 500)
+      }
+    }
+
     // THE NATIVE RUNTIME'S SESSION ROUTES (B4.3, §28 subset) — `/api/runtime/sessions`,
     // `/api/runtime/sessions/:id/messages`, `/api/runtime/sessions/:id/stream`,
     // `/api/runtime/tools/:execId/approve` and `/api/runtime/runs/:id/cancel`, all matched inside

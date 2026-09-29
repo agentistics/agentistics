@@ -36,6 +36,7 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import {
+  builtinCommandEntries,
   grantsManifest,
   revokeProject,
   trustDecision,
@@ -66,17 +67,12 @@ export const PROJECT_DIR_NAME = '.agentistics'
 export const MAX_FILE_BYTES = 256 * 1024
 
 /**
- * Built-in entries (decision 9). Only what EXISTS today: `agentop code` answers `/exit` itself
- * (`cli-code.ts`), so a repository must not be able to define a command of that name. The rest of
- * the built-in list is UI.6's call and the command registry's (B8.5); built-in profiles and agents
- * are B8.4 / B8.7.
+ * Built-in entries (decision 9): the built-in COMMANDS, taken from the runtime's registry
+ * (`builtinCommandEntries`, B8.5) rather than restated here, so the names B8.1's precedence protects are
+ * exactly the verbs every surface lists. A repository therefore cannot define `/undo` or
+ * `/permissions`, and a user needs `override: true`. Built-in profiles and agents are B8.4 / B8.7.
  */
-export const HOST_BUILTINS: readonly CatalogueEntry[] = [
-  {
-    kind: 'command', name: 'exit', scope: 'builtin', source: {}, enabled: true, trust: 'n/a', problems: [],
-    def: { description: 'Leave the session.', template: '' },
-  },
-]
+export const HOST_BUILTINS: readonly CatalogueEntry[] = builtinCommandEntries()
 
 /** Names a scope directory may hold that are not read here but are not unknown either. */
 const RESERVED_TOP = new Set([

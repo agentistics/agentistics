@@ -38,8 +38,11 @@ import type {
   AnyAgentisticsEvent,
 } from '@agentistics/core'
 import {
+  expandCustomCommand,
   openSession,
   repairInterruptedRun,
+  resolveCommandInput,
+  type BuiltinHandlerId,
   type PersonAnswer,
   type PersonAsker,
   type PersonQuestion,
@@ -50,7 +53,9 @@ import {
   type SessionContentStore,
   type SessionWatcher,
 } from '@agentistics/runtime'
-import { PROVIDER_FLAG_ENV, providerFlagOn } from './config.ts'
+import { HOME_DIR, PROVIDER_FLAG_ENV, providerFlagOn } from './config.ts'
+import { resolveLang } from './cli-lang.ts'
+import { commandListing, helpLines, loadCommands, resolveFileRefs, type LoadedCommands } from './command-registry.ts'
 import { createRuntimeHost, workspaceRootFor, type RuntimeHost } from './runtime-host.ts'
 
 // ── The host seam this module needs beyond `RuntimeHost` (module doc) ──────────────────────────
@@ -103,6 +108,11 @@ export interface CodeCliDeps {
   onInterrupt: (handler: () => void) => () => void
   /** `providerFlagOn()` — the native runtime's BETA flag (`AGENTISTICS_PROVIDER`). Absent reads OFF. */
   flagOn: () => boolean
+  /** The ONE command registry (B8.5, `command-registry.ts`), loaded at session start and on
+   *  `/reload`. Injected so a test reads a catalogue it built, never this machine's. */
+  commands: (cwd: string) => Promise<LoadedCommands>
+  /** The language the registry's sentences are printed in. */
+  lang: 'en' | 'pt'
 }
 
 const DEFAULT_ASK_TIMEOUT_MS = 5 * 60 * 1000
@@ -157,6 +167,8 @@ function defaultDeps(): CodeCliDeps {
       process.on('SIGINT', handler)
       return () => { process.off('SIGINT', handler) }
     },
+    commands: (cwd) => loadCommands({ cwd }),
+    lang: 'en',
   }
 }
 
@@ -385,7 +397,71 @@ function printRecentTurns(d: CodeCliDeps, messages: readonly { seq: number; mess
 
 // ── The drive loop: single-shot off a tty, interactive on one ──────────────────────────────────
 
-async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string | undefined, d: CodeCliDeps): Promise<number> {
+// ── Commands: every typed line goes through the ONE registry (B8.5) ───────────────────────────
+
+type LineOutcome =
+  | { kind: 'send'; prompt: string }
+  | { kind: 'exit' }
+  /** Answered here without a turn; `code` is what a single-shot run exits with. */
+  | { kind: 'handled'; code: number }
+
+interface CommandState { loaded: LoadedCommands; cwd: string }
+
+const pickLang = (d: CodeCliDeps, s: { en: string; pt: string }): string => (d.lang === 'pt' ? s.pt : s.en)
+
+/**
+ * The built-ins this terminal answers itself. A built-in with no handler here is refused in words —
+ * listed by `/help` like every other, never silently sent to the model as text.
+ */
+const TERMINAL_HANDLERS: Partial<Record<BuiltinHandlerId, (st: CommandState, d: CodeCliDeps) => Promise<LineOutcome>>> = {
+  exit: async () => ({ kind: 'exit' }),
+  help: async (st, d) => {
+    for (const line of helpLines(commandListing(st.loaded, 'terminal'), d.lang)) d.stdout(line)
+    return { kind: 'handled', code: 0 }
+  },
+  reload: async (st, d) => {
+    st.loaded = await d.commands(st.cwd)
+    const n = st.loaded.registry.commands.length
+    d.stdout(d.lang === 'pt' ? `Catálogo relido: ${n} comandos.` : `Catalogue read again: ${n} commands.`)
+    return { kind: 'handled', code: 0 }
+  },
+}
+
+async function interpretLine(line: string, st: CommandState, d: CodeCliDeps): Promise<LineOutcome> {
+  const r = resolveCommandInput(st.loaded.registry, line, { surface: 'terminal', running: false })
+  switch (r.kind) {
+    case 'text':
+      return { kind: 'send', prompt: r.text }
+    case 'refused':
+      d.stderr(pickLang(d, r.why))
+      return { kind: 'handled', code: 2 }
+    case 'builtin': {
+      const handler = TERMINAL_HANDLERS[r.handlerId]
+      if (handler) return handler(st, d)
+      d.stderr(d.lang === 'pt'
+        ? `/${r.command.name} ainda não tem ação no agentop code; /help lista o que funciona aqui.`
+        : `/${r.command.name} has no action in agentop code yet; /help lists what works here.`)
+      return { kind: 'handled', code: 2 }
+    }
+    case 'custom': {
+      for (const s of r.command.ignored) d.stderr(pickLang(d, s))
+      if (r.command.agent !== undefined || r.command.model !== undefined) {
+        d.stderr(d.lang === 'pt'
+          ? `/${r.command.name} indica um perfil de agente ou modelo; o agentop code ainda não troca nenhum dos dois, então roda sob os da sessão.`
+          : `/${r.command.name} names an agent profile or model; agentop code does not switch either yet, so it runs under the session's own.`)
+      }
+      const resolved = await resolveFileRefs(r.refs, { workspaceRoot: st.loaded.workspaceRoot, cwd: st.cwd, home: HOME_DIR })
+      const out = expandCustomCommand(r.command, r.args, resolved)
+      if (!out.ok) {
+        d.stderr(pickLang(d, out.why))
+        return { kind: 'handled', code: 2 }
+      }
+      return { kind: 'send', prompt: out.text }
+    }
+  }
+}
+
+async function drive(host: RuntimeHost, sessionId: string, cwd: string, initialPrompt: string | undefined, d: CodeCliDeps): Promise<number> {
   const activeAbort: { current: AbortController | null } = { current: null }
   let pressCount = 0
   const stop = d.onInterrupt(() => {
@@ -394,34 +470,39 @@ async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string
   })
 
   try {
+    const st: CommandState = { loaded: await d.commands(cwd), cwd }
     if (!d.isTty) {
       if (initialPrompt === undefined) {
         d.stderr('agentop code: no prompt given and stdin is not a terminal.')
         return 2
       }
-      const outcome = await runOnePrompt(host, sessionId, initialPrompt, d, activeAbort)
+      const first = await interpretLine(initialPrompt, st, d)
+      if (first.kind === 'exit') return 0
+      if (first.kind === 'handled') return first.code
+      const outcome = await runOnePrompt(host, sessionId, first.prompt, d, activeAbort)
       return reportOutcome(d, outcome)
     }
 
     let pending = initialPrompt
     let lastCode = 0
     for (;;) {
-      let prompt: string
+      let line: string
       if (pending !== undefined) {
-        prompt = pending
+        line = pending
         pending = undefined
       } else {
         if (pressCount >= 2) break
         d.write('> ')
-        const line = await d.readLine()
-        if (line === null) { d.stdout(''); break }
-        const trimmed = line.trim()
-        if (trimmed === '') continue
-        if (trimmed === '/exit') break
-        prompt = trimmed
+        const read = await d.readLine()
+        if (read === null) { d.stdout(''); break }
+        line = read.trim()
+        if (line === '') continue
       }
+      const next = await interpretLine(line, st, d)
+      if (next.kind === 'exit') break
+      if (next.kind === 'handled') continue
       pressCount = 0
-      const outcome = await runOnePrompt(host, sessionId, prompt, d, activeAbort)
+      const outcome = await runOnePrompt(host, sessionId, next.prompt, d, activeAbort)
       lastCode = reportOutcome(d, outcome)
       if (pressCount >= 2) break
     }
@@ -514,7 +595,7 @@ async function runNewSession(args: CodeArgsNew, d: CodeCliDeps): Promise<number>
     leased = true
 
     printBanner(d, workspaceRoot, sessionId)
-    return await drive(host, sessionId, args.prompt, d)
+    return await drive(host, sessionId, cwd, args.prompt, d)
   } finally {
     if (sessionId !== undefined && leased) await host.release(sessionId).catch(() => {})
     await host.dispose().catch(() => {})
@@ -549,7 +630,7 @@ async function runResume(args: CodeArgsResume, d: CodeCliDeps): Promise<number> 
     printBanner(d, opened.session.workspaceRoot, args.sessionId)
     printRecentTurns(d, opened.messages)
 
-    return await drive(host, args.sessionId, args.prompt, d)
+    return await drive(host, args.sessionId, opened.session.cwd, args.prompt, d)
   } finally {
     if (leased) await host.release(args.sessionId).catch(() => {})
     await host.dispose().catch(() => {})
@@ -641,6 +722,7 @@ const LS_HELP = 'Usage: agentop code ls [--limit <n>]'
 
 export async function runCode(args: string[], deps: Partial<CodeCliDeps> = {}): Promise<number> {
   const d: CodeCliDeps = { ...defaultDeps(), ...deps }
+  if (deps.lang === undefined) d.lang = await resolveLang()
 
   if (args[0] === '--help' || args[0] === '-h') {
     d.stdout(HELP)

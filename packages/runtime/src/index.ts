@@ -57,3 +57,6 @@ export * from './tools/env.ts'
 
 // ── B8.1: the harness catalogue's pure core (the host loader is B8.2) ──────────────────────────
 export * from './catalogue/index.ts'
+
+// ── B8.5: the command registry every surface reads ──────────────────────────────────────────────
+export * from './commands/index.ts'

@@ -10,7 +10,11 @@ import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { fromAnthropicStopReason, fromAnthropicUsage, type AgentisticsEvent } from '@agentistics/core'
 import {
+  buildCommandRegistry,
+  builtinCommandEntries,
   createFileContentStore,
+  parseCommandFile,
+  resolveCatalogue,
   openSqliteSessionStore,
   type InvocationResult,
   type ProviderClient,
@@ -136,6 +140,8 @@ function makeDeps(overrides: Partial<CodeCliDeps>): { deps: Partial<CodeCliDeps>
     clearTimeout: (h) => clearTimeout(h),
     onInterrupt: () => () => {},
     flagOn: () => true,
+    commands: async () => ({ registry: buildCommandRegistry([]), workspaceRoot: ws, projectTrusted: false }),
+    lang: 'en',
     ...overrides,
   }
   return { deps, out }
@@ -316,5 +322,47 @@ describe('agentop code — the BETA flag', () => {
     expect(await runCode(['--model', 'm', 'hi'], deps)).toBe(1)
     expect(built).toBe(false)
     expect(out.join('')).toContain('AGENTISTICS_PROVIDER=1')
+  })
+})
+
+describe('agentop code — the command registry (B8.5)', () => {
+  test('/help lists the registry, an unknown or unhandled command is refused in words, and none reaches the model', async () => {
+    const client = scriptedStreamingClient([])
+    const host = makeHostFactory({ client })
+    const { deps, out } = makeDeps({ host, readLine: scriptedReadLine(['/help', '/nope', '/undo', '/exit']) })
+
+    const code = await runCode(['--model', 'claude-test'], deps)
+
+    expect(code).toBe(0)
+    const joined = out.join('')
+    expect(joined).toContain('/help')
+    expect(joined).toContain('/catalogue [command|skill|agent|mcpServer|permissionProfile|afterEdit]')
+    expect(joined).toContain('!there is no /nope command')
+    expect(joined).toContain('!/undo has no action in agentop code yet')
+    expect(client.requests).toHaveLength(0)
+  })
+
+  test('a custom command expands into ONE message: arguments substituted, @path inlined, ! literal', async () => {
+    await writeFile(join(ws, 'note.md'), 'NOTE BODY\n')
+    const file = parseCommandFile({
+      name: 'greet', scope: 'user', path: '/u/commands/greet.md',
+      text: '---\ndescription: greet someone\n---\nSay hi to $1 !`rm -rf /` using @note.md\n',
+    })
+    const entries = resolveCatalogue([...builtinCommandEntries(), file]).entries.filter(e => e.enabled)
+    const client = scriptedStreamingClient([{ content: [{ type: 'text', text: 'ok' }], deltas: ['ok'] }])
+    const host = makeHostFactory({ client })
+    const { deps } = makeDeps({
+      host,
+      isTty: false,
+      commands: async () => ({ registry: buildCommandRegistry(entries), workspaceRoot: ws, projectTrusted: false }),
+    })
+
+    const code = await runCode(['--model', 'claude-test', '/greet', '"Ana Maria"'], deps)
+
+    expect(code).toBe(0)
+    expect(client.requests).toHaveLength(1)
+    const sent = JSON.stringify(client.requests[0]!.messages)
+    expect(sent).toContain('Say hi to Ana Maria !`rm -rf /` using @note.md')
+    expect(sent).toContain('NOTE BODY')
   })
 })
