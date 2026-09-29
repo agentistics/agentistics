@@ -5,7 +5,7 @@
   "version": "1.1.0",
   "publisher": "blpsoares",
   "private": true,
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "icon": "media/icon.png",
   "engines": {
