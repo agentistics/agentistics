@@ -57,4 +57,4 @@ Requires a running agentistics server (`agentop server` or the Windows desktop a
 
 ## License
 
-MIT — part of the [agentistics](https://github.com/agentistics/agentistics) project.
+FSL-1.1-ALv2 — part of the [agentistics](https://github.com/agentistics/agentistics) project.
