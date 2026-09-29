@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -60,7 +61,7 @@ import {
   type NestRefusal, type SessionUserGroup,
   canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
   nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
-  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup,
+  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount,
   subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
 import {
@@ -457,6 +458,29 @@ export function SessionsAside({
    *  2 the moment anything ahead of them fails to resolve. Local: a drag is not shared state. */
   const [dragFrom, setDragFrom] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
+  /*
+   * THE END OF ANY DRAG CLEARS EVERY DRAG HIGHLIGHT — see `dragCleanup.ts`. A drop handled by a
+   * member row stops propagation, so the folder it landed in never cleared its own orange; this
+   * does, for every highlight at once. Deferred a tick so the specific drop handler runs first, and
+   * on `drop` as well as `dragend` because a row that MOVED to another folder unmounts, and a
+   * detached node's `dragend` never reaches the window.
+   */
+  useEffect(() => {
+    const done = () => {
+      setTimeout(() => {
+        setDragOverGroupId(null); setGroupRowDragOver(null); setGroupReorderOver(null)
+        setNestOverGroupId(null); setDraggingGroupId(null); setDragFrom(null); setDragOver(null)
+        const el = document.activeElement as HTMLElement | null
+        if (el && el.matches?.(':focus-visible') && blurAfterDrag(el)) el.blur()
+      }, 0)
+    }
+    window.addEventListener('drop', done, true)
+    window.addEventListener('dragend', done, true)
+    return () => {
+      window.removeEventListener('drop', done, true)
+      window.removeEventListener('dragend', done, true)
+    }
+  }, [])
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; state: string; verbs: RowVerb[] } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   /** The task picker, anchored where the menu was — see `pickMenuAction`. */
@@ -682,9 +706,9 @@ export function SessionsAside({
    * component's own state, and threading fifteen props through a separate component for a shape
    * that recurses exactly one level deep would be the same code, worse to read.
    *
-   * COUNTING: a folder's header shows its OWN direct sessions only (`gRows.length`) — a parent's
-   * count never rolls up its children's sessions, so nesting a busy folder never makes an unrelated
-   * parent's number jump.
+   * COUNTING: a folder's header shows everything it CONTAINS — its own sessions plus its nested
+   * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
+   * nothing but subfolders read `0`.
    */
   const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
     const { group, rows: gRows } = entry
@@ -878,7 +902,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{gRows.length}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderSessionCount(group.id, groupRowsResolved)}</span>
               </button>
               <button
                 onClick={e => {
@@ -1576,14 +1600,14 @@ export function SessionsAside({
               label: hiddenGroups.has(groupMenu.id) ? (pt ? 'Mostrar nome' : 'Show name') : (pt ? 'Ocultar nome' : 'Hide name'),
               enabled: true,
             },
-            // A nested folder has no order of its own to change (pinned first under its parent).
-            ...(isChild ? [] : [
-              { action: 'move-up', label: pt ? 'Mover para cima' : 'Move up', enabled: menuIndex > 0 },
-              {
-                action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
-                enabled: menuIndex !== -1 && menuIndex < siblingIds.length - 1,
-              },
-            ]),
+            // EVERY folder can step, nested ones included (owner, 2026-09-29): a nested folder moves
+            // among its OWN parent's children — `planStepGroup` already scopes the step to that
+            // sibling list, so it can never leave its parent this way ("Tirar da pasta" does that).
+            { action: 'move-up', label: pt ? 'Mover para cima' : 'Move up', enabled: menuIndex > 0 },
+            {
+              action: 'move-down', label: pt ? 'Mover para baixo' : 'Move down',
+              enabled: menuIndex !== -1 && menuIndex < siblingIds.length - 1,
+            },
             // NESTING (one level max): a folder already nested only offers "take it out"; a
             // top-level one only offers "move it into" — the two are never both meaningful for the
             // same folder, since a child cannot itself hold a folder.
