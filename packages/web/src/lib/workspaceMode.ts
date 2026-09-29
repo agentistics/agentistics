@@ -41,8 +41,15 @@ export function modeOfPath(pathname: string): WorkspaceMode {
  * place. `back` is only honoured when it really is a dashboard path — a stored `/sessions/...`
  * would make the switch a no-op that looks broken.
  */
-export function pathForMode(mode: WorkspaceMode, back?: string | null): string {
-  if (mode === 'sessions') return SESSIONS_ROOT
+export function pathForMode(mode: WorkspaceMode, back?: string | null, sessionsBack?: string | null): string {
+  if (mode === 'sessions') {
+    // RETURNING TO SESSIONS RETURNS TO THE SESSION YOU HAD OPEN (owner, 2026-09-29): it went to the
+    // fleet overview every time, so a trip to the dashboard and back lost your place — the same
+    // failure the dashboard side was fixed for above. Only a real sessions path is honoured; a
+    // session that has since gone is the sessions page's own business to say.
+    const last = (sessionsBack ?? '').trim()
+    return modeOfPath(last) === 'sessions' ? last : SESSIONS_ROOT
+  }
   const candidate = (back ?? '').trim()
   if (candidate.startsWith('/') && modeOfPath(candidate) === 'dashboard') return candidate
   return '/'

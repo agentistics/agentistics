@@ -706,9 +706,9 @@ export function NewSessionModal({
               nothing at all. */}
           {visibleQuestions(wizardHarness).model && (
             <Field label={pt ? 'Modelo (opcional)' : 'Model (optional)'}>
-              {/* A CLOSED picker, never free text: the list is the actual set this harness offers,
-                  and a typed id it does not recognise fails at spawn with no explanation on
-                  screen. The wizard's job is to offer only what will work.
+              {/* CLOSED where the list is the CLI's own set; it takes a typed id only where the
+                  list is the server's fallback table, which cannot name every id the CLI accepts
+                  (see `ModelSelect`'s header and `server/model-catalog.ts`).
 
                   It was a bare `<select>`, which on every platform draws the OS's own menu — a
                   control that ignores this application's palette and its 44px mobile target, and
@@ -722,6 +722,7 @@ export function NewSessionModal({
                 onChange={setModel}
                 options={wizardHarness!.models}
                 unsetLabel={modelUnset}
+                freeText={wizardHarness!.modelFreeText === true}
               />
             </Field>
           )}

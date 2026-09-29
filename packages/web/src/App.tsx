@@ -62,7 +62,7 @@ import { BudgetPanel } from './components/BudgetPanel'
 import { SessionDrilldownModal } from './components/SessionDrilldownModal'
 import { TranscriptModal } from './components/TranscriptModal'
 import type { PrefsDraft, AppContext } from './lib/app-context'
-import { TtyChat } from './components/TtyChat'
+import { NayDock } from './components/nay/NayDock'
 import { UpdateModal } from './components/UpdateModal'
 import { InstallModal } from './components/InstallModal'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
@@ -73,6 +73,7 @@ import { ModeSwitch } from './components/nav/ModeSwitch'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
+import { splitIdOf } from './lib/splitRoute'
 import { getPanelLayout, isPanelShown, setBandOpen, setSlotRightOpen, showPanel, usePanelSlots } from './lib/panelSlots'
 import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
@@ -100,7 +101,6 @@ import { ChangePassword } from './components/ChangePassword'
 import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
-import { type ChatModelId } from './lib/chatModels'
 import { HARNESS_LABELS } from './lib/harness'
 import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
@@ -120,6 +120,7 @@ import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 
 /**
@@ -2321,6 +2322,15 @@ export default function AppLayout() {
     ? headerFleet.rows.find(r => r.id === selectedSessionId || r.conversationId === selectedSessionId)
     : undefined
   const selectedSessionRow = selectedFleetSession ? headerFleetIndex.get(selectedFleetSession.id) : undefined
+  /**
+   * THE STRIP'S OWN SESSION — absent while the workspace is SPLIT (`lib/splitRoute.ts`). Each side
+   * of a split carries its own header, so a title and verbs up here would name one of the two
+   * sessions as though it were the only one on screen.
+   */
+  const [splitSearch] = useSearchParams()
+  const splitActive = inSessionsWorkspace && !isMobile && splitIdOf(splitSearch, selectedSessionId) !== null
+  const headerSession = splitActive ? undefined : selectedFleetSession
+  const headerSessionRow = splitActive ? undefined : selectedSessionRow
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -2543,7 +2553,7 @@ export default function AppLayout() {
     installModalShownRef.current = true
     setShowInstallModal(true)
   }, [data, loading, pwaInstalled, installDismissedPref, isCentral])
-  const [chatModel, setChatModel] = useState<ChatModelId | null>(null)
+  const [chatModel, setChatModel] = useState<string | null>(null)
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState('ping')
   // The repository explorer's autosave switch. A plain preference, loaded with the rest below and
@@ -2618,7 +2628,7 @@ export default function AppLayout() {
       }
       if (prefs.currency) setCurrencyState(prefs.currency)
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
-      if (prefs.chatModel) setChatModel(prefs.chatModel as ChatModelId)
+      if (prefs.chatModel) setChatModel(prefs.chatModel)
       if (prefs.chatSoundEnabled !== undefined) setChatSoundEnabled(prefs.chatSoundEnabled)
       // Absent reads as OFF, so this is `=== true` rather than the `!== undefined` guard above —
       // autosave was never on before it had a switch, and an upgrade must not turn it on.
@@ -3569,15 +3579,18 @@ export default function AppLayout() {
       // same vertical line the content below it does — that is the alignment worth keeping, and it
       // is the left edge, which is the one the eye follows down the page.
       width: '100%', padding: `0 ${PAGE_INSET}px`, boxSizing: 'border-box',
-      display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+      display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative',
     }}>
-      {selectedFleetSession && (
+      {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
+          Cancel" — laid over it, see `ChatSelectionOverlay`. */}
+      <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
+      {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
           <span style={{
             fontSize: 13.5, fontWeight: 650, color: 'var(--text-primary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
-            {selectedFleetSession.title}
+            {headerSession.title}
           </span>
           {/* THE TASK CONTROL MOVED DOWN, THEN AWAY (design item 3, then owner 2026-09-21) — it
               first moved from this header into the bottom bar's own left end
@@ -3594,8 +3607,8 @@ export default function AppLayout() {
             fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 1000000,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
-            {selectedFleetSession.stateLabel}
-            {selectedFleetSession.project ? ` · ${selectedFleetSession.project}` : ''}
+            {headerSession.stateLabel}
+            {headerSession.project ? ` · ${headerSession.project}` : ''}
           </span>
         </div>
       )}
@@ -3652,9 +3665,9 @@ export default function AppLayout() {
           magnifier and the "⋯" session-actions menu, per the owner's drawing: "the top bar becomes
           clean and dedicated to the title etc." */}
 
-      {selectedSessionRow && (
+      {headerSessionRow && (
         <SessionActions
-          row={selectedSessionRow}
+          row={headerSessionRow}
           lang={lang === 'pt' ? 'pt' : 'en'}
           act={headerFleetAct}
           onGone={() => navigate('/sessions')}
@@ -3663,9 +3676,9 @@ export default function AppLayout() {
           // until the next poll carries the new row. See `reopenedSessionRoute`.
           onOpened={id => {
             const r = reopenedSessionRoute(id, {
-              id: selectedSessionRow.id,
-              harness: selectedSessionRow.harness,
-              title: selectedSessionRow.title,
+              id: headerSessionRow.id,
+              harness: headerSessionRow.harness,
+              title: headerSessionRow.title,
             })
             navigate(r.path, r.options)
           }}
@@ -4151,7 +4164,7 @@ export default function AppLayout() {
                 </div>
                 {/* Version badge */}
                 <a
-                  href="https://github.com/blpsoares/agentistics/releases/latest"
+                  href="https://github.com/agentistics/agentistics/releases/latest"
                   target="_blank" rel="noreferrer"
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -4177,11 +4190,11 @@ export default function AppLayout() {
                 {
                   title: lang === 'pt' ? 'Projeto' : 'Project',
                   links: [
-                    { href: 'https://github.com/blpsoares/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
-                    { href: 'https://github.com/blpsoares/agentistics/releases', label: 'Releases' },
-                    { href: 'https://github.com/blpsoares/agentistics/issues', label: 'Issues' },
-                    { href: 'https://github.com/blpsoares/agentistics/pulls', label: 'Pull Requests' },
-                    { href: 'https://github.com/blpsoares/agentistics#readme', label: 'README' },
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
+                    { href: 'https://github.com/agentistics/agentistics/releases', label: 'Releases' },
+                    { href: 'https://github.com/agentistics/agentistics/issues', label: 'Issues' },
+                    { href: 'https://github.com/agentistics/agentistics/pulls', label: 'Pull Requests' },
+                    { href: 'https://github.com/agentistics/agentistics#readme', label: 'README' },
                   ],
                 },
                 {
@@ -4197,9 +4210,9 @@ export default function AppLayout() {
                 {
                   title: lang === 'pt' ? 'Comunidade' : 'Community',
                   links: [
-                    { href: 'https://github.com/blpsoares/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
-                    { href: 'https://github.com/blpsoares/agentistics/fork', label: 'Fork' },
-                    { href: 'https://github.com/blpsoares/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
+                    { href: 'https://github.com/agentistics/agentistics/fork', label: 'Fork' },
+                    { href: 'https://github.com/agentistics/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
                     { href: 'https://github.com/blpsoares', label: '@blpsoares' },
                   ],
                 },
@@ -4847,29 +4860,18 @@ export default function AppLayout() {
         />
       )}
 
-      {/* TTY Chat (Nay) — floating button + panel. Hidden on a pure central (aggregator with
-          no local harness): the chat needs a locally-installed harness to be meaningful.
-          Also hidden when the server revoked the localChat capability (an exposed instance
-          answers /api/chat-tty and /api/exec with 403 — see server/capability-guard.ts), so the
-          UI never offers an action that cannot work. */}
-      {!teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false && chatOffered && (
-        <TtyChat
+      {/* The Nay chat — floating button + a panel of REAL sessions (`NayDock`). A Nay conversation
+          is a managed session, so the panel needs BOTH the chat switch and the session power: the
+          `localChat` capability + the user's chat switch (`chatOffered`), and `localShell`, which
+          guards every `/api/fleet` route. Hidden on a pure central, which has no local harness. */}
+      {!teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
+        && teamSession?.capabilities?.localShell !== false && chatOffered && (
+        <NayDock
           lang={lang}
-          chatModel={chatModel}
-          chatSoundEnabled={chatSoundEnabled}
-          chatSoundId={chatSoundId}
-          filters={filters}
-          setFilters={setFilters}
-          onPdfExport={(range) => setPdfDirectExportRange(range)}
           isMobile={isMobile}
-          onModelSet={(model) => {
-            setChatModel(model)
-            fetch('/api/preferences', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chatModel: model }),
-            }).catch(() => {})
-          }}
+          ctx={appCtx}
+          filters={filters}
+          activeOnly={activeOnly}
         />
       )}
 

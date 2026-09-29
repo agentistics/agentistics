@@ -36,7 +36,7 @@ packages/server/bin/cli.ts  (binary entry point — agentop)
   ├── agentop restart …    → bounce a mode's service (`server`/`watch` → systemd; `central` → central.sh restart; `--all` → cli-start.ts restartAllServices over every running service). `--rebuild` rebuilds before restarting instead of just bouncing (`central` → `up`; machine → `compose build --no-cache` then `compose up -d --force-recreate`; `server`/`watch` → `rebuildNativeBinary()`, i.e. `bun run bin`, which needs the repo checkout — outside one it says so and restarts the existing build). **A rebuild is a FULL rebuild**: the Docker paths pass `--no-cache`, because a cached one could hand back the very image it was asked to replace, and they say so on the way in — that build is several minutes. `--cache` is the escape hatch (reuse Docker's layer cache); `-y`/`-n` answer `central.sh up`'s "re-run interactive setup?" prompt up front, so an unattended rebuild never waits on a keypress. All of it is resolved by the pure `rebuild-flags.ts` (`parseRebuildFlags` / `centralRebuildArgs` / `composeRebuildCommands`) — the shell receives an already-decided answer, `-y` with `-n` (or `--cache` with `--no-cache`) is refused rather than resolved, and the control center's rebuild verb passes `-n` EXPLICITLY instead of relying on its piped child failing `[ -t 0 ]`. A plain `agentop central up` / `central.sh up` is not a rebuild and keeps its cached build
   ├── agentop tui          → an ALIAS for `start`, renamed in cli.ts's one-line dispatch. There is no second Ink app: the metrics ARE the control center's `dashboard` tab, and a branch of its own would be a copy that starts identical and drifts
   ├── agentop watch        → server/otel-watcher.ts (daemon only)
-  ├── agentop central …    → server/cli-central.ts (up/init/down/logs/status/restart/pull/setup-token/reset-password). **HOW a central runs is the USER'S choice, not an inference** — the pure `central-runtime.ts` holds the three shapes (`docker-build` = central.sh builds from the checkout, `docker-image` = pull ghcr.io/blpsoares/agentistics, `native` = the binary IS the server) plus which of them work HERE and why not. It used to be pure inference (a checkout meant central.sh, no checkout meant the image), which made two reasonable requests impossible to express: the published image from inside a clone, and a native server anywhere. `up` now takes `--image` / `--build` / `--native` (+ `--bg`, which finally exposes the detached native start that only the control center could reach), the wizard ASKS and records the answer in `AGENTISTICS_CENTRAL_RUNTIME` — read by the CLI only, passed into no container — and every later action resolves the same way the first did. **A requested shape that cannot work is REFUSED in a sentence, never downgraded**: a `--native` that quietly became a Docker start is a central running under a shape its operator did not choose. `defaultCentralRuntime` reproduces the old inference exactly and `central-runtime.test.ts` pins it against `planCentralStart`, so an upgrade changes nothing for an existing central. `up` still takes -y/-n and --cache/--no-cache
+  ├── agentop central …    → server/cli-central.ts (up/init/down/logs/status/restart/pull/setup-token/reset-password). **HOW a central runs is the USER'S choice, not an inference** — the pure `central-runtime.ts` holds the three shapes (`docker-build` = central.sh builds from the checkout, `docker-image` = pull ghcr.io/agentistics/agentistics, `native` = the binary IS the server) plus which of them work HERE and why not. It used to be pure inference (a checkout meant central.sh, no checkout meant the image), which made two reasonable requests impossible to express: the published image from inside a clone, and a native server anywhere. `up` now takes `--image` / `--build` / `--native` (+ `--bg`, which finally exposes the detached native start that only the control center could reach), the wizard ASKS and records the answer in `AGENTISTICS_CENTRAL_RUNTIME` — read by the CLI only, passed into no container — and every later action resolves the same way the first did. **A requested shape that cannot work is REFUSED in a sentence, never downgraded**: a `--native` that quietly became a Docker start is a central running under a shape its operator did not choose. `defaultCentralRuntime` reproduces the old inference exactly and `central-runtime.test.ts` pins it against `planCentralStart`, so an upgrade changes nothing for an existing central. `up` still takes -y/-n and --cache/--no-cache
   ├── agentop member …     → server/cli-member.ts (connect/leave/status; whoami-verified, no browser)
   ├── agentop session …    → server/sessions/cli-session.ts (start/ls/list/attach/kill/rename/note;
   │                          `--bg` detaches via tmux, attach prints the REAL detach key; `list`
@@ -779,8 +779,9 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   ├── lib/
   │   ├── app-context.ts        → AppContext interface (React context type shared by all pages)
   │   ├── componentCatalog.tsx  → catalog of all components available in the custom layout builder
-  │   ├── chatModels.ts         → web-only model list
+  │   ├── chatModel.ts          → PURE: which model the Nay chat runs + its label, read off `/api/chat-harnesses` (the server's ONE model catalog, `server/model-catalog.ts` — each CLI's own list where it publishes one, the verified `HARNESS_MODELS` table + a typed id where it does not). The old hardcoded `chatModels.ts` is gone
   │   ├── chatSounds.ts         → 5 synthesized notification sounds via Web Audio API (Ping, Chime, Soft, Bell, Pop)
+  │   ├── nayDock.ts            → PURE: the Nay chat's geometry (resizable docked panel) and WHERE a session opens — a detached window holding it is raised/restored, otherwise it opens in the panel; one session is never on screen twice
   │   ├── notifications.ts      → notification store (useSyncExternalStore) + render-time pt/en i18n (NOTIFICATION_TEXT keyed by code, interpolates meta)
   │   └── harness.ts            → HARNESS_LABELS, HARNESS_COLORS, capable(harness, metric), HARNESS_INFO (data-source/contains/missing/note metadata for HarnessInfoPanel)
   ├── hooks/
@@ -819,6 +820,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
       │                          panels (top projects, languages) are on Home, sessions are the
       │                          sessions workspace's, and the dimension the page was really asked
       │                          for is the REPOSITORY — `/projects` redirects to `/repositories`
+      ├── nay/NayDock.tsx       → **the Nay chat is REAL SESSIONS** (docs/superpowers/specs/2026-09-29-nay-as-sessions-design.md). A Nay conversation is an ordinary managed `claude` session whose cwd is `~/.agentistics/nay-chat` (`isNayCwd`, core `nay.ts` — the cwd IS the marker, no new field), started by `POST /api/fleet/nay` (`sessions/nay-web.ts` = `runFleetSpawn` with the directory fixed, gated by `/api/fleet`'s `localShell` AND the chat switch) and filed under the user group "Nay" (`planNayFiling`). The panel draws the workspace's own `SessionChat`, so the composer (attachments, metrics chip, mic, auto mode) is that one, never a copy; its tabs are **Nay** (running Nay sessions + new conversation) and **Sessões** (the same `SessionsAside`, whose new `onCreated`/`selectedId` props keep it in the panel instead of navigating). The fixed button is ALWAYS the chat button; detached windows minimize to orange pills. The old `TtyChat` (`claude --print` per message) is gone; `chat-drivers/` + `/api/chat-tty` are no longer used by the panel
       ├── HarnessInfoPanel.tsx  → inline panel explaining each harness's data sources / what's captured / what's missing (and why) / caveats; driven by HARNESS_INFO in lib/harness.ts
       ├── PreferencesModal.tsx  → unified Settings modal with tabs: Preferences / Live / Install (Environment tab removed)
       ├── TeamLogin.tsx / TeamMembers.tsx / TeamSettings.tsx → central: password login, members panel (mint/rotate/revoke/rename + presence), team settings (interval/express, offline-data policy)
@@ -1484,7 +1486,7 @@ The display **name is set by the central** on the minted token — there is no n
   (unknown machine, missing cache), so precision is added, never invented. Project / repo / tag /
   model / date genuinely have no cache granularity and stay cache-blind (`cacheBlindScope`).
 - **The central is the sole authority on the push interval** — members clamp to `max(central, EXPRESS_MIN_SEC)`; there is no faster member override.
-- **`agentop central` runs from anywhere** — in a repo checkout it wraps `central.sh` (which does `build: .`); from the standalone binary (no repo) `cli-central.ts` falls back to a Docker-image path: it materializes a compose that pulls `ghcr.io/blpsoares/agentistics:<version>` + generates `central.env` into `~/.agentistics/central/` and drives `docker compose` directly. The image is published to GHCR by the `publish-image` job in `release.yml`. Override the image with `AGENTISTICS_IMAGE`.
+- **`agentop central` runs from anywhere** — in a repo checkout it wraps `central.sh` (which does `build: .`); from the standalone binary (no repo) `cli-central.ts` falls back to a Docker-image path: it materializes a compose that pulls `ghcr.io/agentistics/agentistics:<version>` + generates `central.env` into `~/.agentistics/central/` and drives `docker compose` directly. The image is published to GHCR by the `publish-image` job in `release.yml`. Override the image with `AGENTISTICS_IMAGE`.
 - **Per-connection sharing rules — projects and repositories, denylist or allowlist, never on the
   wire.** A connection restricts what it receives across two dimensions (`repo`/`project`, plus
   the fixed `none` bucket for sessions with no resolvable repo) under one of two modes:
@@ -2756,8 +2758,37 @@ interchangeable.
 - **the VS Code extension** — `packages/vscode`, a client of `agentop server` and nothing more.
 - **`agentop session …`** — the CLI verbs.
 
+**The Sessions workspace can SPLIT: two sessions side by side, desktop only, never more**
+(docs/superpowers/specs/2026-09-29-sessions-split-view-design.md). The second session is `?split=<id>`
+(`lib/splitRoute.ts`, pure: every gesture's landing place), each side is a whole `SessionsPageBody`
+wrapped in a `PaneFrame`, and **every store that assumed one open session keeps one state PER PANE**
+(`lib/paneScope.ts`): `panelSlots`, `floatingPanels`, `artifactsStore`'s focus request, the shell-band
+prefs and the `ag-gap-*` DOM ids. Hooks read the pane from context; an imperative call outside React
+uses the ACTIVE pane, marked in each frame's capture phase. The main pane keeps every historical key
+and id, so a browser that never splits sees nothing change. **A new store or DOM id that assumes "the
+open session" must be pane-scoped the same way**, or the two sides will fight over it. One of each
+global thing: the leave guard (on main, with both sessions' keys), the idle watch, the pressure
+notification, and the right-edge report (rightmost pane).
+
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
+
+### Mentioning and forwarding in the conversation — see docs/sessions-web.md
+
+- **`#` mentions a session, `@` is MCP, `/` is the harness's commands** — never overload one. A chip
+  is `#«Title · shortId»` and carries its own id (`lib/sessionMention.ts`); **`expandSessionMentions`
+  runs in `send()` so the harness never receives a raw `#` from a chip** (Claude Code reads a message
+  opening with `#` as a memory note). A mention is a POINTER; content travels only by Forward.
+- **Forward defaults to the target's DRAFT** (appended through `sessionScratch` under the target's
+  `scratchKey`, never replacing), and "send now" is the existing `broadcast` verb — no second write
+  path. The block carries the origin and nothing else (`lib/chatForward.ts`).
+- **Selection mode is published to the header through `lib/chatSelection.ts`**, not threaded as
+  props, and is keyed on `turnKey`, never on a turn's index (the conversation is a sliding window).
+  `Esc` is checked before the composer's stop verb.
+- **A reply is a LIST of quotes** (`replyQuote.ts`'s `addReply`/`orderReplies`/`quoteAll`): Reply
+  ADDS, selection's `Reply (N)` adds all, and they go out in conversation order through
+  `composeReply`'s blank-line rule. `sessionScratch.readReply` returns an array and still reads the
+  old single-object shape.
 
 ### Idle sessions — the Sessions workspace's bell, review card and review modal
 

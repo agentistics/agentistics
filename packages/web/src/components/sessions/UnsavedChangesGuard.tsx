@@ -36,9 +36,14 @@ export interface UnsavedChangesGuardProps {
   lang: 'pt' | 'en'
   /** Every id the open session answers to; empty when no session is open. */
   sessionKeys: readonly string[]
+  /**
+   * False on the SECOND pane of a split view: the guard patches the router's own navigator, so two
+   * of them would ask twice — the main pane's one guard carries both sessions' keys instead.
+   */
+  active?: boolean
 }
 
-export function UnsavedChangesGuard({ lang, sessionKeys }: UnsavedChangesGuardProps) {
+export function UnsavedChangesGuard({ lang, sessionKeys, active = true }: UnsavedChangesGuardProps) {
   const unsaved = useUnsaved()
   const dirty = unsaved.files.length > 0
   const navigation = useContext(UNSAFE_NavigationContext)
@@ -50,6 +55,7 @@ export function UnsavedChangesGuard({ lang, sessionKeys }: UnsavedChangesGuardPr
   keys.current = sessionKeys
 
   useEffect(() => {
+    if (!active) return
     if (!navigator || typeof navigator.push !== 'function' || typeof navigator.replace !== 'function') return
     return guardNavigator(
       navigator,
@@ -57,7 +63,7 @@ export function UnsavedChangesGuard({ lang, sessionKeys }: UnsavedChangesGuardPr
         && !navigationRetiresStudio(state, keys.current),
       run => holdIfUnsaved('leave', run),
     )
-  }, [navigator])
+  }, [navigator, active])
 
   // The index of the entry on SCREEN, refreshed after every navigation the router renders. A pop
   // cannot read it from `history.state`, which by then already names the destination.
@@ -69,21 +75,23 @@ export function UnsavedChangesGuard({ lang, sessionKeys }: UnsavedChangesGuardPr
 
   const routed = location !== undefined
   useEffect(() => {
-    if (!routed) return
+    if (!routed || !active) return
     return armHistoryPopGuard({
       lastIndex: () => shownIndex.current,
       hold: pathname => !navigationKeepsStudio(pathname, keys.current),
       onHold: run => holdIfUnsaved('leave', run),
     })
-  }, [routed])
+  }, [routed, active])
 
   useEffect(() => {
-    if (!dirty) return
+    if (!dirty || !active) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
+  }, [dirty, active])
 
+  // One question on screen, not one per pane.
+  if (!active) return null
   return <UnsavedLeaveQuestion files={unsaved.files} question={unsaved.question} lang={lang} />
 }
 

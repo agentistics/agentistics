@@ -37,7 +37,7 @@
  * for the same refusal.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
@@ -87,6 +87,7 @@ import {
 } from '../SessionDrilldown'
 import { ArtifactDoc } from './ArtifactDoc'
 import { GalleryTab } from './GalleryTab'
+import { turnAnchorIds } from '../../lib/promptHistory'
 // The FOURTH copy of this shape lived here, byte-identical to the three the repository
 // explorer's own views had already folded into `repoNote.tsx`. Imported under the name this
 // file's own call sites already use: one shape, one place for it to change.
@@ -338,6 +339,10 @@ export function ArtifactsAside({
     ...producedGroups(artifacts),
     ...viewedGroups(turns ?? []),
   ], [turns, artifacts])
+  // The chat's own identity-based anchor for a turn position — the gallery's "go to message" goes
+  // through it, so both surfaces name one bubble by the same id (see `promptHistory.ts`).
+  const galleryAnchors = useMemo(() => turnAnchorIds(sessionId, turns ?? []), [sessionId, turns])
+  const galleryAnchorOf = useCallback((i: number) => galleryAnchors[i], [galleryAnchors])
   const galleryFiles = useMemo(() => galleryFileCount(gallery), [gallery])
   /** LIST or GRID, remembered. A private window that refuses storage simply keeps the default. */
   const [galleryView, setGalleryView] = useState<GalleryView>(() => {
@@ -1272,6 +1277,7 @@ export function ArtifactsAside({
           onScopeChange={chooseGalleryScope}
           {...(focusStep !== undefined ? { focusStep } : {})}
           {...(older ? { older } : {})}
+          anchorOf={galleryAnchorOf}
         />
       </>
     )

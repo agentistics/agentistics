@@ -1,0 +1,140 @@
+/**
+ * nayDock.ts — PURE: the Nay chat's geometry and WHERE a session opens.
+ *
+ * The chat is a docked panel (bottom-right, resizable by its top and left edges) plus any number of
+ * DETACHED windows, each holding one session. The rule the owner asked for: picking a session opens
+ * it where it already is. If a window holds it, that window is raised and restored; otherwise it
+ * opens inside the panel. One session is never on screen twice, because two composers typing into
+ * one pane is the duplicate-send defect `SessionPanel` keys itself against.
+ */
+
+export interface Size { w: number; h: number }
+export interface Viewport { w: number; h: number }
+
+export interface NayWindow {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  minimized: boolean
+  /** Stacking order: the higher the number, the nearer the front. */
+  z: number
+}
+
+export interface DockState {
+  open: boolean
+  /** The session shown inside the docked panel, or null for the tab list. */
+  panelSession: string | null
+  windows: NayWindow[]
+}
+
+export const PANEL_MIN: Size = { w: 360, h: 480 }
+/** Tall enough for an approval card and the composer together — measured at 620 the card clipped. */
+export const PANEL_DEFAULT: Size = { w: 480, h: 720 }
+/** The panel sits this far from the right and bottom edges; the rest is its room to grow. */
+export const PANEL_MARGIN = { right: 24, bottom: 80, top: 16, left: 16 }
+export const WINDOW_DEFAULT: Size = { w: 460, h: 560 }
+
+/** Clamp a panel size into what the viewport can hold, never below the minimum. */
+export function clampPanelSize(size: Size, vp: Viewport): Size {
+  const maxW = Math.max(PANEL_MIN.w, vp.w - PANEL_MARGIN.right - PANEL_MARGIN.left)
+  const maxH = Math.max(PANEL_MIN.h, vp.h - PANEL_MARGIN.bottom - PANEL_MARGIN.top)
+  return {
+    w: Math.round(Math.min(maxW, Math.max(PANEL_MIN.w, size.w))),
+    h: Math.round(Math.min(maxH, Math.max(PANEL_MIN.h, size.h))),
+  }
+}
+
+/**
+ * A drag on the panel's resize handles. The panel is anchored to the bottom-right corner, so pulling
+ * the LEFT edge left (negative dx) widens it and pulling the TOP edge up (negative dy) heightens it.
+ */
+export function resizePanel(start: Size, dx: number, dy: number, edges: { left: boolean; top: boolean }, vp: Viewport): Size {
+  return clampPanelSize({
+    w: edges.left ? start.w - dx : start.w,
+    h: edges.top ? start.h - dy : start.h,
+  }, vp)
+}
+
+const topZ = (windows: readonly NayWindow[]) => windows.reduce((m, w) => Math.max(m, w.z), 0)
+
+/**
+ * Open a session: RAISE its window if one holds it (restoring a minimized one), otherwise show it
+ * in the panel and open the panel.
+ */
+export function openSession(state: DockState, id: string): DockState {
+  const win = state.windows.find(w => w.id === id)
+  if (win) {
+    const z = topZ(state.windows) + 1
+    return { ...state, windows: state.windows.map(w => (w.id === id ? { ...w, minimized: false, z } : w)) }
+  }
+  return { ...state, open: true, panelSession: id }
+}
+
+/** Move the panel's session into a window of its own, cascaded so windows never stack exactly. */
+export function detachSession(state: DockState, id: string, vp: Viewport): DockState {
+  if (state.windows.some(w => w.id === id)) return openSession(state, id)
+  const n = state.windows.length
+  const size = { w: Math.min(WINDOW_DEFAULT.w, vp.w - 32), h: Math.min(WINDOW_DEFAULT.h, vp.h - 32) }
+  const x = Math.max(16, Math.min(vp.w - size.w - 16, Math.round((vp.w - size.w) / 2) + n * 28))
+  const y = Math.max(16, Math.min(vp.h - size.h - 16, Math.round((vp.h - size.h) / 3) + n * 28))
+  return {
+    ...state,
+    panelSession: state.panelSession === id ? null : state.panelSession,
+    windows: [...state.windows, { id, x, y, ...size, minimized: false, z: topZ(state.windows) + 1 }],
+  }
+}
+
+/** Bring a window's session back into the panel. */
+export function dockSession(state: DockState, id: string): DockState {
+  return { open: true, panelSession: id, windows: state.windows.filter(w => w.id !== id) }
+}
+
+export function minimizeWindow(state: DockState, id: string): DockState {
+  return { ...state, windows: state.windows.map(w => (w.id === id ? { ...w, minimized: true } : w)) }
+}
+
+export function closeWindow(state: DockState, id: string): DockState {
+  return { ...state, windows: state.windows.filter(w => w.id !== id) }
+}
+
+/** Move/resize a window, kept on screen by at least its header. */
+export function placeWindow(state: DockState, id: string, next: Partial<Pick<NayWindow, 'x' | 'y' | 'w' | 'h'>>, vp: Viewport): DockState {
+  return {
+    ...state,
+    windows: state.windows.map(w => {
+      if (w.id !== id) return w
+      const width = Math.max(320, Math.min(vp.w, next.w ?? w.w))
+      const height = Math.max(240, Math.min(vp.h, next.h ?? w.h))
+      const x = Math.max(80 - width, Math.min(vp.w - 80, next.x ?? w.x))
+      const y = Math.max(0, Math.min(vp.h - 40, next.y ?? w.y))
+      return { ...w, x, y, w: width, h: height }
+    }),
+  }
+}
+
+/**
+ * Forget sessions that are gone (a window over a session nobody can find any more would show an
+ * empty frame forever). `known` answers whether an id still names a row.
+ */
+export function pruneDock(state: DockState, known: (id: string) => boolean): DockState {
+  const windows = state.windows.filter(w => known(w.id))
+  const panelSession = state.panelSession && known(state.panelSession) ? state.panelSession : null
+  if (windows.length === state.windows.length && panelSession === state.panelSession) return state
+  return { ...state, windows, panelSession }
+}
+
+/** Read a stored dock state, tolerating anything malformed — it is a per-viewer convenience. */
+export function parseDockState(raw: unknown): Pick<DockState, 'windows'> {
+  if (typeof raw !== 'object' || raw === null || !Array.isArray((raw as { windows?: unknown }).windows)) return { windows: [] }
+  const windows = ((raw as { windows: unknown[] }).windows).flatMap(v => {
+    if (typeof v !== 'object' || v === null) return []
+    const w = v as Record<string, unknown>
+    const num = (k: string) => (typeof w[k] === 'number' && Number.isFinite(w[k]) ? w[k] as number : null)
+    const [x, y, ww, hh, z] = [num('x'), num('y'), num('w'), num('h'), num('z')]
+    if (typeof w.id !== 'string' || !w.id || x === null || y === null || ww === null || hh === null) return []
+    return [{ id: w.id, x, y, w: ww, h: hh, z: z ?? 1, minimized: w.minimized === true }]
+  })
+  return { windows }
+}

@@ -34,7 +34,8 @@ import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { modelsFor, type ModelOption, type Baseline } from '@agentistics/core'
+import { type ModelOption, type Baseline } from '@agentistics/core'
+import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 
@@ -330,6 +331,19 @@ export async function runFleetAction(
     case 'kill':
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
+    case 'rewind': {
+      if (!host.rewindSession) return { ok: false, message: s.sessionsNoHost }
+      // The prompt is the ANCHOR, compared against the harness's own menu row by row — not an index,
+      // which the harness's list (it scrolls, and a queued turn can join it) cannot be trusted to keep.
+      const raw = req.text ?? ''
+      if (!raw.trim()) return { ok: false, message: s.sessionsNoHost }
+      const occ = Number.isInteger(req.occurrence) && (req.occurrence ?? 0) >= 0 ? req.occurrence! : 0
+      return await host.rewindSession(req.id, raw, occ)
+    }
+    case 'sendNow': {
+      if (!host.sendQueuedNow) return { ok: false, message: s.sessionsNoHost }
+      return await host.sendQueuedNow(req.id)
+    }
     case 'interrupt': {
       // Only meaningful on a session that is actually doing something: pressing Escape into an idle
       // prompt closes whatever the harness has open, which is not what "stop" means.
@@ -664,6 +678,14 @@ export interface FleetNewOptions {
      */
     models: ModelOption[]
     /**
+     * Where `models` came from — `model-catalog.ts`. `cli`: the harness's own list (the account's
+     * real set). `table`: the verified fallback, which cannot name every id the CLI accepts. Optional
+     * so a client reading an older server still parses; absent reads as `table`.
+     */
+    modelsSource?: 'cli' | 'table'
+    /** The picker must also accept a typed id — true exactly when the list is the table. */
+    modelFreeText?: boolean
+    /**
      * What this CLI uses when no `--model` is passed, and ONLY where the CLI publishes it. Absent
      * for every harness today — see the defaults block in `spawn-spec.ts`. A client renders the
      * name when it is here and its own "the assistant's default" when it is not; it may never
@@ -727,6 +749,12 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
     const configured = new Map(await Promise.all(harnesses.map(async h =>
       [h.id, await readHarnessDefaults(h.id as HarnessId).catch(() => ({} as Defaults))] as const,
     )))
+    // The models each harness offers HERE — its own list where it publishes one, the verified
+    // table where it does not. Never waits on a command (`agy models` goes to the network).
+    const { modelCatalog } = await import('../model-catalog')
+    const catalogs = new Map(await Promise.all(harnesses.map(async h =>
+      [h.id, await modelCatalog(h.id as HarnessId)] as const,
+    )))
     // An EMPTY list with a reason is a fault the wizard must say out loud — see `harnessNotice`.
     const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
     return {
@@ -740,8 +768,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
         return {
           id: h.id,
           label: h.label,
-          modelSuggestions: [...h.modelSuggestions],
-          models: modelsFor(h.id),
+          ...catalogFields(h.modelSuggestions, catalogs.get(h.id)),
           ...(defaultModel ? { defaultModel } : {}),
           supportsModel: h.supportsModel,
           efforts: [...h.efforts],

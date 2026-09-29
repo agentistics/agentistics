@@ -6,7 +6,11 @@ describe('resolveAsset', () => {
     const result = resolveAsset('linux', 'x64', '1.22.1');
     expect(result).toEqual({
       ok: true,
-      url: 'https://github.com/blpsoares/agentistics/releases/download/v1.22.1/agentop',
+      url: 'https://github.com/agentistics/agentistics/releases/download/v1.22.1/agentop',
+      urls: [
+        'https://github.com/agentistics/agentistics/releases/download/v1.22.1/agentop',
+        'https://github.com/blpsoares/agentistics/releases/download/v1.22.1/agentop',
+      ],
     });
   });
 

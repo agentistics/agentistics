@@ -79,6 +79,7 @@ import { clampRailWidth, RAIL_WIDTH_FLOOR_PX } from './railFit'
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
 import { holdIfUnsaved } from './unsavedBuffers'
 import { getFloating, raisePanel, subscribeFloating, type FloatingSet } from './floatingPanels'
+import { getActivePane, paneStorageKey, usePaneId, type PaneId } from './paneScope'
 
 /** The ten panels ArtifactsAside used to render as tabs inside one `contents` container. */
 export type TabPanelId =
@@ -703,9 +704,9 @@ function migrateLegacy(r: Record<string, unknown>): SlotLayout {
 /** Read the persisted layout. Exported so the storage guard is directly testable with an injected
  *  `Storage`. Never throws: an unreadable value, or one this build does not recognise, reads as the
  *  plain defaults. */
-export function readLayout(storage?: Storage): SlotLayout {
+export function readLayout(storage?: Storage, key: string = STORAGE_KEY): SlotLayout {
   try {
-    const raw = (storage ?? globalThis.localStorage)?.getItem(STORAGE_KEY)
+    const raw = (storage ?? globalThis.localStorage)?.getItem(key)
     if (!raw) return EMPTY_SLOT_LAYOUT
     const v = JSON.parse(raw) as unknown
     if (typeof v !== 'object' || v === null) return EMPTY_SLOT_LAYOUT
@@ -735,31 +736,52 @@ export function readLayout(storage?: Storage): SlotLayout {
   }
 }
 
-function writeLayout(layout: SlotLayout, storage?: Storage): void {
+function writeLayout(layout: SlotLayout, storage?: Storage, key: string = STORAGE_KEY): void {
   try {
     (storage ?? globalThis.localStorage)?.setItem(
-      STORAGE_KEY, JSON.stringify({ version: LAYOUT_VERSION, ...layout }),
+      key, JSON.stringify({ version: LAYOUT_VERSION, ...layout }),
     )
   } catch { /* the memory is a convenience; the panels still work without it */ }
 }
 
-let state: SlotLayout = readLayout()
-const listeners = new Set<() => void>()
+/**
+ * ONE LAYOUT PER PANE (`paneScope.ts`). The main pane keeps the historical key, so a browser that
+ * never opens a split reads and writes exactly what it always did. The split pane has its own
+ * record, and starts from the main pane's arrangement the first time it is opened, so the second
+ * session opens looking like the first rather than bare.
+ */
+interface PaneLayoutStore { state: SlotLayout; listeners: Set<() => void> }
+const stores = new Map<PaneId, PaneLayoutStore>()
 
-function commit(next: SlotLayout): void {
-  if (next === state) return
-  state = next
-  writeLayout(state)
-  for (const l of listeners) l()
+function storeOf(pane: PaneId): PaneLayoutStore {
+  let st = stores.get(pane)
+  if (!st) {
+    const key = paneStorageKey(STORAGE_KEY, pane)
+    let initial = readLayout(undefined, key)
+    if (pane !== 'main' && initial === EMPTY_SLOT_LAYOUT) initial = storeOf('main').state
+    st = { state: initial, listeners: new Set() }
+    stores.set(pane, st)
+  }
+  return st
 }
 
-export function getPanelLayout(): SlotLayout {
-  return state
+function commitTo(next: SlotLayout, pane: PaneId): void {
+  const st = storeOf(pane)
+  if (next === st.state) return
+  st.state = next
+  writeLayout(next, undefined, paneStorageKey(STORAGE_KEY, pane))
+  for (const l of st.listeners) l()
 }
 
-export function subscribePanelLayout(cb: () => void): () => void {
-  listeners.add(cb)
-  return () => { listeners.delete(cb) }
+/** A pane's layout. Without a pane: the ACTIVE one (an imperative call outside React). */
+export function getPanelLayout(pane: PaneId = getActivePane()): SlotLayout {
+  return storeOf(pane).state
+}
+
+export function subscribePanelLayout(cb: () => void, pane: PaneId = getActivePane()): () => void {
+  const st = storeOf(pane)
+  st.listeners.add(cb)
+  return () => { st.listeners.delete(cb) }
 }
 
 /**
@@ -767,10 +789,12 @@ export function subscribePanelLayout(cb: () => void): () => void {
  * it does; MOVING it (it stays shown, just in the other slot) never does, because `isPanelShown`
  * reads `true` on both sides of a move.
  */
-export function showPanel(panel: PanelId): void {
+export function showPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
+  const commit = (n: SlotLayout) => commitTo(n, pane)
   // A panel floating as a window has no docked slot to open into — asking for it (a rail pick, a
   // chat note's "open the Gallery") brings its window to the front instead.
-  if (getFloating()[panel] !== undefined) { raisePanel(panel); return }
+  if (getFloating(pane)[panel] !== undefined) { raisePanel(panel, pane); return }
+  const state = getPanelLayout(pane)
   const next = openPanel(state, panel)
   if (next === state) return
   const studioDisplaced = panel !== 'studio'
@@ -785,43 +809,43 @@ export function showPanel(panel: PanelId): void {
  * `after`, when given, runs once the panel is ACTUALLY gone — immediately if there was nothing to
  * ask about, or once the reader discards. It never runs on "keep editing".
  */
-export function hidePanel(panel: PanelId, after?: () => void): void {
-  const next = closePanel(state, panel)
-  if (next === state) { after?.(); return }
+export function hidePanel(panel: PanelId, after?: () => void, pane: PaneId = getActivePane()): void {
+  const commit = (n: SlotLayout) => commitTo(n, pane)
+  const next = closePanel(getPanelLayout(pane), panel)
+  if (next === getPanelLayout(pane)) { after?.(); return }
   if (panel === 'studio' && holdIfUnsaved('close', () => { commit(next); after?.() })) return
   commit(next)
   after?.()
 }
 
 /** Move a panel to the rail or the bottom band imperatively. Never asks — see `movePanel`. */
-export function relocatePanel(panel: PanelId, to: OpenPlacement): void {
-  commit(movePanel(state, panel, to))
+export function relocatePanel(panel: PanelId, to: OpenPlacement, pane: PaneId = getActivePane()): void {
+  commitTo(movePanel(getPanelLayout(pane), panel, to), pane)
 }
 
 /** A drag's drop, imperatively (spec §3) — same-bar reorder or cross-bar move, decided by
  *  `planPanelDrop`. Never asks — same as `relocatePanel`, which this can do everything that one
  *  does (a cross-bar drop can displace the Studio exactly as the gear's own move verb can, and
  *  neither one has ever asked first). */
-export function dropPanel(panel: PanelId, target: PanelDropTarget): void {
-  commit(planPanelDrop(state, panel, target))
+export function dropPanel(panel: PanelId, target: PanelDropTarget, pane: PaneId = getActivePane()): void {
+  commitTo(planPanelDrop(getPanelLayout(pane), panel, target), pane)
 }
 
-export function setBandOpen(open: boolean): void {
-  commit(setBottomOpen(state, open))
+export function setBandOpen(open: boolean, pane: PaneId = getActivePane()): void {
+  commitTo(setBottomOpen(getPanelLayout(pane), open), pane)
 }
 
 /**
  * "Ocultar" (spec §5), imperatively — a panel goes to `hidden`: no icon, no tab, reachable only
  * through the config area's eye. Built on the pure `hidePanelPlacement`, which already removes the
- * panel as the active occupant of whichever slot it was showing in (a hidden panel has no icon or
- * tab a reader could have clicked to see it — see that function's own header).
+ * panel as the active occupant of whichever slot it was showing in.
  *
  * ASKS ONLY when hiding the Studio while it is CURRENTLY the active occupant would discard unsaved
- * edits — the exact same risk `hidePanel` (the ordinary close) already guards, because hiding it
- * removes it as an occupant identically to closing it. Hiding any other panel, or hiding the Studio
- * while it is not currently shown, never asks.
+ * edits — the exact same risk `hidePanel` (the ordinary close) already guards.
  */
-export function concealPanel(panel: PanelId): void {
+export function concealPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
+  const commit = (n: SlotLayout) => commitTo(n, pane)
+  const state = getPanelLayout(pane)
   const next = hidePanelPlacement(state, panel)
   if (next === state) return
   const studioDisplaced = panel === 'studio' && isPanelShown(state, 'studio')
@@ -831,37 +855,38 @@ export function concealPanel(panel: PanelId): void {
 
 /**
  * The eye's "put it back where it was" verb (spec §5), imperatively — restores a hidden panel to
- * its remembered `restoreTo` placement. Never asks: restoring only ever ADDS an icon or a tab back
- * to the rail/bottom, it never displaces anything that is currently shown.
+ * its remembered `restoreTo` placement. Never asks: restoring only ever ADDS an icon or a tab back.
  */
-export function revealPanel(panel: PanelId): void {
-  commit(restorePanelPlacement(state, panel))
+export function revealPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
+  commitTo(restorePanelPlacement(getPanelLayout(pane), panel), pane)
 }
 
 /** Minimize or restore the right slot's own content — never asks: it never unmounts anything (the
  *  Studio's own host stays parked), so there is nothing here for `holdIfUnsaved` to protect. */
-export function setSlotRightOpen(open: boolean): void {
-  commit(setRightOpen(state, open))
+export function setSlotRightOpen(open: boolean, pane: PaneId = getActivePane()): void {
+  commitTo(setRightOpen(getPanelLayout(pane), open), pane)
 }
 
-/** The header row's PIN toggle (spec §11 item 3), imperatively. Never asks: pinning/unpinning
- *  discards no buffer and displaces no occupant. */
-export function togglePinned(panel: PanelId): void {
-  commit(togglePanelPinned(state, panel))
+/** The header row's PIN toggle (spec §11 item 3), imperatively. Never asks. */
+export function togglePinned(panel: PanelId, pane: PaneId = getActivePane()): void {
+  commitTo(togglePanelPinned(getPanelLayout(pane), panel), pane)
 }
 
-/** The rail's own resize grip, imperatively — clamps and persists (owner, 2026-09-21). Never asks:
- *  resizing the rail displaces no occupant and discards no buffer. */
-export function setRailWidth(width: number): void {
+/** The rail's own resize grip, imperatively — clamps and persists (owner, 2026-09-21). Never asks. */
+export function setRailWidth(width: number, pane: PaneId = getActivePane()): void {
   const clamped = clampRailWidth(width)
+  const state = getPanelLayout(pane)
   if (clamped === state.railWidth) return
-  commit({ ...state, railWidth: clamped })
+  commitTo({ ...state, railWidth: clamped }, pane)
 }
 
 /** For tests: forget everything. */
 export function resetPanelSlots(): void {
-  state = EMPTY_SLOT_LAYOUT
-  for (const l of listeners) l()
+  stores.delete('split')
+  derivedByPane.clear()
+  const main = storeOf('main')
+  main.state = EMPTY_SLOT_LAYOUT
+  for (const l of main.listeners) l()
 }
 
 export interface PanelSlotsApi {
@@ -883,55 +908,56 @@ export interface PanelSlotsApi {
   togglePinned: (panel: PanelId) => void
 }
 
-/** The one hook every panel-aware component reads. Bound actions carry the same names as the pure
- *  functions above — they are methods on the returned object, so there is no export collision. */
-let derivedFrom: { layout: SlotLayout; floating: FloatingSet } | null = null
-let derived: SlotLayout = EMPTY_SLOT_LAYOUT
-/** The stored layout with the current session's floating panels applied (`applyFloating`), as a
- *  STABLE snapshot: the same object until either store changes, which `useSyncExternalStore`
+/** The stored layout with the pane's floating panels applied (`applyFloating`), as a STABLE
+ *  snapshot per pane: the same object until either store changes, which `useSyncExternalStore`
  *  requires of a snapshot or it re-renders forever. */
-function getEffectiveLayout(): SlotLayout {
-  const floating = getFloating()
-  if (derivedFrom && derivedFrom.layout === state && derivedFrom.floating === floating) return derived
-  derivedFrom = { layout: state, floating }
-  derived = applyFloating(state, Object.keys(floating) as PanelId[])
+const derivedByPane = new Map<PaneId, { layout: SlotLayout; floating: FloatingSet; derived: SlotLayout }>()
+function getEffectiveLayout(pane: PaneId): SlotLayout {
+  const floating = getFloating(pane)
+  const layout = getPanelLayout(pane)
+  const hit = derivedByPane.get(pane)
+  if (hit && hit.layout === layout && hit.floating === floating) return hit.derived
+  const derived = applyFloating(layout, Object.keys(floating) as PanelId[])
+  derivedByPane.set(pane, { layout, floating, derived })
   return derived
 }
-function subscribeEffective(cb: () => void): () => void {
-  const a = subscribePanelLayout(cb)
-  const b = subscribeFloating(cb)
-  return () => { a(); b() }
-}
 
+/** The one hook every panel-aware component reads — bound to the pane it is rendered in. */
 export function usePanelSlots(): PanelSlotsApi {
-  const layout = useSyncExternalStore(subscribeEffective, getEffectiveLayout, () => EMPTY_SLOT_LAYOUT)
+  const pane = usePaneId()
+  const layout = useSyncExternalStore(
+    cb => {
+      const a = subscribePanelLayout(cb, pane)
+      const b = subscribeFloating(cb)
+      return () => { a(); b() }
+    },
+    () => getEffectiveLayout(pane),
+    () => EMPTY_SLOT_LAYOUT,
+  )
   return {
     layout,
-    openPanel: showPanel,
-    closePanel: hidePanel,
-    movePanel: relocatePanel,
-    dropPanel,
-    setBottomOpen: setBandOpen,
-    setRightOpen: setSlotRightOpen,
-    hidePanelToConfig: concealPanel,
-    restorePanel: revealPanel,
-    setRailWidth,
-    togglePinned,
+    openPanel: panel => showPanel(panel, pane),
+    closePanel: panel => hidePanel(panel, undefined, pane),
+    movePanel: (panel, to) => relocatePanel(panel, to, pane),
+    dropPanel: (panel, target) => dropPanel(panel, target, pane),
+    setBottomOpen: open => setBandOpen(open, pane),
+    setRightOpen: open => setSlotRightOpen(open, pane),
+    hidePanelToConfig: panel => concealPanel(panel, pane),
+    restorePanel: panel => revealPanel(panel, pane),
+    setRailWidth: width => setRailWidth(width, pane),
+    togglePinned: panel => togglePinned(panel, pane),
   }
 }
 
 /**
- * THE RAIL'S OWN LIVE WIDTH, ALONE — every "stay clear of the rail" reader (`SessionsPage.tsx`'s
- * `closedRightEdge` report, both bands' `fullscreenInsetRight` call, `PanelRail.tsx`'s own DOM
- * width) needs this ONE number and nothing else `SlotLayout` carries. `usePanelSlots()` would work
- * too — `layout.railWidth` is right there — but it re-renders on every reorder, open and drop
- * anywhere on the rail or the bottom band, which is none of THOSE three consumers' own concern.
- * `useSyncExternalStore`'s snapshot here is a bare number, so `Object.is` skips the re-render
- * whenever a layout change leaves the width untouched — which is most of them.
+ * THE RAIL'S OWN LIVE WIDTH, ALONE — every "stay clear of the rail" reader needs this ONE number
+ * and nothing else `SlotLayout` carries. `useSyncExternalStore`'s snapshot here is a bare number, so
+ * `Object.is` skips the re-render whenever a layout change leaves the width untouched. Per pane.
  */
 export function useRailWidth(): number {
+  const pane = usePaneId()
   return useSyncExternalStore(
-    subscribePanelLayout, () => getPanelLayout().railWidth, () => RAIL_WIDTH_FLOOR_PX,
+    cb => subscribePanelLayout(cb, pane), () => getPanelLayout(pane).railWidth, () => RAIL_WIDTH_FLOOR_PX,
   )
 }
 

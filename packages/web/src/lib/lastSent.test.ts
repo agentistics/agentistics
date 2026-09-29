@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { isPersonMessage, lastSentMessage, turnAnchorId } from './lastSent'
+import { isPersonMessage, lastSentMessage } from './lastSent'
 
 const user = (text: string) => ({ role: 'user' as const, text })
 const bot = (text: string) => ({ role: 'assistant' as const, text })
@@ -53,9 +53,4 @@ test('isPersonMessage answers each exclusion on its own', () => {
   expect(isPersonMessage({ role: 'user', text: 'x', system: 'slash command' })).toBe(false)
   expect(isPersonMessage({ role: 'user', text: 'x', task: {} })).toBe(false)
   expect(isPersonMessage(user('\n\t '))).toBe(false)
-})
-
-test('the two runs are namespaced apart — turn 0 and echo 0 are both a first', () => {
-  expect(turnAnchorId('turn', 0)).not.toBe(turnAnchorId('echo', 0))
-  expect(turnAnchorId('turn', 3)).toBe('ag-chat-turn-3')
 })

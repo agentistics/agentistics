@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'bun:test'
-import { folderSessionCount } from './sessionUserGroups'
+import { folderCountLabel, folderSessionCount, listNarrowed } from './sessionUserGroups'
 import {
   type SessionUserGroupsValue,
   canNestGroup, groupOfSession, planAddToGroup, planCreateGroup, planDeleteGroup, planMoveToGroup,
@@ -353,5 +353,21 @@ describe('folderSessionCount — a container counts what it contains', () => {
   })
   test('an unrelated folder is never counted', () => {
     expect(folderSessionCount('other', resolved)).toBe(1)
+  })
+})
+
+describe('folders follow the list\'s filters', () => {
+  test('narrowed, the header says how much of the folder matches', () => {
+    expect(folderCountLabel(3, 61, true)).toBe('3/61')
+    expect(folderCountLabel(0, 61, true)).toBe('0/61')
+  })
+  test('not narrowed, just the total', () => {
+    expect(folderCountLabel(61, 61, false)).toBe('61')
+  })
+  test('active-only, a search or a value filter all narrow', () => {
+    expect(listNarrowed({ activeOnly: true, query: '', valueFiltered: 10, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: 'líder', valueFiltered: 10, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: '  ', valueFiltered: 4, total: 10 })).toBe(true)
+    expect(listNarrowed({ activeOnly: false, query: '', valueFiltered: 10, total: 10 })).toBe(false)
   })
 })

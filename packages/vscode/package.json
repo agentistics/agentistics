@@ -25,10 +25,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blpsoares/agentistics.git",
+    "url": "git+https://github.com/agentistics/agentistics.git",
     "directory": "packages/vscode"
   },
-  "homepage": "https://github.com/blpsoares/agentistics",
+  "homepage": "https://github.com/agentistics/agentistics",
   "main": "./dist/extension.cjs",
   "activationEvents": [
     "onStartupFinished"

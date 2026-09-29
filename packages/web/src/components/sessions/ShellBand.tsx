@@ -49,6 +49,7 @@ import { useElementWidth } from '../../hooks/useElementWidth'
 import { keyStripShown } from '../../lib/terminalSurface'
 import { floatPanel } from '../../lib/floatingPanels'
 import { dockedShowsTarget, usePanelSlots, type PanelDropTarget } from '../../lib/panelSlots'
+import { usePaneId } from '../../lib/paneScope'
 import {
   followBottomOccupant, resolveDockedTarget, shellTargetUnavailable, targetLabel, targetScope,
   targetStreamId, type TerminalTarget,
@@ -340,7 +341,7 @@ export interface ShellBandProps {
    * seed involved); but with the band open on STUDIO, picking Shell (or CLI) MINIMIZED it, needing
    * a second click. Studio and this band do not share a React instance, so the "open" the reader
    * was looking at was `StudioBand`'s own controlled `open` prop; the moment this band mounted in
-   * its place, `useState(() => readBandPrefs())` read the ONE shared `agentistics-shell-band`
+   * its place, `useState(() => readBandPrefs(undefined, bandPane))` read the ONE shared `agentistics-shell-band`
    * record's `open` field cold, ignoring the `bottomOpen: true` `openPanel` had just written to the
    * slot the RENDER before — a stale `false` left over from whenever ANY panel in that band was
    * last collapsed (the field was never panel-scoped, unlike `full` — see `BandPrefs.full`'s own
@@ -360,6 +361,8 @@ export function ShellBand({
   shellCapable = true, onShellEnabledChange,
   columnHeight = 0, open: openSeed, onOpenChange,
 }: ShellBandProps) {
+  /** The side of a split view this band belongs to — its prefs are kept per pane. */
+  const bandPane = usePaneId()
   const t = TXT[lang]
   const isMobile = useIsMobile()
   const documentVisible = useDocumentVisible()
@@ -372,7 +375,7 @@ export function ShellBand({
   // ONCE, like `target` below is seeded from `bottomOccupant`: a fresh mount must show what the
   // slot was JUST told to do, never a stale flag the LAST panel in this band happened to leave
   // behind.
-  const [prefs, setPrefs] = useState(() => seedBandOpen(readBandPrefs(), openSeed))
+  const [prefs, setPrefs] = useState(() => seedBandOpen(readBandPrefs(undefined, bandPane), openSeed))
   /**
    * WHICH terminal this band is showing. It is the band's own state and not the session's, because
    * the band is now the door to BOTH panes: the header's `Conversa | Terminal` toggle is gone, a
@@ -387,7 +390,7 @@ export function ShellBand({
    * `'cli'` — see that function's own header.
    */
   const [storedTarget, setTarget] = useState<TerminalTarget>(
-    () => fixedTarget ?? resolveDockedTarget(bottomOccupant, readBandPrefs().target, shellEnabled),
+    () => fixedTarget ?? resolveDockedTarget(bottomOccupant, readBandPrefs(undefined, bandPane).target, shellEnabled),
   )
   const target: TerminalTarget = fixedTarget ?? storedTarget
   const scope = targetScope(target)
@@ -409,7 +412,7 @@ export function ShellBand({
   const bandOpen = dedicated || prefs.open
   // THE MACHINE, not a pile of flags. See `shellBandState.ts` for the rule it enforces.
   // Reads the ALREADY-SEEDED `prefs.open` (computed just above, same render) rather than a second,
-  // independent `readBandPrefs()` call — two reads of the same flag at mount is two chances for
+  // independent `readBandPrefs(undefined, bandPane)` call — two reads of the same flag at mount is two chances for
   // them to disagree about whether `openSeed` applies.
   const [band, dispatch] = useReducer(shellBandReducer, INITIAL_SHELL_BAND, init =>
     dedicated || prefs.open ? shellBandReducer(init, { type: 'openBand' }) : init)
@@ -449,7 +452,7 @@ export function ShellBand({
     // A mount pinned to one pane never switches, and never rewrites the docked band's choice.
     if (fixedTarget) return
     setTarget(next)
-    try { writeBandPrefs({ ...readBandPrefs(), target: next }) } catch { /* storage blocked */ }
+    try { writeBandPrefs({ ...readBandPrefs(undefined, bandPane), target: next }, undefined, bandPane) } catch { /* storage blocked */ }
   }, [fixedTarget])
 
   /**
@@ -510,7 +513,7 @@ export function ShellBand({
       // whatever the Studio or Contents/Hardware left behind untouched, and vice versa. See
       // `BandPrefs.full`'s own header in `shellBand.ts`.
       if (next.full !== undefined) merged = withBandPanelFull(merged, target, next.full)
-      writeBandPrefs(merged)
+      writeBandPrefs(merged, undefined, bandPane)
       return merged
     })
     if (next.open === true) dispatch({ type: 'openBand' })

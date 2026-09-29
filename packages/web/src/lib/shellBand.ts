@@ -25,6 +25,7 @@
 // `PanelId`/`PANEL_IDS` only — `panelSlots.ts` imports nothing from this module, so this stays a
 // one-way dependency rather than a circular one.
 import { PANEL_IDS, type PanelId } from './panelSlots'
+import { paneStorageKey, type PaneId } from './paneScope'
 
 /** The smallest band worth drawing: a prompt, a command and a few lines of its output. */
 export const BAND_MIN_PX = 140
@@ -308,9 +309,10 @@ export interface PaneGeometry { cols: number; rows: number }
 /** ABSENT READS AS CLOSED. Nobody acquires an open shell band by having reloaded the page. */
 export const DEFAULT_BAND_PREFS: BandPrefs = { open: false, height: 240 }
 
-export function readBandPrefs(storage?: Storage): BandPrefs {
+/** Per PANE of a split view (`paneScope.ts`); the main pane keeps the historical key. */
+export function readBandPrefs(storage?: Storage, pane: PaneId = 'main'): BandPrefs {
   try {
-    const raw = (storage ?? globalThis.localStorage)?.getItem(STORAGE_KEY)
+    const raw = (storage ?? globalThis.localStorage)?.getItem(paneStorageKey(STORAGE_KEY, pane))
     if (!raw) return DEFAULT_BAND_PREFS
     const v = JSON.parse(raw) as unknown
     if (typeof v !== 'object' || v === null) return DEFAULT_BAND_PREFS
@@ -440,8 +442,8 @@ export function writeBandGeometry(
   } catch { /* the memory is a convenience; the band works without it */ }
 }
 
-export function writeBandPrefs(prefs: BandPrefs, storage?: Storage): void {
+export function writeBandPrefs(prefs: BandPrefs, storage?: Storage, pane: PaneId = 'main'): void {
   try {
-    (storage ?? globalThis.localStorage)?.setItem(STORAGE_KEY, JSON.stringify(prefs))
+    (storage ?? globalThis.localStorage)?.setItem(paneStorageKey(STORAGE_KEY, pane), JSON.stringify(prefs))
   } catch { /* a browser blocking site data costs the convenience, never the band */ }
 }

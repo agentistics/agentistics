@@ -56,7 +56,7 @@ export function InstallModal({ lang, pwaPrompt, onClose, onPwaInstalled }: Props
   }
 
   function handleDesktop() {
-    window.open('https://github.com/blpsoares/agentistics/releases/latest', '_blank', 'noopener')
+    window.open('https://github.com/agentistics/agentistics/releases/latest', '_blank', 'noopener')
     onClose(dontShow)
   }
 

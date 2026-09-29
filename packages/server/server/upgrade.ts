@@ -7,8 +7,8 @@ import { getVersionInfo, CURRENT_VERSION, compareVersions } from './version.ts'
 import { restartAutostart } from './autostart.ts'
 import { AGENTISTICS_DATA_DIR, PORT } from './config.ts'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n.ts'
+import { PRIMARY_REPO, fetchFirstOk, releaseAssetUrls } from './release-source.ts'
 
-const GITHUB_REPO = 'blpsoares/agentistics'
 /**
  * Where a release asset lives, addressed BY VERSION.
  *
@@ -23,12 +23,14 @@ const GITHUB_REPO = 'blpsoares/agentistics'
  * then failed to download v2.5.0 — the one thing an upgrade must never do is announce a version it
  * is not fetching.
  */
-function releaseAssetUrl(version: string, asset: string): string {
-  // The tag is `v<version>`; `version` arrives from the releases API without the prefix.
-  return `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${asset}`
+function releaseAssetTarget(version: string, asset: string): UpgradeTarget {
+  // The tag is `v<version>`; `version` arrives from the releases API without the prefix. Every
+  // owner the repository has lived under is listed (release-source.ts), new first.
+  const urls = releaseAssetUrls(version, asset)
+  return { asset, url: urls[0]!, urls }
 }
 /** Where a user goes when self-install is refused (unsupported platform/arch). */
-export const RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases`
+export const RELEASES_PAGE = `https://github.com/${PRIMARY_REPO}/releases`
 
 const _ESC = '\x1b'
 const _R  = `${_ESC}[0m`
@@ -59,8 +61,10 @@ const MACHINE_IMAGE = 'agentistics-machine'
 export interface UpgradeTarget {
   /** Release asset name, as published by the workflow. */
   asset: string
-  /** Full download URL for that asset. */
+  /** Full download URL for that asset, under the CURRENT owner. */
   url: string
+  /** Every URL the asset may be fetched from, in order: the current owner, then the legacy one. */
+  urls: string[]
 }
 
 /**
@@ -74,8 +78,8 @@ export interface UpgradeTarget {
  */
 export function resolveUpgradeAsset(platformId: string, arch: string, version: string): UpgradeTarget | null {
   const key = `${platformId}/${arch}`
-  if (key === 'linux/x64') return { asset: 'agentop', url: releaseAssetUrl(version, 'agentop') }
-  if (key === 'win32/x64') return { asset: 'agentop.exe', url: releaseAssetUrl(version, 'agentop.exe') }
+  if (key === 'linux/x64') return releaseAssetTarget(version, 'agentop')
+  if (key === 'win32/x64') return releaseAssetTarget(version, 'agentop.exe')
   return null
 }
 
@@ -921,7 +925,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
 
   let resp: Response
   try {
-    resp = await fetch(target.url, {
+    resp = await fetchFirstOk(target.urls, {
       headers: { 'User-Agent': `agentistics/${CURRENT_VERSION}` },
       signal: AbortSignal.timeout(120_000),
     })

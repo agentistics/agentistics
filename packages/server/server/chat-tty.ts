@@ -3,20 +3,12 @@ import { agentisticsMcpLaunch, CANONICAL_MCP_NAME, sameMcpLaunch, staleAgentisti
 import { mkdir, writeFile } from 'node:fs/promises'
 import { HOME_DIR } from './config'
 
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..')
 
 export const NAY_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'nay-chat')
 export const CLAUDE_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'claude-chat')
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-export const CHAT_MODELS = [
-  { id: 'claude-haiku-4-5',   label: 'Haiku 4.5',   badge: 'Fast',     desc: 'Fastest responses, great for quick questions',    inputPer1M: 0.80,  outputPer1M: 4.00  },
-  { id: 'claude-sonnet-4-6',  label: 'Sonnet 4.6',  badge: 'Balanced', desc: 'Best balance of speed and intelligence',          inputPer1M: 3.00,  outputPer1M: 15.00 },
-  { id: 'claude-opus-4-7',    label: 'Opus 4.7',    badge: 'Powerful', desc: 'Most capable — ideal for complex analysis',       inputPer1M: 15.00, outputPer1M: 75.00 },
-] as const
-
-export type ChatModelId = typeof CHAT_MODELS[number]['id']
 
 // Written to ~/.agentistics/nay-chat/CLAUDE.md on every server start
 // so git pull + restart always gets the latest instructions.
@@ -126,6 +118,15 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | agentistics_repos | Repository breakdown by normalized git remote |
 | agentistics_team_status | This machine's team mode (solo/central/member) and central connections |
 | agentistics_team_members | Team roster (central only): presence, latency, last seen |
+| agentistics_session_groups | The user's session folders/groups and which sessions each holds |
+| agentistics_session_group_create | Create a folder (group), optionally filing sessions into it |
+| agentistics_session_group_edit | Add/remove a session, rename, nest or delete a folder |
+| agentistics_tasks / agentistics_task | The task board, and one delivery in detail |
+| agentistics_task_create / agentistics_task_edit / agentistics_task_status | Create a delivery, edit it, move its status |
+
+You run as a session inside the agentistics sessions workspace: the person may be looking at you
+beside their other sessions. Organising sessions (folders, groups, filing) is part of your job —
+use the session-group tools directly when asked.
 
 ---
 
@@ -168,39 +169,24 @@ Filter query params (append to route when result is project-specific):
 - ?projects=PATH1|PATH2 — filter by multiple projects (pipe-separated)
 `
 
-// MCP settings written dynamically so the cwd path and port are always correct.
-export function buildNaySettings(port: number) {
+/**
+ * Nay's PROJECT settings (`~/.agentistics/nay-chat/.claude/settings.json`).
+ *
+ * A Nay conversation is an interactive managed session now, so the settings only decide what it may
+ * do without asking. `mcp__agentistics` allows the WHOLE agentistics server — the old hand-kept list
+ * of 18 tools denied the other 20 in silence under `--print`, which is how Nay could not touch a
+ * session group or a task. Anything else still asks, as the ordinary approval card.
+ *
+ * No `mcpServers` block: Claude Code does not read one from a project `settings.json`, and the one
+ * written here named `bun run packages/mcp/...`, a file only a checkout has. The server is registered
+ * at user scope by `registerMcpGlobally`, through `agentisticsMcpLaunch()`.
+ */
+export function buildNaySettings() {
   return {
-    mcpServers: {
-      agentistics: {
-        command: 'bun',
-        args: ['run', 'packages/mcp/agentistics-mcp.ts'],
-        cwd: AGENTISTICS_ROOT,
-        env: { AGENTISTICS_API: `http://localhost:${port}` },
-      },
-    },
     permissions: {
       allow: [
         'WebFetch(domain:localhost)',
-        // Allow all agentistics MCP tools without prompting (non-interactive --print mode)
-        'mcp__agentistics__agentistics_summary',
-        'mcp__agentistics__agentistics_projects',
-        'mcp__agentistics__agentistics_sessions',
-        'mcp__agentistics__agentistics_costs',
-        'mcp__agentistics__agentistics_component_catalog',
-        'mcp__agentistics__agentistics_get_layouts',
-        'mcp__agentistics__agentistics_build_layout',
-        'mcp__agentistics__agentistics_add_component',
-        'mcp__agentistics__agentistics_remove_component',
-        'mcp__agentistics__agentistics_create_layout',
-        'mcp__agentistics__agentistics_set_active_layout',
-        'mcp__agentistics__agentistics_delete_layout',
-        'mcp__agentistics__agentistics_export_pdf',
-        'mcp__agentistics__agentistics_tags',
-        'mcp__agentistics__agentistics_tag_detail',
-        'mcp__agentistics__agentistics_repos',
-        'mcp__agentistics__agentistics_team_status',
-        'mcp__agentistics__agentistics_team_members',
+        'mcp__agentistics',
       ],
     },
   }
@@ -222,7 +208,7 @@ export async function ensureNayChat(port: number): Promise<void> {
   await writeFile(path.join(NAY_CHAT_DIR, 'CLAUDE.md'), claudeMd)
   await writeFile(
     path.join(dotClaude, 'settings.json'),
-    JSON.stringify(buildNaySettings(port), null, 2),
+    JSON.stringify(buildNaySettings(), null, 2),
   )
   await registerMcpGlobally(port)
 }
@@ -317,7 +303,7 @@ export interface StreamViaClaudioOpts {
 export async function streamViaClaude(
   message: string,
   history: ChatMessage[],
-  model: ChatModelId,
+  model: string,
   onChunk: (text: string) => void,
   onTool: (name: string) => void,
   onDone: () => void,
@@ -335,7 +321,8 @@ export async function streamViaClaude(
     args.push('--budget-tokens', String(opts.thinkingBudget))
   }
 
-  args.push('--model', model)
+  // `''` is the CLI's own default — no flag, never an invented model.
+  if (model) args.push('--model', model)
 
   const imageAttachments = opts?.attachments?.filter(a => a.isImage) ?? []
   const textAttachments = opts?.attachments?.filter(a => !a.isImage) ?? []

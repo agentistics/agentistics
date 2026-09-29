@@ -13,8 +13,10 @@ import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
   dismissStoredNotification, clearStoredNotifications, localViewer, type NotificationInput,
 } from './notifications-store'
-import { streamViaClaude, execCommand, ensureNayChat, ensureClaudeChat, CLAUDE_CHAT_DIR, type ChatMessage, type ChatModelId, type ChatAttachment } from './chat-tty'
-import { getChatDriver, chatHarnessStatus } from './chat-drivers/index'
+import { streamViaClaude, execCommand, ensureNayChat, ensureClaudeChat, CLAUDE_CHAT_DIR, type ChatMessage, type ChatAttachment } from './chat-tty'
+import { getChatDriver, chatHarnessStatus, chatDefaultModel } from './chat-drivers/index'
+import { modelCatalog } from './model-catalog'
+import { resolveChatModel } from './model-catalog-parse'
 import { listNaySessions, getNaySessionMessages } from './nay-sessions'
 import { listClaudeSessions, getClaudeSessionMessages, type ClaudeSessionSummary, type ClaudeSessionMessage } from './claude-sessions'
 import { listCodexSessions, getCodexSessionMessages, type CodexSessionSummary, type CodexSessionMessage } from './codex-sessions'
@@ -349,6 +351,10 @@ void (async () => {
       console.warn(`[mcp] could not register for ${driver.id}:`, err instanceof Error ? err.message : String(err)))
   }
 })()
+// The model pickers read the CLIs' own lists (`model-catalog.ts`); warm the ones that are COMMANDS
+// (`agy models` goes to the network) so the first wizard open already offers them. A central neither
+// spawns sessions nor chats, so it asks no CLI anything.
+if (!TEAM_CENTRAL) void import('./model-catalog').then(m => m.warmModelCatalogs())
 
 
 // ---------------------------------------------------------------------------
@@ -2273,6 +2279,34 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // this one call reads a directory from the body when `resume` refuses to, and `fleet-spawn.ts`
     // for every check made on it. `localShell` is what bounds it: unreachable on a `lan` or `public`
     // profile whoever is authenticated.
+    // A NAY conversation: a managed `claude` session in Nay's own directory, filed under the "Nay"
+    // group (`sessions/nay-web.ts`). It rides `/api/fleet`'s `localShell` guard like every start, and
+    // it is also the chat — so the user's chat switch (`chat-gate.ts`) must be on too.
+    if (url.pathname === '/api/fleet/nay' && req.method === 'POST') {
+      if (!chatAllowed(CAPS.localChat, (await readPreferences()).chatEnabled)) {
+        return new Response(JSON.stringify({ ok: false, message: 'chat_disabled' }), {
+          status: 403,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const { fleetLang } = await import('./sessions/fleet-web')
+        const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+        const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT))
+        return new Response(JSON.stringify(out), {
+          status: out.code === 'memory_budget' ? 409 : 200,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     if (url.pathname === '/api/fleet/new' && req.method === 'POST') {
       try {
         const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')
@@ -2971,7 +3005,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/chat-harnesses' && req.method === 'GET') {
-      return new Response(JSON.stringify(chatHarnessStatus()), {
+      return new Response(JSON.stringify(await chatHarnessStatus()), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
@@ -3005,12 +3039,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         const driver = (requestedDriver?.isAvailable() ? requestedDriver : undefined) ?? getChatDriver('claude')!
 
-        // The model MUST belong to the resolved driver — a model from another
-        // harness (or none) would be rejected by that CLI. Fall back to the
-        // driver's defaultModel when the requested model isn't one of its own.
-        const model = (requestedModel && driver.models.some(m => m.id === requestedModel))
-          ? requestedModel
-          : driver.defaultModel
+        // The model MUST belong to the resolved driver — a model from another harness would be
+        // rejected by that CLI. A listed id is taken as asked; an unlisted one only where the list
+        // is the incomplete fallback table AND it is a safe argv value; otherwise the machine's
+        // configured default, and `''` means no --model at all (the CLI's own default).
+        const model = resolveChatModel(requestedModel, await modelCatalog(driver.id), await chatDefaultModel(driver.id))
 
         // Ensure MCP is registered for the selected driver
         await driver.ensureMcp(PORT)
@@ -3067,8 +3100,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/claude-chat' && req.method === 'POST') {
       try {
-        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: ChatModelId; sessionId?: string | null; thinkingBudget?: number; projectPath?: string; attachments?: ChatAttachment[] }
-        const { message, history = [], model = 'claude-sonnet-4-6', sessionId = null, thinkingBudget, projectPath, attachments } = body
+        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: string; sessionId?: string | null; thinkingBudget?: number; projectPath?: string; attachments?: ChatAttachment[] }
+        const { message, history = [], model: requestedModel, sessionId = null, thinkingBudget, projectPath, attachments } = body
+        // Same rule as /api/chat-tty: never hand an unvalidated value to the CLI's argv.
+        const model = resolveChatModel(requestedModel, await modelCatalog('claude'), await chatDefaultModel('claude'))
         const enc = new TextEncoder()
         const stream = new ReadableStream<Uint8Array>({
           start(ctrl) {

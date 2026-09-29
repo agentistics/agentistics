@@ -157,26 +157,26 @@ test('storage that throws still keeps echoes across a navigation', () => {
 test('the reply target survives with the draft — it CHANGES what gets sent', () => {
   const s = createSessionScratch(fakeStore())
   s.writeDraft('a', 'about that')
-  s.writeReply('a', { role: 'assistant', text: 'what it said' })
+  s.writeReply('a', [{ role: 'assistant', text: 'what it said' }])
   expect(s.readDraft('a')).toBe('about that')
-  expect(s.readReply('a')).toEqual({ role: 'assistant', text: 'what it said' })
+  expect(s.readReply('a')).toEqual([{ role: 'assistant', text: 'what it said' }])
 })
 
 test('a reply target never leaks between sessions, and clearing it removes it', () => {
   const store = fakeStore()
   const s = createSessionScratch(store)
-  s.writeReply('a', { role: 'user', text: 'mine' })
-  expect(s.readReply('b')).toBeNull()
-  s.writeReply('a', null)
-  expect(s.readReply('a')).toBeNull()
+  s.writeReply('a', [{ role: 'user', text: 'mine' }])
+  expect(s.readReply('b')).toEqual([])
+  s.writeReply('a', [])
+  expect(s.readReply('a')).toEqual([])
   expect([...store.data.keys()].some(k => k.includes('reply'))).toBe(false)
 })
 
 test('storage that throws still keeps the reply target across a navigation', () => {
   for (const throwOn of ['get', 'set', 'remove'] as const) {
     const s = createSessionScratch(fakeStore({ throwOn }))
-    s.writeReply('a', { role: 'user', text: 'x' })
-    expect(s.readReply('a')).toEqual({ role: 'user', text: 'x' })
+    s.writeReply('a', [{ role: 'user', text: 'x' }])
+    expect(s.readReply('a')).toEqual([{ role: 'user', text: 'x' }])
   }
 })
 

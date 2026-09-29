@@ -15,7 +15,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { getActivePane } from '../../lib/paneScope'
+import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
+
 import {
   ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
   PinOff, Plus, RotateCcw, Search, Send, X,
@@ -34,6 +37,7 @@ import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
 import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
+import { folderFold } from '../../lib/folderFold'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -61,7 +65,7 @@ import {
   type NestRefusal, type SessionUserGroup,
   canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
   nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
-  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount,
+  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount, folderCountLabel, listNarrowed,
   subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
 import {
@@ -74,6 +78,9 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 // one unit (continuous left accent bar + shared tint, header down through the last row) — reused
 // rather than invented a second time for user session groups.
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
+
+/** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
+const OPEN_BESIDE = '__open_beside__'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -162,6 +169,14 @@ export interface SessionsAsideProps {
   filtersCount?: number
   onToggleFilters?: () => void
   filtersButtonRef?: (el: HTMLButtonElement | null) => void
+  /**
+   * A session this aside just CREATED — reported instead of navigating to `/sessions/:id`, for a
+   * mount that is not the sessions workspace (the Nay chat's "Sessões" tab opens it in its own
+   * panel). Absent: the workspace behaviour, straight into the new session's route.
+   */
+  onCreated?: (id: string) => void
+  /** The session this mount has open, where that is not the route's — see `onCreated`. */
+  selectedId?: string
 }
 
 /**
@@ -200,13 +215,30 @@ function groupMenuExtras(
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
+  onCreated, selectedId,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
   // 44px is the MOBILE figure. Applying it on desktop turns a compact list into a row of buttons.
   const isMobile = useIsMobile()
   const tap = isMobile ? 44 : undefined
-  const { sessionId } = useParams()
+  const { sessionId: routeSessionId } = useParams()
+  const sessionId = selectedId ?? routeSessionId
+  /**
+   * THE SPLIT VIEW (`lib/splitRoute.ts`). With two sessions open, a pick from this list replaces
+   * the one in the pane the person is working in (`getActivePane`) and keeps the other; "Abrir ao
+   * lado" puts a session in the right-hand pane. A phone never splits, so there it is the plain
+   * route, as it always was.
+   */
+  const [routeSearch] = useSearchParams()
+  const openSessionRoute = (id: string) => {
+    const route = readSplitRoute(routeSessionId, routeSearch)
+    if (isMobile || route.split === null) { navigate(sessionPath(id)); return }
+    navigate(splitHref(openInPane(route, id, getActivePane()), routeSearch))
+  }
+  const openSessionBeside = (id: string) => {
+    navigate(splitHref(openBeside(readSplitRoute(routeSessionId, routeSearch), id), routeSearch))
+  }
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   /**
@@ -357,10 +389,6 @@ export function SessionsAside({
     })),
     [groupsValue, rows, pinned],
   )
-  const groupedVisibleCount = useMemo(
-    () => groupRowsResolved.reduce((n, g) => n + g.rows.length, 0),
-    [groupRowsResolved],
-  )
   /** Which user-group bands are folded on THIS screen — per viewer, alongside the aside's other
    *  arrangement prefs (see `sessionsAsidePrefs.ts`). Membership itself is shared/server-side. */
   const [foldedUserGroups, setFoldedUserGroupsState] =
@@ -371,6 +399,13 @@ export function SessionsAside({
     setFoldedUserGroupsState(next)
     writeAsideGroupPrefs({ collapsedUserGroups: [...next] })
   }
+  /** Dimmed folders (nothing in them matches) the person opened on this screen — see `folderFold`. */
+  const [openedDimmed, setOpenedDimmed] = useState<Set<string>>(() => new Set())
+  const toggleOpenedDimmed = (id: string) => setOpenedDimmed(cur => {
+    const next = new Set(cur)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
   /** The "Fixadas" and "Grupos" SECTIONS themselves — distinct from any one row/folder's own fold.
    *  The owner asked that EVERYTHING in this list be collapsible, and these two headings were the
    *  two things that could not fold at all. */
@@ -516,6 +551,11 @@ export function SessionsAside({
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
+    if (action === OPEN_BESIDE) {
+      openSessionBeside(id)
+      setMenu(null)
+      return
+    }
     if (action === 'link-task') {
       // The picker is anchored where the menu was, so the gesture stays in one place on screen.
       setLinking({ id, x: menu.x, y: menu.y })
@@ -583,6 +623,20 @@ export function SessionsAside({
     () => (activeOnly ? searched.filter(r => !active.has(r.state)).length : 0),
     [searched, activeOnly, active],
   )
+  /*
+   * THE FOLDERS FOLLOW THE LIST (owner, 2026-09-29). They were resolved against the raw fleet so a
+   * folder would survive a filter — and so a search for "Líder" left every folder showing everything
+   * while the rest of the list narrowed. Now what a folder DRAWS is cut by the very same pipeline as
+   * the list (value filters → search → active only); `groupRowsResolved` stays whole for the TOTAL
+   * in the header (`3/61`) and for the menu's attention count.
+   */
+  const narrowing = listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
+  const groupRowsShown = useMemo(() => {
+    if (!narrowing) return groupRowsResolved
+    const ids = new Set(matched.map(r => r.id))
+    return groupRowsResolved.map(e => ({ ...e, rows: e.rows.filter(r => ids.has(r.id)) }))
+  }, [narrowing, matched, groupRowsResolved])
+  const searching = query.trim() !== ''
   /** Which SET filter dimensions this fleet cannot answer at all, said in one line — never silent. */
   const ignoredNote = useMemo(() => ignoredDimensions(filters, lang), [filters, lang])
 
@@ -674,7 +728,7 @@ export function SessionsAside({
   const total = bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
-  ) + pinnedRows.length + groupedVisibleCount
+  ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
@@ -710,20 +764,37 @@ export function SessionsAside({
    * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
    * nothing but subfolders read `0`.
    */
-  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
-    const { group, rows: gRows } = entry
-    const folded = foldedUserGroups.has(group.id)
+  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false): React.ReactNode => {
+    const { group } = entry
+    // What matches in this folder (its nested folders included) — see `groupRowsShown`.
+    const shownInFolder = folderSessionCount(group.id, groupRowsShown)
+    // A SEARCH opens the folders that hold results, without touching what the person folded: the
+    // stored fold is untouched, it is only overridden while there is text in the search box.
+    // Nothing here matches: kept, and quieter — never removed (see `listNarrowed`) — and shown as its
+    // header alone, since a body that only says "nothing matches" is noise in a filtered list.
+    // A dimmed folder is still a folder: it opens and closes (`folderFold` — forcing it folded made
+    // the click a no-op), and opened it shows what it holds.
+    const fold = folderFold({
+      storedFolded: foldedUserGroups.has(group.id), openedDimmed: openedDimmed.has(group.id),
+      narrowing, searching, shownCount: shownInFolder,
+    })
+    const noMatches = fold.dimmed
+    const folded = fold.folded
+    const source = fold.showAll || parentDimmed ? groupRowsResolved : groupRowsShown
+    const gRows = fold.showAll || parentDimmed
+      ? (groupRowsResolved.find(g => g.group.id === group.id)?.rows ?? entry.rows)
+      : entry.rows
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
-    const children = depth === 0 ? groupRowsResolved.filter(g => g.group.parentId === group.id) : []
+    const children = depth === 0 ? source.filter(g => g.group.parentId === group.id) : []
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
         key={group.id}
-        style={{ marginLeft: depth * 14 }}
+        style={{ marginLeft: depth * 14, ...(noMatches && !parentDimmed ? { opacity: 0.5 } : {}) }}
       >
         <div
           // Suppressed for the WHOLE list while ANY folder is being dragged, not only for the one
@@ -871,7 +942,8 @@ export function SessionsAside({
               style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, cursor: 'grab' }}
             >
               <button
-                onClick={() => toggleUserGroupFold(group.id)}
+                onClick={() => (fold.toggles === 'dimmed' ? toggleOpenedDimmed(group.id) : toggleUserGroupFold(group.id))}
+                aria-expanded={!folded}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
                   background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -902,7 +974,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderSessionCount(group.id, groupRowsResolved)}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
               </button>
               <button
                 onClick={e => {
@@ -927,10 +999,14 @@ export function SessionsAside({
                   order a file explorer uses, and the reason a freshly nested folder becoming the
                   FIRST child (`moveToFrontAmongSiblings`, core) actually reads as "first" on screen
                   instead of sitting after every session the parent already held. */}
-              {children.map(c => renderGroupBand(c, 1))}
+              {children.map(c => renderGroupBand(c, 1, noMatches || parentDimmed))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                  {pt
+                  {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
+                      sessions into a folder that holds sixty would be wrong. */}
+                  {noMatches && folderSessionCount(group.id, groupRowsResolved) > 0
+                    ? (pt ? 'Nada aqui corresponde aos filtros ou à busca.' : 'Nothing here matches the filters or the search.')
+                    : pt
                     ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                     : 'Drag a session here, or use "Move to group" on its menu.'}
                 </p>
@@ -979,7 +1055,7 @@ export function SessionsAside({
                           selected={rowSelected(s, sessionId)}
                           {...(tap ? { tap } : {})}
                           onPin={() => flip(s)}
-                          onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                          onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                           {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
                           onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
                           onFile={(x, y) => setLinking({ id: s.id, x, y })}
@@ -1253,7 +1329,8 @@ export function SessionsAside({
             // aside is visible before and after this navigation settles.
             if (id) {
               markSessionPending({ id, ...started })
-              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+              if (onCreated) onCreated(id)
+              else navigate(sessionPath(id), { state: { creating: started ?? {} } })
             }
           }}
         />
@@ -1398,7 +1475,7 @@ export function SessionsAside({
                     pinned
                     {...(tap ? { tap } : {})}
                     onPin={() => flip(s)}
-                    onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                    onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                     onMoveBy={d => {
                       // The step buttons move relative to the VISIBLE neighbor — same key-based
                       // rule as the drag above; there is no raw-array index to step by here either.
@@ -1468,7 +1545,7 @@ export function SessionsAside({
             </button>
           </div>
 
-          {!foldedGroupsSection && groupRowsResolved.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
+          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (
@@ -1498,7 +1575,7 @@ export function SessionsAside({
                 bandId={b.id}
                 label={b.label} groups={b.groups} groupBy={groupBy} pinned={pinned}
                 sessionId={sessionId} tap={tap} onPin={flip}
-                onOpen={s => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                onOpen={s => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                 {...(rowsById ? { rowsById } : {})}
                 onOpenMenu={openMenu}
                 onFile={(s, x, y) => setLinking({ id: s.id, x, y })}
@@ -1540,7 +1617,17 @@ export function SessionsAside({
           x={menu.x} y={menu.y}
           entries={rowMenuEntries(
             menu.verbs, menu.state,
-            groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+            [
+              // The split view (desktop only, and only where this list opens sessions itself —
+              // a mount that routes picks elsewhere via `onOpenRow` has no side to open beside).
+              ...(!isMobile && !onOpenRow ? [{
+                action: OPEN_BESIDE,
+                label: pt ? 'Abrir ao lado' : 'Open beside',
+                enabled: menu.id !== routeSessionId,
+                ...(menu.id === routeSessionId ? { reason: pt ? 'Já está aberta à esquerda.' : 'Already open on the left.' } : {}),
+              }] : []),
+              ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+            ],
           )}
           onPick={pickMenuAction}
           onClose={() => setMenu(null)}
