@@ -100,7 +100,6 @@ import { ChangePassword } from './components/ChangePassword'
 import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
-import { type ChatModelId } from './lib/chatModels'
 import { HARNESS_LABELS } from './lib/harness'
 import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
@@ -2536,7 +2535,7 @@ export default function AppLayout() {
     installModalShownRef.current = true
     setShowInstallModal(true)
   }, [data, loading, pwaInstalled, installDismissedPref, isCentral])
-  const [chatModel, setChatModel] = useState<ChatModelId | null>(null)
+  const [chatModel, setChatModel] = useState<string | null>(null)
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState('ping')
   // The repository explorer's autosave switch. A plain preference, loaded with the rest below and
@@ -2611,7 +2610,7 @@ export default function AppLayout() {
       }
       if (prefs.currency) setCurrencyState(prefs.currency)
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
-      if (prefs.chatModel) setChatModel(prefs.chatModel as ChatModelId)
+      if (prefs.chatModel) setChatModel(prefs.chatModel)
       if (prefs.chatSoundEnabled !== undefined) setChatSoundEnabled(prefs.chatSoundEnabled)
       // Absent reads as OFF, so this is `=== true` rather than the `!== undefined` guard above —
       // autosave was never on before it had a switch, and an upgrade must not turn it on.

@@ -35,33 +35,6 @@ const CODEX_CONFIG_PATH = path.join(HOME_DIR, '.codex', 'config.toml')
 const CODEX_AUTH_PATH = path.join(HOME_DIR, '.codex', 'auth.json')
 const MCP_SERVER_NAME = 'agentistics'
 
-// Models available to ChatGPT-authenticated Codex accounts.
-// gpt-5.4-mini is the primary model that works with ChatGPT OAuth auth.
-// Additional slugs from models_cache.json and supported model list are included
-// for users with API key auth or higher-tier ChatGPT accounts.
-const CODEX_MODELS = [
-  {
-    id: 'gpt-5.4-mini',
-    label: 'GPT-5.4 Mini',
-    badge: 'Fast',
-    desc: 'Fast, cost-efficient Codex model — ideal for most coding tasks',
-  },
-  {
-    id: 'gpt-5.1-codex-mini',
-    label: 'GPT-5.1 Codex Mini',
-    badge: 'Balanced',
-    desc: 'Balanced Codex model (GPT-5.1 generation)',
-  },
-  {
-    id: 'gpt-5.2-codex',
-    label: 'GPT-5.2 Codex',
-    badge: 'Powerful',
-    desc: 'Latest flagship Codex model — ideal for complex project-scale work',
-  },
-] as const
-
-type CodexModelId = typeof CODEX_MODELS[number]['id']
-
 function codexIsAvailable(): boolean {
   return findCli('codex')
 }
@@ -168,10 +141,6 @@ export const codexDriver: ChatDriver = {
     docUrl: 'https://github.com/openai/codex',
   },
 
-  models: CODEX_MODELS.map(m => ({ ...m })),
-
-  defaultModel: 'gpt-5.4-mini' satisfies CodexModelId,
-
   async ensureMcp(port: number) {
     await ensureCodexMcp(port)
   },
@@ -185,7 +154,7 @@ export const codexDriver: ChatDriver = {
       'codex', 'exec',
       '--json',
       '--skip-git-repo-check',
-      '-m', model,
+      ...(model ? ['-m', model] : []),
       '-',  // read prompt from stdin
     ]
 

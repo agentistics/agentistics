@@ -27,29 +27,6 @@ const GEMINI_SETTINGS_PATH = path.join(HOME_DIR, '.gemini', 'settings.json')
 const GEMINI_OAUTH_PATH = path.join(HOME_DIR, '.gemini', 'oauth_creds.json')
 const MCP_SERVER_NAME = 'agentistics'
 
-const GEMINI_MODELS = [
-  {
-    id: 'gemini-3-flash-preview',
-    label: 'Gemini 3 Flash',
-    badge: 'Fast',
-    desc: 'Fast Gemini 3 model — ideal for most tasks',
-  },
-  {
-    id: 'gemini-3-pro-preview',
-    label: 'Gemini 3 Pro',
-    badge: 'Powerful',
-    desc: 'Most capable Gemini 3 model — ideal for complex analysis',
-  },
-  {
-    id: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    badge: 'Balanced',
-    desc: 'Balanced speed and intelligence (Gemini 2.5)',
-  },
-] as const
-
-type GeminiModelId = typeof GEMINI_MODELS[number]['id']
-
 function geminiIsAvailable(): boolean {
   return findCli('gemini')
 }
@@ -161,10 +138,6 @@ export const geminiDriver: ChatDriver = {
     note: 'Free-tier access has been discontinued for some accounts and migrated to Antigravity (https://antigravity.google). If you receive an IneligibleTierError at runtime, visit the Antigravity link to check your account eligibility.',
   },
 
-  models: GEMINI_MODELS.map(m => ({ ...m })),
-
-  defaultModel: 'gemini-3-flash-preview' satisfies GeminiModelId,
-
   async ensureMcp(port: number) {
     await ensureGeminiMcp(port)
   },
@@ -176,7 +149,7 @@ export const geminiDriver: ChatDriver = {
       'gemini',
       '--prompt', prompt,
       '-o', 'stream-json',
-      '-m', model,
+      ...(model ? ['-m', model] : []),
       '--approval-mode', 'yolo',
     ]
 

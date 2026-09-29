@@ -21,16 +21,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Bot, Volume2, VolumeX, Zap } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { CHAT_MODELS, DEFAULT_CHAT_MODEL, type ChatModelId } from '../../lib/chatModels'
+import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings } from '../../lib/sessionNotifications'
 import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
-
-const BADGE_COLORS: Record<string, string> = {
-  Fast:     'var(--accent-green)',
-  Balanced: 'var(--anthropic-orange)',
-  Powerful: 'var(--accent-purple)',
-}
 
 export default function ChatSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -40,7 +34,9 @@ export default function ChatSettings() {
   const [capable, setCapable] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const [chatModel, setChatModel] = useState<ChatModelId | null>(null)
+  const [chatModel, setChatModel] = useState<string | null>(null)
+  const { harnesses } = useChatHarnesses()
+  const claudeModels = harnesses.find(h => h.id === 'claude')?.models ?? []
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState(DEFAULT_CHAT_SOUND_ID)
 
@@ -60,11 +56,11 @@ export default function ChatSettings() {
         fetch('/api/preferences')
           .then(r => (r.ok ? r.json() : {}) as Promise<{
             chatEnabled?: boolean
-            chatModel?: ChatModelId
+            chatModel?: string
             chatSoundEnabled?: boolean
             chatSoundId?: string
           }>)
-          .catch(() => ({}) as { chatEnabled?: boolean; chatModel?: ChatModelId; chatSoundEnabled?: boolean; chatSoundId?: string }),
+          .catch(() => ({}) as { chatEnabled?: boolean; chatModel?: string; chatSoundEnabled?: boolean; chatSoundId?: string }),
         fetch('/api/team/session')
           .then(r => (r.ok ? r.json() : {}) as Promise<{ capabilities?: { localChat?: boolean } }>)
           .catch(() => ({}) as { capabilities?: { localChat?: boolean } }),
@@ -120,7 +116,7 @@ export default function ChatSettings() {
     }).catch(() => {})
   }, [previewSound, ctx])
 
-  const selectModel = useCallback((id: ChatModelId) => {
+  const selectModel = useCallback((id: string) => {
     setChatModel(id)
     ctx.setChatModel(id)
     void fetch('/api/preferences', {
@@ -206,9 +202,15 @@ export default function ChatSettings() {
             {pt ? 'Modelo do chat' : 'Chat model'}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {CHAT_MODELS.map(m => {
-              const active = (chatModel ?? DEFAULT_CHAT_MODEL) === m.id
-              const badgeColor = BADGE_COLORS[m.badge] ?? 'var(--text-tertiary)'
+            {claudeModels.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                {enabled
+                  ? (pt ? 'Carregando os modelos que o Claude Code oferece nesta máquina…' : 'Loading the models Claude Code offers on this machine…')
+                  : (pt ? 'Ative o chat para escolher o modelo.' : 'Turn the chat on to choose its model.')}
+              </div>
+            )}
+            {claudeModels.map(m => {
+              const active = (chatModel ?? claudeModels[0]?.id) === m.id
               return (
                 <button key={m.id} onClick={() => selectModel(m.id)} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 7,
@@ -218,19 +220,10 @@ export default function ChatSettings() {
                 }}>
                   <Bot size={14} color={active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)'} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--anthropic-orange)' : 'var(--text-primary)' }}>{m.label}</span>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: badgeColor,
-                        background: `color-mix(in srgb, ${badgeColor} 12%, transparent)`,
-                        border: `1px solid color-mix(in srgb, ${badgeColor} 30%, transparent)`,
-                        padding: '1px 5px', borderRadius: 4,
-                      }}>{m.badge}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{m.desc}</div>
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', textAlign: 'right', flexShrink: 0, lineHeight: 1.6 }}>
-                    <div>${m.inputPer1M}</div><div>${m.outputPer1M}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--anthropic-orange)' : 'var(--text-primary)' }}>{m.label}</div>
+                    {m.label !== m.id && (
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1, fontFamily: 'var(--font-mono, monospace)' }}>{m.id}</div>
+                    )}
                   </div>
                   {active && <Zap size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />}
                 </button>
@@ -238,7 +231,9 @@ export default function ChatSettings() {
             })}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>
-            {pt ? 'USD por 1M tokens (entrada / saída)' : 'USD per 1M tokens (input / output)'}
+            {pt
+              ? 'A lista é a que o próprio Claude Code oferece à sua conta, lida nesta máquina.'
+              : 'This is the list Claude Code itself offers your account, read on this machine.'}
           </div>
         </>
       )}
