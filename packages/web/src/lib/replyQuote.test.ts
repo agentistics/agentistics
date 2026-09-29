@@ -1,5 +1,5 @@
-import { test, expect } from 'bun:test'
-import { markExcerpt, parseReply, quoteFor, quoteLines, replyAuthor, replyPreview, composeReply } from './replyQuote'
+import { describe, test, expect } from 'bun:test'
+import { addReply, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, composeReply } from './replyQuote'
 
 test('a quote is "> "-prefixed, line by line', () => {
   expect(quoteLines('one\ntwo')).toBe('> one\n> two')
@@ -128,4 +128,36 @@ test('a quote with nothing typed after it is just the quote', () => {
 test('a multi-line quote keeps its own lines together', () => {
   expect(composeReply({ quote: '> uma\n> duas', paths: [], text: 'resposta' }))
     .toBe('> uma\n> duas\n\nresposta')
+})
+
+describe('several quotes at once', () => {
+  const a = { role: 'assistant' as const, text: 'Question one?', key: 'k1' }
+  const b = { role: 'assistant' as const, text: 'Question two?', key: 'k2' }
+  test('Reply ADDS to the list, never twice', () => {
+    const one = addReply([], b)
+    const two = addReply(one, a)
+    expect(two).toEqual([b, a])
+    expect(addReply(two, a)).toEqual([b, a])
+    expect(addReply(two, { ...a, text: '  ' })).toEqual([b, a])
+  })
+  test('an excerpt of a message is a different quote from the whole message', () => {
+    expect(addReply([a], { ...a, excerpt: true })).toHaveLength(2)
+  })
+  test('the list is put back in conversation order', () => {
+    expect(orderReplies([b, a], ['k0', 'k1', 'k2'])).toEqual([a, b])
+    const loose = { role: 'user' as const, text: 'no key' }
+    expect(orderReplies([loose, b, a], ['k1', 'k2'])).toEqual([a, b, loose])
+  })
+  test('each quote travels briefly, a blank line apart, and the text stays out of the last one', () => {
+    const q = quoteAll([a, { role: 'assistant', text: '1\n2\n3\n4\n5\n6', key: 'k3' }])
+    expect(q).toBe('> Question one?\n\n> 1\n> 2\n> 3\n> 4\n> …')
+    expect(composeReply({ quote: q, paths: [], text: 'answers' }).endsWith('> …\n\nanswers')).toBe(true)
+    expect(quoteAll([])).toBe('')
+  })
+  test('a stored list parses, and so does the old single-object shape', () => {
+    expect(parseReplies(JSON.stringify([a, { role: 'x', text: 'bad' }, b]))).toEqual([a, b])
+    expect(parseReplies('{"role":"user","text":"old"}')).toEqual([{ role: 'user', text: 'old' }])
+    expect(parseReplies('nope')).toEqual([])
+    expect(parseReplies(null)).toEqual([])
+  })
 })

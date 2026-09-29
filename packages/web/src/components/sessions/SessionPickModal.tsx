@@ -20,7 +20,7 @@
  * A dialog that invents its own chrome reads as a different product from the one beside it.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Loader, Paperclip, RotateCcw, Search, Send, X } from 'lucide-react'
+import { ArrowLeft, Forward, Loader, Paperclip, RotateCcw, Search, Send, X } from 'lucide-react'
 import {
   PICK_TABS, filterPickRows, initialPick, pickAllState, pickEmpty, pickTabHint,
   pickTabLabel, pickedRows, togglePick, togglePickAll,
@@ -28,6 +28,7 @@ import {
 } from '../../lib/sessionPick'
 import { composeBroadcastText, wizardPrimaryLabel, type WizardStep } from '../../lib/sendWizard'
 import { hasSomethingToSend } from '../../lib/composerAction'
+import { forwardConfirmLabel } from '../../lib/chatForward'
 import { MAX_ATTACHMENTS, attachmentRoom, planPaste } from '../../lib/pastePlan'
 import { isImagePath } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
@@ -45,22 +46,38 @@ const MAX_BROADCAST = 12
 export type PickModalRow = PickRow
 
 interface Props {
-  kind: 'reopen' | 'send'
+  /**
+   * `forward` is the third feature on this one picker: tick the sessions a forwarded message goes
+   * to, then (second step) add an optional comment and choose where it lands — the target's DRAFT by
+   * default, or sent straight away. Its rows are all pickable, because a draft can be written for a
+   * session that is not running; whether a DIRECT send can reach each one is the server's to decide
+   * (`broadcast` reports what it skipped, and can bring a reopenable session back first).
+   */
+  kind: 'reopen' | 'send' | 'forward'
   rows: readonly PickModalRow[]
   lang: 'pt' | 'en'
   busy?: boolean
+  /** `forward` only: the quoted block being forwarded, shown read-only on the second step. */
+  forwardPreview?: string
   onClose: () => void
-  /** `text` is present only for `send`. */
-  onConfirm: (ids: string[], text: string) => void
+  /**
+   * `text` is the prompt for `send` and the optional COMMENT for `forward`; empty for `reopen`.
+   * `opts.direct` is present only for `forward`.
+   */
+  onConfirm: (ids: string[], text: string, opts?: { direct: boolean }) => void
 }
 
 /** One uploaded file, as the composer holds it — the same shape `SessionChat`'s own composer uses. */
 interface Attachment { name: string; path: string }
 
-export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }: Props) {
+export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClose, onConfirm }: Props) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const needsText = kind === 'send'
+  const forwarding = kind === 'forward'
+  const twoStep = kind !== 'reopen'
+  /** `forward` only: send straight away instead of landing in each target's draft. Off by default. */
+  const [direct, setDirect] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(() => initialPick(rows, kind === 'reopen' ? 'all' : 'none'))
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
@@ -103,12 +120,15 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
   // silently shrank what the button was about to do would be the worst kind of quiet.
   const allState = pickAllState(shown, picked)
   const chosen = useMemo(() => pickedRows(rows, picked), [rows, picked])
-  const overCap = needsText && chosen.length > MAX_BROADCAST
-  const primary = wizardPrimaryLabel(step, kind, chosen.length, pt)
+  // A DRAFT is written in this browser and has no cap; a direct forward is a broadcast and has its.
+  const overCap = (needsText || (forwarding && direct)) && chosen.length > MAX_BROADCAST
+  const primary = forwarding && step === 'compose'
+    ? forwardConfirmLabel(chosen.length, direct, pt)
+    : wizardPrimaryLabel(step, kind === 'forward' ? 'send' : kind, chosen.length, pt)
   // On the PICK step, `send` only turns the page — busy/cap/text have nothing to do with that yet.
   // On the one step `reopen` has, and on `send`'s COMPOSE step, the button actually PERFORMS the
   // verb, so it inherits every guard the single-screen modal always had.
-  const ready = step === 'pick' && kind === 'send'
+  const ready = step === 'pick' && twoStep
     ? primary.enabled && !busy
     : primary.enabled && !busy && !overCap
       && (!needsText || hasSomethingToSend({ draft: text, attachments: attached.length }))
@@ -180,15 +200,25 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
   const t = {
     title: kind === 'reopen'
       ? (pt ? 'Reabrir o que caiu' : 'Reopen what fell')
-      : (pt ? 'Enviar prompt em massa' : 'Send a prompt to several sessions'),
+      : forwarding
+        ? (pt ? 'Encaminhar mensagens' : 'Forward messages')
+        : (pt ? 'Enviar prompt em massa' : 'Send a prompt to several sessions'),
     lead: kind === 'reopen'
       ? (pt
         ? 'Estas sessões estavam abertas quando a máquina parou. Vêm todas marcadas — desmarque as que não quiser de volta.'
         : 'These sessions were open when the machine stopped. They all start ticked — untick any you do not want back.')
+      : forwarding
+        ? (pt
+          ? 'Escolha uma ou mais sessões para onde encaminhar. Busque por título, pasta, harness ou estado.'
+          : 'Pick one or more sessions to forward to. Search by title, folder, harness or state.')
       : (pt
         ? 'Escolha as sessões que vão receber o mesmo prompt. Nenhuma vem marcada: escolha uma a uma.'
         : 'Pick the sessions that will receive the same prompt. None start ticked: pick them yourself.'),
-    composeLead: pt
+    composeLead: forwarding
+      ? (pt
+        ? 'Por padrão o encaminhamento vai para o rascunho de cada sessão, para você completar a instrução lá.'
+        : 'By default the forward lands in each session’s draft, so you can finish the instruction there.')
+      : pt
       ? (chosen.length === 1
         ? 'O prompt vai para 1 sessão.'
         : `O prompt vai para ${chosen.length} sessões, uma de cada vez.`)
@@ -196,6 +226,18 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
         ? 'The prompt goes to 1 session.'
         : `The prompt goes to ${chosen.length} sessions, one at a time.`),
     sessions: pt ? 'Sessões' : 'Sessions',
+    comment: pt ? 'Comentário (opcional)' : 'Comment (optional)',
+    commentPlaceholder: pt ? 'Uma linha antes do conteúdo encaminhado…' : 'A line above the forwarded content…',
+    forwarded: pt ? 'O que vai ser encaminhado' : 'What will be forwarded',
+    delivery: pt ? 'Entrega' : 'Delivery',
+    toDraft: pt ? 'Colocar no rascunho' : 'Put in the draft',
+    toDraftHint: pt
+      ? 'Nada é enviado. Você abre a sessão, completa a instrução e envia.'
+      : 'Nothing is sent. You open the session, finish the instruction and send it.',
+    sendNow: pt ? 'Enviar direto' : 'Send now',
+    sendNowHint: pt
+      ? 'Vai como mensagem agora, para cada sessão escolhida, uma de cada vez.'
+      : 'Goes out as a message now, to each chosen session, one at a time.',
     prompt: pt ? 'Prompt' : 'Prompt',
     all: pt ? 'Marcar todas' : 'Tick all',
     none: pt ? 'Desmarcar todas' : 'Untick all',
@@ -424,6 +466,60 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
                 </div>
               </Field>
 
+              {forwarding ? (
+                <>
+                  <Field label={t.comment}>
+                    <textarea
+                      value={text}
+                      onChange={e => setText(e.target.value)}
+                      placeholder={t.commentPlaceholder}
+                      rows={2}
+                      style={{
+                        ...inputStyle, paddingLeft: 12, resize: 'vertical', lineHeight: 1.5,
+                        ...(isMobile ? { fontSize: 16 } : {}),
+                      }}
+                    />
+                  </Field>
+                  {forwardPreview && (
+                    <Field label={t.forwarded}>
+                      <pre style={{
+                        margin: 0, maxHeight: isMobile ? 180 : 140, overflow: 'auto',
+                        padding: '8px 10px', borderRadius: 10,
+                        border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
+                        fontFamily: 'inherit', fontSize: 11.5, lineHeight: 1.5,
+                        color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                      }}>{forwardPreview}</pre>
+                    </Field>
+                  )}
+                  <Field label={t.delivery}>
+                    <div role="radiogroup" aria-label={t.delivery} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {([[false, t.toDraft, t.toDraftHint], [true, t.sendNow, t.sendNowHint]] as const).map(([value, label, hint]) => (
+                        <label key={String(value)} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer',
+                          padding: '9px 10px', borderRadius: 8, minHeight: isMobile ? 44 : undefined,
+                          border: `1px solid ${direct === value ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+                          background: direct === value ? 'var(--bg-elevated)' : 'transparent',
+                        }}>
+                          <input
+                            type="radio"
+                            name="forward-delivery"
+                            checked={direct === value}
+                            onChange={() => setDirect(value)}
+                            style={{ marginTop: 2, accentColor: 'var(--anthropic-orange)', flexShrink: 0 }}
+                          />
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-primary)' }}>{label}</span>
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>{hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {overCap && (
+                      <span role="status" style={{ fontSize: 11.5, color: 'var(--accent-red)' }}>{t.cap}</span>
+                    )}
+                  </Field>
+                </>
+              ) : (
               <Field label={t.prompt}>
                 <textarea
                   value={text}
@@ -523,6 +619,7 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
                   <span role="status" style={{ fontSize: 11.5, color: 'var(--accent-red)' }}>{t.cap}</span>
                 )}
               </Field>
+              )}
             </>
           )}
         </div>
@@ -548,7 +645,8 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
               if (!ready) return
               // `send`'s pick step only turns the page — the verb has not happened yet, so it must
               // not call `onConfirm`, which is what actually starts writing into live sessions.
-              if (kind === 'send' && step === 'pick') { setStep('compose'); return }
+              if (twoStep && step === 'pick') { setStep('compose'); return }
+              if (forwarding) { onConfirm(chosen.map(r => r.id), text.trim(), { direct }); return }
               onConfirm(
                 chosen.map(r => r.id),
                 kind === 'send' ? composeBroadcastText(attached.map(a => a.path), text.trim()) : '',
@@ -565,7 +663,10 @@ export function SessionPickModal({ kind, rows, lang, busy, onClose, onConfirm }:
               fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
             }}
           >
-            {kind === 'reopen' ? <RotateCcw size={13} /> : (step === 'compose' ? <Send size={13} /> : null)}
+            {kind === 'reopen'
+              ? <RotateCcw size={13} />
+              : step !== 'compose' ? null
+              : forwarding && !direct ? <Forward size={13} /> : <Send size={13} />}
             {primary.label}
           </button>
         </footer>
