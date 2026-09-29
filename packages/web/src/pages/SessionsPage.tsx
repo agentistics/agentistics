@@ -1254,8 +1254,13 @@ export default function SessionsPage() {
       ),
     })
     : null
+  // THE BOTTOM BAND HIDES IT TOO (owner, 2026-09-29: a panel moved to the bottom bar showed the
+  // aside's own "close the panel" button, which read as a stray "minimize the aside" control inside
+  // the bar). The band's own bar already carries the minimize for whatever it docks, right above
+  // this header — the same duplicate the right slot removed. Mobile keeps it, for the same reason
+  // the right slot does: there is no such bar there.
   const bottomTabPane = slotLayout.bottom !== null && isTabPanelId(slotLayout.bottom)
-    ? tabPane(slotLayout.bottom) : null
+    ? tabPane(slotLayout.bottom, { hideCloseButton: !isMobile }) : null
 
   /**
    * THE SAME `HardwarePanel` ELEMENT, reused for the BOTTOM band too (owner, 2026-09-19: "o hardware
@@ -1266,10 +1271,11 @@ export default function SessionsPage() {
    * THE RIGHT SLOT GETS ITS OWN SEPARATE ELEMENT NOW (`hardwarePaneRightEl`, below this one) rather
    * than reusing this one — the two placements need different props (`hideCloseButton`/`controls`
    * for the merged single-header-row right slot; neither for the bottom band, whose own
-   * `SimpleDockedBand` bar already draws the trio in its OWN row, and whose minimize COLLAPSES
-   * rather than closes, so this element's own close button keeps its job there unchanged).
+   * `SimpleDockedBand` bar already draws the trio in its OWN row — which is also why the bottom
+   * element hides its own close button on desktop, like the right one: that bar's minimize is right
+   * above it).
    */
-  const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} />
+  const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} hideCloseButton={!isMobile} />
   const hardwarePaneRightEl = (
     <HardwarePanel
       lang={pt ? 'pt' : 'en'}
