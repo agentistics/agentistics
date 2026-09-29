@@ -20,8 +20,8 @@
   <a href="https://github.com/blpsoares/agentistics/actions/workflows/release.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/blpsoares/agentistics/release.yml?label=build" alt="Build status" />
   </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/blpsoares/agentistics?color=green" alt="MIT License" />
+  <a href="LICENSING.md">
+    <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-green" alt="License: FSL-1.1-ALv2" />
   </a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey" alt="Platform: Linux | Windows" />
   <img src="https://img.shields.io/badge/Bun-runtime-f9f1e1?logo=bun" alt="Bun" />
@@ -437,7 +437,18 @@ real player with selectable text) rendered to GIF with [`agg`](https://github.co
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Everything in this project is in English — code, comments,
-commits, docs.
+commits, docs. Contributions are accepted under the [Contributor License Agreement](CLA.md).
+
+---
+
+## License
+
+Agentistics is **source-available** under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE),
+and each release becomes **Apache-2.0 two years after it ships**. Use it personally or inside your
+company, self-host it, modify it and build integrations for free. What the licence does not allow is
+offering it to others as a competing commercial product or service: a hosted service, a rebrand or a
+resale. Versions up to and including `mit-final` remain MIT. See [LICENSING.md](LICENSING.md) for the
+full picture and [TRADEMARKS.md](TRADEMARKS.md) for the name and logo.
 
 ---
 

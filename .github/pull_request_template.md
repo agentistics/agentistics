@@ -17,3 +17,7 @@
 <!-- How did you verify this works? What should reviewers check? -->
 
 - [ ]
+
+## Contributor License Agreement
+
+- [ ] I have read [CLA.md](../CLA.md) and agree that it applies to this contribution.
