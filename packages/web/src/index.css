@@ -928,7 +928,13 @@ button:focus-within .ag-row-pin,
 .ag-composer-ground::before {
   content: '';
   position: absolute;
-  inset: 0;
+  /* Reaches 56px ABOVE the composer: the zone where a line of the conversation passes behind the
+     field is the one that has to fade, and a ground that stopped at the field's own top edge left
+     the text sharp until the instant it vanished under the box. */
+  top: -56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: -1;
   pointer-events: none;
   /* PREFIXED FIRST, STANDARD LAST — the same order `mask-image` already uses three lines down,
@@ -945,16 +951,19 @@ button:focus-within .ag-row-pin,
      that only keeps one. */
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  /* Plain first, so a browser without `color-mix` still gets the fade rather than no ground. */
-  background: linear-gradient(to bottom, transparent 0%, var(--bg-base) 100%);
+  /* Plain first, so a browser without `color-mix` still gets the fade rather than no ground.
+     `--ag-composer-ground` is the surface the conversation sits on — the page's `--bg-base` by
+     default, the Nay panel's `--bg-surface` inside it — so the fade ends in the colour under it
+     rather than in a band of a different one. */
+  background: linear-gradient(to bottom, transparent 0%, var(--ag-composer-ground, var(--bg-base)) 100%);
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    color-mix(in srgb, var(--bg-base) 72%, transparent) 45%,
-    var(--bg-base) 100%
+    color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 72%, transparent) 45%,
+    var(--ag-composer-ground, var(--bg-base)) 100%
   );
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
-  mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
 }
 
 /*
@@ -963,7 +972,8 @@ button:focus-within .ag-row-pin,
  */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ag-composer-ground::before {
-    background: var(--bg-base);
+    top: 0;
+    background: var(--ag-composer-ground, var(--bg-base));
     -webkit-mask-image: none;
     mask-image: none;
   }

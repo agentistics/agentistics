@@ -2116,6 +2116,11 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         // variable" without repeating the other three sides by hand anyway.
         paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 16, paddingLeft: 20,
         background: 'transparent',
+        // ITS OWN STACKING CONTEXT. `.ag-composer-ground::before` (the blur-and-fade) sits at
+        // `z-index: -1`, and without a context here that `-1` resolved against the PANEL — so the
+        // fade was painted BEHIND the conversation scroller and the text showed straight through
+        // (owner, 2026-09-29). `z-index: 1` keeps the ground under the field and over the messages.
+        zIndex: 1,
       }}>
         {/* Back to the end. Only while the reader has actually scrolled away — a control that is
             always there teaches nothing about where you are. */}
@@ -2539,81 +2544,6 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 </div>
               )}
 
-              {attached.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                  {attached.map(a => isImagePath(a.path) ? (
-                    // The same square the sent message will wear (see ChatBubble's AttachmentThumb)
-                    // — what you see here is what the session's reply will show.
-                    <span key={a.path} title={a.name} style={{
-                      position: 'relative', display: 'block', width: 48, height: 48,
-                      borderRadius: 8, overflow: 'hidden', flexShrink: 0,
-                      border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-                    }}>
-                      {/* The picture OPENS. It is a button and not a click handler on the `img`,
-                          so it is reachable by keyboard and announced as something that does
-                          something — and it stays a SIBLING of the remove control rather than its
-                          parent, because a button inside a button is invalid and the inner one
-                          stops being clickable in some browsers. */}
-                      <button
-                        type="button"
-                        onClick={() => setComposerLightbox(composerImages.indexOf(a.path))}
-                        aria-label={pt ? `Ver ${a.name}` : `View ${a.name}`}
-                        style={{
-                          display: 'block', width: '100%', height: '100%', padding: 0,
-                          border: 'none', background: 'transparent', cursor: 'zoom-in',
-                        }}
-                      >
-                        <img
-                          src={attachmentUrl(a.path)} alt=""
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        />
-                      </button>
-                      <button
-                        onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
-                        aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
-                        style={{
-                          position: 'absolute', top: 2, right: 2,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          width: 16, height: 16, borderRadius: '50%', border: 'none', padding: 0,
-                          background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer',
-                        }}
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ) : (
-                    <span key={a.path} title={a.path} style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
-                      padding: '5px 8px', borderRadius: 8, minWidth: 0,
-                      background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                      fontSize: 11.5, color: 'var(--text-secondary)',
-                    }}>
-                      <Paperclip size={11} style={{ flexShrink: 0 }} />
-                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {a.name}
-                      </span>
-                      <button
-                        onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
-                        aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
-                        style={{
-                          display: 'flex', border: 'none', background: 'transparent', padding: 0,
-                          color: 'var(--text-tertiary)', cursor: 'pointer', flexShrink: 0,
-                        }}
-                      >
-                        <X size={11} />
-                      </button>
-                    </span>
-                  ))}
-                  {/* Said plainly, because it is NOT what attach means in a chat application: the
-                      file is on the machine running the session, and the path is what is sent. */}
-                  <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', alignSelf: 'center' }}>
-                    {pt
-                      ? 'gravados nesta máquina; o caminho vai na mensagem'
-                      : 'stored on this machine; the path goes in the message'}
-                  </span>
-                </div>
-              )}
-
               {/* A session that is not running cannot be written to, and a disabled field is a dead
                   end. The conversation is still fully readable above; what is offered here is the
                   way BACK INTO it. The verb is the row's own `resume`, which the server enables only
@@ -2742,6 +2672,86 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                   onChange={e => pick(e.target.files)}
                   style={{ display: 'none' }}
                 />
+                {/* THE ATTACHMENTS LIVE INSIDE THE FIELD — its first row, above the text, the way Claude
+                    Desktop draws them. They used to sit ABOVE the field, loose over the conversation
+                    on a transparent ground, where a pasted screenshot was hard to see and it was not
+                    even clear anything was attached (owner, 2026-09-29). Inside the box they read as
+                    part of the message being written, which is what they are. */}
+                {attached.length > 0 && (
+                  <div
+                    aria-label={pt ? 'Anexos desta mensagem' : 'Attachments for this message'}
+                    title={pt
+                      ? 'Gravados nesta máquina; o caminho vai na mensagem'
+                      : 'Stored on this machine; the path goes in the message'}
+                    style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '6px 4px 4px' }}
+                  >
+                    {attached.map(a => isImagePath(a.path) ? (
+                      // The same square the sent message will wear (see ChatBubble's AttachmentThumb)
+                      // — what you see here is what the session's reply will show.
+                      <span key={a.path} title={a.name} style={{
+                        position: 'relative', display: 'block', width: 64, height: 64,
+                        borderRadius: 10, overflow: 'hidden', flexShrink: 0,
+                        border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                      }}>
+                        {/* The picture OPENS. It is a button and not a click handler on the `img`,
+                            so it is reachable by keyboard, and it stays a SIBLING of the remove
+                            control rather than its parent — a button inside a button is invalid. */}
+                        <button
+                          type="button"
+                          onClick={() => setComposerLightbox(composerImages.indexOf(a.path))}
+                          aria-label={pt ? `Ver ${a.name}` : `View ${a.name}`}
+                          style={{
+                            display: 'block', width: '100%', height: '100%', padding: 0,
+                            border: 'none', background: 'transparent', cursor: 'zoom-in',
+                          }}
+                        >
+                          <img
+                            src={attachmentUrl(a.path)} alt=""
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                          />
+                        </button>
+                        <button
+                          onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
+                          aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
+                          title={pt ? 'Remover' : 'Remove'}
+                          className="ag-tap-icon"
+                          style={{
+                            position: 'absolute', top: 4, right: 4,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 18, height: 18, borderRadius: '50%', padding: 0,
+                            border: '1px solid rgba(255,255,255,0.25)',
+                            background: 'rgba(0,0,0,0.7)', color: '#fff', cursor: 'pointer',
+                          }}
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ) : (
+                      <span key={a.path} title={a.path} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
+                        height: 32, padding: '0 8px', borderRadius: 10, minWidth: 0, alignSelf: 'flex-end',
+                        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                        fontSize: 11.5, color: 'var(--text-secondary)',
+                      }}>
+                        <Paperclip size={11} style={{ flexShrink: 0 }} />
+                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {a.name}
+                        </span>
+                        <button
+                          onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
+                          aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
+                          className="ag-tap-icon"
+                          style={{
+                            display: 'flex', border: 'none', background: 'transparent', padding: 0,
+                            color: 'var(--text-tertiary)', cursor: 'pointer', flexShrink: 0,
+                          }}
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {/* THE INVOCATION IS PAINTED LIKE A BUTTON, IN THE FIELD ITSELF.
                     A textarea cannot hold a coloured span, so a FOUND command is drawn by a mirror:
                     a div with the SAME typography, padding and wrapping, behind the field, drawing
