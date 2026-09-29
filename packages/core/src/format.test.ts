@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { sessionLabel, fmt, fmtCost, fmtCostFull, fmtElapsed } from './format'
+import { sessionLabel, fmt, fmtCost, fmtCostFull, fmtElapsed, promptTitle, cleanPromptText, sessionTimeTitle, PROMPT_TITLE_MAX } from './format'
 
 describe('fmtCost', () => {
   // A local model (see isLocalModelId/LOCAL_MODEL_PRICE in local-models.ts) prices at exactly 0 —
@@ -122,5 +122,73 @@ describe('fmt', () => {
 
   it('leaves small numbers alone', () => {
     expect(fmt(942)).toBe('942')
+  })
+})
+
+describe('promptTitle', () => {
+  const FB = 'Session 2026-09-28 14:03 UTC'
+
+  it('is deterministic: the same prompt always yields the same title', () => {
+    const p = 'Refactor the parser so it streams instead of buffering the whole file in memory'
+    expect(promptTitle(p, FB)).toBe(promptTitle(p, FB))
+  })
+
+  it('collapses whitespace', () => {
+    expect(promptTitle('  fix\n\n the   login\tbug  ', FB)).toBe('fix the login bug')
+  })
+
+  it('strips the harness wrappers, like sessionLabel', () => {
+    const p = '<command-name>/commit</command-name><local-command-caveat>x</local-command-caveat> please commit'
+    expect(promptTitle(p, FB)).toBe('please commit')
+    expect(cleanPromptText(p)).toBe(sessionLabel({ first_prompt: p }))
+  })
+
+  it('caps on a word boundary with an ellipsis, never over the limit', () => {
+    const p = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen'
+    const t = promptTitle(p, FB, 30)
+    expect(t).toBe('one two three four five six…')
+    expect(t.length).toBeLessThanOrEqual(30)
+    expect(promptTitle(p, FB).length).toBeLessThanOrEqual(PROMPT_TITLE_MAX)
+  })
+
+  it('drops trailing punctuation before the ellipsis', () => {
+    expect(promptTitle('alpha beta, gamma delta epsilon', FB, 13)).toBe('alpha beta…')
+  })
+
+  it('cuts a single over-long word hard', () => {
+    const t = promptTitle('a'.repeat(100), FB, 20)
+    expect(t).toBe(`${'a'.repeat(19)}…`)
+  })
+
+  it('leaves a prompt at the limit untouched', () => {
+    expect(promptTitle('exactly ten', FB, 11)).toBe('exactly ten')
+  })
+
+  it('falls back on an empty prompt or one that is only a slash command', () => {
+    expect(promptTitle('', FB)).toBe(FB)
+    expect(promptTitle('   \n ', FB)).toBe(FB)
+    expect(promptTitle('/clear', FB)).toBe(FB)
+    expect(promptTitle('/superpowers:brainstorming', FB)).toBe(FB)
+    expect(promptTitle('<command-name>/clear</command-name>', FB)).toBe(FB)
+    expect(promptTitle('/review the auth module', FB)).toBe('/review the auth module')
+  })
+
+  it('redacts a secret before cutting, so no prefix of it survives', () => {
+    const key = 'sk-ant-api03-' + 'A1b2C3d4E5f6G7h8'.repeat(4)
+    const t = promptTitle(`use ${key} to call the api`, FB)
+    expect(t).not.toContain('sk-ant')
+    expect(t).toContain('[REDACTED]')
+    const t2 = promptTitle(`deploy with MONGO_URL=mongodb+srv://user:hunter2pass@db.example.com now`, FB)
+    expect(t2).not.toContain('hunter2pass')
+  })
+})
+
+describe('sessionTimeTitle', () => {
+  it('reads the day and minute off an ISO timestamp, zone-independent', () => {
+    expect(sessionTimeTitle('2026-09-28T14:03:59.123Z')).toBe('Session 2026-09-28 14:03 UTC')
+  })
+  it('says only "Session" for anything else', () => {
+    expect(sessionTimeTitle('')).toBe('Session')
+    expect(sessionTimeTitle('yesterday')).toBe('Session')
   })
 })

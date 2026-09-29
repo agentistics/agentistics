@@ -1,3 +1,5 @@
+import { redactSecrets } from './redact'
+
 /** Compact number for dense UI: 1.5K, 2.4M, 13.3B. Scales past M — a heavy Claude history
  *  reaches billions of tokens, and "13290.8M" is not a number anyone can read at a glance. */
 export function fmt(n: number): string {
@@ -85,14 +87,63 @@ export function sessionLabel(s: { user_label?: string; title?: string; first_pro
   if (own) return own
   const title = (s.title ?? '').trim()
   if (title) return title
-  const fp = (s.first_prompt ?? '').trim()
-  const cleaned = fp
+  return cleanPromptText(s.first_prompt ?? '')
+}
+
+/**
+ * A first prompt with the harness's own wrappers removed (`<local-command-…>` / `<command-…>`
+ * blocks, any other tag) and whitespace collapsed. The ONE reading of "what the person typed" —
+ * `sessionLabel` falls back to it and `promptTitle` derives a stored title from it, so the label a
+ * list shows and the title a native session is given can never strip different things.
+ */
+export function cleanPromptText(prompt: string): string {
+  return prompt
     .replace(/<local-command-[a-z]*>[\s\S]*?<\/local-command-[a-z]*>/gi, ' ')
     .replace(/<command-[a-z]+>[\s\S]*?<\/command-[a-z]+>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return cleaned || ''
+}
+
+/** How long a derived title may be, in characters, ellipsis included. */
+export const PROMPT_TITLE_MAX = 60
+
+/** A prompt that is ONLY a slash command — exactly one `/word` token (`/clear`, `/plugin:skill`). */
+const ONLY_SLASH_COMMAND = /^\/[\w:.-]+$/
+
+/**
+ * A DETERMINISTIC title for a session, derived from its first prompt with no model call: the same
+ * prompt always yields the same title. Steps, in this order:
+ *
+ * 1. `cleanPromptText` — the same stripping `sessionLabel` does.
+ * 2. `redactSecrets` — BEFORE the cut, so a key is replaced whole rather than cut to a prefix the
+ *    redactor no longer recognises and then shown. A pasted credential never becomes a title.
+ * 3. Cap at `max` characters, cutting on a WORD boundary and ending in `…`; a single word longer
+ *    than the cap is cut hard (there is no boundary to cut on).
+ *
+ * An empty prompt, or one that is only a slash command, has nothing to name the session by and
+ * yields `fallback` — callers pass something neutral and stable, such as the creation time.
+ */
+export function promptTitle(prompt: string, fallback: string, max = PROMPT_TITLE_MAX): string {
+  const cleaned = cleanPromptText(typeof prompt === 'string' ? prompt : '')
+  if (cleaned === '' || ONLY_SLASH_COMMAND.test(cleaned)) return fallback
+  const safe = redactSecrets(cleaned)
+  const limit = Math.max(2, Math.floor(max))
+  if (safe.length <= limit) return safe
+  const room = safe.slice(0, limit - 1)
+  const space = room.lastIndexOf(' ')
+  const cut = space > 0 ? room.slice(0, space) : room
+  return `${cut.replace(/[\s,.;:!?-]+$/, '')}…`
+}
+
+/**
+ * The neutral fallback for `promptTitle`: `Session YYYY-MM-DD HH:MM UTC`, read straight off an ISO
+ * timestamp so it does not depend on the clock or the zone of whoever computes it. A value that is
+ * not an ISO timestamp yields plain `Session`.
+ */
+export function sessionTimeTitle(iso: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(typeof iso === 'string' ? iso : '')
+  return m ? `Session ${m[1]} ${m[2]} UTC` : 'Session'
 }
 
 export function fmtFull(n: number): string {

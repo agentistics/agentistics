@@ -21,7 +21,7 @@ import { gitTestEnv } from '../../test/git-test-env.ts'
 import { createFileContentStore } from './content-store.ts'
 import { createRunScheduler } from './scheduler.ts'
 import { openSqliteSessionStore } from './sqlite-store.ts'
-import { createSessionRuntime, type CreateSessionRuntimeDeps, type SessionRuntime } from './runtime.ts'
+import { createSessionRuntime, derivedSessionTitle, isFirstPromptUntitled, type CreateSessionRuntimeDeps, type SessionRuntime } from './runtime.ts'
 import type { SessionStore } from './types.ts'
 
 function scriptedClient(turns: ProviderContent[][]): ProviderClient {
@@ -347,5 +347,67 @@ describe('createSessionRuntime — create, run, events', () => {
     const after = await runtime.get(session.sessionId)
     expect(after?.status).toBe('failed')
     expect(events.map(e => e.type)).toEqual(['session.started', 'session.ended'])
+  })
+})
+
+describe('H7 — a deterministic title from the first prompt', () => {
+  const cred = { provider: 'anthropic', id: 't' } as unknown as CredentialRef
+  const twoTurns = () => scriptedClient([[{ type: 'text', text: 'one' }], [{ type: 'text', text: 'two' }]])
+
+  test('the first prompt titles an untitled session, once; a later prompt never re-derives it', async () => {
+    const client = twoTurns()
+    const runtime = createSessionRuntime(baseDeps({ clientFor: () => client }))
+    const s = await runtime.create({ workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'm', credential: cred })
+    expect(s.title).toBeUndefined()
+
+    await runtime.run(s.sessionId, '  Fix   the login\n bug in the auth module  ')
+    expect((await runtime.get(s.sessionId))?.title).toBe('Fix the login bug in the auth module')
+
+    await runtime.run(s.sessionId, 'now something completely different')
+    expect((await runtime.get(s.sessionId))?.title).toBe('Fix the login bug in the auth module')
+  })
+
+  test('a title a PERSON gave wins: the first prompt does not replace it', async () => {
+    const runtime = createSessionRuntime(baseDeps())
+    const s = await runtime.create({ title: 'My name for it', workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'm', credential: cred })
+    await runtime.run(s.sessionId, 'fix the login bug')
+    expect((await runtime.get(s.sessionId))?.title).toBe('My name for it')
+  })
+
+  test('a rename landing before the first prompt is recorded wins too', async () => {
+    const runtime = createSessionRuntime(baseDeps())
+    const s = await runtime.create({ workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'm', credential: cred })
+    await store.updateSession(s.sessionId, { title: 'Renamed by a person' })
+    await runtime.run(s.sessionId, 'fix the login bug')
+    expect((await runtime.get(s.sessionId))?.title).toBe('Renamed by a person')
+  })
+
+  test('a slash-command-only first prompt falls back to the creation time', async () => {
+    const runtime = createSessionRuntime(baseDeps())
+    const s = await runtime.create({ workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'm', credential: cred })
+    await runtime.run(s.sessionId, '/clear')
+    const title = (await runtime.get(s.sessionId))?.title
+    expect(title).toBe(derivedSessionTitle('/clear', s.createdAt))
+    expect(title).toMatch(/^Session \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/)
+  })
+
+  test('a pasted secret never becomes the title', async () => {
+    const runtime = createSessionRuntime(baseDeps())
+    const s = await runtime.create({ workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'm', credential: cred })
+    await runtime.run(s.sessionId, 'deploy with PASSWORD=Sup3rS3cretValue99 please')
+    const title = (await runtime.get(s.sessionId))?.title ?? ''
+    expect(title).not.toContain('Sup3rS3cretValue99')
+    expect(title).toContain('[REDACTED]')
+  })
+})
+
+describe('isFirstPromptUntitled', () => {
+  test('only an untitled session at or before its first message', () => {
+    expect(isFirstPromptUntitled({ lastSeq: 0 })).toBe(true)
+    expect(isFirstPromptUntitled({ lastSeq: 1 })).toBe(false)
+    expect(isFirstPromptUntitled({ lastSeq: 1 }, 1)).toBe(true)
+    expect(isFirstPromptUntitled({ lastSeq: 3 }, 1)).toBe(false)
+    expect(isFirstPromptUntitled({ lastSeq: 0, title: 'x' })).toBe(false)
+    expect(isFirstPromptUntitled({ lastSeq: 0, title: '' })).toBe(true)
   })
 })

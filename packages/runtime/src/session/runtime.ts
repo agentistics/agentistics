@@ -39,6 +39,7 @@
  */
 
 import type { AgentisticsEvent, ProviderId, RunStartedData, RunStatus, SessionStartedData } from '@agentistics/core'
+import { promptTitle, sessionTimeTitle } from '@agentistics/core'
 import type { CredentialRef } from '../provider/credential.ts'
 import type { ProviderClient, ProviderMessage, ProviderMessagePart, ProviderStreamEvent } from '../provider/client.ts'
 import type { EmitScope, ProviderJournalSink } from '../provider/emit.ts'
@@ -104,6 +105,24 @@ function createTeeJournal(inner: ProviderJournalSink | null, onEvent: ((e: Agent
 }
 
 // ── Public shapes ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The title a native session gets from its first prompt — `promptTitle` (@agentistics/core: the
+ * `sessionLabel` stripping, then `redactSecrets`, then a word-boundary cap) with the session's
+ * creation time as the neutral fallback. Pure: the same prompt and session yield the same title.
+ */
+export function derivedSessionTitle(firstPrompt: string, createdAt: string): string {
+  return promptTitle(firstPrompt, sessionTimeTitle(createdAt))
+}
+
+/**
+ * True while a session has no title AND has recorded at most `seen` messages — `0` before the first
+ * prompt is appended, `1` right after it. A session with any title, or past its first message, is
+ * never (re)titled here.
+ */
+export function isFirstPromptUntitled(session: Pick<SessionRecord, 'title' | 'lastSeq'>, seen = 0): boolean {
+  return (session.title === undefined || session.title === '') && session.lastSeq <= seen
+}
 
 export interface CreateSessionInput {
   title?: string
@@ -244,6 +263,22 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
     return session
   }
 
+  /**
+   * H7: the first prompt names the session, ONCE. Written only when this is the session's first
+   * message and nobody has titled it — a title a person gave (at create, or by a rename landing
+   * before this line) always wins, because the store is re-read immediately before the write. After
+   * that the title is simply present, so no later prompt can ever re-derive it.
+   */
+  async function recordDerivedTitle(session: SessionRecord, userText: string): Promise<void> {
+    if (!isFirstPromptUntitled(session)) return
+    try {
+      const fresh = await deps.store.getSession(session.sessionId)
+      if (!fresh || !isFirstPromptUntitled(fresh, 1)) return
+      const title = derivedSessionTitle(userText, fresh.createdAt)
+      await deps.store.updateSession(session.sessionId, { title })
+    } catch { /* a title is a label; failing to write one never fails the run */ }
+  }
+
   async function run(sessionId: string, userText: string, opts: RunOptions = {}): Promise<RunOutcome> {
     const session = await deps.store.getSession(sessionId)
     if (!session) return { ok: false, reason: 'session-not-found', sentence: `No such session: ${sessionId}.` }
@@ -280,6 +315,7 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
       // the person's own message durable.
       const userRef = await deps.content.put(JSON.stringify(userMsg))
       if (userRef) await deps.store.appendMessage({ sessionId, runId, role: 'user', content: userRef, createdAt: startedIso })
+      await recordDerivedTitle(session, userText)
 
       const client = deps.clientFor(session.provider)
       const policy = policyFor(session)
