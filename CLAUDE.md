@@ -2759,6 +2759,23 @@ interchangeable.
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
 
+### Mentioning and forwarding in the conversation — see docs/sessions-web.md
+
+- **`#` mentions a session, `@` is MCP, `/` is the harness's commands** — never overload one. A chip
+  is `#«Title · shortId»` and carries its own id (`lib/sessionMention.ts`); **`expandSessionMentions`
+  runs in `send()` so the harness never receives a raw `#` from a chip** (Claude Code reads a message
+  opening with `#` as a memory note). A mention is a POINTER; content travels only by Forward.
+- **Forward defaults to the target's DRAFT** (appended through `sessionScratch` under the target's
+  `scratchKey`, never replacing), and "send now" is the existing `broadcast` verb — no second write
+  path. The block carries the origin and nothing else (`lib/chatForward.ts`).
+- **Selection mode is published to the header through `lib/chatSelection.ts`**, not threaded as
+  props, and is keyed on `turnKey`, never on a turn's index (the conversation is a sliding window).
+  `Esc` is checked before the composer's stop verb.
+- **A reply is a LIST of quotes** (`replyQuote.ts`'s `addReply`/`orderReplies`/`quoteAll`): Reply
+  ADDS, selection's `Reply (N)` adds all, and they go out in conversation order through
+  `composeReply`'s blank-line rule. `sessionScratch.readReply` returns an array and still reads the
+  old single-object shape.
+
 ### Idle sessions — the Sessions workspace's bell, review card and review modal
 
 The idle RULE is pure and lives in `packages/core/src/idleSessions.ts` (`idleCandidates` /

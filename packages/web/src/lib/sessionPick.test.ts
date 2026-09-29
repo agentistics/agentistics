@@ -174,3 +174,16 @@ describe('buildPickRows — one row per SESSION, whatever the caller iterated', 
   })
 })
 
+
+describe('the search reaches what the row does not print', () => {
+  test('harness, state and task are searchable through buildPickRows', () => {
+    const { sendRows } = buildPickRows([
+      { id: 'a', title: 'One', project: 'p', harness: 'codex', stateLabel: 'needs you', task: 'Billing' },
+      { id: 'b', title: 'Two', project: 'p', harness: 'claude' },
+    ], false)
+    expect(filterPickRows(sendRows, 'all', 'codex').map(r => r.id)).toEqual(['a'])
+    expect(filterPickRows(sendRows, 'all', 'needs you').map(r => r.id)).toEqual(['a'])
+    expect(filterPickRows(sendRows, 'all', 'billing').map(r => r.id)).toEqual(['a'])
+    expect(filterPickRows(sendRows, 'all', 'claude').map(r => r.id)).toEqual(['b'])
+  })
+})

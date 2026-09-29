@@ -62,6 +62,7 @@ import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
 import type { SessionComposerMetrics } from '../components/sessions/SessionChat'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
+import { ChatSelectionOverlay } from '../components/sessions/ChatSelectionBar'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
@@ -2496,7 +2497,10 @@ export default function SessionsPage() {
         // the taps went to the status bar. See `--safe-top`.
         paddingTop: 'var(--safe-top)',
         borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
+        position: 'relative',
       }}>
+        {/* Selection mode's face for this bar — see `ChatSelectionOverlay`. */}
+        <ChatSelectionOverlay lang={pt ? 'pt' : 'en'} padX={10} />
         <button
           onClick={() => navigate('/sessions')}
           aria-label={pt ? 'Voltar para as sessões' : 'Back to sessions'}
