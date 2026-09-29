@@ -68,7 +68,8 @@ usually context for an instruction still to be written; with one destination the
 **Send now** is the explicit alternative and goes through the existing `broadcast` verb, so the
 server's cap, its reopen-if-reopenable rule and its report of what it skipped all apply unchanged. A
 draft forwarded into a session that is not running is said on its hidden composer ("a draft is
-waiting here"), and survives Reopen because the draft is keyed on the conversation.
+waiting here"), and survives Reopen because the draft is keyed on the conversation. The **Your messages** panel (`RecentPromptsPanel`) offers Forward on each row too, into the same
+modal.
 
 **Coming back to the tab re-reads the conversation.** A backgrounded tab's poll is throttled by the
 browser, so returning to a session that had answered showed the last message you sent for several

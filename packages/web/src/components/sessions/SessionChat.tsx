@@ -3442,6 +3442,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           onClose={closePrompts}
           onGoTo={goToPrompt}
           onRestore={restoreFrom}
+          // Forward from "your messages": the same modal the message menu opens, with the message
+          // as sent (the dictation mark stripped, as restore strips it).
+          onForward={entry => {
+            setPromptsOpen(false)
+            setForwardTurns([{ role: 'user', text: stripDictatedMark(entry.text).text, ...(entry.at ? { at: entry.at } : {}) }])
+          }}
         />
       )}
 
