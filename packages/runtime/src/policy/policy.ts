@@ -65,6 +65,7 @@ import { isInside, resolveToolPath } from '../tools/paths.ts'
 import {
   downloadToShell,
   floorForPath,
+  gitSubcommandIndex,
   floorForRaw,
   floorForSegment,
   inGitDir,
@@ -77,6 +78,7 @@ import {
   type FloorHit,
 } from './floor.ts'
 import { gitConfigPlan, resolutionChange } from './resolution.ts'
+import { profileLayer, switchProfile as planSwitch, withProfile, type ProfileId, type ProfileSwitch } from './profiles.ts'
 import { decideByRules, type PolicyLayer, type RuleHit, type RuleTarget } from './rules.ts'
 import { commandName, parseShell, type ShellSegment, type ShellWord } from './shell-parse.ts'
 
@@ -87,6 +89,11 @@ export type ClassDefault = 'allow' | 'ask' | 'deny'
 export interface PolicyOptions {
   /** machine → user → project, in that order. */
   layers: readonly PolicyLayer[]
+  /**
+   * The built-in permission profile the session runs in (`./profiles.ts`), inserted as a layer
+   * between the user and project layers. Unset: `default`. An unknown id throws.
+   */
+  profile?: ProfileId
   /** Per-class defaults. Unset: `auto` → allow, `ask` → ask, `gated` → deny. */
   defaults?: Partial<Record<ToolPermission, ClassDefault>>
   /** Extra globs no call may read or write (the floor's `protected-path`). */
@@ -117,6 +124,14 @@ export interface SessionApproval {
 export interface SessionPolicy extends ToolPolicy {
   /** What a person approved "for this session", in order. */
   approvals(): readonly SessionApproval[]
+  /** The permission profile in force. */
+  profile(): ProfileId
+  /**
+   * Moves the session to another profile. Approvals survive a switch to a stricter (or the same)
+   * profile and are dropped on a switch to a looser one; nothing else changes. The returned record
+   * is what a host journals. An unknown id throws and changes nothing.
+   */
+  switchProfile(to: ProfileId): ProfileSwitch
 }
 
 // ── Internal verdicts ───────────────────────────────────────────────────────────────────────────
@@ -167,12 +182,20 @@ const READ_ONLY_VIEWERS = new Set([
   'basename', 'dirname', 'od', 'xxd', 'hexdump', 'strings', 'jq', 'git',
 ])
 
+/** `find` actions that delete, run a command or write a file. */
+const FIND_WRITING = /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/
+
+/** `sed` editing in place: `-i`, `-i.bak`, a cluster like `-ni`/`-Ei`, `--in-place[=…]`. */
+function sedInPlace(arg: string): boolean {
+  return /^-[A-Za-z]*i/.test(arg) || arg.startsWith('--in-place')
+}
+
 function readsOnly(seg: ShellSegment, wordIndex: number): boolean {
   const name = commandName(seg.argv[0] ?? '')
   if (READ_ONLY_VIEWERS.has(name)) return true
   const args = seg.argv.slice(1)
-  if (name === 'find') return !args.some(a => /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(a))
-  if (name === 'sed') return !args.some(a => /^-[A-Za-z]*i/.test(a) || a.startsWith('--in-place'))
+  if (name === 'find') return !args.some(a => FIND_WRITING.test(a))
+  if (name === 'sed') return !args.some(sedInPlace)
   if (name === 'cp') {
     // A SOURCE of `cp` is read; its target (the last operand, or the `-t` directory) is written.
     const hasT = args.some(a => a === '-t' || a.startsWith('--target-directory'))
@@ -186,6 +209,33 @@ function readsOnly(seg: ShellSegment, wordIndex: number): boolean {
     return operands.includes(wordIndex) && (hasT || wordIndex !== operands[operands.length - 1])
   }
   return false
+}
+
+/**
+ * The argv stages a DENY or ASK rule is matched against: every stage the parser unwrapped, plus a
+ * CANONICAL spelling of the ones whose meaning sits past argv[1] (B4.7, coordinator D19) — so a
+ * `commandPrefix` rule cannot be stepped around by a flag spelling:
+ * - `git <global options> <sub> …` also as `git <sub> …` (`git -C d commit` meets `['git','commit']`);
+ * - `sed` editing in place, in any spelling, also as `sed -i`;
+ * - `find` with a writing action also as `find <action>` (`find . -delete` meets `['find','-delete']`).
+ * Only ever ADDS stages, and only for deny/ask: an allow rule still sees the command as written, so
+ * nothing here can make a call MORE permitted.
+ */
+export function ruleStages(stages: readonly (readonly string[])[]): (readonly string[])[] {
+  const out: (readonly string[])[] = [...stages]
+  for (const st of stages) {
+    const name = commandName(st[0] ?? '')
+    const args = st.slice(1)
+    if (name === 'git') {
+      const sub = gitSubcommandIndex(st)
+      if (sub > 1 && sub < st.length) out.push([st[0] ?? 'git', ...st.slice(sub)])
+    } else if (name === 'sed') {
+      if (args.some(sedInPlace)) out.push([st[0] ?? 'sed', '-i'])
+    } else if (name === 'find') {
+      for (const a of args) if (FIND_WRITING.test(a)) out.push([st[0] ?? 'find', a])
+    }
+  }
+  return out
 }
 
 /** The value of a `--option=value` word, as a word of its own, when it looks like a path. */
@@ -270,7 +320,8 @@ function rel(root: string, p: string): string {
 // ── The policy ──────────────────────────────────────────────────────────────────────────────────
 
 export function createPolicy(opts: PolicyOptions): SessionPolicy {
-  const layers = opts.layers
+  let profile: ProfileId = opts.profile ?? 'default'
+  let layers: readonly PolicyLayer[] = withProfile(opts.layers, profile)
   const classDefaults: Record<ToolPermission, ClassDefault> = { ...DEFAULT_CLASS, ...(opts.defaults ?? {}) }
   const now = opts.now ?? (() => new Date())
   const home = (opts.home ?? homedir()).replace(/\/$/, '') || '/'
@@ -428,7 +479,7 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
         }
 
         // The segment itself.
-        const anyStages = seg.stages
+        const anyStages = ruleStages(seg.stages)
         const elevatedStage = seg.elevated
           ? seg.stages.filter(st => ['sudo', 'doas'].includes(commandName(st[0] ?? ''))).slice(-1)
           : null
@@ -739,6 +790,18 @@ export function createPolicy(opts: PolicyOptions): SessionPolicy {
     },
     approvals() {
       return [...approvals.values()].map(({ key, label, approvedAt }) => ({ key, label, approvedAt }))
+    },
+    profile() {
+      return profile
+    },
+    switchProfile(to: ProfileId): ProfileSwitch {
+      profileLayer(to)
+      const sw = planSwitch(profile, to, [...approvals.values()])
+      for (const a of sw.dropped) approvals.delete(a.key)
+      profile = to
+      layers = withProfile(opts.layers, profile)
+      const pub = (a: SessionApproval): SessionApproval => ({ key: a.key, label: a.label, approvedAt: a.approvedAt })
+      return { ...sw, kept: sw.kept.map(pub), dropped: sw.dropped.map(pub) }
     },
   }
 }
