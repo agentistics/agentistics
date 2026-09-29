@@ -38,6 +38,10 @@ export * from './tools/shell/index.ts'
 export * from './tools/git/index.ts'
 export * from './tools/interact/plan.ts'
 export * from './tools/interact/ask-user.ts'
+// TOOL.1: schema-validated structured output. `result.submit` is built by the loop for a run given
+// `structured`; it is exported so a host can declare or test it, never added to `createNativeTools`.
+export * from './tools/result/submit.ts'
+export * from './structured/index.ts'
 export * from './loop/loop.ts'
 export * from './loop/emit.ts'
 export * from './loop/wire.ts'

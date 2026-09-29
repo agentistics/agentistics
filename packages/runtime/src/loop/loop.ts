@@ -47,6 +47,20 @@
  * call goes to the gate with `./repeat-policy.ts` wrapped around the run's policy: the policy still
  * decides first, a deny stays a deny, and an allow becomes a question to the person — with no person,
  * a refusal the model reads in words. The gate is not skipped and no ask or floor is lifted.
+ *
+ * ## Structured output (TOOL.1) — only when `opts.structured` is given
+ *
+ * The request is checked FIRST — its `maxRetries`, its schema's subset and its satisfiability
+ * (`../structured/request.ts`) — and a refusal ends the run as `structured-refused` before any model
+ * call. Otherwise the loop adds `result.submit` (`../tools/result/submit.ts`) to the catalogue. Each
+ * submission that reaches the gate is ONE attempt, and so is a model turn that ends without one; each
+ * attempt is journaled as `structured.attempt` naming the billed response it came in. A valid value
+ * ends the run as `submitted` (the rest of that turn's calls are answered "not run" in words); an
+ * invalid one goes back to the model as the tool's result and it tries again, until `maxRetries + 1`
+ * attempts are spent — then the run ends as `schema-failed`, `structured.exhausted` is journaled and
+ * the value is `null`, never the last near-miss. A `result.submit` in the turn `maxTurns` makes the
+ * last one still runs (a valid value needs no reading back); every other bound applies to it as to any
+ * call. Without `opts.structured` the loop behaves exactly as it did before TOOL.1.
  */
 
 import { classifyProviderError, sha256Hex, type RetryPolicy } from '@agentistics/core'
@@ -95,6 +109,9 @@ import {
 } from './repeat-guard.ts'
 import { REPEAT_GUARD_POLICY, repeatGuardPolicy } from './repeat-policy.ts'
 import { buildWireTable } from './wire.ts'
+import { decideAttempt, prepareStructured, type StructuredRequest } from '../structured/request.ts'
+import { createStructuredEmitter, type StructuredEmittedType } from '../structured/emit.ts'
+import { createResultSubmitTool, isSubmitVerdict, RESULT_SUBMIT_TOOL } from '../tools/result/submit.ts'
 
 // ── Public shapes ───────────────────────────────────────────────────────────────────────────────
 
@@ -119,6 +136,12 @@ export type ToolLoopStatus =
   | 'model-failed'
   /** The tool list cannot be declared to a provider (a duplicate or colliding name). Nothing ran. */
   | 'invalid-catalogue'
+  /** `structured`: the request was refused before any model call (`ToolLoopStructured.refusal`). */
+  | 'structured-refused'
+  /** `structured`: a value that matches the schema was accepted. */
+  | 'submitted'
+  /** `structured`: every attempt `maxRetries` allowed failed validation. */
+  | 'schema-failed'
 
 export type ToolCallStatus =
   | GateResult['status']
@@ -153,6 +176,24 @@ export interface ToolLoopResult {
   /** Why the retry loop stopped on the last model turn. */
   lastRetry?: RetryStoppedBecause
   lost: { provider: EmitCounters['lost']; tool: ToolEmitCounters['lost'] }
+  /** Present exactly when the run was given `structured`. */
+  structured?: ToolLoopStructured
+}
+
+export interface ToolLoopStructured {
+  /** The accepted value; `null` unless `status` is `submitted` — never a partially valid value. */
+  value: unknown
+  /**
+   * Why there is no value: `refused` (the request, before any call), `schema-failed` (the attempts
+   * ran out), `run-stopped` (another bound or a failure stopped the run first; `status` names it).
+   * Absent when a value was accepted.
+   */
+  reason?: 'refused' | 'schema-failed' | 'run-stopped'
+  /** The refusal code and sentence when `reason` is `refused`. */
+  refusal?: { code: 'max-retries' | 'unsupported' | 'unsatisfiable'; sentence: string }
+  attempts: number
+  maxRetries: number
+  lost: Record<StructuredEmittedType, number>
 }
 
 export interface ToolLoopOptions<R extends ProviderAppendResult = ProviderAppendResult> {
@@ -188,17 +229,21 @@ export interface ToolLoopOptions<R extends ProviderAppendResult = ProviderAppend
   now?: () => Date
   monotonicNow?: () => number
   mintInvocationId?: () => string
+  /** Require a schema-validated result through `result.submit` (TOOL.1); absent = no requirement. */
+  structured?: StructuredRequest
 }
 
 // ── Sentences (the model and the person read these; nothing here is journaled) ──────────────────
 
-type Bound = 'max-turns' | 'max-tool-calls' | 'wall-time' | 'aborted'
+type Bound = 'max-turns' | 'max-tool-calls' | 'wall-time' | 'aborted' | 'submitted' | 'schema-failed'
 
 const NOT_RUN: Record<Bound, string> = {
   'max-turns': 'Not run: the turn budget for this run is spent, so the result of this call could never be read back.',
   'max-tool-calls': 'Not run: the tool-call budget for this run is spent.',
   'wall-time': 'Not run: the time budget for this run is spent.',
   aborted: 'Not run: the run was cancelled.',
+  submitted: 'Not run: a result was already accepted in this turn, so the run is over.',
+  'schema-failed': 'Not run: the attempts allowed for a structured result are spent, so the run is over.',
 }
 
 /** The error class a call left unrun by each bound is journaled under. */
@@ -207,6 +252,8 @@ const NOT_RUN_CLASS: Record<Bound, ToolErrorClass> = {
   'max-tool-calls': 'killed',
   'wall-time': 'timeout',
   aborted: 'killed',
+  submitted: 'killed',
+  'schema-failed': 'killed',
 }
 
 function stopSentence(status: ToolLoopStatus, limits: ToolLoopLimits, last?: InvocationResult): string {
@@ -224,6 +271,9 @@ function stopSentence(status: ToolLoopStatus, limits: ToolLoopLimits, last?: Inv
         ? `Stopped: the model call failed (${last.error.userCode}) and was not retried further.`
         : 'Stopped: the model call failed and was not retried further.'
     case 'invalid-catalogue': return 'Stopped: the tool catalogue could not be declared to the model.'
+    case 'structured-refused': return 'Stopped: the structured-result request was refused, so no model call was made.'
+    case 'submitted': return 'The model submitted a result that matches the schema.'
+    case 'schema-failed': return 'Stopped: no submitted result matched the schema within the allowed attempts.'
   }
 }
 
@@ -404,15 +454,48 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
   })
   const lost = () => ({ provider: providerEmitter.counters().lost, tool: toolEvents.counters().lost })
 
+  // ── Structured output (TOOL.1): decided before anything is billed ──
+  const structuredEvents = createStructuredEmitter({ journal: opts.journal, adapterVersion: opts.runtimeVersion, scope, now })
+  const prepared = opts.structured ? prepareStructured(opts.structured) : null
+  let attempts = 0
+  let accepted: { value: unknown } | null = null
+  let exhausted = false
+
   let turns = 0
   let toolCalls = 0
   let lastResult: InvocationResult | undefined
   let lastRetry: RetryStoppedBecause | undefined
-  const done = (status: ToolLoopStatus, sentence = stopSentence(status, limits, lastResult)): ToolLoopResult => ({
-    status, sentence, messages, turns, toolCalls, calls, lastResult, lastRetry, lost: lost(),
-  })
+  const done = (status: ToolLoopStatus, sentence = stopSentence(status, limits, lastResult)): ToolLoopResult => {
+    const r: ToolLoopResult = { status, sentence, messages, turns, toolCalls, calls, lastResult, lastRetry, lost: lost() }
+    if (prepared) {
+      const st: ToolLoopStructured = {
+        value: accepted ? accepted.value : null,
+        attempts,
+        maxRetries: prepared.ok ? prepared.prepared.maxRetries : (opts.structured?.maxRetries ?? 0),
+        lost: structuredEvents.lost(),
+      }
+      if (!prepared.ok) {
+        st.reason = 'refused'
+        st.refusal = { code: prepared.code, sentence: prepared.sentence }
+      } else if (!accepted) st.reason = exhausted ? 'schema-failed' : 'run-stopped'
+      r.structured = st
+    }
+    return r
+  }
+  if (prepared && !prepared.ok) return done('structured-refused', prepared.sentence)
+  const structured = prepared?.ok ? prepared.prepared : null
 
-  const wire = buildWireTable(opts.tools)
+  /** Fold one attempt: journal it, and say what the run does next. */
+  const recordAttempt = async (ok: boolean, errorCount: number, submitted: boolean, invocationId: string) => {
+    attempts += 1
+    await structuredEvents.attempt({ attempt: attempts, ok, errorCount, submitted, invocationId })
+    const d = decideAttempt(attempts, ok, structured!.maxRetries)
+    if (d === 'exhausted') exhausted = true
+    return d
+  }
+
+  const tools = structured ? [...opts.tools, createResultSubmitTool(structured.schema) as Tool<unknown>] : opts.tools
+  const wire = buildWireTable(tools)
   if (!wire.ok) return done('invalid-catalogue', wire.sentence)
   const table = wire.table
   const available = [...table.byWire.keys()]
@@ -485,7 +568,24 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
       const plan = planTurn(final, collect.current.calls, collect.current.failures)
       if (plan.calls.length === 0) {
         if (plan.assistant.length > 0) messages.push({ role: 'assistant', content: plan.assistant })
-        return done('end-turn')
+        if (!structured) return done('end-turn')
+        // A turn that ends without a submission is an attempt too: it was billed and gave no value.
+        if (await recordAttempt(false, 1, false, final.invocationId) === 'exhausted') {
+          await structuredEvents.exhausted({ attempts })
+          return done('schema-failed')
+        }
+        const nudge: ProviderMessagePart = {
+          type: 'text',
+          text: `This run must end by calling ${RESULT_SUBMIT_TOOL} with a value that matches the required schema; ` +
+            `no value was submitted in that turn. Call ${RESULT_SUBMIT_TOOL} now.`,
+        }
+        // Roles must alternate: after an empty assistant turn the last message is already the user's.
+        const last = messages[messages.length - 1]
+        if (last?.role === 'user') {
+          const prior: ProviderMessagePart[] = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : [...last.content]
+          messages[messages.length - 1] = { role: 'user', content: [...prior, nudge] }
+        } else messages.push({ role: 'user', content: [nudge] })
+        continue
       }
       messages.push({ role: 'assistant', content: plan.assistant })
 
@@ -504,11 +604,19 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
         if (bound === null) bound = hardStop()
         if (bound === null && planned.kind === 'call' && tool && toolCalls >= limits.maxToolCalls) bound = 'max-tool-calls'
 
-        if (bound !== null) {
-          const text = NOT_RUN[bound]
-          await answerWithoutGate(toolExecutionId, name, tool?.kind ?? 'other', NOT_RUN_CLASS[bound], 'cancelled', text)
+        // A submission in the turn `maxTurns` makes the last still runs: an accepted value needs no
+        // reading back. Every other bound still stops it.
+        const isSubmit = structured !== null && planned.kind === 'call' && tool?.name === RESULT_SUBMIT_TOOL
+        let callBound: Bound | null = bound
+        if (callBound === 'max-turns' && isSubmit) {
+          callBound = hardStop() ?? (toolCalls >= limits.maxToolCalls ? 'max-tool-calls' : null)
+        }
+
+        if (callBound !== null) {
+          const text = NOT_RUN[callBound]
+          await answerWithoutGate(toolExecutionId, name, tool?.kind ?? 'other', NOT_RUN_CLASS[callBound], 'cancelled', text)
           reply(text, true)
-          calls.push({ toolExecutionId, toolUseId, name, status: 'not-run', errorClass: NOT_RUN_CLASS[bound] })
+          calls.push({ toolExecutionId, toolUseId, name, status: 'not-run', errorClass: NOT_RUN_CLASS[callBound] })
           continue
         }
 
@@ -553,9 +661,25 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
         const summary: ToolCallSummary = { toolExecutionId, toolUseId, name, status: r.status }
         if (r.outcome.error) summary.errorClass = r.outcome.error.class
         calls.push(summary)
+
+        if (isSubmit && r.status !== 'cancelled') {
+          // A verdict exists only when the value was validated; an input that did not parse, or a
+          // policy that refused the call, is a failed attempt with one error.
+          const v = isSubmitVerdict(r.outcome.result) ? r.outcome.result : null
+          const ok = v?.accepted === true
+          const errorCount = v ? (v.accepted ? 0 : v.errors.length) : 1
+          const d = await recordAttempt(ok, errorCount, true, final.invocationId)
+          if (d === 'accept' && v?.accepted) { accepted = { value: v.value }; bound = 'submitted' }
+          else if (d === 'exhausted') bound = 'schema-failed'
+        }
       }
       messages.push({ role: 'user', content: results })
 
+      if (accepted) return done('submitted')
+      if (exhausted) {
+        await structuredEvents.exhausted({ attempts })
+        return done('schema-failed')
+      }
       if (bound !== null) return done(bound)
     }
   } finally {
