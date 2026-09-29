@@ -90,7 +90,7 @@ Legend:
 | Version | `GET /api/version` | ✗ |
 | Upgrade | `POST /api/upgrade` | ✗ |
 | Lifecycle (server, central up/down, restart, autostart, hooks install) | CLI only | **N** in v1 (**D-5**) |
-| Arbitrary exec, chat spawn | `/api/exec`, `/api/chat-tty`, `/api/claude-chat` | **N** forever |
+| Arbitrary exec, chat spawn | `/api/exec`, `/api/chat-tty` (`/api/claude-chat` was deleted, P0.1) | **N** forever |
 
 ## 3. Proposed tools
 
@@ -317,7 +317,7 @@ public FSL code, so the rules are:
 
 | Surface | Reason |
 |---|---|
-| `/api/exec`, `/api/chat-tty`, `/api/claude-chat` | arbitrary process or model on the host; Nay spawning Nay is a loop with a wallet |
+| `/api/exec`, `/api/chat-tty` | arbitrary process or model on the host; Nay spawning Nay is a loop with a wallet (`/api/claude-chat`, the third, was deleted in P0.1) |
 | WS `/api/fleet/input`, `/api/shell/*`, `/api/fleet/attach` | raw keyboard or shell = unbounded |
 | `/api/fleet/tree` writes | bypasses the target session's own permission prompts |
 | `PUT/DELETE /api/provider/:id`, team connection add, `/api/team/tokens*`, `/api/team/repos` writes | credentials |
@@ -700,6 +700,9 @@ kill. The intent gate is the backstop, and the wrapping is the first line.
    - Its siblings `/api/chat-tty` and `/api/chat-harnesses` have both.
    - On a central it is behind the account gate, but it still runs a model on the central host.
    - Security, high.
+   - **Resolved by deletion (P0.1, fix/remove-claude-chat):** nothing called it since Nay became
+     real sessions (#780), so the route was removed instead of guarded. A test boots the real server
+     and asserts a 404 with no `claude` run.
 2. **`PUT /api/config` and `POST /api/config/restore` write the env config with no guard entry.**
    - `PUT /api/preferences` also writes the security switches with no guard.
    - On `lan` without the opt-in, `/api/fleet` is refused but the switch file that governs it is
@@ -721,8 +724,9 @@ item with its mobile version.
 
 **P0 — close what is open today (no new powers)**
 
-- P0.1 **S** — Guard `/api/claude-chat` (capability-guard `localChat` plus `chatAllowed`). Test in
-  `capability-guard.test.ts`. Defect 1.
+- P0.1 **S** — ~~Guard~~ **Delete** `/api/claude-chat` (leader decision, D19: a dead route that
+  spawns `claude` on the host is pure attack surface; guarding it would keep code nobody calls).
+  Test: `claude-chat-removed.test.ts` (404, no `claude` run). Defect 1.
 - P0.2 **S** — Guard `/api/config*`. Decide `/api/preferences` via the allowlist route in P1.5.
   Defect 2.
 - P0.3 **S** — Fix the doc drift: `mcp.md`, `nay.md`, the `exposure.ts` comment. Defects 5 and 6.
