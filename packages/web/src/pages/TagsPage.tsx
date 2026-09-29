@@ -543,7 +543,7 @@ export default function TagsPage() {
 
       {loaded && !err && tags.length === 0 && (
         <div style={{
-          border: '1px dashed var(--border)', borderRadius: 12, padding: 24,
+          border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 24,
           fontSize: 12.5, color: 'var(--text-tertiary)', textAlign: 'center',
         }}>
           {pt ? 'Nenhuma tag ainda.' : 'No tags yet.'}
@@ -573,7 +573,7 @@ export default function TagsPage() {
               type="button"
               onClick={() => void openDetail(t._id)}
               style={{
-                border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg-card)',
+                border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)',
                 padding: 16, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0,
                 textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
               }}
@@ -626,7 +626,7 @@ export default function TagsPage() {
           ))}
         </div>
       ) : (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           {tags.map((t, i) => (
             <button
               key={t._id}

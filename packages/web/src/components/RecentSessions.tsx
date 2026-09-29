@@ -709,7 +709,7 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
           flexDirection: 'column',
           gap: 12,
           padding: '14px 18px',
-          borderRadius: 12,
+          borderRadius: 'var(--radius-lg)',
           background: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
         }}
