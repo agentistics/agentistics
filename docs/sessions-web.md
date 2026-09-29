@@ -29,6 +29,39 @@ fragment back at the session is the common case, and copying it was a right-clic
 impossible. One control per selection: the excerpt menu and the message menu used to both draw a
 `reply`.
 
+**Each message has ONE menu, `⋯`** — revealed on hover on a desktop, always visible on touch, and
+also opened by a right click or a LONG PRESS on a phone: **Reply** (the old corner reply button moved
+in here), **Forward**, **Select** and **Copy**. A long press ends in the browser's compatibility
+`mousedown`, which is exactly what closes the menu, so the `touchend` of a press that opened it is
+`preventDefault`ed. The menu opens UPWARDS when the room above the composer cannot hold it
+(`lib/bubbleMenu.ts`) — on the last message it went behind the composer, and scrolling it into view
+closed it.
+
+**Select is WhatsApp's model.** Selection mode draws a checkbox on every message, a tap anywhere on a
+bubble toggles it, and the workspace's own header (desktop strip in `App.tsx`, the phone bar in
+`SessionsPage`) turns into `N selected · Forward · Copy · Cancel` — laid OVER the header by
+`ChatSelectionOverlay`, from the small store `lib/chatSelection.ts`, because the header is not the
+chat's DOM. `Esc` leaves the mode, and the composer checks it BEFORE the stop verb, so leaving the
+mode never interrupts a turn. The selection is keyed on the turn (`turnKey`), not its index: the
+conversation is a sliding window, and an index would forward a message nobody ticked.
+
+**Forward carries CONTENT; a mention (below) only POINTS.** It reuses the fleet picker
+(`SessionPickModal`, `kind: 'forward'`): pick one or several sessions (searched by title, folder,
+harness, state or task), then an optional comment, then where it lands. What travels is a short
+quoted block that names its origin and nothing else (`lib/chatForward.ts`):
+
+    > forwarded from «Session title» (Claude Code):
+    > the message
+
+— several messages in conversation order, a quoted blank line apart, and a speaker label ONLY when
+the selection mixes both sides. It is not capped: it was picked, like an excerpt. **The default is the
+target's DRAFT** (`sessionScratch`, appended, never replacing what was typed) because a forward is
+usually context for an instruction still to be written; with one destination the page opens it.
+**Send now** is the explicit alternative and goes through the existing `broadcast` verb, so the
+server's cap, its reopen-if-reopenable rule and its report of what it skipped all apply unchanged. A
+draft forwarded into a session that is not running is said on its hidden composer ("a draft is
+waiting here"), and survives Reopen because the draft is keyed on the conversation.
+
 **Coming back to the tab re-reads the conversation.** A backgrounded tab's poll is throttled by the
 browser, so returning to a session that had answered showed the last message you sent for several
 seconds before catching up. `visibilitychange` now forces a read.
@@ -131,6 +164,16 @@ advertise the cycle key.
 - **`Enter` sends on a hardware keyboard and BREAKS THE LINE on a phone.** `shift+enter` needs a
   shift key a software keyboard does not have, so on a touch layout the return key is the only way
   to write a second line; sending is the button beside the field. `TtyChat` already split this way.
+- **`#` mentions another session** (`lib/sessionMention.ts`). `/` is the harness's command table
+  and `@` an MCP server, so a third trigger got its own character. The picker lists the fleet minus
+  this session, title matches first, and a pick writes a CHIP, `#«Title · 3f5f21a8»`, painted by the
+  same mirror as the MCP references. The chip is self-contained — it carries its own short id, so it
+  survives a reload or a paste with no side table — and a query may hold spaces (`#PROBE li`: a
+  one-word query closed at the space and the next Enter sent the raw text). A query with a space is
+  offered only while it matches, and one starting with a space (`# Title`) is a heading, not a
+  search. **On send every chip becomes `«Title» (session 3f5f21a8)`**: a message STARTING with `#`
+  is a memory note in Claude Code, so the harness must never see a raw `#` from a chip. It is a
+  pointer only; context travels by Forward.
 - **A prompt is refused while a dialog is open**, in words: a line typed into a permission prompt
   goes into that dialog's filter and the submit takes the highlighted option.
 - The skills list is gone from the composer's overflow menu — the aside has a Skills tab of its own,

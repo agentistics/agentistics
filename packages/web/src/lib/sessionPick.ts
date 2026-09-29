@@ -30,6 +30,12 @@ export interface PickRow {
   enabled?: boolean
   /** Why it cannot, already localized by the server. Rendered only when `enabled` is false. */
   reason?: string
+  /**
+   * More text the search may match that the row does not print — the harness, the state word, the
+   * task. Searched, never shown: the row already says those things in its own way, or does not need
+   * to, and a picker you can only find a session in by its folder is half a search.
+   */
+  search?: string
 }
 
 /** The list is filed by whether the row can take the verb NOW. `all` keeps the caller's order. */
@@ -93,7 +99,9 @@ export function filterPickRows<T extends PickRow>(
   return rows.filter(r => {
     if (tab === 'active' && r.enabled === false) return false
     if (q.length === 0) return true
-    return r.title.toLowerCase().includes(q) || (r.detail ?? '').toLowerCase().includes(q)
+    return r.title.toLowerCase().includes(q)
+      || (r.detail ?? '').toLowerCase().includes(q)
+      || (r.search ?? '').toLowerCase().includes(q)
   })
 }
 
@@ -188,6 +196,8 @@ export interface PickSource {
   fell?: boolean
   /** Already localized by the server — the word the fleet list prints for this row's state. */
   stateLabel?: string
+  harness?: string
+  task?: string
   verbs?: readonly { action?: string; enabled?: boolean; reason?: string }[]
 }
 
@@ -230,10 +240,14 @@ export function buildPickRows(rows: Iterable<PickSource>, pt: boolean): PickRows
     if (!id || seen.has(id)) continue
     seen.add(id)
 
+    const extra = [r.harness, r.stateLabel, r.task, r.project && r.cwd ? r.cwd : undefined]
+      .filter((x): x is string => typeof x === 'string' && x !== '')
+      .join(' ')
     const base: PickModalSource = {
       id,
       title: r.title || (pt ? 'sem título' : 'untitled'),
       ...(r.project ? { detail: r.project } : r.cwd ? { detail: r.cwd } : {}),
+      ...(extra ? { search: extra } : {}),
     }
     if (r.fell) fellRows.push(base)
 

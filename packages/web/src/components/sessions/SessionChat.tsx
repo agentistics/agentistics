@@ -86,6 +86,22 @@ import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
+import { useNavigate } from 'react-router-dom'
+import { useFleet } from '../../lib/fleet'
+import {
+  applySessionMention, expandSessionMentions, filterMentionCandidates, hashPickerShown, hashQuery, isSameSession,
+  sessionMentionTokens, shortSessionId,
+} from '../../lib/sessionMention'
+import {
+  appendToDraft, composeForward, copyTurnsText, draftedNotice, forwardBlock, forwardable,
+  selectedTurns, toggleTurn,
+} from '../../lib/chatForward'
+import { chatSelection } from '../../lib/chatSelection'
+import { turnKey as turnKeyOf } from '../../lib/chatForward'
+import { buildPickRows } from '../../lib/sessionPick'
+import { sessionPath } from '../../lib/sessionRoute'
+import { copyText } from '../../lib/clipboard'
+import { SessionPickModal } from './SessionPickModal'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
@@ -578,7 +594,10 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * something unverified. See `mentionTokens.ts`.
    */
   const mentions = useMemo(
-    () => mentionTokens(draft, knownServers(mcpServers)),
+    // Session chips (`#«title · id»`, `sessionMention.ts`) are references too, and are painted by
+    // the same mirror as the MCP ones. They need no list to vouch for them: the chip carries its
+    // own id, and an edited chip simply stops matching.
+    () => [...mentionTokens(draft, knownServers(mcpServers)), ...sessionMentionTokens(draft)],
     [draft, mcpServers],
   )
   /** Escape closes the picker while the `@word` it was triggered by is still on screen — see `slashDismissed`. */
@@ -672,6 +691,43 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       node.setSelectionRange(out.caret, out.caret)
     })
   }, [draft, caret, editDraft])
+
+  /**
+   * THE `#` PICKER — mention ANOTHER SESSION (`sessionMention.ts`). Same shape as the `@` picker
+   * above: the trigger is read from the text before the caret, Escape dismisses it while the `#word`
+   * is still on screen, and a pick writes a chip into the draft without sending anything.
+   *
+   * The candidates are the FLEET's own rows, read through the shared poll (`useFleet` is refcounted,
+   * so this costs no request of its own), with this session left out.
+   */
+  const { fleet, act: fleetAct } = useFleet(lang)
+  const [hashDismissed, setHashDismissed] = useState(false)
+  const [hashIndex, setHashIndex] = useState(0)
+  const hashPickerRef = useRef<HTMLDivElement | null>(null)
+  const hashText = useMemo(() => hashQuery(draft.slice(0, caret)), [draft, caret])
+  useEffect(() => { if (hashText === null) setHashDismissed(false) }, [hashText])
+  useEffect(() => { setHashIndex(0) }, [hashText])
+  const hashRows = useMemo(
+    () => (hashText === null ? [] : filterMentionCandidates(fleet.sessions, hashText, session)),
+    [hashText, fleet.sessions, session],
+  )
+  useEffect(() => {
+    const el = hashPickerRef.current?.querySelector(`[data-hash-index="${hashIndex}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [hashIndex, hashRows])
+  const insertMention = useCallback((row: FleetRow) => {
+    const at = textareaRef.current?.selectionStart ?? caret
+    const out = applySessionMention(draft, at, row, pt)
+    if (!out) return
+    editDraft(out.text)
+    setCaret(out.caret)
+    requestAnimationFrame(() => {
+      const node = textareaRef.current
+      if (!node) return
+      node.focus()
+      node.setSelectionRange(out.caret, out.caret)
+    })
+  }, [draft, caret, editDraft, pt])
 
   /** Switch the model mid-conversation by TYPING the harness's own command — see modelSwitch.ts. */
   const switchModel = useCallback(async (model: string) => {
@@ -1199,6 +1255,100 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   }, [toTail, editReply])
 
   /**
+   * SELECTION MODE (WhatsApp's model) and FORWARDING — see `chatForward.ts`.
+   *
+   * `selecting` is the set of ticked turns, or `null` outside the mode. The selection is PUBLISHED
+   * to `chatSelection` so the workspace's own header can turn into "N selected · Forward · Copy ·
+   * Cancel"; the header is not this component's DOM. Every callback handed to a bubble is one stable
+   * reference, for `ChatBubble`'s memo.
+   */
+  const navigate = useNavigate()
+  const [selecting, setSelecting] = useState<Set<string> | null>(null)
+  const [forwardTurns, setForwardTurns] = useState<ChatTurn[] | null>(null)
+  const [forwardBusy, setForwardBusy] = useState(false)
+  const onSelectStart = useCallback((t: ChatTurn) => setSelecting(toggleTurn(new Set(), t)), [])
+  const onToggleSelect = useCallback((t: ChatTurn) => {
+    setSelecting(prev => (prev === null ? prev : toggleTurn(prev, t)))
+  }, [])
+  const onForwardTurn = useCallback((t: ChatTurn) => setForwardTurns([t]), [])
+  const selectedList = useMemo(
+    () => (selecting === null ? [] : selectedTurns(turns, selecting)),
+    [turns, selecting],
+  )
+  useEffect(() => {
+    if (selecting === null) { chatSelection.clear(scratchId); return }
+    chatSelection.set({
+      owner: scratchId,
+      count: selectedList.length,
+      forward: () => { if (selectedList.length > 0) setForwardTurns(selectedList) },
+      copy: () => {
+        const n = selectedList.length
+        void copyText(copyTurnsText(selectedList)).then(ok => {
+          setNotice(ok
+            ? (pt ? (n === 1 ? '1 mensagem copiada.' : `${n} mensagens copiadas.`) : (n === 1 ? '1 message copied.' : `${n} messages copied.`))
+            : (pt ? 'O navegador não liberou a área de transferência aqui.' : 'The browser did not allow the clipboard here.'))
+          if (ok) setSelecting(null)
+        })
+      },
+      cancel: () => setSelecting(null),
+    })
+  }, [selecting, selectedList, scratchId, pt])
+  // Leaving the conversation leaves the mode: a header still offering to forward messages from a
+  // chat that is no longer on screen would forward something the reader cannot see.
+  useEffect(() => () => chatSelection.clear(scratchId), [scratchId])
+  useEffect(() => { setSelecting(null); setForwardTurns(null) }, [scratchId])
+  // Esc leaves the mode wherever the focus is — the composer's own handler checks first, so the key
+  // never also reaches the stop verb.
+  useEffect(() => {
+    if (selecting === null || forwardTurns !== null) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); setSelecting(null) } }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selecting, forwardTurns])
+
+  const harnessLabel = (HARNESS_LABELS as Record<string, string>)[session.harness] ?? session.harness
+  const forwardSource = useMemo(() => ({ title: session.title, harness: harnessLabel }), [session.title, harnessLabel])
+  /**
+   * Where a forward may go: the whole fleet but this session, every row PICKABLE — a draft is written
+   * in this browser and needs nothing from the session, and a direct send is the server's to refuse
+   * (`broadcast` says what it skipped). The picker's own rows, so its search is the same everywhere.
+   */
+  const forwardRows = useMemo(() => {
+    if (forwardTurns === null) return []
+    const others = fleet.sessions.filter(r => !isSameSession(r, session))
+    return buildPickRows(others, pt).sendRows.map(({ reason: _reason, ...r }) => ({ ...r, enabled: true }))
+  }, [forwardTurns, fleet.sessions, session, pt])
+
+  const deliverForward = useCallback(async (ids: string[], comment: string, opts?: { direct: boolean }) => {
+    const body = composeForward({ from: forwardSource, turns: forwardTurns ?? [], comment, pt })
+    if (body === '' || ids.length === 0) { setForwardTurns(null); return }
+    if (opts?.direct) {
+      setForwardBusy(true)
+      const out = await fleetAct({ id: ids[0]!, action: 'broadcast', ids, text: body })
+      setForwardBusy(false)
+      setNotice(out.message)
+      if (out.ok) { setForwardTurns(null); setSelecting(null) }
+      return
+    }
+    // THE DEFAULT: into each target's DRAFT, appended — never replacing — under the same key the
+    // target's own composer reads (`scratchKey`), so opening it shows the forward ready to finish.
+    const titles: string[] = []
+    for (const id of ids) {
+      const row = fleet.sessions.find(r => r.id === id)
+      if (!row) continue
+      const key = scratchKey(row)
+      sessionScratch.writeDraft(key, appendToDraft(sessionScratch.readDraft(key), body))
+      titles.push(row.title)
+    }
+    setForwardTurns(null)
+    setSelecting(null)
+    setNotice(draftedNotice(titles, pt))
+    // One destination: go there — the instruction is finished in that composer. Several: stay, and
+    // the notice names where they went.
+    if (ids.length === 1 && titles.length === 1) navigate(sessionPath(ids[0]!))
+  }, [forwardSource, forwardTurns, pt, fleetAct, fleet.sessions, navigate])
+
+  /**
    * Land at the END on first paint, then follow the tail only while the reader is already there.
    *
    * `useLayoutEffect` for the landing: with a plain effect the conversation paints at the top and
@@ -1408,6 +1558,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * submit takes the highlighted option.
    */
   const atOpen = canPrompt && !blocked && !atDismissed && atText !== null
+  /** The `#` picker is open — same refusals as the other two, and never while one of them is. */
+  const hashOpen = canPrompt && !blocked && !hashDismissed && hashText !== null && !atOpen && !skillPickerOpen
+    && hashPickerShown(hashText, hashRows.length)
   /** The row's own reopen verb, if it has one. Enabled by the server, never inferred here. */
   const reopen = row?.verbs.find(v => v.action === 'resume')
   const [reopening, setReopening] = useState(false)
@@ -1574,7 +1727,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
 
   async function send() {
     // A trailing `@server:` is the picker's scaffolding and was never typed — it must not be sent.
-    const text = dropEmptyAtTrigger(draft).trim()
+    // `#` chips become their lean reference HERE, so the harness never sees a raw `#` — which Claude
+    // Code would read as a memory note when it opens the message. See `sessionMention.ts`.
+    const text = expandSessionMentions(dropEmptyAtTrigger(draft), pt).trim()
     // A message that is ONLY attachments is still a message: the paths are the content.
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
@@ -1783,7 +1938,20 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
                 : {})}
               {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
-              {...(canPrompt ? { onReply: onReplyToTurn } : {})}
+              {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
+              {
+                // Forwarding and selecting READ this conversation, so they need nothing from the
+                // session's state — only a message that says something.
+                ...(forwardable(t) && !t.system && !t.task
+                  ? {
+                    onForward: onForwardTurn,
+                    onSelectStart,
+                    ...(selecting !== null
+                      ? { selectMode: true, selected: selecting.has(turnKeyOf(t)), onToggleSelect }
+                      : {}),
+                  }
+                  : {})
+              }
               {
                 // Only on the assistant's side: quoting a fragment of your OWN message back at the
                 // session says nothing it did not already read from you a moment ago.
@@ -2164,6 +2332,83 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
               )}
             </div>
           )}
+          {/* THE SESSION PICKER, opened by typing `#` at the start of a word. It lists the fleet —
+              searched by title, folder, harness and state — and writes a CHIP naming the session
+              (`#«title · id»`) that goes out as a lean reference. A pointer, never the other
+              session's content: that is what Forward is for. */}
+          {hashOpen && (
+            <div
+              ref={hashPickerRef}
+              role="listbox"
+              aria-label={pt ? 'Mencionar sessão' : 'Mention a session'}
+              style={{
+                position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 60,
+                marginBottom: 8, padding: 4, borderRadius: 12,
+                background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
+                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+              }}
+            >
+              {hashRows.length === 0 ? (
+                <p style={{ margin: 0, padding: '8px 10px', fontSize: 11.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
+                  {fleet.sessions.length === 0
+                    ? (pt ? 'Lendo as sessões…' : 'Reading the sessions…')
+                    : (pt ? `Nenhuma outra sessão corresponde a “${hashText ?? ''}”.` : `No other session matches “${hashText ?? ''}”.`)}
+                </p>
+              ) : (
+                <>
+                  {hashRows.map((r, i) => {
+                    const active = i === Math.min(hashIndex, hashRows.length - 1)
+                    const where = [
+                      (HARNESS_LABELS as Record<string, string>)[r.harness] ?? r.harness,
+                      r.stateLabel,
+                      r.task || r.project || r.cwd,
+                    ].filter(Boolean).join(' · ')
+                    return (
+                      <button
+                        key={r.id}
+                        role="option"
+                        aria-selected={active}
+                        data-hash-index={i}
+                        onMouseDown={e => e.preventDefault()}
+                        onMouseEnter={() => setHashIndex(i)}
+                        onClick={() => insertMention(r)}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          minHeight: isMobile ? 44 : 34, padding: '6px 8px', borderRadius: 8,
+                          border: 'none', background: active ? 'var(--bg-surface)' : 'transparent',
+                          color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12.5,
+                          cursor: 'pointer', minWidth: 0,
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            #{r.title || (pt ? 'sem título' : 'untitled')}
+                          </span>
+                          <span style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono, monospace)' }}>
+                            {shortSessionId(r)}
+                          </span>
+                        </span>
+                        {where && (
+                          <span style={{
+                            display: 'block', fontSize: 10.5, lineHeight: 1.35, color: 'var(--text-tertiary)',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {where}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                  <p style={{ margin: '4px 8px', fontSize: 10, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
+                    {pt
+                      ? '↑↓ escolhe · enter ou tab menciona · esc fecha. Vai como nome + id curto — para levar o conteúdo, use Encaminhar.'
+                      : '↑↓ to move · enter or tab mentions it · esc closes. It goes as name + short id — to carry content, use Forward.'}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           {/* NO COMPOSER UNTIL THE CONVERSATION IS THERE. A field offered over a conversation still
               loading invites a message into a session whose state is not yet known — including one
               sitting in a dialog, where the text would go into the dialog's own filter. */}
@@ -2342,6 +2587,16 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                       ? 'Esta sessão não está rodando, então não dá para escrever nela.'
                       : 'This session is not running, so there is nothing to write to.'}
                   </span>
+                  {/* A DRAFT waiting here — typically a FORWARD landed in it — is invisible while the
+                      field is hidden, so it is said. It is keyed on the conversation, so Reopen
+                      brings the field back with it (`scratchKey`). */}
+                  {draft.trim() !== '' && (
+                    <span role="status" style={{ flexBasis: '100%', order: 3, fontSize: 11.5, lineHeight: 1.5, color: 'var(--anthropic-orange)' }}>
+                      {pt
+                        ? 'Há um rascunho guardado aqui. Reabra a sessão para continuar a escrever e enviar.'
+                        : 'A draft is waiting here. Reopen the session to finish and send it.'}
+                    </span>
+                  )}
                   <button
                     onClick={() => void reopenNow()}
                     disabled={!reopen.enabled || reopening}
@@ -2518,6 +2773,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     // is what a keyboard user tabbing onto an entry does.
                     const into = e.relatedTarget as Node | null
                     if (!skillPickerRef.current?.contains(into)) setSlashDismissed(true)
+                    if (!hashPickerRef.current?.contains(into)) setHashDismissed(true)
                     if (!atPickerRef.current?.contains(into)) {
                       setAtDismissed(true)
                       setDraft(d => dropEmptyAtTrigger(d))
@@ -2564,6 +2820,21 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                         return
                       }
                     }
+                    // THE `#` PICKER owns the same keys while it is open — see `insertMention`.
+                    if (hashOpen && hashRows.length > 0) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setHashIndex(i => stepSkill(i, hashRows.length, 1)); return }
+                      if (e.key === 'ArrowUp') { e.preventDefault(); setHashIndex(i => stepSkill(i, hashRows.length, -1)); return }
+                      if (isPickerSelectKey({ key: e.key, shiftKey: e.shiftKey, isMobile })) {
+                        e.preventDefault()
+                        const picked = hashRows[Math.min(hashIndex, hashRows.length - 1)]
+                        if (picked) insertMention(picked)
+                        return
+                      }
+                    }
+                    if (e.key === 'Escape' && hashOpen) { e.preventDefault(); setHashDismissed(true); return }
+                    // SELECTION MODE takes Escape before the stop verb — leaving the mode must never
+                    // also interrupt the session's turn.
+                    if (e.key === 'Escape' && selecting !== null) { e.preventDefault(); setSelecting(null); return }
                     if (e.key === 'Escape' && atOpen) {
                       e.preventDefault()
                       setAtDismissed(true)
@@ -3142,6 +3413,20 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           onIndexChange={setComposerLightbox}
           onClose={() => setComposerLightbox(null)}
           lang={lang}
+        />
+      )}
+
+      {/* FORWARD — the fleet picker as its third feature: pick one or more sessions, then an
+          optional comment and where it lands (the draft by default). See `chatForward.ts`. */}
+      {forwardTurns !== null && (
+        <SessionPickModal
+          kind="forward"
+          lang={lang}
+          rows={forwardRows}
+          busy={forwardBusy}
+          forwardPreview={forwardBlock(forwardSource, forwardTurns, pt)}
+          onClose={() => { if (!forwardBusy) setForwardTurns(null) }}
+          onConfirm={(ids, comment, opts) => { void deliverForward(ids, comment, opts) }}
         />
       )}
 
