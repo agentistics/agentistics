@@ -108,7 +108,7 @@ import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/flee
 import { runningConversationIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
 import {
-  filtrosPanelInert, sessionsFiltersShouldReturnFocus, filtrosPanelBounds,
+  filtrosPanelInert, filtrosPanelOverflow, sessionsFiltersShouldReturnFocus, filtrosPanelBounds,
 } from './lib/sessionsFiltersPanel'
 import { useRightAsideEdge } from './lib/rightAsideEdge'
 import { setLeftAsideEdge } from './lib/leftAsideEdge'
@@ -2146,6 +2146,22 @@ export default function AppLayout() {
   /** The panel's own clipped wrapper (carries `inert` while collapsed) and its trigger — both
    *  needed to answer "is focus inside the thing about to become unreachable" on collapse. */
   const sessionsFiltersPanelRef = useRef<HTMLDivElement | null>(null)
+  /*
+   * The CARD's own height, for `filtrosPanelOverflow`: the panel may only become a scroll container
+   * when the card genuinely outgrows its room, or it clips every popover drawn inside it. Observed
+   * rather than read once, because the chip rows below the bar grow as filters are picked. An
+   * absolutely positioned menu does not change this box, so opening one cannot flip the decision.
+   */
+  const sessionsFiltersCardRef = useRef<HTMLDivElement | null>(null)
+  const [sessionsFiltersCardHeight, setSessionsFiltersCardHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const el = sessionsFiltersCardRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setSessionsFiltersCardHeight(el.offsetHeight))
+    ro.observe(el)
+    setSessionsFiltersCardHeight(el.offsetHeight)
+    return () => ro.disconnect()
+  }, [])
   const sessionsFiltersTriggerRef = useRef<HTMLButtonElement | null>(null)
   /**
    * NOT a functional `setState` updater with side effects inside it (the shape `toggleFleet` below
@@ -3739,16 +3755,20 @@ export default function AppLayout() {
                 ref={sessionsFiltersPanelRef}
                 inert={filtrosPanelInert(sessionsFiltersOpen)}
                 style={{
-                  // `auto`, never `visible`, once settled: it shows NO scrollbar at all while the
-                  // content (the ordinary case) fits under `sessionsFiltersAnchor.maxHeight`, and
-                  // only becomes a real scroll region on a window too short to hold it — which is
-                  // exactly "no fixed max that forces a scroll, unless it would exceed the viewport".
-                  overflow: (!sessionsFiltersOpen || sessionsFiltersClip) ? 'hidden' : 'auto',
+                  // `visible` once settled while the card fits, so the popovers FiltersBar draws in
+                  // flow escape this box; `auto` only when the card itself outgrows the measured room.
+                  // See `filtrosPanelOverflow` for why `auto` clipped every one of them.
+                  overflow: filtrosPanelOverflow({
+                    open: sessionsFiltersOpen,
+                    animating: sessionsFiltersClip,
+                    contentHeight: sessionsFiltersCardHeight,
+                    maxHeight: sessionsFiltersAnchor?.maxHeight ?? null,
+                  }),
                   minHeight: 0,
                   ...(sessionsFiltersAnchor ? { maxHeight: sessionsFiltersAnchor.maxHeight } : {}),
                 }}
               >
-                <div style={{
+                <div ref={sessionsFiltersCardRef} style={{
                   padding: '10px 12px', borderRadius: 10,
                   border: '1px solid var(--border)', background: 'var(--bg-surface)',
                   boxShadow: '0 10px 28px rgba(0,0,0,0.3)', boxSizing: 'border-box',
