@@ -31,6 +31,7 @@ import {
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
+import { MinimizedMenu } from './MinimizedMenu'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -324,36 +325,23 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         </NayWindowFrame>
       ))}
 
-      {/* Minimized windows: orange pills to the left of the chat button, one per session. */}
-      {minimized.length > 0 && (
-        <div style={{ position: 'fixed', right: 24 + 56 + 10, bottom: 30, zIndex: 300, display: 'flex', gap: 6, flexDirection: 'row-reverse', maxWidth: '60vw', overflowX: 'auto' }}>
-          {minimized.map(w => (
-            <button
-              key={w.id}
-              onClick={() => setDock(d => openSession(d, w.id))}
-              title={pt ? 'Restaurar a janela' : 'Restore the window'}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, maxWidth: 200, padding: '6px 10px', borderRadius: 999,
-                border: `1px solid ${ORANGE}`, background: ORANGE_DIM, color: ORANGE, cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 12, fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
-              }}
-            >
-              <PictureInPicture2 size={13} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{findSession(w.id)?.title ?? 'Nay'}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* THE chat button — always this one, whatever is detached. */}
       {!(isMobile && dock.open) && (
+        <MinimizedMenu
+          pt={pt}
+          items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
+          onRestore={id => setDock(d => openSession(d, id))}
+          onClose={id => setDock(d => closeWindow(d, id))}
+          anchorStyle={{ position: 'fixed', right: 24, bottom: isMobile ? 'calc(12px + var(--mobile-nav-h, 0px))' : 24, zIndex: 300 }}
+          renderButton={({ onClickCapture, onKeyDown }) => (
         <button
+          onClickCapture={onClickCapture}
+          onKeyDown={onKeyDown}
           onClick={() => setDock(d => ({ ...d, open: !d.open }))}
           aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
           aria-expanded={dock.open}
           title="Nay"
           style={{
-            position: 'fixed', right: 24, bottom: isMobile ? 'calc(12px + var(--mobile-nav-h, 0px))' : 24, zIndex: 300,
             width: 56, height: 56, borderRadius: 16, border: `1.5px solid ${ORANGE}`,
             background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
@@ -363,6 +351,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             ? <X size={20} color="var(--bg-surface)" />
             : <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 30, height: 30, borderRadius: 8 }} />}
         </button>
+          )}
+        />
       )}
     </>
   )

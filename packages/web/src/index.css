@@ -1014,3 +1014,8 @@ button:focus-within .ag-row-pin,
   background: color-mix(in srgb, var(--text-tertiary) 38%, transparent);
   border-radius: 5px; text-decoration: none;
 }
+
+/* The minimized-windows list opened from the Nay button (MinimizedMenu.tsx). */
+@keyframes ag-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.ag-menu-row:hover, .ag-menu-row:focus-visible { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
+@media (prefers-reduced-motion: reduce) { [role="menu"][aria-label] { animation: none !important; } }
