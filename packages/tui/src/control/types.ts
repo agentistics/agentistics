@@ -1542,6 +1542,20 @@ export interface ControlHost {
   interruptSession?(id: string): Promise<ActionResult>
 
   /**
+   * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
+   * harness's own rewind. `occurrence` picks among identical prompts, 0 = the latest. Refused, in a
+   * sentence, where no rewind was measured for the harness, while a dialog is open, or when the
+   * prompt is not in the harness's menu.
+   */
+  rewindSession?(id: string, prompt: string, occurrence: number): Promise<ActionResult>
+
+  /**
+   * Send the messages a busy session is holding in its own queue NOW, instead of when its turn ends.
+   * All of them, in order — the harness's own rule.
+   */
+  sendQueuedNow?(id: string): Promise<ActionResult>
+
+  /**
    * Advance a session's harness to its NEXT mode, without attaching to it.
    *
    * One keystroke, and the harness decides which mode comes next — there is no key that picks one

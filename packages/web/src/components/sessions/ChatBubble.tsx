@@ -19,13 +19,14 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 // A single newline is a LINE BREAK here. Without this plugin markdown collapses it to a space, so a
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, Clock, Copy, CornerUpLeft, Image as ImageIcon, Loader, User } from 'lucide-react'
+import { ArrowUpRight, Check, Clock, Copy, CornerUpLeft, Image as ImageIcon, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -335,7 +336,10 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
   // An attachment is a PATH the composer typed into the pane (see `attachmentPreview.ts`'s header),
   // so it arrives in `turn.text` like any other line — pulled out here rather than at the source, so
   // the SAME rule reads an echoed message and its later transcript copy identically.
-  const { images, text: prose } = splitImageAttachments(turn.text)
+  // A DICTATED message carries a one-line mark for the model (`dictationMark.ts`); the person sees
+  // their words and a small microphone instead of the mark.
+  const { text: spokenText, dictated } = mine ? stripDictatedMark(turn.text) : { text: turn.text, dictated: false }
+  const { images, text: prose } = splitImageAttachments(spokenText)
 
   // And `[Image #4]` — the same question asked of what the HARNESS substituted rather than what the
   // composer typed; without this it ran into the first word of the prose (see `splitImageMarkers`).
@@ -702,6 +706,15 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
               whiteSpace: 'nowrap', flexShrink: 0, opacity: 0.75,
             }}
           >{stamp.label}</time>
+        )}
+        {dictated && (
+          <span
+            title={pt ? 'Mensagem ditada pelo microfone' : 'Dictated message'}
+            aria-label={pt ? 'Mensagem ditada pelo microfone' : 'Dictated message'}
+            style={{ display: 'inline-flex', alignSelf: 'flex-end', color: 'var(--text-tertiary)', opacity: 0.75 }}
+          >
+            <Mic size={10} />
+          </span>
         )}
 
         {/* The label sits INSIDE the bubble, under the text: it is a fact about this message, and

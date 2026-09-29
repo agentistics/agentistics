@@ -47,19 +47,27 @@ export interface ModeSwitchProps {
   onNavigate?: () => void
 }
 
+const DASHBOARD_BACK_KEY = 'agentistics-dashboard-path'
+const SESSIONS_BACK_KEY = 'agentistics-sessions-path'
+
 export function ModeSwitch({ lang, collapsed = false, attention = 0, onNavigate }: ModeSwitchProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const active = modeOfPath(location.pathname)
 
-  // Where "back to the dashboard" goes. Remembered on the way out rather than recomputed: once you
-  // are inside the sessions workspace the router no longer knows where you came from.
-  const back = typeof sessionStorage !== 'undefined'
-    ? sessionStorage.getItem('agentistics-dashboard-path')
-    : null
-  if (active === 'dashboard' && typeof sessionStorage !== 'undefined') {
-    try { sessionStorage.setItem('agentistics-dashboard-path', location.pathname) } catch { /* private mode */ }
+  // Where each side's "back" goes — the dashboard page and the SESSION you were last on. Remembered
+  // on the way out rather than recomputed: once you are in the other workspace the router no longer
+  // knows where you came from. Every access is guarded: a private window makes the accessor throw.
+  const read = (key: string): string | null => {
+    try { return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null } catch { return null }
   }
+  const back = read(DASHBOARD_BACK_KEY)
+  const sessionsBack = read(SESSIONS_BACK_KEY)
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(active === 'dashboard' ? DASHBOARD_BACK_KEY : SESSIONS_BACK_KEY, location.pathname)
+    }
+  } catch { /* private mode */ }
 
   return (
     <div
@@ -90,7 +98,7 @@ export function ModeSwitch({ lang, collapsed = false, attention = 0, onNavigate 
             aria-selected={on}
             aria-label={collapsed ? label : undefined}
             title={collapsed ? label : undefined}
-            onClick={() => { navigate(pathForMode(mode, back)); onNavigate?.() }}
+            onClick={() => { navigate(pathForMode(mode, back, sessionsBack)); onNavigate?.() }}
             style={{
               flex: '1 1 0', minWidth: 0, boxSizing: 'border-box',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,

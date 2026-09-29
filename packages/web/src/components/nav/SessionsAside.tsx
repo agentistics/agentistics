@@ -61,7 +61,7 @@ import {
   type NestRefusal, type SessionUserGroup,
   canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
   nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
-  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount,
+  reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount, folderCountLabel, listNarrowed,
   subscribeSessionGroups,
 } from '../../lib/sessionUserGroups'
 import {
@@ -357,10 +357,6 @@ export function SessionsAside({
     })),
     [groupsValue, rows, pinned],
   )
-  const groupedVisibleCount = useMemo(
-    () => groupRowsResolved.reduce((n, g) => n + g.rows.length, 0),
-    [groupRowsResolved],
-  )
   /** Which user-group bands are folded on THIS screen — per viewer, alongside the aside's other
    *  arrangement prefs (see `sessionsAsidePrefs.ts`). Membership itself is shared/server-side. */
   const [foldedUserGroups, setFoldedUserGroupsState] =
@@ -583,6 +579,20 @@ export function SessionsAside({
     () => (activeOnly ? searched.filter(r => !active.has(r.state)).length : 0),
     [searched, activeOnly, active],
   )
+  /*
+   * THE FOLDERS FOLLOW THE LIST (owner, 2026-09-29). They were resolved against the raw fleet so a
+   * folder would survive a filter — and so a search for "Líder" left every folder showing everything
+   * while the rest of the list narrowed. Now what a folder DRAWS is cut by the very same pipeline as
+   * the list (value filters → search → active only); `groupRowsResolved` stays whole for the TOTAL
+   * in the header (`3/61`) and for the menu's attention count.
+   */
+  const narrowing = listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
+  const groupRowsShown = useMemo(() => {
+    if (!narrowing) return groupRowsResolved
+    const ids = new Set(matched.map(r => r.id))
+    return groupRowsResolved.map(e => ({ ...e, rows: e.rows.filter(r => ids.has(r.id)) }))
+  }, [narrowing, matched, groupRowsResolved])
+  const searching = query.trim() !== ''
   /** Which SET filter dimensions this fleet cannot answer at all, said in one line — never silent. */
   const ignoredNote = useMemo(() => ignoredDimensions(filters, lang), [filters, lang])
 
@@ -674,7 +684,7 @@ export function SessionsAside({
   const total = bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
-  ) + pinnedRows.length + groupedVisibleCount
+  ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
@@ -712,18 +722,25 @@ export function SessionsAside({
    */
   const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
     const { group, rows: gRows } = entry
-    const folded = foldedUserGroups.has(group.id)
+    // What matches in this folder (its nested folders included) — see `groupRowsShown`.
+    const shownInFolder = folderSessionCount(group.id, groupRowsShown)
+    // A SEARCH opens the folders that hold results, without touching what the person folded: the
+    // stored fold is untouched, it is only overridden while there is text in the search box.
+    // Nothing here matches: kept, and quieter — never removed (see `listNarrowed`) — and shown as its
+    // header alone, since a body that only says "nothing matches" is noise in a filtered list.
+    const noMatches = narrowing && shownInFolder === 0
+    const folded = (foldedUserGroups.has(group.id) || noMatches) && !(searching && shownInFolder > 0)
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
-    const children = depth === 0 ? groupRowsResolved.filter(g => g.group.parentId === group.id) : []
+    const children = depth === 0 ? groupRowsShown.filter(g => g.group.parentId === group.id) : []
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
         key={group.id}
-        style={{ marginLeft: depth * 14 }}
+        style={{ marginLeft: depth * 14, ...(noMatches ? { opacity: 0.5 } : {}) }}
       >
         <div
           // Suppressed for the WHOLE list while ANY folder is being dragged, not only for the one
@@ -902,7 +919,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderSessionCount(group.id, groupRowsResolved)}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
               </button>
               <button
                 onClick={e => {
@@ -930,7 +947,11 @@ export function SessionsAside({
               {children.map(c => renderGroupBand(c, 1))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                  {pt
+                  {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
+                      sessions into a folder that holds sixty would be wrong. */}
+                  {noMatches && folderSessionCount(group.id, groupRowsResolved) > 0
+                    ? (pt ? 'Nada aqui corresponde aos filtros ou à busca.' : 'Nothing here matches the filters or the search.')
+                    : pt
                     ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                     : 'Drag a session here, or use "Move to group" on its menu.'}
                 </p>
@@ -1468,7 +1489,7 @@ export function SessionsAside({
             </button>
           </div>
 
-          {!foldedGroupsSection && groupRowsResolved.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
+          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (

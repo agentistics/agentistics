@@ -4,11 +4,13 @@
  */
 
 import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
+import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
+import type { RewindOutcome } from './types'
 import {
   attachArgs, capturePaneArgs, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
   tmuxListIsEmptyState,
-  resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs,
+  resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
   clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
   showPrefixArgs, trimCapture,
   type TerminalProfile,
@@ -151,6 +153,66 @@ async function focusInput(id: string): Promise<boolean> {
     await sleep(SUBMIT_SETTLE_MS)
   }
   return inputFocusOf(await captureFrame(id)) === 'input'
+}
+
+/**
+ * Empty the input box — one `C-u` per line, since claude's `C-u` deletes the CURRENT line only
+ * (measured: a two-line input needed two). It stops as soon as a press changes nothing, which also
+ * ends it on claude's grey prompt SUGGESTION: that is drawn in the box, reads exactly like typed text
+ * on a capture, and no key deletes it — nor does it need deleting, since typing replaces it.
+ */
+async function clearInput(id: string): Promise<void> {
+  let before = await captureFrame(id)
+  for (let i = 0; i < 12; i++) {
+    if ((await tmux(sendKeysNamedArgs(id, 'C-u'))).code !== 0) return
+    await sleep(SUBMIT_POLL_MS)
+    const after = await captureFrame(id)
+    if (!frameChanged(before, after)) return
+    before = after
+  }
+}
+
+/** See `SessionBackend.rewindTo` and `claude-rewind.ts`. Runs under the pane's write lock. */
+async function rewindDriver(id: string, text: string, occurrence: number): Promise<RewindOutcome> {
+  if (!(await focusInput(id))) return 'failed'
+  await clearInput(id)
+  // ONE burst — two Esc sent 300 ms apart did not open the menu in the measurement.
+  if ((await tmux(sendKeysNamedSequenceArgs(id, ['Escape', 'Escape']))).code !== 0) return 'failed'
+  await sleep(SUBMIT_SETTLE_MS * 2)
+  let menu = parseRewindMenu(await captureFrame(id))
+  if (!menu) return 'no-menu'
+  let seen = 0
+  for (let step = 0; step < REWIND_MAX_STEPS; step++) {
+    if ((await tmux(sendKeysNamedArgs(id, 'Up'))).code !== 0) break
+    await sleep(SUBMIT_POLL_MS)
+    const next = parseRewindMenu(await captureFrame(id))
+    if (!next) { await tmux(sendKeysNamedArgs(id, 'Escape')); return 'unexpected' }
+    const row = highlightedRow(next)
+    // The top of the list: the cursor did not move and nothing is hidden above it.
+    const stuck = row !== null && highlightedRow(menu) === row && next.cursor === menu.cursor && !next.moreAbove
+    menu = next
+    if (row !== null && rewindRowMatches(row, text)) {
+      if (seen === occurrence) {
+        if ((await tmux(sendKeysNamedArgs(id, 'Enter'))).code !== 0) return 'failed'
+        await sleep(SUBMIT_SETTLE_MS * 3)
+        // Still a menu of some kind after the choice: a screen nobody measured. Cancel, never guess.
+        const after = await captureFrame(id)
+        if (parseRewindMenu(after) || /Enter to continue · Esc to cancel/.test(after.join('\n'))) {
+          await tmux(sendKeysNamedArgs(id, 'Escape'))
+          await sleep(SUBMIT_POLL_MS)
+          await tmux(sendKeysNamedArgs(id, 'Escape'))
+          return 'unexpected'
+        }
+        // The restored prompt is put back in the box; the next message must not be typed after it.
+        await clearInput(id)
+        return 'done'
+      }
+      seen++
+    }
+    if (stuck) break
+  }
+  await tmux(sendKeysNamedArgs(id, 'Escape'))
+  return 'not-found'
 }
 
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
@@ -415,6 +477,20 @@ export const tmuxBackend: SessionBackend = {
         await tmux(clearHistoryArgs(id))
       }
       return ok
+    })
+  },
+
+  async rewindTo(id: string, text: string, occurrence: number) {
+    return writeToPane(id, () => rewindDriver(id, text, occurrence))
+  },
+
+  async sendQueuedNow(id: string) {
+    return writeToPane(id, async () => {
+      // claude's own "ctrl+x ctrl+s to send now" — measured: it cut the running reply and sent BOTH
+      // queued messages as one turn, in order.
+      if ((await tmux(sendKeysNamedArgs(id, 'C-x'))).code !== 0) return false
+      await sleep(SUBMIT_POLL_MS)
+      return (await tmux(sendKeysNamedArgs(id, 'C-s'))).code === 0
     })
   },
 

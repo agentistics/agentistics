@@ -287,3 +287,23 @@ export function folderSessionCount(
   }
   return n
 }
+
+/**
+ * PURE: what a folder's header says while the list is NARROWED by a filter, a search or "active
+ * only" — owner, 2026-09-29: the filters applied to everything outside the folders and not inside
+ * them, so searching for "Líder" left every folder showing everything. Folders now show only what
+ * matches, and the header says how much of the folder that is (`3/61`), so a folded folder still
+ * tells you there are results in it. Not narrowed, it is just the total.
+ */
+export function folderCountLabel(shown: number, total: number, narrowing: boolean): string {
+  return narrowing ? `${shown}/${total}` : String(total)
+}
+
+/**
+ * PURE: is the list narrowed right now? "Active only" counts: it hides sessions exactly like a
+ * filter does, and it is on by default, which is why a folder with nothing matching is DIMMED and
+ * never removed — removing it would make a folder like "Finalizadas" vanish on every visit.
+ */
+export function listNarrowed(o: { activeOnly: boolean; query: string; valueFiltered: number; total: number }): boolean {
+  return o.activeOnly || o.query.trim() !== '' || o.valueFiltered < o.total
+}

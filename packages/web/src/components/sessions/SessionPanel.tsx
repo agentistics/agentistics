@@ -81,7 +81,7 @@ export interface SessionPanelProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   theme: 'dark' | 'light'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number })
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number })
     => Promise<{ ok: boolean; message: string; id?: string }>
   authorName?: string
   /** Called after a verb that removes the row — the panel has nothing left to show. */

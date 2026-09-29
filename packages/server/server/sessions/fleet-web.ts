@@ -330,6 +330,19 @@ export async function runFleetAction(
     case 'kill':
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
+    case 'rewind': {
+      if (!host.rewindSession) return { ok: false, message: s.sessionsNoHost }
+      // The prompt is the ANCHOR, compared against the harness's own menu row by row — not an index,
+      // which the harness's list (it scrolls, and a queued turn can join it) cannot be trusted to keep.
+      const raw = req.text ?? ''
+      if (!raw.trim()) return { ok: false, message: s.sessionsNoHost }
+      const occ = Number.isInteger(req.occurrence) && (req.occurrence ?? 0) >= 0 ? req.occurrence! : 0
+      return await host.rewindSession(req.id, raw, occ)
+    }
+    case 'sendNow': {
+      if (!host.sendQueuedNow) return { ok: false, message: s.sessionsNoHost }
+      return await host.sendQueuedNow(req.id)
+    }
     case 'interrupt': {
       // Only meaningful on a session that is actually doing something: pressing Escape into an idle
       // prompt closes whatever the harness has open, which is not what "stop" means.
