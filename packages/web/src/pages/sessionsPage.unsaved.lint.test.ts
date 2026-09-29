@@ -33,13 +33,15 @@ const GUARD = stripComments(readFileSync(join(WEB_SRC, 'components/sessions/Unsa
  * own header names, so it is asserted over the source like the others.
  */
 function navigatorGuardInstalled(src: string): boolean {
-  return /useEffect\(\(\) => \{[^}]*?return guardNavigator\(\s*navigator,\s*\(to, state\) => !navigationKeepsStudio\(pathnameOf\(to, window\.location\.pathname\), keys\.current\)\s*&& !navigationRetiresStudio\(state, keys\.current\),\s*run => holdIfUnsaved\('leave', run\),\s*\)\s*\}, \[navigator\]\)/
+  // `active` is false only on the second pane of a split view, whose ONE guard lives on the main
+  // pane — the guard itself must still be installed there, in exactly this shape.
+  return /useEffect\(\(\) => \{\s*if \(!active\) return[^}]*?return guardNavigator\(\s*navigator,\s*\(to, state\) => !navigationKeepsStudio\(pathnameOf\(to, window\.location\.pathname\), keys\.current\)\s*&& !navigationRetiresStudio\(state, keys\.current\),\s*run => holdIfUnsaved\('leave', run\),\s*\)\s*\}, \[navigator, active\]\)/
     .test(src)
 }
 
 /** The Back/Forward half: the page ARMS the one pop guard, held through the same question. */
 function popGuardArmed(src: string): boolean {
-  return /useEffect\(\(\) => \{\s*if \(!routed\) return\s*return armHistoryPopGuard\(\{\s*lastIndex: \(\) => shownIndex\.current,\s*hold: pathname => !navigationKeepsStudio\(pathname, keys\.current\),\s*onHold: run => holdIfUnsaved\('leave', run\),\s*\}\)\s*\}, \[routed\]\)/
+  return /useEffect\(\(\) => \{\s*if \(!routed \|\| !active\) return\s*return armHistoryPopGuard\(\{\s*lastIndex: \(\) => shownIndex\.current,\s*hold: pathname => !navigationKeepsStudio\(pathname, keys\.current\),\s*onHold: run => holdIfUnsaved\('leave', run\),\s*\}\)\s*\}, \[routed, active\]\)/
     .test(src)
     && /useEffect\(\(\) => \{\s*shownIndex\.current = historyIndexOf\(window\.history\.state\)\s*\}, \[location\?\.key\]\)/.test(src)
 }
@@ -176,12 +178,12 @@ describe('the links the guard depends on', () => {
   test('the scan still sees a guard component that stopped installing either', () => {
     const at = GUARD.indexOf('return guardNavigator(')
     const effectStart = GUARD.lastIndexOf('useEffect(', at)
-    const effectEnd = GUARD.indexOf('}, [navigator])', at) + '}, [navigator])'.length
+    const effectEnd = GUARD.indexOf('}, [navigator, active])', at) + '}, [navigator, active])'.length
     expect(effectStart).toBeGreaterThan(-1)
     // The deletion the reviewer made: the whole effect gone.
     expect(navigatorGuardInstalled(GUARD.slice(0, effectStart) + GUARD.slice(effectEnd))).toBe(false)
     // Installed, but asking nothing.
-    expect(navigatorGuardInstalled(GUARD.replace("run => holdIfUnsaved('leave', run),\n    )\n  }, [navigator])", 'run => false,\n    )\n  }, [navigator])')))
+    expect(navigatorGuardInstalled(GUARD.replace("run => holdIfUnsaved('leave', run),\n    )\n  }, [navigator, active])", 'run => false,\n    )\n  }, [navigator, active])')))
       .toBe(false)
     // Prose naming it is not it.
     expect(navigatorGuardInstalled(stripComments(`/* ${GUARD.slice(effectStart, effectEnd)} */`))).toBe(false)
