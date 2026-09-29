@@ -2771,6 +2771,10 @@ The FLEET is what all four show: the live sessions plus the conversations that c
 - **Selection mode is published to the header through `lib/chatSelection.ts`**, not threaded as
   props, and is keyed on `turnKey`, never on a turn's index (the conversation is a sliding window).
   `Esc` is checked before the composer's stop verb.
+- **A reply is a LIST of quotes** (`replyQuote.ts`'s `addReply`/`orderReplies`/`quoteAll`): Reply
+  ADDS, selection's `Reply (N)` adds all, and they go out in conversation order through
+  `composeReply`'s blank-line rule. `sessionScratch.readReply` returns an array and still reads the
+  old single-object shape.
 
 ### Idle sessions — the Sessions workspace's bell, review card and review modal
 

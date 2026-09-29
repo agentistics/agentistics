@@ -33,7 +33,7 @@
  * off would be a far worse bug than the one this fixes.
  */
 
-import { parseReply, type ReplyTarget } from './replyQuote'
+import { parseReplies, type ReplyTarget } from './replyQuote'
 
 /** The shape this module keeps for a conversation. Structural, so it never imports the chat view. */
 export interface CachedChat {
@@ -208,8 +208,9 @@ export interface SessionScratch {
    * said, so it does not have to resolve against a transcript that has since been re-fetched. And
    * it is per session id, so it can never surface over another conversation.
    */
-  readReply(id: string): ReplyTarget | null
-  writeReply(id: string, target: ReplyTarget | null): void
+  readReply(id: string): ReplyTarget[]
+  /** An empty list clears it. Several quotes are one reply — see `replyQuote.ts`. */
+  writeReply(id: string, targets: readonly ReplyTarget[]): void
   readChat(id: string): CachedChat | null
   writeChat(id: string, chat: CachedChat): void
   /**
@@ -240,7 +241,7 @@ export function createSessionScratch(store: ScratchStore | null): SessionScratch
   const memoryDrafts = new Map<string, string>()
   const memoryAttached = new Map<string, ScratchAttachment[]>()
   const memoryEchoes = new Map<string, string[]>()
-  const memoryReply = new Map<string, ReplyTarget>()
+  const memoryReply = new Map<string, ReplyTarget[]>()
 
   return {
     readDraft(id) {
@@ -300,18 +301,20 @@ export function createSessionScratch(store: ScratchStore | null): SessionScratch
       if (store) {
         try {
           const raw = store.getItem(replyKey(id))
-          if (raw !== null) return parseReply(raw)
+          if (raw !== null) return parseReplies(raw)
         } catch { /* storage blocked — fall through to memory */ }
       }
-      return memoryReply.get(id) ?? null
+      return [...(memoryReply.get(id) ?? [])]
     },
-    writeReply(id, target) {
-      if (target === null) {
+    writeReply(id, targets) {
+      if (targets.length === 0) {
         memoryReply.delete(id)
         if (store) { try { store.removeItem(replyKey(id)) } catch { /* nothing to do */ } }
         return
       }
-      const value = { role: target.role, text: target.text }
+      // The whole target travels, `excerpt` included — dropping it here uncapped nothing but lost
+      // the "an excerpt of" wording on reload, and `key` is what keeps the order.
+      const value = targets.map(t => ({ ...t }))
       memoryReply.set(id, value)
       if (store) {
         try { store.setItem(replyKey(id), JSON.stringify(value)) } catch { /* memory still has it */ }
@@ -356,7 +359,7 @@ export function createSessionScratch(store: ScratchStore | null): SessionScratch
       const draft = this.readDraft(from)
       if (draft !== '' && this.readDraft(to) === '') this.writeDraft(to, draft)
       const reply = this.readReply(from)
-      if (reply && this.readReply(to) === null) this.writeReply(to, reply)
+      if (reply.length > 0 && this.readReply(to).length === 0) this.writeReply(to, reply)
       const echoes = this.readEchoes(from)
       if (echoes.length > 0 && this.readEchoes(to).length === 0) this.writeEchoes(to, echoes)
       const files = this.readAttachments(from)

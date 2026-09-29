@@ -21,6 +21,8 @@ export interface ChatSelectionState {
   forward: () => void
   copy: () => void
   cancel: () => void
+  /** "Reply (N)": quote every ticked message in the composer. Absent where the session cannot be written to. */
+  reply?: () => void
 }
 
 export interface ChatSelectionStore {

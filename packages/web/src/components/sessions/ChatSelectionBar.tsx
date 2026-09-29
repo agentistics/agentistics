@@ -9,7 +9,7 @@
  * not the focus is in this bar.
  */
 import type { CSSProperties } from 'react'
-import { Copy, Forward, X } from 'lucide-react'
+import { Copy, CornerUpLeft, Forward, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useChatSelection, type ChatSelectionState } from '../../lib/chatSelection'
 import { selectionCountLabel } from '../../lib/chatForward'
@@ -47,6 +47,14 @@ export function ChatSelectionBar({ sel, lang }: { sel: ChatSelectionState; lang:
       }}>
         {selectionCountLabel(sel.count, pt)}
       </span>
+      {sel.reply && (
+        <button onClick={() => { if (!none) sel.reply?.() }} disabled={none} style={btn(!none)}
+          aria-label={pt ? `Responder (${sel.count})` : `Reply (${sel.count})`}
+          title={pt ? 'Citar as selecionadas no composer' : 'Quote the selected ones in the composer'}>
+          <CornerUpLeft size={15} />
+          {isMobile ? sel.count : (pt ? `Responder (${sel.count})` : `Reply (${sel.count})`)}
+        </button>
+      )}
       <button onClick={() => { if (!none) sel.forward() }} disabled={none} style={btn(!none)}
         aria-label={pt ? 'Encaminhar' : 'Forward'} title={pt ? 'Encaminhar' : 'Forward'}>
         <Forward size={15} style={{ color: 'var(--anthropic-orange)' }} />

@@ -45,6 +45,14 @@ chat's DOM. `Esc` leaves the mode, and the composer checks it BEFORE the stop ve
 mode never interrupts a turn. The selection is keyed on the turn (`turnKey`), not its index: the
 conversation is a sliding window, and an index would forward a message nobody ticked.
 
+**A reply can quote SEVERAL messages.** A long answer often asks several questions, so the reply is a
+LIST (`replyQuote.ts`: `addReply` / `orderReplies` / `quoteAll`): the message menu's Reply ADDS to it
+(never twice, never replacing), and selection mode's `Reply (N)` adds every ticked message — offered
+only where the session can take a message. The composer shows one removable strip per quote, in
+CONVERSATION order (keyed on `turnKey`, not click order), and the message sends each quote with its
+usual cap, a blank line apart, then a blank line before the typed text — the `composeReply` rule, so
+the answer never falls into the last blockquote. The stored draft reads the old single-quote shape.
+
 **Forward carries CONTENT; a mention (below) only POINTS.** It reuses the fleet picker
 (`SessionPickModal`, `kind: 'forward'`): pick one or several sessions (searched by title, folder,
 harness, state or task), then an optional comment, then where it lands. What travels is a short

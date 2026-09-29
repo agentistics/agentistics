@@ -66,7 +66,7 @@ import {
   emptyAtServerReason, emptyAtToolReason, filterAtServers, findAtServer, resolveAtToolView,
   type MenuMcpServer, dropEmptyAtTrigger,
 } from '../../lib/atMenu'
-import { composeReply, markExcerpt, quoteFor, replyAuthor, replyPreview, type ReplyTarget } from '../../lib/replyQuote'
+import { addReply, composeReply, markExcerpt, orderReplies, quoteAll, replyAuthor, replyPreview, type ReplyTarget } from '../../lib/replyQuote'
 import { pendingEchoes } from '@agentistics/core'
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -780,7 +780,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * sent above what you write, which is what the assistant will actually see and is the same thing
    * mail has always done. Saying it plainly beats a UI that implies threading the session cannot do.
    */
-  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(
+  const [replyTo, setReplyTo] = useState<ReplyTarget[]>(
     () => sessionScratch.readReply(scratchId),
   )
 
@@ -795,9 +795,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * reason for that shape — the id and the value are read together, so a session switch can never
    * write one conversation's reply into another's slot.
    */
-  const editReply = useCallback((next: ReplyTarget | null) => {
-    sessionScratch.writeReply(scratchId, next)
-    setReplyTo(next)
+  const editReply = useCallback((next: ReplyTarget[] | ((prev: ReplyTarget[]) => ReplyTarget[])) => {
+    setReplyTo(prev => {
+      const v = typeof next === 'function' ? next(prev) : next
+      sessionScratch.writeReply(scratchId, v)
+      return v
+    })
   }, [scratchId])
   /**
    * Files written to THIS MACHINE, whose paths go into the message.
@@ -1231,7 +1234,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
 
   /** ONE stable reference for every bubble's reply button — see `ChatBubble`'s memo. */
   const onReplyToTurn = useCallback((t: ChatTurn) => {
-    editReply({ role: t.role, text: t.text }); setAtTail(true); toTail()
+    // ADDS to the reply set — answering several questions of one long message is quoting each.
+    editReply(prev => addReply(prev, { role: t.role, text: t.text, key: turnKeyOf(t) })); setAtTail(true); toTail()
     // Choosing a message to answer IS starting to write one. Asked for, and it is the same call the
     // skill picker already makes after inserting: the next thing the person does is type.
     textareaRef.current?.focus()
@@ -1250,7 +1254,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const onReplyToExcerpt = useCallback((t: ChatTurn, selected: string) => {
     const text = markExcerpt(t.text, selected)
     if (text === '') return
-    editReply({ role: t.role, text, excerpt: true }); setAtTail(true); toTail()
+    editReply(prev => addReply(prev, { role: t.role, text, excerpt: true, key: turnKeyOf(t) })); setAtTail(true); toTail()
     textareaRef.current?.focus()
   }, [toTail, editReply])
 
@@ -1275,24 +1279,18 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     () => (selecting === null ? [] : selectedTurns(turns, selecting)),
     [turns, selecting],
   )
-  useEffect(() => {
-    if (selecting === null) { chatSelection.clear(scratchId); return }
-    chatSelection.set({
-      owner: scratchId,
-      count: selectedList.length,
-      forward: () => { if (selectedList.length > 0) setForwardTurns(selectedList) },
-      copy: () => {
-        const n = selectedList.length
-        void copyText(copyTurnsText(selectedList)).then(ok => {
-          setNotice(ok
-            ? (pt ? (n === 1 ? '1 mensagem copiada.' : `${n} mensagens copiadas.`) : (n === 1 ? '1 message copied.' : `${n} messages copied.`))
-            : (pt ? 'O navegador não liberou a área de transferência aqui.' : 'The browser did not allow the clipboard here.'))
-          if (ok) setSelecting(null)
-        })
-      },
-      cancel: () => setSelecting(null),
-    })
-  }, [selecting, selectedList, scratchId, pt])
+  /** The reply set in CONVERSATION order — what the chips show and what `send` quotes. */
+  const orderedReplies = useMemo(() => orderReplies(replyTo, turns.map(turnKeyOf)), [replyTo, turns])
+  /** "Reply (N)": every ticked message joins the reply set, the mode ends, the field is ready. */
+  const replyToSelection = useCallback(() => {
+    const picked = selectedList
+    editReply(prev => picked.reduce<ReplyTarget[]>(
+      (acc, t) => addReply(acc, { role: t.role, text: t.text, key: turnKeyOf(t) }), prev,
+    ))
+    setSelecting(null)
+    setAtTail(true)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [selectedList, editReply])
   // Leaving the conversation leaves the mode: a header still offering to forward messages from a
   // chat that is no longer on screen would forward something the reader cannot see.
   useEffect(() => () => chatSelection.clear(scratchId), [scratchId])
@@ -1543,6 +1541,31 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     setSendingNow(false)
     if (out.ok) { setNotice(null); nudgeChat.current() } else setNotice(out.message)
   }, [act, session.id])
+  /** Selection mode's "Reply (N)" exists only where the composer can send. */
+  const canReplySelection = canPrompt
+  // Publishes the selection to the header — see `chatSelection.ts`. Declared here, after
+  // `canPrompt`, because whether "Reply (N)" is offered depends on it.
+  useEffect(() => {
+    if (selecting === null) { chatSelection.clear(scratchId); return }
+    chatSelection.set({
+      owner: scratchId,
+      count: selectedList.length,
+      forward: () => { if (selectedList.length > 0) setForwardTurns(selectedList) },
+      copy: () => {
+        const n = selectedList.length
+        void copyText(copyTurnsText(selectedList)).then(ok => {
+          setNotice(ok
+            ? (pt ? (n === 1 ? '1 mensagem copiada.' : `${n} mensagens copiadas.`) : (n === 1 ? '1 message copied.' : `${n} messages copied.`))
+            : (pt ? 'O navegador não liberou a área de transferência aqui.' : 'The browser did not allow the clipboard here.'))
+          if (ok) setSelecting(null)
+        })
+      },
+      cancel: () => setSelecting(null),
+      // Only where the session can take a message — a Reply that the composer will refuse is a
+      // control that teaches the wrong thing.
+      ...(canReplySelection ? { reply: replyToSelection } : {}),
+    })
+  }, [selecting, selectedList, scratchId, pt, canReplySelection, replyToSelection])
   /**
    * The `/` picker is open.
    *
@@ -1760,7 +1783,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
     // reply that repeats forty lines back at the session costs it context for no benefit.
-    const quote = replyTo ? quoteFor(replyTo) : ''
+    // Every quote, in conversation order, each capped as before and a blank line apart.
+    const quote = quoteAll(orderedReplies)
     // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
     // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
     // the person's own words render inside the grey bar as if the session had said them.
@@ -1794,7 +1818,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     sessionScratch.clearDraft(scratchId)
     setAttached([])
     sessionScratch.writeAttachments(scratchId, [])
-    editReply(null)
+    editReply([])
     setAtTail(true)
     toTail()
     setNotice(null)
@@ -2450,9 +2474,22 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 </p>
               )}
 
-              {replyTo && (
-                <div style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8,
+              {/* THE REPLY SET — one strip per quoted message, in conversation order, each with
+                  its own remove. The strip's words are `replyQuote.ts`'s, as before; with several
+                  quotes the first one also says how many there are, so the count is read before
+                  the list. */}
+              {orderedReplies.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                  {orderedReplies.length > 1 && (
+                    <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                      {pt
+                        ? `Respondendo a ${orderedReplies.length} mensagens — cada uma vai citada antes do que você escrever.`
+                        : `Replying to ${orderedReplies.length} messages — each one is quoted before what you write.`}
+                    </span>
+                  )}
+                  {orderedReplies.map((r, i) => (
+                <div key={`${r.key ?? ''}:${i}:${r.text.length}`} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
                   padding: '7px 10px', borderRadius: 9, minWidth: 0,
                   background: 'var(--bg-elevated)',
                   borderLeft: '3px solid var(--anthropic-orange)',
@@ -2460,12 +2497,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                   <CornerUpLeft size={13} style={{ flexShrink: 0, marginTop: 3, color: 'var(--anthropic-orange)' }} />
                   <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--anthropic-orange)' }}>
-                      {replyTo.excerpt
+                      {r.excerpt
                         ? (pt ? 'Respondendo a um trecho de' : 'Replying to an excerpt from')
                         : (pt ? 'Respondendo a' : 'Replying to')}
                       {' '}
                       {replyAuthor(
-                        replyTo.role,
+                        r.role,
                         (HARNESS_LABELS as Record<string, string>)[session.harness],
                         pt ? 'pt' : 'en',
                       )}
@@ -2474,13 +2511,17 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                       fontSize: 11.5, lineHeight: 1.45, color: 'var(--text-tertiary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
-                      {replyPreview(replyTo.text)}
+                      {replyPreview(r.text)}
                     </span>
                   </span>
                   <button
-                    onClick={() => editReply(null)}
-                    aria-label={pt ? 'Cancelar resposta' : 'Cancel reply'}
-                    title={pt ? 'Cancelar resposta' : 'Cancel reply'}
+                    onClick={() => editReply(prev => prev.filter(x => x !== r))}
+                    aria-label={orderedReplies.length > 1
+                      ? (pt ? `Remover a citação ${i + 1}` : `Remove quote ${i + 1}`)
+                      : (pt ? 'Cancelar resposta' : 'Cancel reply')}
+                    title={orderedReplies.length > 1
+                      ? (pt ? 'Remover esta citação' : 'Remove this quote')
+                      : (pt ? 'Cancelar resposta' : 'Cancel reply')}
                     className="ag-tap-icon"
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2493,6 +2534,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                   >
                     <X size={13} />
                   </button>
+                </div>
+                  ))}
                 </div>
               )}
 
