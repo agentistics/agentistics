@@ -18,6 +18,11 @@
  * the device cannot make, so the order was reorderable on a desktop and frozen everywhere else.
  * Every ticked row therefore carries ▲/▼ buttons — a real control, reachable by thumb and by
  * keyboard, doing exactly what the drag does.
+ *
+ * **TABS** (`tabs`) put two related lists behind ONE trigger — the task table's "Columns" holds the
+ * deliveries' columns and the subtasks' columns side by side, where two neighbouring buttons named
+ * "Columns" and "Subtask columns" read as one control said twice. Each tab is a whole list of its
+ * own (items, value, order, note); the panel only swaps which one it draws.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -36,10 +41,7 @@ export interface PickerItem {
   color?: string
 }
 
-export interface PickerMenuProps {
-  /** The trigger's contents. */
-  children: React.ReactNode
-  title: string
+export interface PickerList {
   /** Everything offerable, in the order it should be listed when nothing is ordered. */
   items: readonly PickerItem[]
   /** What is ticked, IN ORDER when the list is orderable. */
@@ -49,6 +51,16 @@ export interface PickerMenuProps {
   orderable?: boolean
   /** One sentence under the list, saying what the choice means. */
   note?: string
+}
+
+export interface PickerTab extends PickerList { id: string; label: string }
+
+export type PickerMenuProps = PickerMenuBase & (PickerList | { tabs: readonly PickerTab[] })
+
+interface PickerMenuBase {
+  /** The trigger's contents. */
+  children: React.ReactNode
+  title: string
   width?: number
   triggerStyle?: React.CSSProperties
   /** The reader's language, for the ▲▼ buttons' own `aria-label`s — everything else here (the
@@ -57,9 +69,14 @@ export interface PickerMenuProps {
   lang?: Lang
 }
 
-export function PickerMenu(p: PickerMenuProps) {
+export function PickerMenu(props: PickerMenuProps) {
   const isMobile = useIsMobile()
-  const copy = boardCopy(p.lang ?? 'en')
+  const copy = boardCopy(props.lang ?? 'en')
+  const [tab, setTab] = useState(0)
+  const tabs = 'tabs' in props ? props.tabs : null
+  const p: PickerMenuBase & PickerList = tabs
+    ? { ...props, ...tabs[Math.min(tab, tabs.length - 1)]! }
+    : props as PickerMenuBase & PickerList
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
@@ -161,6 +178,28 @@ export function PickerMenu(p: PickerMenuProps) {
             boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
           }}>
             <div style={{ ...microLabel, marginBottom: 3 }}>{p.title}</div>
+            {tabs && (
+              <div role="tablist" style={{
+                display: 'flex', gap: 2, padding: 2, marginBottom: 4, borderRadius: 7,
+                background: 'var(--bg-surface)', border: '1px solid var(--border)',
+              }}>
+                {tabs.map((t, i) => {
+                  const on = i === Math.min(tab, tabs.length - 1)
+                  return (
+                    <button
+                      key={t.id} type="button" role="tab" aria-selected={on}
+                      onClick={() => setTab(i)}
+                      style={{
+                        flex: 1, border: 'none', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit',
+                        fontSize: 11.5, fontWeight: 600, minHeight: isMobile ? 40 : 24,
+                        background: on ? 'var(--bg-card-hover)' : 'transparent',
+                        color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                      }}
+                    >{t.label}</button>
+                  )
+                })}
+              </div>
+            )}
             {ordered.map(item => {
               const on = p.value.includes(item.value)
               return (

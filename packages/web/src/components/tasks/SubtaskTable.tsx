@@ -62,7 +62,6 @@ import {
   cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
 } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { ConfirmModal } from '../../pages/settings/primitives'
 import {
   button, liveStatusMap, liveStatusOrder, microLabel, pill,
   statusStyle, surface, type BoardStatus,
@@ -78,8 +77,7 @@ import {
 import { SessionRef } from './SessionRef'
 import { SortTh } from './SortHeader'
 import { orderedSubtasks } from './subtaskSortView'
-import { StagedSessionCompose } from './StagedSessionCompose'
-import { StagedSessionView } from './StagedSessionView'
+import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { useMoney } from './money'
 import { costCellFor, tokensCellFor } from './subtaskRollup'
@@ -90,7 +88,7 @@ import { readBoardPrefs, writeBoardPrefs } from './boardPrefs'
 import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { subtaskColumnCell } from './subtaskColumnCell'
 import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
-import { SubtaskFilterBar } from './SubtaskFilterBar'
+import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import type {
   StagedSessionWriteResult, StatusWriteResult, Subtask, SubtaskPatch, SubtaskView,
   TaskFile, TaskSessionRow, TaskStatus,
@@ -220,14 +218,13 @@ export function SubtaskTable(p: SubtaskTableProps) {
   /** Set when a status write refused `done` for having no session filed yet — see
    *  `DoneNeedsSessionDialog`. Named so its shortcut can reopen `SessionPicker` for the SAME row. */
   const [doneRefusal, setDoneRefusal] = useState<{ id: string; title: string } | null>(null)
-  /** The subtask/group whose staged-session compose dialog is open — see `StagedSessionCompose`. */
-  const [composing, setComposing] = useState<Subtask | null>(null)
-  /** The subtask/group whose read-only staged-session summary is open — see `StagedSessionView`. */
-  const [viewing, setViewing] = useState<Subtask | null>(null)
-  /** The subtask/group whose draft is being confirmed for deletion, from the menu directly — never
-   *  requires opening `StagedSessionCompose` first. */
-  const [deleting, setDeleting] = useState<Subtask | null>(null)
-  const [stagedError, setStagedError] = useState<string | null>(null)
+  // The staged-session draft's dialogs — shared with `TaskTable`'s inline rows (`useStagedDialogs`).
+  const stagedDialogs = useStagedDialogs<StagedTarget>(p.lang, {
+    save: (t, d) => p.onSaveStagedSession(t.subtask.id, d),
+    clear: t => p.onClearStagedSession(t.subtask.id),
+    upload: (_t, f) => p.onUploadFile(f),
+  })
+  const target = (t: Subtask): StagedTarget => ({ subtask: t, files: p.taskFiles })
   /**
    * Which GROUPS are showing their members (product feedback, 2026-09-21: "por padrão sempre vem
    * minimizado os grupos e o usuário escolhe expandir") — a group with at least one member starts
@@ -304,19 +301,25 @@ export function SubtaskTable(p: SubtaskTableProps) {
         <div style={{ flex: 1, maxWidth: 220 }}>
           <TaskProgressBar done={done} total={p.subtasks.length} />
         </div>
-        <SubtaskFilterBar value={filter} onChange={setFilter} sessions={p.sessions} statuses={p.statuses} lang={p.lang} />
+        {/* The grid's own controls sit together at the far end: one labeled Filter (the panel names
+            each dimension) beside Columns — never a row of three bare "All" selects. */}
+        <span style={{ flex: 1 }} />
+        <SubtaskFilterMenu
+          value={filter} onChange={setFilter} sessions={p.sessions} statuses={p.statuses} lang={p.lang}
+          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28, gap: 6 }}
+        />
         <PickerMenu
           title={boardCopy(p.lang).pickers.columnsTitle}
           lang={p.lang}
           width={230}
           orderable
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
+          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28, gap: 6 }}
           items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: boardCopy(p.lang).subtaskColumns[c.id] }))}
           value={shownCols}
           onChange={next => setColumns(next as SubtaskColumnId[])}
           note={boardCopy(p.lang).pickers.columnsNote}
         >
-          <Columns3 size={12} /> {boardCopy(p.lang).pickers.columnsTrigger}
+          <Columns3 size={13} /> {boardCopy(p.lang).pickers.columnsTrigger}
         </PickerMenu>
       </div>
 
@@ -402,11 +405,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   staged={{
                     hasDraft: Boolean(t.stagedSession),
                     preparing: p.preparingStagedSessionId === t.id,
-                    onCompose: () => setComposing(t),
-                    onEdit: () => setComposing(t),
+                    onCompose: () => stagedDialogs.compose(target(t)),
+                    onEdit: () => stagedDialogs.compose(target(t)),
                     onFire: () => p.onFireStagedSession(t),
-                    onView: () => setViewing(t),
-                    onDelete: () => setDeleting(t),
+                    onView: () => stagedDialogs.view(target(t)),
+                    onDelete: () => stagedDialogs.remove(target(t)),
                   }}
                 />
               </td>
@@ -598,92 +601,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
         />
       )}
 
-      {composing && (
-        <StagedSessionCompose
-          lang={p.lang}
-          subtaskTitle={composing.title}
-          {...(composing.stagedSession ? { initial: composing.stagedSession } : {})}
-          taskFiles={p.taskFiles}
-          onUpload={p.onUploadFile}
-          onSave={async d => {
-            const result = await p.onSaveStagedSession(composing.id, d)
-            if (!result.ok) {
-              // Structurally unreachable through this UI (the control is absent on a member row),
-              // but the server is the authority and a network hiccup can still refuse — say so
-              // rather than pretending the dialog's close meant success. The compose dialog still
-              // closes: what was typed was not saved, and repeating it in a member row would refuse
-              // again — this is defence in depth, not a path a person composing from this table can
-              // actually reach.
-              setStagedError(result.reason === 'subtask_in_group'
-                ? (p.lang === 'pt'
-                  ? 'Esta subtarefa pertence a um grupo e não pode receber uma sessão em espera.'
-                  : 'This subtask belongs to a group and cannot hold a staged session.')
-                : staged.networkError)
-            }
-          }}
-          {...(composing.stagedSession
-            ? { onDiscard: () => void p.onClearStagedSession(composing.id) }
-            : {})}
-          onClose={() => setComposing(null)}
-        />
-      )}
-
-      {viewing && viewing.stagedSession && (
-        <StagedSessionView
-          lang={p.lang}
-          subtaskTitle={viewing.title}
-          draft={viewing.stagedSession}
-          taskFiles={p.taskFiles}
-          onEdit={() => { const t = viewing; setViewing(null); setComposing(t) }}
-          onClose={() => setViewing(null)}
-        />
-      )}
-
-      {/* Reachable straight from the gear menu — never requires opening `StagedSessionCompose`
-          first. Product ask, verbatim: "deletar eh acao destrutiva entao precisa de modal de
-          confirmacao" — the same `ConfirmModal` every other destructive act in this app uses,
-          rather than a second bespoke dialog for this one. */}
-      <ConfirmModal
-        open={deleting !== null}
-        title={staged.discardTitle}
-        message={staged.discardMessage}
-        confirmLabel={staged.discard}
-        cancelLabel={staged.cancel}
-        onCancel={() => setDeleting(null)}
-        onConfirm={() => {
-          if (!deleting) return
-          void p.onClearStagedSession(deleting.id)
-          setDeleting(null)
-        }}
-      />
-
-      {stagedError && (
-        <div
-          role="alertdialog" aria-modal="true"
-          onClick={e => { if (e.target === e.currentTarget) setStagedError(null) }}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 435, background: 'var(--ag-scrim)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-          }}
-        >
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 14,
-            width: '100%', maxWidth: 380, padding: 18, display: 'grid', gap: 12,
-          }}>
-            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-              {stagedError}
-            </p>
-            <button
-              type="button" onClick={() => setStagedError(null)}
-              style={{
-                justifySelf: 'flex-end', padding: '7px 14px', borderRadius: 7,
-                border: '1px solid var(--border)', background: 'transparent',
-                color: 'var(--text-secondary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >OK</button>
-          </div>
-        </div>
-      )}
+      {stagedDialogs.element}
     </div>
   )
 }

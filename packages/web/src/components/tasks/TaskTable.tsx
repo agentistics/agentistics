@@ -25,7 +25,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Bot, CheckSquare, ChevronDown, ChevronRight, Columns3, MessageSquare, Paperclip, Plus,
-  Rocket, Rows3, SquareArrowOutUpRight, Trash2, X,
+  Rows3, SquareArrowOutUpRight, Trash2, X,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -63,15 +63,17 @@ import { SessionRef } from './SessionRef'
 import { subtaskColumnCell } from './subtaskColumnCell'
 import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
-import { SubtaskFilterBar } from './SubtaskFilterBar'
+import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
 import { subtaskGridLayout } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
-import { StagedSessionCompose } from './StagedSessionCompose'
+import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
+import { useStagedFire } from './useStagedFire'
+import { pushNotification } from '../../lib/notifications'
 import {
-  addSubtask, fetchTaskDetail, saveStagedSession, uploadFile,
-  type StagedSessionWriteResult, type StatusWriteResult, type Subtask, type SubtaskPatch,
+  clearStagedSession, saveStagedSession, uploadFile,
+  type StatusWriteResult, type Subtask, type SubtaskPatch,
   type SubtaskView, type TaskClaim, type TaskDetail, type TaskFile, type TaskListRow,
   type TaskSessionRow, type TaskStatus,
 } from '../../lib/tasks'
@@ -307,7 +309,7 @@ function cellFor(
 
 function SubtaskRows({
   subtasks, subtaskRollups, indent, mainCols, subtaskCols, sessions, lang, nowMs, statuses, onPatch, onRemove,
-  onCreateGroup, onLinkSession, onUnfile, onOpenSession,
+  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor,
 }: {
   subtasks: Subtask[]
   /** The delivery's own `TaskDetail.subtaskRollups` — a GROUP's own `groupProgress` (§F.1), and now
@@ -336,6 +338,8 @@ function SubtaskRows({
   onLinkSession: (subtaskId: string) => void
   onUnfile: (sessionId: string) => void
   onOpenSession?: (sessionId: string) => void
+  /** The staged-session section of each subtask's gear — the same one the delivery page offers. */
+  stagedFor: (t: Subtask) => NonNullable<React.ComponentProps<typeof SubtaskActionsMenu>['staged']>
 }) {
   const isMobile = useIsMobile()
   const money = useMoney()
@@ -402,11 +406,9 @@ function SubtaskRows({
         <tr key={t.id} style={{ background: clustered ? undefined : 'var(--bg-surface)' }}>
           {/* The leading "checkbox" slot every row above this one uses for batch-select — a subtask
               is never batch-selectable, so it was always blank here. It now carries the ONE gear
-              menu instead (`SubtaskActionsMenu`'s own doc comment): group actions and remove, the
-              two of its five sections this board already wires. Blocked-by and the staged-session
-              lifecycle are NOT here — this inline view has never had that plumbing (no compose
-              dialog, no `onSaveStagedSession`), a pre-existing gap this pass does not invent, so the
-              same component simply omits what it was not given. The inset left bar
+              menu instead (`SubtaskActionsMenu`'s own doc comment): group actions, the
+              staged-session lifecycle (the same one the delivery page offers — the rocket lives
+              HERE, on the subtask, never on the delivery row) and remove. The inset left bar
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
           <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
@@ -418,6 +420,7 @@ function SubtaskRows({
               onPatch={onPatch}
               onCreateGroup={onCreateGroup}
               onRemove={onRemove}
+              staged={stagedFor(t)}
             />
           </td>
           {/* A MEMBER is indented one level further than the base subtask indent — the visual
@@ -477,6 +480,15 @@ function SubtaskRows({
                 {lang === 'pt' ? 'parte do grupo: ' : 'part of group: '}
                 <span style={{ color: 'var(--text-secondary)' }}>
                   {parentGroup?.title ?? (lang === 'pt' ? '(não encontrado)' : '(not found)')}
+                </span>
+              </div>
+            )}
+            {/* "Ready to fire" stays glanceable, exactly as on the delivery page — the verbs behind
+                it are in the gear. */}
+            {!isMember && t.stagedSession && (
+              <div style={{ marginTop: 3 }}>
+                <span style={{ ...pill('var(--anthropic-orange)'), fontSize: 9.5 }}>
+                  {boardCopy(lang).staged.ready}
                 </span>
               </div>
             )}
@@ -604,7 +616,15 @@ export interface TaskTableProps {
   onOpenSession?: (sessionId: string) => void
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
+  /** Re-read ONE delivery's detail, cached or not — `onExpand` is a no-op once it is cached, so a
+   *  write that must show its result (a staged draft saved, a session fired) calls this instead. */
+  onRefreshDetail: (ref: string) => Promise<unknown> | void
+  /** Drawn at the START of the toolbar row — the page's search box, so the table has ONE row of
+   *  controls instead of a search row above a controls row. */
+  toolbarStart?: React.ReactNode
 }
+
+type TableStagedTarget = StagedTarget & { taskId: string }
 
 export function TaskTable(p: TaskTableProps) {
   const isMobile = useIsMobile()
@@ -664,48 +684,33 @@ export function TaskTable(p: TaskTableProps) {
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
   /**
-   * Staging a session straight from the TABLE, without opening the task (t-63b7d3b2b0 #4) — reuses
-   * `StagedSessionCompose`, the SAME dialog `SubtaskTable.tsx`'s own detail page already draws, and
-   * the SAME `lib/tasks.ts` writes (`addSubtask`/`saveStagedSession`/`uploadFile`) it calls — never a
-   * second form for the one act. A staged session belongs to a SUBTASK (or a group), never to the
-   * task directly, so this picks the task's first bucketable subtask when one already exists and
-   * mints a new one (titled after the delivery) when it does not — the same "a delivery with no
-   * subtasks yet still needs somewhere to hold work" reasoning the "+ Add subtask" row already
-   * expresses one click away.
+   * The staged-session lifecycle (compose / edit / view / fire / delete) lives in each SUBTASK's
+   * gear, exactly as on the delivery's own page — a staged session belongs to a subtask or a group,
+   * never to the delivery row. Both hooks are the ones `SubtaskTable`/`DeliveryDetail` use, so the
+   * table carries no second copy of the draft form or of the spawn rules.
    */
-  const [staging, setStaging] = useState<{ ref: string; subtaskId: string; title: string; files: readonly TaskFile[] } | null>(null)
-  const [stagingBusy, setStagingBusy] = useState<string | null>(null)
-  const [stagingError, setStagingError] = useState<string | null>(null)
-  async function startStaging(row: TaskListRow) {
-    const ref = row.task.id
-    setStagingBusy(ref)
-    setStagingError(null)
-    // The already-loaded detail for an EXPANDED row is current; anything else is fetched fresh
-    // rather than trusted stale, since this may be the first time this task's subtasks are read.
-    const cached = p.details.get(ref)
-    const result = cached ? ({ ok: true as const, detail: cached }) : await fetchTaskDetail(ref)
-    if (!result.ok) {
-      setStagingBusy(null)
-      setStagingError(p.lang === 'pt' ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
-      return
+  const stagedDialogs = useStagedDialogs<TableStagedTarget>(p.lang ?? 'en', {
+    save: (t, d) => saveStagedSession(t.taskId, t.subtask.id, d)
+      .then(r => { if (r.ok) void p.onRefreshDetail(t.taskId); return r }),
+    clear: async t => { await clearStagedSession(t.taskId, t.subtask.id); await p.onRefreshDetail(t.taskId) },
+    upload: (t, f) => uploadFile(t.taskId, f),
+  })
+  // A filing refused because the subtask is blocked is SAID, never swallowed — the session exists
+  // and runs either way; what the reader must learn is that it is not filed where they asked.
+  const fire = useStagedFire(p.lang ?? 'en', b => pushNotification({
+    type: 'error', code: 'tasks.fire_filing_blocked', meta: { blockedBy: b.blockedBy.join(', ') },
+  }))
+  const stagedFor = (taskId: string, files: readonly TaskFile[]) => (t: Subtask) => {
+    const target: TableStagedTarget = { taskId, subtask: t, files }
+    return {
+      hasDraft: Boolean(t.stagedSession),
+      preparing: fire.preparingId === t.id,
+      onCompose: () => stagedDialogs.compose(target),
+      onEdit: () => stagedDialogs.compose(target),
+      onFire: () => void fire.startFire({ taskId, subtask: t, files, reload: () => p.onRefreshDetail(taskId) }),
+      onView: () => stagedDialogs.view(target),
+      onDelete: () => stagedDialogs.remove(target),
     }
-    const { detail } = result
-    // A GROUP MEMBER can never hold a session (`subtask_in_group`) and therefore never a staged one
-    // either — the same rule `SubtaskTable.tsx`'s own compose control already refuses on.
-    const target = detail.subtasks.find(s => !isGroupMember(s))
-    if (target) {
-      setStagingBusy(null)
-      setStaging({ ref, subtaskId: target.id, title: target.title, files: detail.files })
-      return
-    }
-    const newId = await addSubtask(ref, row.task.title)
-    setStagingBusy(null)
-    if (!newId) {
-      setStagingError(p.lang === 'pt' ? 'Não foi possível criar a subtarefa.' : 'Could not create the subtask.')
-      return
-    }
-    p.onExpand(ref)
-    setStaging({ ref, subtaskId: newId, title: row.task.title, files: detail.files })
   }
   const copy = boardCopy(p.lang ?? 'en')
   const L = copy.list
@@ -795,6 +800,13 @@ export function TaskTable(p: TaskTableProps) {
     visible.filter(g => !collapsed.has(g.status)).flatMap(g => g.rows.map(r => r.task.id)),
   )
 
+  // Every toolbar trigger is the same height and shape — a row of mixed sizes reads as unrelated
+  // controls. On a phone they share the row evenly, each a full 44px target.
+  const TRIGGER: React.CSSProperties = {
+    ...button(isMobile), height: isMobile ? 44 : 28, gap: 6,
+    ...(isMobile ? { flex: '1 1 auto', justifyContent: 'center' } : {}),
+  }
+
   const openBtn: React.CSSProperties = {
     background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
@@ -803,64 +815,80 @@ export function TaskTable(p: TaskTableProps) {
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {/* The chooser bar. Groups first: it decides what is on the screen at all, and the columns
-          only decide what each row says. Both are the app's own multi-select popover — fixed, in a
-          portal, clamped — because a menu that opens inside a scrolling table is clipped by it. */}
+      {/* ONE toolbar row: what to look for (search, injected by the page), how it is ordered (the
+          sort chip, only when it is not the default), then the three things that shape the table —
+          filter, groups, columns — and Select. The subtask grid's filter and columns live INSIDE
+          those same controls (the filter is subtask-only and says so; "Columns" has a Deliveries and
+          a Subtasks tab), rather than on a second row of bare, unlabeled selects. Every menu is the
+          app's portal popover — a menu opened inside a scrolling table is clipped by it. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ ...microLabel, fontSize: 10.5 }}>
-          {visible.length} of {groups.length} groups
-        </span>
+        {p.toolbarStart && (
+          <div style={{ flex: isMobile ? '1 1 100%' : '0 1 340px', minWidth: 0 }}>{p.toolbarStart}</div>
+        )}
         {sort.key !== DEFAULT_SORT.key && (
           // Said in words, with the way out beside it: a sort is invisible once you have scrolled
           // past the header, and "why is this board in this order" should never need investigating.
           <button
             onClick={() => setSort(DEFAULT_SORT)}
+            title={L.resetSort}
             style={{
-              ...button(isMobile), height: isMobile ? 44 : 26, fontSize: 11,
+              ...button(isMobile), height: isMobile ? 44 : 28, fontSize: 11,
               color: 'var(--anthropic-orange)',
             }}
           >
-            {L.sortedByPrefix} {L.keys[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'} · {L.resetSort}
+            {L.sortedByPrefix} {L.keys[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'}
+            <X size={12} />
           </button>
         )}
-        <span style={{ flex: 1 }} />
+        {!isMobile && <span style={{ flex: 1 }} />}
+        <SubtaskFilterMenu
+          value={subtaskFilter} onChange={setSubtaskFilter}
+          sessions={[...p.details.values()].flatMap(d => d.sessions)}
+          statuses={p.statuses} lang={p.lang ?? 'en'}
+          label={copy.subtaskFilter.title}
+          triggerStyle={TRIGGER}
+        />
         <PickerMenu
           title={copy.pickers.groupsTitle}
           lang={p.lang ?? 'en'}
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
+          triggerStyle={TRIGGER}
           items={groups.map(g => ({
             value: g.status,
-            // The SAME word the chip in every row of this group prints — one vocabulary, one
-            // language. The heading used to read the English constant while the cell beside it
-            // was translated.
+            // The SAME word the chip in every row of this group prints — one vocabulary, one language.
             label: statusLabel(g.status, p.lang ?? 'en', p.statuses),
             color: statusStyle(p.statuses, g.status).color,
             // The count of a HIDDEN group too — "hidden" must not read as "empty".
             hint: String(g.rows.length),
           }))}
           value={groupsShown}
-          // The picked ORDER is kept, not re-canonicalised: the board and the table share this
-          // field, and the board draws its columns in it — forcing the live list's own order here
-          // would undo a reorder made one screen away.
+          // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
           onChange={next => setGroups(next as BoardStatus[])}
-          // ORDERABLE, exactly like the columns beside it. The order was always honoured (`visible`
-          // walks `groupsShown`, not the live list's raw order) and the only way to change it was to
-          // untick every group and tick them back in the order you wanted — a sequence with no control.
           orderable
           note={copy.pickers.groupsNote}
         >
           <Rows3 size={13} /> {copy.pickers.groupsTrigger}
+          {/* How many are on screen, on the trigger itself — it used to be a separate caption. */}
+          <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
         </PickerMenu>
         <PickerMenu
           title={copy.pickers.columnsTitle}
           lang={p.lang ?? 'en'}
           width={270}
-          orderable
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
-          items={COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) }))}
-          value={shown}
-          onChange={next => setColumns(next as ColumnId[])}
-          note={copy.pickers.columnsNote}
+          triggerStyle={TRIGGER}
+          tabs={[
+            {
+              id: 'deliveries', label: copy.pickers.deliveriesTab, orderable: true,
+              items: COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) })),
+              value: shown, onChange: next => setColumns(next as ColumnId[]),
+              note: copy.pickers.columnsNote,
+            },
+            {
+              id: 'subtasks', label: copy.pickers.subtasksTab, orderable: true,
+              items: SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] })),
+              value: shownSubtaskCols, onChange: next => setSubtaskColumns(next as SubtaskColumnId[]),
+              note: copy.pickers.subtaskColumnsNote,
+            },
+          ]}
         >
           <Columns3 size={13} /> {copy.pickers.columnsTrigger}
         </PickerMenu>
@@ -870,7 +898,7 @@ export function TaskTable(p: TaskTableProps) {
           aria-pressed={sel.on}
           title={L.selectTitle}
           style={{
-            ...button(isMobile), height: isMobile ? 44 : 28,
+            ...TRIGGER,
             ...(sel.on ? {
               color: 'var(--anthropic-orange)', border: '1px solid var(--anthropic-orange)',
               background: 'var(--anthropic-orange-dim)',
@@ -879,33 +907,6 @@ export function TaskTable(p: TaskTableProps) {
         >
           <CheckSquare size={13} /> {L.select}{sel.on && selected.length > 0 ? ` · ${selected.length}` : ''}
         </button>
-      </div>
-
-      {/* A SEPARATE row for the subtask grid's own arrangement (t-63b7d3b2b0 #1/#2) — ONE picker and
-          ONE filter for every expanded delivery on this table, sharing the exact columns/filter
-          `SubtaskTable.tsx`'s own standalone grid reads/writes (`boardPrefs.subtaskColumns`). Kept
-          off the first row so "Columns" (the delivery table's own) is never confused with
-          "Subtask columns" sitting right beside it. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ ...microLabel, fontSize: 10.5 }}>{copy.subtasks}</span>
-        <SubtaskFilterBar
-          value={subtaskFilter} onChange={setSubtaskFilter}
-          sessions={[...p.details.values()].flatMap(d => d.sessions)}
-          statuses={p.statuses} lang={p.lang ?? 'en'}
-        />
-        <PickerMenu
-          title={copy.pickers.subtaskColumnsTrigger}
-          lang={p.lang ?? 'en'}
-          width={230}
-          orderable
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
-          items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] }))}
-          value={shownSubtaskCols}
-          onChange={next => setSubtaskColumns(next as SubtaskColumnId[])}
-          note={copy.pickers.subtaskColumnsNote}
-        >
-          <Columns3 size={13} /> {copy.pickers.subtaskColumnsTrigger}
-        </PickerMenu>
       </div>
 
       {visible.length === 0 && (
@@ -1068,6 +1069,7 @@ export function TaskTable(p: TaskTableProps) {
                             onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
                             onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
                             onOpenSession={p.onOpenSession}
+                            stagedFor={stagedFor(row.task.id, detail?.files ?? [])}
                           />
                           <tr style={{ background: 'var(--bg-surface)' }}>
                             <td style={{ padding: '5px 10px' }} />
@@ -1151,16 +1153,6 @@ export function TaskTable(p: TaskTableProps) {
                                   aria-label={`${open ? L.hideSubtasks : L.showSubtasks}: ${row.task.title}`}
                                   style={openBtn}
                                 >{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
-                                {/* Stage a session directly, without opening the task (t-63b7d3b2b0
-                                    #4) — see `startStaging`'s own doc comment. */}
-                                <button
-                                  type="button"
-                                  onClick={e => { e.stopPropagation(); void startStaging(row) }}
-                                  disabled={stagingBusy === row.task.id}
-                                  title={copy.staged.compose}
-                                  aria-label={`${copy.staged.compose}: ${row.task.title}`}
-                                  style={{ ...openBtn, opacity: stagingBusy === row.task.id ? 0.5 : 1 }}
-                                ><Rocket size={13} /></button>
                               </span>
                             </td>
                             {/* The NAME still opens the subitems, as it always did — the row's name
@@ -1302,54 +1294,8 @@ export function TaskTable(p: TaskTableProps) {
         />
       )}
 
-      {staging && (
-        <StagedSessionCompose
-          lang={p.lang ?? 'en'}
-          subtaskTitle={staging.title}
-          taskFiles={staging.files}
-          onUpload={file => uploadFile(staging.ref, file)}
-          onSave={async d => {
-            const result: StagedSessionWriteResult = await saveStagedSession(staging.ref, staging.subtaskId, d)
-            if (result.ok) p.onExpand(staging.ref)
-            else {
-              setStagingError(result.reason === 'subtask_in_group'
-                ? (p.lang === 'pt'
-                  ? 'Esta subtarefa pertence a um grupo e não pode receber uma sessão em espera.'
-                  : 'This subtask belongs to a group and cannot hold a staged session.')
-                : copy.staged.networkError)
-            }
-          }}
-          onClose={() => setStaging(null)}
-        />
-      )}
-
-      {stagingError && (
-        <div
-          role="alertdialog" aria-modal="true"
-          onClick={e => { if (e.target === e.currentTarget) setStagingError(null) }}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 435, background: 'var(--ag-scrim)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-          }}
-        >
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 14,
-            width: '100%', maxWidth: 380, padding: 18, display: 'grid', gap: 12,
-          }}>
-            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-              {stagingError}
-            </p>
-            <button
-              type="button" onClick={() => setStagingError(null)}
-              style={{
-                justifySelf: 'flex-end', padding: '7px 14px', borderRadius: 7,
-                border: '1px solid var(--border)', background: 'transparent',
-                color: 'var(--text-secondary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >OK</button>
-          </div>
-        </div>
-      )}
+      {stagedDialogs.element}
+      {fire.element}
 
       {sel.on && selected.length > 0 && (
         // Monday's batch bar: it says how many, and it carries only the verbs that make sense on

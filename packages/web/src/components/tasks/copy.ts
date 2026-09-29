@@ -271,6 +271,9 @@ export interface BoardCopy {
      *  as the same control twice. */
     subtaskColumnsTrigger: string
     subtaskColumnsNote: string
+    /** The two tabs of the task table's single "Columns" menu. */
+    deliveriesTab: string
+    subtasksTab: string
     boardColumnsTitle: string
     boardColumnsTrigger: string
     boardColumnsNote: string
@@ -481,6 +484,8 @@ const EN: BoardCopy = {
     columnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — the table follows this order.',
     subtaskColumnsTrigger: 'Subtask columns',
     subtaskColumnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — every expanded delivery\'s subtasks follow this order.',
+    deliveriesTab: 'Deliveries',
+    subtasksTab: 'Subtasks',
     boardColumnsTitle: 'Columns on the board',
     boardColumnsTrigger: 'Columns',
     boardColumnsNote:
@@ -694,6 +699,8 @@ const PT: BoardCopy = {
     columnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — a tabela segue essa ordem.',
     subtaskColumnsTrigger: 'Colunas das subtarefas',
     subtaskColumnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — as subtarefas de toda entrega expandida seguem essa ordem.',
+    deliveriesTab: 'Entregas',
+    subtasksTab: 'Subtarefas',
     boardColumnsTitle: 'Colunas do quadro',
     boardColumnsTrigger: 'Colunas',
     boardColumnsNote:
