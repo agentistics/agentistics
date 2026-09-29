@@ -350,3 +350,86 @@ export function bootCaveat(id: ServiceManagerId): 'linger' | 'login-only' | 'pm2
     case 'pm2': return 'pm2-startup'
   }
 }
+
+// ---------------------------------------------------------------------------
+// Verifying a restart by what is SERVING
+//
+// `systemctl restart`'s exit code is a fact about systemd's command queue, not about who answers
+// the port. Measured 2026-09-27: with no reachable user bus and a foreground server outside the
+// unit, `agentop restart server` printed "Restarted" and the same pid went on serving the old
+// code and config. The claim being made is "the thing serving changed", so that is what is
+// observed: the pid (or the unit's own MainPID) BEFORE against AFTER, with a bounded wait for the
+// new one to answer. Facts in, verdict out — the process table, the port and the clock arrive as
+// arguments.
+// ---------------------------------------------------------------------------
+
+/** What is serving a mode right now: its pid, and whether it answers. */
+export interface ServingObservation {
+  pid: number | null
+  answering: boolean
+}
+
+/** `systemctl --user` could not reach a manager at all (no bus, no systemd, no binary). */
+export function managerUnreachable(stderr: string): boolean {
+  return /failed to connect to (?:user scope )?bus|has not been booted with systemd|can't operate|host is down|enoent|no medium found/i.test(stderr)
+}
+
+/** `systemctl --user show <unit> -p MainPID -p ActiveState`. `MainPID=0` is "no process". */
+export function parseUnitShow(out: string): { mainPid: number | null; state: string } {
+  const pid = Number(/^MainPID=(\d+)$/m.exec(out)?.[1])
+  const state = /^ActiveState=(\S+)$/m.exec(out)?.[1] ?? 'unknown'
+  return { mainPid: Number.isInteger(pid) && pid > 0 ? pid : null, state }
+}
+
+/** Is `pid` the unit's main process, or a descendant of it (a wrapper script is a real shape)?
+ *  Bounded, so a cyclic or hostile process table cannot loop. */
+export async function pidUnderUnit(
+  pid: number,
+  mainPid: number | null,
+  parentOf: (pid: number) => Promise<number | null>,
+): Promise<boolean> {
+  if (mainPid === null) return false
+  let at: number | null = pid
+  for (let depth = 0; at !== null && at > 1 && depth < 16; depth++) {
+    if (at === mainPid) return true
+    at = await parentOf(at)
+  }
+  return false
+}
+
+export type RestartVerdict =
+  | { kind: 'replaced'; before: number | null; after: number }
+  | { kind: 'unchanged'; pid: number }
+  | { kind: 'silent'; before: number | null }
+
+/**
+ * Observe until a DIFFERENT pid answers, or the bounded time runs out.
+ *
+ * `unchanged` (the same pid still serving) and `silent` (nothing answering) are told apart because
+ * they send the person to different places: the first is a restart that replaced nothing, the
+ * second a server that was replaced and never came up. `sleep`/`now` are injected so the bound is
+ * testable without a real clock.
+ */
+export async function awaitReplacement(
+  before: ServingObservation,
+  observe: () => Promise<ServingObservation>,
+  opts: { timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+): Promise<RestartVerdict> {
+  const timeoutMs = opts.timeoutMs ?? 15_000
+  const intervalMs = opts.intervalMs ?? 500
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  const now = opts.now ?? Date.now
+  const deadline = now() + timeoutMs
+  let last: ServingObservation = { pid: null, answering: false }
+  for (;;) {
+    last = await observe()
+    if (last.answering && last.pid !== null && last.pid !== before.pid) {
+      return { kind: 'replaced', before: before.pid, after: last.pid }
+    }
+    if (now() >= deadline) break
+    await sleep(intervalMs)
+  }
+  return last.pid !== null && last.pid === before.pid && before.pid !== null
+    ? { kind: 'unchanged', pid: before.pid }
+    : { kind: 'silent', before: before.pid }
+}

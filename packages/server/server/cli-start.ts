@@ -114,6 +114,7 @@ import {
 import { confirm } from './cli-ui'
 import { CURRENT_VERSION, getVersionInfo } from './version'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
+import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
 import { resolveLang } from './cli-lang'
 import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
@@ -1068,6 +1069,33 @@ interface RestartMode extends RunMode {
   rebuild?: boolean
   /** What the user said about the setup prompt and the Docker cache (`rebuild-flags.ts`). */
   flags?: RebuildFlags
+  /** OUT: the one sentence saying why a restart was not carried out, so the caller that composes the
+   *  `ActionResult` (the cockpit's restart verb, `restartNativeServer`) reports the SAME sentence
+   *  rather than a generic "did not come back". Set by `restartLocalSvc`. */
+  failure?: string
+}
+
+/** What a verdict on a native restart means. `replaced` is the only success: a health check that
+ *  answers is not proof anything was restarted, since the server being replaced answers it too. */
+export function localRestartOutcome(v: RestartVerdict, s: CliStrings): { ok: true } | { ok: false; message: string } {
+  if (v.kind === 'replaced') return { ok: true }
+  if (v.kind === 'unchanged') return { ok: false, message: s.restartNotStopped(v.pid) }
+  return { ok: false, message: s.localStartFailed }
+}
+
+/** The pid listening on the API port and whether it answers — what "the server was replaced" is
+ *  observed against. `lsof` first, then `ss` (`listenerPid`), so a machine without lsof still has a
+ *  pid; `null` only when neither tool can say. */
+async function observeLocalServer(): Promise<ServingObservation> {
+  let pid: number | null = Number((await listeningServerPids())[0])
+  if (!Number.isInteger(pid) || pid <= 0) {
+    const { listenerPid } = await import('./autostart')
+    pid = await listenerPid(PORT, async (cmd) => {
+      const r = await sh(cmd)
+      return { code: r.code, stdout: r.out, stderr: '' }
+    })
+  }
+  return { pid, answering: await isServerRunning() }
 }
 
 /** Returns whether the local server actually came back up. `startBackground` is fire-and-forget
@@ -1084,17 +1112,27 @@ async function restartLocalSvc(s: CliStrings, mode: RestartMode = {}): Promise<b
     else if (r === 'failed') process.stderr.write(`  ${YE}${s.localRebuildFailed}${R}\n`)
   }
   process.stdout.write(`  ${D}${s.restartingLocal}${R}\n`)
+  // What was serving BEFORE, so "restarted" can mean "something else is serving now". The old check
+  // was `isServerRunning()` alone, which the server being replaced also satisfies — a stop that did
+  // not take (a permission, a supervisor respawning it) was reported as a successful restart.
+  const before = await observeLocalServer()
   await stopLocal(s)
   const log = startBackground()
   // A fresh compile + boot can take longer than the plain bounce this loop also covers, so it
   // gets more headroom than `stopLocal`'s symmetric wait-for-down loop (20 * 150ms).
-  let up = false
-  for (let i = 0; i < 40; i++) {
-    if (await isServerRunning()) { up = true; break }
-    await sleep(250)
-  }
-  if (!up) {
-    process.stderr.write(`  ${YE}${s.localStartFailed}${R}\n`)
+  // A server that answers while neither lsof nor ss can name it has no identity to compare, so the
+  // old "something answers" reading is all there is — the one case the pid check cannot cover.
+  const unverifiable = before.answering && before.pid === null
+  const verdict: RestartVerdict = unverifiable
+    ? await awaitReplacement({ pid: null, answering: false }, async () => {
+        const o = await observeLocalServer()
+        return { pid: o.answering ? 1 : null, answering: o.answering }
+      }, { timeoutMs: 10_000, intervalMs: 250 })
+    : await awaitReplacement(before, observeLocalServer, { timeoutMs: 10_000, intervalMs: 250 })
+  const outcome = localRestartOutcome(verdict, s)
+  if (!outcome.ok) {
+    mode.failure = outcome.message
+    process.stderr.write(`  ${YE}${outcome.message}${R}\n`)
     return false
   }
   // `agentop restart --all` is a plain CLI command with no screen to report into, and it is the one
@@ -1217,8 +1255,9 @@ export async function restartNativeServer(
   if (!(await isRuntimeUp('local'))) {
     return { ok: false, message: s.nothingRunning }
   }
-  const ok = await restartLocalSvc(s, { rebuild, flags })
-  return ok ? { ok: true, message: s.restartedDone } : { ok: false, message: s.localStartFailed }
+  const mode: RestartMode = { rebuild, flags }
+  const ok = await restartLocalSvc(s, mode)
+  return ok ? { ok: true, message: s.restartedDone } : { ok: false, message: mode.failure ?? s.localStartFailed }
 }
 
 export async function restartAllServices(rebuild = false, flags: RebuildFlags = {}): Promise<number> {
@@ -2731,9 +2770,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
        * inherited the terminal and wrote past any capture); piping it is what removed that.
        */
       const watchable = rebuild || targets.includes('central') || targets.includes('machine')
-      const work = () => restartRuntimes(s, targets, { rebuild, stream: watchable })
+      const mode: RestartMode = { rebuild, stream: watchable }
+      const work = () => restartRuntimes(s, targets, mode)
       const ok = watchable ? await streamOutput(work) : (await captureOutput(work)).value
-      if (!ok) return { ok: false, message: s.restartFailed }
+      if (!ok) return { ok: false, message: mode.failure ?? s.restartFailed }
       return { ok: true, message: target === 'all' ? s.restartedAll : s.restartedDone }
     },
 

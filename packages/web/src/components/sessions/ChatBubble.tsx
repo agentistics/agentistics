@@ -26,7 +26,7 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, Clock, Copy, CornerUpLeft, Image as ImageIcon, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Check, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -35,6 +35,7 @@ import { splitSlashLine } from '../../lib/slashLine'
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
 import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
+import { bubbleMenuHeight, bubbleMenuTop } from '../../lib/bubbleMenu'
 import { echoStatus } from '../../lib/echoStatus'
 import { messageTime } from '../../lib/messageTime'
 import { attachmentUrl } from '../../lib/attachmentUrl'
@@ -144,7 +145,27 @@ export interface ChatBubbleProps {
    * bubble and whatever goes looking for it, so "go to message" can never hunt an id nothing wrote.
    */
   anchorId?: string
+  /**
+   * FORWARD this turn to other sessions (`chatForward.ts`). Offered on every settled message, the
+   * source's own state notwithstanding — forwarding READS this conversation and writes elsewhere,
+   * so a session that cannot take a prompt can still hand its words on. Same stability rule as
+   * `onReply`.
+   */
+  onForward?: (turn: ChatTurn) => void
+  /** Enter SELECTION MODE with this turn ticked. Same stability rule as `onReply`. */
+  onSelectStart?: (turn: ChatTurn) => void
+  /**
+   * The conversation is in selection mode: the bubble draws a checkbox, a tap anywhere on it
+   * toggles, and the per-message menu stands down — one gesture per mode.
+   */
+  selectMode?: boolean
+  /** This turn is ticked. Only meaningful while `selectMode`. */
+  selected?: boolean
+  onToggleSelect?: (turn: ChatTurn) => void
 }
+
+/** How long a finger must rest on a bubble before its menu opens, ms — the platform's own feel. */
+const LONG_PRESS_MS = 480
 
 /**
  * Memoized: a long conversation renders hundreds of these, and every one of them re-rendered on
@@ -230,7 +251,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs }: ChatBubbleProps) {
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -266,6 +287,35 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
     return () => clearTimeout(t)
   }, [copied])
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * The ONE per-message menu: `⋯` (hover on a desktop, always visible on touch), right click, and a
+   * LONG PRESS on a phone all open it. Reply used to be its own corner button; it moved in here with
+   * Forward, Select and Copy so a message carries one control, not four.
+   */
+  const hasMenu = !provisional && !awaiting && Boolean(onReply || onForward || onSelectStart)
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pressAt = useRef<{ x: number; y: number } | null>(null)
+  /** The long press OPENED the menu — so the touch's end must not become a click. */
+  const longFired = useRef(false)
+  const cancelPress = useCallback(() => {
+    if (pressTimer.current) clearTimeout(pressTimer.current)
+    pressTimer.current = null
+  }, [])
+  useEffect(() => cancelPress, [cancelPress])
+  /** Open the menu at a point inside this bubble, flipping it up when it would go under the composer. */
+  const openMenuAt = useCallback((x: number, localY: number) => {
+    const r = bodyRef.current?.getBoundingClientRect()
+    const rows = [onReply, onForward, onSelectStart].filter(Boolean).length + 1
+    const ground = document.querySelector('.ag-composer-ground')?.getBoundingClientRect().top
+    const floor = Math.min(window.innerHeight, ground ?? window.innerHeight)
+    const y = r
+      ? bubbleMenuTop({ localY, anchorViewportY: r.top + localY, menuHeight: bubbleMenuHeight(rows, isMobile), floor })
+      : localY
+    // Inside the viewport horizontally too — a narrow bubble on the right of a phone put the menu's
+    // right half off screen. 170 is the menu's own `minWidth`.
+    const left = r ? Math.max(8 - r.left, Math.min(x, window.innerWidth - 8 - 170 - r.left)) : x
+    setMenuAt({ x: left, y })
+  }, [onReply, onForward, onSelectStart, isMobile])
   useEffect(() => {
     if (menuAt === null) return
     const close = () => setMenuAt(null)
@@ -300,7 +350,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
    */
   const [excerpt, setExcerpt] = useState<{ x: number; y: number; text: string } | null>(null)
   const readSelection = useCallback(() => {
-    if (!onReplyExcerpt || provisional) return
+    if (!onReplyExcerpt || provisional || selectMode) return
     const sel = window.getSelection()
     const body = bodyRef.current
     if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !body) { setExcerpt(null); return }
@@ -316,7 +366,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
       y: Math.min(rect.bottom - box.top + 6, box.height),
       text,
     })
-  }, [onReplyExcerpt, provisional])
+  }, [onReplyExcerpt, provisional, selectMode])
   useEffect(() => {
     if (excerpt === null) return
     // It goes away when the selection does — clicking elsewhere, or a keystroke that moves the
@@ -413,14 +463,38 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
       <div
         ref={bodyRef}
         onMouseUp={readSelection}
-        onTouchEnd={readSelection}
+        onTouchStart={e => {
+          if (!hasMenu || selectMode) return
+          const t = e.touches[0]
+          const r = bodyRef.current?.getBoundingClientRect()
+          pressAt.current = t && r ? { x: t.clientX - r.left, y: t.clientY - r.top } : { x: 8, y: 8 }
+          cancelPress()
+          longFired.current = false
+          pressTimer.current = setTimeout(() => {
+            pressTimer.current = null
+            longFired.current = true
+            if (pressAt.current) openMenuAt(pressAt.current.x, pressAt.current.y)
+          }, LONG_PRESS_MS)
+        }}
+        onTouchMove={cancelPress}
+        onTouchEnd={e => {
+          cancelPress()
+          // The browser follows a touch with COMPAT mouse events; that `mousedown` is exactly what
+          // closes the menu (see the effect above), so a menu opened by the press closed on release.
+          if (longFired.current) { longFired.current = false; e.preventDefault(); return }
+          readSelection()
+        }}
+        onTouchCancel={cancelPress}
+        onClick={selectMode && onToggleSelect ? () => onToggleSelect(turn) : undefined}
+        role={selectMode ? 'checkbox' : undefined}
+        aria-checked={selectMode ? Boolean(selected) : undefined}
         onContextMenu={e => {
           // Only where a reply is actually possible. Swallowing the browser's own menu to offer
           // one entry that is not there would be a control that teaches the wrong thing.
-          if (!onReply || provisional) return
+          if (!hasMenu || selectMode) return
           e.preventDefault()
           const r = bodyRef.current?.getBoundingClientRect()
-          setMenuAt(r ? { x: e.clientX - r.left, y: e.clientY - r.top } : { x: 8, y: 8 })
+          if (r) openMenuAt(e.clientX - r.left, e.clientY - r.top); else setMenuAt({ x: 8, y: 8 })
         }}
         style={{
         // `minWidth: 0` is what actually keeps wide content inside the card: without it a flex item
@@ -428,7 +502,11 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
         minWidth: 0, maxWidth: mine ? (isMobile ? '85%' : '82%') : '100%',
         display: 'flex', flexDirection: 'column', gap: isMobile ? 4 : 6,
         background: mine ? 'var(--bg-elevated)' : 'var(--bg-card)',
-        border: '1px solid var(--border-subtle)',
+        border: `1px solid ${selectMode && selected ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+        boxShadow: selectMode && selected ? '0 0 0 1px var(--anthropic-orange)' : undefined,
+        cursor: selectMode ? 'pointer' : undefined,
+        // A long press opens the menu; the platform's own callout would open over it.
+        WebkitTouchCallout: hasMenu ? 'none' : undefined,
         borderRadius: isMobile ? 12 : 14,
         padding: isMobile ? (mine ? '8px 11px' : '9px 12px') : '11px 14px',
         position: 'relative',
@@ -446,6 +524,8 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
             display: 'flex', alignItems: 'center', gap: 6,
             fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
             color: provisional ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+            // Room for the `⋯` / checkbox in this corner, so it never sits on the name.
+            paddingRight: hasMenu || selectMode ? 24 : 0,
           }}>
             <HarnessMark harness={harness} size={14} />
             <span style={{ color }}>{name}</span>
@@ -480,47 +560,62 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
           </div>
         )}
 
-        {/* Reply. Revealed with the bubble rather than standing on every message — a column of
-            controls down a conversation competes with the words. Always reachable by keyboard. */}
-        {onReply && !provisional && (
+        {/* THE MESSAGE'S MENU, `⋯`. Revealed with the bubble rather than standing on every message
+            — a column of controls down a conversation competes with the words — and always visible
+            on a touch screen (`.ag-bubble-reply`'s own rule). Always reachable by keyboard.
+
+            THE SELECTION STILL WINS: with part of this bubble selected, Reply in the menu answers the
+            excerpt and Copy copies it, exactly as the old corner button did. */}
+        {hasMenu && !selectMode && (
           <button
             className="ag-bubble-reply"
-            // THE SELECTION WINS. Reported: three words selected, reply pressed, and the whole
-            // message was quoted — because this button and the excerpt pill were two controls and
-            // the reader used the one that was already there. A selection inside this bubble is a
-            // more specific statement of what is being answered than "this message", so it is what
-            // gets quoted; with nothing selected the button means what it always meant.
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => {
-              if (excerpt && onReplyExcerpt) { const t = excerpt.text; setExcerpt(null); onReplyExcerpt(turn, t); return }
-              onReply(turn)
+            onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+            onClick={e => {
+              e.stopPropagation()
+              if (menuAt) { setMenuAt(null); return }
+              const r = bodyRef.current?.getBoundingClientRect()
+              const b = e.currentTarget.getBoundingClientRect()
+              const x = r ? (mine ? b.left - r.left : Math.max(0, b.right - r.left - 170)) : 8
+              openMenuAt(x, r ? b.bottom - r.top + 4 : 30)
             }}
-            aria-label={pt ? 'Responder' : 'Reply'}
-            title={excerpt
-              ? (pt ? 'Responder ao trecho selecionado' : 'Reply to the selected excerpt')
-              : (pt ? 'Responder' : 'Reply')}
-            // POSITION only. Everything else — the size, the surface, and the `opacity: 0` the
-            // hover reveals — lives in `.ag-bubble-reply`, because an inline style beats a
-            // stylesheet rule without `!important`: written here, the reveal could never fire and
-            // the control was invisible on every message, at every width, forever.
+            aria-label={pt ? 'Ações da mensagem' : 'Message actions'}
+            aria-haspopup="menu"
+            aria-expanded={menuAt !== null}
+            title={pt ? 'Responder, encaminhar, selecionar, copiar' : 'Reply, forward, select, copy'}
+            // POSITION only — see `.ag-bubble-reply` for why the rest lives in the stylesheet.
             style={{ position: 'absolute', top: 6, [mine ? 'left' : 'right']: 6 } as React.CSSProperties}
           >
-            <CornerUpLeft size={12} />
+            <Ellipsis size={13} />
           </button>
         )}
 
+        {/* SELECTION MODE: a checkbox in the corner the menu button used. The whole bubble is the
+            target (see `onClick` above); this box only SAYS which state it is in. */}
+        {selectMode && (
+          <span aria-hidden style={{
+            position: 'absolute', top: 7, [mine ? 'left' : 'right']: 7,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 18, height: 18, borderRadius: 5,
+            border: `1.5px solid ${selected ? 'var(--anthropic-orange)' : 'var(--text-tertiary)'}`,
+            background: selected ? 'var(--anthropic-orange)' : 'transparent', color: '#fff',
+          } as React.CSSProperties}>
+            {selected && <Check size={12} strokeWidth={3} />}
+          </span>
+        )}
+
         {/* The right-click menu. Anchored inside the bubble at the point that was clicked. */}
-        {menuAt && onReply && (
+        {menuAt && hasMenu && !selectMode && (
           <div
             role="menu"
             onMouseDown={e => e.stopPropagation()}
             style={{
               position: 'absolute', top: menuAt.y, left: menuAt.x, zIndex: 40,
-              minWidth: 130, padding: 4, borderRadius: 9,
+              minWidth: 170, padding: 4, borderRadius: 9,
               background: 'var(--bg-elevated)', border: '1px solid var(--border)',
               boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
             }}
           >
+            {onReply && (
             <button
               role="menuitem"
               onMouseDown={e => e.preventDefault()}
@@ -531,7 +626,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
               }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                minHeight: 34, padding: '6px 8px', borderRadius: 6, border: 'none',
+                minHeight: isMobile ? 44 : 34, padding: '6px 8px', borderRadius: 6, border: 'none',
                 background: 'transparent', color: 'var(--text-primary)',
                 fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
               }}
@@ -541,6 +636,31 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
                 ? (pt ? 'Responder ao trecho' : 'Reply to excerpt')
                 : (pt ? 'Responder' : 'Reply')}
             </button>
+            )}
+
+            {onForward && (
+              <button
+                role="menuitem"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { setMenuAt(null); onForward(turn) }}
+                style={menuItemStyle(isMobile)}
+              >
+                <Forward size={13} style={{ flexShrink: 0 }} />
+                {pt ? 'Encaminhar' : 'Forward'}
+              </button>
+            )}
+
+            {onSelectStart && (
+              <button
+                role="menuitem"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { setMenuAt(null); setExcerpt(null); onSelectStart(turn) }}
+                style={menuItemStyle(isMobile)}
+              >
+                <ListChecks size={13} style={{ flexShrink: 0 }} />
+                {pt ? 'Selecionar' : 'Select'}
+              </button>
+            )}
 
             {/* COPY. What it copies is what the reader can SEE they selected — the excerpt when
                 there is one, the whole message otherwise — so the menu never quietly takes more
@@ -560,7 +680,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
               }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                minHeight: 34, padding: '6px 8px', borderRadius: 6, border: 'none',
+                minHeight: isMobile ? 44 : 34, padding: '6px 8px', borderRadius: 6, border: 'none',
                 background: 'transparent', color: 'var(--text-primary)',
                 fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
               }}
@@ -795,4 +915,14 @@ function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void })
       />
     </button>
   )
+}
+
+/** One row of the message menu. 44px on a phone, where it is opened with a thumb. */
+function menuItemStyle(isMobile: boolean): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+    minHeight: isMobile ? 44 : 34, padding: '6px 8px', borderRadius: 6, border: 'none',
+    background: 'transparent', color: 'var(--text-primary)',
+    fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+  }
 }

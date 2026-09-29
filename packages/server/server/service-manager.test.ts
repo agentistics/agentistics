@@ -1,5 +1,9 @@
-import { test, expect } from 'bun:test'
+import { test, expect, describe } from 'bun:test'
 import {
+  awaitReplacement,
+  managerUnreachable,
+  parseUnitShow,
+  pidUnderUnit,
   SERVICE_MANAGERS,
   availableServiceManagers,
   bootCaveat,
@@ -244,4 +248,80 @@ test('both migrations compose on the same pre-fix unit', () => {
   expect(once).toContain('Environment="PATH=/home/u/.local/bin:')
   expect(migrateUnitKillMode(once)).toBeNull()
   expect(migrateUnitPath(once, '/home/u/.local/bin')).toBeNull()
+})
+
+// --- verifying a restart by what is SERVING, never by an exit code ---------------------------
+
+describe('managerUnreachable', () => {
+  test('recognises the ways `systemctl --user` says it cannot talk to a manager', () => {
+    expect(managerUnreachable('Failed to connect to bus: No medium found')).toBe(true)
+    expect(managerUnreachable('Failed to connect to user scope bus via local transport: No such file or directory')).toBe(true)
+    expect(managerUnreachable('System has not been booted with systemd as init system (PID 1). Can\'t operate.')).toBe(true)
+    expect(managerUnreachable('spawn systemctl ENOENT')).toBe(true)
+  })
+  test('does not mistake an ordinary unit failure for an unreachable manager', () => {
+    expect(managerUnreachable('Unit agentop-server.service not found.')).toBe(false)
+    expect(managerUnreachable('')).toBe(false)
+  })
+})
+
+describe('parseUnitShow', () => {
+  test('reads MainPID and ActiveState off `systemctl show`', () => {
+    expect(parseUnitShow('MainPID=200\nActiveState=active')).toEqual({ mainPid: 200, state: 'active' })
+  })
+  test('MainPID=0 means no process, and junk reads as unknown rather than as a pid', () => {
+    expect(parseUnitShow('MainPID=0\nActiveState=inactive')).toEqual({ mainPid: null, state: 'inactive' })
+    expect(parseUnitShow('nonsense')).toEqual({ mainPid: null, state: 'unknown' })
+  })
+})
+
+describe('pidUnderUnit', () => {
+  test('the unit\'s own process, or a descendant of it, is under the unit', async () => {
+    const parents: Record<number, number> = { 210: 205, 205: 200, 200: 1 }
+    const parentOf = async (p: number) => parents[p] ?? null
+    expect(await pidUnderUnit(200, 200, parentOf)).toBe(true)
+    expect(await pidUnderUnit(210, 200, parentOf)).toBe(true)
+    expect(await pidUnderUnit(999, 200, parentOf)).toBe(false)
+  })
+  test('a unit with no main process owns nothing, and a cyclic table cannot loop', async () => {
+    expect(await pidUnderUnit(555, null, async () => 1)).toBe(false)
+    expect(await pidUnderUnit(1, 200, async (p) => (p === 1 ? 2 : 1))).toBe(false)
+  })
+})
+
+describe('awaitReplacement', () => {
+  const clock = () => { let t = 0; return { sleep: async (ms: number) => { t += ms }, now: () => t } }
+  test('replaced: a different pid answers', async () => {
+    const c = clock(); let n = 0
+    const v = await awaitReplacement({ pid: 200, answering: true },
+      async () => (++n < 3 ? { pid: 200, answering: true } : { pid: 300, answering: true }),
+      { timeoutMs: 10_000, intervalMs: 1_000, ...c })
+    expect(v).toEqual({ kind: 'replaced', before: 200, after: 300 })
+  })
+  test('unchanged: the same pid is still serving when the window ends', async () => {
+    const v = await awaitReplacement({ pid: 200, answering: true },
+      async () => ({ pid: 200, answering: true }), { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
+    expect(v).toEqual({ kind: 'unchanged', pid: 200 })
+  })
+  test('silent: nothing answers when the window ends', async () => {
+    const v = await awaitReplacement({ pid: 200, answering: true },
+      async () => ({ pid: null, answering: false }), { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
+    expect(v).toEqual({ kind: 'silent', before: 200 })
+  })
+  test('a new pid that does not answer yet is not a success', async () => {
+    const v = await awaitReplacement({ pid: 200, answering: true },
+      async () => ({ pid: 300, answering: false }), { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
+    expect(v.kind).toBe('silent')
+  })
+  test('nothing was running before: any answering pid is a start', async () => {
+    const v = await awaitReplacement({ pid: null, answering: false },
+      async () => ({ pid: 300, answering: true }), { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
+    expect(v).toEqual({ kind: 'replaced', before: null, after: 300 })
+  })
+  test('the budget is bounded: it stops observing once spent', async () => {
+    let calls = 0
+    await awaitReplacement({ pid: 200, answering: true },
+      async () => { calls++; return { pid: 200, answering: true } }, { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
+    expect(calls).toBeLessThanOrEqual(5)
+  })
 })

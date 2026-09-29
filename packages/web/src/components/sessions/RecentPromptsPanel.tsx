@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { History, Paperclip, RotateCcw, Search, X } from 'lucide-react'
+import { Forward, History, Paperclip, RotateCcw, Search, X } from 'lucide-react'
 import { attachmentName, isImageAttachment, splitMessage } from '../../lib/messageAttachments'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { messageTime } from '../../lib/messageTime'
@@ -44,10 +44,12 @@ export interface RecentPromptsPanelProps {
   onGoTo: (entry: PromptEntry) => void
   /** Restore from this message. Resolves with the server's own already-localized sentence. */
   onRestore: (entry: PromptEntry) => Promise<{ ok: boolean; message: string }>
+  /** Forward this message to other sessions (`chatForward.ts`). Absent = no Forward button. */
+  onForward?: (entry: PromptEntry) => void
 }
 
 export function RecentPromptsPanel({
-  entries, lang, isMobile, harness, state, dialogOpen, onClose, onGoTo, onRestore,
+  entries, lang, isMobile, harness, state, dialogOpen, onClose, onGoTo, onRestore, onForward,
 }: RecentPromptsPanelProps) {
   const pt = lang === 'pt'
   const [query, setQuery] = useState('')
@@ -202,6 +204,7 @@ export function RecentPromptsPanel({
                   onGoTo={() => { onGoTo(entry); onClose() }}
                   onView={() => setViewing(entry)}
                   onRestore={() => { setNotice(null); setConfirming(entry) }}
+                  {...(onForward ? { onForward: () => onForward(entry) } : {})}
                 />
               ))}
             </div>
@@ -218,7 +221,7 @@ function entryTime(entry: PromptEntry, lang: 'pt' | 'en'): { label: string; full
   return null
 }
 
-function PromptRow({ entry, pt, lang, isMobile, verdict, onGoTo, onView, onRestore }: {
+function PromptRow({ entry, pt, lang, isMobile, verdict, onGoTo, onView, onRestore, onForward }: {
   entry: PromptEntry
   pt: boolean
   lang: 'pt' | 'en'
@@ -227,6 +230,7 @@ function PromptRow({ entry, pt, lang, isMobile, verdict, onGoTo, onView, onResto
   onGoTo: () => void
   onView: () => void
   onRestore: () => void
+  onForward?: () => void
 }) {
   const time = entryTime(entry, lang)
   const parts = splitMessage(entry.text)
@@ -266,6 +270,12 @@ function PromptRow({ entry, pt, lang, isMobile, verdict, onGoTo, onView, onResto
         <button onClick={onView} style={rowButton(isMobile, 'plain')}>
           {pt ? 'Ver mensagem' : 'View'}
         </button>
+        {onForward && (
+          <button onClick={onForward} style={rowButton(isMobile, 'plain')}>
+            <Forward size={12} style={{ marginRight: 5, flexShrink: 0 }} />
+            {pt ? 'Encaminhar' : 'Forward'}
+          </button>
+        )}
         {verdict.state !== 'hidden' && (
           <button
             onClick={onRestore}

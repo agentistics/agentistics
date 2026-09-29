@@ -32,6 +32,12 @@ export interface ReplyTarget {
    * whole of a very short message.
    */
   excerpt?: boolean
+  /**
+   * The turn this quote came from (`chatForward.ts`'s `turnKey`), when known. It is what puts
+   * several quotes back in CONVERSATION order and stops the same message being added twice.
+   * Absent for a target stored before replies became a list.
+   */
+  key?: string
 }
 
 /** How many lines of the quoted message travel with the reply. See decision 1. */
@@ -150,8 +156,64 @@ export function parseReply(raw: string | null): ReplyTarget | null {
     // The mark is only ever honoured when it is literally `true`: a stored value of any other
     // shape is a document this code did not write, and reading it as truthy would uncap the quote.
     const excerpt = (v as Record<string, unknown>).excerpt === true
-    return excerpt ? { role, text, excerpt: true } : { role, text }
+    const key = (v as Record<string, unknown>).key
+    return {
+      role, text,
+      ...(excerpt ? { excerpt: true } : {}),
+      ...(typeof key === 'string' && key !== '' ? { key } : {}),
+    }
   } catch { return null }
+}
+
+// ---------------------------------------------------------------------------
+// SEVERAL QUOTES AT ONCE.
+//
+// A long answer often asks several questions, and answering each means quoting each. So the reply
+// is a LIST: the message menu's Reply ADDS to it (never replaces), and selection mode's
+// "Reply (N)" adds every ticked message. What travels is each quote, briefly (`quoteFor`'s own
+// cap), in CONVERSATION order, a blank line between them — and a blank line before the typed text,
+// the `composeReply` rule, so the answer never falls into the last quote.
+// ---------------------------------------------------------------------------
+
+/**
+ * A stored reply list. Reads the old single-object shape too, so a draft written before replies
+ * became a list still sends its quote. Unusable entries are dropped, as `parseReply` drops them.
+ */
+export function parseReplies(raw: string | null): ReplyTarget[] {
+  if (!raw) return []
+  try {
+    const v: unknown = JSON.parse(raw)
+    const items = Array.isArray(v) ? v : [v]
+    return items.flatMap(x => {
+      const t = parseReply(JSON.stringify(x))
+      return t ? [t] : []
+    })
+  } catch { return [] }
+}
+
+function sameReply(a: ReplyTarget, b: ReplyTarget): boolean {
+  return a.text === b.text && Boolean(a.excerpt) === Boolean(b.excerpt)
+    && (a.key ?? '') === (b.key ?? '') && a.role === b.role
+}
+
+/** Add one quote to the list — appended, and never twice. */
+export function addReply(list: readonly ReplyTarget[], target: ReplyTarget): ReplyTarget[] {
+  if (target.text.trim() === '' || list.some(t => sameReply(t, target))) return [...list]
+  return [...list, target]
+}
+
+/** The list in the order the messages appear in the conversation. Unplaceable ones keep theirs, last. */
+export function orderReplies(list: readonly ReplyTarget[], turnKeys: readonly string[]): ReplyTarget[] {
+  const at = new Map(turnKeys.map((k, i) => [k, i]))
+  return list
+    .map((t, i) => ({ t, i, pos: t.key !== undefined && at.has(t.key) ? at.get(t.key)! : Number.POSITIVE_INFINITY }))
+    .sort((a, b) => (a.pos - b.pos) || (a.i - b.i))
+    .map(x => x.t)
+}
+
+/** Every quote, each capped as `quoteFor` caps it, a blank line apart. Empty for an empty list. */
+export function quoteAll(list: readonly ReplyTarget[]): string {
+  return list.map(quoteFor).filter(q => q !== '').join('\n\n')
 }
 
 
