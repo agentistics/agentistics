@@ -23,6 +23,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { isPanelId, showPanel, type PanelId } from './panelSlots'
+import { getActivePane, usePaneId, type PaneId } from './paneScope'
 import type { EdgeHint } from './artifactLayout'
 
 /** What the session is doing this instant — the edge strip's own fact, see `currentAction`. */
@@ -49,22 +50,41 @@ export interface ArtifactsState {
 
 const EMPTY: ArtifactsState = { sessionId: null, count: 0 }
 
-let state: ArtifactsState = EMPTY
+/**
+ * ONE RECORD PER SESSION. A split view shows two sessions at once, and each side reports its own
+ * count and live action — a single slot replaced on every report would make the two flip-flop, and
+ * the card of one session would read the other's "running X".
+ */
+const records = new Map<string, ArtifactsState>()
 const listeners = new Set<() => void>()
+/** The record most recently reported, for the few callers that read without naming a session. */
+let latest: ArtifactsState = EMPTY
+
+function recordOf(sessionId: string): ArtifactsState {
+  return records.get(sessionId) ?? { sessionId, count: 0 }
+}
 
 function emit(next: ArtifactsState): void {
+  const id = next.sessionId
+  if (id === null) return
+  const prev = records.get(id)
   // Reference equality is what `useSyncExternalStore` compares, so an unchanged state must keep the
-  // same object or every poll re-renders both consumers.
-  if (
-    next.sessionId === state.sessionId && next.count === state.count && next.live === state.live
-  ) return
-  state = next
+  // same object or every poll re-renders every consumer.
+  if (prev && prev.count === next.count && prev.live === next.live) return
+  records.set(id, next)
+  latest = next
   for (const l of listeners) l()
 }
 
-/** The current record. Exists for tests and for callers that read once rather than subscribe. */
+/** The most recently reported record. Exists for tests and for callers that read once rather than
+ *  subscribe; a caller that knows its session reads `getArtifactsOf`. */
 export function getArtifacts(): ArtifactsState {
-  return state
+  return latest
+}
+
+/** One session's record. */
+export function getArtifactsOf(sessionId: string): ArtifactsState {
+  return recordOf(sessionId)
 }
 
 /**
@@ -74,19 +94,14 @@ export function getArtifacts(): ArtifactsState {
  * The stored object keeps its IDENTITY while its content is unchanged: the conversation is polled
  * every few seconds and yields a fresh object each time, and `useSyncExternalStore` compares by
  * reference, so without this the card would re-render on every poll to say the same thing.
- * A report for a session the store is not describing is dropped when it is `null` (there is
- * nothing to clear) and otherwise starts that session's record, exactly as a count does.
  */
 export function setArtifactLive(sessionId: string, live: ArtifactLive | null): void {
-  if (state.sessionId !== sessionId) {
-    if (live === null) return
-    emit({ sessionId, count: 0, live })
-    return
-  }
-  const same = live !== null && state.live !== undefined &&
-    state.live.kind === live.kind && state.live.text === live.text && state.live.ref === live.ref
+  const cur = recordOf(sessionId)
+  const same = live !== null && cur.live !== undefined &&
+    cur.live.kind === live.kind && cur.live.text === live.text && cur.live.ref === live.ref
   if (same) return
-  const { live: _drop, ...rest } = state
+  if (live === null && cur.live === undefined) return
+  const { live: _drop, ...rest } = cur
   emit(live === null ? rest : { ...rest, live })
 }
 
@@ -94,14 +109,16 @@ export function setArtifactLive(sessionId: string, live: ArtifactLive | null): v
 export function useArtifactLive(sessionId: string | undefined): ArtifactLive | null {
   return useSyncExternalStore(
     cb => { listeners.add(cb); return () => { listeners.delete(cb) } },
-    () => (sessionId !== undefined && state.sessionId === sessionId ? state.live ?? null : null),
+    () => (sessionId !== undefined ? records.get(sessionId)?.live ?? null : null),
     () => null,
   )
 }
 
 /** The panel's page reports which session it is showing and how many files it found. */
 export function setArtifactCount(sessionId: string, count: number): void {
-  emit(state.sessionId === sessionId ? { ...state, count } : { sessionId, count })
+  const cur = recordOf(sessionId)
+  if (cur.count === count && records.has(sessionId)) return
+  emit({ ...cur, count })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -110,6 +127,8 @@ export function setArtifactCount(sessionId: string, count: number): void {
 
 export interface PanelFocusRequest {
   tab: PanelId
+  /** The side of a split view the request is for — `paneScope.ts`. */
+  pane: PaneId
   ref?: string
   /** The stamp that makes this a REQUEST rather than a setting — see `openArtifacts`'s own header
    *  on why. */
@@ -123,10 +142,13 @@ export function getPanelFocusRequest(): PanelFocusRequest | null {
   return focus
 }
 
+/** The latest request FOR THE PANE this component is rendered in — the other side of a split
+ *  never lands on a row it was not asked about. */
 export function usePanelFocusRequest(): PanelFocusRequest | null {
+  const pane = usePaneId()
   return useSyncExternalStore(
     cb => { focusListeners.add(cb); return () => { focusListeners.delete(cb) } },
-    () => focus,
+    () => (focus !== null && focus.pane === pane ? focus : null),
     () => null,
   )
 }
@@ -147,15 +169,16 @@ function setPanelFocusRequest(next: PanelFocusRequest): void {
  * request (asking twice for "Live" must still re-focus the latest row, not be a no-op because the
  * tab id did not change).
  */
-export function openArtifacts(tab?: string, ref?: string): void {
+export function openArtifacts(tab?: string, ref?: string, pane: PaneId = getActivePane()): void {
   const panel: PanelId = isPanelId(tab) ? tab : 'live'
-  showPanel(panel)
-  if (ref !== undefined) setPanelFocusRequest({ tab: panel, ref, at: Date.now() })
+  showPanel(panel, pane)
+  if (ref !== undefined) setPanelFocusRequest({ tab: panel, pane, ref, at: Date.now() })
 }
 
 /** For tests: forget everything. */
 export function resetArtifacts(): void {
-  state = EMPTY
+  records.clear()
+  latest = EMPTY
   focus = null
   for (const l of listeners) l()
   for (const l of focusListeners) l()

@@ -15,7 +15,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { getActivePane } from '../../lib/paneScope'
+import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
+
 import {
   ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
   PinOff, Plus, RotateCcw, Search, Send, X,
@@ -74,6 +77,9 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 // one unit (continuous left accent bar + shared tint, header down through the last row) — reused
 // rather than invented a second time for user session groups.
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
+
+/** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
+const OPEN_BESIDE = '__open_beside__'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -217,6 +223,21 @@ export function SessionsAside({
   const tap = isMobile ? 44 : undefined
   const { sessionId: routeSessionId } = useParams()
   const sessionId = selectedId ?? routeSessionId
+  /**
+   * THE SPLIT VIEW (`lib/splitRoute.ts`). With two sessions open, a pick from this list replaces
+   * the one in the pane the person is working in (`getActivePane`) and keeps the other; "Abrir ao
+   * lado" puts a session in the right-hand pane. A phone never splits, so there it is the plain
+   * route, as it always was.
+   */
+  const [routeSearch] = useSearchParams()
+  const openSessionRoute = (id: string) => {
+    const route = readSplitRoute(routeSessionId, routeSearch)
+    if (isMobile || route.split === null) { navigate(sessionPath(id)); return }
+    navigate(splitHref(openInPane(route, id, getActivePane()), routeSearch))
+  }
+  const openSessionBeside = (id: string) => {
+    navigate(splitHref(openBeside(readSplitRoute(routeSessionId, routeSearch), id), routeSearch))
+  }
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   /**
@@ -522,6 +543,11 @@ export function SessionsAside({
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
+    if (action === OPEN_BESIDE) {
+      openSessionBeside(id)
+      setMenu(null)
+      return
+    }
     if (action === 'link-task') {
       // The picker is anchored where the menu was, so the gesture stays in one place on screen.
       setLinking({ id, x: menu.x, y: menu.y })
@@ -1010,7 +1036,7 @@ export function SessionsAside({
                           selected={rowSelected(s, sessionId)}
                           {...(tap ? { tap } : {})}
                           onPin={() => flip(s)}
-                          onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                          onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                           {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
                           onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
                           onFile={(x, y) => setLinking({ id: s.id, x, y })}
@@ -1430,7 +1456,7 @@ export function SessionsAside({
                     pinned
                     {...(tap ? { tap } : {})}
                     onPin={() => flip(s)}
-                    onOpen={() => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                    onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                     onMoveBy={d => {
                       // The step buttons move relative to the VISIBLE neighbor — same key-based
                       // rule as the drag above; there is no raw-array index to step by here either.
@@ -1530,7 +1556,7 @@ export function SessionsAside({
                 bandId={b.id}
                 label={b.label} groups={b.groups} groupBy={groupBy} pinned={pinned}
                 sessionId={sessionId} tap={tap} onPin={flip}
-                onOpen={s => (onOpenRow ? onOpenRow(s) : navigate(sessionPath(s.id)))}
+                onOpen={s => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                 {...(rowsById ? { rowsById } : {})}
                 onOpenMenu={openMenu}
                 onFile={(s, x, y) => setLinking({ id: s.id, x, y })}
@@ -1572,7 +1598,17 @@ export function SessionsAside({
           x={menu.x} y={menu.y}
           entries={rowMenuEntries(
             menu.verbs, menu.state,
-            groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+            [
+              // The split view (desktop only, and only where this list opens sessions itself —
+              // a mount that routes picks elsewhere via `onOpenRow` has no side to open beside).
+              ...(!isMobile && !onOpenRow ? [{
+                action: OPEN_BESIDE,
+                label: pt ? 'Abrir ao lado' : 'Open beside',
+                enabled: menu.id !== routeSessionId,
+                ...(menu.id === routeSessionId ? { reason: pt ? 'Já está aberta à esquerda.' : 'Already open on the left.' } : {}),
+              }] : []),
+              ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+            ],
           )}
           onPick={pickMenuAction}
           onClose={() => setMenu(null)}

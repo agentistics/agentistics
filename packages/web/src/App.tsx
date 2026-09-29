@@ -73,6 +73,7 @@ import { ModeSwitch } from './components/nav/ModeSwitch'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
+import { splitIdOf } from './lib/splitRoute'
 import { getPanelLayout, isPanelShown, setBandOpen, setSlotRightOpen, showPanel, usePanelSlots } from './lib/panelSlots'
 import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
@@ -2314,6 +2315,15 @@ export default function AppLayout() {
     ? headerFleet.rows.find(r => r.id === selectedSessionId || r.conversationId === selectedSessionId)
     : undefined
   const selectedSessionRow = selectedFleetSession ? headerFleetIndex.get(selectedFleetSession.id) : undefined
+  /**
+   * THE STRIP'S OWN SESSION — absent while the workspace is SPLIT (`lib/splitRoute.ts`). Each side
+   * of a split carries its own header, so a title and verbs up here would name one of the two
+   * sessions as though it were the only one on screen.
+   */
+  const [splitSearch] = useSearchParams()
+  const splitActive = inSessionsWorkspace && !isMobile && splitIdOf(splitSearch, selectedSessionId) !== null
+  const headerSession = splitActive ? undefined : selectedFleetSession
+  const headerSessionRow = splitActive ? undefined : selectedSessionRow
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -3567,13 +3577,13 @@ export default function AppLayout() {
       {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
           Cancel" — laid over it, see `ChatSelectionOverlay`. */}
       <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
-      {selectedFleetSession && (
+      {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
           <span style={{
             fontSize: 13.5, fontWeight: 650, color: 'var(--text-primary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
-            {selectedFleetSession.title}
+            {headerSession.title}
           </span>
           {/* THE TASK CONTROL MOVED DOWN, THEN AWAY (design item 3, then owner 2026-09-21) — it
               first moved from this header into the bottom bar's own left end
@@ -3590,8 +3600,8 @@ export default function AppLayout() {
             fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 1000000,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
-            {selectedFleetSession.stateLabel}
-            {selectedFleetSession.project ? ` · ${selectedFleetSession.project}` : ''}
+            {headerSession.stateLabel}
+            {headerSession.project ? ` · ${headerSession.project}` : ''}
           </span>
         </div>
       )}
@@ -3648,9 +3658,9 @@ export default function AppLayout() {
           magnifier and the "⋯" session-actions menu, per the owner's drawing: "the top bar becomes
           clean and dedicated to the title etc." */}
 
-      {selectedSessionRow && (
+      {headerSessionRow && (
         <SessionActions
-          row={selectedSessionRow}
+          row={headerSessionRow}
           lang={lang === 'pt' ? 'pt' : 'en'}
           act={headerFleetAct}
           onGone={() => navigate('/sessions')}
@@ -3659,9 +3669,9 @@ export default function AppLayout() {
           // until the next poll carries the new row. See `reopenedSessionRoute`.
           onOpened={id => {
             const r = reopenedSessionRoute(id, {
-              id: selectedSessionRow.id,
-              harness: selectedSessionRow.harness,
-              title: selectedSessionRow.title,
+              id: headerSessionRow.id,
+              harness: headerSessionRow.harness,
+              title: headerSessionRow.title,
             })
             navigate(r.path, r.options)
           }}

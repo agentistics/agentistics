@@ -2758,6 +2758,18 @@ interchangeable.
 - **the VS Code extension** — `packages/vscode`, a client of `agentop server` and nothing more.
 - **`agentop session …`** — the CLI verbs.
 
+**The Sessions workspace can SPLIT: two sessions side by side, desktop only, never more**
+(docs/superpowers/specs/2026-09-29-sessions-split-view-design.md). The second session is `?split=<id>`
+(`lib/splitRoute.ts`, pure: every gesture's landing place), each side is a whole `SessionsPageBody`
+wrapped in a `PaneFrame`, and **every store that assumed one open session keeps one state PER PANE**
+(`lib/paneScope.ts`): `panelSlots`, `floatingPanels`, `artifactsStore`'s focus request, the shell-band
+prefs and the `ag-gap-*` DOM ids. Hooks read the pane from context; an imperative call outside React
+uses the ACTIVE pane, marked in each frame's capture phase. The main pane keeps every historical key
+and id, so a browser that never splits sees nothing change. **A new store or DOM id that assumes "the
+open session" must be pane-scoped the same way**, or the two sides will fight over it. One of each
+global thing: the leave guard (on main, with both sessions' keys), the idle watch, the pressure
+notification, and the right-edge report (rightmost pane).
+
 The FLEET is what all four show: the live sessions plus the conversations that can be reopened. A
 "session" is one conversation; the "fleet" is the set.
 
