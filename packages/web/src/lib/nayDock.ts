@@ -138,3 +138,26 @@ export function parseDockState(raw: unknown): Pick<DockState, 'windows'> {
   })
   return { windows }
 }
+
+/** The count on the chat button when windows are minimized: nothing at zero, a cap past nine. */
+export function minimizedBadge(count: number): string | null {
+  if (!Number.isFinite(count) || count <= 0) return null
+  return count > 9 ? '9+' : String(Math.floor(count))
+}
+
+export interface MenuPlacement { vertical: 'above' | 'below'; horizontal: 'left' | 'right' }
+
+/** Room the list needs above the button before it flips below. */
+export const MENU_MIN_ABOVE = 240
+
+/**
+ * Which way the minimized list opens from the chat button. Above it and growing leftward is the
+ * default (the button lives bottom-right); it flips below when the button is near the top edge,
+ * and grows rightward when the button is near the left edge. Once the button can be dragged
+ * anywhere, both flips are what keep the list on screen.
+ */
+export function menuPlacement(anchor: { top: number; bottom: number; left: number; right: number }, vp: Viewport, menuWidth: number): MenuPlacement {
+  const vertical = anchor.top >= MENU_MIN_ABOVE || anchor.top >= vp.h - anchor.bottom ? 'above' : 'below'
+  const horizontal = anchor.right - menuWidth >= 8 ? 'right' : 'left'
+  return { vertical, horizontal }
+}
