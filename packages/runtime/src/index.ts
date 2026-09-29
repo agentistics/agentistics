@@ -43,3 +43,5 @@ export * from './loop/emit.ts'
 export * from './loop/wire.ts'
 export * from './policy/index.ts'
 export * from './sandbox/index.ts'
+// ── B8.1: the harness catalogue's pure core (the host loader is B8.2) ──────────────────────────
+export * from './catalogue/index.ts'
