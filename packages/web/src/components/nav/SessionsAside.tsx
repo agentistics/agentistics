@@ -34,6 +34,7 @@ import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
 import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
+import { folderFold } from '../../lib/folderFold'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -377,6 +378,13 @@ export function SessionsAside({
     setFoldedUserGroupsState(next)
     writeAsideGroupPrefs({ collapsedUserGroups: [...next] })
   }
+  /** Dimmed folders (nothing in them matches) the person opened on this screen — see `folderFold`. */
+  const [openedDimmed, setOpenedDimmed] = useState<Set<string>>(() => new Set())
+  const toggleOpenedDimmed = (id: string) => setOpenedDimmed(cur => {
+    const next = new Set(cur)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
   /** The "Fixadas" and "Grupos" SECTIONS themselves — distinct from any one row/folder's own fold.
    *  The owner asked that EVERYTHING in this list be collapsible, and these two headings were the
    *  two things that could not fold at all. */
@@ -730,27 +738,37 @@ export function SessionsAside({
    * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
    * nothing but subfolders read `0`.
    */
-  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1): React.ReactNode => {
-    const { group, rows: gRows } = entry
+  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false): React.ReactNode => {
+    const { group } = entry
     // What matches in this folder (its nested folders included) — see `groupRowsShown`.
     const shownInFolder = folderSessionCount(group.id, groupRowsShown)
     // A SEARCH opens the folders that hold results, without touching what the person folded: the
     // stored fold is untouched, it is only overridden while there is text in the search box.
     // Nothing here matches: kept, and quieter — never removed (see `listNarrowed`) — and shown as its
     // header alone, since a body that only says "nothing matches" is noise in a filtered list.
-    const noMatches = narrowing && shownInFolder === 0
-    const folded = (foldedUserGroups.has(group.id) || noMatches) && !(searching && shownInFolder > 0)
+    // A dimmed folder is still a folder: it opens and closes (`folderFold` — forcing it folded made
+    // the click a no-op), and opened it shows what it holds.
+    const fold = folderFold({
+      storedFolded: foldedUserGroups.has(group.id), openedDimmed: openedDimmed.has(group.id),
+      narrowing, searching, shownCount: shownInFolder,
+    })
+    const noMatches = fold.dimmed
+    const folded = fold.folded
+    const source = fold.showAll || parentDimmed ? groupRowsResolved : groupRowsShown
+    const gRows = fold.showAll || parentDimmed
+      ? (groupRowsResolved.find(g => g.group.id === group.id)?.rows ?? entry.rows)
+      : entry.rows
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
-    const children = depth === 0 ? groupRowsShown.filter(g => g.group.parentId === group.id) : []
+    const children = depth === 0 ? source.filter(g => g.group.parentId === group.id) : []
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
         key={group.id}
-        style={{ marginLeft: depth * 14, ...(noMatches ? { opacity: 0.5 } : {}) }}
+        style={{ marginLeft: depth * 14, ...(noMatches && !parentDimmed ? { opacity: 0.5 } : {}) }}
       >
         <div
           // Suppressed for the WHOLE list while ANY folder is being dragged, not only for the one
@@ -898,7 +916,8 @@ export function SessionsAside({
               style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, cursor: 'grab' }}
             >
               <button
-                onClick={() => toggleUserGroupFold(group.id)}
+                onClick={() => (fold.toggles === 'dimmed' ? toggleOpenedDimmed(group.id) : toggleUserGroupFold(group.id))}
+                aria-expanded={!folded}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
                   background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -954,7 +973,7 @@ export function SessionsAside({
                   order a file explorer uses, and the reason a freshly nested folder becoming the
                   FIRST child (`moveToFrontAmongSiblings`, core) actually reads as "first" on screen
                   instead of sitting after every session the parent already held. */}
-              {children.map(c => renderGroupBand(c, 1))}
+              {children.map(c => renderGroupBand(c, 1, noMatches || parentDimmed))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                   {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
