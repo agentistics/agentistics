@@ -435,7 +435,7 @@ export default function TagDetailPage() {
             one whose machines have not pushed yet) — say so instead of showing five zeros. */}
         {empty && (
           <div style={{
-            marginTop: 10, border: '1px dashed var(--border)', borderRadius: 12, padding: 20,
+            marginTop: 10, border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 20,
             fontSize: 12.5, color: 'var(--text-tertiary)', textAlign: 'center', lineHeight: 1.5,
           }}>
             {pt

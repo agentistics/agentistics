@@ -2,7 +2,26 @@ import { expect, test, describe } from 'bun:test'
 import {
   activeJunctions, applyAxisDrag, applyJunctionDrag, clampSize, gapHitRect, isDragEndEvent,
   junctionHitRect, pointInRect, resolveHitZone, type JunctionAxis,
+  CARD_RADIUS, PANEL_RADIUS,
 } from './panelLayout'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+describe('the board radius family', () => {
+  // The CSS scale is what every card reads; the TS constants are what the panels read. One number
+  // written in two places is exactly the drift this test exists to stop.
+  const css = readFileSync(join(import.meta.dir, '../index.css'), 'utf8')
+  const token = (name: string) => Number(css.match(new RegExp(`--${name}:\\s*(\\d+)px`))?.[1])
+
+  test('--radius-lg is the panel corner', () => {
+    expect(token('radius-lg')).toBe(PANEL_RADIUS)
+  })
+
+  test('--radius-md is the nested-card corner, tighter than the panel around it', () => {
+    expect(token('radius-md')).toBe(CARD_RADIUS)
+    expect(CARD_RADIUS).toBeLessThan(PANEL_RADIUS)
+  })
+})
 
 describe('clampSize', () => {
   test('holds a value inside its bounds', () => {

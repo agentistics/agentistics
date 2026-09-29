@@ -91,7 +91,7 @@ import { AsideResizer } from './components/nav/AsideResizer'
 import { modeOfPath } from './lib/workspaceMode'
 import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
 import { PanelGap } from './components/sessions/PanelGap'
-import { PANEL_GAP } from './lib/panelLayout'
+import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLayout'
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
@@ -1296,8 +1296,10 @@ function SideNav({
       // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
       // the bordered box a reader sees. Every OTHER workspace keeps the plain elevated-surface aside
       // it always had — this is a `mode === 'sessions'` styling branch, nothing else.
-      background: mode === 'sessions' ? 'var(--bg-base)' : 'var(--bg-surface)',
-      borderRight: mode === 'sessions' ? 'none' : '1px solid var(--border)',
+      // The dashboard joined the board too (owner, 2026-09-27): its page area is now a panel on
+      // the same ground, so the nav is frame in BOTH workspaces — ground colour, no edge line.
+      background: 'var(--bg-base)',
+      borderRight: 'none',
       display: 'flex', flexDirection: 'column',
       // OUTER FRAME GAPS (`sdd/brief.md`, task 2): the sessions-workspace panel's LEFT edge sits
       // exactly 6px from the window's left edge and its BOTTOM edge 6px from the window's bottom —
@@ -1504,7 +1506,12 @@ export default function AppLayout() {
   const navigate = useNavigate()
   // Reset scroll to the top on every route change — otherwise navigating away while scrolled to the
   // bottom of a page lands the next page still scrolled down.
-  useEffect(() => { window.scrollTo(0, 0) }, [location.pathname])
+  // On the desktop board the page scrolls inside its PANEL, not the window, so both are reset.
+  const pageScrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0
+  }, [location.pathname])
   // Pages that render their OWN filter bar(s) and must not get the header's as well. `/custom`
   // embeds one; `/compare?mode=filter` owns two, and three bars on one screen is not a page.
   const isCustomPage =
@@ -3844,6 +3851,80 @@ export default function AppLayout() {
    * MOBILE IS UNTOUCHED. The strip is a desktop element; the phone keeps its collapsible filter
    * band and its bottom nav, which are sized for a viewport this row would not fit in.
    */
+  /**
+   * The expanded "Estatísticas" strip. It used to open UNDER its tab as a floating overlay, which on
+   * every page sat over the page's own top — its title, "New tag", the compare tabs. On the board it
+   * takes its OWN row instead: the first thing inside the page panel (see `<main>`), pushing the page
+   * down rather than covering it, and scrolling with it. The tab that toggles it still hangs from the
+   * panel's top edge (`dashboardTopBar`).
+   */
+  const fleetStrip = (() => {
+    const sep = <span style={{ color: 'var(--border)' }}>·</span>
+    const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
+    return (
+    <div style={{
+      display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '2px 9px',
+      padding: '7px 12px', borderRadius: 'var(--radius-md)', maxWidth: '100%', boxSizing: 'border-box',
+      border: '1px solid var(--border)', background: 'var(--bg-card)',
+      fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
+    }}>
+      {/* WHAT IS ON SCREEN, first — the totals the filters actually produced. They
+          lead because they are the numbers that move when you touch a filter;
+          everything after them is the standing context of the whole machine.
+
+          The group is NAMED. Without the word this strip would carry two counts of
+          "sessions" — this one narrowed by the filters, the one inside `fleetSince`
+          counting every session ever recorded — and on the machine this was reported
+          from they happened to be the same number, which is exactly the coincidence
+          that makes an unlabelled pair impossible to tell apart later. */}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
+          {lang === 'pt' ? 'No filtro' : 'In view'}
+        </span>
+        <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
+        <span style={{ opacity: 0.35 }}>·</span>
+        <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
+        <span style={{ opacity: 0.35 }}>·</span>
+        <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
+      </span>
+      {sep}
+      <span>{lang === 'pt' ? 'Atualizado em' : 'Updated'} <span style={{ color: 'var(--text-secondary)' }}>{fleetUpdated}</span></span>
+      {fleetSince && (<>{sep}<span style={{ color: 'var(--text-secondary)' }}>{fleetSince}</span></>)}
+      {isCentral && (<>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Users size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{memberCount} {lang === 'pt' ? (memberCount === 1 ? 'membro' : 'membros') : (memberCount === 1 ? 'member' : 'members')}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
+        </span>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Server size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{machineCount} {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas online' : 'Machines online'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas offline' : 'Machines offline'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
+        </span>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Users size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{teamCount} {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
+        </span>
+      </>)}
+      {sep}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <FolderOpen size={11} style={iconSt} />
+        <span style={{ color: 'var(--text-secondary)' }}>{projectCount} {lang === 'pt' ? (projectCount === 1 ? 'projeto' : 'projetos') : (projectCount === 1 ? 'project' : 'projects')}</span>
+      </span>
+      {sep}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <GitBranch size={11} style={iconSt} />
+        <span style={{ color: 'var(--text-secondary)' }}>{repoCount} {lang === 'pt' ? (repoCount === 1 ? 'repositório' : 'repositórios') : (repoCount === 1 ? 'repository' : 'repositories')}</span>
+      </span>
+    </div>
+    )
+  })()
+
   const dashboardTopBar = (!inSessionsWorkspace && !isMobile && !isCustomPage) ? (
     <div style={{
       // Full width, for the reason the sessions strip records: a bar centred in the body's box
@@ -3980,15 +4061,18 @@ export default function AppLayout() {
       )}
       {/* The collapsible "fleet stats" tab, which hangs BELOW this row (position: absolute,
           top: 100%) and is therefore anchored to the fixed strip now rather than to the sticky
-          header that used to hold it. Expands to updated/since + members/machines/teams/projects/
-          repos. Dashboard only — these are STORED metrics, and a live fleet already states its own
+          header that used to hold it. It is only the TOGGLE: the strip it opens (updated/since +
+          members/machines/teams/projects/repos) is `fleetStrip`, drawn in its own row inside the
+          page panel. Dashboard only — these are STORED metrics, and a live fleet already states its own
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
       {(() => {
-        const sep = <span style={{ color: 'var(--border)' }}>·</span>
-        const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
         return (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
+          // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that
+          // border (flat top, rounded bottom — a pull tab on the panel). Inset by the same figure on
+          // both sides so its right edge lands on the panel's own content column.
+          <div style={{ position: 'absolute', top: `calc(100% + ${OUTER_GAP + 1}px)`, left: OUTER_GAP + 1, right: OUTER_GAP + 1, zIndex: 300, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ maxWidth: pageMaxWidth(location.pathname), width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: PAGE_INSET, boxSizing: 'border-box', pointerEvents: 'none' }}>
               <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                 <button
@@ -3996,76 +4080,14 @@ export default function AppLayout() {
                   title={fleetOpen ? (lang === 'pt' ? 'Minimizar' : 'Collapse') : (lang === 'pt' ? 'Mostrar estatísticas' : 'Show stats')}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
-                    border: '1px solid var(--border)',
-                    borderRadius: 7, background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)', borderTop: 'none',
+                    borderRadius: '0 0 7px 7px', background: 'var(--bg-surface)',
                     color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
                   }}
                 >
                   {lang === 'pt' ? 'Estatísticas' : 'Stats'}
                   {fleetOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                 </button>
-                {fleetOpen && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '2px 9px',
-                    marginTop: 4, padding: '7px 12px', borderRadius: 8, maxWidth: '80vw',
-                    border: '1px solid var(--border)', background: 'var(--bg-surface)', boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-                    fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
-                  }}>
-                    {/* WHAT IS ON SCREEN, first — the totals the filters actually produced. They
-                        lead because they are the numbers that move when you touch a filter;
-                        everything after them is the standing context of the whole machine.
-
-                        The group is NAMED. Without the word this strip would carry two counts of
-                        "sessions" — this one narrowed by the filters, the one inside `fleetSince`
-                        counting every session ever recorded — and on the machine this was reported
-                        from they happened to be the same number, which is exactly the coincidence
-                        that makes an unlabelled pair impossible to tell apart later. */}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
-                        {lang === 'pt' ? 'No filtro' : 'In view'}
-                      </span>
-                      <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
-                      <span style={{ opacity: 0.35 }}>·</span>
-                      <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
-                      <span style={{ opacity: 0.35 }}>·</span>
-                      <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
-                    </span>
-                    {sep}
-                    <span>{lang === 'pt' ? 'Atualizado em' : 'Updated'} <span style={{ color: 'var(--text-secondary)' }}>{fleetUpdated}</span></span>
-                    {fleetSince && (<>{sep}<span style={{ color: 'var(--text-secondary)' }}>{fleetSince}</span></>)}
-                    {isCentral && (<>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Users size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{memberCount} {lang === 'pt' ? (memberCount === 1 ? 'membro' : 'membros') : (memberCount === 1 ? 'member' : 'members')}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
-                      </span>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Server size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{machineCount} {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas online' : 'Machines online'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas offline' : 'Machines offline'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
-                      </span>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Users size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{teamCount} {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
-                      </span>
-                    </>)}
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <FolderOpen size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{projectCount} {lang === 'pt' ? (projectCount === 1 ? 'projeto' : 'projetos') : (projectCount === 1 ? 'project' : 'projects')}</span>
-                    </span>
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <GitBranch size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{repoCount} {lang === 'pt' ? (repoCount === 1 ? 'repositório' : 'repositórios') : (repoCount === 1 ? 'repository' : 'repositories')}</span>
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -4093,6 +4115,152 @@ export default function AppLayout() {
   // reappears on top of whatever that screen is showing.
   const headerHostsMagnifier = isMobile || stripTrailing !== null
 
+  /* Footer — dashboard only. The sessions workspace is an application pane that fills the
+          window exactly and scrolls inside itself; a marketing footer under a terminal is a strip
+          of links nobody can reach without first scrolling a pane that does not scroll. */
+  const pageFooter = inSessionsWorkspace ? null : (
+      <footer style={{
+        borderTop: '1px solid var(--border)',
+        // Inside the desktop page panel the footer is part of the panel's surface; on a phone it
+        // is its own band under the page, as it always was.
+        background: isMobile ? 'var(--bg-surface)' : 'transparent',
+      }}>
+        <div style={{ maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', padding: '56px 32px 36px' }}>
+
+          {/* Main row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 80, flexWrap: 'wrap', marginBottom: 48 }}>
+
+            {/* Logo only — no text */}
+            <div style={{ flexShrink: 0 }}>
+              {/* Two plates, one visible: the theme is an attribute on <html>, so CSS picks the one
+                  that suits the surface (index.css `.ag-logo-*`). */}
+              <img className="ag-logo-dark" src={brandAsset('/logo.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
+              <img className="ag-logo-light" src={brandAsset('/logo-light.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
+            </div>
+
+            {/* Description + stats + version — middle */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: '1 1 200px' }}>
+              <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>
+                {lang === 'pt'
+                  ? 'Dashboard local de uso do Claude Code. Seus dados ficam no seu computador — sem servidores, sem rastreamento.'
+                  : 'Local Claude Code usage dashboard. Your data stays on your machine — no servers, no tracking.'}
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {/* Live stats pill */}
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '4px 12px', borderRadius: 20,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: 'var(--accent-green)', boxShadow: '0 0 8px var(--accent-green)',
+                  }} />
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {derived.totalSessions.toLocaleString()} {lang === 'pt' ? 'sessões' : 'sessions'}
+                    {' · '}
+                    {derived.totalMessages.toLocaleString()} {lang === 'pt' ? 'mensagens' : 'messages'}
+                  </span>
+                </div>
+                {/* Version badge */}
+                <a
+                  href="https://github.com/agentistics/agentistics/releases/latest"
+                  target="_blank" rel="noreferrer"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '4px 10px', borderRadius: 20,
+                    background: 'var(--anthropic-orange-dim)',
+                    border: '1px solid var(--anthropic-orange-dim)',
+                    fontSize: 11, color: 'var(--anthropic-orange-light)',
+                    textDecoration: 'none', fontWeight: 600,
+                    transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+                  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                >
+                  <Zap size={11} />
+                  v{version}
+                </a>
+              </div>
+            </div>
+
+            {/* Link columns — right */}
+            <div style={{ display: 'flex', gap: 56, flexShrink: 0, flexWrap: 'wrap' }}>
+              {([
+                {
+                  title: lang === 'pt' ? 'Projeto' : 'Project',
+                  links: [
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
+                    { href: 'https://github.com/agentistics/agentistics/releases', label: 'Releases' },
+                    { href: 'https://github.com/agentistics/agentistics/issues', label: 'Issues' },
+                    { href: 'https://github.com/agentistics/agentistics/pulls', label: 'Pull Requests' },
+                    { href: 'https://github.com/agentistics/agentistics#readme', label: 'README' },
+                  ],
+                },
+                {
+                  title: 'Stack',
+                  links: [
+                    { href: 'https://bun.sh', label: 'Bun' },
+                    { href: 'https://react.dev', label: 'React 19' },
+                    { href: 'https://www.typescriptlang.org', label: 'TypeScript' },
+                    { href: 'https://vitejs.dev', label: 'Vite' },
+                    { href: 'https://recharts.org', label: 'Recharts' },
+                  ],
+                },
+                {
+                  title: lang === 'pt' ? 'Comunidade' : 'Community',
+                  links: [
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
+                    { href: 'https://github.com/agentistics/agentistics/fork', label: 'Fork' },
+                    { href: 'https://github.com/agentistics/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
+                    { href: 'https://github.com/blpsoares', label: '@blpsoares' },
+                  ],
+                },
+              ] as { title: string; links: { href: string; label: string }[] }[]).map(({ title, links }) => (
+                <div key={title} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    {title}
+                  </span>
+                  {links.map(({ href, label }) => (
+                    <a key={href} href={href} target="_blank" rel="noreferrer" style={{
+                      fontSize: 13, color: 'var(--text-tertiary)', textDecoration: 'none',
+                      transition: 'color 0.15s',
+                    }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexWrap: 'wrap', gap: 12, paddingTop: 24,
+            borderTop: '1px solid var(--border-subtle)',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+              {lang === 'pt' ? 'Feito com' : 'Made with'}{' '}
+              <span style={{ color: 'var(--anthropic-orange)', fontWeight: 700 }}>♥</span>
+              {' '}{lang === 'pt' ? 'por' : 'by'}{' '}
+              <a href="https://github.com/blpsoares" target="_blank" rel="noreferrer" style={{
+                color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 500, transition: 'color 0.15s',
+              }}
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
+              >
+                Bryan Soares
+              </a>
+            </span>
+          </div>
+        </div>
+      </footer>
+  )
+
   return (
     <div style={{
       // `min-height` is NOT set in the sessions workspace, and that is the whole fix.
@@ -4105,7 +4273,9 @@ export default function AppLayout() {
       // Measured before the fix — input at 606-642, nav starting at 608.
       //
       // Everywhere else it stays, because a short page still has to fill the window.
-      ...(inSessionsWorkspace ? {} : { minHeight: '100vh' }),
+      // The DESKTOP dashboard is on the board as well: its page scrolls inside its own panel, so
+      // the root is a window-sized frame there too, never a document that grows.
+      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: '100vh' }),
       // The REAL cause of the session pane's header/composer "scrolling away" and landing at the
       // wrong spot: `<main>` below sets an explicit `height` for the sessions workspace, but a flex
       // item with `flex: 1 1 0%` computes its used size from the flex algorithm, not from its own
@@ -4185,7 +4355,7 @@ export default function AppLayout() {
       // There is no cost on a desktop: with no dynamic toolbars `dvh` and `vh` are the same number.
       // A rule that holds on every screen does not need a breakpoint, and the breakpoint was the
       // whole defect.
-      height: inSessionsWorkspace ? '100dvh' : undefined,
+      height: inSessionsWorkspace || !isMobile ? '100dvh' : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.
@@ -4221,7 +4391,7 @@ export default function AppLayout() {
           // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
           // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
           // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
-          noBottomBorder={inSessionsWorkspace}
+          noBottomBorder
           {...(stripTrailing ? { trailing: stripTrailing, trailingFlush: true } : {})}
         />
       )}
@@ -4490,6 +4660,21 @@ export default function AppLayout() {
               minHeight: 0,
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
+          : !isMobile
+          ? {
+              // THE PAGE IS A PANEL ON THE BOARD (owner, 2026-09-27; floating-panels design): the
+              // same border, corners and outer gap as every panel in the Sessions workspace, read
+              // from `lib/panelLayout.ts` so the two cannot drift. It fills what the strip and the
+              // nav leave and SCROLLS INSIDE ITSELF, like an editor pane — all four corners stay
+              // on screen, which is the point of the design. The page's own max-width box lives
+              // one level down (`pageScrollRef`'s child), so the panel itself runs edge to edge.
+              flex: 1, minWidth: 0, minHeight: 0,
+              margin: OUTER_GAP,
+              border: PANEL_BORDER, borderRadius: PANEL_RADIUS,
+              background: 'var(--bg-surface)',
+              overflow: 'hidden', boxSizing: 'border-box',
+              display: 'flex', flexDirection: 'column',
+            }
           : {
               // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
               maxWidth: pageMaxWidth(location.pathname),
@@ -4508,7 +4693,26 @@ export default function AppLayout() {
               gap: isMobile ? 14 : 20,
             }
       }>
-        <Outlet context={appCtx} />
+        {inSessionsWorkspace || isMobile ? <Outlet context={appCtx} /> : (
+          <div ref={pageScrollRef} data-page-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+            <div style={{
+              // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
+              maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', width: '100%',
+              boxSizing: 'border-box', padding: '24px 32px',
+              // At least the panel's own height, so the footer below always sits a scroll away
+              // rather than floating up into a half-empty panel on a short page.
+              minHeight: '100%',
+              display: 'flex', flexDirection: 'column', gap: 20,
+            }}>
+              {/* Only where its tab exists (`dashboardTopBar`), so it can always be closed again. */}
+              {fleetOpen && dashboardTopBar && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
+              )}
+              <Outlet context={appCtx} />
+            </div>
+            {pageFooter}
+          </div>
+        )}
       </main>
 
       {/* Install Modal — shown once after first data load */}
@@ -4671,149 +4875,9 @@ export default function AppLayout() {
         />
       )}
 
-      {/* Footer — dashboard only. The sessions workspace is an application pane that fills the
-          window exactly and scrolls inside itself; a marketing footer under a terminal is a strip
-          of links nobody can reach without first scrolling a pane that does not scroll. */}
-      {!inSessionsWorkspace && (
-      <footer style={{
-        borderTop: '1px solid var(--border)',
-        background: 'var(--bg-surface)',
-      }}>
-        <div style={{ maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', padding: '56px 32px 36px' }}>
-
-          {/* Main row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 80, flexWrap: 'wrap', marginBottom: 48 }}>
-
-            {/* Logo only — no text */}
-            <div style={{ flexShrink: 0 }}>
-              {/* Two plates, one visible: the theme is an attribute on <html>, so CSS picks the one
-                  that suits the surface (index.css `.ag-logo-*`). */}
-              <img className="ag-logo-dark" src={brandAsset('/logo.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
-              <img className="ag-logo-light" src={brandAsset('/logo-light.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
-            </div>
-
-            {/* Description + stats + version — middle */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: '1 1 200px' }}>
-              <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>
-                {lang === 'pt'
-                  ? 'Dashboard local de uso do Claude Code. Seus dados ficam no seu computador — sem servidores, sem rastreamento.'
-                  : 'Local Claude Code usage dashboard. Your data stays on your machine — no servers, no tracking.'}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {/* Live stats pill */}
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '4px 12px', borderRadius: 20,
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                }}>
-                  <div style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: 'var(--accent-green)', boxShadow: '0 0 8px var(--accent-green)',
-                  }} />
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                    {derived.totalSessions.toLocaleString()} {lang === 'pt' ? 'sessões' : 'sessions'}
-                    {' · '}
-                    {derived.totalMessages.toLocaleString()} {lang === 'pt' ? 'mensagens' : 'messages'}
-                  </span>
-                </div>
-                {/* Version badge */}
-                <a
-                  href="https://github.com/agentistics/agentistics/releases/latest"
-                  target="_blank" rel="noreferrer"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                    padding: '4px 10px', borderRadius: 20,
-                    background: 'var(--anthropic-orange-dim)',
-                    border: '1px solid var(--anthropic-orange-dim)',
-                    fontSize: 11, color: 'var(--anthropic-orange-light)',
-                    textDecoration: 'none', fontWeight: 600,
-                    transition: 'opacity 0.15s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
-                  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-                >
-                  <Zap size={11} />
-                  v{version}
-                </a>
-              </div>
-            </div>
-
-            {/* Link columns — right */}
-            <div style={{ display: 'flex', gap: 56, flexShrink: 0, flexWrap: 'wrap' }}>
-              {([
-                {
-                  title: lang === 'pt' ? 'Projeto' : 'Project',
-                  links: [
-                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
-                    { href: 'https://github.com/agentistics/agentistics/releases', label: 'Releases' },
-                    { href: 'https://github.com/agentistics/agentistics/issues', label: 'Issues' },
-                    { href: 'https://github.com/agentistics/agentistics/pulls', label: 'Pull Requests' },
-                    { href: 'https://github.com/agentistics/agentistics#readme', label: 'README' },
-                  ],
-                },
-                {
-                  title: 'Stack',
-                  links: [
-                    { href: 'https://bun.sh', label: 'Bun' },
-                    { href: 'https://react.dev', label: 'React 19' },
-                    { href: 'https://www.typescriptlang.org', label: 'TypeScript' },
-                    { href: 'https://vitejs.dev', label: 'Vite' },
-                    { href: 'https://recharts.org', label: 'Recharts' },
-                  ],
-                },
-                {
-                  title: lang === 'pt' ? 'Comunidade' : 'Community',
-                  links: [
-                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
-                    { href: 'https://github.com/agentistics/agentistics/fork', label: 'Fork' },
-                    { href: 'https://github.com/agentistics/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
-                    { href: 'https://github.com/blpsoares', label: '@blpsoares' },
-                  ],
-                },
-              ] as { title: string; links: { href: string; label: string }[] }[]).map(({ title, links }) => (
-                <div key={title} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    {title}
-                  </span>
-                  {links.map(({ href, label }) => (
-                    <a key={href} href={href} target="_blank" rel="noreferrer" style={{
-                      fontSize: 13, color: 'var(--text-tertiary)', textDecoration: 'none',
-                      transition: 'color 0.15s',
-                    }}
-                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-                    >
-                      {label}
-                    </a>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Bottom bar */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexWrap: 'wrap', gap: 12, paddingTop: 24,
-            borderTop: '1px solid var(--border-subtle)',
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-              {lang === 'pt' ? 'Feito com' : 'Made with'}{' '}
-              <span style={{ color: 'var(--anthropic-orange)', fontWeight: 700 }}>♥</span>
-              {' '}{lang === 'pt' ? 'por' : 'by'}{' '}
-              <a href="https://github.com/blpsoares" target="_blank" rel="noreferrer" style={{
-                color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 500, transition: 'color 0.15s',
-              }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-              >
-                Bryan Soares
-              </a>
-            </span>
-          </div>
-        </div>
-      </footer>
-      )}
+      {/* The footer — below the page on a phone. On the desktop board it is the LAST thing inside
+          the page panel instead (see `<main>`), because the panel is what scrolls there. */}
+      {!inSessionsWorkspace && isMobile && pageFooter}
 
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />

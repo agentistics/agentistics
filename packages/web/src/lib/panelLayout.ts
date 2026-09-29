@@ -30,6 +30,30 @@
  */
 export const PANEL_GAP = 10
 
+/**
+ * THE OUTER FRAME GAP — a panel's own border to the window's edge, or to the header above it. See
+ * `PANEL_GAP`'s note for why it is a different figure from the inner seam and stays 6px.
+ *
+ * It lived as a local `const OUTER_GAP = 6` inside `SessionsPage.tsx` while the Sessions workspace
+ * was the only board in the app. The dashboard pages now sit on the same board (their page area is
+ * one panel on the same ground), so the figure moved here: two surfaces restating one number is how
+ * they drift apart one edit at a time.
+ */
+export const OUTER_GAP = 6
+
+/** THE PANEL CORNER — every panel on the board, in both workspaces. */
+export const PANEL_RADIUS = 10
+
+/**
+ * A card NESTED inside a panel (a KPI, a chart, a record). One step tighter than the panel it sits
+ * in, so an inner corner is never rounder than the outer one around it — the rule every nested
+ * rounded surface follows, and the reason this is not simply `PANEL_RADIUS` again.
+ */
+export const CARD_RADIUS = 8
+
+/** THE PANEL EDGE — the existing `--border` token, never a new colour. */
+export const PANEL_BORDER = '1px solid var(--border)'
+
 export interface PanelOpenState {
   leftOpen: boolean
   rightOpen: boolean
