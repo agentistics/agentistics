@@ -27,11 +27,19 @@ import {
 test('only the platform/arch pairs the release workflow publishes are self-installable', () => {
   expect(resolveUpgradeAsset('linux', 'x64', '2.5.0')).toEqual({
     asset: 'agentop',
-    url: 'https://github.com/blpsoares/agentistics/releases/download/v2.5.0/agentop',
+    url: 'https://github.com/agentistics/agentistics/releases/download/v2.5.0/agentop',
+    urls: [
+      'https://github.com/agentistics/agentistics/releases/download/v2.5.0/agentop',
+      'https://github.com/blpsoares/agentistics/releases/download/v2.5.0/agentop',
+    ],
   })
   expect(resolveUpgradeAsset('win32', 'x64', '2.5.0')).toEqual({
     asset: 'agentop.exe',
-    url: 'https://github.com/blpsoares/agentistics/releases/download/v2.5.0/agentop.exe',
+    url: 'https://github.com/agentistics/agentistics/releases/download/v2.5.0/agentop.exe',
+    urls: [
+      'https://github.com/agentistics/agentistics/releases/download/v2.5.0/agentop.exe',
+      'https://github.com/blpsoares/agentistics/releases/download/v2.5.0/agentop.exe',
+    ],
   })
 })
 
@@ -50,7 +58,7 @@ test('the URL carries the version it was GIVEN — never a default', () => {
   // An upgrade that announces one version and fetches another is the failure this signature exists
   // to make impossible, so `version` is required rather than optional.
   expect(resolveUpgradeAsset('linux', 'x64', '9.9.9')!.url)
-    .toBe('https://github.com/blpsoares/agentistics/releases/download/v9.9.9/agentop')
+    .toBe('https://github.com/agentistics/agentistics/releases/download/v9.9.9/agentop')
   expect(resolveUpgradeAsset('linux', 'x64', '1.0.0')!.url).toContain('/v1.0.0/')
 })
 

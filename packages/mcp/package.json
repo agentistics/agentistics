@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/mcp",
-  "version": "2.72.0",
+  "version": "2.73.0",
   "description": "Agentistics MCP server — Claude Code analytics for Claude Desktop and Claude Code",
   "type": "module",
   "main": "./dist/agentistics-mcp.js",
@@ -32,8 +32,8 @@
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blpsoares/agentistics.git",
+    "url": "git+https://github.com/agentistics/agentistics.git",
     "directory": "packages/mcp"
   },
-  "homepage": "https://github.com/blpsoares/agentistics"
+  "homepage": "https://github.com/agentistics/agentistics"
 }

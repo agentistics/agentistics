@@ -10,7 +10,7 @@ submitting a change.
 **Prerequisites:** [Bun](https://bun.sh) v1.0+, Node.js is not required.
 
 ```bash
-git clone https://github.com/blpsoares/agentistics.git
+git clone https://github.com/agentistics/agentistics.git
 cd agentistics
 bun install
 bun run dev      # API on :47291, UI on :47292 (Vite proxies /api automatically)
@@ -140,7 +140,7 @@ your contribution. The pull-request template asks you to tick that box.
 
 ## Reporting bugs
 
-Use the [bug report template](https://github.com/blpsoares/agentistics/issues/new?template=bug_report.yml).
+Use the [bug report template](https://github.com/agentistics/agentistics/issues/new?template=bug_report.yml).
 Include your install method, version, and steps to reproduce.
 
 ## Architecture notes
@@ -154,4 +154,4 @@ Include your install method, version, and steps to reproduce.
   embedded assets are never loaded.
 - Full module-by-module documentation lives in `CLAUDE.md` (dense, written for an AI harness) and
   `docs/*.md` (the canonical, human-and-tool-readable version) — see the
-  [wiki](https://github.com/blpsoares/agentistics/wiki) for an index.
+  [wiki](https://github.com/agentistics/agentistics/wiki) for an index.

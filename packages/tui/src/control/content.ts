@@ -113,7 +113,7 @@ const HELP_EN: ContentSection[] = [
     title: 'Central',
     rows: [
       { cmd: 'agentop central', text: '<up|init|down|logs|status|restart|pull>' },
-      { text: 'Manage the team central via Docker. In a repo checkout it uses central.sh; from the standalone binary it pulls the published image (ghcr.io/blpsoares/agentistics) and materializes a compose in ~/.agentistics/central — no clone required.' },
+      { text: 'Manage the team central via Docker. In a repo checkout it uses central.sh; from the standalone binary it pulls the published image (ghcr.io/agentistics/agentistics) and materializes a compose in ~/.agentistics/central — no clone required.' },
     ],
   },
   {
@@ -240,7 +240,7 @@ const HELP_PT: ContentSection[] = [
     title: 'Central',
     rows: [
       { cmd: 'agentop central', text: '<up|init|down|logs|status|restart|pull>' },
-      { text: 'Gerencia a central do time via Docker. Num checkout do repositório usa o central.sh; a partir do binário avulso baixa a imagem publicada (ghcr.io/blpsoares/agentistics) e materializa um compose em ~/.agentistics/central — sem precisar clonar nada.' },
+      { text: 'Gerencia a central do time via Docker. Num checkout do repositório usa o central.sh; a partir do binário avulso baixa a imagem publicada (ghcr.io/agentistics/agentistics) e materializa um compose em ~/.agentistics/central — sem precisar clonar nada.' },
     ],
   },
   {
@@ -400,7 +400,7 @@ const CHEAT_PT: ContentSection[] = [
 // Contribute — every fact below was read out of the repository, not assumed
 // ---------------------------------------------------------------------------
 
-const REPO_URL = 'https://github.com/blpsoares/agentistics'
+const REPO_URL = 'https://github.com/agentistics/agentistics'
 const ISSUES_URL = `${REPO_URL}/issues`
 const BUG_TEMPLATE_URL = `${REPO_URL}/issues/new?template=bug_report.yml`
 

@@ -1,6 +1,7 @@
 import { test, expect, beforeEach } from 'bun:test'
 import {
-  getArtifacts, getPanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
+  getArtifacts,
+  getArtifactsOf, getPanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
   setArtifactLive,
 } from './artifactsStore'
 import { resetUnsaved } from './unsavedBuffers'
@@ -112,14 +113,16 @@ test('an unchanged live fact keeps its object, so a poll does not re-render its 
   expect(getArtifacts()).not.toBe(first)
 })
 
-test('a live fact belongs to ONE session: switching drops it, and clearing another session is a no-op', () => {
+test('a live fact belongs to ONE session: a second session never clears or borrows it (split view)', () => {
   setArtifactCount('a', 2)
   setArtifactLive('a', { kind: 'wrote', text: 'x.ts' })
   setArtifactCount('b', 0)
-  expect('live' in getArtifacts()).toBe(false)
-  const before = getArtifacts()
+  expect('live' in getArtifactsOf('b')).toBe(false)
+  expect(getArtifactsOf('a').live).toEqual({ kind: 'wrote', text: 'x.ts' })
+  const bBefore = getArtifactsOf('b')
   setArtifactLive('a', null)
-  expect(getArtifacts()).toBe(before)
+  expect('live' in getArtifactsOf('a')).toBe(false)
+  expect(getArtifactsOf('b')).toBe(bBefore)
 })
 
 test('a new count for the same session keeps what it is doing', () => {

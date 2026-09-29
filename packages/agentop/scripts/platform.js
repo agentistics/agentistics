@@ -6,7 +6,10 @@
 // sync by hand. See CLAUDE.md's PKG_FILES comment in release.yml for the same
 // documented trade-off (two things that must agree, checked nowhere but here).
 
-const REPO = 'blpsoares/agentistics';
+// The repository moved from blpsoares/ to agentistics/. Both owners are tried, new first, so a
+// package published on either side of the transfer can still find its binary.
+const REPOS = ['agentistics/agentistics', 'blpsoares/agentistics'];
+const REPO = REPOS[0];
 const BINARY = 'agentop';
 
 // node's process.platform/process.arch -> the `uname -s` / `uname -m` strings
@@ -36,7 +39,7 @@ function displayArch(arch) {
  * @param {string} platform - process.platform value
  * @param {string} arch - process.arch value
  * @param {string} version - the npm package's own version (no leading "v")
- * @returns {{ok: true, url: string} | {ok: false, message: string}}
+ * @returns {{ok: true, url: string, urls: string[]} | {ok: false, message: string}}
  */
 function resolveAsset(platform, arch, version) {
   if (platform !== 'linux') {
@@ -53,10 +56,8 @@ function resolveAsset(platform, arch, version) {
     };
   }
 
-  return {
-    ok: true,
-    url: `https://github.com/${REPO}/releases/download/v${version}/${BINARY}`,
-  };
+  const urls = REPOS.map((r) => `https://github.com/${r}/releases/download/v${version}/${BINARY}`);
+  return { ok: true, url: urls[0], urls };
 }
 
 // True when the ancestor package.json (the root of whatever checkout this
@@ -79,4 +80,4 @@ function isMonorepoCheckout(ancestorPkg) {
   return ancestorPkg != null && ancestorPkg.name === 'agentistics';
 }
 
-module.exports = { resolveAsset, isMonorepoCheckout, REPO, BINARY };
+module.exports = { resolveAsset, isMonorepoCheckout, REPO, REPOS, BINARY };

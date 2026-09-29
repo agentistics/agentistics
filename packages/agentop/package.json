@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/agentop",
-  "version": "2.72.0",
+  "version": "2.73.0",
   "description": "agentop CLI — npm install for the same native binary distributed via install.sh (Linux x86_64 only)",
   "type": "commonjs",
   "bin": {
@@ -36,8 +36,8 @@
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blpsoares/agentistics.git",
+    "url": "git+https://github.com/agentistics/agentistics.git",
     "directory": "packages/agentop"
   },
-  "homepage": "https://github.com/blpsoares/agentistics"
+  "homepage": "https://github.com/agentistics/agentistics"
 }

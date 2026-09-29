@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report privately, not as a public issue: open a
-[GitHub security advisory](https://github.com/blpsoares/agentistics/security/advisories/new)
+[GitHub security advisory](https://github.com/agentistics/agentistics/security/advisories/new)
 on this repository. That channel is private until a fix ships.
 
 Useful in a report: the version or commit, the deployment shape (solo machine / LAN central /

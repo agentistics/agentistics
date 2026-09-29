@@ -14,11 +14,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/blpsoares/agentistics/releases/latest">
-    <img src="https://img.shields.io/github/v/release/blpsoares/agentistics?label=release&color=f97316" alt="Latest release" />
+  <a href="https://github.com/agentistics/agentistics/releases/latest">
+    <img src="https://img.shields.io/github/v/release/agentistics/agentistics?label=release&color=f97316" alt="Latest release" />
   </a>
-  <a href="https://github.com/blpsoares/agentistics/actions/workflows/release.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/blpsoares/agentistics/release.yml?label=build" alt="Build status" />
+  <a href="https://github.com/agentistics/agentistics/actions/workflows/release.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/agentistics/agentistics/release.yml?label=build" alt="Build status" />
   </a>
   <a href="LICENSING.md">
     <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-green" alt="License: FSL-1.1-ALv2" />
@@ -111,7 +111,7 @@ Open the dashboard at **http://localhost:47292** (the API + MCP endpoint stays o
 
 ### Windows
 
-Download the latest `.msi` or `.exe` from the [Releases page](https://github.com/blpsoares/agentistics/releases/latest).
+Download the latest `.msi` or `.exe` from the [Releases page](https://github.com/agentistics/agentistics/releases/latest).
 On first launch agentistics detects your Claude Code data path automatically (Windows native or WSL).
 
 > **SmartScreen warning?** "More info → Run anyway". The binary is not code-signed yet.
@@ -119,7 +119,7 @@ On first launch agentistics detects your Claude Code data path automatically (Wi
 ### From source
 
 ```bash
-git clone https://github.com/blpsoares/agentistics.git
+git clone https://github.com/agentistics/agentistics.git
 cd agentistics && bun install
 bun run dev            # API (47291) + UI dev server (47292)
 ```
@@ -455,11 +455,11 @@ full picture and [TRADEMARKS.md](TRADEMARKS.md) for the name and logo.
 ## Star History
 
 <p align="center">
-  <a href="https://star-history.com/#blpsoares/agentistics&Date">
+  <a href="https://star-history.com/#agentistics/agentistics&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=blpsoares/agentistics&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=blpsoares/agentistics&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=blpsoares/agentistics&type=Date" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=agentistics/agentistics&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=agentistics/agentistics&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=agentistics/agentistics&type=Date" />
     </picture>
   </a>
 </p>

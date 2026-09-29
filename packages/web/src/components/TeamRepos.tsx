@@ -53,7 +53,7 @@ function buildStepOidc(): string {
         env:
           AGENTISTICS_CENTRAL_URL: \${{ vars.AGENTISTICS_CENTRAL_URL }}
         run: |
-          curl -fsSL "https://github.com/blpsoares/agentistics/releases/latest/download/agentop" -o agentop
+          curl -fsSL "https://github.com/agentistics/agentistics/releases/latest/download/agentop" -o agentop
           chmod +x agentop
           ./agentop ci-push`
 }
@@ -67,7 +67,7 @@ function buildStepToken(): string {
     AGENTISTICS_CENTRAL_URL: \${{ vars.AGENTISTICS_CENTRAL_URL }}
     AGENTISTICS_CI_TOKEN: \${{ secrets.AGENTISTICS_CI_TOKEN }}
   run: |
-    curl -fsSL "https://github.com/blpsoares/agentistics/releases/latest/download/agentop" -o agentop
+    curl -fsSL "https://github.com/agentistics/agentistics/releases/latest/download/agentop" -o agentop
     chmod +x agentop
     ./agentop ci-push`
 }

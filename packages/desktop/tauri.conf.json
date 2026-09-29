@@ -28,6 +28,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE3NzY3OTM4NzA5MjVCQQpSV1M2SlFtSGsyZDNBVTllbDdZV3VZWFpjeXlTeXZOcEtGa2d5ZUcvR3hzTHkxUjJFeEF5TUJyVAo=",
       "endpoints": [
+        "https://github.com/agentistics/agentistics/releases/latest/download/latest.json",
         "https://github.com/blpsoares/agentistics/releases/latest/download/latest.json"
       ]
     }

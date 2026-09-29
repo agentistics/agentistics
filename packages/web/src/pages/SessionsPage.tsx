@@ -27,7 +27,9 @@ import {
   X as XIcon, ArrowRight,
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
-import { PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
+import { PanelGap, PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
+import { SplitPaneHeader } from '../components/sessions/SplitPaneHeader'
+import { mainPaneWidth, parseSplitRatio, ratioFromWidth, SPLIT_DEFAULT_RATIO, SPLIT_MIN_PX, SPLIT_RATIO_KEY } from '../lib/splitLayout'
 import { activeJunctions, isDragEndEvent, junctionHitRect, PANEL_GAP } from '../lib/panelLayout'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
@@ -82,6 +84,8 @@ import {
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
+import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
+import { closePane, readSplitRoute, replaceInPane, splitHref, SPLIT_VIEW_PARAM, type SplitRoute } from '../lib/splitRoute'
 import { useLeftAsideEdge } from '../lib/leftAsideEdge'
 import { useLeftAsideOpen } from '../lib/leftAsideOpen'
 import { useViewportWidth } from '../hooks/useViewportWidth'
@@ -212,7 +216,106 @@ export function mountStudioHostPanel(params: StudioHostMountParams): ReactElemen
   })
 }
 
+/**
+ * One side of the split view: the scope every store inside it reads (`lib/paneScope.ts`), and the
+ * CAPTURE-phase mark that makes it the active pane before any handler inside it runs — so a pick
+ * from the list, a keyboard shortcut or an "open the Gallery" note lands in the side the person is
+ * working in.
+ */
+function PaneFrame({ pane, style, children }: { pane: PaneId; style: CSSProperties; children: ReactNode }) {
+  const mark = () => setActivePane(pane)
+  return (
+    <PaneScope pane={pane}>
+      <div
+        data-split-pane={pane}
+        onPointerDownCapture={mark}
+        onFocusCapture={mark}
+        style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, ...style }}
+      >
+        {children}
+      </div>
+    </PaneScope>
+  )
+}
+
+/**
+ * THE SESSIONS WORKSPACE — one session, or two side by side.
+ *
+ * The main session is the route's own `/sessions/:id`; the second is `?split=<id>`
+ * (`lib/splitRoute.ts`). Each side is a whole `SessionsPageBody` — its own header, chat and
+ * composer, artifacts rail, bottom band and floating windows — scoped by `PaneFrame`, and the gap
+ * between them is a resize handle, as every other seam in the floating-panels design is. Never more
+ * than two. A phone never splits: there the route's session is the only one, exactly as before.
+ */
 export default function SessionsPage() {
+  const { lang } = useOutletContext<AppContext>()
+  const { sessionId } = useParams()
+  const [search] = useSearchParams()
+  const isMobile = useIsMobile()
+  const route = readSplitRoute(sessionId, search)
+  const splitId = isMobile ? null : route.split
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const [rowWidth, setRowWidth] = useState(0)
+  const [ratio, setRatio] = useState(() => {
+    try { return parseSplitRatio(localStorage.getItem(SPLIT_RATIO_KEY)) } catch { return SPLIT_DEFAULT_RATIO }
+  })
+
+  useEffect(() => { if (splitId === null) setActivePane('main') }, [splitId])
+  useLayoutEffect(() => {
+    const el = rowRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width
+      if (typeof w === 'number') setRowWidth(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [splitId])
+
+  if (splitId === null) {
+    return <SessionsPageBody pane="main" sessionId={sessionId} splitRoute={null} publishesRightEdge />
+  }
+
+  const room = Math.max(0, rowWidth - PANEL_GAP)
+  const mainWidth = room > 0 ? mainPaneWidth(ratio, room) : 0
+  return (
+    <div ref={rowRef} style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
+      <PaneFrame pane="main" style={{ flex: room > 0 ? `0 0 ${mainWidth}px` : 1 }}>
+        <SessionsPageBody pane="main" sessionId={sessionId} splitRoute={route} publishesRightEdge={false} />
+      </PaneFrame>
+      <PanelGap
+        orientation="vertical"
+        label={lang === 'pt' ? 'Redimensionar a divisão entre as sessões' : 'Resize the split between the sessions'}
+        value={mainWidth}
+        min={SPLIT_MIN_PX}
+        max={Math.max(SPLIT_MIN_PX, room - SPLIT_MIN_PX)}
+        sign={1}
+        onChange={w => setRatio(ratioFromWidth(w, room))}
+        onCommit={w => {
+          const next = ratioFromWidth(w, room)
+          try { localStorage.setItem(SPLIT_RATIO_KEY, String(next)) } catch { /* a convenience */ }
+        }}
+      />
+      <PaneFrame pane="split" style={{ flex: 1 }}>
+        <SessionsPageBody key={splitId} pane="split" sessionId={splitId} splitRoute={route} publishesRightEdge />
+      </PaneFrame>
+    </div>
+  )
+}
+
+interface SessionsPageBodyProps {
+  /** Which side of a split view this is (`lib/paneScope.ts`) — `'main'` outside a split. */
+  pane: PaneId
+  /** The session this body shows: the route's own for the main pane, `?split=` for the other. */
+  sessionId: string | undefined
+  /** The whole route, ONLY while the workspace is split (`lib/splitRoute.ts`), so every gesture —
+   *  a reopen, a close, a session that disappears — lands in this pane's own place. */
+  splitRoute: SplitRoute | null
+  /** Only the RIGHTMOST pane reports the right edge the App's Filtros tab anchors to. */
+  publishesRightEdge: boolean
+}
+
+function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: SessionsPageBodyProps) {
   const ctx = useOutletContext<AppContext>()
   const {
     lang, isCentral, theme, filters, setFilters, activeOnly, setActiveOnly,
@@ -220,7 +323,6 @@ export default function SessionsPage() {
     data, currency, brlRate, sessionPresets,
   } = ctx
   const pt = lang === 'pt'
-  const { sessionId } = useParams()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   /**
@@ -360,7 +462,7 @@ export default function SessionsPage() {
    * call sits in this component moved, which is safe precisely because nothing between here and its
    * old position is a conditional hook call.
    */
-  const { critical: hardwareCritical, ramUnderPressure } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  const { critical: hardwareCritical, ramUnderPressure } = useHardwarePressureWatch(pt ? 'pt' : 'en', pane === 'main')
   const { candidates: idleCandidates } = useIdleSessions({
     rows: fleet.rows,
     finishedTasks: fleet.finishedTasks,
@@ -369,7 +471,7 @@ export default function SessionsPage() {
     // Never on a central (it relays another machine's fleet; the feature is local-only), never while
     // the poll itself cannot be trusted, and never before the first answer has arrived — the same
     // three facts `unsupported`/`loading` already state elsewhere on this page.
-    enabled: !isCentral && !pollUnsupported && !loading,
+    enabled: pane === 'main' && !isCentral && !pollUnsupported && !loading,
   })
   const [idleOpen, setIdleOpen] = useState(false)
   useEffect(() => {
@@ -406,7 +508,8 @@ export default function SessionsPage() {
    * already means "leave the terminal". `?pane=` says which screen; an unrecognised value resolves
    * to the assistant rather than blanking one (`readTerminalPane`).
    */
-  const dedicatedTerminal = useLocation().pathname.endsWith('/terminal')
+  const onTerminalRoute = useLocation().pathname.endsWith('/terminal')
+  const dedicatedTerminal = pane === 'main' && onTerminalRoute
   const dedicatedPane = readTerminalPane(useSearchParams()[0].get('pane'))
   const shellEnabled = ctx.shellEnabled === true
   // `CAPS.localShell` alone, never narrowed by the preference — the disabled-shell empty state's
@@ -459,7 +562,20 @@ export default function SessionsPage() {
     const r = reopenedSessionRoute(id, selected
       ? { id: selected.id, harness: selected.harness, title: selected.title }
       : undefined)
+    // SPLIT: only THIS pane follows the new id; the other side is left exactly where it is. The
+    // arrival state rides along for the main pane, whose route it describes.
+    if (splitRoute) {
+      navigate(splitHref(replaceInPane(splitRoute, pane, id), viewParams), pane === 'main' ? r.options : undefined)
+      return
+    }
     navigate(r.path, r.options)
+  }
+
+  /** This pane's session is gone or was closed: in a split only this side closes (the main pane's
+   *  closing promotes the other session); otherwise back to the fleet, as always. */
+  const closeThisPane = () => {
+    if (splitRoute) navigate(splitHref(closePane(splitRoute, pane), viewParams))
+    else navigate('/sessions')
   }
 
   /**
@@ -536,7 +652,8 @@ export default function SessionsPage() {
    * fixed. `arrivalFor` returns the previous record unchanged for the same id, so it settles at
    * once instead of looping.
    */
-  const creatingState = (useLocation().state as { creating?: { harness?: string; label?: string } } | null)?.creating
+  const routeCreatingState = (useLocation().state as { creating?: { harness?: string; label?: string } } | null)?.creating
+  const creatingState = pane === 'main' ? routeCreatingState : undefined
   const [arrival, setArrival] = useState<SessionArrival | null>(null)
   const nextArrival = arrivalFor(arrival, sessionId, creatingState !== undefined, Date.now())
   if (nextArrival !== arrival) setArrival(nextArrival)
@@ -566,11 +683,13 @@ export default function SessionsPage() {
   // prop threaded down from there: the header and this page can never disagree about which view is
   // showing without a context wire built just to carry two strings.
   const [viewParams, setViewParams] = useSearchParams()
-  const sessionView: SessionView = viewParams.get('view') === 'terminal' ? 'terminal' : 'chat'
+  // Per pane: the split side's own choice is `?splitView=`, beside the main pane's `?view=`.
+  const viewKey = pane === 'split' ? SPLIT_VIEW_PARAM : 'view'
+  const sessionView: SessionView = viewParams.get(viewKey) === 'terminal' ? 'terminal' : 'chat'
   const setSessionView = (v: SessionView) => setViewParams(prev => {
     const next = new URLSearchParams(prev)
-    if (v === 'chat') next.delete('view')
-    else next.set('view', v)
+    if (v === 'chat') next.delete(viewKey)
+    else next.set(viewKey, v)
     return next
   }, { replace: true })
 
@@ -775,8 +894,8 @@ export default function SessionsPage() {
    * reads it to take the floating panels out of their docked slots for every consumer at once.
    */
   const floatingKey = !isMobile && selected ? sessionIdentityKey(selected) : null
-  useLayoutEffect(() => { setFloatingSession(floatingKey) }, [floatingKey])
-  useLayoutEffect(() => () => setFloatingSession(null), [])
+  useLayoutEffect(() => { setFloatingSession(floatingKey, pane) }, [floatingKey, pane])
+  useLayoutEffect(() => () => setFloatingSession(null, pane), [pane])
   const floating = useFloatingPanels()
   const panelFocus = usePanelFocusRequest()
   const panelGates: PanelGates = { editorEnabled, shellEnabled, relayed }
@@ -1818,8 +1937,10 @@ export default function SessionsPage() {
   const leaveGuard = (
     <UnsavedChangesGuard
       lang={pt ? 'pt' : 'en'}
-      sessionKeys={[sessionId, selected?.id, selected?.conversationId]
+      // SPLIT: one guard, on the main pane, answering for BOTH sessions (`active` below).
+      sessionKeys={[sessionId, selected?.id, selected?.conversationId, splitRoute?.split ?? undefined]
         .filter((k): k is string => typeof k === 'string' && k !== '')}
+      active={pane === 'main'}
     />
   )
 
@@ -1830,7 +1951,7 @@ export default function SessionsPage() {
       lang={pt ? 'pt' : 'en'}
       theme={theme === 'light' ? 'light' : 'dark'}
       act={act}
-      onGone={() => navigate('/sessions')}
+      onGone={closeThisPane}
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
@@ -2158,16 +2279,16 @@ export default function SessionsPage() {
       // The rail's LIVE width (owner, 2026-09-21) — a rail dragged out to its ceiling must push
       // this fallback edge with it, or the Filtros chips paint back into the wider icons exactly
       // the way the original regression `closedRightEdge`'s own header describes did.
-      setRightAsideEdge(closedRightEdge(!isMobile && selected !== undefined, viewportWidth, rawSlotLayout.railWidth))
+      if (publishesRightEdge) setRightAsideEdge(closedRightEdge(!isMobile && selected !== undefined, viewportWidth, rawSlotLayout.railWidth))
       return
     }
     if (artShell === 'fullscreen' || !el) {
-      setRightAsideEdge(null)
+      if (publishesRightEdge) setRightAsideEdge(null)
       return
     }
     const report = () => {
       const rect = el.getBoundingClientRect()
-      setRightAsideEdge(restingLeftEdge(rect.left, getComputedStyle(el).transform))
+      if (publishesRightEdge) setRightAsideEdge(restingLeftEdge(rect.left, getComputedStyle(el).transform))
     }
     report()
     const onTransformSettled = (e: TransitionEvent) => {
@@ -2186,7 +2307,7 @@ export default function SessionsPage() {
       el.removeEventListener('transitioncancel', onTransformSettled)
     }
   }, [isMobile, artShell, splitRoom, asideIn, selected, viewportWidth, rawSlotLayout.railWidth])
-  useEffect(() => () => setRightAsideEdge(null), [])
+  useEffect(() => () => { if (publishesRightEdge) setRightAsideEdge(null) }, [publishesRightEdge])
 
   /**
    * THE NARROW-WIDTH OVERLAY'S CLICK-OUTSIDE-MINIMIZES (spec §11 items 2-3) — `artShell ===
@@ -2298,7 +2419,7 @@ export default function SessionsPage() {
    */
   const [bandGapY, setBandGapY] = useState<number | null>(null)
   const measureBandGapY = useCallback(() => {
-    const el = document.getElementById('ag-gap-band-height')
+    const el = document.getElementById(paneDomId('ag-gap-band-height', pane))
     if (!el) { setBandGapY(null); return }
     const r = el.getBoundingClientRect()
     setBandGapY(r.top + r.height / 2)
@@ -2935,6 +3056,29 @@ export default function SessionsPage() {
 
   return (
     <>
+    {splitRoute && selected ? (
+      <SplitPaneHeader
+        pane={pane}
+        lang={pt ? 'pt' : 'en'}
+        session={selected}
+        {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
+        meta={selectedMeta}
+        currency={currency}
+        brlRate={brlRate}
+        costBasis={ctx.costBasis}
+        planFactor={sessionPlanFactor(ctx.planBasis.basis, selected.harness)}
+        {...(sessionMetrics ? { onOpenFull: () => openArtifacts('metrics', undefined, pane) } : {})}
+        onOpenLive={ref => openArtifacts('live', ref, pane)}
+        onOpenTask={ref => navigate(`/tasks/${encodeURIComponent(ref)}`)}
+        onLinked={refresh}
+        act={act}
+        onGone={closeThisPane}
+        onOpened={goToReopened}
+        onClosePane={closeThisPane}
+        view={sessionView}
+        onViewChange={setSessionView}
+      />
+    ) : null}
     {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`
         (both its desktop and mobile-list instances), never here — see that card's own header. This
         page still owns the REVIEW MODAL below, and the ONE known gap stated for the old banner still
@@ -3029,7 +3173,7 @@ export default function SessionsPage() {
             title={floatingTitle}
             onRaise={raisePanel}
             onPlace={placePanel}
-            onArea={setFloatingArea}
+            onArea={area => setFloatingArea(area, pane)}
           />
         )}
       </div>
@@ -3047,7 +3191,7 @@ export default function SessionsPage() {
           // A stable id — the bottom-right T-junction (below) replays a synthetic `mousedown` on
           // this exact element (`PanelGap.tsx`'s `armGap`) to arm its own window-level drag
           // listener, reusing `dragArt`/`shownArtWidth`'s own clamp/persistence verbatim.
-          id="ag-gap-aside-right"
+          id={paneDomId('ag-gap-aside-right', pane)}
           onMouseDown={e => {
             // From the width on screen, not the remembered one: a clamped panel would otherwise
             // jump to its stored width the moment the handle is touched.
@@ -3069,17 +3213,17 @@ export default function SessionsPage() {
           size={JUNCTION_SIZE}
           left={rightAsideEdgeNow - PANEL_GAP / 2}
           top={bandGapY}
-          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-right')}
+          onDown={onJunctionDown(paneDomId('ag-gap-band-height', pane), paneDomId('ag-gap-aside-right', pane))}
         />
       )}
-      {bandGapY !== null && junctionIds.includes('bottom-left') && (
+      {pane === 'main' && bandGapY !== null && junctionIds.includes('bottom-left') && (
         <PanelJunction
           key="bottom-left"
           label={pt ? 'Redimensionar altura da barra e largura da lista' : 'Resize band height and list width'}
           size={JUNCTION_SIZE}
           left={leftAsideEdge - PANEL_GAP / 2}
           top={bandGapY}
-          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-left')}
+          onDown={onJunctionDown(paneDomId('ag-gap-band-height', pane), 'ag-gap-aside-left')}
         />
       )}
       {/* THE ONE PANE. See the block comment at the top of this section. */}
@@ -3239,7 +3383,7 @@ export default function SessionsPage() {
           pane holds the question asked before the pane is dropped — see `leaveGuard`. */}
       {leaveGuard}
     </div>
-    {idleOpen && (
+    {pane === 'main' && idleOpen && (
       <IdleSessionsModal
         lang={pt ? 'pt' : 'en'}
         candidates={idleCandidates}
@@ -3253,3 +3397,4 @@ export default function SessionsPage() {
     </>
   )
 }
+
