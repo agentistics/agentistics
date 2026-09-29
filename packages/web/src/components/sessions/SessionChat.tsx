@@ -312,7 +312,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * broken, which is exactly what was reported.
    */
   const [heard, setHeard] = useState('')
-  const recognitionRef = useRef<{ stop: () => void } | null>(null)
+  const recognitionRef = useRef<{ stop: () => void; abort?: () => void; onresult: unknown } | null>(null)
   const dictation = useMemo(
     () => dictationSupport(typeof window === 'undefined' ? undefined : (window as never), pt ? 'pt' : 'en'),
     [pt],
@@ -379,6 +379,26 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       setListening(false)
     }
   }, [listening, pt])
+
+  /**
+   * SENDING ENDS THE DICTATION.
+   *
+   * The microphone used to stay on after a send, so it went on listening into a composer that had
+   * just been emptied: the tail of a sentence still being recognised landed in the NEXT draft, and
+   * the tab's microphone indicator stayed lit for a message already delivered. What was said up to
+   * the send is what was sent — so the recogniser is detached FIRST (a result arriving on the way
+   * down would otherwise be appended to the fresh draft) and then aborted, which, unlike `stop`,
+   * discards whatever it had not settled on yet. Pressing the microphone again starts a new one.
+   */
+  const endDictationForSend = useCallback(() => {
+    const rec = recognitionRef.current
+    if (!rec) return
+    rec.onresult = null
+    recognitionRef.current = null
+    try { (rec.abort ?? rec.stop).call(rec) } catch { /* already ended */ }
+    setListening(false)
+    setHeard('')
+  }, [])
 
   // A click anywhere else closes the model menu. Requiring a second click on the button is the
   // behaviour of a toggle, and a dropdown is not one — every menu in this app and every menu the
@@ -1510,6 +1530,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           : 'This session is not taking messages right now. If it has stopped, use Reopen.'))
       return
     }
+    // The message is going out: the microphone stops with it — see `endDictationForSend`.
+    endDictationForSend()
     // Paths first, on their own lines, then what was typed — the assistant reads the files it is
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
