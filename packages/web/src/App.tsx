@@ -3838,6 +3838,80 @@ export default function AppLayout() {
    * MOBILE IS UNTOUCHED. The strip is a desktop element; the phone keeps its collapsible filter
    * band and its bottom nav, which are sized for a viewport this row would not fit in.
    */
+  /**
+   * The expanded "Estatísticas" strip. It used to open UNDER its tab as a floating overlay, which on
+   * every page sat over the page's own top — its title, "New tag", the compare tabs. On the board it
+   * takes its OWN row instead: the first thing inside the page panel (see `<main>`), pushing the page
+   * down rather than covering it, and scrolling with it. The tab that toggles it still hangs from the
+   * panel's top edge (`dashboardTopBar`).
+   */
+  const fleetStrip = (() => {
+    const sep = <span style={{ color: 'var(--border)' }}>·</span>
+    const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
+    return (
+    <div style={{
+      display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '2px 9px',
+      padding: '7px 12px', borderRadius: 'var(--radius-md)', maxWidth: '100%', boxSizing: 'border-box',
+      border: '1px solid var(--border)', background: 'var(--bg-card)',
+      fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
+    }}>
+      {/* WHAT IS ON SCREEN, first — the totals the filters actually produced. They
+          lead because they are the numbers that move when you touch a filter;
+          everything after them is the standing context of the whole machine.
+
+          The group is NAMED. Without the word this strip would carry two counts of
+          "sessions" — this one narrowed by the filters, the one inside `fleetSince`
+          counting every session ever recorded — and on the machine this was reported
+          from they happened to be the same number, which is exactly the coincidence
+          that makes an unlabelled pair impossible to tell apart later. */}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
+          {lang === 'pt' ? 'No filtro' : 'In view'}
+        </span>
+        <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
+        <span style={{ opacity: 0.35 }}>·</span>
+        <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
+        <span style={{ opacity: 0.35 }}>·</span>
+        <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
+      </span>
+      {sep}
+      <span>{lang === 'pt' ? 'Atualizado em' : 'Updated'} <span style={{ color: 'var(--text-secondary)' }}>{fleetUpdated}</span></span>
+      {fleetSince && (<>{sep}<span style={{ color: 'var(--text-secondary)' }}>{fleetSince}</span></>)}
+      {isCentral && (<>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Users size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{memberCount} {lang === 'pt' ? (memberCount === 1 ? 'membro' : 'membros') : (memberCount === 1 ? 'member' : 'members')}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
+        </span>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Server size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{machineCount} {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas online' : 'Machines online'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas offline' : 'Machines offline'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
+        </span>
+        {sep}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Users size={11} style={iconSt} />
+          <span style={{ color: 'var(--text-secondary)' }}>{teamCount} {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
+        </span>
+      </>)}
+      {sep}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <FolderOpen size={11} style={iconSt} />
+        <span style={{ color: 'var(--text-secondary)' }}>{projectCount} {lang === 'pt' ? (projectCount === 1 ? 'projeto' : 'projetos') : (projectCount === 1 ? 'project' : 'projects')}</span>
+      </span>
+      {sep}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <GitBranch size={11} style={iconSt} />
+        <span style={{ color: 'var(--text-secondary)' }}>{repoCount} {lang === 'pt' ? (repoCount === 1 ? 'repositório' : 'repositórios') : (repoCount === 1 ? 'repository' : 'repositories')}</span>
+      </span>
+    </div>
+    )
+  })()
+
   const dashboardTopBar = (!inSessionsWorkspace && !isMobile && !isCustomPage) ? (
     <div style={{
       // Full width, for the reason the sessions strip records: a bar centred in the body's box
@@ -3974,13 +4048,12 @@ export default function AppLayout() {
       )}
       {/* The collapsible "fleet stats" tab, which hangs BELOW this row (position: absolute,
           top: 100%) and is therefore anchored to the fixed strip now rather than to the sticky
-          header that used to hold it. Expands to updated/since + members/machines/teams/projects/
-          repos. Dashboard only — these are STORED metrics, and a live fleet already states its own
+          header that used to hold it. It is only the TOGGLE: the strip it opens (updated/since +
+          members/machines/teams/projects/repos) is `fleetStrip`, drawn in its own row inside the
+          page panel. Dashboard only — these are STORED metrics, and a live fleet already states its own
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
       {(() => {
-        const sep = <span style={{ color: 'var(--border)' }}>·</span>
-        const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
         return (
           // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
           // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that
@@ -4002,68 +4075,6 @@ export default function AppLayout() {
                   {lang === 'pt' ? 'Estatísticas' : 'Stats'}
                   {fleetOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                 </button>
-                {fleetOpen && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '2px 9px',
-                    marginTop: 4, padding: '7px 12px', borderRadius: 8, maxWidth: '80vw',
-                    border: '1px solid var(--border)', background: 'var(--bg-surface)', boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-                    fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
-                  }}>
-                    {/* WHAT IS ON SCREEN, first — the totals the filters actually produced. They
-                        lead because they are the numbers that move when you touch a filter;
-                        everything after them is the standing context of the whole machine.
-
-                        The group is NAMED. Without the word this strip would carry two counts of
-                        "sessions" — this one narrowed by the filters, the one inside `fleetSince`
-                        counting every session ever recorded — and on the machine this was reported
-                        from they happened to be the same number, which is exactly the coincidence
-                        that makes an unlabelled pair impossible to tell apart later. */}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
-                        {lang === 'pt' ? 'No filtro' : 'In view'}
-                      </span>
-                      <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
-                      <span style={{ opacity: 0.35 }}>·</span>
-                      <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
-                      <span style={{ opacity: 0.35 }}>·</span>
-                      <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
-                    </span>
-                    {sep}
-                    <span>{lang === 'pt' ? 'Atualizado em' : 'Updated'} <span style={{ color: 'var(--text-secondary)' }}>{fleetUpdated}</span></span>
-                    {fleetSince && (<>{sep}<span style={{ color: 'var(--text-secondary)' }}>{fleetSince}</span></>)}
-                    {isCentral && (<>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Users size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{memberCount} {lang === 'pt' ? (memberCount === 1 ? 'membro' : 'membros') : (memberCount === 1 ? 'member' : 'members')}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
-                      </span>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Server size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{machineCount} {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas online' : 'Machines online'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas offline' : 'Machines offline'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
-                      </span>
-                      {sep}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <Users size={11} style={iconSt} />
-                        <span style={{ color: 'var(--text-secondary)' }}>{teamCount} {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
-                      </span>
-                    </>)}
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <FolderOpen size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{projectCount} {lang === 'pt' ? (projectCount === 1 ? 'projeto' : 'projetos') : (projectCount === 1 ? 'project' : 'projects')}</span>
-                    </span>
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <GitBranch size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{repoCount} {lang === 'pt' ? (repoCount === 1 ? 'repositório' : 'repositórios') : (repoCount === 1 ? 'repository' : 'repositories')}</span>
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -4680,6 +4691,10 @@ export default function AppLayout() {
               minHeight: '100%',
               display: 'flex', flexDirection: 'column', gap: 20,
             }}>
+              {/* Only where its tab exists (`dashboardTopBar`), so it can always be closed again. */}
+              {fleetOpen && dashboardTopBar && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
+              )}
               <Outlet context={appCtx} />
             </div>
             {pageFooter}
