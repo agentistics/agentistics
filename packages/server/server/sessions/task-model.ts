@@ -617,6 +617,32 @@ export interface HistoricalSession {
   note?: string
 }
 
+/**
+ * A NATIVE runtime session (`@agentistics/runtime`, `agentop code`) filed under a task (harness TUI
+ * D-TUI-6: a session the `code` tab starts is always on the board).
+ *
+ * WHY a record of its own and not a `HistoricalSession`: a native session has no registry row (it is
+ * not a tmux session) AND no `SessionMeta` in the consolidate store (that store is built from harness
+ * transcripts; the native runtime writes its own sqlite store), so `attachConversation` refuses it
+ * with `no_such_conversation` and `attachSession` finds no row. This is the smallest record that
+ * lets the board say "this delivery has a native session" and lets the session name its task back.
+ *
+ * It deliberately does NOT enter rollups: there is no meta to price, so a native session contributes
+ * no cost/tokens/rounds to its task (P1 scope). The board therefore never shows a confident number
+ * for it — it shows the link only. ONE LINK PER SESSION: `id` is derived from `sessionId`, so a
+ * second filing MOVES it, exactly like filing a registry row or a historical conversation.
+ */
+export interface NativeSessionLink {
+  /** `native:<sessionId>` — derived (`nativeLinkId`), never chosen by a caller. */
+  id: string
+  sessionId: string
+  taskId: string
+  subtaskId?: string
+  /** When the filing was MADE, ISO. */
+  linkedAt: string
+  title?: string
+}
+
 export interface TaskBook {
   tasks: Task[]
   attempts: Attempt[]
@@ -628,6 +654,11 @@ export interface TaskBook {
    * Always an array on a read (a book written before this existed carries none).
    */
   historicalSessions: HistoricalSession[]
+  /**
+   * Native runtime sessions filed on a task — see `NativeSessionLink`. Always an array on a read (a
+   * book written before this existed carries none).
+   */
+  nativeSessions: NativeSessionLink[]
   /**
    * The status VOCABULARY — see `@agentistics/core`'s `taskStatus.ts`. Absent or empty means "never
    * seeded yet"; `task-source.ts`'s `ensureStatusesSeeded` fills it in, once, the first time the
@@ -658,6 +689,10 @@ export interface TaskBook {
 }
 
 /** The id of the ONE historical link a conversation can hold. */
+export function nativeLinkId(sessionId: string): string {
+  return `native:${sessionId}`
+}
+
 export function historicalLinkId(conversationId: string): string {
   return `hist:${conversationId}`
 }

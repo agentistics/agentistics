@@ -11,7 +11,7 @@ import {
   canDeleteStatus, isKnownStatusId, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
-import { historicalLinkId, type HistoricalSession } from './task-model'
+import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink } from './task-model'
 import { planConversationFiling } from './task-historical'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
@@ -1032,6 +1032,91 @@ export async function attachConversation(
     ok: true, id: link.id, conversationId: conversation, harness: conv.harness,
     ...(movedFrom ? { movedFrom } : {}),
   }
+}
+
+/**
+ * File a NATIVE runtime session (`agentop code`, the cockpit's `code` tab) under a task.
+ *
+ * Harness TUI D-TUI-6: a session the TUI starts is ALWAYS on the board. `attachSession` cannot take
+ * it (no registry row — a native session is not a tmux session) and `attachConversation` refuses it
+ * (`no_such_conversation` — the consolidate store is built from harness transcripts, and the native
+ * runtime writes its own sqlite store), so it has a record of its own (`NativeSessionLink`).
+ *
+ * It is a MOVE (one link per session, `movedFrom` says where it came from), it refuses a CLOSED-as-
+ * done task (a delivery that is finished takes no new work), and it advances a `backlog`/`todo` task
+ * to `in_progress` exactly like `attachConversation` — filing a session IS the evidence work began.
+ *
+ * P1 SCOPE, stated so nobody reads a zero into it: the link does NOT enter any rollup. There is no
+ * `SessionMeta` for a native session, so nothing can price it — the board shows the LINK and no
+ * number, never a confident 0.
+ */
+export type AttachNativeResult =
+  | { ok: true; id: string; sessionId: string; movedFrom?: FilingTarget }
+  | {
+    ok: false
+    reason: 'no_such_task' | 'task_done' | 'no_such_subtask' | 'needs_subtask' | 'wrong_delivery'
+      | 'blocked' | 'subtask_in_group'
+    blockedBy?: readonly string[]
+  }
+
+export async function attachNativeSession(
+  ref: string,
+  sessionId: string,
+  o: { subtaskId?: string; title?: string; actor?: string } = {},
+): Promise<AttachNativeResult> {
+  const w = await loadTaskWorld()
+  const task = findTask(ref, w.book.tasks)
+  if (!task) return { ok: false, reason: 'no_such_task' }
+  if (task.status === 'done') return { ok: false, reason: 'task_done' }
+
+  const plan = planAttach({
+    target: o.subtaskId ? { kind: 'subtask', id: o.subtaskId } : { kind: 'task', id: task.id },
+    taskIds: w.book.tasks.map(t => t.id),
+    subtasks: w.book.subtasks.map(st => ({
+      id: st.id, taskId: st.taskId, done: st.done, blockedBy: st.blockedBy,
+      parentGroupId: st.parentGroupId,
+    })),
+  })
+  if (!plan.ok) {
+    return plan.reason === 'blocked'
+      ? { ok: false, reason: 'blocked', blockedBy: plan.blockedBy }
+      : { ok: false, reason: plan.reason }
+  }
+  if (plan.taskId !== task.id) return { ok: false, reason: 'wrong_delivery' }
+
+  const id = sessionId.trim()
+  const link: NativeSessionLink = {
+    id: nativeLinkId(id),
+    sessionId: id,
+    taskId: task.id,
+    ...(plan.subtaskId ? { subtaskId: plan.subtaskId } : {}),
+    linkedAt: new Date().toISOString(),
+    ...(o.title?.trim() ? { title: o.title.trim() } : {}),
+  }
+  const { replaced } = await w.store.fileNative(link)
+  const movedFrom: FilingTarget | undefined = replaced
+    && (replaced.taskId !== link.taskId || (replaced.subtaskId ?? null) !== (link.subtaskId ?? null))
+    ? { taskId: replaced.taskId, ...(replaced.subtaskId ? { subtaskId: replaced.subtaskId } : {}) }
+    : undefined
+
+  const advanced = statusAfterAttach(task.status)
+  if (advanced) await markTask(task.id, advanced, o.actor ?? 'agentop code')
+  await w.store.logEvents([event(task.id, o.actor ?? 'agentop code', 'session', {
+    to: id, detail: 'native runtime',
+  })])
+  return { ok: true, id: link.id, sessionId: id, ...(movedFrom ? { movedFrom } : {}) }
+}
+
+/** The task a native session is filed under, or null — read from the board, never inferred. */
+export async function nativeSessionTask(
+  sessionId: string,
+): Promise<{ taskId: string; ref: string; title: string; subtaskId?: string } | null> {
+  const w = await loadTaskWorld()
+  const link = w.book.nativeSessions.find(l => l.id === nativeLinkId(sessionId))
+  if (!link) return null
+  const task = w.book.tasks.find(t => t.id === link.taskId)
+  if (!task) return null
+  return { taskId: task.id, ref: task.id, title: task.title, ...(link.subtaskId ? { subtaskId: link.subtaskId } : {}) }
 }
 
 /**

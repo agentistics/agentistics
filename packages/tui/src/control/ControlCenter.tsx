@@ -40,6 +40,8 @@ import { Backup } from './tabs/Backup'
 import { Sessions } from './tabs/Sessions'
 import { Dashboard } from './tabs/Dashboard'
 import { HardwareTab } from './tabs/HardwareTab'
+import { Code } from './tabs/Code'
+import type { CodeLaunch } from './code-types'
 import { writeFrame } from './altScreen'
 
 /**
@@ -127,6 +129,8 @@ export interface ControlCenterProps {
     tab?: TabId
     /** Open with the setup wizard up — what "bare `agentop` opens on Setup" became. */
     setup?: boolean
+    /** `agentop code …`'s launch, handed to the `code` tab on its first mount. */
+    code?: CodeLaunch
   }
   onExit: (exit: ControlExit) => void
   /**
@@ -324,6 +328,24 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     )
   }, [])
 
+  /**
+   * One sentence on the status row, and nothing else (GL-06).
+   *
+   * The `code` tab answers most keys itself — a prompt queued, a permission answered, a command that
+   * does not exist — and routing each of those through `run()` would spin the spinner and re-probe
+   * systemd and docker for a keypress. It still has to leave its sentence where every other screen
+   * leaves one, or those keys would be silently inert.
+   */
+  const say = useCallback((res: ActionResult) => { setResult(res) }, [])
+
+  /**
+   * Change tab by one step, for a screen that CAPTURES the keyboard. While it captures, the shell's
+   * own `[`/`]` stand down with every other global key, so the screen forwards them itself.
+   */
+  const stepTab = useCallback((step: 1 | -1) => {
+    setTab(prev => TAB_ORDER[(TAB_ORDER.indexOf(prev) + step + TAB_ORDER.length) % TAB_ORDER.length]!)
+  }, [])
+
   const switchLang = useCallback((next: CliLang) => {
     setLang(next)
     // The host localizes what it returns — the mode sentence, the service labels, the outcome in
@@ -406,7 +428,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // every claim to them means a screen that never reports cannot inherit a stale `true` and lock
   // the global keys with no owner left to release them.
   const reports = tab === 'services' || tab === 'sessions' || tab === 'backup' || tab === 'dashboard'
-    || tab === 'logs'
+    || tab === 'logs' || tab === 'code'
   const capturing = chrome.capture && reports
   const arrowsClaimed = Boolean(chrome.claimArrows) && reports
 
@@ -578,6 +600,24 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           corrupted frame rather than as a cramped one. Every screen budgets itself against
           `height`; this is the guarantee that a miscount degrades into a missing row instead. */}
       <Box flexDirection="column" height={height} overflowY="hidden">
+        {/* The native session. It frames its own regions (the conversation, the permission card, the
+            composer, the session panel) like the two cockpits do, so the one that needs the person
+            can wear the accent border. */}
+        <Screen visible={tab === 'code'}>
+          <Code
+            code={host.code}
+            launch={initial?.code}
+            lang={lang}
+            strings={s}
+            width={width}
+            height={height}
+            isActive={tab === 'code'}
+            onChrome={reportChrome}
+            onSay={say}
+            onTab={stepTab}
+          />
+        </Screen>
+
         <Screen visible={tab === 'services'}>
           <Services
             host={host}

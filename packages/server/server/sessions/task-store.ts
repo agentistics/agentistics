@@ -22,10 +22,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { isValidStatusColor, normalizeStagedSession, type TaskStatusDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
-import { historicalLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
+import { historicalLinkId, nativeLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
 import type {
-  Attempt, AttemptStatus, HistoricalSession, Subtask, Task, TaskBook, TaskClaim, TaskComment,
+  Attempt, AttemptStatus, HistoricalSession, NativeSessionLink, Subtask, Task, TaskBook, TaskClaim, TaskComment,
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus,
 } from './task-model'
 
@@ -66,7 +66,7 @@ export interface AttemptPatch {
 
 const EMPTY_BOOK = (): TaskBook => ({
   tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
-  historicalSessions: [],
+  historicalSessions: [], nativeSessions: [],
   // Absent/empty is exactly what `planStatusMigration` reads as "never seeded yet" — see
   // `task-source.ts`'s `ensureStatusesSeeded`, which fills this in on the very next load.
   statuses: [],
@@ -163,6 +163,10 @@ export interface TaskStore {
    * written, because a conversation with no statement belongs to no task (`conversationOwners`).
    */
   unfileHistorical(ref: string): Promise<HistoricalSession | null>
+
+  /** File a NATIVE runtime session (`NativeSessionLink`) — or MOVE it. One link per session, decided
+   *  under the lock, so `replaced` is exactly what THIS write displaced. */
+  fileNative(link: NativeSessionLink): Promise<{ replaced?: NativeSessionLink }>
 }
 
 /**
@@ -398,6 +402,21 @@ function sanitizeHistorical(raw: unknown): HistoricalSession | null {
   }
 }
 
+/** Kept only when it names a SESSION and a TASK; the id is re-derived, like `sanitizeHistorical`. */
+function sanitizeNative(raw: unknown): NativeSessionLink | null {
+  if (!raw || typeof raw !== 'object') return null
+  const h = raw as Record<string, unknown>
+  const sessionId = str(h.sessionId); const taskId = str(h.taskId)
+  if (!sessionId || !taskId) return null
+  return {
+    id: nativeLinkId(sessionId),
+    sessionId, taskId,
+    ...(str(h.subtaskId) ? { subtaskId: str(h.subtaskId)! } : {}),
+    linkedAt: str(h.linkedAt) ?? new Date(0).toISOString(),
+    ...(str(h.title) ? { title: str(h.title)! } : {}),
+  }
+}
+
 function sanitizeFile(raw: unknown): TaskFile | null {
   if (!raw || typeof raw !== 'object') return null
   const f = raw as Record<string, unknown>
@@ -451,6 +470,16 @@ export function createTaskStore(file: string): TaskStore {
             arr(raw.historicalSessions)
               .map(sanitizeHistorical)
               .filter((h): h is HistoricalSession => h !== null)
+              .map(h => [h.id, h] as const),
+          ).values(),
+        ],
+        // Absent on a book written before native links existed; a whitelist like the one above, so
+        // the collection survives the next `read()`.
+        nativeSessions: [
+          ...new Map(
+            arr(raw.nativeSessions)
+              .map(sanitizeNative)
+              .filter((h): h is NativeSessionLink => h !== null)
               .map(h => [h.id, h] as const),
           ).values(),
         ],
@@ -578,6 +607,11 @@ export function createTaskStore(file: string): TaskStore {
             const { subtaskId: _dropped, ...rest } = h
             return rest
           }),
+          nativeSessions: book.nativeSessions.map(h => {
+            if (h.subtaskId !== id) return h
+            const { subtaskId: _dropped, ...rest } = h
+            return rest
+          }),
         })
         return true
       })
@@ -611,6 +645,7 @@ export function createTaskStore(file: string): TaskStore {
           // frees it to be filed elsewhere (a link left behind would name a task nobody can open and
           // keep the conversation from ever being owned by another one).
           historicalSessions: book.historicalSessions.filter(h => h.taskId !== id),
+          nativeSessions: book.nativeSessions.filter(h => h.taskId !== id),
           events: book.events.filter(e => e.taskId !== id),
           // The status VOCABULARY is board-wide, not per-task — deleting a task never touches it.
           statuses: book.statuses,
@@ -736,6 +771,17 @@ export function createTaskStore(file: string): TaskStore {
           historicalSessions: book.historicalSessions.filter(h => h.id !== found.id),
         })
         return found
+      })
+    },
+    fileNative(link) {
+      return enqueue(async () => {
+        const book = await read()
+        const replaced = book.nativeSessions.find(h => h.id === link.id)
+        await write({
+          ...book,
+          nativeSessions: [...book.nativeSessions.filter(h => h.id !== link.id), link],
+        })
+        return replaced ? { replaced } : {}
       })
     },
     removeStatus(id) {

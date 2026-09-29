@@ -36,7 +36,7 @@ describe('createTaskStore', () => {
     const { s } = await store()
     expect(await s.read()).toEqual({
       tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
-      historicalSessions: [], statuses: [],
+      historicalSessions: [], nativeSessions: [], statuses: [],
     })
   })
 
@@ -111,7 +111,7 @@ describe('createTaskStore', () => {
     await writeFile(file, '{ this is not json', 'utf8')
     expect(await s.read()).toEqual({
       tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
-      historicalSessions: [], statuses: [],
+      historicalSessions: [], nativeSessions: [], statuses: [],
     })
   })
 

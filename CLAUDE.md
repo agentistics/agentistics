@@ -550,6 +550,24 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          moved to the END by `direction: rtl` (`eu/freelas/Proj/~`, which reads
   │                          as a folder called `~`; the trim is computed now, `shellWhere`).
   ├── cli-start.ts         → the control center's HOST (`ControlHost`): service detection, start/stop/restart, connect/disconnect, boot service, archive consent, language — every action returns an already-localized `ActionResult` instead of printing
+  ├── code-host.ts         → the `code` tab's HOST (`createCodeHost`, the `CodeHost` of `@agentistics/tui/control/code-types`):
+  │                          drives native sessions IN the control center's process over `createRuntimeHost` and its hub. It
+  │                          TRANSLATES hub frames into the tab's `CodeEvent`s and decides every refusal in words (EN/PT).
+  │                          **A permission card's diff is read by IDENTITY, never guessed**: `question.id` →
+  │                          `toolExecutionId` → `store.listToolCalls(runId)` → `toolUseId` → that `tool_use`'s own input
+  │                          (the loop records `started` and persists the assistant message BEFORE the gate asks) — no
+  │                          link, no diff. **A TUI-started session is FILED or it does not exist** (D-TUI-6): create →
+  │                          lease → `attachNativeSession` (`TaskBook.nativeSessions`, additive; native sessions have no
+  │                          consolidate-store meta, so `attachConversation` cannot take them and they enter no rollup
+  │                          yet) → driver; a failed filing ENDS the session. The first message is HELD until the tab
+  │                          subscribes, because the hub asker denies a question nobody watches. `checkpoint` is always
+  │                          false (the runtime records its checkpoint after the write, in memory). The runtime journals
+  │                          no money, so the host prices each response through `calcCost` — only for a model the table
+  │                          prices EXACTLY and only with all four counters. A client that cannot stream sends no
+  │                          `delta`, so a response with no deltas has its text read from the persisted message.
+  │                          `agentop code` on a tty opens THIS tab (`runStart`); without a tty, `ls` and `--help` stay
+  │                          the line-mode `cli-code.ts` — the non-TTY fallback, like `cli-ui.ts`. Proven offline by
+  │                          `code-tab.e2e.test.ts` (the whole control center, keys, a scripted model, 108 and 80 cols)
   ├── cli-stream.ts        → the control center's OUTPUT CHANNEL: subscribers + `streamCommand` (both pipes captured, never `inherit`) → lines via the pure `@agentistics/tui/control/stream`
   ├── cli-ui.ts            → dependency-free arrow-key select/confirm/input/pause + clearScreen (bundles clean into the binary; no node_modules to resolve)
   ├── central-runtime.ts   → **pure**: the three shapes a central can take here, each with `available` + a REASON CODE
@@ -2065,13 +2083,28 @@ packages/tui/src/
                      repository, or gone with nothing recorded; `GONE_PROJECT_KEY` is left intact)
                      and **a worktree outside the main checkout gets ONE branch named after its own
                      folder** — a relative path that cannot be established is never synthesised
-    tabs/            Services (the cockpit — and the SETUP wizard, as a question in its detail
-                     region), Sessions (+ SessionWizard), Dashboard, Logs,
-                     Static (Help / Cheat sheet / Contribute)
+    code-types.ts    the `code` tab ↔ host contract (`CodeHost`, `CodeEvent`, `CodeAsk`, …) —
+                     TYPES ONLY; `server/code-host.ts` implements it over the native runtime
+    code.ts          PURE: the `code` tab — `reduceCode` (the event fold; a counter never reported
+                     stays ABSENT → N/A), `createCoalescer` (≤1 repaint per 50ms while streaming),
+                     `codeLayout` (≥100 cols: conversation + 38-col panel; narrow: one pane + a
+                     one-line status, `ctrl+b` panel), every line builder (header with `▲ no sandbox`
+                     never dropped, tool rows, inline diff, permission card with the POLICY's
+                     options in its order, full diff, composer, session panel), `CODE_COMMANDS` (THE
+                     `/` list — the P2 palette reads the same table), `codeKeyIntent` + `codeHints`
+                     (one context, so the footer cannot name a key that does nothing)
+    code-wizard.ts   PURE: the P1 new-session wizard — `task` (required; esc closes, nothing starts;
+                     inline "new task…") then `review` (refuses with the host's sentence when no model)
+    code-i18n.ts     EN/PT words of the `code` tab (the tab's NAME stays in i18n.ts `tabs`)
+    tabs/            Code (the native session: CD-01…04/07/09/11/12, NW-01/06), Services (the
+                     cockpit — and the SETUP wizard, as a question in its detail region), Sessions
+                     (+ SessionWizard), Dashboard, Logs, Static (Help / Cheat sheet / Contribute)
   stubs/react-devtools-core/   REQUIRED for the binary build — see below
 packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to stdout at a chosen
-                                   size/lang/mode, with `--keys` to drive it into a question first
-                                   and `--task running|done` to stream a fake build into the pane
+                                   size/lang/mode, with `--keys` to drive it into a question first,
+                                   `--task running|done` to stream a fake build into the pane, and
+                                   `--code empty|wizard|review|streaming|ask-patch|ask-shell|full-diff`
+                                   to give the host a scripted native-runtime fake (`--tab` = `--screen`)
 ```
 (`stubs/` sits at the package root, `packages/tui/stubs/`, not under `src/`.)
 
@@ -2390,6 +2423,13 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   `host.lang`, never the value it resolved at boot** — the language is a closure variable the in-app
   toggle reassigns, so attaching to a session and detaching remounted the whole cockpit in the
   previous language, with nothing on screen to explain it and nothing to do but restart.
+- **The `code` tab CAPTURES the keyboard whenever the native runtime is available** — the composer
+  is always live, and a `q` typed into a prompt must be a `q`. So the shell's global keys stand down
+  there, the tab forwards `[`/`]` itself through `onTab` (on an EMPTY draft only — otherwise they are
+  typed), `ctrl+c` is the way out and the footer says so, and every outcome goes to the status row
+  through `onSay` rather than the heavy `run()` path. Its subscription to the open session stays up
+  while the tab is HIDDEN: the runtime only asks while somebody watches, and an unwatched question
+  is a denial.
 
 ## VS Code extension (`packages/vscode`)
 

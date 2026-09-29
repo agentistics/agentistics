@@ -31,7 +31,8 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
+import type { CodeHost, CodeLaunch } from '@agentistics/tui/control/code-types'
 import { homedir, platform } from 'node:os'
 import {
   DEFAULT_TEAM, HARNESS_ORDER, repoShortName,
@@ -3988,24 +3989,61 @@ export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
   return (await ensureSessionsPoller()).poll()
 }
 
-export async function runStart(): Promise<StartResult> {
+/**
+ * What `agentop code` hands the control center when it opens on the `code` tab: the parsed launch
+ * (`CodeLaunch` — a first prompt or a session to resume) plus the two flags that are NOT the tab's
+ * to decide — the model the person named and the directory the session would work in.
+ */
+export interface CodeStartLaunch {
+  launch: CodeLaunch
+  model?: string
+  cwd?: string
+}
+
+export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResult> {
   if (!process.stdin.isTTY) return 'foreground'
 
   const lang = await resolveLang()
-  const [{ runControlCenter }, { altScreen }] = await Promise.all([
-    import('@agentistics/tui/control'),
-    import('@agentistics/tui/control/altScreen'),
-  ])
+  const { altScreen } = await import('@agentistics/tui/control/altScreen')
 
-  const host = createControlHost(lang, altScreen)
+  const host: StartHost & { code?: CodeHost } = createControlHost(lang, altScreen)
+
+  // ONE code host for the whole process. The loop below REMOUNTS the app after every attach/detach,
+  // and a host built per mount would drop a session's lease and its reader between two visits to
+  // the tab. It is loaded lazily: `@agentistics/runtime` (sqlite, the tool catalogue) is dead weight
+  // for the many runs of `agentop` that never open the `code` tab. It reads `host.lang` on every
+  // sentence — the language is a closure variable the in-app toggle reassigns.
+  const { createCodeHost } = await import('./code-host')
+  const code = createCodeHost({
+    lang: () => host.lang,
+    ...(codeLaunch?.model ? { model: codeLaunch.model } : {}),
+    cwd: resolvePath(codeLaunch?.cwd ?? process.cwd()),
+  })
+  host.code = code
+
+  try {
+    return await runControlLoop(host, lang, codeLaunch)
+  } finally {
+    await code.dispose().catch(() => {})
+  }
+}
+
+async function runControlLoop(
+  host: StartHost & { code?: CodeHost },
+  lang: CliLang,
+  codeLaunch: CodeStartLaunch | undefined,
+): Promise<StartResult> {
+  const { runControlCenter } = await import('@agentistics/tui/control')
 
   // A machine that has never been configured still opens on the WIZARD — it is just no longer a tab
   // of its own. Setup is a question the cockpit asks, drawn in the detail region like every other
   // one, so "open on setup" is now "open the cockpit with the question up": `initial.setup`. Landing
   // an unconfigured user on a list of services to start would still leave the mode and the
   // history-preservation consent behind something they have no reason to look for.
-  const setup = await isUnconfigured()
-  let tab: TabId | undefined
+  // An explicit `agentop code` is not a request to configure the machine: it goes straight to the tab.
+  const setup = codeLaunch ? false : await isUnconfigured()
+  let tab: TabId | undefined = codeLaunch ? ('code' as TabId) : undefined
+  let launch: CodeLaunch | undefined = codeLaunch?.launch
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink
   // app never execs anything: it unmounts, the session gets the real tty here, and when the user
@@ -4021,9 +4059,12 @@ export async function runStart(): Promise<StartResult> {
     // detaching was enough to put the whole cockpit back into the previous language, with nothing
     // on screen to explain it and nothing to do about it but restart the application, which is how
     // it was reported. `execAttachTicket` below already read it correctly.
-    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening })
+    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening, ...(launch ? { code: launch } : {}) })
     opening = false
-    if (exit.kind === 'foreground') break
+    // The launch is a first-mount instruction: a remount after an attach must not restart the wizard
+    // or resume the session a second time.
+    launch = undefined
+    if (exit.kind === 'foreground') { if (codeLaunch) return 0; break }
     if (exit.kind === 'quit') return exit.code
     await execAttachTicket(exit.ticket, cliStrings(host.lang))
     tab = 'sessions'
