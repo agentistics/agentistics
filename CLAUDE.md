@@ -781,6 +781,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   │   ├── componentCatalog.tsx  → catalog of all components available in the custom layout builder
   │   ├── chatModel.ts          → PURE: which model the Nay chat runs + its label, read off `/api/chat-harnesses` (the server's ONE model catalog, `server/model-catalog.ts` — each CLI's own list where it publishes one, the verified `HARNESS_MODELS` table + a typed id where it does not). The old hardcoded `chatModels.ts` is gone
   │   ├── chatSounds.ts         → 5 synthesized notification sounds via Web Audio API (Ping, Chime, Soft, Bell, Pop)
+  │   ├── nayDock.ts            → PURE: the Nay chat's geometry (resizable docked panel) and WHERE a session opens — a detached window holding it is raised/restored, otherwise it opens in the panel; one session is never on screen twice
   │   ├── notifications.ts      → notification store (useSyncExternalStore) + render-time pt/en i18n (NOTIFICATION_TEXT keyed by code, interpolates meta)
   │   └── harness.ts            → HARNESS_LABELS, HARNESS_COLORS, capable(harness, metric), HARNESS_INFO (data-source/contains/missing/note metadata for HarnessInfoPanel)
   ├── hooks/
@@ -819,6 +820,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
       │                          panels (top projects, languages) are on Home, sessions are the
       │                          sessions workspace's, and the dimension the page was really asked
       │                          for is the REPOSITORY — `/projects` redirects to `/repositories`
+      ├── nay/NayDock.tsx       → **the Nay chat is REAL SESSIONS** (docs/superpowers/specs/2026-09-29-nay-as-sessions-design.md). A Nay conversation is an ordinary managed `claude` session whose cwd is `~/.agentistics/nay-chat` (`isNayCwd`, core `nay.ts` — the cwd IS the marker, no new field), started by `POST /api/fleet/nay` (`sessions/nay-web.ts` = `runFleetSpawn` with the directory fixed, gated by `/api/fleet`'s `localShell` AND the chat switch) and filed under the user group "Nay" (`planNayFiling`). The panel draws the workspace's own `SessionChat`, so the composer (attachments, metrics chip, mic, auto mode) is that one, never a copy; its tabs are **Nay** (running Nay sessions + new conversation) and **Sessões** (the same `SessionsAside`, whose new `onCreated`/`selectedId` props keep it in the panel instead of navigating). The fixed button is ALWAYS the chat button; detached windows minimize to orange pills. The old `TtyChat` (`claude --print` per message) is gone; `chat-drivers/` + `/api/chat-tty` are no longer used by the panel
       ├── HarnessInfoPanel.tsx  → inline panel explaining each harness's data sources / what's captured / what's missing (and why) / caveats; driven by HARNESS_INFO in lib/harness.ts
       ├── PreferencesModal.tsx  → unified Settings modal with tabs: Preferences / Live / Install (Environment tab removed)
       ├── TeamLogin.tsx / TeamMembers.tsx / TeamSettings.tsx → central: password login, members panel (mint/rotate/revoke/rename + presence), team settings (interval/express, offline-data policy)
