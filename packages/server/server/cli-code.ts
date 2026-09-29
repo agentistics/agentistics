@@ -4,6 +4,8 @@
  * Spec: docs/superpowers/specs/2026-09-27-runtime-b4-sessions.md §6. `agentop code [prompt]`
  * starts a NEW session in the workspace of the current (or `--cwd`) directory; `agentop code
  * --resume <id> [prompt]` repairs and continues one already on disk; `agentop code ls` lists them.
+ * `/undo` in the loop — and `agentop code undo <id> [--yes]` outside it — reverts the agent's last
+ * file change set (H4, `runtime.undo`); its words live in the pure `code-undo-text.ts`, EN and PT.
  *
  * ## Why this module builds its own `content`/`journal`, not only a `RuntimeHost`
  *
@@ -51,6 +53,8 @@ import {
   type SessionWatcher,
 } from '@agentistics/runtime'
 import { PROVIDER_FLAG_ENV, providerFlagOn } from './config.ts'
+import { resolveLang, type CliLang } from './cli-lang.ts'
+import { isYes, renderUndo, UNDO_TEXT } from './code-undo-text.ts'
 import { createRuntimeHost, workspaceRootFor, type RuntimeHost } from './runtime-host.ts'
 
 // ── The host seam this module needs beyond `RuntimeHost` (module doc) ──────────────────────────
@@ -103,6 +107,8 @@ export interface CodeCliDeps {
   onInterrupt: (handler: () => void) => () => void
   /** `providerFlagOn()` — the native runtime's BETA flag (`AGENTISTICS_PROVIDER`). Absent reads OFF. */
   flagOn: () => boolean
+  /** The language `/undo` answers in (`cli-lang.ts`: `--lang`, then `preferences.lang`, then EN). */
+  lang: () => Promise<CliLang>
 }
 
 const DEFAULT_ASK_TIMEOUT_MS = 5 * 60 * 1000
@@ -142,6 +148,7 @@ function defaultReadLine(): Promise<string | null> {
 function defaultDeps(): CodeCliDeps {
   return {
     flagOn: () => providerFlagOn(),
+    lang: resolveLang,
     host: defaultHost,
     stdout: (line) => { process.stdout.write(`${line}\n`) },
     stderr: (line) => { process.stderr.write(`${line}\n`) },
@@ -383,6 +390,39 @@ function printRecentTurns(d: CodeCliDeps, messages: readonly { seq: number; mess
   d.stdout('—')
 }
 
+// ── `/undo` (H4) ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reverts the agent's last file change set through `runtime.undo` — the session's own policy and the
+ * terminal asker, so the write is asked about like any other. When the runtime needs a yes (a file
+ * changed since, or a change set from an earlier turn) the person is asked here on a terminal;
+ * `assumeYes` answers it up front, and with neither nothing is written.
+ */
+async function performUndo(host: RuntimeHost, sessionId: string, d: CodeCliDeps, assumeYes: boolean): Promise<number> {
+  const lang = await d.lang()
+  const first = await host.runtime.undo(sessionId)
+  const shown = renderUndo(first, lang, sessionId)
+  for (const line of shown.lines) d.stdout(line)
+  if (shown.confirm === undefined) return shown.code
+
+  let yes = assumeYes
+  if (!yes) {
+    if (!d.isTty) {
+      d.stderr(UNDO_TEXT[lang].passYes)
+      return 1
+    }
+    d.write(shown.confirm)
+    yes = isYes(await d.readLine())
+  }
+  if (!yes) {
+    d.stdout(UNDO_TEXT[lang].declined)
+    return 0
+  }
+  const second = renderUndo(await host.runtime.undo(sessionId, { confirm: true }), lang, sessionId)
+  for (const line of second.lines) d.stdout(line)
+  return second.code
+}
+
 // ── The drive loop: single-shot off a tty, interactive on one ──────────────────────────────────
 
 async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string | undefined, d: CodeCliDeps): Promise<number> {
@@ -418,6 +458,10 @@ async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string
         const trimmed = line.trim()
         if (trimmed === '') continue
         if (trimmed === '/exit') break
+        if (trimmed === '/undo') {
+          lastCode = await performUndo(host, sessionId, d, false)
+          continue
+        }
         prompt = trimmed
       }
       pressCount = 0
@@ -557,6 +601,41 @@ async function runResume(args: CodeArgsResume, d: CodeCliDeps): Promise<number> 
   }
 }
 
+// ── `agentop code undo <sessionId> [--yes]` ─────────────────────────────────────────────────
+
+async function runUndoCommand(rawArgs: string[], d: CodeCliDeps): Promise<number> {
+  let sessionId: string | undefined
+  let assumeYes = false
+  for (const tok of rawArgs) {
+    if (tok === '--yes' || tok === '-y') assumeYes = true
+    else if (tok === '--help' || tok === '-h') { d.stdout(UNDO_HELP); return 0 }
+    else if (tok.startsWith('-')) { d.stderr(`agentop code undo: unknown flag "${tok}".`); return 2 }
+    else if (sessionId === undefined) sessionId = tok
+    else { d.stderr('agentop code undo: one session id only.'); return 2 }
+  }
+  if (sessionId === undefined) { d.stderr(UNDO_HELP); return 2 }
+
+  const terminalAsker = createTerminalAsker(d)
+  const built = await d.host(() => terminalAsker)
+  const { host } = built
+  let leased = false
+  try {
+    // Undoing WRITES the session's files, so it takes the same lease a run does: a session another
+    // process is driving is refused here rather than reverted under it.
+    const acquire = await host.acquire(sessionId)
+    if (!acquire.ok) {
+      d.stderr(acquire.sentence)
+      return 1
+    }
+    leased = true
+    return await performUndo(host, sessionId, d, assumeYes)
+  } finally {
+    if (leased) await host.release(sessionId).catch(() => {})
+    await host.dispose().catch(() => {})
+    built.close?.()
+  }
+}
+
 // ── `agentop code ls` ───────────────────────────────────────────────────────────────────────
 
 const DEFAULT_LS_LIMIT = 20
@@ -610,6 +689,7 @@ const HELP = `
 Usage: agentop code [--model <id>] [--cwd <dir>] [prompt...]
        agentop code --resume <sessionId> [prompt...]
        agentop code ls [--limit <n>]
+       agentop code undo <sessionId> [--yes]
 
 The terminal front door onto a native Agentistics session (BETA). Runs a conversation against the
 Anthropic API using this machine's own stored key (see \`agentop provider key set\`), with every
@@ -625,11 +705,19 @@ here in the terminal (never auto-approved; no tty/no answer/timeout all deny).
 
 With a prompt and no terminal attached, runs once and exits. On a terminal, drops into an
 interactive loop after any given prompt — type \`/exit\` or press Ctrl-D to leave; Ctrl-C
-cancels a run in progress, a second Ctrl-C leaves.
+cancels a run in progress, a second Ctrl-C leaves. \`/undo\` reverts the agent's last file change
+set (only what its file tools wrote — never what a shell command changed); the write is asked
+about like any other, and a file changed since the agent wrote it is never overwritten.
 
 agentop code ls        List native sessions (id, status, last update, title/model).
   --limit <n>          At most this many (default 20).
+
+agentop code undo <id> Revert that session's last file change set, as \`/undo\` does.
+  --yes                Confirm up front when some files cannot be undone, or the change set is
+                       from an earlier turn (without it, a terminal is asked; none means no).
 `.trim()
+
+const UNDO_HELP = 'Usage: agentop code undo <sessionId> [--yes]'
 
 const LS_HELP = 'Usage: agentop code ls [--limit <n>]'
 
@@ -647,6 +735,7 @@ export async function runCode(args: string[], deps: Partial<CodeCliDeps> = {}): 
     d.stderr(`agentop code: the native runtime is off (BETA) — set ${PROVIDER_FLAG_ENV}=1 to use it.`)
     return 1
   }
+  if (args[0] === 'undo') return runUndoCommand(args.slice(1), d)
 
   const parsed = parseCodeArgs(args)
   if (!parsed.ok) {
