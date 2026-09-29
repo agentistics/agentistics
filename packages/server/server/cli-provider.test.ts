@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { providerKeyFile } from './config.ts'
 import { keyShapeSentence, refusalSentence, validateKeyShape } from './provider/credential-plan.ts'
-import { runProvider, type ProviderCliDeps } from './cli-provider.ts'
+import { rateLimitSentence, runProvider, type ProviderCliDeps } from './cli-provider.ts'
 
 // A fake key built at runtime, never a literal in source — same convention the spec asks for so a
 // source grep for a real-looking key can never mistake this file's own fixture for a leak.
@@ -617,6 +617,84 @@ describe('runProvider — try <endpoint> --stream (B2 × B5a)', () => {
     const h = await makeHarness()
     expect(await runProvider(['try', 'openrouter', '--stream'], h.deps)).toBe(2)
     expect(h.err.join('\n')).toContain('has no default model')
+    await cleanup(h)
+  })
+})
+
+// ── B9.3 — the rate-limit line ──────────────────────────────────────────────────────────────────
+
+describe('rateLimitSentence — one line, in the machine\'s local time', () => {
+  const NOW = new Date('2026-09-28T14:00:00.000Z')
+  const reading = {
+    source: 'headers' as const,
+    resources: [
+      { kind: 'requests' as const, limit: 50, remaining: 49, resetsAt: '2026-09-28T14:32:00.000Z' },
+      { kind: 'tokens' as const, limit: 40000, remaining: 39000, resetsAt: '2026-09-28T14:32:40.000Z' },
+    ],
+    dropped: 0,
+  }
+
+  test('EN, UTC', () => {
+    expect(rateLimitSentence(reading, 'en', { now: NOW, timeZone: 'UTC' }))
+      .toBe('rate limit: requests 49/50 left until 14:32 · tokens 39,000/40,000 left until 14:32')
+  })
+
+  test('PT, São Paulo — the zone is the injected one, not the host\'s', () => {
+    expect(rateLimitSentence(reading, 'pt', { now: NOW, timeZone: 'America/Sao_Paulo' }))
+      .toBe('limite de taxa: requisições 49/50 restantes até 11:32 · tokens 39.000/40.000 restantes até 11:32')
+  })
+
+  test('a reset on another local day carries its date', () => {
+    const r = { ...reading, resources: [{ kind: 'requests' as const, remaining: 3, resetsAt: '2026-09-29T02:10:00.000Z' }] }
+    expect(rateLimitSentence(r, 'en', { now: NOW, timeZone: 'UTC' })).toBe('rate limit: requests 3 left until 2026-09-29 02:10')
+  })
+
+  test('an absent remaining is said, never printed as 0', () => {
+    const r = { ...reading, resources: [{ kind: 'output-tokens' as const, limit: 8000 }] }
+    const line = rateLimitSentence(r, 'en', { now: NOW, timeZone: 'UTC' })
+    expect(line).toBe('rate limit: output tokens limit 8,000 (remaining not stated)')
+    expect(line).not.toContain(' 0')
+  })
+
+  test('retry-after and dropped headers are named', () => {
+    const r = { source: 'headers' as const, resources: [], retryAfterMs: 56_000, dropped: 2 }
+    expect(rateLimitSentence(r, 'en', { now: NOW, timeZone: 'UTC' })).toBe('rate limit: retry after 56s · 2 headers unreadable')
+    expect(rateLimitSentence(r, 'pt', { now: NOW, timeZone: 'UTC' })).toBe('limite de taxa: tentar de novo em 56s · 2 cabeçalhos ilegíveis')
+  })
+
+  test('absent readings are a reason in words', () => {
+    expect(rateLimitSentence({ absent: 'not-documented', dropped: 0 }, 'en', { now: NOW, timeZone: 'UTC' }))
+      .toBe('rate limit: not stated — this provider documents no rate-limit header')
+    expect(rateLimitSentence({ absent: 'no-headers', dropped: 0 }, 'pt', { now: NOW, timeZone: 'UTC' }))
+      .toBe('limite de taxa: não informado — a resposta não trouxe cabeçalho de limite de taxa')
+    expect(rateLimitSentence({ absent: 'unparseable', dropped: 3 }, 'en', { now: NOW, timeZone: 'UTC' }))
+      .toBe('rate limit: not read — 3 rate-limit headers were present and none could be parsed')
+  })
+})
+
+describe('runProvider — try prints the rate-limit line (fake client, no network)', () => {
+  test('after the summary, in the chosen language', async () => {
+    const { openJournal } = await import('./journal/journal')
+    const { storeCredential } = await import('./provider/credentials.ts')
+    const h = await makeHarness({ lang: 'pt', timeZone: 'UTC' })
+    expect((await storeCredential('anthropic', FAKE_KEY, { dir: h.dir })).ok).toBe(true)
+    const journal = await openJournal({ path: join(h.dir, 'journal.db') })
+    h.deps.openJournal = async () => journal
+    h.deps.client = {
+      provider: 'anthropic', adapterVersion: 'fake-1', capabilities: { streaming: false, editPolicy: 'none' as never },
+      async invokeOnce(req, attempt) {
+        return {
+          invocationId: req.correlation.invocationId, attempt, provider: 'anthropic', requestedModel: req.model,
+          startedAt: new Date().toISOString(), latencyMs: 7, status: 'completed',
+          messageId: 'msg_rl', servedModel: req.model, usage: { input: 9, output: 2, cacheRead: 0, cacheWrite: 0 },
+          usageAnomalies: [], stopReason: { kind: 'end-turn' }, content: [{ type: 'text', text: 'ok' }],
+          rateLimit: { source: 'headers', resources: [{ kind: 'requests', limit: 50, remaining: 49, resetsAt: '2099-01-01T14:32:00.000Z' }], dropped: 0 },
+        }
+      },
+    }
+    expect(await runProvider(['try', 'anthropic'], h.deps)).toBe(0)
+    expect(h.out).toContain('  limite de taxa: requisições 49/50 restantes até 2099-01-01 14:32')
+    journal.close()
     await cleanup(h)
   })
 })

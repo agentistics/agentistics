@@ -53,6 +53,7 @@ import {
   type ObservedStream,
 } from '../capture.ts'
 import { readAnthropicExchange, readSdkUsageCrossCheck } from './raw.ts'
+import { readRateLimit } from '../rate-limit.ts'
 import {
   createAnthropicStreamReader,
   createSseDecoder,
@@ -458,6 +459,7 @@ export async function invokeOnce(
     usageAnomalies: read.usageAnomalies,
     stopReason: read.stopReason,
     content: read.content,
+    rateLimit: readRateLimit('anthropic', ex.headers, d.now()),
     ...(read.requestId !== undefined ? { requestId: read.requestId } : {}),
     ...(capture !== undefined ? { capture } : {}),
   }
@@ -696,6 +698,7 @@ export async function* streamOnce(
       stopReason: verdict.stopReason,
       content: verdict.content,
       toolCallFailures: verdict.toolCallFailures,
+      rateLimit: readRateLimit('anthropic', ex.headers, d.now()),
       ...(requestId !== undefined ? { requestId } : {}),
       ...(capture !== undefined ? { capture } : {}),
     })
