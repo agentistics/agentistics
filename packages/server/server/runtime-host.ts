@@ -19,9 +19,13 @@
  * real key store sat unguarded somewhere else.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { closeSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
+import { isAbsolute, join, relative } from 'node:path'
 import {
+  AGENTS_MD_FILE,
+  AGENTS_MD_FILE_CAP,
+  agentsMdChain,
+  collectAgentsMd,
   createAnthropicClient,
   createFileContentStore,
   createHubAsker,
@@ -32,6 +36,8 @@ import {
   createSessionRuntime,
   openSqliteSessionStore,
   textDeltaFromProviderEvent,
+  type AgentsMdRead,
+  type AgentsMdResult,
   type LeaseAcquireResult,
   type LeaseHolder,
   type NativeTools,
@@ -139,6 +145,58 @@ export function workspaceRootFor(cwd: string): string {
 
 // ── The host ────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The `AGENTS.md` files a session in `cwd` is given (B8 §10, H2): from the workspace root DOWN to
+ * `cwd`, read by the host, cut by the pure `collectAgentsMd`. Only `AGENTS.md` is read — `CLAUDE.md` /
+ * `GEMINI.md` arrive with B8.2's `compat` opt-in, which is not in this base.
+ *
+ * - **Never outside the workspace root.** Each file is resolved with `realpath`; one that lands
+ *   outside the root's own realpath (a symlink to `~/.ssh/…`, or up and out) is refused UNREAD, with a
+ *   notice — the B8.2 rule. The chain itself never asks a parent of the root.
+ * - **Bounded read.** At most `AGENTS_MD_FILE_CAP + 1` bytes are read from any file, so a huge file
+ *   costs a bounded read; its real size still reaches the notice.
+ * - **The text is never logged, journaled or sent anywhere here.** It is the person's own
+ *   instruction file, so `redactSecrets` is deliberately NOT applied to it; this function only
+ *   returns it. Wiring it into the system prompt is a follow-up (H1-lean is owner-pending).
+ */
+export function readAgentsMd(cwd: string, opts: { workspaceRoot?: string } = {}): AgentsMdResult {
+  const root = opts.workspaceRoot ?? workspaceRootFor(cwd)
+  const chain = agentsMdChain(root, cwd)
+  if (!chain) return { sections: [], truncated: false, notices: [{ kind: 'cwd-outside-workspace', path: cwd }] }
+  let realRoot: string
+  try { realRoot = realpathSync(root) } catch {
+    return { sections: [], truncated: false, notices: [{ kind: 'cwd-outside-workspace', path: cwd }] }
+  }
+  const inside = (p: string) => {
+    const rel = relative(realRoot, p)
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+  }
+  const reads: AgentsMdRead[] = chain.map((dir): AgentsMdRead => {
+    const file = join(dir, AGENTS_MD_FILE)
+    try { lstatSync(file) } catch (e) {
+      return (e as { code?: string }).code === 'ENOENT' || (e as { code?: string }).code === 'ENOTDIR'
+        ? { dir } : { dir, refused: 'unreadable' }
+    }
+    let real: string
+    try { real = realpathSync(file) } catch { return { dir, refused: 'unreadable' } }
+    if (!inside(real)) return { dir, refused: 'outside-workspace' }
+    let fd: number | null = null
+    try {
+      const st = statSync(real)
+      if (!st.isFile()) return { dir, refused: 'not-a-file' }
+      fd = openSync(real, 'r')
+      const buf = Buffer.alloc(Math.min(st.size, AGENTS_MD_FILE_CAP + 1))
+      const n = readSync(fd, buf, 0, buf.length, 0)
+      return { dir, text: buf.subarray(0, n).toString('utf-8'), size: st.size }
+    } catch {
+      return { dir, refused: 'unreadable' }
+    } finally {
+      if (fd !== null) closeSync(fd)
+    }
+  })
+  return collectAgentsMd(reads)
+}
+
 /** How many native runs one process drives at once. A CEILING, not a timer (§24.4). */
 export const NATIVE_RUN_CEILING = 4
 /** How long a lease lives without a refresh. A crashed holder frees it after this at the latest. */
@@ -192,6 +250,11 @@ export interface RuntimeHost {
   /** Take (or refresh) the right to DRIVE a session. Watching needs none. */
   acquire(sessionId: string): Promise<LeaseAcquireResult>
   release(sessionId: string): Promise<void>
+  /**
+   * The `AGENTS.md` sections for a session in `cwd` (`readAgentsMd`). INTERNAL: nothing consumes it
+   * yet — a follow-up puts it into the system prompt once H1-lean is decided.
+   */
+  agentsMd(cwd: string): AgentsMdResult
   dispose(): Promise<void>
 }
 
@@ -302,6 +365,9 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
       stopRefresh(sessionId)
       askers.delete(sessionId)
       await store.releaseLease(sessionId, holder)
+    },
+    agentsMd(cwd) {
+      return readAgentsMd(cwd)
     },
     async dispose() {
       for (const id of [...refreshers.keys()]) stopRefresh(id)

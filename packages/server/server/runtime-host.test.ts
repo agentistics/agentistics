@@ -3,9 +3,12 @@
  * refused by a native session's policy, and a relocated data dir is passed on.
  */
 import { describe, expect, test } from 'bun:test'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { globMatches } from '@agentistics/runtime'
 import { omittedSecrets } from './backup/backup-plan'
-import { hostPolicy, hostProtectedPaths, protectedPathsFromSecrets } from './runtime-host'
+import { hostPolicy, hostProtectedPaths, protectedPathsFromSecrets, readAgentsMd } from './runtime-host'
 
 const env = { home: '/home/u', workspaceRoot: '/home/u/work/repo' }
 const floored = (globs: readonly string[], path: string) => globs.some(g => globMatches(g, path, env))
@@ -56,5 +59,76 @@ describe('hostPolicy', () => {
     expect((await ask('/srv/agt/provider-keys/anthropic.json')).decision).toBe('deny')
     expect((await ask('/home/u/.agentistics/provider-keys/anthropic.json')).decision).toBe('deny')
     expect((await ask('/home/u/work/repo/README.md')).decision).toBe('allow')
+  })
+})
+
+describe('readAgentsMd (H2)', () => {
+  function fixture() {
+    const base = mkdtempSync(join(tmpdir(), 'agents-md-'))
+    const root = join(base, 'repo')
+    const deep = join(root, 'packages', 'a')
+    mkdirSync(deep, { recursive: true })
+    return { base, root, deep, done: () => rmSync(base, { recursive: true, force: true }) }
+  }
+
+  test('root to cwd, in order; a missing file is no notice; nothing above the root is read', () => {
+    const f = fixture()
+    try {
+      writeFileSync(join(f.base, 'AGENTS.md'), 'ABOVE THE ROOT\n')
+      writeFileSync(join(f.root, 'AGENTS.md'), 'root\n')
+      writeFileSync(join(f.deep, 'AGENTS.md'), 'deep\n')
+      const r = readAgentsMd(f.deep, { workspaceRoot: f.root })
+      expect(r.sections.map(s => [s.path, s.text])).toEqual([
+        [join(f.root, 'AGENTS.md'), 'root\n'],
+        [join(f.deep, 'AGENTS.md'), 'deep\n'],
+      ])
+      expect(r.notices).toEqual([])
+    } finally { f.done() }
+  })
+
+  test('a symlink resolving outside the workspace is refused UNREAD', () => {
+    const f = fixture()
+    try {
+      const secret = join(f.base, 'secret.md')
+      writeFileSync(secret, 'do not read\n')
+      chmodSync(secret, 0o000) // were it read, the notice would be `unreadable`, not `outside-workspace`
+      symlinkSync(secret, join(f.deep, 'AGENTS.md'))
+      writeFileSync(join(f.root, 'AGENTS.md'), 'root\n')
+      const r = readAgentsMd(f.deep, { workspaceRoot: f.root })
+      expect(r.sections.map(s => s.text)).toEqual(['root\n'])
+      expect(r.notices).toEqual([{ kind: 'outside-workspace', path: join(f.deep, 'AGENTS.md') }])
+    } finally { f.done() }
+  })
+
+  test('a symlink staying inside the workspace is followed', () => {
+    const f = fixture()
+    try {
+      writeFileSync(join(f.root, 'shared.md'), 'shared\n')
+      symlinkSync(join(f.root, 'shared.md'), join(f.deep, 'AGENTS.md'))
+      const r = readAgentsMd(f.deep, { workspaceRoot: f.root })
+      expect(r.sections.map(s => s.text)).toEqual(['shared\n'])
+    } finally { f.done() }
+  })
+
+  test('a directory named AGENTS.md is not a file; a huge file is read bounded and cut', () => {
+    const f = fixture()
+    try {
+      mkdirSync(join(f.root, 'AGENTS.md'))
+      writeFileSync(join(f.deep, 'AGENTS.md'), 'x'.repeat(99) + '\n' + 'y'.repeat(200_000))
+      const r = readAgentsMd(f.deep, { workspaceRoot: f.root })
+      expect(r.notices).toEqual([
+        { kind: 'not-a-file', path: join(f.root, 'AGENTS.md') },
+        { kind: 'cut-file', path: join(f.deep, 'AGENTS.md'), bytes: 200_100, keptBytes: 100 },
+      ])
+      expect(r.sections[0]!.text).toBe('x'.repeat(99) + '\n')
+    } finally { f.done() }
+  })
+
+  test('cwd outside the given workspace root reads nothing and says so', () => {
+    const f = fixture()
+    try {
+      const r = readAgentsMd(f.base, { workspaceRoot: f.root })
+      expect(r).toEqual({ sections: [], truncated: false, notices: [{ kind: 'cwd-outside-workspace', path: f.base }] })
+    } finally { f.done() }
   })
 })
