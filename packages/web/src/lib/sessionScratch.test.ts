@@ -179,3 +179,20 @@ test('storage that throws still keeps the reply target across a navigation', () 
     expect(s.readReply('a')).toEqual({ role: 'user', text: 'x' })
   }
 })
+
+test('a refusal is never remembered as the conversation — the last real one is kept', () => {
+  const s = createSessionScratch(fakeStore())
+  const real: CachedChat = { turns: [{ role: 'user', text: 'oi' }], live: true }
+  s.writeChat('conv:a', real)
+  // The first read of a just-reopened row can land before its link; that answer must not replace
+  // the conversation, or the next open paints "sem conversa vinculada" first.
+  s.writeChat('conv:a', { turns: [], live: true, unavailable: 'Esta sessão ainda não tem uma conversa vinculada' })
+  expect(s.readChat('conv:a')).toEqual(real)
+})
+
+test('migrating a row that only ever held a refusal carries nothing', () => {
+  const s = createSessionScratch(fakeStore())
+  s.writeChat('row:x', { turns: [], live: true, unavailable: 'no link yet' })
+  s.migrate('row:x', 'conv:y')
+  expect(s.readChat('conv:y')).toBeNull()
+})
