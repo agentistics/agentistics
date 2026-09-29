@@ -476,6 +476,17 @@ const ALWAYS: string[] = [
   // staged like `preferences.json`) answers both. A journal moved by `AGENTISTICS_JOURNAL_DIR`
   // outside the data dir is not under this path and does not travel.
   '.agentistics/journal.db',
+  // The native harness's USER catalogue (B8 spec §3.3): `settings.json`, `commands/`, `skills/`,
+  // `agents/`, `profiles/`, `harness.lock.json`. Configuration a person wrote — rules they chose,
+  // prompts they composed — and nothing regenerates it. The whole directory travels, so the stores
+  // the round-3 spec (§9 row 5) places under it — `harness/orchestrations/` (ORC.8) and
+  // `harness/artifacts/` (ART.2) — are carried by THIS row; a row of their own would walk them
+  // twice. What must NOT travel sits elsewhere on purpose: trust and remembered MCP approvals live
+  // in `.agentistics/runtime/harness-grants.json` (the `runtime` exclusion), because a grant keyed
+  // to a path on this machine would trust whatever repository sits at that path on another one.
+  // STATED LIMIT: the substring exclusions (`.key`, `.tmp-`, `.corrupt-`) apply inside it too;
+  // `agentop catalogue` names every entry a backup would therefore not carry.
+  '.agentistics/harness',
   // Claude's deep aggregate. It is the only surviving source of pre-30-day totals once Claude
   // Code's own cleanup has run, and it is 24 KB.
   '.claude/stats-cache.json',

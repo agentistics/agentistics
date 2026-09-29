@@ -43,6 +43,7 @@ import {
   type SessionRuntime,
   type SessionStore,
   type ToolEnv,
+  type FloorEnv,
 } from '@agentistics/runtime'
 import type { ProviderId } from '@agentistics/core'
 import { omittedSecrets, type ExcludeRule } from './backup/backup-plan'
@@ -115,14 +116,30 @@ export interface HostPolicyOptions {
  * answers do not survive a restart (B4 contract §4, the safer direction).
  */
 export function hostPolicy(opts: HostPolicyOptions = {}): SessionPolicy {
-  const dataDir = opts.dataDir ?? AGENTISTICS_DATA_DIR
-  const relocated = dataDir !== (opts.defaultDataDir ?? DEFAULT_AGENTISTICS_DATA_DIR)
+  const env = hostFloorEnv('', opts)
   return createPolicy({
     layers: [],
+    home: env.home,
+    protectedPaths: env.protectedPaths,
+    ...(env.agentisticsDir !== undefined ? { agentisticsDir: env.agentisticsDir } : {}),
+  })
+}
+
+/**
+ * The REAL floor environment of this machine for one workspace: the real home, the harness
+ * credential globs, and the relocated data dir when `AGENTISTICS_DIR` moved it. The catalogue
+ * loader (B8.2) hands this to B8.1's floor probe — never `SYMBOLIC_FLOOR_ENV`, under which an
+ * absolute glob naming THIS home (`/home/ana/.ssh/**`) would not probe the floor at all.
+ */
+export function hostFloorEnv(workspaceRoot: string, opts: HostPolicyOptions = {}): FloorEnv {
+  const dataDir = opts.dataDir ?? AGENTISTICS_DATA_DIR
+  const relocated = dataDir !== (opts.defaultDataDir ?? DEFAULT_AGENTISTICS_DATA_DIR)
+  return {
     home: opts.home ?? HOME_DIR,
+    workspaceRoot,
     protectedPaths: opts.protectedPaths ?? hostProtectedPaths(),
     ...(relocated ? { agentisticsDir: dataDir } : {}),
-  })
+  }
 }
 
 /**

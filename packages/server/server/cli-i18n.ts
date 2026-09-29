@@ -499,6 +499,71 @@ export interface CliStrings {
   rateLimitRetryAfter: (seconds: string) => string
   rateLimitDropped: (n: number) => string
   rateLimitAbsent: (reason: RateLimitAbsentReason, dropped: number) => string
+  /** `agentop catalogue` — the chrome only; every problem/inert/notice sentence arrives bilingual from the loader. */
+  catalogue: CatalogueStrings
+}
+
+export interface CatalogueStrings {
+  usage: string
+  refusedCentral: string
+  unknownVerb: (v: string) => string
+  unknownFlag: (f: string) => string
+  flagNeedsValue: (f: string) => string
+  badKind: (v: string, allowed: string) => string
+  badScope: (v: string, allowed: string) => string
+  showNeedsArgs: string
+  roots: (workspace: string, user: string, project: string | null, compat: string[]) => string
+  statusWord: { active: string; disabled: string; shadowed: string; inert: string }
+  none: string
+  builtinPath: string
+  overrides: (scope: string, path: string) => string
+  backupLabel: string
+  settingsHeader: string
+  settingsRules: string
+  settingsProfile: string
+  settingsDefaultModel: string
+  settingsCompat: string
+  settingsSkills: string
+  noRules: string
+  noticesHeader: string
+  emptyList: string
+  emptyFiltered: string
+  summary: (n: number, active: number, disabled: number, shadowed: number, inert: number) => string
+  noMatch: (kind: string, name: string) => string
+  fieldKind: string
+  fieldName: string
+  fieldScope: string
+  fieldStatus: string
+  fieldTrust: string
+  fieldEnabled: string
+  fieldSource: string
+  fieldShadows: string
+  fieldProblems: string
+  fieldInert: string
+  fieldBackup: string
+  yes: string
+  no: string
+  fieldDescription: string
+  fieldArgs: string
+  fieldAgent: string
+  fieldModel: string
+  fieldOverride: string
+  fieldTemplate: string
+  fieldBody: string
+  fieldTools: string
+  fieldProfile: string
+  fieldPrompt: string
+  fieldType: string
+  fieldCommand: string
+  fieldUrl: string
+  fieldEnvKeys: string
+  fieldHeaderKeys: string
+  fieldCredential: string
+  fieldRules: string
+  fieldMatch: string
+  fieldRun: string
+  fieldTimeout: string
+  noDef: string
 }
 
 const EN: CliStrings = {
@@ -878,6 +943,75 @@ const EN: CliStrings = {
       case 'unparseable': return `not read — ${dropped} rate-limit header${dropped === 1 ? ' was' : 's were'} present and none could be parsed`
     }
   },
+  catalogue: {
+    usage: [
+      'Usage:',
+      '  agentop catalogue ls [--kind <kind>] [--scope <scope>] [--problems] [--json] [--cwd <dir>]',
+      '  agentop catalogue show <kind> <name> [--scope <scope>] [--json] [--cwd <dir>]',
+      '',
+      'Kinds: command, skill, agent, mcpServer, permissionProfile, afterEdit',
+      'Scopes: builtin, user, project, compat',
+    ].join('\n'),
+    refusedCentral: 'The catalogue configures the native harness on THIS machine, and a central runs none, so there is nothing to list here. Run it on a member or solo machine.',
+    unknownVerb: (v) => `Unknown catalogue command "${v}".`,
+    unknownFlag: (f) => `Unknown option "${f}".`,
+    flagNeedsValue: (f) => `Option ${f} needs a value.`,
+    badKind: (v, allowed) => `"${v}" is not a catalogue kind (one of: ${allowed}).`,
+    badScope: (v, allowed) => `"${v}" is not a scope (one of: ${allowed}).`,
+    showNeedsArgs: 'show needs a kind and a name.',
+    roots: (w, u, p, c) => `Workspace root: ${w}\nUser directory: ${u}\nProject directory: ${p ?? 'none'}\nCompat directories read: ${c.length > 0 ? c.join(', ') : 'none'}`,
+    statusWord: { active: 'active', disabled: 'disabled', shadowed: 'shadowed', inert: 'inert' },
+    none: 'none',
+    builtinPath: 'builtin',
+    overrides: (scope, path) => `overrides the ${scope} one at ${path}`,
+    backupLabel: 'backup',
+    settingsHeader: 'Settings',
+    settingsRules: 'rules in force',
+    settingsProfile: 'profile',
+    settingsDefaultModel: 'default model',
+    settingsCompat: 'compat',
+    settingsSkills: 'skills',
+    noRules: 'no rules',
+    noticesHeader: 'Notices',
+    emptyList: 'The catalogue is empty: no commands, skills, agents, servers, profiles or steps were found.',
+    emptyFiltered: 'Nothing matches those filters.',
+    summary: (n, a, d, s, i) => `${n} item(s): ${a} active, ${d} disabled, ${s} shadowed, ${i} inert`,
+    noMatch: (k, n) => `No ${k} named "${n}" in the catalogue.`,
+    fieldKind: 'kind',
+    fieldName: 'name',
+    fieldScope: 'scope',
+    fieldStatus: 'status',
+    fieldTrust: 'trust',
+    fieldEnabled: 'enabled',
+    fieldSource: 'source',
+    fieldShadows: 'shadows',
+    fieldProblems: 'problems',
+    fieldInert: 'inert parts',
+    fieldBackup: 'backup',
+    yes: 'yes',
+    no: 'no',
+    fieldDescription: 'description',
+    fieldArgs: 'args',
+    fieldAgent: 'agent',
+    fieldModel: 'model',
+    fieldOverride: 'override',
+    fieldTemplate: 'template',
+    fieldBody: 'body',
+    fieldTools: 'tools',
+    fieldProfile: 'permission profile',
+    fieldPrompt: 'prompt',
+    fieldType: 'type',
+    fieldCommand: 'command',
+    fieldUrl: 'url',
+    fieldEnvKeys: 'env keys',
+    fieldHeaderKeys: 'header keys',
+    fieldCredential: 'auth credential',
+    fieldRules: 'rules',
+    fieldMatch: 'match',
+    fieldRun: 'run',
+    fieldTimeout: 'timeout (ms)',
+    noDef: 'no definition (the file could not be parsed far enough)',
+  },
 }
 
 const PT: CliStrings = {
@@ -1242,6 +1376,75 @@ const PT: CliStrings = {
       case 'no-headers': return 'não informado — a resposta não trouxe cabeçalho de limite de taxa'
       case 'unparseable': return `não lido — ${dropped} ${dropped === 1 ? 'cabeçalho de limite de taxa presente, ilegível' : 'cabeçalhos de limite de taxa presentes, nenhum legível'}`
     }
+  },
+  catalogue: {
+    usage: [
+      'Uso:',
+      '  agentop catalogue ls [--kind <tipo>] [--scope <escopo>] [--problems] [--json] [--cwd <dir>]',
+      '  agentop catalogue show <tipo> <nome> [--scope <escopo>] [--json] [--cwd <dir>]',
+      '',
+      'Tipos: command, skill, agent, mcpServer, permissionProfile, afterEdit',
+      'Escopos: builtin, user, project, compat',
+    ].join('\n'),
+    refusedCentral: 'O catálogo configura o harness nativo DESTA máquina, e uma central não roda nenhum, então não há nada para listar aqui. Rode em uma máquina member ou solo.',
+    unknownVerb: (v) => `Comando de catálogo desconhecido "${v}".`,
+    unknownFlag: (f) => `Opção desconhecida "${f}".`,
+    flagNeedsValue: (f) => `A opção ${f} precisa de um valor.`,
+    badKind: (v, allowed) => `"${v}" não é um tipo de catálogo (um de: ${allowed}).`,
+    badScope: (v, allowed) => `"${v}" não é um escopo (um de: ${allowed}).`,
+    showNeedsArgs: 'show precisa de um tipo e de um nome.',
+    roots: (w, u, p, c) => `Raiz do workspace: ${w}\nDiretório do usuário: ${u}\nDiretório do projeto: ${p ?? 'nenhum'}\nDiretórios compat lidos: ${c.length > 0 ? c.join(', ') : 'nenhum'}`,
+    statusWord: { active: 'ativo', disabled: 'desativado', shadowed: 'sobreposto', inert: 'inerte' },
+    none: 'nenhum',
+    builtinPath: 'embutido',
+    overrides: (scope, path) => `sobrepõe o do escopo ${scope} em ${path}`,
+    backupLabel: 'backup',
+    settingsHeader: 'Configurações',
+    settingsRules: 'regras em vigor',
+    settingsProfile: 'perfil',
+    settingsDefaultModel: 'modelo padrão',
+    settingsCompat: 'compat',
+    settingsSkills: 'skills',
+    noRules: 'sem regras',
+    noticesHeader: 'Avisos',
+    emptyList: 'O catálogo está vazio: nenhum comando, skill, agente, servidor, perfil ou passo foi encontrado.',
+    emptyFiltered: 'Nada corresponde a esses filtros.',
+    summary: (n, a, d, s, i) => `${n} item(ns): ${a} ativo(s), ${d} desativado(s), ${s} sobreposto(s), ${i} inerte(s)`,
+    noMatch: (k, n) => `Nenhum ${k} chamado "${n}" no catálogo.`,
+    fieldKind: 'tipo',
+    fieldName: 'nome',
+    fieldScope: 'escopo',
+    fieldStatus: 'status',
+    fieldTrust: 'confiança',
+    fieldEnabled: 'habilitado',
+    fieldSource: 'origem',
+    fieldShadows: 'sobrepõe',
+    fieldProblems: 'problemas',
+    fieldInert: 'partes inertes',
+    fieldBackup: 'backup',
+    yes: 'sim',
+    no: 'não',
+    fieldDescription: 'descrição',
+    fieldArgs: 'argumentos',
+    fieldAgent: 'agente',
+    fieldModel: 'modelo',
+    fieldOverride: 'override',
+    fieldTemplate: 'template',
+    fieldBody: 'corpo',
+    fieldTools: 'ferramentas',
+    fieldProfile: 'perfil de permissão',
+    fieldPrompt: 'prompt',
+    fieldType: 'tipo',
+    fieldCommand: 'comando',
+    fieldUrl: 'url',
+    fieldEnvKeys: 'chaves de env',
+    fieldHeaderKeys: 'chaves de header',
+    fieldCredential: 'credencial de autenticação',
+    fieldRules: 'regras',
+    fieldMatch: 'match',
+    fieldRun: 'executa',
+    fieldTimeout: 'timeout (ms)',
+    noDef: 'sem definição (o arquivo não pôde ser lido até esse ponto)',
   },
 }
 

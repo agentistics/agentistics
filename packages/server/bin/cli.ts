@@ -106,6 +106,9 @@ Commands:
   code          BETA — the terminal front door onto a native session: runs a conversation
                 against your stored Anthropic key, asking you here for anything not
                 allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')
+  catalogue     List the native harness catalogue in force here — commands, skills, agents, MCP
+                servers, profiles, after-edit steps — with each one's status and problems
+                ('catalogue ls [--kind k] [--scope s] [--problems] [--json]'; 'catalogue show <kind> <name>')
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
@@ -507,6 +510,11 @@ if (command === 'provider') {
 if (command === 'code') {
   const { runCode } = await import('../server/cli-code.ts')
   process.exit(await runCode(args))
+}
+
+if (command === 'catalogue') {
+  const { runCatalogue } = await import('../server/cli-catalogue.ts')
+  process.exit(await runCatalogue(args))
 }
 
 if (command === 'member') {
