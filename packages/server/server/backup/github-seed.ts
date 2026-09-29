@@ -23,7 +23,7 @@ const SEED_TEXT = [
   '# agentistics backups',
   '',
   'This repository holds versioned backups of one or more machines running',
-  '[agentistics](https://github.com/blpsoares/agentistics).',
+  '[agentistics](https://github.com/agentistics/agentistics).',
   '',
   'Each backup is a **release**, and the archive is its asset. The release tag names the machine',
   'that made it (`backup-<machine>-<timestamp>`), so several machines can share this repository',

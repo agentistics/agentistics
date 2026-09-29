@@ -36,8 +36,8 @@
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blpsoares/agentistics.git",
+    "url": "git+https://github.com/agentistics/agentistics.git",
     "directory": "packages/agentop"
   },
-  "homepage": "https://github.com/blpsoares/agentistics"
+  "homepage": "https://github.com/agentistics/agentistics"
 }

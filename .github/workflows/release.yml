@@ -772,7 +772,19 @@ jobs:
 
   # Build & push the central (Team Mode aggregator) image to GHCR so `agentop central`
   # can run from any machine WITHOUT cloning the repo — the CLI materializes a compose
-  # that pulls `ghcr.io/blpsoares/agentistics:<version>` instead of building from source.
+  # that pulls `ghcr.io/agentistics/agentistics:<version>` instead of building from source.
+  #
+  # DUAL-PUBLISHED across the repository move (blpsoares/ -> agentistics/): every tag is pushed
+  # to BOTH namespaces from ONE build, so both carry the same digest. Installs built before the
+  # move pull `ghcr.io/blpsoares/agentistics` (their compose files name it), and a transfer
+  # does NOT redirect GHCR the way it redirects the git and API URLs.
+  #
+  # One credential must be able to write both namespaces. GITHUB_TOKEN can only write the
+  # repository owner's, so the second namespace needs `secrets.GHCR_PUBLISH_TOKEN` (a PAT with
+  # write:packages, owned by an account that can publish to both) and `vars.GHCR_PUBLISH_USER`
+  # (that account's login). Without them: after the transfer the job publishes
+  # ghcr.io/agentistics only and SAYS so with a warning; before the transfer it FAILS, because
+  # the CLI it ships pulls a namespace GITHUB_TOKEN cannot write from blpsoares/.
   publish-image:
     name: Publish central image to GHCR
     runs-on: ubuntu-latest
@@ -793,20 +805,59 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Resolve image namespaces
+        id: ns
+        env:
+          HAS_DUAL_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN != '' }}
+          OWNER: ${{ github.repository_owner }}
+          VERSION: ${{ needs.build.outputs.next }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          if [ "$HAS_DUAL_TOKEN" = "true" ]; then
+            images="ghcr.io/agentistics/agentistics ghcr.io/blpsoares/agentistics"
+          else
+            images="ghcr.io/${owner}/agentistics"
+            echo "::warning::GHCR_PUBLISH_TOKEN is not set — publishing ghcr.io/${owner}/agentistics only; the other namespace does not get v${VERSION}."
+          fi
+          tags=""
+          for img in $images; do
+            tags="${tags}${img}:${VERSION}"$'\n'"${img}:latest"$'\n'
+          done
+          {
+            echo "images=${images}"
+            echo "tags<<EOF"
+            printf '%s' "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.GHCR_PUBLISH_TOKEN != '' && vars.GHCR_PUBLISH_USER || github.actor }}
+          password: ${{ secrets.GHCR_PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # ONE build, every tag: the same manifest is pushed to each namespace, so the digests match.
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/blpsoares/agentistics:${{ needs.build.outputs.next }}
-            ghcr.io/blpsoares/agentistics:latest
+          tags: ${{ steps.ns.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify every namespace carries the same digest
+        env:
+          IMAGES: ${{ steps.ns.outputs.images }}
+          VERSION: ${{ needs.build.outputs.next }}
+        run: |
+          first=""
+          for img in $IMAGES; do
+            d="$(docker buildx imagetools inspect "${img}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            echo "${img}:${VERSION} -> ${d}"
+            if [ -z "$d" ]; then echo "::error::no digest for ${img}:${VERSION}"; exit 1; fi
+            if [ -z "$first" ]; then first="$d"; elif [ "$d" != "$first" ]; then
+              echo "::error::${img}:${VERSION} is ${d}, expected ${first}"; exit 1
+            fi
+          done

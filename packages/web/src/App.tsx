@@ -4715,7 +4715,7 @@ export default function AppLayout() {
                 </div>
                 {/* Version badge */}
                 <a
-                  href="https://github.com/blpsoares/agentistics/releases/latest"
+                  href="https://github.com/agentistics/agentistics/releases/latest"
                   target="_blank" rel="noreferrer"
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -4741,11 +4741,11 @@ export default function AppLayout() {
                 {
                   title: lang === 'pt' ? 'Projeto' : 'Project',
                   links: [
-                    { href: 'https://github.com/blpsoares/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
-                    { href: 'https://github.com/blpsoares/agentistics/releases', label: 'Releases' },
-                    { href: 'https://github.com/blpsoares/agentistics/issues', label: 'Issues' },
-                    { href: 'https://github.com/blpsoares/agentistics/pulls', label: 'Pull Requests' },
-                    { href: 'https://github.com/blpsoares/agentistics#readme', label: 'README' },
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Repositório' : 'Repository' },
+                    { href: 'https://github.com/agentistics/agentistics/releases', label: 'Releases' },
+                    { href: 'https://github.com/agentistics/agentistics/issues', label: 'Issues' },
+                    { href: 'https://github.com/agentistics/agentistics/pulls', label: 'Pull Requests' },
+                    { href: 'https://github.com/agentistics/agentistics#readme', label: 'README' },
                   ],
                 },
                 {
@@ -4761,9 +4761,9 @@ export default function AppLayout() {
                 {
                   title: lang === 'pt' ? 'Comunidade' : 'Community',
                   links: [
-                    { href: 'https://github.com/blpsoares/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
-                    { href: 'https://github.com/blpsoares/agentistics/fork', label: 'Fork' },
-                    { href: 'https://github.com/blpsoares/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
+                    { href: 'https://github.com/agentistics/agentistics', label: lang === 'pt' ? 'Star no GitHub' : 'Star on GitHub' },
+                    { href: 'https://github.com/agentistics/agentistics/fork', label: 'Fork' },
+                    { href: 'https://github.com/agentistics/agentistics/issues/new', label: lang === 'pt' ? 'Contribuir' : 'Contribute' },
                     { href: 'https://github.com/blpsoares', label: '@blpsoares' },
                   ],
                 },

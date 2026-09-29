@@ -40,7 +40,7 @@ RUN bun run build:assets
 FROM oven/bun:1-slim AS runner
 
 LABEL org.opencontainers.image.licenses="FSL-1.1-ALv2" \
-      org.opencontainers.image.source="https://github.com/blpsoares/agentistics"
+      org.opencontainers.image.source="https://github.com/agentistics/agentistics"
 
 WORKDIR /app
 

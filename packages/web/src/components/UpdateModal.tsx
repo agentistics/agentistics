@@ -344,7 +344,7 @@ export function UpdateModal({ current, latest, lang, isCentral, isMember, onClos
               {t.binaryDesc}
             </p>
             <a
-              href="https://github.com/blpsoares/agentistics/releases/latest"
+              href="https://github.com/agentistics/agentistics/releases/latest"
               target="_blank"
               rel="noreferrer"
               style={{

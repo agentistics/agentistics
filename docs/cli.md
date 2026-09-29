@@ -617,7 +617,7 @@ mints the token).
 
 ```bash
 # inside a GitHub Actions job, after the Claude Code Action step:
-curl -fsSL "https://github.com/blpsoares/agentistics/releases/latest/download/agentop" -o agentop
+curl -fsSL "https://github.com/agentistics/agentistics/releases/latest/download/agentop" -o agentop
 chmod +x agentop
 ./agentop ci-push
 ```

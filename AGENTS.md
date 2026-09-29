@@ -18,7 +18,7 @@ implementation detail: those live in `docs/` (canonical) and in each harness's o
      a PR is open, `Done` when it merges. Don't leave a card silently stale in the wrong column.
    - **Priority** — `P0` / `P1` / `P2`. Ask the user if it's unclear; never guess `P0`.
 3. **Architecture-affecting or breaking changes get a Discussion first**, in the
-   [Ideas category](https://github.com/blpsoares/agentistics/discussions/categories/ideas), before
+   [Ideas category](https://github.com/agentistics/agentistics/discussions/categories/ideas), before
    an Issue is opened — link the Issue back to the Discussion once it exists. Skip this step for
    bug fixes, docs-only changes, and scoped features that don't change a public contract (an API
    route, the `SessionMeta` shape, a CLI flag, the `HarnessAdapter` contract, a stored document
@@ -67,7 +67,7 @@ implementation detail: those live in `docs/` (canonical) and in each harness's o
   operational memory: dense, repo-specific invariants written for a model. It is not the canonical
   source for anything, and other harnesses do not read it. If a decision or an invariant is worth
   remembering, it belongs in `docs/` — `CLAUDE.md` may reference it, never replace it.
-- The [Wiki](https://github.com/blpsoares/agentistics/wiki) is an index INTO `docs/`, not a copy of
+- The [Wiki](https://github.com/agentistics/agentistics/wiki) is an index INTO `docs/`, not a copy of
   it. Update the doc under `docs/`; the wiki page links there rather than repeating the prose.
 - Update `docs/` (and `CLAUDE.md`, if the change affects how a harness should operate in this repo)
   in the SAME PR as the code change — never as a follow-up someone has to remember to do.
