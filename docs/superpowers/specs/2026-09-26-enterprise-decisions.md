@@ -234,3 +234,56 @@ on a tool that reads `~/.claude` breaks trust, is removed by the first fork, and
 companies that pay — while a prominent optional login still makes an account the common path.
 *Rejected:* mandatory login for everything (the Notion model) — right for a cloud-native product,
 wrong for a local open-source one.
+
+## Revisions of 2026-09-29 (owner, relayed by the Enterprise bridge session)
+
+**Where this document lives now.** Private repositories may carry private documentation, so this
+record, the product spec and pricing belong in `agentistics/agentistics-cloud/docs`, **never in the
+public repository**. Until that repository exists they stay on a local, never-pushed branch.
+
+**Licence (decided in `2026-09-29-licensing-strategy.md`).** The public platform is FSL-1.1-ALv2
+(each release becomes Apache-2.0 after two years); Apache-2.0 is reserved for future integration
+SDKs. Last MIT release: `mit-final` (v2.68.7); first FSL: v2.69.0; v3 is reserved for the native
+harness launch.
+
+**E26 · Three repositories — supersedes E9.**
+- `agentistics/agentistics` — **public, FSL**: the community product (core, web, TUI/cockpit, CLI,
+  local server, sessions, ALM, self-hosted central, VS Code, MCP, legacy metric readers) plus an
+  **engine interface**.
+- `agentistics/agentistics-engine` — **private, proprietary (EULA)**: the native harness runtime,
+  the canonical integrations and live ingestion (whether journal/projections stay public is the
+  project lead's call). The official binary embeds it.
+- `agentistics/agentistics-cloud` — **private, proprietary**: the hub (multi-tenant, relay,
+  billing, GitHub App, hosted MCP).
+
+Two **public, versioned contracts**: community ↔ engine (the engine interface) and device ↔ hub
+(ingest + tunnel). *Rejected:* two repositories (E9) — it left no place for a closed engine.
+
+**E27 · The closed engine is free on one machine (answers Q2).** "Free" is no longer "open
+source": free = the FSL community product + the proprietary engine under a free-use EULA (no
+reverse engineering, no redistribution). The free local version keeps the Agentistics harness and
+the adapters usable from the web and the TUI. What is paid stays what only exists when machines or
+people are joined (E2): cross-device orchestration, policies and budgets, our runner. *Rejected:*
+charging for the engine on one machine — it is the adoption driver and would break E2's
+structural line. *Stated limit:* a local binary can be reversed with effort; a real secret only
+exists in what runs in the cloud.
+
+**E28 · The free cloud account = identity + one connected device + a 14-day Pro trial.** Signing
+in has a reason to exist without giving Pro away.
+
+**E29 · Business.** Bootstrapped (infrastructure ~US$100/month, E10); revisit when form D needs
+capital. Open a Brazilian company (CNPJ) now, with an accountant and Stripe Brazil; a US entity only
+if an investor or customer requires it. Price **anchors, to be validated in 15–20 interviews before
+any price is fixed**: Pro ~US$8–12/month, Team ~US$20–30/seat/month, the first 3–5 design-partner
+teams free.
+
+**E30 · The self-hosted central stays in the community (FSL).** The FSL's non-compete clause is what
+protects the hub for two years. Self-hosted **with SSO and audit** is sold by contract (Enterprise).
+
+**E31 · The device side of the E8/E12 encryption lives in the public repository.** Only the hub side
+lives in `agentistics-cloud`. *Reason:* "the hub cannot read your conversation" is a promise nobody
+can verify if the code that encrypts it is closed.
+
+**E25 · PENDING again.** The owner asked what the login is for and how it works. Proposed wording,
+not yet approved: basic local use never requires an account; **new engine features may require the
+free account** (E28), which stays optional for anyone who does not use them.
