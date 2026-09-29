@@ -108,6 +108,8 @@ export interface RuntimeSessionsWebDeps {
   readSpawnBudget: () => Promise<SpawnBudget | null>
   /** Sessions this process has already taken the lease and attached a driver for — see file header. */
   driven: Set<string>
+  /** The caller's address, for the audit line (H8). `index.ts` passes its `clientIp`. */
+  ip: string
 }
 
 export function defaultRuntimeSessionsWebDeps(): RuntimeSessionsWebDeps {
@@ -117,6 +119,7 @@ export function defaultRuntimeSessionsWebDeps(): RuntimeSessionsWebDeps {
     host: () => (liveBundle ??= buildLiveBundle()),
     readSpawnBudget,
     driven: liveDriven,
+    ip: 'local',
   }
 }
 
@@ -286,6 +289,7 @@ async function handleCreate(req: Request, d: RuntimeSessionsWebDeps): Promise<Ru
     credential: { provider: 'anthropic', id: 'default' },
     ...(parsed.body.title !== undefined ? { title: parsed.body.title } : {}),
   })
+  bundle.host.audit({ verb: 'create', surface: 'web', sessionId: session.sessionId, model: parsed.body.model, outcome: 'ok' }, { ip: d.ip })
   return j(201, { session })
 }
 
@@ -349,6 +353,7 @@ async function handleMessagesPost(req: Request, id: string, d: RuntimeSessionsWe
   if (!d.driven.has(id)) {
     const acquired = await bundle.host.acquire(id)
     if (!acquired.ok) {
+      bundle.host.audit({ verb: 'resume', surface: 'web', sessionId: id, outcome: 'held' }, { ip: d.ip })
       return j(409, {
         code: rc('held'),
         sentence: acquired.sentence,
@@ -356,7 +361,8 @@ async function handleMessagesPost(req: Request, id: string, d: RuntimeSessionsWe
         expiresAt: acquired.expiresAt,
       })
     }
-    await repairInterruptedRun(bundle.resume, id)
+    const repair = await repairInterruptedRun(bundle.resume, id)
+    bundle.host.audit({ verb: 'resume', surface: 'web', sessionId: id, repaired: repair.repaired === true, outcome: 'ok' }, { ip: d.ip })
     bundle.host.hub.attachDriver(id, async text => {
       await bundle.host.runtime.run(id, text)
     })
@@ -364,6 +370,8 @@ async function handleMessagesPost(req: Request, id: string, d: RuntimeSessionsWe
   }
 
   const ack = bundle.host.hub.submit(id, { clientRef: parsed.body.clientRef, text: parsed.body.text })
+  // The act and its outcome — never the text, never the client's own reference.
+  bundle.host.audit({ verb: 'send', surface: 'web', sessionId: id, outcome: ack.status === 'queued' ? 'ok' : (ack.code ?? ack.status) }, { ip: d.ip })
   return j(ackStatus(ack), ack)
 }
 
@@ -429,6 +437,12 @@ async function handleApprove(req: Request, execId: string, d: RuntimeSessionsWeb
   if (parsed.body.choice !== undefined) ans.choice = parsed.body.choice
   if (parsed.body.text !== undefined) ans.text = parsed.body.text
   const accepted = bundle.host.hub.answer(parsed.body.sessionId, parsed.body.questionId, ans)
+  bundle.host.audit({
+    verb: 'approve', surface: 'web', sessionId: parsed.body.sessionId, questionId: parsed.body.questionId,
+    answer: parsed.body.choice !== undefined ? 'choice' : parsed.body.text !== undefined ? 'text' : 'denied',
+    ...(parsed.body.choice !== undefined ? { choice: parsed.body.choice } : {}),
+    outcome: accepted ? 'ok' : 'no_such_question',
+  }, { ip: d.ip })
   return accepted
     ? j(200, { accepted: true })
     : j(409, { accepted: false, code: rc('no_such_question'), sentence: 'no question with that id is pending in this session.' })
@@ -437,6 +451,13 @@ async function handleApprove(req: Request, execId: string, d: RuntimeSessionsWeb
 async function handleCancel(runId: string, d: RuntimeSessionsWebDeps): Promise<RuntimeSessionsResult> {
   const bundle = await d.host()
   const cancelled = bundle.host.runtime.cancel(runId)
+  // Which session the run belonged to, best effort: an unknown run still leaves a line naming the run.
+  const run = await bundle.host.store.getRun(runId).catch(() => null)
+  bundle.host.audit({
+    verb: 'cancel', surface: 'web', runId,
+    ...(run ? { sessionId: run.sessionId } : {}),
+    outcome: cancelled ? 'ok' : 'not_running',
+  }, { ip: d.ip })
   return j(200, { cancelled })
 }
 

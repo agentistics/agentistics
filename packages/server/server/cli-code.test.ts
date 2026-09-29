@@ -8,7 +8,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { fromAnthropicStopReason, fromAnthropicUsage, type AgentisticsEvent } from '@agentistics/core'
+import { classifyProviderError, fromAnthropicStopReason, fromAnthropicUsage, type AgentisticsEvent } from '@agentistics/core'
 import {
   createFileContentStore,
   openSqliteSessionStore,
@@ -22,6 +22,7 @@ import {
   type SessionStore,
 } from '@agentistics/runtime'
 import { createRuntimeHost } from './runtime-host.ts'
+import type { AuditInput } from './audit.ts'
 import { runCode, type CodeCliDeps, type CodeHostFactory } from './cli-code.ts'
 
 // ── A scripted, STREAMING provider client (agentop code always streams — see cli-code.ts's module
@@ -93,6 +94,8 @@ afterEach(async () => {
 function makeHostFactory(opts: {
   client: ProviderClient
   journalEvents?: AgentisticsEvent[]
+  /** H8: capture the audit lines instead of appending them to a log beside the temp store. */
+  auditLines?: AuditInput[]
 }): CodeHostFactory {
   return async (askerFor) => {
     const events = opts.journalEvents
@@ -110,6 +113,8 @@ function makeHostFactory(opts: {
       journal,
       clientFor: () => opts.client,
       askerFor,
+      actor: 'local:tester',
+      ...(opts.auditLines ? { auditSink: (l: AuditInput) => { opts.auditLines!.push(l); return true } } : {}),
     })
     const content = createFileContentStore(join(dbDir, 'content'))
     return { host, content, journal, runtimeVersion: 'agentistics-runtime@b4-test' }
@@ -316,5 +321,123 @@ describe('agentop code — the BETA flag', () => {
     expect(await runCode(['--model', 'm', 'hi'], deps)).toBe(1)
     expect(built).toBe(false)
     expect(out.join('')).toContain('AGENTISTICS_PROVIDER=1')
+  })
+})
+
+// ── H8: every act `agentop code` takes on a session is audited, and no line carries content ─────
+
+const SENTINEL = 'SENTINEL_h8_cli_51d0'
+
+/** A streaming client whose one turn waits for the caller's abort — for the Ctrl-C test. */
+function hangingStreamingClient(): ProviderClient {
+  return {
+    provider: 'anthropic',
+    adapterVersion: 'stub@1',
+    capabilities: { streaming: true, editPolicy: 'verbatim' as never },
+    async invokeOnce(): Promise<InvocationResult> {
+      throw new Error('streams only')
+    },
+    stream(req: ProviderRequest, attempt: number) {
+      async function* gen(): AsyncGenerator<ProviderStreamEvent> {
+        yield { type: 'started' }
+        await new Promise<void>((resolve) => {
+          if (req.signal?.aborted) return resolve()
+          req.signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        const result: InvocationResult = {
+          invocationId: req.correlation.invocationId, attempt, provider: 'anthropic', requestedModel: req.model,
+          startedAt: '2026-09-27T12:00:00.000Z', latencyMs: 1, status: 'failed',
+          error: classifyProviderError({ transport: 'aborted' }),
+        }
+        yield { type: 'end', result }
+      }
+      return gen()
+    },
+  }
+}
+
+describe('agentop code — audit (H8)', () => {
+  test('create, send and the approval are audited from the cli surface; the prompt and the tool input are not', async () => {
+    const client = scriptedStreamingClient([
+      { content: [use('t1', 'shell__start', { command: `cat ${SENTINEL}.txt` })] },
+      { content: [{ type: 'text', text: `done ${SENTINEL}` }], deltas: ['done'] },
+    ])
+    const auditLines: AuditInput[] = []
+    const host = makeHostFactory({ client, auditLines })
+    const { deps } = makeDeps({ host, readLine: scriptedReadLine(['1']) })
+
+    const code = await runCode(['--model', 'claude-test', `please ${SENTINEL}`], deps)
+
+    expect(code).toBe(0)
+    expect(JSON.stringify(auditLines)).not.toContain(SENTINEL)
+    const acts = auditLines.map(l => [l.action, l.meta!.outcome])
+    expect(acts).toEqual([
+      ['runtime.session.create', 'ok'],
+      ['runtime.session.send', 'ok'],
+      ['runtime.session.approve', 'ok'],
+    ])
+    const sessionId = auditLines[0]!.targetId
+    expect(sessionId).toMatch(/^ses_/)
+    for (const l of auditLines) {
+      expect(l.targetId).toBe(sessionId)
+      expect(l.actorId).toBe('local:tester')
+      expect(l.meta!.surface).toBe('cli')
+    }
+    expect(auditLines[2]!.meta).toMatchObject({ answer: 'choice', choice: 0 })
+  })
+
+  test('Ctrl-C during a run is audited as a cancel', async () => {
+    const auditLines: AuditInput[] = []
+    const host = makeHostFactory({ client: hangingStreamingClient(), auditLines })
+    const { deps } = makeDeps({
+      host,
+      isTty: false,
+      onInterrupt: (handler) => { const t = setTimeout(handler, 100); return () => clearTimeout(t) },
+    })
+
+    await runCode(['--model', 'claude-test', SENTINEL], deps)
+
+    expect(auditLines.map(l => l.action)).toEqual([
+      'runtime.session.create', 'runtime.session.send', 'runtime.session.cancel',
+    ])
+    expect(JSON.stringify(auditLines)).not.toContain(SENTINEL)
+  })
+
+  test('--resume is audited with whether a run was repaired, and a held session as held', async () => {
+    const store: SessionStore = openSqliteSessionStore(join(dbDir, 'sessions.db'))
+    const sessionId = `ses_${'b'.repeat(32)}`
+    await store.createSession({
+      sessionId, createdAt: '2026-09-27T12:00:00.000Z', updatedAt: '2026-09-27T12:00:00.000Z',
+      status: 'open', workspaceRoot: ws, cwd: ws, provider: 'anthropic', model: 'claude-test',
+      credential: { provider: 'anthropic', id: 'default' }, messageCount: 0, lastSeq: 0, runCount: 1,
+    })
+    await store.createRun({
+      runId: 'run_dead11111111111111111111111', sessionId,
+      startedAt: '2026-09-27T12:00:00.000Z', status: 'running', turns: 1, toolCalls: 0,
+    })
+    store.close()
+
+    const auditLines: AuditInput[] = []
+    const client = scriptedStreamingClient([{ content: [{ type: 'text', text: 'ok' }], deltas: ['ok'] }])
+    const { deps } = makeDeps({ host: makeHostFactory({ client, auditLines }), readLine: scriptedReadLine([]) })
+    expect(await runCode(['--resume', sessionId, SENTINEL], deps)).toBe(0)
+    expect(auditLines.map(l => [l.action, l.meta!.outcome])).toEqual([
+      ['runtime.session.resume', 'ok'],
+      ['runtime.session.send', 'ok'],
+    ])
+    expect(auditLines[0]!.meta!.repaired).toBe(true)
+
+    // Held by a really live process.
+    const other = Bun.spawn(['sleep', '30'])
+    const s2: SessionStore = openSqliteSessionStore(join(dbDir, 'sessions.db'))
+    await s2.acquireLease(sessionId, { pid: other.pid, token: 'someone-else' }, 60_000)
+    s2.close()
+    const held: AuditInput[] = []
+    const { deps: deps2 } = makeDeps({ host: makeHostFactory({ client: scriptedStreamingClient([]), auditLines: held }) })
+    const code = await runCode(['--resume', sessionId], deps2)
+    other.kill()
+    expect(code).toBe(1)
+    expect(held.map(l => [l.action, l.targetId, l.meta!.outcome])).toEqual([['runtime.session.resume', sessionId, 'held']])
+    expect(JSON.stringify([...auditLines, ...held])).not.toContain(SENTINEL)
   })
 })

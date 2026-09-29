@@ -20,6 +20,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
+import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import {
   createAnthropicClient,
@@ -48,6 +49,7 @@ import type { ProviderId } from '@agentistics/core'
 import { omittedSecrets, type ExcludeRule } from './backup/backup-plan'
 import { AGENTISTICS_DATA_DIR, CONTENT_DIR, DEFAULT_AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { hostAnthropicClientDeps } from './cli-provider'
+import type { AuditInput, RuntimeSessionAct } from './audit'
 
 /** The native session store. Excluded from backups with a reason (`backup-plan.ts`). */
 export const RUNTIME_DIR = join(AGENTISTICS_DATA_DIR, 'runtime')
@@ -144,6 +146,96 @@ export const NATIVE_RUN_CEILING = 4
 /** How long a lease lives without a refresh. A crashed holder frees it after this at the latest. */
 export const LEASE_TTL_MS = 60_000
 
+// ── The audit hook (H8) ─────────────────────────────────────────────────────────────────────────
+
+/** Where a built audit line goes. Resolves `false` (or throws) when it could not be stored — either
+ *  way the act it describes has already happened and is never undone or failed because of it. */
+export type RuntimeAuditSink = (input: AuditInput) => Promise<boolean> | boolean | void
+
+/** Who the local person is. The native runtime refuses to run on a central (`runtime-sessions-web.ts`),
+ *  so there is never an authenticated account principal here: the actor is the OS user running this
+ *  server or this `agentop code`. */
+export function localActor(): string {
+  try {
+    const name = userInfo().username
+    return name ? `local:${name}` : 'local:unknown'
+  } catch {
+    return 'local:unknown'
+  }
+}
+
+export interface RuntimeSessionAuditor {
+  /** Record one act. Never throws, never awaits the sink on the caller's path. */
+  audit(act: RuntimeSessionAct, ctx?: { ip?: string }): void
+  /** Wait for writes still in flight, at most `timeoutMs` — a short-lived CLI calls this before it
+   *  exits so its last acts are not dropped by `process.exit`. What is still pending then is counted. */
+  flush(timeoutMs?: number): Promise<void>
+  /** Acts this auditor could not write (sink threw, rejected, answered `false`, or was cut off by a flush). */
+  failures(): number
+}
+
+const AUDIT_FLUSH_MS = 1500
+
+/** Where this machine's native-session audit lines live. Under `RUNTIME_DIR`, so the backup plan's
+ *  `.agentistics/runtime` exclusion already decides it (a session store and its log travel together). */
+export const RUNTIME_AUDIT_LOG = join(RUNTIME_DIR, 'audit.jsonl')
+
+/** A sink appending to a local log — not `writeAudit`'s Mongo collection: the native runtime never runs
+ *  on a central, the one machine that has that collection (`appendAuditLine`'s doc). */
+export function localAuditSink(path: string = RUNTIME_AUDIT_LOG): RuntimeAuditSink {
+  return async (input) => {
+    const { appendAuditLine } = await import('./audit')
+    return appendAuditLine(path, input)
+  }
+}
+
+/**
+ * The one place a native-session act becomes an audit line: the pure `buildRuntimeSessionAudit`
+ * (audit.ts) decides what the line may carry, then the sink writes it. A failure is COUNTED here and
+ * in `audit.ts`'s process-wide counter (`noteAuditFailure`), and never reaches the caller — an audit
+ * write must not fail the act it describes.
+ */
+export function createRuntimeSessionAuditor(opts: { sink?: RuntimeAuditSink; actor?: string } = {}): RuntimeSessionAuditor {
+  const sink = opts.sink ?? localAuditSink()
+  const actorId = opts.actor ?? localActor()
+  // One entry per write in flight. `counted` stops a write that a flush already gave up on from being
+  // counted a second time when it finally fails.
+  const pending = new Map<Promise<void>, { counted: boolean }>()
+  let failed = 0
+  // `alreadyCounted`: a sink that answered `false` is `writeAudit`, which has counted the loss in the
+  // process-wide counter itself; a throw or a flush cut-off has not.
+  const lost = (entry: { counted: boolean }, alreadyCounted = false) => {
+    if (entry.counted) return
+    entry.counted = true
+    failed += 1
+    if (!alreadyCounted) void import('./audit').then(m => m.noteAuditFailure(), () => {})
+  }
+  return {
+    audit(act, ctx) {
+      const entry = { counted: false }
+      const p: Promise<void> = import('./audit')
+        .then(async (m) => {
+          const out = await sink(m.buildRuntimeSessionAudit(act, { actorId, ip: ctx?.ip ?? 'local' }))
+          if (out === false) lost(entry, true)
+        })
+        .catch(() => { lost(entry) })
+        .finally(() => { pending.delete(p) })
+      pending.set(p, entry)
+    },
+    async flush(timeoutMs = AUDIT_FLUSH_MS) {
+      if (pending.size === 0) return
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timedOut = await Promise.race([
+        Promise.allSettled([...pending.keys()]).then(() => false),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), timeoutMs) }),
+      ])
+      if (timer) clearTimeout(timer)
+      if (timedOut) for (const entry of pending.values()) lost(entry)
+    },
+    failures: () => failed,
+  }
+}
+
 export interface RuntimeHostOptions {
   /** Default `RUNTIME_SESSIONS_DB`. */
   dbPath?: string
@@ -172,6 +264,12 @@ export interface RuntimeHostOptions {
   /** A hub to publish on; default a fresh one. Lets a caller watch a session before driving it. */
   hub?: SessionHub
   retry?: Parameters<typeof createSessionRuntime>[0]['retry']
+  /** Where native-session audit lines go (H8). Default: `audit.jsonl` BESIDE the session store
+   *  (`RUNTIME_AUDIT_LOG` for the default `dbPath`) — a store and its log travel together, and a test's
+   *  temp store never writes into the real `~/.agentistics`. */
+  auditSink?: RuntimeAuditSink
+  /** The actor recorded on every audit line. Default `localActor()`. */
+  actor?: string
 }
 
 export interface RuntimeHost {
@@ -192,6 +290,16 @@ export interface RuntimeHost {
   /** Take (or refresh) the right to DRIVE a session. Watching needs none. */
   acquire(sessionId: string): Promise<LeaseAcquireResult>
   release(sessionId: string): Promise<void>
+  /**
+   * H8: record one act on a native session — create, send, approve, cancel, resume. EVERY surface that
+   * creates or drives a session calls this: the `/api/runtime/*` routes (`surface: 'web'`), `agentop
+   * code` (`'cli'`) and the control center's code tab (`'tui'`). Facts only; never throws; never
+   * delays the act. See `RuntimeSessionAct` for what it can carry (and, by construction, what not).
+   */
+  audit(act: RuntimeSessionAct, ctx?: { ip?: string }): void
+  /** Audit lines this host could not write. */
+  auditFailures(): number
+  /** Flushes pending audit writes (bounded) and then closes what the host opened. */
   dispose(): Promise<void>
 }
 
@@ -277,6 +385,10 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
   const holder: LeaseHolder = { pid: opts.pid ?? process.pid, token: crypto.randomUUID() }
   // A held lease is REFRESHED while this process holds it, or a run longer than the TTL would hand
   // the session to the next process that asked. One timer per held session, cleared on release.
+  const auditor = createRuntimeSessionAuditor({
+    sink: opts.auditSink ?? localAuditSink(join(dbPath, '..', 'audit.jsonl')),
+    ...(opts.actor !== undefined ? { actor: opts.actor } : {}),
+  })
   const refreshers = new Map<string, ReturnType<typeof setInterval>>()
   const stopRefresh = (sessionId: string) => {
     const t = refreshers.get(sessionId)
@@ -303,7 +415,10 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
       askers.delete(sessionId)
       await store.releaseLease(sessionId, holder)
     },
+    audit: (act, ctx) => auditor.audit(act, ctx),
+    auditFailures: () => auditor.failures(),
     async dispose() {
+      await auditor.flush().catch(() => {})
       for (const id of [...refreshers.keys()]) stopRefresh(id)
       await tools.dispose()
       closeJournal?.()

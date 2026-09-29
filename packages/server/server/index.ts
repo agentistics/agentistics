@@ -1694,7 +1694,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     ) {
       try {
         const { handleRuntimeSessionsRequest } = await import('./runtime-sessions-web')
-        const out = await handleRuntimeSessionsRequest(req, url)
+        const out = await handleRuntimeSessionsRequest(req, url, { ip: clientIp })
         if (out !== null) {
           if (out.kind === 'stream') {
             return new Response(out.stream, {

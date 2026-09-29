@@ -253,6 +253,28 @@ export function createTerminalAsker(d: CodeCliDeps): PersonAsker {
   }
 }
 
+/**
+ * H8: the terminal asker, with its answer recorded — which question, which option (by index), or that
+ * nobody answered. Never the question's text, never the subjects it showed.
+ */
+export function auditedAsker(inner: PersonAsker, host: () => RuntimeHost | null, sessionId: string): PersonAsker {
+  return {
+    async ask(question: PersonQuestion, signal?: AbortSignal): Promise<PersonAnswer> {
+      const answer = await inner.ask(question, signal)
+      const h = host()
+      if (h) {
+        h.audit({
+          verb: 'approve', surface: 'cli', sessionId, questionId: question.id,
+          answer: !answer.answered ? 'denied' : answer.choice !== undefined ? 'choice' : 'text',
+          ...(answer.answered && answer.choice !== undefined ? { choice: answer.choice } : {}),
+          outcome: answer.answered ? 'ok' : answer.reason,
+        })
+      }
+      return answer
+    },
+  }
+}
+
 // ── Streaming a run: delta text + one line per tool call, never the tool content ────────────────
 
 function eventLine(toolNames: Map<string, string>, ev: AnyAgentisticsEvent): string | null {
@@ -316,6 +338,7 @@ async function runOnePrompt(
 
   const ac = new AbortController()
   activeAbort.current = ac
+  host.audit({ verb: 'send', surface: 'cli', sessionId, outcome: 'ok' })
   let outcome: RunOutcome
   try {
     outcome = await host.runtime.run(sessionId, promptText, { signal: ac.signal })
@@ -390,7 +413,10 @@ async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string
   let pressCount = 0
   const stop = d.onInterrupt(() => {
     pressCount += 1
-    if (activeAbort.current) activeAbort.current.abort()
+    if (activeAbort.current) {
+      host.audit({ verb: 'cancel', surface: 'cli', sessionId, outcome: 'ok' })
+      activeAbort.current.abort()
+    }
   })
 
   try {
@@ -492,8 +518,10 @@ async function runNewSession(args: CodeArgsNew, d: CodeCliDeps): Promise<number>
   const workspaceRoot = workspaceRootFor(cwd)
 
   const terminalAsker = createTerminalAsker(d)
-  const built = await d.host(() => terminalAsker)
+  let hostRef: RuntimeHost | null = null
+  const built = await d.host((sid) => auditedAsker(terminalAsker, () => hostRef, sid))
   const { host } = built
+  hostRef = host
   let leased = false
   let sessionId: string | undefined
   try {
@@ -505,6 +533,7 @@ async function runNewSession(args: CodeArgsNew, d: CodeCliDeps): Promise<number>
       credential: { provider: 'anthropic', id: 'default' },
     })
     sessionId = session.sessionId
+    host.audit({ verb: 'create', surface: 'cli', sessionId, model: args.model, outcome: 'ok' })
 
     const acquire = await host.acquire(sessionId)
     if (!acquire.ok) {
@@ -526,12 +555,15 @@ async function runNewSession(args: CodeArgsNew, d: CodeCliDeps): Promise<number>
 
 async function runResume(args: CodeArgsResume, d: CodeCliDeps): Promise<number> {
   const terminalAsker = createTerminalAsker(d)
-  const built = await d.host(() => terminalAsker)
+  let hostRef: RuntimeHost | null = null
+  const built = await d.host((sid) => auditedAsker(terminalAsker, () => hostRef, sid))
   const { host, content, journal, runtimeVersion } = built
+  hostRef = host
   let leased = false
   try {
     const acquire = await host.acquire(args.sessionId)
     if (!acquire.ok) {
+      host.audit({ verb: 'resume', surface: 'cli', sessionId: args.sessionId, outcome: 'held' })
       d.stderr(acquire.sentence)
       return 1
     }
@@ -542,9 +574,11 @@ async function runResume(args: CodeArgsResume, d: CodeCliDeps): Promise<number> 
 
     const opened = await openSession({ store: host.store, content }, args.sessionId)
     if (opened === null) {
+      host.audit({ verb: 'resume', surface: 'cli', sessionId: args.sessionId, outcome: 'not_found' })
       d.stderr(`No such session: ${args.sessionId}.`)
       return 1
     }
+    host.audit({ verb: 'resume', surface: 'cli', sessionId: args.sessionId, repaired: repair.repaired === true, outcome: 'ok' })
 
     printBanner(d, opened.session.workspaceRoot, args.sessionId)
     printRecentTurns(d, opened.messages)

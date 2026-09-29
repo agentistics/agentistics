@@ -9,6 +9,8 @@
  * log that stores credentials is a liability, not a control — and truncates long values so one
  * call cannot bloat the collection.
  */
+import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { getMongoDb } from './mongo'
 
 export type AuditAction =
@@ -53,6 +55,12 @@ export type AuditAction =
   // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
   // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
   | 'provider.set' | 'provider.remove'
+  // A NATIVE runtime session created or driven (H8) — the `/api/runtime/*` routes, `agentop code`
+  // and the TUI code tab, all through `runtime-host.ts`'s `RuntimeHost.audit`. One action per verb,
+  // built ONLY by `buildRuntimeSessionAudit` below: who, what, which session, from which surface —
+  // never a prompt, a tool input, a file's content or a credential.
+  | 'runtime.session.create' | 'runtime.session.send' | 'runtime.session.approve'
+  | 'runtime.session.cancel' | 'runtime.session.resume'
 
 export interface AuditEvent {
   action: AuditAction
@@ -100,14 +108,134 @@ export function buildAuditEvent(input: AuditInput, now: Date): AuditEvent {
   }
 }
 
-/** Fire-and-forget: an audit write must never break the request it is describing. */
-export async function writeAudit(input: AuditInput): Promise<void> {
+let auditFailures = 0
+
+/** How many audit events this process could not write (the sink failed, or a caller counted a drop
+ *  through `noteAuditFailure`). An audit that is lost must at least be COUNTED — "nothing was
+ *  recorded" and "nothing happened" are different facts. */
+export function auditFailureCount(): number {
+  return auditFailures
+}
+
+/** Count one audit event that could not be written by a path that does not go through `writeAudit`. */
+export function noteAuditFailure(): void {
+  auditFailures += 1
+}
+
+/** Tests only. */
+export function _resetAuditFailures(): void {
+  auditFailures = 0
+}
+
+/** Fire-and-forget: an audit write must never break the request it is describing. Resolves `true`
+ *  when the event was stored, `false` when it was lost (and counted). Never rejects. */
+export async function writeAudit(input: AuditInput): Promise<boolean> {
   try {
     const db = await getMongoDb()
     await db.collection<AuditEvent>('audit').insertOne(buildAuditEvent(input, new Date()))
+    return true
   } catch {
     // Swallowed on purpose. A failing audit sink is an operational problem, not a reason to
-    // deny a legitimate login.
+    // deny a legitimate login — but it is counted.
+    auditFailures += 1
+    return false
+  }
+}
+
+/** Rotation threshold for a local audit log: past it the file becomes `<path>.1` (one generation). */
+export const LOCAL_AUDIT_MAX_BYTES = 5 * 1024 * 1024
+
+/**
+ * The same event `writeAudit` stores, appended as ONE JSON line to a local file (0600, parent 0700) —
+ * for a machine with no audit collection. The native runtime refuses to run on a central, which is the
+ * only machine that has one, so its acts are recorded here instead of being attempted against a Mongo
+ * that is not there (and that a solo machine would wait 30 s per act to find absent). Built by the same
+ * `buildAuditEvent`, so the same fields are redacted. Resolves `false` (and counts) on any failure;
+ * never rejects.
+ */
+export async function appendAuditLine(
+  path: string,
+  input: AuditInput,
+  opts: { now?: Date; maxBytes?: number } = {},
+): Promise<boolean> {
+  try {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    const size = await stat(path).then(st => st.size, () => 0)
+    if (size >= (opts.maxBytes ?? LOCAL_AUDIT_MAX_BYTES)) await rename(path, `${path}.1`).catch(() => {})
+    await appendFile(path, `${JSON.stringify(buildAuditEvent(input, opts.now ?? new Date()))}\n`, { mode: 0o600 })
+    return true
+  } catch {
+    auditFailures += 1
+    return false
+  }
+}
+
+// ── Native runtime sessions (H8) ─────────────────────────────────────────────────────────────────
+
+export type RuntimeSessionVerb = 'create' | 'send' | 'approve' | 'cancel' | 'resume'
+
+/** Which front door the act came through. `tui` is the control center's code tab. */
+export type RuntimeSessionSurface = 'web' | 'cli' | 'tui'
+
+/**
+ * One act on a native session. Every field is an IDENTIFIER, a count or a closed word — there is
+ * deliberately no field that could carry a prompt, a tool input, a question's text, a free-text
+ * answer, a title, a path or a credential. A caller holding one of those has nowhere to put it.
+ */
+export interface RuntimeSessionAct {
+  verb: RuntimeSessionVerb
+  surface: RuntimeSessionSurface
+  /** Absent only for a cancel whose run could not be traced back to a session. */
+  sessionId?: string
+  /** `cancel`: the run asked to stop. */
+  runId?: string
+  /** `approve`: the question answered (an id, never its text). */
+  questionId?: string
+  /** `approve`: the picked option's 0-based index; a free-text answer is recorded as `answer: 'text'`
+   *  and its words are never kept. */
+  choice?: number
+  /** `approve`: which kind of answer was given — `denied` when the person answered nothing. */
+  answer?: 'choice' | 'text' | 'denied'
+  /** `create`: the model id (an identifier, not content). */
+  model?: string
+  /** What came of the act: `ok`, or the refusal code the caller was given. */
+  outcome: string
+  /** `resume`: whether a run a dead process left `running` was repaired. */
+  repaired?: boolean
+}
+
+export const RUNTIME_SESSION_ACTIONS: Record<RuntimeSessionVerb, AuditAction> = {
+  create: 'runtime.session.create',
+  send: 'runtime.session.send',
+  approve: 'runtime.session.approve',
+  cancel: 'runtime.session.cancel',
+  resume: 'runtime.session.resume',
+}
+
+const SHORT = 128
+function clip(v: string): string {
+  return v.length > SHORT ? v.slice(0, SHORT) : v
+}
+
+/**
+ * PURE: the `AuditInput` for one native-session act. `meta` is built from an ALLOWLIST, field by
+ * field — never a spread of what the caller passed — so a field added to `RuntimeSessionAct` does not
+ * reach the log until somebody adds it here on purpose.
+ */
+export function buildRuntimeSessionAudit(act: RuntimeSessionAct, who: { actorId: string; ip: string }): AuditInput {
+  const meta: Record<string, unknown> = { surface: act.surface, outcome: clip(act.outcome) }
+  if (act.runId !== undefined) meta.runId = clip(act.runId)
+  if (act.questionId !== undefined) meta.questionId = clip(act.questionId)
+  if (act.answer !== undefined) meta.answer = act.answer
+  if (act.choice !== undefined && Number.isInteger(act.choice) && act.choice >= 0) meta.choice = act.choice
+  if (act.model !== undefined) meta.model = clip(act.model)
+  if (act.repaired !== undefined) meta.repaired = act.repaired === true
+  return {
+    action: RUNTIME_SESSION_ACTIONS[act.verb],
+    actorId: clip(who.actorId),
+    ...(act.sessionId !== undefined ? { targetId: clip(act.sessionId) } : {}),
+    ip: who.ip,
+    meta,
   }
 }
 
