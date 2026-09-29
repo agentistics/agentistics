@@ -119,6 +119,7 @@ import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 
 /**
@@ -3561,8 +3562,11 @@ export default function AppLayout() {
       // same vertical line the content below it does — that is the alignment worth keeping, and it
       // is the left edge, which is the one the eye follows down the page.
       width: '100%', padding: `0 ${PAGE_INSET}px`, boxSizing: 'border-box',
-      display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+      display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative',
     }}>
+      {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
+          Cancel" — laid over it, see `ChatSelectionOverlay`. */}
+      <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
       {selectedFleetSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
           <span style={{
