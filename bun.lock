@@ -46,14 +46,14 @@
     },
     "packages/agentop": {
       "name": "@agentistics/agentop",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "bin": {
         "agentop": "bin/agentop.js",
       },
     },
     "packages/core": {
       "name": "@agentistics/core",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.1",
         "date-fns": "^4.1.0",
@@ -69,9 +69,13 @@
         "@tauri-apps/cli": "^2.0.0",
       },
     },
+    "packages/engine-api": {
+      "name": "@agentistics/engine-api",
+      "version": "1.0.0",
+    },
     "packages/mcp": {
       "name": "@agentistics/mcp",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "bin": {
         "agentistics-mcp": "dist/agentistics-mcp.js",
       },
@@ -81,7 +85,7 @@
     },
     "packages/runtime": {
       "name": "@agentistics/runtime",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@ai-sdk/anthropic": "4.0.58",
@@ -90,7 +94,7 @@
     },
     "packages/server": {
       "name": "@agentistics/server",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/runtime": "workspace:*",
@@ -101,7 +105,7 @@
     },
     "packages/tui": {
       "name": "@agentistics/tui",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "es-toolkit": "^1.50.0",
@@ -126,7 +130,7 @@
     },
     "packages/web": {
       "name": "@agentistics/web",
-      "version": "2.61.0",
+      "version": "2.71.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/tui": "workspace:*",
@@ -165,6 +169,8 @@
     "@agentistics/core": ["@agentistics/core@workspace:packages/core"],
 
     "@agentistics/desktop": ["@agentistics/desktop@workspace:packages/desktop"],
+
+    "@agentistics/engine-api": ["@agentistics/engine-api@workspace:packages/engine-api"],
 
     "@agentistics/mcp": ["@agentistics/mcp@workspace:packages/mcp"],
 
