@@ -1,6 +1,6 @@
 {
   "name": "agentistics",
-  "version": "2.68.3",
+  "version": "2.68.5",
   "description": "Local analytics dashboard for AI coding assistants — tracks tokens, cost, sessions, and activity from ~/.claude/",
   "keywords": [
     "claude",
