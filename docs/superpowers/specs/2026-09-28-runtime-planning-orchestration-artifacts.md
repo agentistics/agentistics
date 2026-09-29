@@ -48,13 +48,13 @@ imports server/web (`runtime-boundary.lint.test.ts`).
 | # | Decision | Status |
 |---|---|---|
 | P1 | **The ALM acceptance-criteria gap is real** (`[G]` OTH.1: no `AcceptanceCriterion` on the board; master spec section 26 describes it, nothing files it). Filed here as **SPEC.AC**, the first item of the SPEC group. **LIFE.1 and SPEC.10 depend on it** | [LEADER] |
-| P2 | **The person-only permission class `gated` is accepted as part of B8.4.** It holds under all three B4.7 built-in profiles; the acceptance test is the plan-profile-bypass test's shape, over a table (section 5) | [LEADER] |
+| P2 | **The person-only permission class is accepted as part of B8.4**, under the value **`person`** (P8). It holds under all three B4.7 built-in profiles (#744); the acceptance test is the plan-profile-bypass test's shape, over a table (section 5) | [LEADER] |
 | P3 | **Orchestrations start DECLARATIVE**: a typed JSON pipeline of steps, no new JS or WASM dependency. `[G]` ORC.2 "WASM interpreter" becomes "declarative pipeline executor". The free script engine is a numbered owner decision (N1, section 7) and **nothing depends on it** | [LEADER] |
 | P4 | **First cut = TOOL.1-3, SPEC.1-3 + SPEC.AC, LIFE.1-2, ORC.1-4, ART.1-3, in full.** Every other item of `[G]` §3 is a row in section 8 | [LEADER] |
-| P5 | **Order: TOOL.1 plus `gated` first, then SPEC, then ORC; LIFE and ART after or alongside as dependencies allow** (graph in section 4) | [LEADER] |
+| P5 | **Order: TOOL.1 plus `person` first, then SPEC, then ORC; LIFE and ART after or alongside as dependencies allow** (graph in section 4) | [LEADER] |
 | P6 | **The spec-artifact root is GENERIC**: a setting with a neutral default (`docs/specs/<slug>/`). Agentistics configures its own (`docs/superpowers/specs/`). The runtime embeds no host-specific fact (D23) | [LEADER] |
-| P7 | **B9.1 and B9.2 are todo; only B9.3 and H18 are done.** Items that lean on effort or image input (role `effort`, LIFE.9, ART.10) are stated as gated on the todo items | [LEADER] |
-| P8 | **Name collision, VERIFIED in shipped code.** `gated` already exists: `packages/runtime/src/tools/contract.ts:95` declares `ToolPermission = 'auto' \| 'ask' \| 'gated'`, and `policy/policy.ts` treats that class as **deny by default, overridable per class through the policy's `defaults`**. The class accepted in P2 means the opposite: **no rule of any layer, and no default, releases it**. Giving both meanings one value on one type means a configuration that today lifts `gated` would release person-only gates. **Recommendation: the new class takes a new value, `person`**. Existing `gated` is untouched, and this spec's "gated" sections read as `person` once the leader confirms. The earlier draft proposed the reverse (renaming the shipped class); that is withdrawn, because it changes the meaning of a value already in code and configuration. The leader accepted the concept under the name `gated`, so **the name is the leader's call** | [PROPOSED], leader to confirm |
+| P7 | **B9.1 and B9.2 are todo; only B9.3 and H18 are done.** Items that lean on effort or image input (role `effort`, LIFE.9, ART.10) are stated as blocked on the todo items | [LEADER] |
+| P8 | **DECIDED: the person-only class is a NEW value, `person`, beside the shipped `gated`.** `gated` already exists with a different meaning: `packages/runtime/src/tools/contract.ts:95` `ToolPermission = 'auto' \| 'ask' \| 'gated'`, deny by default and OVERRIDABLE through `PolicyOptions.defaults` (`policy/policy.ts:91`). **`gated` keeps its shipped meaning; nothing is renamed or migrated.** For `person`: no rule, no profile and no `defaults` entry can release it; only a person's answer at the prompt does. Verified by the leader on `origin/dev` | [LEADER] |
 | P9 | The declarative manifest carries `kind: "pipeline"` and a `schemaVersion`, so a future `kind: "script"` can be added without breaking a stored manifest. An unknown `kind` is REFUSED, never treated as a pipeline | [PROPOSED] |
 | P10 | Unattended orchestrated agent hitting an `ask`: **deny with a sentence** in the first cut. Card pre-grants and "park as needs-you" are ORC.16 (Later). Matches the recommendation of `[G]` Q17 | [PROPOSED], owner pending (Q17) |
 | P11 | `waived` (a criterion state, LIFE.1) is settable only through a person-origin write. The MCP door refuses it (422 `waive_person_only`) | [PROPOSED] |
@@ -87,7 +87,7 @@ response, and the estimate shows that figure instead of claiming zero.
 
 ```mermaid
 graph TD
-  GATED["B8.4 gated class + PersonAct (section 5)"]
+  PERSON["B8.4 person class + PersonAct (section 5)"]
   T1["TOOL.1 structured output"]
   T3["TOOL.3 completion gate"]
   AC["SPEC.AC acceptance criteria (ALM)"]
@@ -104,8 +104,8 @@ graph TD
   A2["ART.2 artifact store"]
   A3["ART.3 artifact tools"]
   T2["TOOL.2 report.findings"]
-  GATED --> S3
-  GATED --> O1
+  PERSON --> S3
+  PERSON --> O1
   T1 --> O1
   S1 --> S2
   S1 --> S3
@@ -125,24 +125,24 @@ graph TD
 
 Order of work [LEADER]:
 
-1. **Wave 0**: the `gated` class and `PersonAct` (section 5), with **TOOL.1**. TOOL.3 is independent and may run beside them.
+1. **Wave 0**: the `person` class and `PersonAct` (section 5), with **TOOL.1**. TOOL.3 is independent and may run beside them.
 2. **Wave 1 (SPEC)**: SPEC.AC (server, independent of the runtime, may start at wave 0), then SPEC.1 -> SPEC.2 -> SPEC.3.
 3. **Wave 2 (ORC)**: ORC.1 -> ORC.2 and ORC.3 -> ORC.4.
 4. **Alongside, as dependencies allow**: LIFE.1 (after SPEC.AC) -> LIFE.2 (after SPEC.1); ART.1 -> ART.2 -> ART.3 (needs only the journal and B4.6, so it can start in wave 1); TOOL.2 after ART.1.
 
-The only cross-group hard edges are: SPEC.AC -> LIFE.1, `gated` -> SPEC.3 and ORC.1, TOOL.1 -> ORC.1, SPEC.1 -> LIFE.2. ART has no edge into SPEC/LIFE/ORC in the first cut (evidence ART.6 and report artifacts ORC.9 are Later).
+The only cross-group hard edges are: SPEC.AC -> LIFE.1, `person` -> SPEC.3 and ORC.1, TOOL.1 -> ORC.1, SPEC.1 -> LIFE.2. ART has no edge into SPEC/LIFE/ORC in the first cut (evidence ART.6 and report artifacts ORC.9 are Later).
 
 ---
 
-## 5. Foundation: the `gated` class and `PersonAct` (an extension of B8.4)
+## 5. Foundation: the `person` class and `PersonAct` (an extension of B8.4)
 
 B8 section 5.5 defines the permission profiles and B3 section 3 the classes `auto` / `ask` / `gated`.
 This section is the delta. Naming reconciliation: P8.
 
 ### 5.1 What it adds
 
-- **A fourth value on the shipped `ToolPermission` (`contract.ts:95`)**, working name "gated",
-  recommended value `person` (P8). The shipped `gated` stays as it is. The person-only class means: only a
+- **A fourth value on the shipped `ToolPermission` (`contract.ts:95`): `person`** (P8). The shipped `gated` stays exactly as it is.
+  The `person` class means: only a
   person can release the call, per call; no allow-for-session, no prefix approval, no rule of any
   layer releases it; the releasing actor is recorded.
 - **`PersonAct`** (pure type in `packages/runtime/src/policy/`): the single proof that a person did
@@ -151,10 +151,10 @@ This section is the delta. Naming reconciliation: P8.
   runtime code constructs one; the type is opaque (branded) so a fixture cannot forge it outside
   tests. It is **single-use and bound to one call hash** (I6). ORC.10's `PersonConfirmation` and this
   release are the same type, so there is one mechanism, not two.
-- **Loader refusal.** A `rules` entry of effect `allow` whose subject is a gated tool is refused at
+- **Loader refusal.** A `rules` entry of effect `allow` whose subject is a person-class tool is refused at
   load in words, in every layer, exactly as B8 refuses a rule that targets a floor subject.
-- **Events**: `policy.gated.requested{tool, callHash}`, `policy.gated.released{tool, callHash, actor, surface}`, `policy.gated.refused{tool, callHash, reason}`. Facts only, no arguments copied (D5).
-- **Headless and unattended**: a gated call with no person available is REFUSED, never waited on
+- **Events**: `policy.person.requested{tool, callHash}`, `policy.person.released{tool, callHash, actor, surface}`, `policy.person.refused{tool, callHash, reason}`. Facts only, no arguments copied (D5).
+- **Headless and unattended**: a person-class call with no person available is REFUSED, never waited on
   (H16 non-interactive mode; orchestrated agents, P10).
 
 ### 5.2 Lives in
@@ -169,31 +169,37 @@ B4.7 (the three profiles, board item #744, in progress), B8.4 (layers). Extends 
 
 ### 5.4 Acceptance criteria
 
-1. **The bypass table.** A generated test enumerates every built-in profile (`default`, `plan`,
-   `accept-edits`) x every rule layer (machine, user, profile, project, session-remembered) x every
-   allow kind (exact allow rule, prefix allow, glob/path allow, allow-for-session, remembered
-   approval, allow-once from a non-person actor, a trusted-project grant). Each cell attempts to
-   release a fixture gated call. **Every cell is refused.** The test is built the way B4.7 tested the
-   plan-profile bypass and fails the build when a profile, layer or allow kind is added without a row.
-2. A gated call is released by exactly one path: a `PersonAct` bound to that call's hash. A
+1. **The bypass table.** A generated test enumerates:
+   - every built-in B4.7 profile (`default`, `plan`, `accept-edits`; #744);
+   - every rule-layer POSITION (`PolicyLayer.name` is free text and only the order counts,
+     `rules.ts:60`);
+   - every allow kind: exact allow rule, prefix allow, glob/path allow, allow-for-session,
+     remembered approval, allow-once from a non-person actor, a trusted-project grant, and **the
+     policy's `defaults` setting the `person` class to `'allow'`** (`PolicyOptions.defaults`,
+     `policy.ts:91`: the shipped `gated` accepts that row, `person` must refuse it).
+
+   Each cell attempts to release a fixture person-class call. **Every cell is refused.** The test is
+   built the way B4.7 tested the plan-profile bypass, and it fails the build when a profile, a layer
+   position or an allow kind is added without a row.
+2. A person-class call is released by exactly one path: a `PersonAct` bound to that call's hash. A
    `PersonAct` for call X cannot release call Y; a used one cannot release again.
-3. `policy.gated.released` carries the actor and surface; a release without an actor is impossible
+3. `policy.person.released` carries the actor and surface; a release without an actor is impossible
    to express (type test).
-4. The loader refuses an `allow` rule targeting a gated tool in every layer, with a file:line
+4. The loader refuses an `allow` rule targeting a person-class tool in every layer, with a file:line
    sentence; the same rule as a `deny` or `ask` is accepted (it only narrows).
-5. Under `plan`, a gated call still asks a person and is never auto-denied into a silent no-op: the
+5. Under `plan`, a person-class call still asks a person and is never auto-denied into a silent no-op: the
    refusal names the reason.
-6. The deny floor is unchanged: no gated release lifts it (test over every floor subject).
-7. A fixture gated tool is the test vehicle; no shipped tool is changed to `gated` by this work.
+6. The deny floor is unchanged: no person-class release lifts it (test over every floor subject).
+7. A fixture person-class tool is the test vehicle; no shipped tool is changed to `person` by this work.
 
 ### 5.5 Stated limits
 
-`gated` proves a PERSON acted on a surface; it cannot prove the person read the card. The class
+`person` proves a PERSON acted on a surface; it cannot prove the person read the card. The class
 protects against a model or a rule releasing the call, not against a careless click. Throughout
-this section "gated" is the WORKING name of the person-only class. The shipped `gated` value
-(deny by default, overridable through `defaults`) is a different thing and is untouched. Per P8, the
-recommended final value is `person`. Acceptance criterion 1 must also include the row "the policy's
-`defaults` set the class to allow", which the shipped `gated` permits and the person-only class must
+this section `person` is a NEW value; the shipped `gated` (deny by default, overridable through
+`defaults`) is a different class and is untouched. Acceptance criterion 1 must include the row
+"the policy's `defaults` set the class to allow", which the shipped `gated` permits and `person` must
+refuse, and every B4.7 profile (#744).
 refuse.
 
 ---
@@ -301,7 +307,7 @@ setting is read through the catalogue (B8 settings).
 2. With an unchanged open set and no distinct tool results over `N` turns, release reason `no-progress`.
 3. A run with no `task.plan` items is never blocked by Rule 1 (test: no plan, no gate).
 4. Rule 3 is inert unless the setting is on; with it on, an edit with no later passing command blocks once.
-5. Headless runs are gated identically and never wait on a person.
+5. Headless runs are handled identically and never wait on a person.
 6. The gate never adds a tool call itself and never marks a plan item done (test: state before equals state after, except the injected message).
 
 **Stated limits.** The gate proves a command exited 0, not that it tested the right thing (`[E]`
@@ -408,7 +414,7 @@ not that the criterion is a good one. The person's review carries that (`[E]` R9
 `plan` `[E]` A.2 "How the plan profile enforces read-only".
 
 **Adds.**
-- **The mechanism** (extends B4.7, section 9 row 1): a permission profile may carry a **scoped allow**: one tool name plus one path glob. The loader validates that the tool is NOT gated (section 5), the glob resolves inside `spec.root` of the current slug, and the profile it amends is `plan`. It only ever ADDS an allow inside that glob; every other `plan` denial stands.
+- **The mechanism** (extends B4.7, section 9 row 1): a permission profile may carry a **scoped allow**: one tool name plus one path glob. The loader validates that the tool is NOT person-class (section 5), the glob resolves inside `spec.root` of the current slug, and the profile it amends is `plan`. It only ever ADDS an allow inside that glob; every other `plan` denial stands.
 - **The profile switch is a journaled event** and session approvals survive only a switch to a STRICTER profile (B8 section 5.5, restated as an acceptance criterion here because the spec profile is the first profile that amends `plan`).
 - Built-in agent profiles (B8.7): `spec` (prompt addendum, permission profile `plan` + the scoped allow, phase model routing left to a later item) and `spec-critic` (read tools only, cheaper model if configured). A profile only narrows the spawning session's grants (B8 section 3.5).
 - **Honest limit on ordering**: the tool the allow names, `spec.write`, is SPEC.4 (Later). In the first cut the mechanism is tested with a FIXTURE tool, and the `spec` profile can read, ask the person (`ask.user`) and run `spec.check`; it cannot yet write an artifact. Until SPEC.4 the person writes the files (or the model proposes text in chat).
@@ -416,12 +422,12 @@ not that the criterion is a good one. The person's review carries that (`[E]` R9
 **Lives in.** Pure: `packages/runtime/src/policy/` (scoped-allow validation) and the built-in profile data
 in the catalogue. Host: none new.
 
-**Depends on.** B4.7, B8.4, B8.7, SPEC.1 (the root and glob), SPEC.2 (`spec-critic` uses `spec.check`), `gated` (section 5, for the validation "not gated").
+**Depends on.** B4.7, B8.4, B8.7, SPEC.1 (the root and glob), SPEC.2 (`spec-critic` uses `spec.check`), `person` (section 5, for the validation "not person-class").
 
 **Acceptance criteria.**
 1. Under `spec`, the fixture tool succeeds inside `<spec.root>/<slug>/*.md` and is denied one directory up, on a sibling slug, via `..`, and via a symlink resolving outside.
 2. Under `spec`, `file.patch`, `file.write`, mutating shell segments and git write tools are denied (the same table B4.7 uses for `plan`).
-3. A scoped allow naming a gated tool, or a glob outside the spec root, is refused at load with a sentence.
+3. A scoped allow naming a person-class tool, or a glob outside the spec root, is refused at load with a sentence.
 4. A scoped allow on any profile other than `plan`-derived ones is refused (it is not a general widening).
 5. Switching `spec` -> `accept-edits` drops session approvals; `accept-edits` -> `spec` keeps them (both journaled).
 6. The deny floor is unchanged (test over every floor subject).
@@ -500,7 +506,7 @@ scope: "product" means operable and trustworthy, not deployed by us (Q10).
 
 **Lives in.** Pure: `packages/runtime/src/orchestration/` (all of it). Host: supplies `MeasuredBasis`, prices, the world stamp.
 
-**Depends on.** B6.1 (agent contract), TOOL.1 (schemas, structured results), `gated`/`PersonAct` (section 5).
+**Depends on.** B6.1 (agent contract), TOOL.1 (schemas, structured results), `person`/`PersonAct` (section 5).
 
 **Acceptance criteria.**
 1. A manifest naming a `model`, or lacking any of `maxUSD`, `maxAgents`, `maxWallClock`, `concurrency` in its defaults or bindings, fails `checkManifest` with a sentence each (I4, I5).
@@ -573,7 +579,7 @@ inside its own grants (`[F]` A.5). Read-only roles are the default.
 2. With a ceiling that fits only k agents' worst cases, at most k are ever reserved at once; the rest wait, and a step that can never fit returns `budget`.
 3. On ceiling exhaustion the run enters `paused-budget`: in-flight agents complete, no new one starts, the checkpoint round-trips, and the run resumes only after a `PersonAct`-bound raise.
 4. Total settled spend never exceeds `ceiling + worstOvershoot` across randomized runs (property test), and the run reports `overshoot` when it happens.
-5. An orchestrated agent asking for an `ask` action receives a denial sentence and a `policy.denied` event; a gated call is refused; neither blocks the run.
+5. An orchestrated agent asking for an `ask` action receives a denial sentence and a `policy.denied` event; a person-class call is refused; neither blocks the run.
 6. An orchestrated agent cannot call `agent.spawn` beyond the depth cap, and there is no tool in its list that launches a run (I1 test over the resolved tool list).
 7. The effective policy of an agent is never wider than the launching session's (test: for a random pair of layers, the intersection is a subset of both).
 
@@ -726,7 +732,7 @@ the Notes column. **OTH.1 is now SPEC.AC (first cut).** "First cut" dependencies
 
 | Id | Title | Size | Depends on | Notes |
 |---|---|---|---|---|
-| SPEC.4 | spec.write / spec.gate / spec.reopen: hash-bound gates, journal events (gated class) | medium | B8.4 (gated), **SPEC.1**, **SPEC.3** | Makes the SPEC.3 scoped allow real; needs Q2 |
+| SPEC.4 | spec.write / spec.gate / spec.reopen: hash-bound gates, journal events (person class) | medium | B8.4 (person class), **SPEC.1**, **SPEC.3** | Makes the SPEC.3 scoped allow real; needs Q2 |
 | SPEC.5 | Person's gate action: host handler, web card, TUI, VS Code, `agentop spec approve` | medium | SPEC.4, B4.6, TUI board | One implementation, four doors |
 | SPEC.6 | Built-in `/spec*` commands and five spec-* skills | medium | B8.5, B8.6, SPEC.4 | |
 | SPEC.7 | Path router (spike / quick / full), default quick when unsure | small | SPEC.6 | Q5 |
@@ -740,7 +746,7 @@ the Notes column. **OTH.1 is now SPEC.AC (first cut).** "First cut" dependencies
 
 | Id | Title | Size | Depends on | Notes |
 |---|---|---|---|---|
-| LIFE.3 | stage.status / verify / evidence / waive / exit / reopen tools, events, promotion is a person's gated act | medium | **LIFE.2**, SPEC.4, ART.6 | |
+| LIFE.3 | stage.status / verify / evidence / waive / exit / reopen tools, events, promotion is a person-class act | medium | **LIFE.2**, SPEC.4, ART.6 | |
 | LIFE.4 | POC stage: brief, worktree bootstrap, run-recipe verifier, `poc-builder`, keep/kill | medium | LIFE.3, SPEC.6, H15, B4.7 | |
 | LIFE.5 | MVP verifiers: secret probe, scan wrapper (offline = "could not verify"), rollback proof, test-per-requirement, bundle + branch (no publish) | medium | LIFE.3, B8.9 | Q12 |
 | LIFE.6 | Product stage: checklist, readiness re-run, per-release reopen | medium | LIFE.3 | |
@@ -818,7 +824,7 @@ first-cut item needs it and when.
 | # | Existing item | What changes | Needed by |
 |---|---|---|---|
 | 1 | B4.7 (three built-in profiles) | The `plan` profile is amendable by a scoped allow (one tool, one path glob); the profile switch is a journaled event; approvals survive only a switch to a stricter profile | SPEC.3 |
-| 2 | B8.4 (permission profiles, settings rules as layers) | New class `gated` and `PersonAct` (section 5), named in one place; shared by SPEC.4, LIFE.3, ORC.10 | Wave 0; SPEC.3, ORC.1 |
+| 2 | B8.4 (permission profiles, settings rules as layers) | New class `person` and `PersonAct` (section 5), named in one place; shared by SPEC.4, LIFE.3, ORC.10 | Wave 0; SPEC.3, ORC.1 |
 | 3 | B8.5 (command registry) | Command parameters and a response-schema field, retry check; a `person`-only command class not reachable from any model call; optional `orchestration: <name>` field that opens a launch card (never launches) | Later (SPEC.6, ORC.8) |
 | 4 | B8.7 (agent profiles) | Profile may carry a model per phase and a `small_model` (same provider, B8 Q5 stands); built-ins added: `spec`, `spec-critic`, `poc-builder`, `security-reviewer`, `explore` | SPEC.3 (`spec`, `spec-critic`) |
 | 5 | B8.2 / backup rows | `ALWAYS` allowlist entries with a reason for `orchestrations/` and `artifacts/` stores | ART.2 (`artifacts/`); ORC.8 (`orchestrations/`) |
@@ -827,14 +833,14 @@ first-cut item needs it and when.
 | 8 | H2 (AGENTS.md) | Imports, path-scoped rules, just-in-time subtree files, personal local file; optional constitution file read as standing project rules | Later (SPEC.8) |
 | 9 | H4 (Undo) | Persisted, named, whole-state checkpoints (files + conversation; auto-created at milestones and before recovery); shadow-git compare | Later |
 | 10 | H21 (fork and export) | Fork/rewind of conversation and code independently; per-message revert | Later |
-| 11 | H16 (headless) | A non-interactive permission mode (deny what would ask, never wait); required ceiling flags; exit code 2 with a sentence when a mandatory flag is missing | TOOL.1 (soft), ORC.10, gated headless refusal |
+| 11 | H16 (headless) | A non-interactive permission mode (deny what would ask, never wait); required ceiling flags; exit code 2 with a sentence when a mandatory flag is missing | TOOL.1 (soft), ORC.10, person-class headless refusal |
 | 12 | B6.1 (agent.spawn/wait/stop) | Resume a finished subagent; named-agent messaging; a fork inheriting the conversation; the runtime's own records are the authoritative list; orchestrated agents count toward the same depth cap | ORC.3 |
 | 13 | B6.2 (delegate) | The delegated session is registered as an agent of the run and measured by the existing readers; unreadable cost is `unknown`, never 0; wall-clock kill as the only hard bound | Later (ORC.14) |
 | 14 | B6.3 (MCP bridge) | Deferred/searchable tool loading and per-agent MCP scoping; a skill/tool cost view | Later |
 | 15 | B6.5 (ALM tools) | The tools compose to file a whole spec in one approved step; nothing filed is dispatched | Later (SPEC.10); reads SPEC.AC |
 | 16 | B6.6 (memory) | Model-written notes (`memory.note`, v3) stay behind the same consent and journal rules | Later |
 | 17 | B3.7 / H18 area (`task.plan`) | Nothing new here; the completion gate is TOOL.3 | TOOL.3 |
-| 18 | H8 (audit event) | Additive event families (`spec.*`, `stage.*`, `orch.*`, `artifact.*`, `policy.gated.*`, `structured.*`, `completion.*`) are declared by their owning items, all facts-only, content never copied | All first-cut event emitters |
+| 18 | H8 (audit event) | Additive event families (`spec.*`, `stage.*`, `orch.*`, `artifact.*`, `policy.person.*`, `structured.*`, `completion.*`) are declared by their owning items, all facts-only, content never copied | All first-cut event emitters |
 
 Row 2 is where the person-only class is recorded. Its VALUE is the P8 question: the recommendation
 is a new value `person`, beside the shipped `gated`, which keeps its current meaning.
@@ -851,7 +857,7 @@ is a new value `person`, beside the shipped `gated`, which keeps its current mea
 | Plugin code in-process, a marketplace loader | D9: contract now, loader on demand |
 | Model-written summaries of the context or of a phase standing in for the artifact | CTX 6.5: phases carry approved files |
 | A "yolo"/bypass mode or any mode lifting the deny floor; "Always allow" on an orchestration; a keyword that starts a run; inheriting the session model for an orchestrated agent | The deny floor is never lifted (INV); section 3 invariants I1-I6 |
-| A model-callable tool that approves a gate, releases a stage or launches a run | Person-only by construction: `gated` and `PersonAct` (section 5) |
+| A model-callable tool that approves a gate, releases a stage or launches a run | Person-only by construction: `person` and `PersonAct` (section 5) |
 | The runtime package importing server/web | D23; `runtime-boundary.lint.test.ts` |
 | A capability that needs another harness installed to work | Other harnesses are precedent, never a dependency |
 | A project-scope config, script or template acting before the folder is trusted | B8 section 4 |
@@ -874,7 +880,7 @@ a first-cut item:**
 |---|---|---|
 | Q1 spec root `docs/specs/<slug>/` | SPEC.1 | Settled by P6 [LEADER]; the owner may confirm the neutral default |
 | Q2 write specs through a scoped `spec.write` (vs hold text in the store) | SPEC.3 mechanism, SPEC.4 | [OWNER PENDING]; recommendation: scoped `spec.write` |
-| Q3 new `gated` class | Wave 0, SPEC.3, ORC.1 | Settled by P2 [LEADER]; P8 (the name collision with B3) is the residue |
+| Q3 new person-only class | Wave 0, SPEC.3, ORC.1 | Settled by P2 [LEADER]; named `person` by P8 [LEADER] |
 | Q7 three built-in stages, project-defined names allowed | LIFE.1, LIFE.2 | [OWNER PENDING]; recommendation yes |
 | Q8 labelled defaults with `[E]`/`[I]` basis visible | LIFE.2 | [OWNER PENDING]; recommendation yes |
 | Q12 scanner needing network reports "could not verify" | LIFE.2 (`couldNotVerify`) | [OWNER PENDING]; recommendation yes |
@@ -921,7 +927,7 @@ the first cut.
 ## 13. Acceptance criteria for this spec as a whole
 
 1. Every first-cut item carries purpose, additions, home (runtime vs host), dependencies by board id, numbered testable criteria and stated limits (sections 5 and 6).
-2. `gated` passes the profile x layer x allow-kind bypass table with every cell refused (5.4 criterion 1).
+2. `person` passes the profile x layer x allow-kind bypass table with every cell refused (5.4 criterion 1).
 3. No first-cut item depends on the script engine; the manifest refuses an unknown `kind`; the dependency graph (section 4) has no edge from section 7.
 4. The orchestration invariants I1-I6 each have a named test in ORC.1-ORC.4 (section 3 table).
 5. The runtime embeds no Agentistics-specific path (D23 grep in SPEC.1 and LIFE.2), and Agentistics's own spec root is a setting in its own project configuration.
