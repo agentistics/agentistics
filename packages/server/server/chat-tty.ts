@@ -1,20 +1,15 @@
 import path from 'node:path'
+import { agentisticsMcpLaunch, CANONICAL_MCP_NAME, sameMcpLaunch, staleAgentisticsMcps, type StaleMcp } from './mcp-launch'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { HOME_DIR } from './config'
 
 const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..')
+
 export const NAY_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'nay-chat')
 export const CLAUDE_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'claude-chat')
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-export const CHAT_MODELS = [
-  { id: 'claude-haiku-4-5',   label: 'Haiku 4.5',   badge: 'Fast',     desc: 'Fastest responses, great for quick questions',    inputPer1M: 0.80,  outputPer1M: 4.00  },
-  { id: 'claude-sonnet-4-6',  label: 'Sonnet 4.6',  badge: 'Balanced', desc: 'Best balance of speed and intelligence',          inputPer1M: 3.00,  outputPer1M: 15.00 },
-  { id: 'claude-opus-4-7',    label: 'Opus 4.7',    badge: 'Powerful', desc: 'Most capable — ideal for complex analysis',       inputPer1M: 15.00, outputPer1M: 75.00 },
-] as const
-
-export type ChatModelId = typeof CHAT_MODELS[number]['id']
 
 // Written to ~/.agentistics/nay-chat/CLAUDE.md on every server start
 // so git pull + restart always gets the latest instructions.
@@ -230,20 +225,26 @@ export async function ensureNayChat(port: number): Promise<void> {
 // Safe to call on every restart — skips if already registered with the same port.
 export async function registerMcpGlobally(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, `bun run <script>` in a checkout — see `mcp-launch.ts`
+  // for why the script path alone left every other machine without an MCP.
+  const launch = agentisticsMcpLaunch()
 
-  // Check if already registered with the correct URL *and* script path —
-  // a stale path with a matching URL must still trigger re-registration.
+  // Already registered with this URL AND this exact launch? A stale launch with a matching URL
+  // (the old script path on an installed binary) must still be replaced.
+  let registered = false
+  let upToDate = false
+  let stale: StaleMcp[] = []
   try {
     const dotClaudeJson = path.join(HOME_DIR, '.claude.json')
     const raw = await Bun.file(dotClaudeJson).text()
     const json = JSON.parse(raw) as Record<string, unknown>
-    const servers = json['mcpServers'] as Record<string, { env?: Record<string, string>; args?: string[] }> | undefined
-    const existing = servers?.['agentistics']
-    const urlOk = existing?.env?.['AGENTISTICS_API'] === apiUrl
-    const pathOk = Array.isArray(existing?.args) && existing.args.some(a => a.includes(mcpScript))
-    if (urlOk && pathOk) return // already up to date
+    const servers = json['mcpServers'] as Record<string, { env?: Record<string, string>; command?: unknown; args?: unknown }> | undefined
+    const existing = servers?.[CANONICAL_MCP_NAME]
+    registered = existing !== undefined
+    upToDate = existing?.env?.['AGENTISTICS_API'] === apiUrl && sameMcpLaunch(existing, launch)
+    stale = staleAgentisticsMcps(json)
   } catch { /* read or parse failed — proceed with registration */ }
+  if (upToDate && stale.length === 0) return
 
   // Use the official CLI to register at user scope.
   //
@@ -254,13 +255,35 @@ export async function registerMcpGlobally(port: number): Promise<void> {
   // source snippet — a startup that looks broken while everything except nay-chat is fine.
   // Anything else (a permission error, a crashing CLI) still propagates and is still loud.
   try {
+    // `claude mcp add` REFUSES a name that already exists (see `mcp-admin.ts`), so a stale entry
+    // is removed first — otherwise the wrong launch would be permanent. The entry is ours by name.
+    //
+    // EVERY OTHER COPY goes too: a hand-registered one (another name, or a project's LOCAL scope,
+    // which Claude Code prefers) kept serving an older MCP across every restart. Only entries
+    // `staleAgentisticsMcps` proves are the agentistics MCP are touched, and each is said in the log.
+    for (const copy of stale) {
+      const r = Bun.spawn(['claude', 'mcp', 'remove', '-s', copy.scope, copy.name], {
+        stdout: 'pipe', stderr: 'pipe', ...(copy.project ? { cwd: copy.project } : {}),
+      })
+      const code = await r.exited.catch(() => -1)
+      console.info(`[mcp] ${code === 0 ? 'removed' : 'could not remove'} an older agentistics MCP registration: ` +
+        `"${copy.name}" (${copy.scope}${copy.project ? ` scope, ${copy.project}` : ' scope'}) — this server's own replaces it`)
+    }
+    if (upToDate) return
+    if (registered) {
+      await Bun.spawn(['claude', 'mcp', 'remove', '-s', 'user', CANONICAL_MCP_NAME], { stdout: 'pipe', stderr: 'pipe' }).exited
+    }
     const proc = Bun.spawn(
-      ['claude', 'mcp', 'add', '-s', 'user', 'agentistics',
+      ['claude', 'mcp', 'add', '-s', 'user', CANONICAL_MCP_NAME,
         '-e', `AGENTISTICS_API=${apiUrl}`,
-        '--', 'bun', 'run', mcpScript],
+        '--', launch.command, ...launch.args],
       { stdout: 'pipe', stderr: 'pipe' },
     )
-    await proc.exited
+    const code = await proc.exited
+    if (code !== 0) {
+      const err = (await new Response(proc.stderr).text()).trim()
+      console.warn(`[mcp] claude mcp add failed (exit ${code})${err ? `: ${err}` : ''}`)
+    }
   } catch (err) {
     if ((err as { code?: string })?.code === 'ENOENT') {
       console.info('[nay-chat] the Claude CLI is not on PATH — nay-chat stays unavailable; everything else runs normally.')
@@ -287,7 +310,7 @@ export interface StreamViaClaudioOpts {
 export async function streamViaClaude(
   message: string,
   history: ChatMessage[],
-  model: ChatModelId,
+  model: string,
   onChunk: (text: string) => void,
   onTool: (name: string) => void,
   onDone: () => void,
@@ -305,7 +328,8 @@ export async function streamViaClaude(
     args.push('--budget-tokens', String(opts.thinkingBudget))
   }
 
-  args.push('--model', model)
+  // `''` is the CLI's own default — no flag, never an invented model.
+  if (model) args.push('--model', model)
 
   const imageAttachments = opts?.attachments?.filter(a => a.isImage) ?? []
   const textAttachments = opts?.attachments?.filter(a => !a.isImage) ?? []

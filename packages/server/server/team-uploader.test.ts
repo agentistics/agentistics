@@ -27,7 +27,7 @@ import {
 } from './team-uploader'
 import { handleTeamStatus } from './team-connections'
 import { updateTeamConfigAt, type TeamConfigMutator, type Preferences } from './preferences'
-import { __setTeamConnDirForTests, TEAM_CONN_DIR, teamSentFile, teamSyncFile, teamForgetFile } from './config'
+import { __setTeamConnDirForTests, AGENTISTICS_DATA_DIR, TEAM_CONN_DIR, teamSentFile, teamSyncFile, teamForgetFile } from './config'
 import { loadRulesState, saveRulesState, emptyRulesState } from './team-rules'
 import { convertSentStateV1 } from './team-migrate'
 import {
@@ -264,6 +264,12 @@ const _origConnDir = TEAM_CONN_DIR
 let _tmpConnDir: string
 
 beforeAll(async () => {
+  // A fresh machine has no ~/.agentistics — exactly what a CI runner is — and on one the pushes
+  // below never settle: 42 of these tests ran into their timeouts (5-15 s each, the whole suite
+  // going from ~45 s to 300 s) while every one passes in ~1 s the moment the directory exists.
+  // The suite only ever passed on runners because an EARLIER test file happened to create it, an
+  // ordering nobody chose. Creating it here makes the file independent of that.
+  await mkdir(AGENTISTICS_DATA_DIR, { recursive: true })
   // Redirect TEAM_CONN_DIR (a live `let` binding, see config.ts) at the module level, for the
   // whole rest of this bun test process — restored to `_origConnDir` in afterAll below.
   _tmpConnDir = join(tmpdir(), `agentistics-team-conn-${crypto.randomUUID()}`)

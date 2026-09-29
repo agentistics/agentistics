@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat', 'providers'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -61,6 +61,12 @@ test('chat is absent when the exposure profile denies localChat — there is not
 
 test('chat is absent on a central, as before', () => {
   expect(ids({ central: true, localChat: true })).not.toContain('chat')
+})
+
+test('providers is a machine section — a central has no local runtime to hold credentials for', () => {
+  expect(ids({ central: false })).toContain('providers')
+  expect(ids({ central: true, role: 'owner' })).not.toContain('providers')
+  expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('providers')
 })
 
 test('the other sections are unaffected by the new field', () => {

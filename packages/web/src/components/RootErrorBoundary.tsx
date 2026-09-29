@@ -73,7 +73,7 @@ export class RootErrorBoundary extends React.Component<Props, State> {
             }}
             style={{
               padding: '9px 20px', borderRadius: 8, border: 'none',
-              background: '#D97706', color: '#fff', fontSize: 13, fontWeight: 700,
+              background: '#FD8924', color: '#fff', fontSize: 13, fontWeight: 700,
               cursor: 'pointer', fontFamily: 'inherit', marginBottom: 16,
             }}
           >

@@ -47,6 +47,7 @@ import {
 import { useDocumentVisible } from '../../hooks/useDocumentVisible'
 import { useElementWidth } from '../../hooks/useElementWidth'
 import { keyStripShown } from '../../lib/terminalSurface'
+import { floatPanel } from '../../lib/floatingPanels'
 import { dockedShowsTarget, usePanelSlots, type PanelDropTarget } from '../../lib/panelSlots'
 import {
   followBottomOccupant, resolveDockedTarget, shellTargetUnavailable, targetLabel, targetScope,
@@ -67,7 +68,8 @@ import {
 import {
   INITIAL_SHELL_BAND, shellBandReducer, shellResolveWanted, type OpenShell,
 } from '../../lib/shellBandState'
-import { ctrlKeyFor, keyBytes, stripEntries, stripKeyLabel } from '../../lib/keyStrip'
+import { ctrlKeyFor, keyBytes, stripCtrlGuard, stripEntries, stripKeyLabel } from '../../lib/keyStrip'
+import { guardNoticeText, NOTICE_TONE, type NoticeKind } from '../../lib/terminalShortcuts'
 import { clipboardPasteAvailable, pasteFromClipboard } from '../../lib/clipboardPaste'
 import { terminalStatus } from '../../lib/terminalStream'
 import { createPaneResizer } from '../../lib/paneResizeRequest'
@@ -80,6 +82,7 @@ import {
 } from './bandControls'
 
 const SessionTerminal = lazy(() => import('../SessionTerminal'))
+import type { TerminalNotice } from '../SessionTerminal'
 
 interface T {
   title: string
@@ -100,6 +103,7 @@ interface T {
   endThis: string
   whichTerminal: string
   openOnRight: string
+  floatingElsewhere: string
   /** The VISIBLE word beside the icon (fix-wave review, owner follow-up #5) — short, unlike the
    *  fuller `fullscreen`/`close`/`collapse`/`expand` sentences above, which stay the tooltip. */
   fullscreenLabel: string
@@ -139,6 +143,7 @@ const TXT: Record<'pt' | 'en', T> = {
     endThis: 'End this terminal',
     whichTerminal: 'Which terminal',
     openOnRight: 'This is open in the panel on the right. Pick it again to bring it back here.',
+    floatingElsewhere: 'This is floating in its own window. Press the pin on that window to dock it back here.',
     fullscreenLabel: 'Full screen',
     closeLabel: 'End shell',
     collapseLabel: 'Collapse',
@@ -171,6 +176,7 @@ const TXT: Record<'pt' | 'en', T> = {
     endThis: 'Encerrar este terminal',
     whichTerminal: 'Qual terminal',
     openOnRight: 'Isto está aberto no painel à direita. Selecione de novo para trazer de volta aqui.',
+    floatingElsewhere: 'Isto está flutuando numa janela. Aperte o pin dela para encaixar de volta aqui.',
     fullscreenLabel: 'Tela cheia',
     closeLabel: 'Encerrar shell',
     collapseLabel: 'Recolher',
@@ -213,6 +219,14 @@ export interface ShellBandProps {
    * unwatch discipline — which is the entire reason this is a prop and not a second component.
    */
   placement?: 'docked' | 'dedicated' | 'aside'
+  /**
+   * PIN WHICH PANE this mount shows, for the placements that show exactly one: the right slot, a
+   * floating window and the dedicated screen each ask for `cli` or `shell` by name. Without it the
+   * pane came from the DOCKED band's stored preference, so a right-slot "Claude Code" could open
+   * on the shell. This band is the ONE terminal of the Sessions workspace — the older
+   * `TerminalRegion` with its line-input fallback is no longer used there (owner, 2026-09-27).
+   */
+  fixedTarget?: TerminalTarget
   /**
    * Offered only when there is somewhere to go: the band's "take the whole screen" control.
    *
@@ -341,7 +355,7 @@ export interface ShellBandProps {
 }
 
 export function ShellBand({
-  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen,
+  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen, fixedTarget,
   barEntries, onBarPick, onBarDrop, onBarMove, studioSeen = true, bottomOccupant = null, shellEnabled = true,
   shellCapable = true, onShellEnabledChange,
   columnHeight = 0, open: openSeed, onOpenChange,
@@ -372,9 +386,10 @@ export function ShellBand({
    * empty state below can explain it), and only a fresh mount's own invented DEFAULT is clamped to
    * `'cli'` — see that function's own header.
    */
-  const [target, setTarget] = useState<TerminalTarget>(
-    () => resolveDockedTarget(bottomOccupant, readBandPrefs().target, shellEnabled),
+  const [storedTarget, setTarget] = useState<TerminalTarget>(
+    () => fixedTarget ?? resolveDockedTarget(bottomOccupant, readBandPrefs().target, shellEnabled),
   )
+  const target: TerminalTarget = fixedTarget ?? storedTarget
   const scope = targetScope(target)
   /**
    * EXCLUSIVITY WITH THE RIGHT SLOT (C3) — only the DOCKED placement needs this. This band's own
@@ -415,15 +430,27 @@ export function ShellBand({
     if (!shellEnabled && target === 'shell' && shell) dispatch({ type: 'ended' })
   }, [shellEnabled, target, shell])
   const [ctrlArmed, setCtrlArmed] = useState(false)
+  /** The terminal's last confirmation (a key sent, refused, a copy, a paste) — shown in the band's
+   *  own sentence line, the one place every message this terminal gives appears, for 5 seconds. */
+  const [keyNotice, setKeyNotice] = useState<TerminalNotice | null>(null)
+  /** When the strip's first `ctrl`+`d` was pressed — the confirming second press must follow soon. */
+  const stripEofAt = useRef<number | null>(null)
+  useEffect(() => {
+    if (!keyNotice) return
+    const t = setTimeout(() => setKeyNotice(n => (n && n.at === keyNotice.at ? null : n)), 5000)
+    return () => clearTimeout(t)
+  }, [keyNotice])
   /** The open shells, fetched ONLY when the ceiling refuses — see `shellCeiling.ts`. */
   const [ceiling, setCeiling] = useState<{ rows: CeilingRow[]; cap: number } | null>(null)
   const [ctrlNote, setCtrlNote] = useState<string | null>(null)
 
   /** Choosing a terminal is remembered, so the band comes back on the one you were using. */
   const chooseTarget = useCallback((next: TerminalTarget) => {
+    // A mount pinned to one pane never switches, and never rewrites the docked band's choice.
+    if (fixedTarget) return
     setTarget(next)
     try { writeBandPrefs({ ...readBandPrefs(), target: next }) } catch { /* storage blocked */ }
-  }, [])
+  }, [fixedTarget])
 
   /**
    * FOLLOW `bottomOccupant` FOR THE LIFE OF THE MOUNT, not only at the first frame — see that prop's
@@ -461,6 +488,18 @@ export function ShellBand({
     if (follow) chooseTarget(follow)
   }, [bottomOccupant, target, chooseTarget])
 
+  /**
+   * THE PANE ON SCREEN WAS FLOATED (`lib/floatingPanels.ts`) — it left for its own window, so the
+   * band collapses rather than stand open over an empty screen. Deliberately NOT switched to the
+   * other pane: switching to `shell` would open a shell nobody asked for. Docking back reopens it
+   * here through `bottomOccupant`, like any other open of this slot.
+   */
+  const targetFloats = placement === 'docked' && (slotLayout.floating?.includes(target) ?? false)
+  const setBandRef = useRef<((next: { open: boolean }) => void) | null>(null)
+  useEffect(() => {
+    if (targetFloats) setBandRef.current?.({ open: false })
+  }, [targetFloats])
+
   const setBand = useCallback((next: Partial<{ open: boolean; height: number; full: boolean }>) => {
     setPrefs(p => {
       let merged: BandPrefs = { ...p }
@@ -483,6 +522,7 @@ export function ShellBand({
     // which, unsynced, is a second stale flag exactly like the one this fix already closed at mount.
     if (next.open !== undefined) onOpenChange?.(next.open)
   }, [target, onOpenChange])
+  setBandRef.current = setBand
 
   /**
    * Resolve THIS session's shell: reuse the one already running for it, else open one.
@@ -634,11 +674,19 @@ export function ShellBand({
       const key = ctrlKeyFor(data)
       if (!key) { setCtrlNote(t.ctrlRefused(data)); return }
       setCtrlNote(null)
+      // The phone's session-ending guard — see `stripCtrlGuard`.
+      const now = Date.now()
+      const verdict = stripCtrlGuard(key, target === 'cli', stripEofAt.current, now)
+      const tell = (kind: NoticeKind) => setKeyNotice({ text: guardNoticeText(kind, lang), tone: NOTICE_TONE[kind], at: now })
+      if (verdict === 'blocked-interrupt') { tell('blocked-interrupt-strip'); return }
+      if (verdict === 'arm-eof') { stripEofAt.current = now; tell('eof-arm-strip'); return }
+      stripEofAt.current = null
+      if (verdict === 'confirmed-eof') tell('confirmed-eof')
       write.send(keyBytes(key))
       return
     }
     write.send(data)
-  }, [ctrlArmed, write, t])
+  }, [ctrlArmed, write, t, target, lang])
 
   /** A paste — from the native paste event OR the strip's own `paste` button — is one atomic
    *  message, never a keystroke, and cancels an armed ctrl the same way any other strip press
@@ -804,8 +852,15 @@ export function ShellBand({
       setBand({ open: true })
       return
     }
+    // THE OPEN TAB, CLICKED AGAIN: minimize, like the right rail (`resolvePanelBarPick`'s
+    // `'minimize'`). This band keeps its own open state, so it collapses itself here — the same
+    // `setBand({ open: false })` its own chevron runs — rather than leaving it to the shared handler.
+    if ((id === 'cli' || id === 'shell') && id === target && bandOpen && !dedicated) {
+      setBand({ open: false })
+      return
+    }
     onBarPick?.(id)
-  }, [barEntries, onBarPick, chooseTarget, bandOpen, setBand, target, bottomOccupant])
+  }, [barEntries, onBarPick, chooseTarget, bandOpen, setBand, target, bottomOccupant, dedicated])
   /** The bar's OWN measured width (design item 7), never the window's — see `useElementWidth`'s
    *  own header on why. */
   const [barWidthRef, barWidth] = useElementWidth()
@@ -962,6 +1017,10 @@ export function ShellBand({
           onInput={send}
           onPaste={sendPasteText}
           onGeometry={streamId ? onGeometry : undefined}
+          lang={lang}
+          // Ctrl+C ends an ASSISTANT's session; in the utility shell it only stops a command.
+          guardInterrupt={target === 'cli'}
+          onNotice={setKeyNotice}
         />
       </Suspense>
     </div>
@@ -971,8 +1030,10 @@ export function ShellBand({
    *  EXCLUDED (C3) overrides all of it — the pane is not connecting or idle, it is simply showing
    *  somewhere else, and `status.detail` (built from an `idle`, un-watched stream) would otherwise
    *  say "No session"/"No shell" about a pane that is very much open, just not here. */
+  const keyTone = keyNotice && !excludedFromDocked ? keyNotice.tone : null
   const line = excludedFromDocked
-    ? t.openOnRight
+    ? (slotLayout.floating?.includes(target) ? t.floatingElsewhere : t.openOnRight)
+    : keyNotice ? keyNotice.text
     : band.message ?? (write.reason ? write.reason : band.phase === 'opening' ? t.opening : status.detail)
   const lineIsBad = Boolean(band.message || write.reason)
   const busy = band.phase === 'opening'
@@ -982,7 +1043,12 @@ export function ShellBand({
       role={lineIsBad ? 'status' : undefined}
       style={{
         fontSize: 11, lineHeight: 1.5, flexShrink: 0,
-        color: lineIsBad ? 'var(--accent-red)' : 'var(--text-tertiary)',
+        // A terminal confirmation (`keyNotice`) outranks the band's standing sentence while it lasts,
+        // and reads in its own tone: plain, a refusal in orange, a session-ending key sent in red.
+        color: keyTone === 'danger' ? 'var(--accent-red)'
+          : keyTone === 'warn' ? 'var(--anthropic-orange)'
+          : keyTone === 'info' ? 'var(--text-secondary)'
+          : lineIsBad ? 'var(--accent-red)' : 'var(--text-tertiary)',
       }}
     >
       {ctrlArmed ? t.ctrlHint : ctrlNote ?? line}
@@ -1197,33 +1263,42 @@ export function ShellBand({
     )
   }
 
-  // ---- desktop: the last band of the panel, under the composer ---------------------------------
+  // ---- desktop: its own panel, below the conversation ---------------------------------------
   return (
-    <div
-      ref={bandDrop.ref}
-      style={{
-      // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
-      // `resolveBandDrag`'s own header in `shellBand.ts` for the bug that shape was: two
-      // `flex-grow: 1` siblings (this root and the conversation's own `flex: 1` above it) split the
-      // column by CONTENT size rather than handing the whole thing to the one that asked to fill it,
-      // so the band silently rendered at roughly half the column instead of all of it. `renderedHeight`
-      // already resolves to the measured `columnHeight` while THIS panel's own `full` entry is
-      // true, and the content box below spends it via its own `flex: '1 1 auto'` — never both on
-      // the same box. Gated on `prefs.open`: collapsed, this must stay auto-sized to its header
-      // row alone.
-      ...(prefs.open && bandPanelFull(prefs, target) ? { height: renderedHeight, flexShrink: 0 } : { flexShrink: 0 }),
-      display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid var(--border)',
-      ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
-      background: 'var(--bg-surface)',
-    }}>
-      {/* THE GRIP — ALWAYS THE ROOT'S FIRST CHILD, ABOVE THE TAB ROW — the VS Code geometry, where
-          the panel is always the bottom-most strip, and the ONE POSITION `StudioBand`/
-          `SimpleDockedBand` now match rather than rendering their own copy one row lower, level
-          with their bar (see `BandResizeHandle`'s own header in `bandControls.tsx`). It is
-          `role="separator"` and takes the arrow keys, so the band is resizable without a pointer;
-          `ResizeGrip` (design item 6) marks it. */}
-      {prefs.open && <BandResizeHandle label={t.resize} {...grip} />}
+    <>
+      {/* THE GAP IS THE HANDLE (`sdd/brief.md`) — a SIBLING BEFORE the band's own bordered box,
+          never its first child: this band is its own floating panel now, not docked inside the
+          conversation's card. See `BandResizeHandle`'s own header in `bandControls.tsx` and
+          `StudioBand`'s identical fragment split. `role="separator"`, takes the arrow keys, so the
+          band is resizable without a pointer. Present whenever the panel exists; the drag itself
+          only applies while `prefs.open` (a no-op otherwise, matching the old ABSENT-while-collapsed
+          reading — nothing on screen to resize). */}
+      <BandResizeHandle
+        label={t.resize}
+        {...(prefs.open ? grip : { onMouseDown: () => {}, onTouchStart: () => {}, onKeyDown: () => {} })}
+      />
+      <div
+        ref={bandDrop.ref}
+        style={{
+        // FULL (design item 7) is an EXPLICIT PIXEL HEIGHT, never `flex: '1 1 auto'` — see
+        // `resolveBandDrag`'s own header in `shellBand.ts` for the bug that shape was: two
+        // `flex-grow: 1` siblings (this root and the conversation's own `flex: 1` above it) split the
+        // column by CONTENT size rather than handing the whole thing to the one that asked to fill it,
+        // so the band silently rendered at roughly half the column instead of all of it. `renderedHeight`
+        // already resolves to the measured `columnHeight` while THIS panel's own `full` entry is
+        // true, and the content box below spends it via its own `flex: '1 1 auto'` — never both on
+        // the same box. Gated on `prefs.open`: collapsed, this must stay auto-sized to its header
+        // row alone.
+        ...(prefs.open && bandPanelFull(prefs, target) ? { height: renderedHeight, flexShrink: 0 } : { flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column',
+        // FLOATING-PANELS DESIGN — its own border+radius+clip. ShellBand's own "full screen" is a
+        // NAVIGATION to the dedicated terminal route (`onOpenFullscreen`), never an inline
+        // `position: fixed` overlay of this box, so unlike `StudioBand`/`SimpleDockedBand` there is
+        // no fullscreen state to skip this for here.
+        border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+        ...(bandDrop.dropHighlight ? { boxShadow: 'inset 0 0 0 2px var(--anthropic-orange)' } : {}),
+        background: 'var(--bg-surface)',
+      }}>
       {/* THE COMPACT BAR (design item 7): panel segment (icon+label, collapsing to icons below
           ~1100px) · spacer · the FIXED trio (full screen, minimize, gear). Everything that used to
           widen this row on its own — the leading terminal icon, the uppercase target name, the
@@ -1258,6 +1333,11 @@ export function ShellBand({
           collapsed={!prefs.open}
           onMinimize={() => setBand({ open: !prefs.open })}
           minimizeLabel={prefs.open ? t.collapse : t.expand}
+          // PIN = FLOAT (`lib/floatingPanels.ts`) — the pane on screen (Claude Code or Shell) becomes
+          // a window; desktop only, since nothing floats on a phone.
+          {...(!isMobile && placement === 'docked' && !targetFloats
+            ? { pinned: { active: false, onToggle: () => floatPanel(target) } }
+            : {})}
           gearLabel={lang === 'pt' ? 'Mais ações' : 'More actions'}
           gearEntries={gearEntries}
         />
@@ -1280,6 +1360,7 @@ export function ShellBand({
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }

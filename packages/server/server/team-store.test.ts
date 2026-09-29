@@ -227,3 +227,15 @@ test('parseIngestBody leaves tasks absent when the body carries none', () => {
   if (!r.ok) return
   expect(r.body.tasks).toBeUndefined()
 })
+
+// The record that took a central down (2026-09-25): one pushed session carried `languages: {}` and
+// every dashboard threw `object is not iterable` on its first render.
+test('toTeamDoc stores a list where the member sent an object', () => {
+  const bad = { ...session('s1'), languages: {} as unknown as string[] }
+  expect(toTeamDoc(bad, 'acme', 'm1', 'devA').languages).toEqual([])
+})
+
+test('fromTeamDoc repairs a document ALREADY stored malformed', () => {
+  const doc = { ...toTeamDoc(session('s1'), 'acme', 'm1', 'devA'), languages: {} as unknown as string[] }
+  expect(fromTeamDoc(doc).languages).toEqual([])
+})

@@ -64,6 +64,37 @@ export const ARCHIVE_DIR = process.env.AGENTISTICS_ARCHIVE_DIR ?? join(AGENTISTI
 export const ARCHIVE_PROJECTS_DIR = join(ARCHIVE_DIR, 'projects')
 export const ARCHIVE_SESSION_META_DIR = join(ARCHIVE_DIR, 'usage-data', 'session-meta')
 export const ARCHIVE_STATS_DIR = join(ARCHIVE_DIR, 'stats-cache')
+// The durable event journal (decision D2: SQLite WAL, one per machine): <data dir>/journal.db.
+// `AGENTISTICS_JOURNAL_DIR` MOVES it — the escape hatch for a data dir that sits on a network
+// filesystem, where the journal refuses to open (WAL is not safe there). It never disables that
+// check: the override directory is classified exactly like the default one. Written as two literal
+// `join`s rather than one over a computed dir so `backup-coverage.lint.test.ts` can see the name.
+export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db')
+// The shadow writer's flag (P1 §1 item 5, §11): while `AGENTISTICS_JOURNAL` is on, a build ALSO feeds
+// the journal. **Absent reads as OFF** — a machine must not start writing a database because it was
+// upgraded — and only an explicit affirmative turns it on. Rolling back is unsetting it.
+export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
+  (process.env.AGENTISTICS_JOURNAL ?? '').trim().toLowerCase(),
+)
+// What the WRITING process reports about itself (counters since boot), for `agentop journal status`
+// to read from a different process. It sits beside the journal, whichever directory that is.
+// Both side-files below are written as literal `join`s, like `JOURNAL_PATH`, so
+// `backup-coverage.lint.test.ts` can SEE the names and hold each to a decision in `backup-plan.ts`.
+export const JOURNAL_STATUS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.status.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.status.json')
+// The shadow writer's accepted-stamps memory (`journal/shadow.ts`, default `<journal path>.stamps.json`),
+// which lets a run skip sources it has already folded in. Same directory rule as the journal itself.
+export const JOURNAL_STAMPS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.stamps.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.stamps.json')
+// `agentop journal import`'s resume state (`journal/import.ts`: a cursor per replayed source + the
+// store entries already imported), bound to the journal file's identity. Same directory rule.
+export const JOURNAL_IMPORT_STATE_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.import.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.import.json')
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json
@@ -231,6 +262,15 @@ export const COPILOT_DIR = process.env.COPILOT_DIR ?? (_selfContributingCentral 
 // Kimi Code CLI harness. Override with KIMI_DIR; disable with AGENTISTICS_HARNESS_KIMI=0.
 export const KIMI_DIR = process.env.KIMI_DIR ?? join(HOME_DIR, '.kimi-code')
 
+// ---------------------------------------------------------------------------
+// opencode CLI harness — P2 replay ONLY, no legacy adapter (CLAUDE.md "Adding a harness" step 4,
+// skipped by scope: it never produces a SessionMeta). Override the store path with
+// OPENCODE_DB_PATH. `opencode-local.db` (a SEPARATE, per-project database this integration does not
+// read — see integrations/opencode/index.ts's header) is deliberately not named here.
+// ---------------------------------------------------------------------------
+export const OPENCODE_DIR = process.env.OPENCODE_DIR ?? join(HOME_DIR, '.local', 'share', 'opencode')
+export const OPENCODE_DB_PATH = process.env.OPENCODE_DB_PATH ?? join(OPENCODE_DIR, 'opencode.db')
+
 export const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_DIR ?? join(GEMINI_DIR, 'antigravity-cli')
 export const ANTIGRAVITY_BRAIN_DIR = join(ANTIGRAVITY_DIR, 'brain')
 export const ANTIGRAVITY_HISTORY_FILE = join(ANTIGRAVITY_DIR, 'history.jsonl')
@@ -288,6 +328,86 @@ export function teamRulesFile(connId: string): string {
 /** { state, ids, runIds, rulesHash, startedAt } — the removal journal. */
 export function teamForgetFile(connId: string): string {
   return join(TEAM_CONN_DIR, `team-forget-${safeConnId(connId)}.json`)
+}
+
+/** The native runtime's feature flag. ABSENT reads as OFF: with it off no provider module is
+ *  loaded, no credential file is read, and every `agentop provider` verb but `status` refuses in a
+ *  sentence. Kept in ONE exported constant so renaming the flag is one line. */
+export const PROVIDER_FLAG_ENV = 'AGENTISTICS_PROVIDER'
+/** Only `'1'` turns it on — the convention every other `AGENTISTICS_*` switch here follows. */
+export function providerFlagOn(env: Record<string, string | undefined> = process.env): boolean {
+  return env[PROVIDER_FLAG_ENV] === '1'
+}
+
+/** Provider API keys the USER entered for the native runtime (`agentop provider key set`). Its own
+ *  directory, 0700, one 0600 file per provider — never preferences.json, which is served (redacted
+ *  by a list that would have to know the field), written at the default mode and carried by every
+ *  backup. Excluded from backups as a `secret` in backup-plan.ts. */
+export const PROVIDER_KEYS_DIR = join(AGENTISTICS_DATA_DIR, 'provider-keys')
+
+/** The content store (context-manager spec §8.1): `<sha[0:2]>/<sha256>`, content-addressed. The
+ *  native runtime's raw provider captures land here — `@agentistics/runtime` has no path of its own
+ *  (D23), so the host passes this as the client's `captureDir`. Excluded from backups as a `secret`
+ *  in backup-plan.ts. */
+export const CONTENT_DIR = join(AGENTISTICS_DATA_DIR, 'content')
+
+/**
+ * The OpenAI-compatible ENDPOINTS a machine may configure (B5a, contract D1). CLOSED: each one is a
+ * named instance of the Chat Completions protocol with its own stored base URL and (usually) key, and
+ * the id doubles as the key FILE name — so a new endpoint is a line here, never a free-form string
+ * that reaches a path.
+ */
+export type OpenAICompatibleEndpointId = 'openai' | 'openrouter' | 'deepseek' | 'litellm' | '9router' | 'ollama'
+export const OPENAI_COMPATIBLE_ENDPOINTS: readonly OpenAICompatibleEndpointId[] =
+  ['openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
+
+export function isOpenAICompatibleEndpoint(id: unknown): id is OpenAICompatibleEndpointId {
+  return typeof id === 'string' && (OPENAI_COMPATIBLE_ENDPOINTS as readonly string[]).includes(id)
+}
+
+/** Who stands behind an endpoint's usage figures (contract D2) — never inferred from a URL. */
+export type EndpointKind = 'direct' | 'router' | 'local'
+
+export interface EndpointPreset {
+  kind: EndpointKind
+  /** The documented default base URL, or `null` when there is none and `--base-url` is REQUIRED. */
+  defaultBaseUrl: string | null
+  /** May the endpoint be stored with NO key (`--no-key`)? Only a local server that takes none. */
+  keyOptional: boolean
+  /** Human name for a sentence ("the key is still valid at …"). */
+  label: string
+}
+
+/** Contract D2 (kinds) + D6 (defaults). `Record<OpenAICompatibleEndpointId, …>`, so a new endpoint
+ *  fails the build until its row is written. */
+export const ENDPOINT_PRESETS: Readonly<Record<OpenAICompatibleEndpointId, EndpointPreset>> = {
+  openai: { kind: 'direct', defaultBaseUrl: 'https://api.openai.com/v1', keyOptional: false, label: 'OpenAI' },
+  openrouter: { kind: 'router', defaultBaseUrl: 'https://openrouter.ai/api/v1', keyOptional: false, label: 'OpenRouter' },
+  deepseek: { kind: 'direct', defaultBaseUrl: 'https://api.deepseek.com/v1', keyOptional: false, label: 'DeepSeek' },
+  // No default: a LiteLLM proxy lives wherever its operator put it.
+  litellm: { kind: 'router', defaultBaseUrl: null, keyOptional: false, label: 'the LiteLLM proxy' },
+  '9router': { kind: 'router', defaultBaseUrl: 'http://localhost:20128/v1', keyOptional: false, label: '9router' },
+  ollama: { kind: 'local', defaultBaseUrl: 'http://localhost:11434/v1', keyOptional: true, label: 'Ollama' },
+}
+
+/** The providers a key may be STORED for. Closed, and deliberately narrower than core's
+ *  `ProviderId`: Anthropic (B1, owner decision D3) plus the six OpenAI-compatible endpoints (B5a).
+ *  An endpoint is keyed by its ENDPOINT id, never by `'openai-compatible'` — one protocol, six files. */
+export type KeyedProviderId = 'anthropic' | OpenAICompatibleEndpointId
+export const KEYED_PROVIDERS: readonly KeyedProviderId[] = ['anthropic', ...OPENAI_COMPATIBLE_ENDPOINTS]
+
+export function isKeyedProvider(id: unknown): id is KeyedProviderId {
+  return typeof id === 'string' && (KEYED_PROVIDERS as readonly string[]).includes(id)
+}
+
+/** A provider id is interpolated into a path only after this check, the `safeConnId` rule — and
+ *  since the set is closed, every name it lets through is a plain `[a-z0-9]+` word (no separator, no
+ *  dot, no traversal), asserted once more below so a future entry cannot widen it by accident. */
+export function providerKeyFile(provider: KeyedProviderId, dir: string = PROVIDER_KEYS_DIR): string {
+  if (!isKeyedProvider(provider) || !/^[a-z0-9]+$/.test(provider)) {
+    throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
+  }
+  return join(dir, `${provider}.json`)
 }
 
 /** This machine's sealed-envelope keypair. The PRIVATE half lives here and NOWHERE else — never in

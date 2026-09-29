@@ -183,3 +183,37 @@ export function sessionPlanFactor(
   const factor = planAllocation(basis).byHarness[harness as HarnessId]
   return typeof factor === 'number' && Number.isFinite(factor) ? factor : null
 }
+
+/**
+ * `C/A` for a figure that is a SUM over several harnesses — the effective factor that prices each
+ * harness's slice at that harness's OWN factor.
+ *
+ * A board row (a delivery, a subtask, the board's totals) sums sessions that may span harnesses, and
+ * rescaling the whole sum by `aggregateFactor` priced an Antigravity-only delivery at what the
+ * CLAUDE subscription is worth: switching API → Plan multiplied it ~24× with no plan registered for
+ * Antigravity at all. Here every slice is rescaled by `byHarness[h]`, and a slice whose harness no
+ * plan covers stays at its API figure (factor 1) — the only reading that does not invent a price.
+ *
+ * `null` when NO slice is covered, so `viewCost` refuses the plan basis for the row and it reads
+ * exactly as it does in API terms. `null` too for an empty or zero split — there is nothing to
+ * weight, and a factor of 1 would claim a plan figure nobody computed.
+ */
+export function splitPlanFactor(
+  basis: AggregatePlanBasis | null,
+  split: Readonly<Record<string, number>> | null | undefined,
+): number | null {
+  if (!basis || !split) return null
+  const byHarness = planAllocation(basis).byHarness
+  let api = 0
+  let plan = 0
+  let covered = false
+  for (const [harness, usd] of Object.entries(split)) {
+    if (!Number.isFinite(usd) || usd <= 0) continue
+    const f = byHarness[harness as HarnessId]
+    const usable = typeof f === 'number' && Number.isFinite(f)
+    if (usable) covered = true
+    api += usd
+    plan += usd * (usable ? f : 1)
+  }
+  return covered && api > 0 ? plan / api : null
+}

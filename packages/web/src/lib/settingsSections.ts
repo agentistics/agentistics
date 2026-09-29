@@ -1,7 +1,7 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
   | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
-  | 'chat' | 'notifications' | 'backup'
+  | 'chat' | 'providers' | 'notifications' | 'backup'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
 export type SettingsGroup = 'personal' | 'governance'
@@ -33,6 +33,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'connection', labelEn: 'Central connection', labelPt: 'Conexão com a central', group: 'personal' },
   { id: 'live', labelEn: 'Live', labelPt: 'Ao vivo', group: 'personal' },
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
+  // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
+  // Ollama) — a machine-local secret store, same reason `connection`/`live`/`chat` are host-only.
+  { id: 'providers', labelEn: 'Providers', labelPt: 'Provedores', group: 'personal' },
   { id: 'users', labelEn: 'Users', labelPt: 'Usuários', group: 'governance' },
   { id: 'teams', labelEn: 'Teams', labelPt: 'Times', group: 'governance' },
   { id: 'machines', labelEn: 'Machines', labelPt: 'Máquinas', group: 'governance' },
@@ -57,6 +60,9 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       // whole fleet from its operator's own timeline would be a fabricated number — so the plan
       // cost basis does not exist there and neither does the screen that configures it.
       case 'billing': return !v.central
+      // Runtime providers are credentials for THIS machine's own local runtime — a central has no
+      // local runtime to spawn assistants with, the same reason `chat`/`connection`/`live` hide.
+      case 'providers': return !v.central
       case 'users':
       case 'teams': return v.central && (v.role === 'owner' || !!v.isManager)
       // Machines is visible to ANY central account: owner/manager manage the fleet, a plain user

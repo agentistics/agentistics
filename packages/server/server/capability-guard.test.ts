@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { routeCapability, capabilityDenied } from './capability-guard'
+import { routeCapability, capabilityDenied, registeredRoutes } from './capability-guard'
 import { capabilitiesFor } from './exposure'
 
 const publicCaps = capabilitiesFor('public', {
@@ -21,6 +21,16 @@ const localCaps = capabilitiesFor('local', {
 })
 
 describe('routeCapability', () => {
+  it('maps the projection query to localTranscripts, and only that runtime route', () => {
+    // It reads this machine's projection store — derived from host transcripts (models, repo and
+    // project paths, task ids, tools) — so an exposed profile must not reach it.
+    expect(routeCapability('/api/runtime/metrics')).toBe('localTranscripts')
+    expect(routeCapability('/api/runtime/metrics/anything-added-later')).toBe('localTranscripts')
+    expect(routeCapability('/api/runtime/metricsx')).toBeNull()
+    expect(capabilityDenied('localTranscripts', publicCaps)?.status).toBe(403)
+    expect(capabilityDenied('localTranscripts', localCaps)).toBeNull()
+  })
+
   it('maps the shell route', () => {
     expect(routeCapability('/api/exec')).toBe('localShell')
     // It downloads a release binary, EXECUTES it and restarts the service serving the page. If
@@ -203,3 +213,44 @@ test('the prefix does not swallow a neighbouring path', () => {
   // guarding a route nobody registered — which reads as security and is an accident.
   expect(routeCapability('/api/shellfish')).toBeNull()
 })
+
+test('every /api/provider route is guarded by the one prefix entry', () => {
+  // UI.1 wrote the routes (`provider-web.ts`): the list, PUT/DELETE on one provider, and its `/test`
+  // and `/models` sub-resources. They touch a host secret (the stored API key, credentials.ts), and
+  // they are guarded by the prefix entry registered ahead of them — never by a second table somebody
+  // had to remember. A future sub-route is covered by having been ADDED.
+  for (const p of [
+    '/api/provider',
+    '/api/provider/anthropic',
+    '/api/provider/openrouter',
+    '/api/provider/ollama/test',
+    '/api/provider/openai/models',
+    '/api/provider/anthropic/some-future-verb',
+  ]) {
+    expect(routeCapability(p)).toBe('localShell')
+  }
+  // The prefix does not swallow a neighbour.
+  expect(routeCapability('/api/providers')).toBeNull()
+})
+
+describe('registeredRoutes — the table, exported for walking', () => {
+  it('reports every registration, and each one resolves to the capability it claims', () => {
+    const routes = registeredRoutes()
+    // Spot-check both tables are in it — the host-allow walk is only as good as this list.
+    expect(routes.some(r => r.path === '/api/exec' && r.match === 'exact' && r.capability === 'localShell')).toBe(true)
+    expect(routes.some(r => r.path === '/api/fleet' && r.match === 'prefix' && r.capability === 'localShell')).toBe(true)
+    for (const r of routes) {
+      expect(routeCapability(r.path)).toBe(r.capability)
+      if (r.match === 'prefix') expect(routeCapability(`${r.path}/not-written-yet`)).toBe(r.capability)
+    }
+  })
+
+  it('is read-only: a caller cannot widen or narrow the guard through it', () => {
+    const routes = registeredRoutes() as RegisteredRouteMutable[]
+    expect(() => { routes.push({ path: '/api/x', match: 'exact', capability: 'localShell' }) }).toThrow()
+    expect(() => { (routes[0] as { capability: string }).capability = 'mcpAdmin' }).toThrow()
+    expect(routeCapability('/api/exec')).toBe('localShell')
+  })
+})
+
+type RegisteredRouteMutable = { path: string; match: 'exact' | 'prefix'; capability: string }

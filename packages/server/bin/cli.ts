@@ -22,6 +22,22 @@ const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
 /**
+ * `agentop mcp` — the agentistics MCP server over stdio, served from inside the binary.
+ *
+ * Dispatched FIRST and before anything else runs, because stdout is the protocol here: one banner,
+ * update notice or help line written to it is a malformed message to the assistant on the other end.
+ * It exists because the assistants were registered to run `bun run <repo>/packages/mcp/…ts`, a
+ * file only a clone has — so on every installed machine the MCP never started (see
+ * `server/mcp-launch.ts`). The await that follows never settles: the transport keeps the process up
+ * for as long as the assistant holds stdin, and this file must not fall through to the dispatch
+ * below, whose default for an unknown command prints the help to stdout.
+ */
+if (command === 'mcp') {
+  await import('../../mcp/agentistics-mcp.ts')
+  await new Promise<never>(() => {})
+}
+
+/**
  * Load a central env file (KEY=VALUE) into process.env for keys not already set, so a NATIVE
  * central (no Docker) picks up MONGO_URL + the AGENTISTICS_TEAM_* secrets the same way the Docker
  * central reads central.env. Search order: $AGENTISTICS_CENTRAL_ENV, ./central.env,
@@ -81,6 +97,14 @@ Commands:
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
+  journal       The durable event journal: a read-only look ('journal status') and the
+                historical import of this machine's history into it ('journal import')
+  provider      Manage a provider API key for the native runtime (BETA, off by default —
+                set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
+                --stdin, never on the command line ('provider key set|status|remove';
+                'provider try anthropic' makes one real, billed call)
+  mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
+                for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)
@@ -458,6 +482,8 @@ if (command === 'events') {
   process.exit(code)
 }
 
+if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
+
 if (command === 'backup') {
   const { runBackupCli } = await import('../server/cli-backup.ts')
   const code = await runBackupCli(args)
@@ -468,6 +494,11 @@ if (command === 'restore') {
   const { runRestoreCli } = await import('../server/cli-backup.ts')
   const code = await runRestoreCli(args)
   process.exit(code)
+}
+
+if (command === 'provider') {
+  const { runProvider } = await import('../server/cli-provider.ts')
+  process.exit(await runProvider(args))
 }
 
 if (command === 'member') {

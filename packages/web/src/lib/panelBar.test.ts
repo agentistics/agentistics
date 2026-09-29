@@ -59,17 +59,39 @@ describe('gatedBottomOccupant', () => {
 
 describe('bottomBandFor', () => {
   test('bottomOccupant wins whenever it names anything', () => {
-    expect(bottomBandFor({ bottomOccupant: 'skills', relayed: false, isMobile: false })).toBe('skills')
-    expect(bottomBandFor({ bottomOccupant: 'studio', relayed: false, isMobile: false })).toBe('studio')
+    expect(bottomBandFor({ bottomOccupant: 'skills', relayed: false, isMobile: false, bottomHasPanels: true })).toBe('skills')
+    expect(bottomBandFor({ bottomOccupant: 'studio', relayed: false, isMobile: false, bottomHasPanels: true })).toBe('studio')
   })
 
-  test('a local session with nothing docked always gets shell (the floor)', () => {
-    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: false })).toBe('shell')
+  // EMPTY IS EMPTY on a desktop. The old floor drew a bar with no tabs and one orange `−` once
+  // every panel could be moved to the rail — reported twice. See `bottomBandFor`'s own header.
+  test('a local DESKTOP session with nothing docked renders no band at all', () => {
+    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: false, bottomHasPanels: false })).toBe('none')
+  })
+
+  // COLLAPSED is not EMPTY, the case the first draft of this fix got wrong: panels PLACED at the
+  // bottom with none of them open keep their band, tabs and all.
+  test('a local DESKTOP session with panels placed but none open keeps its band', () => {
+    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: false, bottomHasPanels: true })).toBe('shell')
+  })
+
+  // A PHONE keeps the floor: it has no rail, and ShellBand's segment is its only route to the
+  // session's terminal.
+  test('a local PHONE session with nothing docked keeps ShellBand as the floor', () => {
+    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: true, bottomHasPanels: false })).toBe('shell')
+  })
+
+  // COLLAPSED is not EMPTY: a docked panel keeps its band (and the chevron that reopens it)
+  // whatever its open state — the band's presence is decided by occupancy alone.
+  test('a docked panel keeps its band, so a collapsed one can still be reopened', () => {
+    expect(bottomBandFor({ bottomOccupant: 'shell', relayed: false, isMobile: false, bottomHasPanels: true })).toBe('shell')
+    expect(bottomBandFor({ bottomOccupant: 'studio', relayed: false, isMobile: false, bottomHasPanels: true })).toBe('studio')
+    expect(bottomBandFor({ bottomOccupant: 'hardware', relayed: false, isMobile: false, bottomHasPanels: true })).toBe('hardware')
   })
 
   test('a relayed session with nothing docked gets bar-only on desktop, none on a phone', () => {
-    expect(bottomBandFor({ bottomOccupant: null, relayed: true, isMobile: false })).toBe('bar-only')
-    expect(bottomBandFor({ bottomOccupant: null, relayed: true, isMobile: true })).toBe('none')
+    expect(bottomBandFor({ bottomOccupant: null, relayed: true, isMobile: false, bottomHasPanels: false })).toBe('bar-only')
+    expect(bottomBandFor({ bottomOccupant: null, relayed: true, isMobile: true, bottomHasPanels: false })).toBe('none')
   })
 })
 
@@ -95,8 +117,13 @@ describe('resolvePanelBarPick', () => {
       .toEqual({ kind: 'restore' })
   })
 
-  test('the active tab, expanded band: noop', () => {
+  test('the active tab, expanded band: minimize — the right rail own second-click behaviour', () => {
     expect(resolvePanelBarPick({ id: 'cli', activeBottom: 'cli', bottomOpen: true }))
-      .toEqual({ kind: 'noop' })
+      .toEqual({ kind: 'minimize' })
+  })
+
+  test('minimize then pick again: restore — the round trip lands where it started', () => {
+    expect(resolvePanelBarPick({ id: 'studio', activeBottom: 'studio', bottomOpen: true }).kind).toBe('minimize')
+    expect(resolvePanelBarPick({ id: 'studio', activeBottom: 'studio', bottomOpen: false }).kind).toBe('restore')
   })
 })

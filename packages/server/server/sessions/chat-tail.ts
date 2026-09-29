@@ -21,6 +21,7 @@
 // `readFile` is the CHAT view's, which deliberately reads the whole transcript — see readChatTurns'
 // own note on why a cache there would miss by construction. Two readers, two budgets.
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { abandonedBranchLines } from './active-branch'
 import { join } from 'node:path'
 import { splitImageMarkers } from '@agentistics/core'
 import { PROJECTS_DIR } from '../config'
@@ -33,6 +34,10 @@ import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
 import type { ChatTurn } from './chat-turn'
 import { MAX_TAIL_BYTES, TAIL_BYTES, readTailBytes, windowLines } from './transcript-window'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
+
+/** How many uuid entries the branch rule may parse per chat turn the window can hold. A turn is
+ *  several entries (text, tool calls, results), so the budget must cover more than one each. */
+const BRANCH_BUDGET_PER_TURN = 4
 
 // The turn shape now lives in `chat-turn.ts` — every harness reader produces it, and this module
 // is only one of them. Re-exported so nothing that already imports it from here has to move.
@@ -486,7 +491,11 @@ async function readTurnsFromTail(
   // shape earlier in the file is just an ordinary tool call whose result and follow-up text already
   // exist further down and will be read on a later iteration.
   let newest = true
+  // The branch claude is on — the same rule as the chat window, so the six-row tail and the chat
+  // never disagree about which turns happened. See `active-branch.ts`.
+  const abandoned = abandonedBranchLines(lines, Math.max(max, 6) * BRANCH_BUDGET_PER_TURN * 4)
   for (let i = lines.length - 1; i >= 0 && turns.length < max; i--) {
+    if (abandoned.has(i)) continue
     const line = (lines[i] ?? '').trim()
     if (!line) continue
     let e: Record<string, unknown>
@@ -612,9 +621,13 @@ export async function readChatWindow(
    */
   const companions = new Map<string, string[]>()
   let newest = true
+  // THE BRANCH claude IS ON — see `active-branch.ts`. A rewind leaves the abandoned turns in the
+  // file; they are skipped here, bounded to the tail this walk can reach.
+  const abandoned = abandonedBranchLines(lines, max * BRANCH_BUDGET_PER_TURN)
   // Hoisted so the walk can report WHERE it stopped — see `older` at the return.
   let i = lines.length - 1
   for (; i >= 0 && turns.length < max; i--) {
+    if (abandoned.has(i)) continue
     const line = (lines[i] ?? '').trim()
     if (!line) continue
     let e: Record<string, unknown>

@@ -201,6 +201,14 @@ export interface SessionView {
   contextTokens?: number
   contextWindow?: number
   /**
+   * Epoch ms of the person's last message in the conversation this row drives — from the EXACT
+   * conversation link only (`metricsOf`), never the harness-and-directory guess. Absent whenever
+   * that link is absent, exactly like `tokens`/`costUSD` beside it.
+   */
+  lastUserMessageMs?: number
+  /** The task id behind `task` (the label) — `ManagedSession.taskId`, carried straight through. */
+  taskId?: string
+  /**
    * Whether this harness has probed approval rules at all.
    *
    * False means a session blocked on a permission prompt reads as plain `waiting` — still counted,
@@ -619,6 +627,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.model ? { model: r.managed.model } : {}),
       ...(r.managed?.effort ? { effort: r.managed.effort } : {}),
       ...(r.managed?.task ? { task: r.managed.task } : {}),
+      ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(r.managed?.repo ? { recordedRepo: r.managed.repo } : {}),
       // The backend's clock when there is a backend, the REGISTRY's when there is not. A row the
@@ -659,6 +668,7 @@ export function buildSessionViews(o: {
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
         : {}),
+      ...(conv?.lastUserMessageMs !== undefined ? { lastUserMessageMs: conv.lastUserMessageMs } : {}),
       ...(o.sessionHardware?.get(r.id)
         ? {
             pid: o.sessionHardware.get(r.id)!.pid,

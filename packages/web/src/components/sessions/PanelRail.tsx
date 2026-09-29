@@ -73,6 +73,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { railTooltipShown } from '../../lib/railTooltip'
 import { createPortal } from 'react-dom'
 import { ArrowDown, Eye, EyeOff, MoreHorizontal } from 'lucide-react'
 import { PanelContextMenu, PanelTileDropdown, type PanelContextMenuEntry, type PanelTile } from './bandControls'
@@ -240,6 +241,8 @@ export function PanelRail({
   const iconPx = railIconSize(railWidth)
   const glyphPx = Math.round(iconPx / 2)
   const [named, setNamed] = useState<{ id: PanelId; rect: DOMRect } | null>(null)
+  /** A drag from this rail is in flight — see `railTooltipShown`. */
+  const [dragging, setDragging] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
   // The clamped vertical position, measured off the tooltip's OWN rendered height — see the
   // tooltip's own render block, below, for why a purely-CSS centered position can run off the
@@ -313,8 +316,14 @@ export function PanelRail({
       data-panel-rail="true"
       style={{
         position: 'relative', display: 'flex', flexDirection: 'column', width: railWidth, flexShrink: 0,
-        borderLeft: dragOver === 'bar' ? '1px solid var(--anthropic-orange)' : '1px solid var(--border)',
-        background: 'var(--bg-surface)',
+        // The plain state carries NO line any more (owner-approved central-pane inset, 2026-09-26):
+        // the pane immediately to this rail's left now has its OWN right border, 5px away, so a
+        // second line here just sandwiched it. The drag-over highlight stays — that is a live
+        // STATE, not the static frame divider the pane's own border replaced, and the resize
+        // handle's grip (`RailResizeHandle`, below) still marks the edge as draggable.
+        borderLeft: dragOver === 'bar' ? '1px solid var(--anthropic-orange)' : 'none',
+        // FRAME, not a panel (floating-panel board): the rail sits on the same ground as the gaps.
+        background: 'transparent',
       }}
     >
       <RailResizeHandle width={railWidth} onResize={onResizeWidth} lang={lang} />
@@ -350,13 +359,13 @@ export function PanelRail({
               aria-selected={on}
               aria-label={title}
               draggable
-              onDragStart={e => setDragPayload(e, id)}
-              onDragEnd={() => setDragOver(null)}
+              onDragStart={e => { setDragPayload(e, id); setDragging(true); setNamed(null) }}
+              onDragEnd={() => { setDragOver(null); setDragging(false); setNamed(null) }}
               onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; setDragOver(id) }}
               onDrop={e => { e.stopPropagation(); dropHere(e, { panel: id }) }}
               // THE RAIL IS A LAUNCHER (addendum item 3) — `railClickAction` decides, never a bare
-              // "always open". See that function's own header for why the bottom bar's tabs (select-
-              // only) do NOT follow the same rule.
+              // "always open". The bottom bar's tabs now answer the same second click the same way
+              // (`panelBar.ts`'s `resolvePanelBarPick`, `'minimize'`).
               onClick={() => (railClickAction(active, rightOpen, id) === 'minimize' ? onMinimize(id) : onOpen(id))}
               // RIGHT-CLICK / Menu key / Shift+F10 — the icon's own context menu (addendum, 2026-09-21:
               // the move verb that used to live in a gear this icon never had; spec §5's "Ocultar"
@@ -462,7 +471,7 @@ export function PanelRail({
           card's OWN rendered height once mounted and recomputes a clamped `top`, dropping the
           transform once it has one. A hover near the very top or bottom rail icon on a short
           window is exactly the case a purely-CSS centered tooltip would push off-screen. */}
-      {named && createPortal(
+      {named && railTooltipShown(named, visible, dragging) && createPortal(
         <div
           ref={tooltipRef}
           role="tooltip"

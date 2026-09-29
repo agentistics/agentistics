@@ -29,12 +29,12 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  NA, PRIORITY, button, claimLeft, field, fmtInt, fmtTokens, harnessColor, liveStatusMap,
+  NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus, type ColumnId,
 } from './board'
 import { useMoney, type Money } from './money'
 import {
-  cycleSort, DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
+  DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
   type SortKey, type SortSpec, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
   type TaskStatusDef,
 } from '@agentistics/core'
@@ -45,34 +45,47 @@ import {
   toggleMode, toggleRow, type Selection,
 } from './selection'
 import { orderedSubtasks } from './subtaskSortView'
+import { effectiveSubtaskSort, pickSubtaskSort } from './subtaskSortInherit'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { SessionPicker } from './SessionPicker'
-import { DatePicker } from '../DatePicker'
 import { ChipSelect, statusOptions } from './ChipSelect'
 import { StatusChip } from './StatusChip'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { subtaskSessions } from './SubtaskSessions'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
   isGroupSubtask, visibleClusterRows,
 } from './subtaskGroups'
-import { subtaskRollupOf } from './subtaskRollup'
+import { costCellFor, tokensCellFor } from './subtaskRollup'
+import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
+import { ModelCellView } from './SubtaskModelCell'
+import { SessionRef } from './SessionRef'
+import { subtaskColumnCell } from './subtaskColumnCell'
+import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
+import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
+import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
+import { subtaskGridLayout } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
-import type {
-  StatusWriteResult, Subtask, SubtaskPatch, SubtaskView, TaskClaim, TaskDetail, TaskListRow,
-  TaskSessionRow, TaskStatus,
+import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
+import { useStagedFire } from './useStagedFire'
+import { pushNotification } from '../../lib/notifications'
+import {
+  clearStagedSession, saveStagedSession, uploadFile,
+  type StatusWriteResult, type Subtask, type SubtaskPatch,
+  type SubtaskView, type TaskClaim, type TaskDetail, type TaskFile, type TaskListRow,
+  type TaskSessionRow, type TaskStatus,
 } from '../../lib/tasks'
 
-/** The words the "sorted by" note uses. Kept beside `COLUMNS`, whose labels they mirror. */
-const SORT_LABEL: Record<string, string> = {
-  manual: 'the board order', priority: 'priority', title: 'title', status: 'status',
-  created: 'created', updated: 'updated', due: 'due date', assignee: 'owner', cost: 'cost',
-  tokens: 'tokens', rounds: 'rounds', sessions: 'sessions', attempts: 'attempts',
-  comments: 'comments', subtasks: 'subtasks', progress: 'progress', harnesses: 'harnesses',
-  delivered: 'delivered',
+/** `SubtaskColumnId` and `SubtaskSortKey` (`@agentistics/core`) name the same seven legacy columns
+ *  by the same string — `model` is the one column with no sort key at all, so its header carries no
+ *  click affordance, the SAME rule this file's own `cellFor` applies to any main-table column with
+ *  no `sort` in its `ColumnDef`. Mirror of `SubtaskTable.tsx`'s identical helper — kept as its own
+ *  copy rather than a shared import so neither file has to import the other's internals for one
+ *  three-line function. */
+function subtaskSortKeyFor(id: SubtaskColumnId): SubtaskSortKey | undefined {
+  return id === 'model' ? undefined : (id as SubtaskSortKey)
 }
 
 // ---------------------------------------------------------------------------- columns
@@ -81,7 +94,6 @@ export type { ColumnId }
 
 export interface ColumnDef {
   id: ColumnId
-  label: string
   /** Right-aligned, tabular. Every measured number is one; a chip column is not. */
   numeric?: boolean
   width: number
@@ -95,30 +107,35 @@ export interface ColumnDef {
 /**
  * The default set answers the three questions the product exists for before anyone configures
  * anything. The rest are one click away in the `+` menu.
+ *
+ * No `label` here — it used to be a hardcoded English literal per column, which is why this table's
+ * headers stayed English on a Portuguese board while the inline subtask headers right below them
+ * (`subtaskColumns`) were already localized through `boardCopy`. The label is now resolved at render
+ * time from `boardCopy(lang).columns`, the SAME record the "Columns" picker reads, so the picker and
+ * the headers can never disagree.
  */
 export const COLUMNS: ColumnDef[] = [
   // No `sort` on Status, deliberately: this table is GROUPED by status, so every row inside a band
   // has the same one and a sort by it would reorder nothing while its arrow lit up — a control that
   // looks like it works and does not. The order of the bands themselves is the Groups picker's.
-  { id: 'status', label: 'Status', width: 116 },
-  { id: 'priority', label: 'Priority', width: 96, sort: 'priority' },
-  { id: 'assignee', label: 'Owner', width: 110, sort: 'assignee' },
-  { id: 'claim', label: 'Working on it', width: 132 },
-  { id: 'progress', label: 'Progress', width: 132, sort: 'progress' },
-  { id: 'due', label: 'Due', width: 96, sort: 'due' },
-  { id: 'sessions', label: 'Sessions', numeric: true, width: 84, sort: 'sessions' },
-  { id: 'rounds', label: 'Your prompts', numeric: true, width: 108, sort: 'rounds' },
-  { id: 'cost', label: 'Cost', numeric: true, width: 88, sort: 'cost' },
-  { id: 'tokens', label: 'Tokens', numeric: true, width: 84, sort: 'tokens' },
-  { id: 'harnesses', label: 'Harnesses', width: 150, sort: 'harnesses' },
-  { id: 'subtasks', label: 'Subtasks', numeric: true, width: 84, sort: 'subtasks' },
-  { id: 'attempts', label: 'Attempts', numeric: true, width: 84, sort: 'attempts' },
-  { id: 'comments', label: 'Comments', numeric: true, width: 92, sort: 'comments' },
-  { id: 'files', label: 'Files', numeric: true, width: 68 },
-  { id: 'links', label: 'Links', numeric: true, width: 68 },
-  { id: 'blockedBy', label: 'Blocked by', numeric: true, width: 92 },
-  { id: 'created', label: 'Created', width: 104, sort: 'created' },
-  { id: 'updated', label: 'Updated', width: 104, sort: 'updated' },
+  { id: 'status', width: 116 },
+  { id: 'priority', width: 96, sort: 'priority' },
+  { id: 'claim', width: 132 },
+  { id: 'progress', width: 132, sort: 'progress' },
+  { id: 'due', width: 96, sort: 'due' },
+  { id: 'sessions', numeric: true, width: 84, sort: 'sessions' },
+  { id: 'rounds', numeric: true, width: 108, sort: 'rounds' },
+  { id: 'cost', numeric: true, width: 88, sort: 'cost' },
+  { id: 'tokens', numeric: true, width: 84, sort: 'tokens' },
+  { id: 'harnesses', width: 150, sort: 'harnesses' },
+  { id: 'subtasks', numeric: true, width: 84, sort: 'subtasks' },
+  { id: 'attempts', numeric: true, width: 84, sort: 'attempts' },
+  { id: 'comments', numeric: true, width: 92, sort: 'comments' },
+  { id: 'files', numeric: true, width: 68 },
+  { id: 'links', numeric: true, width: 68 },
+  { id: 'blockedBy', numeric: true, width: 92 },
+  { id: 'created', width: 104, sort: 'created' },
+  { id: 'updated', width: 104, sort: 'updated' },
 ]
 
 export const DEFAULT_COLUMNS: ColumnId[] =
@@ -220,9 +237,6 @@ function cellFor(
         onPick={v => onPriority(v as TaskPriorityId)}
       />
     )
-    case 'assignee': return row.task.assignee
-      ? <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{row.task.assignee}</span>
-      : <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
     case 'due': return row.task.dueDate
       ? <DueCell date={row.task.dueDate} closed={row.task.status === 'done' || row.task.status === 'abandoned'} nowMs={nowMs} />
       : <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
@@ -237,18 +251,29 @@ function cellFor(
         {new Date(row.task.updatedAt).toLocaleDateString()}
       </span>
     )
-    case 'sessions': return (
-      <span>
-        <Num v={r.sessionsUsed} />
-        {r.sessionsLinked < r.sessionsUsed && (
-          <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}> ({r.sessionsLinked} priced)</span>
-        )}
-      </span>
-    )
+    case 'sessions': {
+      // "N · M priced" — a SEPARATOR, not parentheses ("N (M priced)" wrapped onto a second line in
+      // an 84px column), one line, and the WORD is localized (`boardCopy`, `sessionsPriced`) rather
+      // than hardcoded English on an otherwise-Portuguese board.
+      const short = r.sessionsLinked < r.sessionsUsed
+      return (
+        <span
+          style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap' }}
+          title={short ? `${r.sessionsLinked} ${boardCopy(lang).sessionsPriced}` : undefined}
+        >
+          <Num v={r.sessionsUsed} />
+          {short && (
+            <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+              · {r.sessionsLinked} {boardCopy(lang).sessionsPriced}
+            </span>
+          )}
+        </span>
+      )
+    }
     case 'rounds': return <Num v={r.rounds} />
     case 'cost': return r.mixedCurrency || (r.credits !== null && r.costUSD === null)
       ? <span style={{ ...numeric, fontSize: 12 }}>{r.credits!.premiumRequests} req</span>
-      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD)}</span>
+      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD, r.costByHarness)}</span>
     case 'tokens': return <span style={{ ...numeric, fontSize: 12, color: r.tokens === null ? 'var(--text-tertiary)' : undefined }}>{fmtTokens(r.tokens)}</span>
     case 'harnesses': return <HarnessBadges harnesses={row.harnesses} />
     case 'subtasks': return row.counts.subtasks === 0
@@ -282,37 +307,29 @@ function cellFor(
 
 // ------------------------------------------------------------------------------ subrow
 
-/**
- * The subitem columns, and they are the SAME ones `SubtaskTable` draws on the detail page.
- *
- * A subtask that carries an owner, two dates and a session in one place and a title with a checkbox
- * in the other is two different records as far as the reader is concerned — and the shorter one
- * teaches people the fields do not exist. One list of columns, stated here and mirrored there.
- */
-export const subtaskColumns = (lang: Lang): Array<{ label: string; key: SubtaskSortKey }> => {
-  const c = boardCopy(lang)
-  return [
-    { label: c.subtasks, key: 'title' }, { label: 'Status', key: 'status' },
-    { label: c.owner, key: 'assignee' }, { label: c.start, key: 'start' },
-    { label: c.due, key: 'due' }, { label: c.sessions, key: 'sessions' },
-  ]
-}
-
 function SubtaskRows({
-  subtasks, subtaskRollups, indent, cols, sessions, lang, statuses, onPatch, onRemove, onCreateGroup,
-  onLinkSession, onUnfile, onOpenSession,
+  subtasks, subtaskRollups, indent, mainCols, subtaskCols, sessions, lang, nowMs, statuses, onPatch, onRemove,
+  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor,
 }: {
   subtasks: Subtask[]
-  /** The delivery's own `TaskDetail.subtaskRollups` — read here only for a GROUP's own
-   *  `groupProgress` (§F.1); the rest of this row's numbers stay off this table by design (see the
-   *  file's own doc comment: a subtask has no rollup of its own in the board's inline view). */
+  /** The delivery's own `TaskDetail.subtaskRollups` — a GROUP's own `groupProgress` (§F.1), and now
+   *  also the per-subtask Cost/Tokens cells (owner-approved reversal of this table's earlier "the
+   *  rest of this row's numbers stay off this table by design" — they no longer do, and are drawn
+   *  through the SAME `subtaskColumnCell` `SubtaskTable.tsx`'s own grid draws them through). */
   subtaskRollups: readonly SubtaskView[]
   indent: number
-  /** How many task columns the group's table has — the filler cell has to close the row exactly. */
-  cols: number
+  /** How many MAIN table columns are shown — the filler cell has to close the row exactly. */
+  mainCols: number
+  /** Which SUBTASK columns are shown, in order (t-63b7d3b2b0 #1) — the SAME arrangement
+   *  `SubtaskTable.tsx`'s own grid reads/writes, via `boardPrefs.subtaskColumns`. `status` is drawn
+   *  through `ChipSelect` here (not `subtaskColumnCell`, which deliberately omits it — see that
+   *  module's own header) whenever it appears in this list. */
+  subtaskCols: readonly SubtaskColumnId[]
   /** The DELIVERY's sessions. Each subtask draws the ones filed under IT — see `SubtaskSessions`. */
   sessions: readonly TaskSessionRow[]
   lang: Lang
+  /** Feeds `fmtDateTime`'s "same calendar year as now" check — see `TaskTable`'s own `nowMs`. */
+  nowMs: number
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
   onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
@@ -321,8 +338,11 @@ function SubtaskRows({
   onLinkSession: (subtaskId: string) => void
   onUnfile: (sessionId: string) => void
   onOpenSession?: (sessionId: string) => void
+  /** The staged-session section of each subtask's gear — the same one the delivery page offers. */
+  stagedFor: (t: Subtask) => NonNullable<React.ComponentProps<typeof SubtaskActionsMenu>['staged']>
 }) {
   const isMobile = useIsMobile()
+  const money = useMoney()
   const bare: React.CSSProperties = {
     width: '100%', background: 'transparent', border: 'none', outline: 'none',
     color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'inherit',
@@ -349,14 +369,27 @@ function SubtaskRows({
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
     flexShrink: 0, minWidth: 18, minHeight: 18,
   }
-  // 1 (leading) + 6 named cells + filler must equal cols + 2 — the task row above is
-  // [leading][title][cols…], and the leading column is there in BOTH modes (Select only adds the
-  // checkbox INSIDE it), so this arithmetic does not depend on whether rows are being picked.
-  const filler = Math.max(0, cols - 5)
+  // 1 (leading) + 1 (title) + `subtaskCols.length` named cells + filler must equal `mainCols + 2` —
+  // the task row above is [leading][title][mainCols…], and the leading column is there in BOTH
+  // modes (Select only adds the checkbox INSIDE it), so this arithmetic does not depend on whether
+  // rows are being picked. See `subtaskGridLayout.ts` — the caller decides `inline` vs `nested`
+  // from this same pair before ever reaching this component.
+  const filler = Math.max(0, mainCols - subtaskCols.length)
   // See `SubtaskTable`'s own doc comment for the full §F.1 clustering reasoning — this mirrors it
   // exactly, over the same `subtasks` pool (already scoped to one delivery): a member renders
   // directly under its group regardless of creation order, connected by an inset bar plus a shared
   // tint, rather than a caption repeated on every member row.
+  //
+  // The `id: null` direct-branch bucket — sessions filed straight on the delivery, under no
+  // subtask (t-63b7d3b2b0 #5). `SubtaskTable.tsx`'s own standalone grid has always drawn this as a
+  // footer row with the sessions listed by name and openable; this inline view never did, so a
+  // delivery whose sessions are ALL direct (no subtask at all) rendered nothing here beyond
+  // "+ Add subtask" — the cost/tokens rollup was visible one level up, on the task row, with no way
+  // to see WHICH sessions produced it short of opening the task. Mirrored here for the same reason
+  // every other subtask cell is mirrored: a fact drawn on one surface and not the other teaches
+  // people the fact does not exist.
+  const directView = subtaskRollups.find(v => v.id === null)
+  const directSessions = sessions.filter(s => s.subtaskId === null)
   return (
     <>
       {visibleClusterRows(clusterSubtaskRows(subtasks), expandedGroups).map(({ subtask: t, depth, clustered }) => {
@@ -373,11 +406,9 @@ function SubtaskRows({
         <tr key={t.id} style={{ background: clustered ? undefined : 'var(--bg-surface)' }}>
           {/* The leading "checkbox" slot every row above this one uses for batch-select — a subtask
               is never batch-selectable, so it was always blank here. It now carries the ONE gear
-              menu instead (`SubtaskActionsMenu`'s own doc comment): group actions and remove, the
-              two of its five sections this board already wires. Blocked-by and the staged-session
-              lifecycle are NOT here — this inline view has never had that plumbing (no compose
-              dialog, no `onSaveStagedSession`), a pre-existing gap this pass does not invent, so the
-              same component simply omits what it was not given. The inset left bar
+              menu instead (`SubtaskActionsMenu`'s own doc comment): group actions, the
+              staged-session lifecycle (the same one the delivery page offers — the rocket lives
+              HERE, on the subtask, never on the delivery row) and remove. The inset left bar
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
           <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
@@ -389,11 +420,15 @@ function SubtaskRows({
               onPatch={onPatch}
               onCreateGroup={onCreateGroup}
               onRemove={onRemove}
+              staged={stagedFor(t)}
             />
           </td>
           {/* A MEMBER is indented one level further than the base subtask indent — the visual
               nesting that replaces the old "parte do grupo" caption for every properly clustered
-              row. */}
+              row. `indent` is the BASE (0 here — see the call site's own note: it used to be 34,
+              leaving a ~50px gap between the gear button and the title nobody asked for); the
+              member's own +20 offset is unchanged, so a member still sits exactly as far under its
+              group as it always did. */}
           <td style={{ padding: cellPad, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {/* Same accordion toggle as `SubtaskTable`'s inline view — collapsed by default. */}
@@ -448,54 +483,73 @@ function SubtaskRows({
                 </span>
               </div>
             )}
+            {/* "Ready to fire" stays glanceable, exactly as on the delivery page — the verbs behind
+                it are in the gear. */}
+            {!isMember && t.stagedSession && (
+              <div style={{ marginTop: 3 }}>
+                <span style={{ ...pill('var(--anthropic-orange)'), fontSize: 9.5 }}>
+                  {boardCopy(lang).staged.ready}
+                </span>
+              </div>
+            )}
           </td>
-          <td style={{ padding: cellPad, ...tint }}>
-            <ChipSelect
-              compact
-              value={t.status}
-              options={statusOptions(liveStatusMap(statuses), liveStatusOrder(statuses))}
-              onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
-            />
-          </td>
-          <td style={{ padding: cellPad, ...tint }}>
-            <input
-              value={t.assignee ?? ''} placeholder="—"
-              onChange={e => void onPatch(t.id, { assignee: e.target.value })}
-              style={bare}
-            />
-          </td>
-          {/* See `SubtaskTable`: one date picker in this app, and it fits its column. */}
-          <td style={{ padding: cellPad, ...tint }}>
-            <DatePicker
-              value={t.startDate ?? ''} label="" placeholder="—" lang="en"
-              onChange={v => void onPatch(t.id, { startDate: v })}
-            />
-          </td>
-          <td style={{ padding: cellPad, ...tint }}>
-            <DatePicker
-              value={t.dueDate ?? ''} label="" placeholder="—" lang="en"
-              min={t.startDate || undefined}
-              onChange={v => void onPatch(t.id, { dueDate: v })}
-            />
-          </td>
-          <td style={{ padding: cellPad, ...tint }}>
-            {/* A MEMBER can never hold a session (§F.1, refused server-side) — no filing control,
-                and never a chip list unioned from its group's sessions (superseded §B.4). */}
-            {!isMember && subtaskSessions({
-              subtaskId: t.id,
-              subtaskIds: [t.id],
-              sessions,
-              lang,
-              mobile: isMobile,
-              onLink: onLinkSession,
-              onUnfile,
-              onOpen: onOpenSession,
-            })}
-          </td>
+          {subtaskCols.map(id => {
+            const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+            return (
+              <td key={id} style={{ padding: cellPad, textAlign: def.numeric ? 'right' : 'left', ...tint }}>
+                {id === 'status'
+                  ? (
+                    <ChipSelect
+                      compact
+                      value={t.status}
+                      options={statusOptions(liveStatusMap(statuses), liveStatusOrder(statuses))}
+                      onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
+                    />
+                  )
+                  : subtaskColumnCell(id, {
+                    subtask: t, isMember, sessions, subtaskRollups, lang, nowMs, isMobile, money,
+                    onLink: onLinkSession, onUnfile, onOpenSession,
+                  })}
+              </td>
+            )
+          })}
           {filler > 0 && <td colSpan={filler} style={tint} />}
         </tr>
         )
       })}
+      {directView && (
+        <tr style={{ background: 'var(--bg-surface)' }}>
+          <td style={{ padding: cellPad }} />
+          <td style={{
+            padding: cellPad, paddingLeft: indent, color: 'var(--text-tertiary)',
+            fontStyle: 'italic', fontSize: 12,
+          }}>
+            {boardCopy(lang).directSessions}
+          </td>
+          {subtaskCols.map(id => {
+            const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+            return (
+              <td key={id} style={{ padding: cellPad, textAlign: def.numeric ? 'right' : 'left' }}>
+                {id === 'sessions' && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
+                    {directSessions.map(s => (
+                      <SessionRef
+                        key={s.id} id={s.id} title={s.label} harness={s.harness} lang={lang}
+                        historical={s.historical === true} onOpen={onOpenSession}
+                        onUnfile={sid => void onUnfile(sid)}
+                      />
+                    ))}
+                  </span>
+                )}
+                {id === 'model' && <ModelCellView sessions={directSessions} />}
+                {id === 'cost' && <CostCellView r={directView.rollup} cost={costCellFor(directView.rollup)} money={money} />}
+                {id === 'tokens' && <TokensCellView tok={tokensCellFor(directView.rollup)} />}
+              </td>
+            )
+          })}
+          {filler > 0 && <td colSpan={filler} />}
+        </tr>
+      )}
     </>
   )
 }
@@ -562,7 +616,15 @@ export interface TaskTableProps {
   onOpenSession?: (sessionId: string) => void
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
+  /** Re-read ONE delivery's detail, cached or not — `onExpand` is a no-op once it is cached, so a
+   *  write that must show its result (a staged draft saved, a session fired) calls this instead. */
+  onRefreshDetail: (ref: string) => Promise<unknown> | void
+  /** Drawn at the START of the toolbar row — the page's search box, so the table has ONE row of
+   *  controls instead of a search row above a controls row. */
+  toolbarStart?: React.ReactNode
 }
+
+type TableStagedTarget = StagedTarget & { taskId: string }
 
 export function TaskTable(p: TaskTableProps) {
   const isMobile = useIsMobile()
@@ -570,6 +632,19 @@ export function TaskTable(p: TaskTableProps) {
   const stored = useMemo(readBoardPrefs, [])
 
   const [shown, setShown] = useState<ColumnId[]>(stored.columns ?? DEFAULT_COLUMNS)
+  // Which SUBTASK columns every expanded delivery's inline grid shows, in the order they were
+  // picked (t-63b7d3b2b0 #1) — ONE arrangement for the whole table, shared through the same
+  // `boardPrefs.subtaskColumns` slot `SubtaskTable.tsx`'s own standalone grid reads/writes, so
+  // opening a delivery here and opening it from its own page never disagree about the columns.
+  const [shownSubtaskCols, setShownSubtaskCols] = useState<SubtaskColumnId[]>(
+    stored.subtaskColumns ?? DEFAULT_SUBTASK_COLUMNS,
+  )
+  const setSubtaskColumns = (next: SubtaskColumnId[]) => {
+    setShownSubtaskCols(next); writeBoardPrefs({ subtaskColumns: next })
+  }
+  /** The subtask column filter (t-63b7d3b2b0 #2) — ONE filter for the whole table, applied to every
+   *  expanded delivery's own subtasks; ephemeral, like the per-delivery sort override below. */
+  const [subtaskFilter, setSubtaskFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
   const [sort, setSortState] = useState<SortSpec>(stored.sort ?? DEFAULT_SORT)
   // One clock for every lease cell on the screen, ticking a minute at a time. A card that says
   // "3m left" forever is worse than one that says nothing, and a timer per cell would be N timers.
@@ -594,8 +669,12 @@ export function TaskTable(p: TaskTableProps) {
   // SELECT MODE (selection.ts): the checkboxes are behind it, it starts off, and leaving it clears
   // the ticks — a batch verb must never act on rows nobody can see are armed.
   const [sel, setSel] = useState<Selection>(NO_SELECTION)
-  /** Each expanded task's subitem grid is ordered on its own — clicking one grid's header must not
-   *  reshuffle another open grid the reader is not looking at. `null` = creation order. */
+  /**
+   * Per-task OVERRIDES only — `null` means "no override, follow the main table's own sort"
+   * (`subtaskSortInherit.ts`'s `effectiveSubtaskSort`/`pickSubtaskSort`), not "creation order"
+   * outright as it used to. Clicking one grid's header must not reshuffle another open grid the
+   * reader is not looking at, so the override is keyed per task and never touches the others.
+   */
   const [subSort, setSubSort] = useState<Record<string, SubtaskSortSpec | null>>({})
   const [adding, setAdding] = useState<TaskStatus | null>(null)
   const [draft, setDraft] = useState('')
@@ -604,12 +683,54 @@ export function TaskTable(p: TaskTableProps) {
   const [linkingSub, setLinkingSub] = useState<{ task: string; sub: string } | null>(null)
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
-  const L = boardCopy(p.lang ?? 'en').list
+  /**
+   * The staged-session lifecycle (compose / edit / view / fire / delete) lives in each SUBTASK's
+   * gear, exactly as on the delivery's own page — a staged session belongs to a subtask or a group,
+   * never to the delivery row. Both hooks are the ones `SubtaskTable`/`DeliveryDetail` use, so the
+   * table carries no second copy of the draft form or of the spawn rules.
+   */
+  const stagedDialogs = useStagedDialogs<TableStagedTarget>(p.lang ?? 'en', {
+    save: (t, d) => saveStagedSession(t.taskId, t.subtask.id, d)
+      .then(r => { if (r.ok) void p.onRefreshDetail(t.taskId); return r }),
+    clear: async t => { await clearStagedSession(t.taskId, t.subtask.id); await p.onRefreshDetail(t.taskId) },
+    upload: (t, f) => uploadFile(t.taskId, f),
+  })
+  // A filing refused because the subtask is blocked is SAID, never swallowed — the session exists
+  // and runs either way; what the reader must learn is that it is not filed where they asked.
+  const fire = useStagedFire(p.lang ?? 'en', b => pushNotification({
+    type: 'error', code: 'tasks.fire_filing_blocked', meta: { blockedBy: b.blockedBy.join(', ') },
+  }))
+  const stagedFor = (taskId: string, files: readonly TaskFile[]) => (t: Subtask) => {
+    const target: TableStagedTarget = { taskId, subtask: t, files }
+    return {
+      hasDraft: Boolean(t.stagedSession),
+      preparing: fire.preparingId === t.id,
+      onCompose: () => stagedDialogs.compose(target),
+      onEdit: () => stagedDialogs.compose(target),
+      onFire: () => void fire.startFire({ taskId, subtask: t, files, reload: () => p.onRefreshDetail(taskId) }),
+      onView: () => stagedDialogs.view(target),
+      onDelete: () => stagedDialogs.remove(target),
+    }
+  }
+  const copy = boardCopy(p.lang ?? 'en')
+  const L = copy.list
+  // The MAIN table's column labels — the one record the header row and the "Columns" picker both
+  // read, so a header can never say something the picker's own row does not.
+  const colLabel = (id: ColumnId): string => copy.columns[id]
 
   const cols = useMemo(
     () => COLUMNS.filter(c => shown.includes(c.id)).sort(
       (a, b) => shown.indexOf(a.id) - shown.indexOf(b.id)),
     [shown],
+  )
+  // How few shown columns it takes before an expanded delivery's subtasks no longer fit as rows of
+  // THIS table without overshooting the main row's own width — see `subtaskGridLayout.ts`. Every
+  // row's column count is the same `cols.length`, so this is decided once for the whole table
+  // rather than per expanded row. Moves with `shownSubtaskCols.length` too: narrowing the subtask
+  // grid's own columns is exactly what lets a narrower main table stay `inline`.
+  const gridLayout = useMemo(
+    () => subtaskGridLayout(cols.length, shownSubtaskCols.length),
+    [cols.length, shownSubtaskCols.length],
   )
 
   // Every group is BUILT, even a hidden one: the chooser needs its count to say what it is hiding.
@@ -679,6 +800,13 @@ export function TaskTable(p: TaskTableProps) {
     visible.filter(g => !collapsed.has(g.status)).flatMap(g => g.rows.map(r => r.task.id)),
   )
 
+  // Every toolbar trigger is the same height and shape — a row of mixed sizes reads as unrelated
+  // controls. On a phone they share the row evenly, each a full 44px target.
+  const TRIGGER: React.CSSProperties = {
+    ...button(isMobile), height: isMobile ? 44 : 28, gap: 6,
+    ...(isMobile ? { flex: '1 1 auto', justifyContent: 'center' } : {}),
+  }
+
   const openBtn: React.CSSProperties = {
     background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
@@ -687,64 +815,82 @@ export function TaskTable(p: TaskTableProps) {
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {/* The chooser bar. Groups first: it decides what is on the screen at all, and the columns
-          only decide what each row says. Both are the app's own multi-select popover — fixed, in a
-          portal, clamped — because a menu that opens inside a scrolling table is clipped by it. */}
+      {/* ONE toolbar row: what to look for (search, injected by the page), how it is ordered (the
+          sort chip, only when it is not the default), then the three things that shape the table —
+          filter, groups, columns — and Select. The subtask grid's filter and columns live INSIDE
+          those same controls (the filter is subtask-only and says so; "Columns" has a Deliveries and
+          a Subtasks tab), rather than on a second row of bare, unlabeled selects. Every menu is the
+          app's portal popover — a menu opened inside a scrolling table is clipped by it. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ ...microLabel, fontSize: 10.5 }}>
-          {visible.length} of {groups.length} groups
-        </span>
+        {p.toolbarStart && (
+          <div style={{ flex: isMobile ? '1 1 100%' : '0 1 340px', minWidth: 0 }}>{p.toolbarStart}</div>
+        )}
         {sort.key !== DEFAULT_SORT.key && (
           // Said in words, with the way out beside it: a sort is invisible once you have scrolled
           // past the header, and "why is this board in this order" should never need investigating.
           <button
             onClick={() => setSort(DEFAULT_SORT)}
+            title={L.resetSort}
             style={{
-              ...button(isMobile), height: isMobile ? 44 : 26, fontSize: 11,
+              ...button(isMobile), height: isMobile ? 44 : 28, fontSize: 11,
               color: 'var(--anthropic-orange)',
             }}
           >
-            sorted by {SORT_LABEL[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'} · reset
+            {L.sortedByPrefix} {L.keys[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'}
+            <X size={12} />
           </button>
         )}
-        <span style={{ flex: 1 }} />
+        {!isMobile && <span style={{ flex: 1 }} />}
+        <SubtaskFilterMenu
+          value={subtaskFilter} onChange={setSubtaskFilter}
+          sessions={[...p.details.values()].flatMap(d => d.sessions)}
+          statuses={p.statuses} lang={p.lang ?? 'en'}
+          label={copy.subtaskFilter.title}
+          triggerStyle={TRIGGER}
+        />
         <PickerMenu
-          title="Show groups"
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
+          title={copy.pickers.groupsTitle}
+          lang={p.lang ?? 'en'}
+          triggerStyle={TRIGGER}
           items={groups.map(g => ({
             value: g.status,
-            // The SAME word the chip in every row of this group prints — one vocabulary, one
-            // language. The heading used to read the English constant while the cell beside it
-            // was translated.
+            // The SAME word the chip in every row of this group prints — one vocabulary, one language.
             label: statusLabel(g.status, p.lang ?? 'en', p.statuses),
             color: statusStyle(p.statuses, g.status).color,
             // The count of a HIDDEN group too — "hidden" must not read as "empty".
             hint: String(g.rows.length),
           }))}
           value={groupsShown}
-          // The picked ORDER is kept, not re-canonicalised: the board and the table share this
-          // field, and the board draws its columns in it — forcing the live list's own order here
-          // would undo a reorder made one screen away.
+          // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
           onChange={next => setGroups(next as BoardStatus[])}
-          // ORDERABLE, exactly like the columns beside it. The order was always honoured (`visible`
-          // walks `groupsShown`, not the live list's raw order) and the only way to change it was to
-          // untick every group and tick them back in the order you wanted — a sequence with no control.
           orderable
-          note="Drag a ticked group, or use ▲▼, to reorder the bands. A hidden group's tasks are still there."
+          note={copy.pickers.groupsNote}
         >
-          <Rows3 size={13} /> Groups
+          <Rows3 size={13} /> {copy.pickers.groupsTrigger}
+          {/* How many are on screen, on the trigger itself — it used to be a separate caption. */}
+          <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
         </PickerMenu>
         <PickerMenu
-          title="Columns"
+          title={copy.pickers.columnsTitle}
+          lang={p.lang ?? 'en'}
           width={270}
-          orderable
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
-          items={COLUMNS.map(c => ({ value: c.id, label: c.label }))}
-          value={shown}
-          onChange={next => setColumns(next as ColumnId[])}
-          note="Drag a ticked column, or use ▲▼, to reorder it — the table follows this order."
+          triggerStyle={TRIGGER}
+          tabs={[
+            {
+              id: 'deliveries', label: copy.pickers.deliveriesTab, orderable: true,
+              items: COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) })),
+              value: shown, onChange: next => setColumns(next as ColumnId[]),
+              note: copy.pickers.columnsNote,
+            },
+            {
+              id: 'subtasks', label: copy.pickers.subtasksTab, orderable: true,
+              items: SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] })),
+              value: shownSubtaskCols, onChange: next => setSubtaskColumns(next as SubtaskColumnId[]),
+              note: copy.pickers.subtaskColumnsNote,
+            },
+          ]}
         >
-          <Columns3 size={13} /> Columns
+          <Columns3 size={13} /> {copy.pickers.columnsTrigger}
         </PickerMenu>
         <button
           type="button"
@@ -752,7 +898,7 @@ export function TaskTable(p: TaskTableProps) {
           aria-pressed={sel.on}
           title={L.selectTitle}
           style={{
-            ...button(isMobile), height: isMobile ? 44 : 28,
+            ...TRIGGER,
             ...(sel.on ? {
               color: 'var(--anthropic-orange)', border: '1px solid var(--anthropic-orange)',
               background: 'var(--anthropic-orange-dim)',
@@ -815,7 +961,7 @@ export function TaskTable(p: TaskTableProps) {
                           )}
                         </th>
                         <SortTh
-                          label="Task" sortKey="title" current={sort} mobile={isMobile}
+                          label={L.taskColumn} sortKey="title" current={sort} mobile={isMobile}
                           onSort={k => setSort(nextSort(sort, k))}
                           title={L.sortByColumn.replace('{column}', L.keys.title!)}
                           style={{ ...th, minWidth: 240 }}
@@ -824,9 +970,9 @@ export function TaskTable(p: TaskTableProps) {
                           // A column with no `sort` carries NO affordance — a header that looks
                           // clickable and does nothing is worse than a plain one.
                           <SortTh
-                            key={c.id} label={c.label} sortKey={c.sort} current={sort} mobile={isMobile}
+                            key={c.id} label={colLabel(c.id)} sortKey={c.sort} current={sort} mobile={isMobile}
                             onSort={k => setSort(nextSort(sort, k))}
-                            title={L.sortByColumn.replace('{column}', c.label)}
+                            title={L.sortByColumn.replace('{column}', colLabel(c.id))}
                             style={{ ...th, width: c.width, textAlign: c.numeric ? 'right' : 'left' }}
                           />
                         ))}
@@ -837,7 +983,119 @@ export function TaskTable(p: TaskTableProps) {
                     {g.rows.map(row => {
                       const open = expanded.has(row.task.id)
                       const detail = p.details.get(row.task.id)
-                      const subs = detail?.subtasks ?? []
+                      // The column FILTER (t-63b7d3b2b0 #2) narrows what is drawn, never `p.subtasks`
+                      // itself — same "display only" rule `sort` already follows one line below.
+                      const subs = filterSubtaskRows(
+                        detail?.subtasks ?? [], detail?.sessions ?? [], subtaskFilter,
+                      )
+                      // The sub-header row, `SubtaskRows` and the "+ Add subtask" row, sized against
+                      // `effectiveCols` — the REAL `cols.length` when they are drawn as rows of this
+                      // table (`gridLayout.mode === 'inline'`), or `shownSubtaskCols.length` when
+                      // they are drawn inside their OWN nested table (see `subtaskGridLayout.ts`),
+                      // which is what makes their filler come out to zero in that case.
+                      const renderSubtaskGrid = (effectiveCols: number) => (
+                        <>
+                          <tr style={{ background: 'var(--bg-surface)' }}>
+                            <td style={{ padding: '5px 10px' }} />
+                            {/* The title column is always shown — never in the "Subtask columns"
+                                picker, exactly like the delivery table's own leading name column. */}
+                            <SortTh
+                              label={copy.subtasks} sortKey="title"
+                              current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}
+                              mobile={isMobile}
+                              onSort={k => setSubSort(m => (
+                                { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
+                              ))}
+                              title={L.sortByColumn.replace('{column}', copy.subtasks)}
+                              style={{
+                                ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
+                                paddingLeft: 0,
+                              }}
+                            />
+                            {shownSubtaskCols.map(id => {
+                              const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+                              const label = copy.subtaskColumns[id]
+                              // Sortable like every other header. The grid orders itself by the
+                              // EFFECTIVE sort (`subtaskSortInherit.ts`): an explicit click on
+                              // THIS grid's own header (`subSort`) if there is one, otherwise
+                              // whatever the main table's own sort translates to — so sorting
+                              // the board by "Cost" re-sorts every open subtask grid by cost too,
+                              // until a reader clicks one of these headers directly. Clusters
+                              // survive either way because the renderer rebuilds them from the
+                              // sorted list (`subtaskSortView.ts`).
+                              return (
+                                <SortTh
+                                  key={id} label={label} sortKey={subtaskSortKeyFor(id)}
+                                  current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}
+                                  mobile={isMobile}
+                                  onSort={k => setSubSort(m => (
+                                    { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
+                                  ))}
+                                  title={L.sortByColumn.replace('{column}', label)}
+                                  style={{
+                                    ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
+                                    paddingLeft: 10,
+                                    textAlign: def.numeric ? 'right' : 'left',
+                                  }}
+                                />
+                              )
+                            })}
+                            {effectiveCols > shownSubtaskCols.length && (
+                              <td colSpan={effectiveCols - shownSubtaskCols.length} />
+                            )}
+                          </tr>
+                          <SubtaskRows
+                            subtasks={orderedSubtasks(
+                              subs, effectiveSubtaskSort(sort, subSort[row.task.id] ?? null),
+                              {
+                                views: detail?.subtaskRollups ?? [],
+                                sessions: detail?.sessions ?? [],
+                                statusOrder: liveStatusOrder(p.statuses),
+                              },
+                            )}
+                            subtaskRollups={detail?.subtaskRollups ?? []}
+                            // Was 34 — the gear cell's own right padding (10px, `cellPad`) already
+                            // separates the button from the title, so a further 34px was an
+                            // unintended ~44-50px gap nobody asked for. A GROUP MEMBER still sits
+                            // its own +20 deeper (see the title cell's own note).
+                            indent={0} mainCols={effectiveCols} subtaskCols={shownSubtaskCols}
+                            sessions={detail?.sessions ?? []}
+                            lang={p.lang ?? 'en'}
+                            nowMs={nowMs}
+                            statuses={p.statuses}
+                            onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
+                            onRemove={id => p.onRemoveSubtask(row.task.id, id)}
+                            onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
+                            onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
+                            onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
+                            onOpenSession={p.onOpenSession}
+                            stagedFor={stagedFor(row.task.id, detail?.files ?? [])}
+                          />
+                          <tr style={{ background: 'var(--bg-surface)' }}>
+                            <td style={{ padding: '5px 10px' }} />
+                            <td colSpan={effectiveCols + 1} style={{ padding: '5px 10px', paddingLeft: 34 }}>
+                              <input
+                                value={subDraft[row.task.id] ?? ''}
+                                placeholder="+ Add subtask"
+                                onChange={e => setSubDraft({ ...subDraft, [row.task.id]: e.target.value })}
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => {
+                                  const v = subDraft[row.task.id] ?? ''
+                                  if (e.key === 'Enter' && v.trim()) {
+                                    p.onAddSubtask(row.task.id, v.trim())
+                                    setSubDraft({ ...subDraft, [row.task.id]: '' })
+                                  }
+                                }}
+                                style={{
+                                  width: '100%', maxWidth: 320, background: 'transparent', border: 'none',
+                                  outline: 'none', color: 'var(--text-secondary)', fontSize: 12,
+                                  fontFamily: 'inherit',
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        </>
+                      )
                       return (
                         <React.Fragment key={row.task.id}>
                           <tr
@@ -936,66 +1194,30 @@ export function TaskTable(p: TaskTableProps) {
                           </tr>
 
                           {open && (
-                            <>
-                              <tr style={{ background: 'var(--bg-surface)' }}>
-                                <td style={{ padding: '5px 10px' }} />
-                                {subtaskColumns(p.lang ?? 'en').map((h, i) => (
-                                  // Sortable like every other header. The grid orders itself (`subSort`)
-                                  // without touching the list it was given: creation order is what
-                                  // "no sort" means, and clusters survive because the renderer rebuilds
-                                  // them from the sorted list (`subtaskSortView.ts`).
-                                  <SortTh
-                                    key={h.key} label={h.label} sortKey={h.key}
-                                    current={subSort[row.task.id] ?? null} mobile={isMobile}
-                                    onSort={k => setSubSort(m => ({ ...m, [row.task.id]: cycleSort(m[row.task.id] ?? null, k) }))}
-                                    title={L.sortByColumn.replace('{column}', h.label)}
-                                    style={{ ...microLabel, fontWeight: 600, textAlign: 'left', padding: '5px 10px', paddingLeft: i === 0 ? 34 : 10 }}
-                                  />
-                                ))}
-                                {cols.length > 5 && <td colSpan={cols.length - 5} />}
-                              </tr>
-                              <SubtaskRows
-                                subtasks={orderedSubtasks(subs, subSort[row.task.id] ?? null, {
-                                  views: detail?.subtaskRollups ?? [],
-                                  sessions: detail?.sessions ?? [],
-                                  statusOrder: liveStatusOrder(p.statuses),
-                                })}
-                                subtaskRollups={detail?.subtaskRollups ?? []}
-                                indent={34} cols={cols.length}
-                                sessions={detail?.sessions ?? []}
-                                lang={p.lang ?? 'en'}
-                                statuses={p.statuses}
-                                onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
-                                onRemove={id => p.onRemoveSubtask(row.task.id, id)}
-                                onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
-                                onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
-                                onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
-                                onOpenSession={p.onOpenSession}
-                              />
-                              <tr style={{ background: 'var(--bg-surface)' }}>
-                                <td style={{ padding: '5px 10px' }} />
-                                <td colSpan={cols.length + 1} style={{ padding: '5px 10px', paddingLeft: 34 }}>
-                                  <input
-                                    value={subDraft[row.task.id] ?? ''}
-                                    placeholder="+ Add subtask"
-                                    onChange={e => setSubDraft({ ...subDraft, [row.task.id]: e.target.value })}
-                                    onClick={e => e.stopPropagation()}
-                                    onKeyDown={e => {
-                                      const v = subDraft[row.task.id] ?? ''
-                                      if (e.key === 'Enter' && v.trim()) {
-                                        p.onAddSubtask(row.task.id, v.trim())
-                                        setSubDraft({ ...subDraft, [row.task.id]: '' })
-                                      }
-                                    }}
-                                    style={{
-                                      width: '100%', maxWidth: 320, background: 'transparent', border: 'none',
-                                      outline: 'none', color: 'var(--text-secondary)', fontSize: 12,
-                                      fontFamily: 'inherit',
-                                    }}
-                                  />
-                                </td>
-                              </tr>
-                            </>
+                            gridLayout.mode === 'inline'
+                              ? renderSubtaskGrid(cols.length)
+                              : (
+                                // Fewer main columns shown than the subtask grid's own current
+                                // column count: its fixed cells alone would already overshoot the
+                                // main row's `cols.length + 2`, so instead of drawing more rows of
+                                // THIS table it gets ONE row — a leading cell plus a single cell
+                                // spanning the rest (matching the "+ Add subtask" row's own
+                                // `colSpan={cols.length + 1}` right below it) — holding its own
+                                // nested table, sized as though there were exactly
+                                // `shownSubtaskCols.length` columns (so ITS filler comes out to
+                                // zero) and scrolling horizontally inside itself rather than ever
+                                // widening the outer one.
+                                <tr style={{ background: 'var(--bg-surface)' }}>
+                                  <td style={{ padding: '5px 10px' }} />
+                                  <td colSpan={cols.length + 1} style={{ padding: '6px 10px' }}>
+                                    <div style={{ overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+                                        <tbody>{renderSubtaskGrid(shownSubtaskCols.length)}</tbody>
+                                      </table>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
                           )}
                         </React.Fragment>
                       )
@@ -1071,6 +1293,9 @@ export function TaskTable(p: TaskTableProps) {
           onClose={() => setLinkingSub(null)}
         />
       )}
+
+      {stagedDialogs.element}
+      {fire.element}
 
       {sel.on && selected.length > 0 && (
         // Monday's batch bar: it says how many, and it carries only the verbs that make sense on

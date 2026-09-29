@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { pressureWatchStep } from './useHardwarePressureWatch'
+import { pressureWatchStep, ramUnderPressure } from './useHardwarePressureWatch'
 import { RAM_CRITICAL_PCT, RAM_WARN_PCT, type HardwarePressureInput } from '../lib/hardwarePressure'
 
 /**
@@ -145,5 +145,34 @@ describe('pressureWatchStep — the notification fires ONCE, exactly on the cros
     expect(broken2.notify).not.toBeNull()
     const real = pressureWatchStep(true, ramSnapshot(RAM_CRITICAL_PCT), 'en')
     expect(real.notify).toBeNull()
+  })
+})
+
+describe('ramUnderPressure — the reading useIdleSessions.ts takes instead of polling hardware itself', () => {
+  test('ok RAM is not under pressure', () => {
+    expect(ramUnderPressure(ramSnapshot(10))).toBe(false)
+  })
+
+  test('warn level counts as under pressure', () => {
+    expect(ramUnderPressure(ramSnapshot(RAM_WARN_PCT))).toBe(true)
+  })
+
+  test('critical level counts as under pressure', () => {
+    expect(ramUnderPressure(ramSnapshot(RAM_CRITICAL_PCT))).toBe(true)
+  })
+
+  test('no reading at all (hardware === null) is never under pressure', () => {
+    expect(ramUnderPressure(null)).toBe(false)
+  })
+
+  test('RAM specifically unmeasured (even with other resources readable) is never under pressure', () => {
+    const diskOnly: HardwarePressureInput = {
+      host: {
+        usedMemoryBytes: null, totalMemoryBytes: null,
+        disk: { usedBytes: 95, totalBytes: 100, available: true },
+        loadavg: null, cpuCores: null,
+      },
+    }
+    expect(ramUnderPressure(diskOnly)).toBe(false)
   })
 })

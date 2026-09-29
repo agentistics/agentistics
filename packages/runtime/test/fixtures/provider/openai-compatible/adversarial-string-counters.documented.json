@@ -1,0 +1,10 @@
+{
+  "_source": "adversarial — prompt_tokens/completion_tokens arrive as STRINGS rather than numbers (a malformed or non-conformant endpoint).",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-stringcounters-0001",
+    "model": "gpt-5.6",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "Hi." } }],
+    "usage": { "prompt_tokens": "100", "completion_tokens": "50", "total_tokens": "150" }
+  }
+}

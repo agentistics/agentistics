@@ -119,6 +119,10 @@ import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
+import { spawnDeath } from './sessions/spawn-check'
+import { bornConversationLink } from './sessions/born-link'
+import { recordRewind } from './sessions/rewind-pending'
+import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
@@ -129,6 +133,11 @@ import { markFleetPhase, timeFleetPhase } from './sessions/fleet-profile'
 import { toControlSession } from './sessions/control-session'
 import { planTaskReopen, taskReopenSucceeded, type TaskReopenPlan } from './sessions/task-reopen'
 import { attemptReopenRow } from './sessions/reopen-attempt'
+// THE GATE — see spawn-admission.ts's header. `spawnManaged` is the one server-side choke point
+// every start/resume/reopen path in this file funnels through, so it is the one place this is read.
+import {
+  admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusalBody, type AdmissionRefusal,
+} from './sessions/spawn-admission'
 import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, readsMarkerSelect } from './sessions/approval-spec'
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
@@ -149,8 +158,7 @@ import { readProcessConversation, resolveProcessLog } from './sessions/process-c
 import { agyLogCollisions } from './sessions/agy-conversation'
 import { idleServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
-import { memoryBudget } from './sessions/memory-budget'
-import { readMemory, readRss } from './sessions/memory-probe'
+import { readSpawnBudget } from './sessions/memory-probe'
 // The lock on the door: one conversation, one live session. See `conversation-claim.ts` for the
 // measurement that made it necessary, and `live-claims.ts` for the evidence it is allowed to use.
 import { conversationHeldBy } from './sessions/conversation-claim'
@@ -1671,10 +1679,42 @@ async function spawnManaged(req: {
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
   taskId?: string
   attemptId?: string
-}, s: CliStrings): Promise<SpawnSessionResult> {
+  /**
+   * Start even if the memory budget refuses. The refusal it overrode still travels on the result
+   * (`overridden`/`note`) — nothing is admitted silently. See `spawn-admission.ts`.
+   */
+  force?: boolean
+  /**
+   * Set ONLY by a caller that already accounted for this spawn's cost in its OWN admission check:
+   * `reopenEntries` gates the WHOLE set it is about to spawn before this is ever called (so
+   * re-checking here per row would either double-refuse a batch that was already admitted whole, or
+   * silently shrink an admitted batch one row at a time), and the takeover branch of
+   * `resumeSessionLocked` has just ENDED the process this spawn replaces — the net memory cost of
+   * proceeding is ~zero, and refusing here would destroy the very session the user asked to bring
+   * back, which is worse than never having gated it. Every other caller leaves this unset and is
+   * gated normally.
+   */
+  skipAdmission?: boolean
+}, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
   if (blocked) return { ok: false, message: blocked }
+
+  // THE GATE — before anything is spawned or written to the registry. A session that has already
+  // been started cannot be un-started, so this has to run first, not merely early.
+  let admittedWith: string | null = null
+  if (!req.skipAdmission) {
+    const admission = admitSpawn(await readSpawnBudget(), 1, { force: req.force })
+    if (!admission.admit) {
+      const refusal = admission.refusal
+      return {
+        ok: false,
+        message: admissionMessage(refusal, lang),
+        admission: admissionRefusalBody(refusal, lang),
+      }
+    }
+    admittedWith = admissionOverrideNote(admission, lang)
+  }
 
   const planned = planSpawn({
     harness: req.harness,
@@ -1688,6 +1728,16 @@ async function spawnManaged(req: {
     conversationId: randomUUID(),
   })
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
+
+  // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
+  // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
+  // server whose PATH cannot reach the harness (a systemd unit that predates `Environment=PATH`)
+  // otherwise spawns a pane that dies in the same second, silently, since a failed `execvp` inside
+  // tmux prints nothing. Refused here, before any row exists, with the PATH named.
+  const bin = planned.plan.argv[0]
+  if (bin && !Bun.which(bin, { PATH: process.env.PATH ?? '' })) {
+    return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
+  }
 
   const id = newSessionId()
   // Stamped BEFORE the launch, for the reason `cli-session.ts` records at its own two spawn sites:
@@ -1709,6 +1759,26 @@ async function spawnManaged(req: {
     return { ok: false, message: s.sessSpawnFailed(e instanceof Error ? e.message : String(e)) }
   }
 
+  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
+  // session". The CLI's spawn sites have always checked; this one, which the browser, the cockpit
+  // and the VS Code extension all use, did not, and so wrote a row for a pane that was already
+  // dead: `off` under Inactive, "transcript not found", no Reopen, and the dialog reporting success.
+  // A dead pane is killed and NO row is written, so the failure is the answer the caller gets.
+  //
+  // The window is `LAUNCH_SETTLE_MS`, not the CLI's `SETTLE_MS`: an exec that fails dies at once,
+  // and every healthy session pays the whole window — five seconds on every "new session" in the
+  // browser, and per row in the serial `reopenEntries` loop, was the wrong price for it.
+  const died = await spawnDeath(backend, id, LAUNCH_SETTLE_MS)
+  if (died) {
+    await backend.kill(id).catch(() => {})
+    const message = bin && execFailed(died, bin)
+      ? s.sessNotOnPath(bin, process.env.PATH ?? '')
+      : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
+    return { ok: false, message }
+  }
+
+  // Born linked — see `born-link.ts` for the window a patch-afterwards left open.
+  const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession({
     id,
     harness: req.harness,
@@ -1729,9 +1799,7 @@ async function spawnManaged(req: {
     // it to reopen this conversation. Without it a fresh session's link exists only while the
     // harness's own record does (`harness-sessions.ts`, claude alone), so a session started with
     // the cockpit closed had nothing to fall back on but the harness-and-directory guess.
-    ...(planned.plan.conversationId
-      ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const }
-      : {}),
+    ...(bornLink ?? {}),
     // Which repository this directory is in, while the directory is provably there. See
     // `ManagedSession.repo`: a worktree removed later leaves a path that names nothing, and the
     // grouping fell through to its last path segment as though it were a project.
@@ -1740,7 +1808,7 @@ async function spawnManaged(req: {
 
   // Give this harness's one exact-link chance its own several seconds, independent of whichever
   // client happens to be polling — see the header above `linkProcessConversationSoon`.
-  if (needsProcessLinkRetry(req.harness, planned.plan.conversationId)) {
+  if (needsProcessLinkRetry(req.harness, bornLink?.conversationId)) {
     linkProcessConversationSoon(id, req.harness)
   }
 
@@ -1756,12 +1824,17 @@ async function spawnManaged(req: {
   })
 
   const name = req.label ?? id
-  if (!req.attach) return { ok: true, id, message: s.sessStartedBg(name) }
+  // The override note is kept as its OWN field rather than folded into `message`: `message` is the
+  // one-line status the shell prints, and a caller (the web UI, the wizard) that wants to say "this
+  // is why the check was overridden" needs that sentence separate from "session X started".
+  const overrideExtra = admittedWith ? { overridden: true as const, note: admittedWith } : {}
+  if (!req.attach) return { ok: true, id, message: s.sessStartedBg(name), ...overrideExtra }
   return {
     ok: true,
     id,
     message: s.sessStarted(name),
     ticket: { argv: backend.attachCommand(id), detachHint: await backend.detachHint(), label: name },
+    ...overrideExtra,
   }
 }
 
@@ -1843,7 +1916,8 @@ async function endProcess(pid: number): Promise<boolean> {
 async function reopenEntries(
   entries: readonly ManagedSession[],
   s: CliStrings,
-): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number }> {
+  lang: CliLang,
+): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal }> {
   const conversations = await loadConversations()
   const backend = await resolveBackend()
   const live = new Set(
@@ -1873,6 +1947,18 @@ async function reopenEntries(
       return { sessionId: conv.sessionId, title: conv.title }
     },
   })
+
+  // GATE THE WHOLE SET, before spawning any of it — see spawn-admission.ts. `plan.reopen.length` is
+  // how many would ACTUALLY start: a row already running, already open elsewhere, or unresolvable
+  // never reaches `backend.spawn` and must not inflate what is being asked for. A refusal here
+  // refuses the batch WHOLE (a half-reopened task is a plan nobody approved) — nothing below this is
+  // touched, and the row-level `spawnManaged` calls skip their own check accordingly.
+  if (plan.reopen.length > 0) {
+    const admission = admitSpawn(await readSpawnBudget(), plan.reopen.length)
+    if (!admission.admit) {
+      return { plan, opened: 0, skipped: plan.skipped.length, admissionRefusal: admission.refusal }
+    }
+  }
 
   let opened = 0
   let skipped = plan.skipped.length
@@ -1918,7 +2004,11 @@ async function reopenEntries(
         // The task travels with the session, whichever set this reopen was chosen from: a fall does
         // not un-file the work someone filed.
         ...(m.task ? { task: m.task } : {}),
-      }, s),
+        // Already gated ABOVE, for the whole batch at once — re-checking per row here would refuse
+        // partway through a set this call already admitted, or double-count the same budget row by
+        // row.
+        skipAdmission: true,
+      }, s, lang),
       onSpawned: async newId => {
         if (newId) await patchSession(newId, { conversationId: row.resumeId })
         // Retired, so a laptop closed and opened twice does not leave two dead twins and one live
@@ -2086,24 +2176,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
    */
   const memoryStatus = async (): Promise<Pick<ControlStatus, 'memory'>> => {
     try {
-      const sample = await readMemory()
-      if (!sample) return {}
-      const { scanProcesses } = await import('./live-sessions')
-      const scan = await scanProcesses()
-      const pidsFromProc = scan.procs
-        .map(p => p.pid)
-        .filter((pid): pid is number => pid !== undefined)
-
-      const index = await loadHarnessSessions().catch(() => null)
-      const pidsFromHarness = index
-        ? [...index.byConversation.values()]
-            .filter(f => f.alive === true && f.pid !== undefined)
-            .map(f => f.pid!)
-        : []
-
-      const pids = Array.from(new Set([...pidsFromProc, ...pidsFromHarness]))
-      const { bytes, read } = await readRss(pids)
-      const b = memoryBudget({ sample, sessionBytes: bytes, sessions: read })
+      // The SAME measurement the spawn gate admits against (`readSpawnBudget`), so the gauge a
+      // person reads and the number that refuses their next session can never disagree.
+      const measured = await readSpawnBudget()
+      if (!measured) return {}
+      const b = measured.budget
       return { memory: { used: b.used, max: b.max, red: b.red, percent: b.percent } }
     } catch {
       // Best-effort, exactly like every other reader on this object: a gauge that throws must not
@@ -2443,7 +2520,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       label: req.label,
       attach: req.attach,
       ...(previous?.task ? { task: previous.task } : {}),
-    }, s)
+      // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
+      // cost of proceeding is ~zero, and refusing here would destroy the very session the user asked
+      // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
+      // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
+      ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
+    }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there
       // is no guessing left for the next reopen. Without it the fallback matches on directory
@@ -3223,6 +3305,52 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         : { ok: false, message: s.sessSendFailed(id) }
     },
 
+    async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      // claude's menu is the only one measured (`claude-rewind.ts`). Anything else is refused by
+      // NAME rather than driven blind — a guessed key sequence in someone's session is the defect.
+      if (managed.harness !== 'claude' || !backend.rewindTo) {
+        return { ok: false, message: s.sessRewindUnsupported(managed.harness) }
+      }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      // Never on an open dialog: Esc Esc there answers the dialog, it does not open the menu.
+      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      const rules = rulesFor(managed.harness)
+      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+        return { ok: false, message: s.sessPromptBlocked }
+      }
+      const out = await backend.rewindTo(id, prompt, occurrence)
+      if (out === 'done') {
+        // The chat cuts at this point until the transcript catches up — see `rewind-pending.ts`.
+        if (managed.conversationId) recordRewind(managed.conversationId, { prompt, occurrence, atMs: Date.now() })
+        return { ok: true, message: s.sessRewound }
+      }
+      return { ok: false, message: s.sessRewindFailed(out) }
+    },
+
+    async sendQueuedNow(id: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      if (managed.harness !== 'claude' || !backend.sendQueuedNow) {
+        return { ok: false, message: s.sessSendNowUnsupported(managed.harness) }
+      }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      return (await backend.sendQueuedNow(id))
+        ? { ok: true, message: s.sessSentNow }
+        : { ok: false, message: s.sessSendFailed(id) }
+    },
+
     async interruptSession(id: string): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
@@ -3300,7 +3428,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: true, message: s.sessRestoreDeclined(wanted.length) }
       }
 
-      const { opened, skipped } = await reopenEntries(wanted, s)
+      const { opened, skipped, admissionRefusal } = await reopenEntries(wanted, s, lang)
+      if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
       return opened > 0
         ? { ok: true, message: s.sessRestored(opened, skipped) }
         : { ok: false, message: s.sessRestoreFailed(skipped) }
@@ -3474,7 +3603,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: unknown.length > 0 ? s.sessFellGone(unknown.length) : s.sessFellNonePicked }
       }
 
-      const { plan, opened, skipped } = await reopenEntries(chosen, s)
+      const { plan, opened, skipped, admissionRefusal } = await reopenEntries(chosen, s, lang)
+      if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
       return taskReopenSucceeded(plan, opened)
         ? { ok: true, message: s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length) }
         : { ok: false, message: s.sessFellNoneOpened(skipped + unknown.length) }
@@ -3813,13 +3943,22 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * A harness with no spec is ABSENT from the wizard rather than offered and failing — the same
      * rule `agentop session`'s `STARTABLE` already follows, and the reason the two can never drift.
      */
+    harnessNotice(): string | undefined {
+      return availableHarnesses().blind ? S().sessNoHarnessOnPath(process.env.PATH ?? '') : undefined
+    },
+
     async startableHarnesses(): Promise<SessionHarnessOption[]> {
       // Narrowed to the CLIs actually ON THIS MACHINE, through the one helper `cli-hooks.ts` also
       // asks — a spec says how to run `codex`, not that codex exists here, and offering the other
       // five started a tmux session that died on `command not found` behind a screen nobody was
       // watching. `availableHarnesses` answers with ALL of them when it cannot tell, because an
       // empty wizard is indistinguishable from a broken one.
-      const { ids } = availableHarnesses()
+      //
+      // BLIND is the exception: not one CLI resolved, which is a broken PATH rather than "cannot
+      // tell", and offering all six there made every pick a pane that died at once. The wizard gets
+      // nothing to offer and `harnessNotice` says why.
+      const { ids, blind } = availableHarnesses()
+      if (blind) return []
       return ids.flatMap(id => {
         const spec = SPAWN_SPECS[id]
         if (!spec) return []
@@ -3867,7 +4006,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
-      }, S())
+        ...(req.force ? { force: true } : {}),
+      }, S(), lang)
     },
   }
 }

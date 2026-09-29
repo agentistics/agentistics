@@ -731,6 +731,38 @@ textarea,
 .ag-resize-handle:active .ag-resize-grip,
 .ag-resize-handle:focus-visible .ag-resize-grip { background: var(--anthropic-orange); }
 
+/* --- .ag-panel-gap / .ag-panel-junction: the floating-panel workspace's gap-as-handle (design
+   `sdd/brief.md`) — the gap between two panels IS the only divider and IS the resize handle. Three
+   dots, subtle at rest, brighter on hover/drag (`.ag-panel-gap-dot`), plus a thin accent line
+   through the gap's own centre (`::after`, matching the approved mockup's `.gutter::after`) that
+   only appears on hover/drag — at rest the gap is meant to read as empty space between two panels,
+   not as a painted line. `.ag-panel-junction` gets no line of its own: the two gaps it overlaps
+   already draw theirs, and its own hover state is carried by them showing simultaneously. */
+.ag-panel-gap { position: relative; }
+.ag-panel-gap::after {
+  content: ""; position: absolute; border-radius: 2px; background: var(--anthropic-orange);
+  opacity: 0; transition: opacity 0.15s ease;
+}
+/* A short accent, centred on the grip (owner: a 40%-of-the-panel line was far too big). */
+.ag-panel-gap[aria-orientation="vertical"]::after { top: calc(50% - 18px); height: 36px; left: calc(50% - 1px); width: 2px; }
+.ag-panel-gap[aria-orientation="horizontal"]::after { left: calc(50% - 18px); width: 36px; top: calc(50% - 1px); height: 2px; }
+.ag-panel-gap:hover::after,
+.ag-panel-gap:active::after,
+.ag-panel-gap:focus-visible::after { opacity: 0.9; }
+
+.ag-panel-gap-dot {
+  display: block; width: 3px; height: 3px; border-radius: 50%;
+  /* A lighter grey than the border tokens, so the grip is visible at rest (owner request). */
+  background: var(--text-tertiary); transition: background 0.15s ease;
+}
+.ag-panel-gap:hover .ag-panel-gap-dot,
+.ag-panel-gap:active .ag-panel-gap-dot,
+.ag-panel-gap:focus-visible .ag-panel-gap-dot { background: var(--anthropic-orange); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-panel-gap::after, .ag-panel-gap-dot { transition: none; }
+}
+
 /* The row's pin. Hidden until the row is hovered or something in it has focus — a column of pin
    glyphs down an unpinned list is noise beside the titles they sit next to — but always visible
    once set, and always reachable by keyboard. */
@@ -935,4 +967,40 @@ button:focus-within .ag-row-pin,
     -webkit-mask-image: none;
     mask-image: none;
   }
+}
+
+/* Brand plate per theme — see the footer in App.tsx. */
+.ag-logo-dark { display: block; }
+.ag-logo-light { display: none; }
+[data-theme="light"] .ag-logo-dark { display: none; }
+[data-theme="light"] .ag-logo-light { display: block; }
+
+/* "Something in this folded group is waiting on you" — see nav/AttentionDot.tsx.
+   It draws NOTHING new: the group already has a 3px left edge (an inset shadow in the tertiary
+   colour), and that same edge breathes from its own colour to the orange. A CSS animation beats the
+   inline `box-shadow` it replaces while it runs. */
+.ag-attn-bar { animation: ag-attn-edge 2.8s ease-in-out infinite; }
+@keyframes ag-attn-edge {
+  0%, 100% { box-shadow: inset 3px 0 0 0 var(--text-tertiary); }
+  50%      { box-shadow: inset 3px 0 0 0 var(--anthropic-orange); }
+}
+/* The automatic bands have no edge of their own, so the number that already sits at the end of the
+   heading breathes instead. */
+.ag-attn-count { animation: ag-attn-count 2.8s ease-in-out infinite; }
+@keyframes ag-attn-count {
+  0%, 100% { color: var(--text-tertiary); }
+  50%      { color: var(--anthropic-orange); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ag-attn-bar { animation: none; box-shadow: inset 3px 0 0 0 var(--anthropic-orange) !important; }
+  .ag-attn-count { animation: none; color: var(--anthropic-orange) !important; }
+}
+
+/* A group whose name is hidden: the text stays in the layout, so the block is exactly as long as the
+   name, and a grey rounded block is painted over it — the skeleton of a loading page, which reads as
+   "there is something here" rather than as a bug. Not selectable or copyable. */
+.ag-name-mask {
+  color: transparent !important; user-select: none; -webkit-user-select: none;
+  background: color-mix(in srgb, var(--text-tertiary) 38%, transparent);
+  border-radius: 5px; text-decoration: none;
 }

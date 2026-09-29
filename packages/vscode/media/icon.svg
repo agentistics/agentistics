@@ -1,22 +1,13 @@
 <!--
-  The agentistics mark, as supplied. Two changes and no others, both required by where it is drawn:
-
-  - `currentColor` instead of the fixed #6672A5. VS Code tints an activity-bar icon itself — dim
-    when the view is inactive, the theme's foreground when it is — and a hardcoded colour keeps the
-    icon at one shade while every neighbour responds, which reads as a broken icon rather than a
-    branded one.
-  - A SQUARE viewBox. The artwork is 323x441; the activity bar draws into a square, so a tall
-    viewBox is letterboxed and the mark comes out smaller than everything beside it. The extra
-    width is padding around the original coordinates — nothing is scaled or moved.
+  The agentistics mark, generated from branding/logo-no-background-vscode.svg by
+  packages/web/scripts/gen-brand-assets.ts. Only change: currentColor instead of the fixed
+  fill, because VS Code tints an activity-bar icon itself (dim when inactive, foreground when
+  active) and a hardcoded colour reads as a broken icon.
 -->
-<svg width="441" height="441" viewBox="-59 0 441 441" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect x="89.5" y="390.49" width="29" height="44" stroke="currentColor" stroke-width="12"/>
-<rect x="147.5" y="364.49" width="29" height="70" stroke="currentColor" stroke-width="12"/>
-<rect x="205.5" y="337.49" width="29" height="97" stroke="currentColor" stroke-width="12"/>
-<rect x="260.5" y="288.49" width="29" height="146" stroke="currentColor" stroke-width="12"/>
-<path d="M81.5 175.49L107.192 130.99L132.884 175.49" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
-<path d="M189.5 175.49L215.192 130.99L240.884 175.49" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
-<path d="M290 221.99L169.5 329.49L146 305.99L100 351.99L88 341.602M290 221.99L317.5 201.99V140.49L290 122.49M290 221.99V122.49M33 219.49L5.5 200.49V143.49L33 123.99M33 219.49V123.99M33 219.49V293.99L88 341.602M33 219.49L88 263.49V341.602M33 123.99V86.9901L161.5 6.49011L290 86.9901V122.49" stroke="currentColor" stroke-width="11"/>
-<path d="M27 208.556L11.5 198.223V143.741L27 132.198V208.556Z" stroke="currentColor"/>
-<path d="M296 211.644L317 200.111V140.268L296 127.383V211.644Z" stroke="currentColor"/>
+<svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="currentColor" stroke-width="3"/>
+<path d="M54 37.0665L50 39.2002V20.2002L54 22.664V37.0665Z" fill="currentColor"/>
+<path d="M3 36.8663L7 39V20L3 22.4638V36.8663Z" fill="currentColor"/>
+<path d="M16 26.5L20 19.5L24 26.5" stroke="currentColor" stroke-width="2"/>
+<path d="M33 26.5L37 19.5L41 26.5" stroke="currentColor" stroke-width="2"/>
 </svg>

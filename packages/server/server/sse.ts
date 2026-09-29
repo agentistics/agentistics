@@ -1,3 +1,4 @@
+import { cacheKind, etagMatches, etagOf, staticCacheControl } from './static-cache'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import { stat } from 'fs/promises'
@@ -207,7 +208,7 @@ const embeddedDist: Record<string, { content: string; encoding: string; contentT
 
 export { SERVE_STATIC }
 
-export function serveStatic(pathname: string): Response | null {
+export function serveStatic(pathname: string, ifNoneMatch?: string | null): Response | null {
   if (!SERVE_STATIC) return null
   const asset = embeddedDist[pathname]
   if (!asset) return null
@@ -225,17 +226,21 @@ export function serveStatic(pathname: string): Response | null {
     const text = typeof body === 'string' ? body : body.toString('utf-8')
     body = pathname === '/index.html' ? centralHtml(text) : centralManifest(text)
   }
-  // Service worker, manifest and the app shell must not be cached aggressively — the shell
-  // carries the hashed asset URLs (and now the central branding), so a year-long cache would
-  // pin a rebuilt app to its old bundle.
-  const isSwOrManifest = pathname === '/sw.js' || pathname === '/manifest.webmanifest'
-    || pathname === '/registerSW.js' || pathname === '/index.html'
-  const cacheControl = isSwOrManifest ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000'
+  // What a browser may keep is decided by `static-cache.ts`: the shell never, hashed assets and
+  // fonts for a year, and everything whose URL stays put while its artwork changes (icons,
+  // favicons, logos) is revalidated — a year-long lifetime there pinned a rebranded logo, and an
+  // installed PWA's icon, to whichever version the browser saw first.
+  const kind = cacheKind(pathname)
   const extraHeaders: Record<string, string> = pathname === '/sw.js'
     ? { 'Service-Worker-Allowed': '/' }
     : {}
-  return new Response(body, {
-    status: 200,
-    headers: { 'Content-Type': asset.contentType, 'Cache-Control': cacheControl, ...extraHeaders },
-  })
+  const headers: Record<string, string> = {
+    'Content-Type': asset.contentType, 'Cache-Control': staticCacheControl(pathname), ...extraHeaders,
+  }
+  if (kind === 'revalidate') {
+    const etag = etagOf(body)
+    headers['ETag'] = etag
+    if (etagMatches(ifNoneMatch, etag)) return new Response(null, { status: 304, headers })
+  }
+  return new Response(body, { status: 200, headers })
 }

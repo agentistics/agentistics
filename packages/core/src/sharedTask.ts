@@ -30,8 +30,9 @@ export interface SharedTaskRecord {
   createdAt: string
   updatedAt: string
   deliveredAt?: string
+  /** When real work actually began — system-stamped, never user-editable. See `Task.startedAt`. */
+  startedAt?: string
   priority?: string
-  assignee?: string
   dueDate?: string
   startDate?: string
   labels?: string[]
@@ -55,9 +56,11 @@ export interface SharedSubtask {
   status: string
   createdAt: string
   updatedAt: string
-  assignee?: string
   dueDate?: string
   startDate?: string
+  /** System-stamped, read-only — see `Subtask.startedAt`/`deliveredAt`. */
+  startedAt?: string
+  deliveredAt?: string
   notes?: string
 }
 

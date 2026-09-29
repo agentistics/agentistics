@@ -40,6 +40,8 @@ export interface FleetNewOptions {
   setQuery: (q: string) => void
   /** A search is in flight for a query the list has not caught up with yet. */
   searching: boolean
+  /** The server's sentence for why it cannot offer anything (`FleetNewOptions.unavailable`). */
+  unavailable: string | undefined
 }
 
 export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
@@ -49,6 +51,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  const [unavailable, setUnavailable] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     if (query === debouncedQuery) return
@@ -66,11 +69,13 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
         const json = await res.json() as {
           harnesses: HarnessAnswer[]; projects: FleetProjectOption[]
           projectTotals?: Record<ProjectKind, number>
+          unavailable?: string
         }
         if (!alive) return
         setHarnesses(json.harnesses)
         setProjects(json.projects)
         setProjectTotals(json.projectTotals)
+        setUnavailable(json.unavailable)
       } catch {
         /* transient — the picker keeps what it had, which is better than an empty list */
       } finally {
@@ -81,5 +86,5 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
     return () => { alive = false }
   }, [lang, debouncedQuery])
 
-  return { harnesses, projects, projectTotals, query, setQuery, searching }
+  return { harnesses, projects, projectTotals, query, setQuery, searching, unavailable }
 }

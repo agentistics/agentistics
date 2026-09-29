@@ -13,20 +13,38 @@ The MCP server runs as a stdio process. It is **not** a separate HTTP server —
 ```bash
 # agentistics must be running first (provides /api/data)
 agentop server
-
-# Then register the MCP (done automatically on first server start, but you can do it manually):
-claude mcp add -s user agentistics \
-  -e AGENTISTICS_API=http://localhost:47291 \
-  -- bun run /path/to/agentistics/packages/mcp/agentistics-mcp.ts
 ```
 
-The agentistics server registers the MCP automatically at startup via `claude mcp add -s user`. If the registration already exists with the correct URL, it is skipped.
+**You do not register it by hand.** Every time `agentop server` starts it registers the MCP for
+every assistant installed on the machine (Claude Code, Codex, Gemini, Copilot), launching the
+installed binary itself:
+
+```bash
+# what the server runs for you — the binary serves the MCP over stdio
+claude mcp add -s user agentistics -e AGENTISTICS_API=http://localhost:47291 -- /path/to/agentop mcp
+```
+
+`agentop mcp` is the MCP server, built into the binary, so the tools an assistant sees always match
+the version installed — an `agentop upgrade` updates them with nothing else to do. (A clone of this
+repository registers `bun run <repo>/packages/mcp/agentistics-mcp.ts` instead, so a developer runs
+the source they are editing.) An up-to-date registration is left alone; a stale one is replaced.
+
+On each boot the server also **removes any other copy of the agentistics MCP** from
+`~/.claude.json` — one registered under another name (for example an older `@agentistics/mcp`
+installed by hand), or in a project's local scope, which Claude Code prefers over user scope and
+which would otherwise keep serving the old tools. Only entries that launch the agentistics MCP are
+touched, and each removal is written to the server log. Sessions that were already open keep the
+MCP they started with until they are restarted.
+
+The registration runs the assistant CLIs (`claude mcp add`, …) on the **server's** PATH. If
+`agentop server` runs as a systemd service whose unit predates the PATH fix, run
+`agentop restart server` from a terminal where those CLIs work — the unit is repaired on the way.
 
 ### Verify registration
 
 ```bash
 claude mcp list
-# Should show: agentistics  bun run .../mcp/agentistics-mcp.ts
+# Should show: agentistics  /path/to/agentop mcp
 ```
 
 ## Environment variables
@@ -344,6 +362,36 @@ Generates a PDF report download link. Returns a `[⬇ Download PDF](pdf:URL)` li
 The Nay chat detects the `pdf:` protocol and renders it as an orange download button. Clicking opens the PDF export modal where you can review and download the report.
 
 ---
+
+### Session groups — `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit`
+
+The Sessions sidebar lets a person keep their fleet in named groups ("Saved to later", "Pelvie"…).
+These three tools let an assistant do the same, so the sessions it starts are filed where the person
+will look for them. They work on a **machine**; a central has no local sessions and refuses them.
+
+The flow an assistant follows:
+
+1. `agentistics_session_groups` — what groups exist, and which sessions are in each. Reuse a group when
+   one fits rather than making a near-duplicate.
+2. Start the session (for example `agentop session start …`, which prints its id).
+3. `agentistics_session_group_create` with `name` and `sessions: [<id>]`, or, for an existing group,
+   `agentistics_session_group_edit` with `action: "add"`, `group`, `session`.
+
+A **session reference** is a managed id (`agentop-…`), a conversation id, an exact title, or a unique
+id prefix. A **group reference** is an id or an exact name (case-insensitive). Anything that matches
+nothing answers `404`, anything that could mean two things answers `409` with the candidates — a
+reference is never guessed, and a call that names a bad session in a batch changes nothing.
+
+Filing a session **moves** it out of any other group (a session belongs to at most one) and **unpins**
+it if it was pinned, exactly as dropping it on a group in the sidebar does. Deleting a group never
+deletes its sessions; they only leave it.
+
+The tools are thin over `GET|POST /api/session-groups`, `POST /api/session-groups/:group`,
+`POST /api/session-groups/:group/sessions`, `POST /api/session-groups/ungroup` and
+`DELETE /api/session-groups/:group`. The rules live in `@agentistics/core` (`sessionGroups.ts`) and
+are the same ones the web sidebar applies; the writes go through the preferences write chain, so a
+browser and an assistant changing groups at the same moment cannot undo each other. The browser picks
+up the change when its tab regains focus.
 
 ## Using the MCP from Claude Code
 

@@ -121,3 +121,28 @@ const BYTES: Record<NamedKey, string> = {
 export function keyBytes(key: NamedKey): string {
   return BYTES[key]
 }
+
+/** How long a first `ctrl`+`d` on the strip waits for its confirming second one. */
+export const STRIP_EOF_CONFIRM_MS = 3000
+
+/**
+ * THE SESSION-ENDING GUARD, ON A PHONE (the desktop one is `terminalShortcuts.ts`). A soft
+ * keyboard has no Shift+Ctrl chord, so the strip's extra step is a SECOND PRESS instead:
+ *
+ *  - `ctrl`+`c` on an assistant's pane is refused — its interrupt, twice, ends the session, and the
+ *    strip already carries `esc`, which interrupts without ending anything. In the utility shell
+ *    (`guardInterrupt: false`) it passes: there it only stops a command.
+ *  - `ctrl`+`d` is sent only when pressed twice within `STRIP_EOF_CONFIRM_MS`; the first press says
+ *    so. `lastEofAt` is the caller's memory of that first press (`null` when there is none).
+ *
+ * PURE: the caller owns the clock and the memory.
+ */
+export function stripCtrlGuard(
+  key: NamedKey, guardInterrupt: boolean, lastEofAt: number | null, now: number,
+): 'send' | 'blocked-interrupt' | 'arm-eof' | 'confirmed-eof' {
+  if (key === 'C-c') return guardInterrupt ? 'blocked-interrupt' : 'send'
+  if (key === 'C-d') {
+    return lastEofAt !== null && now - lastEofAt <= STRIP_EOF_CONFIRM_MS ? 'confirmed-eof' : 'arm-eof'
+  }
+  return 'send'
+}

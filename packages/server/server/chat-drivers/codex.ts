@@ -23,6 +23,7 @@
  */
 
 import path from 'node:path'
+import { agentisticsMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
 import { HOME_DIR } from '../config'
 import type { ChatDriver } from './types'
@@ -30,37 +31,9 @@ import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
 
 // chat-drivers/ is one level deeper than chat-tty.ts, so 4 levels up to reach the repo root
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..', '..')
 const CODEX_CONFIG_PATH = path.join(HOME_DIR, '.codex', 'config.toml')
 const CODEX_AUTH_PATH = path.join(HOME_DIR, '.codex', 'auth.json')
 const MCP_SERVER_NAME = 'agentistics'
-
-// Models available to ChatGPT-authenticated Codex accounts.
-// gpt-5.4-mini is the primary model that works with ChatGPT OAuth auth.
-// Additional slugs from models_cache.json and supported model list are included
-// for users with API key auth or higher-tier ChatGPT accounts.
-const CODEX_MODELS = [
-  {
-    id: 'gpt-5.4-mini',
-    label: 'GPT-5.4 Mini',
-    badge: 'Fast',
-    desc: 'Fast, cost-efficient Codex model — ideal for most coding tasks',
-  },
-  {
-    id: 'gpt-5.1-codex-mini',
-    label: 'GPT-5.1 Codex Mini',
-    badge: 'Balanced',
-    desc: 'Balanced Codex model (GPT-5.1 generation)',
-  },
-  {
-    id: 'gpt-5.2-codex',
-    label: 'GPT-5.2 Codex',
-    badge: 'Powerful',
-    desc: 'Latest flagship Codex model — ideal for complex project-scale work',
-  },
-] as const
-
-type CodexModelId = typeof CODEX_MODELS[number]['id']
 
 function codexIsAvailable(): boolean {
   return findCli('codex')
@@ -88,14 +61,21 @@ async function readCodexConfig(): Promise<string> {
  */
 async function ensureCodexMcp(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
+  const launch = agentisticsMcpLaunch()
 
-  // Quick idempotency check: if both the URL and script path already appear in
-  // the config, skip re-registration (same approach as registerMcpGlobally for Claude).
+  // Quick idempotency check: if the URL and every piece of the launch already appear in the
+  // config, skip re-registration (same approach as registerMcpGlobally for Claude).
   const rawConfig = await readCodexConfig()
   const urlOk = rawConfig.includes(apiUrl)
-  const pathOk = rawConfig.includes(mcpScript)
-  if (urlOk && pathOk) return
+  const launchOk = [launch.command, ...launch.args].every(part => rawConfig.includes(part))
+    && !(launch.command !== 'bun' && rawConfig.includes('agentistics-mcp.ts'))
+  if (urlOk && launchOk) return
+
+  // A stale entry (the old script path) is removed first, so the add below cannot collide with it.
+  if (rawConfig.includes(`mcp_servers.${MCP_SERVER_NAME}`)) {
+    await Bun.spawn(['codex', 'mcp', 'remove', MCP_SERVER_NAME], { stdout: 'pipe', stderr: 'pipe' }).exited
+  }
 
   // Use the Codex CLI to add at user scope
   const proc = Bun.spawn(
@@ -103,7 +83,7 @@ async function ensureCodexMcp(port: number): Promise<void> {
       'codex', 'mcp', 'add',
       '--env', `AGENTISTICS_API=${apiUrl}`,
       MCP_SERVER_NAME,
-      '--', 'bun', 'run', mcpScript,
+      '--', launch.command, ...launch.args,
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   )
@@ -161,10 +141,6 @@ export const codexDriver: ChatDriver = {
     docUrl: 'https://github.com/openai/codex',
   },
 
-  models: CODEX_MODELS.map(m => ({ ...m })),
-
-  defaultModel: 'gpt-5.4-mini' satisfies CodexModelId,
-
   async ensureMcp(port: number) {
     await ensureCodexMcp(port)
   },
@@ -178,7 +154,7 @@ export const codexDriver: ChatDriver = {
       'codex', 'exec',
       '--json',
       '--skip-git-repo-check',
-      '-m', model,
+      ...(model ? ['-m', model] : []),
       '-',  // read prompt from stdin
     ]
 

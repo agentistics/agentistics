@@ -64,3 +64,33 @@ test('the lock directory does not survive a release, so it cannot become stale g
   await expect(stat(`${f}.lock`)).rejects.toBeDefined()
   await rm(f, { force: true })
 })
+
+// A FIRST-TIME MACHINE HAS NO PARENT DIRECTORY, and the non-recursive `mkdir` of the lock failed
+// with ENOENT, which the old loop read as contention and retried forever with no sleep and no
+// deadline — the hang behind 42 uploader tests on a CI runner with no ~/.agentistics, and behind a
+// first push to a central that never finished. See the module header's last rule.
+test('a lock whose PARENT directory does not exist is taken, not spun on forever', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agentop-lock-'))
+  const f = join(root, 'not', 'there', 'yet', 'file.json')
+  const started = Date.now()
+  const held = await Promise.race([
+    lockFile(f),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('lockFile never returned')), 2000)),
+  ])
+  expect(Date.now() - started).toBeLessThan(2000)
+  expect(held.contended).toBe(false)
+  await expect(stat(`${f}.lock`)).resolves.toBeDefined()
+  await held.release()
+  await rm(root, { recursive: true, force: true })
+})
+
+test('withFileLock runs the work when the parent directory does not exist yet', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agentop-lock-'))
+  const f = join(root, 'fresh', 'tasks.json')
+  const out = await Promise.race([
+    withFileLock(f, async () => 'ran'),
+    new Promise<string>(resolve => setTimeout(() => resolve('hung'), 2000)),
+  ])
+  expect(out).toBe('ran')
+  await rm(root, { recursive: true, force: true })
+})

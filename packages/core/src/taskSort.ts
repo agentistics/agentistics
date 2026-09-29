@@ -33,7 +33,7 @@ export const PRIORITY_ORDER: readonly TaskPriorityId[] =
 
 export type SortKey =
   | 'manual' | 'priority' | 'title' | 'status' | 'created' | 'updated' | 'due'
-  | 'assignee' | 'cost' | 'tokens' | 'rounds' | 'sessions' | 'attempts' | 'comments'
+  | 'started' | 'cost' | 'tokens' | 'rounds' | 'sessions' | 'attempts' | 'comments'
   | 'subtasks' | 'progress' | 'harnesses' | 'delivered'
 
 export type SortDir = 'asc' | 'desc'
@@ -53,9 +53,13 @@ export interface SortableRow {
     createdAt: string
     updatedAt: string
     priority?: TaskPriorityId | string
-    assignee?: string
     dueDate?: string
     deliveredAt?: string
+    /**
+     * When real work actually began — stamped once, system-side, never user-editable. See
+     * `task-model.ts`'s `Task.startedAt`. `'started'` is the sort key that reads it.
+     */
+    startedAt?: string
     rank?: string
   }
   attempts?: number
@@ -114,7 +118,7 @@ function valueOf(row: SortableRow, key: SortKey, ctx?: SortContext): number | st
     case 'updated': return t.updatedAt || null
     case 'due': return t.dueDate || null
     case 'delivered': return t.deliveredAt || null
-    case 'assignee': return t.assignee?.toLowerCase() || null
+    case 'started': return t.startedAt || null
     case 'cost': return row.rollup?.costUSD ?? null
     case 'tokens': return row.rollup?.tokens ?? null
     case 'rounds': return row.rollup?.rounds ?? null

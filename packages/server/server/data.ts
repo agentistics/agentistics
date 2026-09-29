@@ -1,14 +1,16 @@
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, HarnessId, WorkflowRun } from '@agentistics/core'
-import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal } from '@agentistics/core'
+import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
 import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
+import { shadowIngest } from './journal/shadow'
 import { planProjectFacts, applyProjectFacts, type ResolvedFacts } from './project-facts'
 import { mergeLocalAndIngestedSessions, sessionKey } from './session-merge'
 import { writeWorkflowRuns, loadWorkflowRuns } from './workflow-store'
 import { createLimiter, safeReadDir, safeReadJson, safeStat } from './utils'
+import { withTimeout } from './with-timeout'
 import { UUID_RE, decodeProjectDir, getProjectGitStats, getGitRemote, gcGitStatsCache } from './git'
 // `activeMinutesFromClaudeJsonl` / `contextTokensFromClaudeJsonl` are no longer called
 // here — the meta-session enrichment they served now runs inside `cachedEnrich`, which
@@ -95,12 +97,7 @@ export async function loadSessionMetas(roots: string[] = [SESSION_META_DIR]): Pr
           if (map.has(sessionId)) return
 
           // Normalise languages: may arrive as Record<string,number> or string[]
-          let languages: string[] = []
-          if (Array.isArray(data.languages)) {
-            languages = data.languages as string[]
-          } else if (data.languages && typeof data.languages === 'object') {
-            languages = Object.keys(data.languages as object)
-          }
+          const languages = coerceLanguages(data.languages)
 
           const meta: SessionMeta = {
             session_id: sessionId,
@@ -1162,15 +1159,22 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const totalTokens = dedupedSessions.reduce((sum, s) => sum + sessionTokenTotal(s), 0)
     onProgress('finalizing', 1, String(totalTokens))
 
+    // The shadow journal (P1 §5): a flagged, additional consumer of the transcripts just read. It is NOT
+    // awaited — `shadowIngest` never rejects, and a build's latency must never include it — and with
+    // `AGENTISTICS_JOURNAL` off it returns before doing anything at all.
+    try {
+      void shadowIngest(dedupedSessions)
+    } catch (err) {
+      console.warn('[journal] shadow ingest could not start:', String(err))
+    }
+
     return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), userStatsCaches, machineStatsCaches, machineOwners, workflows }
   }
 
-  return Promise.race([
-    buildPromise(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Request timed out after 5 minutes')), timeoutMs)
-    ),
-  ])
+  // `withTimeout`, never a bare `Promise.race` against `setTimeout`: the bare form left the 5-minute
+  // timer armed after every build, and its closure kept that build's whole ApiResponse reachable
+  // until it fired — the leak behind the 7.4 GB OOM of 2026-09-26. See `with-timeout.ts`.
+  return withTimeout(buildPromise(), timeoutMs, 'Request timed out after 5 minutes')
 }
 
 async function _buildApiResponse(): Promise<ApiResponse> {

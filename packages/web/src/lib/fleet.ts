@@ -39,6 +39,15 @@ export type FleetActionId =
    * see `FleetActionRequest.ids`.
    */
   | 'reopenFell' | 'broadcast'
+  /**
+   * Claude Code's own REWIND: restore the conversation to just before a given prompt. Carries the
+   * exact prompt `text` and its `occurrence` (0 = the most recent appearance of that text). Sent by
+   * the recent-prompts panel; deliberately NOT in `PERFORMABLE`, which is for verbs a server row
+   * offers — this one is asked for by a control that only exists on a claude session.
+   */
+  | 'rewind'
+  /** Submit every message claude is holding in its OWN queue right now, in order (claude only). */
+  | 'sendNow'
 
 /** The verbs this page can PERFORM. The rest are shown, dimmed, with their reason. */
 export const PERFORMABLE: ReadonlySet<FleetActionId> = new Set<FleetActionId>([
@@ -119,6 +128,27 @@ export interface FleetPayload {
 
 const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
 
+/**
+ * THE ANSWER AS THIS CLIENT READS IT — every list the page iterates is a list, whatever arrived.
+ *
+ * `/api/fleet` omitted `finishedTasks` when it was empty and the page called `.includes` on it, so
+ * on every machine where no task had been finished the Sessions page threw (`TypeError: Cannot read
+ * properties of undefined (reading 'includes')`, reported on v2.65.0). The server now always sends
+ * it, but a newer page can be served by an older server (a central, a stale binary) and read back
+ * from this browser's cache, so the boundary is where absence becomes an empty list. PURE.
+ */
+export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
+  const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : [])
+  return {
+    ...raw,
+    sessions: list(raw.sessions),
+    rows: list(raw.rows),
+    attention: typeof raw.attention === 'number' ? raw.attention : 0,
+    tasks: list(raw.tasks),
+    finishedTasks: list(raw.finishedTasks),
+  }
+}
+
 /** How often the page re-reads the fleet. The cockpit polls at 5s; matching it keeps the two in step. */
 const FLEET_POLL_MS = 5000
 
@@ -148,6 +178,8 @@ export interface FleetState {
     action: FleetActionId
     text?: string
     choice?: number
+    /** `rewind` only: which appearance of `text` — counting from the latest, 0 first. */
+    occurrence?: number
     /**
      * The rows a GROUP verb acts on — `reopenFell` and `broadcast`. It can only ever NARROW the
      * group the server already resolved: absent means "all of it", and an empty array means
@@ -183,7 +215,7 @@ function readFleetCache(): FleetPayload | null {
     const p = parsed.payload
     if (!p || !Array.isArray(p.rows) || !Array.isArray(p.sessions)) return null
     cachedAt = parsed.at ?? 0
-    return p
+    return normalizeFleetPayload(p)
   } catch {
     return null
   }
@@ -340,7 +372,7 @@ async function pollOnce(): Promise<void> {
     // poll left a minutes-old list on screen looking live — a stale list is worse than an empty
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
-    const json = await res.json() as FleetPayload
+    const json = normalizeFleetPayload(await res.json() as FleetPayload)
     snapUnsupported = false
     snapshot = json
     snapFailures = 0
@@ -480,9 +512,29 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // it did not — the second is a statement about the CHANNEL, not about the verb.
       const raw = await res.json().catch(() => null)
       const out = machineId ? parseRelayActResult(raw, lang) : parseActResult(raw, lang)
-      // Re-read immediately: the verb changed the machine, and waiting up to five seconds to show
-      // it is how a control that worked looks like one that did nothing.
-      await pollOnce()
+      /*
+       * RE-READ SOON, BUT DO NOT MAKE THE CALLER WAIT FOR IT.
+       *
+       * This used to be `await pollOnce()`, on the reasoning quoted below — right about WHY a
+       * refresh belongs here, wrong about WHO should pay for it. `pollOnce` is a FULL `/api/fleet`
+       * read: `readFleet` -> `host.sessions()` walks every session on the machine and captures its
+       * pane (`sessions-host.ts`'s own `poll()`), and that walk is measured, in this very codebase,
+       * at up to ~3s under load ("measured individually in a bare process, none of them exceeded
+       * 415ms; measured here inside this Promise.all, the group took 2961ms" — `sessions-host.ts`).
+       * Every caller of `act` (`ApprovalCard.answer`, the composer's `send`) keeps its OWN spinner
+       * lit until the promise this function returns settles, so the poll's cost was being billed
+       * to the CLICK: on a machine running several sessions answering a dialog held its spinner for
+       * as long as that walk took, reported as "demora MUITO pra enviar" — and the send itself (a keystroke
+       * into one pane) is done in a few hundred ms.
+       *
+       * The refresh is still worth having SOON — "the verb changed the machine, and waiting up to
+       * five seconds to show it is how a control that worked looks like one that did nothing" — it
+       * just does not have to be THIS call that waits for it. `pollOnce` mutates the shared
+       * `snapshot` and calls `emit()` when it settles regardless of who kicked it off, so every
+       * mounted `useFleet` still redraws the instant it lands; only the caller's own busy state
+       * stops being held hostage to a walk of every OTHER session on the machine.
+       */
+      void pollOnce()
       return out
     } catch (err) {
       // A poll settles what actually happened — see the note above. It runs even here.

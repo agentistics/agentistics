@@ -28,12 +28,14 @@ import type { ProjectSearchResult } from '@agentistics/tui/control'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { fleetRow, type FleetActionRequest, type FleetRow } from './fleet-row'
 import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
+import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { modelsFor, type ModelOption, type Baseline } from '@agentistics/core'
+import { type ModelOption, type Baseline } from '@agentistics/core'
+import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 
@@ -67,8 +69,13 @@ export interface FleetPayload {
   unavailable?: string
   /** The tasks that already exist here, so filing a session is a pick rather than a spelling test. */
   tasks: string[]
-  /** The tasks the user marked FINISHED — a statement about the work, not about any session. */
-  finishedTasks?: string[]
+  /**
+   * The tasks the user marked FINISHED — a statement about the work, not about any session.
+   * ALWAYS present, `[]` when there are none: the web client reads it as a list, and a field omitted
+   * when empty took the Sessions page down for everyone who had never finished a task (v2.65.0,
+   * `TypeError: … reading 'includes'`).
+   */
+  finishedTasks: string[]
   /**
    * The fall: how many, and when.
    *
@@ -191,7 +198,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   const totalStart = performance.now()
   try {
     const host = await hostFor(lang)
-    if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [] }
+    if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
     const tasks = host.sessionTasks ? await host.sessionTasks().catch(() => []) : []
     const finishedTasks = fleet.finishedTasks ?? []
@@ -206,7 +213,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
       attention: fleet.attention,
       ...(fleet.unavailable ? { unavailable: fleet.unavailable } : {}),
       tasks,
-      ...(finishedTasks.length > 0 ? { finishedTasks: [...finishedTasks] } : {}),
+      finishedTasks: [...finishedTasks],
       // What FELL together, so a client can offer to reopen the lot — the cockpit's own grouping,
       // which errs toward excluding: a session with no evidence it was ever alive is never in it.
       ...(fleet.fell ? { fell: fleet.fell } : {}),
@@ -324,6 +331,19 @@ export async function runFleetAction(
     case 'kill':
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
+    case 'rewind': {
+      if (!host.rewindSession) return { ok: false, message: s.sessionsNoHost }
+      // The prompt is the ANCHOR, compared against the harness's own menu row by row — not an index,
+      // which the harness's list (it scrolls, and a queued turn can join it) cannot be trusted to keep.
+      const raw = req.text ?? ''
+      if (!raw.trim()) return { ok: false, message: s.sessionsNoHost }
+      const occ = Number.isInteger(req.occurrence) && (req.occurrence ?? 0) >= 0 ? req.occurrence! : 0
+      return await host.rewindSession(req.id, raw, occ)
+    }
+    case 'sendNow': {
+      if (!host.sendQueuedNow) return { ok: false, message: s.sessionsNoHost }
+      return await host.sendQueuedNow(req.id)
+    }
     case 'interrupt': {
       // Only meaningful on a session that is actually doing something: pressing Escape into an idle
       // prompt closes whatever the harness has open, which is not what "stop" means.
@@ -658,6 +678,14 @@ export interface FleetNewOptions {
      */
     models: ModelOption[]
     /**
+     * Where `models` came from — `model-catalog.ts`. `cli`: the harness's own list (the account's
+     * real set). `table`: the verified fallback, which cannot name every id the CLI accepts. Optional
+     * so a client reading an older server still parses; absent reads as `table`.
+     */
+    modelsSource?: 'cli' | 'table'
+    /** The picker must also accept a typed id — true exactly when the list is the table. */
+    modelFreeText?: boolean
+    /**
      * What this CLI uses when no `--model` is passed, and ONLY where the CLI publishes it. Absent
      * for every harness today — see the defaults block in `spawn-spec.ts`. A client renders the
      * name when it is here and its own "the assistant's default" when it is not; it may never
@@ -721,7 +749,16 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
     const configured = new Map(await Promise.all(harnesses.map(async h =>
       [h.id, await readHarnessDefaults(h.id as HarnessId).catch(() => ({} as Defaults))] as const,
     )))
+    // The models each harness offers HERE — its own list where it publishes one, the verified
+    // table where it does not. Never waits on a command (`agy models` goes to the network).
+    const { modelCatalog } = await import('../model-catalog')
+    const catalogs = new Map(await Promise.all(harnesses.map(async h =>
+      [h.id, await modelCatalog(h.id as HarnessId)] as const,
+    )))
+    // An EMPTY list with a reason is a fault the wizard must say out loud — see `harnessNotice`.
+    const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
     return {
+      ...(notice ? { unavailable: notice } : {}),
       harnesses: harnesses.map(h => {
         const here = configured.get(h.id) ?? {}
         // The tool's own published default outranks the machine's, on the rare day one publishes
@@ -731,8 +768,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
         return {
           id: h.id,
           label: h.label,
-          modelSuggestions: [...h.modelSuggestions],
-          models: modelsFor(h.id),
+          ...catalogFields(h.modelSuggestions, catalogs.get(h.id)),
           ...(defaultModel ? { defaultModel } : {}),
           supportsModel: h.supportsModel,
           efforts: [...h.efforts],
@@ -773,6 +809,24 @@ export interface FleetSpawnResponse {
   message: string
   /** The id of the session that was started, so the caller can attach to the very one it created. */
   id?: string
+  /**
+   * Present ONLY on `ok: false` when this was refused by the memory budget — never on any other
+   * refusal (an unknown harness, a relative path, …), which are `ok: false` with `message` alone.
+   * `code` is fixed so a client can tell this refusal apart from every other one without parsing
+   * `message`; `refusal` is the DATA behind it, so a client can offer "start anyway" (re-post with
+   * `force: true`) without composing its own sentence. `index.ts` answers this shape with HTTP 409.
+   * See `spawn-admission.ts`'s `AdmissionRefusalBody`.
+   */
+  code?: 'memory_budget'
+  refusal?: AdmissionRefusal
+  /**
+   * `ok: true` and this is set exactly when the request carried `force: true` and the budget had, in
+   * fact, refused — so the caller knows this session exists ONLY because it insisted. `note` is the
+   * sentence saying what was overridden, kept separate from `message` ("session X started") for the
+   * same reason `SpawnSessionResult` keeps them separate on the host side.
+   */
+  overridden?: boolean
+  note?: string
 }
 
 /**
@@ -806,6 +860,10 @@ export async function runFleetSpawn(
   if (!host.spawnSession || !host.startableHarnesses) return { ok: false, message: s.sessionsNoHost }
 
   const decision = planFleetSpawn(body, await host.startableHarnesses())
+  // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
+  // fault, and "no spawn spec for it here" would send someone looking for a bug in agentop.
+  const blindNotice = !decision.ok && decision.reason === 'unknown_harness' ? host.harnessNotice?.() : undefined
+  if (blindNotice) return { ok: false, message: blindNotice }
   if (!decision.ok) {
     const detail = decision.detail ?? ''
     const message =
@@ -818,7 +876,16 @@ export async function runFleetSpawn(
   }
 
   const out = await host.spawnSession(decision.plan)
-  return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+  return {
+    ok: out.ok,
+    message: out.message,
+    ...(out.id ? { id: out.id } : {}),
+    // Flattened rather than nested — `out.admission` is `{code, refusal, message}` and this
+    // response already carries its own `message`, so nesting it again would give the client two
+    // routes to the same sentence.
+    ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
+    ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
+  }
 }
 
 /**

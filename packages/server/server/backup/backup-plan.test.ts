@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { HARNESS_ORDER } from '@agentistics/core'
+import { KEYED_PROVIDERS } from '../config'
 import { BACKUP_LAYERS, EXCLUDE_RULES, HARNESS_SECRETS, excludeFor, omittedSecrets, planSources, withMetrics } from './backup-plan'
 
 test('metrics is always planned, whatever the caller asked for', () => {
@@ -61,6 +62,7 @@ test('every credential path is excluded, and names how to re-establish it', () =
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
     '.agentistics/connections/some-central.json',
+    '.agentistics/provider-keys/anthropic.json',
   ]) {
     const rule = excludeFor(rel)
     expect(rule?.reason).toBe('secret')
@@ -91,6 +93,8 @@ test('every harness has at least one credential rule, and each names how to re-e
     ['.gemini/antigravity-cli/antigravity-oauth-token', 'antigravity'],
     ['.copilot/token', 'copilot'],
     ['.copilot/mcp-oauth-config/github.tokens.json', 'copilot'],
+    ['.copilot/config.json', 'copilot'],
+    ['.claude/agentistics-preferences.json', 'claude'],
     ['.kimi-code/config.toml', 'kimi'],
   ] as [string, string][]) {
     const rule = excludeFor(rel)
@@ -136,6 +140,15 @@ test('the rest of the daemon directory is excluded as runtime state', () => {
   expect(excludeFor('.claude/daemon/attach-journal')?.reason).toBe('runtime')
 })
 
+// The journal's two side-files (config.ts builds both with literal joins so the coverage lint sees
+// them). The journal itself is CARRIED; these are not, and each says why.
+test('the journal side-files are excluded — stamps as regenerable, status as runtime', () => {
+  expect(excludeFor('.agentistics/journal.db.stamps.json')?.reason).toBe('regenerable')
+  expect(excludeFor('.agentistics/journal.db.status.json')?.reason).toBe('runtime')
+  // The journal database itself is not swept up by either rule.
+  expect(excludeFor('.agentistics/journal.db')).toBeNull()
+})
+
 test('ordinary data is not excluded', () => {
   expect(excludeFor('.agentistics/sessions/claude/abc.json')).toBeNull()
   expect(excludeFor('.claude/stats-cache.json')).toBeNull()
@@ -163,7 +176,7 @@ test('the repos layer contributes no $HOME source — its content is made, not f
 // billing-detect.test.ts, which greps its own module rather than trusting a reviewer.
 test('no credential filename can pass the filter — asserted over the source itself', () => {
   const src = readFileSync(join(import.meta.dir, 'backup-plan.ts'), 'utf8')
-  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'connections']) {
+  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'connections', 'provider-keys']) {
     expect(src).toContain(needle)
   }
   for (const probe of [
@@ -171,8 +184,24 @@ test('no credential filename can pass the filter — asserted over the source it
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
     '.agentistics/connections/x',
+    '.agentistics/provider-keys/anthropic.json',
   ]) {
     expect(excludeFor(probe)).not.toBeNull()
+  }
+})
+
+// UI.4 N-5: every provider's key file is probed BY NAME, not only anthropic.json — the directory
+// prefix rule covers them today, and this is what notices the day it stops. The list is written out
+// (a probe derived from the same table it checks would pass on an empty table) and then held equal
+// to KEYED_PROVIDERS, so a provider added to config.ts without a probe here fails by name.
+const PROVIDER_KEY_PROBES = ['anthropic', 'openai', 'openrouter', 'deepseek', 'litellm', '9router', 'ollama']
+
+test('every provider key file is excluded as a secret, probed by name', () => {
+  expect([...PROVIDER_KEY_PROBES].sort()).toEqual([...KEYED_PROVIDERS].sort())
+  for (const id of PROVIDER_KEY_PROBES) {
+    const rule = excludeFor(`.agentistics/provider-keys/${id}.json`)
+    expect(rule?.reason, `${id}.json`).toBe('secret')
+    expect(rule?.restoreWith ?? '').not.toBe('')
   }
 })
 
@@ -203,4 +232,21 @@ test('the control center\'s BACKUP_LAYER_ORDER matches BACKUP_LAYERS, in order',
   expect(decl).toBeDefined()
   const members = [...decl!.matchAll(/'([a-z]+)'/g)].map(m => m[1]!)
   expect(members).toEqual(BACKUP_LAYERS)
+})
+
+// Found by probing KEY NAMES (never values) under each harness's data dir: `~/.copilot/config.json`
+// carries `copilotTokens`, and `~/.claude/agentistics-preferences.json` carries `team.token`. Neither
+// was excluded, so both rode out in the raw layer of a published backup. The fixtures below hold key
+// names and empty placeholders only.
+test('config files holding credential keys are excluded from the raw layer', () => {
+  const fixtures: [string, string][] = [
+    ['.copilot/config.json', 'copilotTokens'],
+    ['.claude/agentistics-preferences.json', 'team.token'],
+  ]
+  for (const [rel, key] of fixtures) {
+    const rule = excludeFor(rel)
+    expect(rule?.reason, `${rel} (${key}) must be a secret`).toBe('secret')
+    expect(rule?.restoreWith ?? '', `${rel} needs a restore command`).not.toBe('')
+    expect(rule?.why ?? '', `${rel} must say which key it holds`).toContain(key)
+  }
 })

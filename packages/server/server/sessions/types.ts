@@ -476,6 +476,19 @@ export interface SessionBackend {
   ): Promise<'sent' | 'wrong-row' | 'failed'>
   sendTextRaw(id: string, text: string): Promise<boolean>
   /**
+   * Restore the conversation to the point BEFORE the prompt `text` (its `occurrence`-th appearance
+   * counted from the most recent, 0 = latest) by driving the harness's OWN rewind menu — see
+   * `claude-rewind.ts`. Clears the prompt the harness puts back into its input box afterwards, so the
+   * next message is not typed after it. Optional: only a harness whose menu was measured has it.
+   */
+  rewindTo?(id: string, text: string, occurrence: number): Promise<RewindOutcome>
+  /**
+   * Submit the messages the harness is holding in its OWN queue now, instead of when the running
+   * turn ends — claude's `ctrl+x ctrl+s`. Every queued message goes, in order: that is the harness's
+   * rule and the one the product wants ("send now" on the second also sends the first).
+   */
+  sendQueuedNow?(id: string): Promise<boolean>
+  /**
    * Press ONE named key — the backend's own vocabulary (`Enter`, `Escape`).
    *
    * Separate from `sendText` because the two are opposites and confusing them fails silently: sent
@@ -509,3 +522,7 @@ export interface SessionBackend {
   /** Map of managed session ID to OS pane process ID, where available. */
   listPanePids?(): Promise<Map<string, number>>
 }
+
+/** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a
+ *  screen nobody measured after the choice, and the driver cancelled rather than guess. */
+export type RewindOutcome = 'done' | 'no-menu' | 'not-found' | 'unexpected' | 'failed'

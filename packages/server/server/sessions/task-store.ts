@@ -34,12 +34,13 @@ export interface TaskPatch {
   detail?: string
   status?: TaskStatus
   deliveredAt?: string
+  /** System-stamped, never set by an ordinary caller — see `Task.startedAt`'s own note. */
+  startedAt?: string
   repo?: string
   updatedAt?: string
   blockedBy?: string[]
   links?: TaskLink[]
   priority?: TaskPriority
-  assignee?: string
   dueDate?: string
   startDate?: string
   labels?: string[]
@@ -198,6 +199,7 @@ function sanitizeTask(raw: unknown): Task | null {
     updatedAt: typeof t.updatedAt === 'string' ? t.updatedAt : new Date(0).toISOString(),
     ...(typeof t.detail === 'string' ? { detail: t.detail } : {}),
     ...(typeof t.deliveredAt === 'string' ? { deliveredAt: t.deliveredAt } : {}),
+    ...(typeof t.startedAt === 'string' ? { startedAt: t.startedAt } : {}),
     ...(typeof t.repo === 'string' ? { repo: t.repo } : {}),
     ...(Array.isArray(t.links)
       ? {
@@ -210,7 +212,6 @@ function sanitizeTask(raw: unknown): Task | null {
     // Absent priority is `none`, never `medium`: see `TaskPriority`. Written explicitly so every
     // reader sees the same word rather than each deciding what absence means.
     priority: migratePriority(t.priority),
-    ...(typeof t.assignee === 'string' && t.assignee ? { assignee: t.assignee } : {}),
     ...(typeof t.dueDate === 'string' && t.dueDate ? { dueDate: t.dueDate } : {}),
     ...(typeof t.startDate === 'string' && t.startDate ? { startDate: t.startDate } : {}),
     ...(Array.isArray(t.labels)
@@ -330,9 +331,10 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     done: subtaskDone(status),
     createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
     updatedAt: str(t.updatedAt) ?? new Date(0).toISOString(),
-    ...(str(t.assignee) ? { assignee: str(t.assignee)! } : {}),
     ...(str(t.dueDate) ? { dueDate: str(t.dueDate)! } : {}),
     ...(str(t.startDate) ? { startDate: str(t.startDate)! } : {}),
+    ...(str(t.startedAt) ? { startedAt: str(t.startedAt)! } : {}),
+    ...(str(t.deliveredAt) ? { deliveredAt: str(t.deliveredAt)! } : {}),
     ...(str(t.sessionId) ? { sessionId: str(t.sessionId)! } : {}),
     ...(str(t.notes) ? { notes: str(t.notes)! } : {}),
     // A sibling-subtask blocker list — same trap as the hierarchy fields below: `patchSubtask`

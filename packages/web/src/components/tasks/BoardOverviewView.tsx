@@ -205,7 +205,7 @@ export function BoardOverviewView({ o, statuses }: {
 
       <Section title="Cost">
         <Big
-          label="Avg cost / delivery" value={money(o.avgCostPerDelivered)} accent
+          label="Avg cost / delivery" value={money(o.avgCostPerDelivered, o.deliveredCostByHarness)} accent
           icon={<Coins size={13} style={{ color: 'var(--anthropic-orange)' }} />}
           help="Mean spend across delivered tasks that could be priced."
           gap={o.avgCostPerDelivered === null
@@ -213,13 +213,13 @@ export function BoardOverviewView({ o, statuses }: {
             : deliveredGap}
         />
         <Big
-          label="Avg cost / task" value={money(o.avgCostPerTask)}
+          label="Avg cost / task" value={money(o.avgCostPerTask, o.costByHarness)}
           icon={<Coins size={13} style={{ color: 'var(--text-tertiary)' }} />}
           help="Mean spend across every priced task, open or delivered."
           gap={boardGap}
         />
         <Big
-          label="Total spent" value={money(o.totalCostUSD)}
+          label="Total spent" value={money(o.totalCostUSD, o.costByHarness)}
           icon={<Coins size={13} style={{ color: 'var(--text-tertiary)' }} />}
           help={`Sum across every priced task — ${fmtTokens(o.totalTokens)} tokens in total.`}
           gap={boardGap}

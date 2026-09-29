@@ -1,0 +1,17 @@
+{
+  "_source": "task brief's own field name (completion_tokens_details.reasoning_tokens for deepseek-reasoner), corroborated by a tool-summarized fetch of https://api-docs.deepseek.com/api/create-chat-completion on 2026-09-27 (paraphrased, not a byte-for-byte quote — see usage.ts module doc). No DeepSeek source confirms the reasoning-tokens/output inclusion relation, hence billing 'unknown' is expected here, not 'included-in-output'.",
+  "kind": "direct",
+  "body": {
+    "id": "chatcmpl-documented-deepseek-reasoner-0001",
+    "model": "deepseek-reasoner",
+    "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "After thinking..." } }],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 200,
+      "total_tokens": 300,
+      "prompt_cache_hit_tokens": 10,
+      "prompt_cache_miss_tokens": 90,
+      "completion_tokens_details": { "reasoning_tokens": 150 }
+    }
+  }
+}

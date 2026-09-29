@@ -37,7 +37,7 @@
  * for the same refusal.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
@@ -87,6 +87,7 @@ import {
 } from '../SessionDrilldown'
 import { ArtifactDoc } from './ArtifactDoc'
 import { GalleryTab } from './GalleryTab'
+import { turnAnchorIds } from '../../lib/promptHistory'
 // The FOURTH copy of this shape lived here, byte-identical to the three the repository
 // explorer's own views had already folded into `repoNote.tsx`. Imported under the name this
 // file's own call sites already use: one shape, one place for it to change.
@@ -200,9 +201,9 @@ export interface ArtifactsAsideProps {
    * only hides the BUTTON, on the ONE mount where it duplicates a control that already sits right
    * above it: the right slot on desktop, where `rightSlotBar`'s own `PanelFixedControls` minimize
    * IS a literal close for every one of these ten panels (`panelMinimizeAction`'s `close-right`) —
-   * calling the exact same `closeSlotPanel(id)` this header's own button called. The bottom band's
-   * own minimize COLLAPSES instead (`collapse-bottom`, the band stays this panel's occupant), so
-   * this button keeps its job there.
+   * calling the exact same `closeSlotPanel(id)` this header's own button called. The bottom band
+   * hides it too on desktop (owner, 2026-09-29): its own bar's minimize sits right above this header,
+   * and the extra button read as a stray "minimize the aside" control inside the bar.
    */
   hideCloseButton?: boolean
   /**
@@ -338,6 +339,10 @@ export function ArtifactsAside({
     ...producedGroups(artifacts),
     ...viewedGroups(turns ?? []),
   ], [turns, artifacts])
+  // The chat's own identity-based anchor for a turn position — the gallery's "go to message" goes
+  // through it, so both surfaces name one bubble by the same id (see `promptHistory.ts`).
+  const galleryAnchors = useMemo(() => turnAnchorIds(sessionId, turns ?? []), [sessionId, turns])
+  const galleryAnchorOf = useCallback((i: number) => galleryAnchors[i], [galleryAnchors])
   const galleryFiles = useMemo(() => galleryFileCount(gallery), [gallery])
   /** LIST or GRID, remembered. A private window that refuses storage simply keeps the default. */
   const [galleryView, setGalleryView] = useState<GalleryView>(() => {
@@ -1272,6 +1277,7 @@ export function ArtifactsAside({
           onScopeChange={chooseGalleryScope}
           {...(focusStep !== undefined ? { focusStep } : {})}
           {...(older ? { older } : {})}
+          anchorOf={galleryAnchorOf}
         />
       </>
     )

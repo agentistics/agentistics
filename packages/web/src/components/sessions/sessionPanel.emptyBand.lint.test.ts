@@ -112,3 +112,29 @@ describe('SimpleDockedBand guards against an empty barEntries, exactly like Pane
     expect(guardAt).toBe(-1)
   })
 })
+
+// THE CASE THE GUARDS ABOVE MISSED, reported a second time on v2.49.2 ("o - ainda aparece na barra
+// mesmo com ela fechada"). The strip came from the band `bottomBandFor` SELECTED for a local
+// desktop session with nothing docked — the old `'shell'` floor — not from a band rendering its
+// own emptiness, so no guard inside a band could see it. `bottomBandFor` now answers `'none'` there
+// (see `panelBar.test.ts`), and what that must not cost is the way back.
+describe('an empty desktop band leaves a drag-only landing strip, and nothing else', () => {
+  const src = stripComments(SESSION_PANEL_RAW)
+
+  test('the drop zone renders only for the none band, on a desktop, for a local session', () => {
+    expect(src).toContain("bottomBand === 'none' && !isMobile && !relayed && (")
+    expect(src).toContain('<EmptyBandDropZone')
+  })
+
+  test('the drop zone exists only while a panel drag is in flight', () => {
+    const zone = src.slice(src.indexOf('function EmptyBandDropZone'))
+    expect(zone).toContain('hasDragPayload(e)')
+    expect(zone).toContain('if (!dragging) return null')
+  })
+
+  test('it lands through the same drop handler every band uses', () => {
+    const zone = src.slice(src.indexOf('function EmptyBandDropZone'))
+    expect(zone).toContain('useBandDropTarget(onDrop)')
+    expect(src).toContain('<EmptyBandDropZone lang={lang} onDrop={dropSlotPanel} />')
+  })
+})

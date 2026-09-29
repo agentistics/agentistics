@@ -18,26 +18,34 @@
  */
 
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactElement, type ReactNode,
 } from 'react'
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon,
+  X as XIcon, ArrowRight,
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
-import { ResizeGrip } from '../components/ResizeGrip'
+import { PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
+import { activeJunctions, isDragEndEvent, junctionHitRect, PANEL_GAP } from '../lib/panelLayout'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
   type OpenPlacement, type PanelGates, type PanelId, type TabPanelId,
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
+import {
+  dockPanel, floatPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession, useFloatingPanels,
+} from '../lib/floatingPanels'
+import { FloatingPanelLayer } from '../components/sessions/FloatingPanelLayer'
+import { sessionIdentityKey } from '../lib/sessionIdentity'
 import { panelTitle } from '../lib/panelMeta'
+import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
+import { freedBytes } from '@agentistics/core'
 import { getCentralMachine } from '../lib/centralMachinePick'
 import type { AppContext } from '../lib/app-context'
 import { useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
@@ -52,10 +60,14 @@ import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 // while creating was the only thing that could announce a session; a reopen announces one too, and
 // two constants for one budget is two answers.
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
+import type { SessionComposerMetrics } from '../components/sessions/SessionChat'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
+import { NotificationBell } from '../components/NotificationBell'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
+import { RelayedAsideNote } from '../components/sessions/RelayedAsideNote'
+import { relayedTabAvailable } from '../lib/relayedAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelTileDropdown } from '../components/sessions/bandControls'
@@ -68,11 +80,18 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
-import { closedRightEdge, restingLeftEdge, setRightAsideEdge } from '../lib/rightAsideEdge'
+import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { useLeftAsideEdge } from '../lib/leftAsideEdge'
+import { useLeftAsideOpen } from '../lib/leftAsideOpen'
 import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
+import { useIdleSessions } from '../hooks/useIdleSessions'
+import { forcedNote, isAdmissionRefusal } from '../lib/spawnAdmission'
+import { pushNotification } from '../lib/notifications'
+import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
+import { publishIdleReview } from '../lib/idleReviewStore'
+import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
 import type { SessionDrilldownProps } from '../components/SessionDrilldown'
 import type { Artifact } from '../lib/sessionArtifacts'
 import { liveEvents, type LiveTurn } from '../lib/artifactTabs'
@@ -85,10 +104,10 @@ import { FiltersSheet } from '../components/sessions/FiltersSheet'
 import {
   arrivalFor, reopenedSessionRoute, sessionPath, stillArriving, type SessionArrival,
 } from '../lib/sessionRoute'
+import { markSessionPending } from '../lib/pendingSessionStore'
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
 import { targetLabel } from '../lib/terminalTarget'
-import { TerminalRegion } from '../components/RecentSessions'
 import { sessionPlanFactor } from '../lib/costBasis'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
@@ -124,7 +143,7 @@ export interface StudioHostMountParams {
   onMove: () => void
   /** The always-visible minimize icon, right-slot only — see `Studio.tsx`'s own `onMinimizeRight`. */
   onMinimizeRight?: () => void
-  /** PIN (spec §11 item 3), right-slot only — see `Studio.tsx`'s own `pinned` prop. */
+  /** PIN = FLOAT (`lib/floatingPanels.ts`) — see `Studio.tsx`'s own `pinned` prop. */
   pinned?: { active: boolean; onToggle: () => void }
   /**
    * NEVER A REAL FIELD (I4, fix wave 3) — declared `never` so a stray `key` on this params object is
@@ -231,6 +250,13 @@ export default function SessionsPage() {
   const [launchingPreset, setLaunchingPreset] = useState<SessionPreset | null>(null)
   const [presetLaunchBusy, setPresetLaunchBusy] = useState(false)
   const [presetLaunchError, setPresetLaunchError] = useState<string | null>(null)
+  /**
+   * Set exactly when `presetLaunchError` came from the machine's memory-budget refusal
+   * (`isAdmissionRefusal`) rather than an ordinary spawn error — the only case `PresetLaunchConfirm`
+   * offers its second, deliberate "start anyway" button (re-posts with `force: true`). Cleared
+   * whenever a fresh preset is selected, so the override never survives into a different launch.
+   */
+  const [presetLaunchForceable, setPresetLaunchForceable] = useState(false)
   const [presetPrefill, setPresetPrefill] = useState<NonNullable<
     Parameters<typeof NewSessionModal>[0]['initialPreset']
   > | null>(null)
@@ -239,6 +265,7 @@ export default function SessionsPage() {
     if (preset.cwd) {
       setLaunchingPreset(preset)
       setPresetLaunchError(null)
+      setPresetLaunchForceable(false)
     } else {
       setPresetPrefill({
         harness: preset.harness, prompt: preset.promptTemplate,
@@ -249,7 +276,12 @@ export default function SessionsPage() {
     }
   }
 
-  async function confirmPresetLaunch() {
+  /**
+   * `force` is the deliberate second click on "start anyway" — see `PresetLaunchConfirm`'s
+   * `onForce`. The ordinary "Launch" button never passes it; only a prior memory-budget refusal on
+   * THIS exact request offers the option at all.
+   */
+  async function confirmPresetLaunch(force = false) {
     if (!launchingPreset) return
     setPresetLaunchBusy(true)
     setPresetLaunchError(null)
@@ -266,22 +298,31 @@ export default function SessionsPage() {
           ...(launchingPreset.model ? { model: launchingPreset.model } : {}),
           ...(launchingPreset.effort ? { effort: launchingPreset.effort } : {}),
           label: launchingPreset.label,
+          ...(force ? { force: true as const } : {}),
         }),
       })
       const json = await res.json() as { ok: boolean; message: string; id?: string }
       if (!json.ok) {
         setPresetLaunchError(json.message)
+        setPresetLaunchForceable(isAdmissionRefusal(json))
         setPresetLaunchBusy(false)
         return
       }
+      // Forced through despite the budget — surfaced through the persisted notification store
+      // (never silently), the same "already-localized sentence, meta-carried" pattern
+      // `hardware.pressure` uses for its own server-computed sentence.
+      const note = forcedNote(json)
+      if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
       const started = launchingPreset
       setLaunchingPreset(null)
       setPresetLaunchBusy(false)
+      setPresetLaunchForceable(false)
       if (json.id) {
         navigate(sessionPath(json.id), { state: { creating: { harness: started.harness, label: started.label } } })
       }
     } catch {
       setPresetLaunchError(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
+      setPresetLaunchForceable(false)
       setPresetLaunchBusy(false)
     }
   }
@@ -306,6 +347,48 @@ export default function SessionsPage() {
   // including the machine's own named refusal.
   const unsupported = pollUnsupported
   const rowIndex = useFleetIndex(fleet.sessions)
+
+  /**
+   * IDLE SESSIONS (Task 6) — the review modal, and the candidates published for the card in
+   * `SessionsAside` (see `lib/idleReviewStore.ts`).
+   *
+   * `useHardwarePressureWatch` is called HERE, ahead of the rail's own use of `hardwareCritical`
+   * further down this file, so `ramUnderPressure` — the SAME 5s hardware poll the rail's red icon
+   * already reads, never a second interval (see that hook's own header and `useIdleSessions.ts`'s) —
+   * is available before `useIdleSessions` needs it. The hook itself is unchanged; only where its one
+   * call sits in this component moved, which is safe precisely because nothing between here and its
+   * old position is a conditional hook call.
+   */
+  const { critical: hardwareCritical, ramUnderPressure } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  const { candidates: idleCandidates } = useIdleSessions({
+    rows: fleet.rows,
+    finishedTasks: fleet.finishedTasks,
+    openSessionId: sessionId ?? null,
+    underPressure: ramUnderPressure,
+    // Never on a central (it relays another machine's fleet; the feature is local-only), never while
+    // the poll itself cannot be trusted, and never before the first answer has arrived — the same
+    // three facts `unsupported`/`loading` already state elsewhere on this page.
+    enabled: !isCentral && !pollUnsupported && !loading,
+  })
+  const [idleOpen, setIdleOpen] = useState(false)
+  useEffect(() => {
+    const open = () => setIdleOpen(true)
+    window.addEventListener('agentistics:open-idle-sessions', open)
+    // A request made before this mount existed at all — see `lib/idleReviewRequest.ts`'s own header
+    // for the race this closes (the bell's `navigate('/sessions')` only schedules the route change).
+    if (takeIdleReviewRequest()) setIdleOpen(true)
+    return () => window.removeEventListener('agentistics:open-idle-sessions', open)
+  }, [])
+  // Publish the summary the idle-review CARD reads (`SessionsAside.tsx`, mounted twice — the
+  // desktop sidebar and the mobile list) — see `lib/idleReviewStore.ts`'s own header for why the
+  // card cannot simply take these as props. Snooze and dismiss live in that store too, so this page
+  // no longer owns any idle-review state beyond the modal's own open/closed flag.
+  useEffect(() => {
+    publishIdleReview(
+      { count: idleCandidates.length, freedBytes: freedBytes(idleCandidates), candidateKeys: idleCandidates.map(c => c.key) },
+      idleOpen,
+    )
+  }, [idleCandidates, idleOpen])
 
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
@@ -401,6 +484,26 @@ export default function SessionsPage() {
         brlRate,
         lang: pt ? 'pt' : 'en',
         ...(data.workflows ? { workflows: data.workflows } : {}),
+      }
+    : undefined
+
+  /**
+   * THE COMPOSER'S CONTEXT GAUGE (design item 3) — the SAME reading `selected`'s own mobile-header
+   * `SessionStatsMenu` call takes, below, bundled through `SessionComposerMetrics` so `SessionChat`
+   * gets it as one prop rather than five. `undefined` whenever there is no selected session at all;
+   * the component itself withholds `onOpenFull` further when the store has no record, exactly as
+   * the mobile card does.
+   */
+  const composerMetrics: SessionComposerMetrics | undefined = selected
+    ? {
+        meta: selectedMeta,
+        currency,
+        brlRate,
+        costBasis: ctx.costBasis,
+        planFactor: sessionPlanFactor(ctx.planBasis.basis, selected.harness),
+        onOpenTask: ref => navigate(`/tasks/${encodeURIComponent(ref)}`),
+        onOpenLive: ref => openArtifacts('live', ref),
+        ...(sessionMetrics ? { onOpenFull: () => openArtifacts('metrics') } : {}),
       }
     : undefined
 
@@ -556,7 +659,9 @@ export default function SessionsPage() {
    * live feed both link to paths, and a link whose only outcome is a refusal is worse than no link.
    */
   useEffect(() => {
-    if (!selected) { setOnDisk(new Map()); setOutsideNote(undefined); return }
+    // A relayed session's files are on ANOTHER machine; `/api/fleet/artifacts` is refused on a
+    // central, and polling it every 15s only produced 403s. See `lib/relayedAside.ts`.
+    if (!selected || relayed) { setOnDisk(new Map()); setOutsideNote(undefined); return }
     let alive = true
     // The sentence holds a count about ONE session, so it is cleared the moment the session changes
     // — unlike `onDisk`, which is deliberately kept so the list is never empty for the length of a
@@ -579,7 +684,7 @@ export default function SessionsPage() {
     // conversation does, and this one stats every recorded path.
     const t = setInterval(read, 15000)
     return () => { alive = false; clearInterval(t) }
-  }, [selected?.id, pt])
+  }, [selected?.id, pt, relayed])
 
   /**
    * The panel's width, dragged and remembered — the right aside was fixed while the left one has
@@ -601,6 +706,10 @@ export default function SessionsPage() {
   const dragArt = useRef<{ x: number; w: number } | null>(null)
   /** A resize in progress. Only used to suspend the open/close animation — see `asideMotion`. */
   const [artDragging, setArtDragging] = useState(false)
+  // The value actually being persisted on release — read through a ref, not the `artWidth` state
+  // itself, so the effect below never needs `artWidth` as a dependency. See the ref's own comment.
+  const artWidthRef = useRef(artWidth)
+  artWidthRef.current = artWidth
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragArt.current) return
@@ -611,17 +720,35 @@ export default function SessionsPage() {
       const next = Math.max(PANEL_MIN_WIDTH, Math.min(cap, dragArt.current.w + (dragArt.current.x - e.clientX)))
       setArtWidth(next)
     }
-    const up = () => {
+    // Every event that must end a drag (`isDragEndEvent`), not `mouseup` alone — and, LOAD-BEARING,
+    // this effect is now REGISTERED ONCE (`[]` below) rather than on `[artWidth]`. It used to tear
+    // its window listeners down and rebuild them on every `setArtWidth` call inside `move` — i.e. on
+    // every single `mousemove` of the drag — which is harmless on its own (teardown and resubscribe
+    // happen back to back) but is exactly the failure mode a T-junction (`PanelGap.tsx`'s `armGap`)
+    // exposes: this gap and the band's own drag are armed together off ONE synthetic `mousedown`, and
+    // a release landing in the gap between one side's teardown and its resubscribe left this panel
+    // still tracking the pointer after the mouse button had already come up.
+    const up = (e: Event) => {
       if (!dragArt.current) return
+      if (!isDragEndEvent(e.type)) return
       dragArt.current = null
       setArtDragging(false)
       document.body.style.userSelect = ''
-      try { localStorage.setItem('agentistics:artifacts-w', String(artWidth)) } catch { /* private mode */ }
+      try { localStorage.setItem('agentistics:artifacts-w', String(artWidthRef.current)) } catch { /* private mode */ }
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [artWidth])
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    window.addEventListener('blur', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('blur', up)
+    }
+  }, [])
   /**
    * WHERE THE STUDIO, CLI AND SHELL SIT — `lib/panelSlots.ts`, design §1. `resolveForViewport` is
    * the phone reading: a stored `bottom: 'studio'` becomes the fullscreen right sheet without
@@ -638,8 +765,18 @@ export default function SessionsPage() {
   const {
     layout: rawSlotLayout, openPanel: openSlotPanel, closePanel: closeSlotPanel,
     movePanel: moveSlotPanel, dropPanel: dropSlotPanel, setRightOpen,
-    hidePanelToConfig: hideSlotPanel, restorePanel: revealSlotPanel, setRailWidth, togglePinned,
+    hidePanelToConfig: hideSlotPanel, restorePanel: revealSlotPanel, setRailWidth,
   } = usePanelSlots()
+  /**
+   * PINNED PANELS FLOAT (`lib/floatingPanels.ts`, owner 2026-09-27). The windows belong to the
+   * session on screen — keyed by `sessionIdentityKey`, so a reopen keeps them — and nothing floats
+   * on a phone. Declared to the store in a LAYOUT effect, before paint, because `usePanelSlots()`
+   * reads it to take the floating panels out of their docked slots for every consumer at once.
+   */
+  const floatingKey = !isMobile && selected ? sessionIdentityKey(selected) : null
+  useLayoutEffect(() => { setFloatingSession(floatingKey) }, [floatingKey])
+  useLayoutEffect(() => () => setFloatingSession(null), [])
+  const floating = useFloatingPanels()
   const panelFocus = usePanelFocusRequest()
   const panelGates: PanelGates = { editorEnabled, shellEnabled, relayed }
   const slotLayout = resolveForGates(resolveForViewport(rawSlotLayout, isMobile), panelGates)
@@ -667,11 +804,16 @@ export default function SessionsPage() {
   const bottomIsHardware = slotLayout.bottom === 'hardware'
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
   const [bottomStudioEl, setBottomStudioEl] = useState<HTMLDivElement | null>(null)
+  /** The floating window's box, when the Studio floats — a third place `StudioHost` can move its
+   *  carrier into, so floating it is a MOVE (buffers survive), never a remount. */
+  const [floatStudioEl, setFloatStudioEl] = useState<HTMLDivElement | null>(null)
+  const studioFloating = floating.studio !== undefined
   /** `null` PARKS the Studio — mounted, hidden, taking no space — which is also what a COLLAPSED
    *  bottom band, or a MINIMIZED right slot (`slotLayout.rightOpen`, the right slot's own analogue
    *  of `bottomOpen` — see `panelSlots.ts`'s own doc comment), holding it means: collapsing or
    *  minimizing must not be a way to lose a buffer. */
-  const studioTarget: HTMLElement | null = rightIsStudio && slotLayout.rightOpen
+  const studioTarget: HTMLElement | null = studioFloating ? floatStudioEl
+    : rightIsStudio && slotLayout.rightOpen
     ? rightSlotEl
     : bottomIsStudio && slotLayout.bottomOpen ? bottomStudioEl : null
   /**
@@ -887,6 +1029,9 @@ export default function SessionsPage() {
     ran: pt ? 'rodando' : 'running',
     thought: pt ? 'pensando' : 'thinking',
     delegated: pt ? 'delegando' : 'delegating',
+    // An MCP or any other tool no rule above recognises. Without it the verb was blank and the label
+    // read `undefined · <tool>`; the references list already says "usando" for the same kind.
+    used: pt ? 'usando' : 'using',
   }
   const edgeMarker = hint === null || selected === undefined ? null : (
     <button
@@ -898,7 +1043,9 @@ export default function SessionsPage() {
       // with no step behind it (reasoning carries its own text), and then this opens the feed
       // exactly as it did before.
       onClick={() => openArtifacts('live', hint.ref)}
-      title={`${HINT_VERB[hint.kind]} · ${hint.text}`}
+      className="ag-edge-hint"
+      title={`${HINT_VERB[hint.kind]} · ${hint.text} — ${pt ? 'acompanhar' : 'follow'}`}
+      aria-label={`${HINT_VERB[hint.kind]} ${hint.text}. ${pt ? 'Abrir o acompanhamento ao vivo' : 'Open the live view'}`}
       style={{
         // THIRD PLACE, and the first two were both wrong for the same reason: it FLOATED.
         // Hanging off the middle of the right edge it covered the conversation's text; sitting
@@ -912,7 +1059,12 @@ export default function SessionsPage() {
         // eye goes when something changes, which is the whole reason it exists.
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
         width: '100%', padding: '7px 14px', textAlign: 'left', cursor: 'pointer',
-        border: 'none', borderBottom: '1px solid var(--border-subtle)',
+        // On the desktop board the strip is its OWN small panel — border, 10px corners and the
+        // same inner gap (`PANEL_GAP`) below it every other panel seam uses — instead of a square
+        // band laid across the top of the conversation.
+        ...(isMobile
+          ? { border: 'none', borderBottom: '1px solid var(--border-subtle)' }
+          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: PANEL_GAP, boxSizing: 'border-box' as const }),
         background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
         fontFamily: 'inherit', fontSize: 11.5,
       }}
@@ -926,14 +1078,25 @@ export default function SessionsPage() {
       <span style={{ fontWeight: 700, color: 'var(--anthropic-orange)', flexShrink: 0 }}>
         {HINT_VERB[hint.kind]}
       </span>
-      {/* The THING, not a count: a path or a command says whether this is worth watching. */}
-      <span style={{
-        minWidth: 0, flex: 1, color: 'var(--text-tertiary)', fontSize: 11,
+      {/* The THING, not a count: a path or a command says whether this is worth watching. It takes
+          the room its text needs and no more, so the arrow can sit right after it instead of a
+          screen away at the far end. */}
+      <span className="ag-edge-hint-text" style={{
+        minWidth: 0, flex: '0 1 auto', color: 'var(--text-tertiary)', fontSize: 11,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl',
       }}>{hint.text}</span>
-      <span style={{ flexShrink: 0, color: 'var(--anthropic-orange)', fontSize: 11 }}>
-        {pt ? 'acompanhar →' : 'follow →'}
-      </span>
+      {/* THE AFFORDANCE. The whole strip is the control, and a line of text with a dot in front of
+          it does not say so. The arrow is what says "this goes somewhere", it nudges on hover, and
+          the text underlines with it — the pair that says "clickable" on any link. The words
+          "acompanhar →" that used to close the bar are gone: they said it a screen away from the
+          thing they were about. */}
+      <ArrowRight
+        aria-hidden
+        className="ag-edge-hint-arrow"
+        size={13}
+        style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }}
+      />
+      <span style={{ flex: 1 }} />
     </button>
   )
 
@@ -999,9 +1162,9 @@ export default function SessionsPage() {
         fullscreen={fullscreen}
         onMinimize={onMinimize}
         minimizeLabel={pt ? `Minimizar ${panelName}` : `Minimize ${panelName}`}
-        // PIN (spec §11 item 3) — every caller of this function builds a RIGHT-SLOT header, so this
-        // is unconditional here, unlike the bottom band's own bars which never pass it at all.
-        pinned={{ active: rawSlotLayout.pinned[panel], onToggle: () => togglePinned(panel) }}
+        // PIN = FLOAT (`lib/floatingPanels.ts`): the panel leaves the right slot and becomes a
+        // window over the session area. Desktop only — this function already returns null on a phone.
+        pinned={{ active: false, onToggle: () => floatPanel(panel) }}
         gearLabel={pt ? `Opções — ${panelName}` : `${panelName} options`}
         gearEntries={gearEntries}
       />
@@ -1021,7 +1184,19 @@ export default function SessionsPage() {
    */
   const tabPane = (
     id: TabPanelId, opts?: { hideCloseButton?: boolean; headerControls?: ReactNode },
-  ): ReactNode => selected === undefined ? null : (
+  ): ReactNode => selected === undefined ? null : relayed && !relayedTabAvailable(id) ? (
+    // ANOTHER MACHINE's session, on a central: this tab reads that machine's own disk or
+    // conversation, which the central cannot reach — say so instead of mounting a panel whose
+    // first request is refused. See `lib/relayedAside.ts`.
+    <RelayedAsideNote
+      key={selected.id}
+      id={id}
+      lang={pt ? 'pt' : 'en'}
+      onClose={() => closeSlotPanel(id)}
+      {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
+      {...(opts?.headerControls ? { headerControls: opts.headerControls } : {})}
+    />
+  ) : (
     <ArtifactsAside
       key={selected.id}
       {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
@@ -1079,8 +1254,13 @@ export default function SessionsPage() {
       ),
     })
     : null
+  // THE BOTTOM BAND HIDES IT TOO (owner, 2026-09-29: a panel moved to the bottom bar showed the
+  // aside's own "close the panel" button, which read as a stray "minimize the aside" control inside
+  // the bar). The band's own bar already carries the minimize for whatever it docks, right above
+  // this header — the same duplicate the right slot removed. Mobile keeps it, for the same reason
+  // the right slot does: there is no such bar there.
   const bottomTabPane = slotLayout.bottom !== null && isTabPanelId(slotLayout.bottom)
-    ? tabPane(slotLayout.bottom) : null
+    ? tabPane(slotLayout.bottom, { hideCloseButton: !isMobile }) : null
 
   /**
    * THE SAME `HardwarePanel` ELEMENT, reused for the BOTTOM band too (owner, 2026-09-19: "o hardware
@@ -1091,10 +1271,11 @@ export default function SessionsPage() {
    * THE RIGHT SLOT GETS ITS OWN SEPARATE ELEMENT NOW (`hardwarePaneRightEl`, below this one) rather
    * than reusing this one — the two placements need different props (`hideCloseButton`/`controls`
    * for the merged single-header-row right slot; neither for the bottom band, whose own
-   * `SimpleDockedBand` bar already draws the trio in its OWN row, and whose minimize COLLAPSES
-   * rather than closes, so this element's own close button keeps its job there unchanged).
+   * `SimpleDockedBand` bar already draws the trio in its OWN row — which is also why the bottom
+   * element hides its own close button on desktop, like the right one: that bar's minimize is right
+   * above it).
    */
-  const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} />
+  const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} hideCloseButton={!isMobile} />
   const hardwarePaneRightEl = (
     <HardwarePanel
       lang={pt ? 'pt' : 'en'}
@@ -1132,6 +1313,11 @@ export default function SessionsPage() {
     if (id === 'hardware') return hardwareOffered
     return true
   }
+  /** The floating windows this session can actually serve right now — `railGateOpen` again, so a
+   *  window is never drawn for a panel whose gate has closed since it was floated. */
+  const floatingShown = Object.fromEntries(
+    Object.entries(floating).filter(([id]) => railGateOpen(id as PanelId)),
+  ) as typeof floating
   /** THE RAIL'S OWN LIST (spec §2) — `panelSlots.railPanels` already sorts by the stored order. */
   const gatedRailPanels = railPanels(slotLayout).filter(railGateOpen)
   /** THE EYE'S OWN LIST (spec §5) — everything currently `hidden`, gated the same way. */
@@ -1141,11 +1327,11 @@ export default function SessionsPage() {
    *  section; read back here through the SAME store rather than recomputed, so the rail can never
    *  disagree with what that card is currently saying about this exact session. */
   const railActivity = railActivityFromHint(useArtifactLive(selected?.id))
-  /** THE HARDWARE ICON'S OWN RED (addendum item 6) — see `useHardwarePressureWatch`'s own header
-   *  for why this reuses `useHardwareSnapshot` rather than a second reader of the machine. Runs
-   *  whenever this workspace is mounted, not only while the rail itself is on screen — a reader on
-   *  a phone still gets the notification even though there is no rail icon here for them to see. */
-  const { critical: hardwareCritical } = useHardwarePressureWatch(pt ? 'pt' : 'en')
+  // THE HARDWARE ICON'S OWN RED (addendum item 6) — `hardwareCritical` is read from the single
+  // `useHardwarePressureWatch` call this page makes, moved up beside the idle-sessions hook (see
+  // that block's own comment) so `ramUnderPressure` is available before it is needed. Runs whenever
+  // this workspace is mounted, not only while the rail itself is on screen — a reader on a phone
+  // still gets the notification even though there is no rail icon here for them to see.
   const rightActivePanel: PanelId | null = slotLayout.right
   // The 44px mobile touch target is PROJECTED by the `.ag-tap-icon` class already on both buttons
   // below (`index.css`'s invisible-hitbox rule), never painted here — a literal `width/height:
@@ -1203,14 +1389,96 @@ export default function SessionsPage() {
     .filter(railGateOpen)
     .filter(id => id !== 'metrics' || sessionMetrics !== undefined)
   const [mobileHiddenAt, setMobileHiddenAt] = useState<{ x: number; y: number } | null>(null)
+  /**
+   * THE MOBILE TAB STRIP SCROLLS IN ONE ROW rather than wrapping into a grid (owner screenshot,
+   * iPhone 390pt: fourteen tabs wrapped four rows deep ate roughly a quarter of the screen). It is a
+   * single `overflow-x: auto` row (`.tabscroll`, the same hidden-scrollbar class `RepoDetailPage`'s
+   * own tab strip already uses) rather than a second overflow control: unlike the desktop rail (a
+   * fixed-height COLUMN that genuinely cannot grow, spec §4's own reason for its "more" button), this
+   * row sits in normal flow above a column that already scrolls, so a row that simply grows wide and
+   * lets the finger move it needs nothing else.
+   *
+   * THE ACTIVE TAB IS KEPT ON SCREEN, centred, whenever it changes AND whenever the switcher itself
+   * mounts (the aside opening) — a tab picked from a chip/deep link must not land off the visible
+   * edge of its own picker. `activeMobileTab` prefers the right slot's occupant (the one usually
+   * shown full-screen on a phone) and falls back to the bottom band's, since only one of the two
+   * genuinely reflects "what a tap here would return you to".
+   */
+  const tabStripRef = useRef<HTMLDivElement | null>(null)
+  const tabButtonRefs = useRef<Map<PanelId, HTMLButtonElement>>(new Map())
+  const [tabStripEdges, setTabStripEdges] = useState<{ left: boolean; right: boolean }>({ left: false, right: false })
+  const updateTabStripEdges = useCallback(() => {
+    const el = tabStripRef.current
+    if (!el) return
+    setTabStripEdges(tabStripEdgeFade({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }))
+  }, [])
+  const activeMobileTab: PanelId | null = rightActivePanel
+    ?? (slotLayout.bottom !== null && gatedMobilePanels.includes(slotLayout.bottom) ? slotLayout.bottom : null)
+  const scrollActiveMobileTabIntoView = useCallback((id: PanelId | null) => {
+    if (id === null) return
+    tabButtonRefs.current.get(id)?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [])
+  /**
+   * THE STRIP'S FIRST MEASUREMENT CANNOT WAIT FOR AN EFFECT KEYED ON `activeMobileTab`. This
+   * container is not always in the tree — it mounts only once the aside itself opens (gated deeper
+   * in this render tree, by `artShell`), so on the very render where a tap on "Session contents"
+   * both picks the first tab AND creates this DOM node for the first time, `activeMobileTab` can
+   * already read that tab's id BEFORE the container exists (an intermediate render this component
+   * legitimately produces while `artShell` itself is still settling) — a `useEffect` on
+   * `[activeMobileTab]` then never re-fires once the node finally mounts, because the value it
+   * watches never changed a second time. A REF CALLBACK has no such gap: it runs at the exact
+   * moment this node is attached, whatever render that happens to be, so the strip is centred on
+   * whatever `activeMobileTab` is holding right then and its overflow is measured immediately —
+   * "the aside opens" no longer needs a second event to notice it happened. Child buttons attach
+   * their own refs (`tabButtonRefs`) before this parent's, in the same commit, so the lookup below
+   * never races an empty map.
+   *
+   * MEMOIZED ON `activeMobileTab` — an inline (non-memoized) ref function is a NEW function identity
+   * every render, and React detaches-then-reattaches a ref whose identity changed even when the DOM
+   * node itself did not move. `updateTabStripEdges` always commits a fresh `EdgeFade` object (it is
+   * a new object literal on every call, equal by value but not by reference), so every one of those
+   * spurious reattachments re-ran it, which re-rendered this component, which built yet another new
+   * inline function — measured live as React's own "Maximum update depth exceeded" (error #185) the
+   * instant this panel opened. Keying the callback on `activeMobileTab` (plus the two already-stable
+   * `useCallback`s below) means React only calls it again when the tab this strip should be centred
+   * on actually changes, which is also the one moment this module wants it to run again anyway.
+   */
+  const attachTabStrip = useCallback((el: HTMLDivElement | null) => {
+    tabStripRef.current = el
+    if (el === null) return
+    updateTabStripEdges()
+    scrollActiveMobileTabIntoView(activeMobileTab)
+  }, [activeMobileTab, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  // The ONGOING case: the strip is already mounted and the active tab changes underneath it (a
+  // chip/deep link opening a different panel while the aside stays open, or the gated panel list
+  // itself changing shape). The mount-time case above and this one are deliberately separate — one
+  // reacts to the DOM appearing, the other to the DATA changing once it already has.
+  useEffect(() => {
+    if (tabStripRef.current === null) return
+    scrollActiveMobileTabIntoView(activeMobileTab)
+    updateTabStripEdges()
+  }, [activeMobileTab, gatedMobilePanels.length, updateTabStripEdges, scrollActiveMobileTabIntoView])
+  const tabStripFade = tabStripFadeMask(tabStripEdges)
   const rightSwitcherMobile = (isMobile && selected) ? (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0,
       padding: '4px 6px', borderBottom: '1px solid var(--border)',
     }}>
-      <div role="tablist" aria-label={pt ? 'O que mostrar' : 'What to show'} style={{
-        display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0,
-      }}>
+      <div
+        ref={attachTabStrip}
+        className="tabscroll"
+        role="tablist"
+        aria-label={pt ? 'O que mostrar' : 'What to show'}
+        onScroll={updateTabStripEdges}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap', overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
+          flex: 1, minWidth: 0,
+          ...(tabStripFade !== null
+            ? { maskImage: tabStripFade, WebkitMaskImage: tabStripFade }
+            : null),
+        }}
+      >
         {gatedMobilePanels.map(id => {
           const on = isPanelShown(slotLayout, id)
           // THE HARDWARE TAB'S OWN RED (addendum item 6, carried to the phone) — the rail's icon
@@ -1222,16 +1490,23 @@ export default function SessionsPage() {
           return (
             <button
               key={id}
+              ref={el => {
+                if (el) tabButtonRefs.current.set(id, el)
+                else tabButtonRefs.current.delete(id)
+              }}
               role="tab"
               aria-selected={on}
               onClick={() => openSlotPanel(id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                minHeight: 44, padding: '0 14px',
+                display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
                 borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500,
+                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',
                 background: on ? 'var(--bg-elevated)' : 'transparent',
-                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-tertiary)'),
+                // Inactive tabs read as TAPPABLE (owner: they were faded to the point of looking
+                // disabled) — `--text-secondary`, the same token `RepoDetailPage`'s own scrolling tab
+                // strip already uses for its inactive tabs, never the fainter `--text-tertiary`.
+                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-secondary)'),
               }}
             >{panelIconFor(id, 12, selected.harness)}{panelTitle(id, pt)}{hot ? ` — ${pt ? 'sob pressão' : 'under pressure'}` : ''}</button>
           )
@@ -1326,6 +1601,94 @@ export default function SessionsPage() {
   const rightSlotHeader = isMobile ? rightSwitcherMobile : null
 
   /**
+   * WHAT A FLOATING WINDOW HOLDS (`lib/floatingPanels.ts`) — the SAME content the right slot mounts
+   * for each panel, with the pin shown pressed: pressing it docks the panel back into the slot its
+   * placement names, and opens it there. A panel whose gate has closed since it was floated (the
+   * Studio switched off, a relayed session with no terminal) draws no window — the same read-time
+   * rule `resolveForGates` applies to the docked slots.
+   */
+  const dockBack = (id: PanelId) => { dockPanel(id); openSlotPanel(id) }
+  const dockControls = (id: PanelId, name: string): ReactNode => (
+    <PanelFixedControls
+      lang={pt ? 'pt' : 'en'}
+      panelName={name}
+      pinned={{ active: true, onToggle: () => dockBack(id) }}
+      gearLabel={pt ? `Opções — ${name}` : `${name} options`}
+      gearEntries={[]}
+    />
+  )
+  const floatingTitle = (id: PanelId): string => (id === 'cli' || id === 'shell') && selected
+    ? targetLabel(id, selected.harness, pt ? 'pt' : 'en')
+    : panelTitle(id, pt)
+  const floatingBar = (id: PanelId): ReactNode => (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, padding: '6px 8px 0 12px', flexShrink: 0,
+    }}>
+      <span style={{
+        fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--text-primary)',
+        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{floatingTitle(id)}</span>
+      <span style={{ flex: 1 }} />
+      {dockControls(id, floatingTitle(id))}
+    </div>
+  )
+  const floatingBody = (id: PanelId): ReactNode => {
+    if (!selected) return null
+    if (id === 'studio') {
+      return <div ref={setFloatStudioEl} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }} />
+    }
+    if (id === 'cli') {
+      return (
+        <>
+          {floatingBar('cli')}
+          <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+            <ShellBand
+              key={`float-cli-${selected.id}`}
+              placement="aside"
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              {...(selected.harness ? { harness: selected.harness } : {})}
+              lang={pt ? 'pt' : 'en'}
+              theme={theme === 'light' ? 'light' : 'dark'}
+            />
+          </div>
+        </>
+      )
+    }
+    if (id === 'shell') {
+      return (
+        <>
+          {floatingBar('shell')}
+          <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+            <ShellBand
+              key={`float-${selected.id}`}
+              placement="aside"
+              fixedTarget="shell"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
+              {...(selected.harness ? { harness: selected.harness } : {})}
+              lang={pt ? 'pt' : 'en'}
+              theme={theme === 'light' ? 'light' : 'dark'}
+            />
+          </div>
+        </>
+      )
+    }
+    if (id === 'hardware') {
+      return (
+        <HardwarePanel
+          lang={pt ? 'pt' : 'en'}
+          onClose={() => dockBack('hardware')}
+          hideCloseButton
+          controls={dockControls('hardware', panelTitle('hardware', pt))}
+        />
+      )
+    }
+    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt)) })
+  }
+
+  /**
    * IS THE RIGHT SLOT'S OWN CONTENT CURRENTLY FULL SCREEN — `fullscreenModeFor`'s `'overlay'` mode
    * (Studio, or any of the ten former Contents tabs, or Hardware) applied to whichever of them
    * actually occupies the right slot right now. `cli`/`shell` are never included: their full screen
@@ -1336,7 +1699,7 @@ export default function SessionsPage() {
     (rightIsStudio && studioFullscreen) || ((rightIsTab || rightIsHardware) && tabFullscreen)
 
   /** What the right box actually shows: the Studio's own target (StudioHost re-parents its carrier
-   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `TerminalRegion`/`ShellBand`
+   *  into it) while `panelSlots` says so; `cli`/`shell` render their own `ShellBand`
    *  with `placement="aside"` (design §1.5) — ordinary mounts, no persistent carrier needed since
    *  neither holds a buffer that must survive the move; `hardware` its own `HardwarePanel`; any of
    *  the ten former Contents tabs its own `ArtifactsAside` mount (`rightTabPane`, bound to
@@ -1351,14 +1714,15 @@ export default function SessionsPage() {
       {rightSlotHeader}
       {rightSlotBar('cli', targetLabel('cli', selected.harness, pt ? 'pt' : 'en'), () => closeSlotPanel('cli'))}
       <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
-        <TerminalRegion
+        <ShellBand
+          key={`aside-cli-${selected.id}`}
           placement="aside"
-          id={selected.id}
-          theme={theme === 'light' ? 'light' : 'dark'}
+          fixedTarget="cli"
+          sessionId={selected.id}
+          {...(selected.cwd ? { cwd: selected.cwd } : {})}
+          {...(selected.harness ? { harness: selected.harness } : {})}
           lang={pt ? 'pt' : 'en'}
-          fill
-          {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-          act={act}
+          theme={theme === 'light' ? 'light' : 'dark'}
         />
       </div>
     </div>
@@ -1370,6 +1734,7 @@ export default function SessionsPage() {
         <ShellBand
           key={`aside-${selected.id}`}
           placement="aside"
+          fixedTarget="shell"
           sessionId={selected.id}
           {...(selected.cwd ? { cwd: selected.cwd } : {})}
           {...(selected.harness ? { harness: selected.harness } : {})}
@@ -1410,6 +1775,15 @@ export default function SessionsPage() {
    * those two already read rather than the `left: 0` this one still had.
    */
   const leftAsideEdge = useLeftAsideEdge()
+  /** Whether the left list is actually resizable right now — the bottom-left T-junction (below)
+   *  exists only then; see `leftAsideOpen.ts`'s own header for why this needs its own bridge rather
+   *  than a comparison against `leftAsideEdge` above. */
+  const leftAsideOpenNow = useLeftAsideOpen()
+  /** The artifacts aside's own live left edge, REACTIVELY — the bottom-right T-junction's own X
+   *  coordinate is this minus half the 6px gap, matching the gap's own centre line exactly. `null`
+   *  when there is no aside on screen (see `rightAsideEdge.ts`'s own header) — the junction has
+   *  nothing to sit beside then and is withheld, same as the plain vertical gap a few lines below. */
+  const rightAsideEdgeNow = useRightAsideEdge()
   const rightSlotContent = rightSlotFullscreen ? (
     <div style={{
       position: 'fixed', top: 0, left: isMobile ? 0 : leftAsideEdge, bottom: 0,
@@ -1459,6 +1833,7 @@ export default function SessionsPage() {
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
+      {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
       // button — one bar instead of two stacked ones saying overlapping things.
@@ -1545,6 +1920,17 @@ export default function SessionsPage() {
             because a pinned lens takes no pointer events of its own. It renders nothing until
             there is a lens to hide. */}
         <HideLensesButton ctx={ctx} />
+        {/* The bell, same reasoning: this workspace draws no <header>, so without a slot here it
+            has no way onto a phone at all. Painted at the same 32×32 its neighbours use, with the
+            44px mobile touch target coming from the invisible `.ag-tap-icon` hit zone (index.css)
+            rather than a grown painted control — `NotificationBell.buttonClassName` exists for
+            exactly this. */}
+        <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32, borderRadius: 8,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
+        }} />
       </>
     )
     : null
@@ -1710,6 +2096,15 @@ export default function SessionsPage() {
         display: 'flex', flexDirection: 'column', width: asideIn ? shownArtWidth : 0,
         flexShrink: 0, minHeight: 0, background: 'var(--bg-surface)',
         overflow: 'hidden',
+        // A panel on the board like every other: border and 10px corners (its top corners were
+        // square). No border while collapsed to width 0, or a 2px sliver would remain.
+        ...(asideIn ? { border: '1px solid var(--border)', borderRadius: 10, boxSizing: 'border-box' as const } : {}),
+        // TOP ALIGNMENT (owner, 2026-09-27): this panel used to start flush against the header, the
+        // one panel on the board with no gap above it at all. `6` is the SAME outer-gap figure the
+        // centre column's own `marginTop` uses (`OUTER_GAP`, declared further down this component —
+        // a bare literal here rather than that binding, since this style is computed above where
+        // `OUTER_GAP` is declared and referencing it here would be a temporal-dead-zone reference).
+        marginTop: 6,
         transition: asideMotion,
       }
   const artInner: CSSProperties = split
@@ -1828,14 +2223,18 @@ export default function SessionsPage() {
       const target = e.target
       const overlayEl = rightAsideRef.current
       const insideOverlay = !!(overlayEl && target instanceof Node && overlayEl.contains(target))
+      // A floating window counts as part of the workspace's own chrome here, like the rail: working
+      // in one is not "clicking away" from the overlay.
       const insideRail = target instanceof Element
-        && (target.closest('[data-panel-rail]') !== null || target.closest('[role="menu"]') !== null)
-      const action = overlayOutsideAction({ pinned: rawSlotLayout.pinned[panel] === true, insideOverlay, insideRail })
+        && (target.closest('[data-panel-rail]') !== null || target.closest('[role="menu"]') !== null
+          || target.closest('[data-floating-panel]') !== null)
+      // The pin no longer keeps an overlay open — it floats the panel (`lib/floatingPanels.ts`).
+      const action = overlayOutsideAction({ pinned: false, insideOverlay, insideRail })
       if (action === 'minimize') minimize()
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      const action = overlayOutsideAction({ pinned: rawSlotLayout.pinned[panel] === true, insideOverlay: false, insideRail: false })
+      const action = overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false })
       if (action === 'minimize') minimize()
     }
     document.addEventListener('mousedown', onPointerDown)
@@ -1844,7 +2243,7 @@ export default function SessionsPage() {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [artShell, slotLayout.right, rawSlotLayout.pinned, closeSlotPanel, setRightOpen])
+  }, [artShell, slotLayout.right, closeSlotPanel, setRightOpen])
 
   /**
    * What the pane sits beside or under. A VALUE, never a `return`: the moment one of these is
@@ -1876,6 +2275,96 @@ export default function SessionsPage() {
   // and `artShell` would otherwise draw one as a FULL-SCREEN OVERLAY on top of the very screen this
   // route exists to show — so mobile keeps the original early `return`, unaffected by any of this.
   // ---------------------------------------------------------------------------
+
+  /**
+   * THE T-JUNCTIONS (design item, owner requirement) — where the band's own horizontal gap meets a
+   * vertical one. `activeJunctions` (`lib/panelLayout.ts`) says WHICH exist for the current
+   * open/closed combination; this effect answers the one question that module deliberately leaves
+   * to its caller, WHERE — the band's own horizontal gap's Y (`bandGapY`), since nothing else in
+   * this codebase already tracks it (unlike the two vertical gaps' X, which are already live,
+   * reactive bridges: `leftAsideEdge`/`rightAsideEdgeNow`, read above). Placed BEFORE the
+   * `dedicatedTerminal` early `return` below, like every other hook in this component — a hook
+   * after it would only run on SOME renders, which is the crash `sessionsPage.lint.test.ts`'s own
+   * "hook-order" describe block exists to catch.
+   *
+   * The band gap's OWN size never changes (a fixed 6px strip), so `ResizeObserver` on the element
+   * itself would never fire for a REPOSITION — only its containing row resizing (a window resize, an
+   * aside width change) moves it without changing its own box, which is exactly the case
+   * `ResizeObserver` on `splitRef` catches. A band-height drag (through the band's own gap directly,
+   * never through a junction) is the one case neither that nor the dependency list below catches
+   * live — accepted, because nothing here is VERIFIED against dragging the plain band gap while a
+   * junction sits on screen; the junction re-measures on its own next open/close.
+   */
+  const [bandGapY, setBandGapY] = useState<number | null>(null)
+  const measureBandGapY = useCallback(() => {
+    const el = document.getElementById('ag-gap-band-height')
+    if (!el) { setBandGapY(null); return }
+    const r = el.getBoundingClientRect()
+    setBandGapY(r.top + r.height / 2)
+  }, [])
+  useEffect(() => {
+    if (isMobile) { setBandGapY(null); return }
+    measureBandGapY()
+    const el = splitRef.current
+    let ro: ResizeObserver | undefined
+    if (el && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measureBandGapY)
+      ro.observe(el)
+    }
+    window.addEventListener('resize', measureBandGapY)
+    return () => { ro?.disconnect(); window.removeEventListener('resize', measureBandGapY) }
+  }, [isMobile, measureBandGapY, slotLayout.bottom, slotLayout.bottomOpen, split, asideIn, artWidth])
+  /**
+   * A junction drag is in progress from the moment its own `mousedown` arms the two real gaps
+   * (`onJunctionDown`, below) until the NEXT `mouseup` anywhere — the same moment either armed gap's
+   * own listener stops applying, so this never outlives the drag it tracks. While it is true, a
+   * `requestAnimationFrame` loop keeps `bandGapY` current AS the band's own height changes under the
+   * junction's own drag; the dependency-driven effect above is what re-measures for every OTHER
+   * reason a junction can move (a window resize, the OTHER axis changing outside a junction drag).
+   */
+  const junctionDraggingRef = useRef(false)
+  const onJunctionDown = useCallback((bandId: string, asideId: string) => (e: { clientX: number; clientY: number }) => {
+    armGap(bandId, e)
+    armGap(asideId, e)
+    if (junctionDraggingRef.current) return
+    junctionDraggingRef.current = true
+    const step = () => {
+      if (!junctionDraggingRef.current) return
+      measureBandGapY()
+      requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+    const unsubscribe = () => {
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('blur', stop)
+    }
+    const stop = (e: Event) => {
+      if (!isDragEndEvent(e.type)) return
+      junctionDraggingRef.current = false
+      unsubscribe()
+    }
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    window.addEventListener('blur', stop)
+  }, [measureBandGapY])
+  const junctionIds = isMobile ? [] : activeJunctions({
+    leftOpen: leftAsideOpenNow,
+    rightOpen: split && asideIn,
+    // NOT `slotLayout.bottom !== null && slotLayout.bottomOpen` — which of `StudioBand`/`ShellBand`/
+    // `SimpleDockedBand`/`PanelBarBand` actually renders is `bottomBandFor` (`lib/panelBar.ts`),
+    // a function of MORE than `slotLayout.bottom` (relayed status, the session's own harness), so
+    // `slotLayout.bottom` can read `null` while a real, open, resizable band sits on screen —
+    // measured live: `bottom: null, bottomOpen: true` on a perfectly ordinary docked Shell. Whether
+    // the band's own gap actually EXISTS (`bandGapY`, which mirrors it exactly — see that state's
+    // own effect) is the one true signal, and it is `null` for a `PanelBarBand` (a relayed session's
+    // bar-only band, which draws no `BandResizeHandle` at all — there is nothing there to junction
+    // with, which is the correct answer for it too).
+    bandOpen: bandGapY !== null,
+  })
+
   if (dedicatedTerminal && selected) {
     const back = () => navigate(sessionPath(selected.id))
     const dedicated = (
@@ -1938,6 +2427,7 @@ export default function SessionsPage() {
             <ShellBand
               key={`shell-${selected.id}`}
               placement="dedicated"
+              fixedTarget="shell"
               sessionId={selected.id}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
@@ -1945,16 +2435,17 @@ export default function SessionsPage() {
               {...(selected.harness ? { harness: selected.harness } : {})}
             />
           ) : (
-            <TerminalRegion
-              /* DEDICATED: you asked for this screen, so focus is the consent and there is no arm
-                 button; on a phone it carries the key strip. */
+            <ShellBand
+              /* DEDICATED: you asked for this screen, so focus is the consent; on a phone it carries
+                 the key strip. The same terminal the bottom band draws — see `fixedTarget`. */
+              key={`cli-${selected.id}`}
               placement="dedicated"
-              id={selected.id}
-              theme={theme === 'light' ? 'light' : 'dark'}
+              fixedTarget="cli"
+              sessionId={selected.id}
+              {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
-              fill
-              {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
-              act={act}
+              theme={theme === 'light' ? 'light' : 'dark'}
+              {...(selected.harness ? { harness: selected.harness } : {})}
             />
           )}
         </div>
@@ -2302,6 +2793,23 @@ export default function SessionsPage() {
       </div>
       </>
     )
+  } else if (creating || finishing) {
+    // THE DESKTOP HALF OF THE SAME FIX (`isMobile && (creating || finishing)` above is the phone
+    // one) — this branch did not exist at all, so a desktop reader fell straight through every
+    // condition below to the LAST `else`, the plain fleet overview: `panel` is `null` while
+    // `selected` is still `undefined` (the fleet has not polled the new row in yet), so nothing
+    // before this point matched. Worse than a blank screen, that `else` ALSO carries the "that
+    // session is no longer in this machine's list" notice (`sessionId !== undefined && !loading`),
+    // which a moment-old, perfectly healthy spawn made read as already gone — this is the reported
+    // "parece que não criou nada" in full: not merely a missing loader, but an actively wrong one.
+    centre = (
+      <SessionCreating
+        lang={pt ? 'pt' : 'en'}
+        ready={finishing}
+        {...(creatingState?.harness ? { harness: creatingState.harness } : {})}
+        {...(creatingState?.label ? { label: creatingState.label } : {})}
+      />
+    )
   } else if (panel) {
     // THE WRAPPER IS UNCONDITIONAL, and that is a focus bug rather than a style. It used to be
     // `edgeMarker === null ? panel : <div>{edgeMarker}{panel}</div>`: swapping the root between
@@ -2379,7 +2887,56 @@ export default function SessionsPage() {
    * regardless of what the content box itself currently has to show.
    */
   const railDesktop = !isMobile && selected !== undefined
+
+  /**
+   * OWNER-APPROVED VISUAL, mockup option "C" (2026-09-26): the central pane — the region below
+   * that holds the open session's conversation/terminal, and the fleet overview when nothing is
+   * selected — reads as a card fitted into the surrounding frame. DESKTOP ONLY (`!isMobile`): a
+   * phone's screens already cover the viewport edge to edge, and insetting them would just clip
+   * the composer against the rounded corner for no visual gain.
+   *
+   * Four numbers, held in one place rather than scattered across the wrapper below and the three
+   * frame dividers it replaces (`TopBar.tsx`'s `noBottomBorder`, `SideNav`'s own `borderRight`,
+   * `PanelRail.tsx`'s `borderLeft`):
+   *   - `border` — the existing `--border` token; no new colour.
+   *   - `radius` — all four corners.
+   *   - `gap` — the space cleared on every side, which is what makes those three frame borders
+   *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
+   *     them be dropped rather than sandwiched.
+   */
+  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 10, gap: 5 } as const
+  /**
+   * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
+   * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
+   * and the two panels' `marginTop` below: it is the SAME number as `PANEL_GAP` used to be before the
+   * owner's 6→10 bump for the INNER seams (`lib/panelLayout.ts`'s own `PANEL_GAP`), and it stays 6
+   * because an outer edge has no neighbour to grip against — the request was for more room around the
+   * grip, not a wider margin to the window.
+   */
+  const OUTER_GAP = 6
+  /** The T-junction's own hit-zone square — `junctionHitRect`'s formula (`gap + extra`) applied to
+   *  the CURRENT inner gap, so a future `PANEL_GAP` change resizes the junction's target along with
+   *  the seam it sits on instead of leaving it sized for the old gap. */
+  const JUNCTION_SIZE = junctionHitRect({ x: 0, y: 0 }, PANEL_GAP, 4).width
+  /**
+   * FLOATING-PANELS DESIGN (`sdd/brief.md`) — `SessionPanel` now draws its OWN two panels (the
+   * conversation, then a gap, then the bottom band) with their own borders/radius/overflow-hidden,
+   * because the bottom band moved from being docked INSIDE the conversation's card to being its own
+   * panel below it. So this wrapper must NOT also draw a border around the pair — that would be a
+   * panel drawn around two panels, exactly the nesting the brief forbids. It still draws the border
+   * for every OTHER `centre` (nothing selected → `FleetOverview`; the dedicated terminal route),
+   * which are genuinely a single region and still want the old inset-card treatment.
+   */
+  const centreOwnsItsPanels = panel !== null && !dedicatedTerminal
+
   return (
+    <>
+    {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`
+        (both its desktop and mobile-list instances), never here — see that card's own header. This
+        page still owns the REVIEW MODAL below, and the ONE known gap stated for the old banner still
+        holds for it: the mobile DEDICATED TERMINAL (`if (isMobile) return dedicated` above) returns
+        before this point and never shows it — a deliberate, documented limitation rather than a
+        restructuring of that early return. */}
     <div
       ref={splitRef}
       // `position: relative` ON EVERY BRANCH (fix, narrow-overlay pass, 2026-09-22) — it is the one
@@ -2402,23 +2959,91 @@ export default function SessionsPage() {
         ...(split || railDesktop
           ? { display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }
           : { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }),
+        // OUTER FRAME GAPS (`sdd/brief.md`, task 2) — the RIGHT edge (rail to window edge) and the
+        // BOTTOM edge (every panel's own bottom, plus the rail's) are both spent HERE, uniformly,
+        // for every child of this row: the centre column, the right gap, the artifacts aside and
+        // the rail. The LEFT edge is the aside's own concern (`App.tsx`'s `SideNav`, `mode ===
+        // 'sessions'` padding) — this row starts exactly where that padding ends, so adding a
+        // paddingLeft here too would double the gap between the sessions list and the conversation.
+        ...(isMobile ? {} : { paddingRight: OUTER_GAP, paddingBottom: OUTER_GAP }),
       }}
     >
       {/* `display: flex` is the load-bearing part, not `flex: 1`. This file has recorded the same
           bug three times: `flex: 1` on a child means nothing until its PARENT is a flex container,
           and a block child ignores its parent's height and grows to its content — which is how the
           composer once ended up 40.305px down the page on an iPhone 12. */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0,
+        // `relative` so the floating-window layer below (`FloatingPanelLayer`, `inset: 0`) covers
+        // exactly the session area and nothing beside it — the rail and the aside are siblings.
+        position: 'relative',
+        // Desktop-only inset card (see `CENTRAL_PANE`, above). `margin`, never `padding`: this div
+        // is a flex ITEM inside `splitRef`'s row (or the sole item in its column, in the fleet-
+        // overview case), so the flex algorithm sizes it INCLUDING the margin — the pane simply
+        // ends up 5px smaller on every side within the space it was already given, rather than the
+        // margin being added on top of a size already computed and overflowing the fixed-height
+        // column this workspace is built on (see the file's own note on the sessions workspace
+        // never growing a page-level scrollbar). `overflow: hidden` clips children to the curve —
+        // checked: the narrow-desktop `overlay` aside (`artOuter`) and every `position: fixed`
+        // element in this file (the mention toast, the preset modals, `leaveGuard`) are SIBLINGS of
+        // this div under `splitRef`, never descendants, so neither is clipped by it; the in-panel
+        // popovers that are descendants (the composer's `/` and `@` pickers, the bubble's
+        // right-click menu, the "more" menu) all open within their own nested containers, inset
+        // from this box's edges, and stay inside it under normal use.
+        //
+        // ONLY `marginTop` SURVIVES HERE UNCONDITIONALLY. TOP ALIGNMENT (owner, 2026-09-27): this
+        // used to be `CENTRAL_PANE.gap` (5px) — close enough to flush that the panel read as touching
+        // the header, while the left list (`App.tsx`'s `SideNav`) has real room above it from its own
+        // mark/mode-switch row. It is now `OUTER_GAP` (6px), the SAME figure every outer edge already
+        // uses, so no panel in this workspace sits closer to a frame edge than any other.
+        // `marginLeft`/`marginRight`/`marginBottom` are ZERO when this div owns its own two panels
+        // (`centreOwnsItsPanels`): each of those three edges already has its own gap drawn by
+        // something else — the LEFT one by the sessions-list panel's own resize gap, the RIGHT one
+        // by the vertical `.ag-panel-gap` sibling below, the BOTTOM one by `splitRef`'s own
+        // `paddingBottom` above — and adding a SECOND margin on top of any of them doubles the visual
+        // gap (measured live, before this: 11px on the right instead of 6, back when both were 6px).
+        // The plain `FleetOverview`/dedicated-terminal case has no such neighbour gaps of its own, so
+        // it takes the same top-only gap as `SessionPanel`'s own panels (no side margin).
+        ...(isMobile ? {} : centreOwnsItsPanels
+          ? { marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0 }
+          : {
+            // Same placement as the panels `SessionPanel` draws for itself: only the top gap under
+            // the header. A margin on the LEFT added itself to the left list's 10px gap (a 15px gap
+            // with the grip's dots hugging the list — owner report); the sides are already the gaps.
+            marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0,
+            border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
+          }),
+      }}>
         {centre}
+        {/* PINNED PANELS FLOAT HERE (`lib/floatingPanels.ts`) — a layer over the session area, so
+            a window can never be dragged outside it. Desktop only; always mounted with a session
+            selected so the area is measured before the first pin is pressed. */}
+        {!isMobile && selected && (
+          <FloatingPanelLayer
+            windows={floatingShown}
+            render={floatingBody}
+            title={floatingTitle}
+            onRaise={raisePanel}
+            onPlace={placePanel}
+            onArea={setFloatingArea}
+          />
+        )}
       </div>
-      {/* The handle. Four pixels of hit area over a one-pixel rule — the rule is what you see, the
-          area is what you can grab, and matching them makes a divider people miss. It goes with the
-          panel: a grab handle for something that is halfway out of the room resizes nothing.
-          `ResizeGrip` (design item 6) paints the small pill that says so without touching the hit
-          area itself — `.ag-resize-handle` is what gives it something to key its hover/drag state
-          off, in `index.css`. */}
+      {/* THE RIGHT GAP IS THE HANDLE (`sdd/brief.md`) — no painted border of its own any more (that
+          was the doubled divider next to the aside's own left border, screenshot `68381135`): the
+          panel's border plus this gap's three dots are now the ONLY line between the centre column
+          and the artifacts aside. Drag math UNCHANGED (`dragArt`/`shownArtWidth`, above) — only the
+          visual and the hit area moved onto the shared `.ag-panel-gap` grip. */}
         {split && asideIn ? <div
-          className="ag-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={pt ? 'Redimensionar painel lateral' : 'Resize the artifacts aside'}
+          tabIndex={0}
+          className="ag-panel-gap"
+          // A stable id — the bottom-right T-junction (below) replays a synthetic `mousedown` on
+          // this exact element (`PanelGap.tsx`'s `armGap`) to arm its own window-level drag
+          // listener, reusing `dragArt`/`shownArtWidth`'s own clamp/persistence verbatim.
+          id="ag-gap-aside-right"
           onMouseDown={e => {
             // From the width on screen, not the remembered one: a clamped panel would otherwise
             // jump to its stored width the moment the handle is touched.
@@ -2426,11 +3051,33 @@ export default function SessionsPage() {
             setArtDragging(true)
             document.body.style.userSelect = 'none'
           }}
-          style={{
-            width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent',
-            borderLeft: '1px solid var(--border)',
-          }}
-        ><ResizeGrip orientation="vertical" /></div> : null}
+          style={{ width: PANEL_GAP, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
+        ><PanelGapDots orientation="vertical" /></div> : null}
+      {/* THE T-JUNCTIONS THEMSELVES — see the effect above this component's `return` for the
+          measuring and `PanelGap.tsx`'s `PanelJunction`/`armGap` for what a press on one actually
+          does. `position: fixed`, so rendering them here (rather than at each individual gap, which
+          is what they sit BETWEEN) is only a matter of convenience — this is the one place both
+          `bandGapY` and the two asides' own live edges are already in scope. */}
+      {bandGapY !== null && junctionIds.includes('bottom-right') && rightAsideEdgeNow !== null && (
+        <PanelJunction
+          key="bottom-right"
+          label={pt ? 'Redimensionar altura da barra e largura do painel' : 'Resize band height and panel width'}
+          size={JUNCTION_SIZE}
+          left={rightAsideEdgeNow - PANEL_GAP / 2}
+          top={bandGapY}
+          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-right')}
+        />
+      )}
+      {bandGapY !== null && junctionIds.includes('bottom-left') && (
+        <PanelJunction
+          key="bottom-left"
+          label={pt ? 'Redimensionar altura da barra e largura da lista' : 'Resize band height and list width'}
+          size={JUNCTION_SIZE}
+          left={leftAsideEdge - PANEL_GAP / 2}
+          top={bandGapY}
+          onDown={onJunctionDown('ag-gap-band-height', 'ag-gap-aside-left')}
+        />
+      )}
       {/* THE ONE PANE. See the block comment at the top of this section. */}
       {artShell === 'none' ? null : (
         <div style={artOuter} ref={rightAsideRef}>
@@ -2494,7 +3141,7 @@ export default function SessionsPage() {
           is the one guarantee that closes that: it fails `tsc` for the literal below AND for that
           routed shape, pinned in `studioHostMountParams.types.test.ts`. */}
       {selected && mountStudioHostPanel({
-        shown: editorEnabled === true && isPanelShown(slotLayout, 'studio'),
+        shown: editorEnabled === true && (isPanelShown(slotLayout, 'studio') || studioFloating),
         sessionId: selected.id,
         lang: pt ? 'pt' : 'en',
         autosave: editorAutosave === true,
@@ -2511,13 +3158,14 @@ export default function SessionsPage() {
         // of 2026-09-19 (`fullscreenModeFor`'s `'overlay'` mode): `SessionsPage`'s own
         // `rightSlotContent` wrapper and `SessionPanel.tsx`'s `StudioBand` both read the SAME flag
         // to draw the actual viewport-covering box, whichever of the two currently holds it.
-        fullscreen: studioFullscreen,
-        onToggleFullscreen: () => setStudioFullscreen(f => !f),
+        // A floating Studio has no full screen of its own: the window IS its size control.
+        fullscreen: studioFloating ? false : studioFullscreen,
+        onToggleFullscreen: studioFloating ? undefined : () => setStudioFullscreen(f => !f),
         // WHERE IT IS, AND HOW TO MOVE IT — the Studio's own ONE menu (`studioGearEntries`) reads
         // these to offer exactly the move the CURRENT slot allows, and nothing about a different
         // panel (owner, 2026-09-19). `rightIsStudio`/`bottomIsStudio` are already mutually
         // exclusive wherever `shown` is true, the same fact `studioTarget` above rests on.
-        slot: rightIsStudio ? 'right' : 'bottom',
+        slot: rightIsStudio || studioFloating ? 'right' : 'bottom',
         // THE REAL PLACEMENT (rail-loose-ends, item 4) — `studioPlacement`, never `rightIsStudio`,
         // which a phone's viewport fold can leave reading `true` long after the real placement has
         // already become `'bottom'`. `onMove` is driven by the SAME fact for the SAME reason: with
@@ -2527,12 +3175,13 @@ export default function SessionsPage() {
         onMove: () => moveSlotPanel('studio', studioPlacement === 'bottom' ? 'rail' : 'bottom'),
         // THE ALWAYS-VISIBLE MINIMIZE ICON — right-slot only; at the bottom `StudioBand`'s own
         // collapse chevron already is this control (`panelMenu.ts`'s own `panelMinimizeAction`).
-        onMinimizeRight: rightIsStudio ? () => setRightOpen(false) : undefined,
-        // PIN (spec §11 item 3) — right-slot only, same gating as `onMinimizeRight` immediately
-        // above and for the same reason: "the rail only".
-        pinned: rightIsStudio
-          ? { active: rawSlotLayout.pinned.studio, onToggle: () => togglePinned('studio') }
-          : undefined,
+        onMinimizeRight: rightIsStudio && !studioFloating ? () => setRightOpen(false) : undefined,
+        // PIN = FLOAT (`lib/floatingPanels.ts`) — pressed on the docked Studio it floats it, pressed
+        // on the floating window it docks it back. Nothing floats on a phone.
+        pinned: isMobile ? undefined
+          : studioFloating
+            ? { active: true, onToggle: () => dockBack('studio') }
+            : { active: false, onToggle: () => floatPanel('studio') },
       })}
       {/* Mobile-only chrome, and a slot that is always here so it can never shift the pane. */}
       {isMobile ? filtersSheet : null}
@@ -2562,8 +3211,10 @@ export default function SessionsPage() {
           preset={launchingPreset}
           busy={presetLaunchBusy}
           error={presetLaunchError}
-          onCancel={() => { if (!presetLaunchBusy) setLaunchingPreset(null) }}
+          forceable={presetLaunchForceable}
+          onCancel={() => { if (!presetLaunchBusy) { setLaunchingPreset(null); setPresetLaunchForceable(false) } }}
           onConfirm={() => void confirmPresetLaunch()}
+          onForce={() => void confirmPresetLaunch(true)}
         />
       )}
       {presetPrefill && (
@@ -2573,7 +3224,10 @@ export default function SessionsPage() {
           initialPreset={presetPrefill}
           onStarted={(id, started) => {
             setPresetPrefill(null)
-            if (id) navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            if (id) {
+              markSessionPending({ id, ...started })
+              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+            }
           }}
         />
       )}
@@ -2581,5 +3235,17 @@ export default function SessionsPage() {
           pane holds the question asked before the pane is dropped — see `leaveGuard`. */}
       {leaveGuard}
     </div>
+    {idleOpen && (
+      <IdleSessionsModal
+        lang={pt ? 'pt' : 'en'}
+        candidates={idleCandidates}
+        rows={fleet.rows}
+        underPressure={ramUnderPressure}
+        onClose={() => setIdleOpen(false)}
+        act={act}
+        refresh={refresh}
+      />
+    )}
+    </>
   )
 }

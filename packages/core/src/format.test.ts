@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { sessionLabel, fmt, fmtCost, fmtCostFull } from './format'
+import { sessionLabel, fmt, fmtCost, fmtCostFull, fmtElapsed } from './format'
 
 describe('fmtCost', () => {
   // A local model (see isLocalModelId/LOCAL_MODEL_PRICE in local-models.ts) prices at exactly 0 —
@@ -65,6 +65,40 @@ describe('sessionLabel', () => {
   it('returns an empty string when nothing usable is present', () => {
     expect(sessionLabel({})).toBe('')
     expect(sessionLabel({ title: '   ', first_prompt: '' })).toBe('')
+  })
+})
+
+describe('fmtElapsed', () => {
+  it('reads as "under a minute" below one minute, in both languages', () => {
+    expect(fmtElapsed(0, 'en')).toBe('<1m')
+    expect(fmtElapsed(0, 'pt')).toBe('<1min')
+    expect(fmtElapsed(30_000, 'en')).toBe('<1m')
+    expect(fmtElapsed(30_000, 'pt')).toBe('<1min')
+  })
+
+  it('shows minutes alone under an hour', () => {
+    expect(fmtElapsed(45 * 60_000, 'en')).toBe('45m')
+    expect(fmtElapsed(45 * 60_000, 'pt')).toBe('45min')
+  })
+
+  it('shows hours and minutes under a day, dropping the minutes when zero', () => {
+    expect(fmtElapsed(62 * 60_000, 'en')).toBe('1h 2m')
+    expect(fmtElapsed(62 * 60_000, 'pt')).toBe('1h 2min')
+    expect(fmtElapsed(3 * 3_600_000, 'en')).toBe('3h')
+    expect(fmtElapsed(3 * 3_600_000, 'pt')).toBe('3h')
+  })
+
+  it('shows days and hours at or beyond a day, dropping the hours when zero', () => {
+    expect(fmtElapsed(25 * 3_600_000, 'en')).toBe('1d 1h')
+    expect(fmtElapsed(25 * 3_600_000, 'pt')).toBe('1d 1h')
+    expect(fmtElapsed(48 * 3_600_000, 'en')).toBe('2d')
+    expect(fmtElapsed(48 * 3_600_000, 'pt')).toBe('2d')
+  })
+
+  it('is null for negative or non-finite spans — bad data, never a confident duration', () => {
+    expect(fmtElapsed(-1, 'en')).toBeNull()
+    expect(fmtElapsed(NaN, 'en')).toBeNull()
+    expect(fmtElapsed(Infinity, 'en')).toBeNull()
   })
 })
 

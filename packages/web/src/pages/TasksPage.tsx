@@ -56,6 +56,7 @@ import { CentralTaskBoard } from '../components/tasks/CentralTaskBoard'
 import { NewTaskWizard } from '../components/tasks/NewTaskWizard'
 import { ManageStatusesModal } from '../components/tasks/ManageStatusesModal'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
+import { markSessionPending } from '../lib/pendingSessionStore'
 import {
   NA, PRIORITY, SESSION_STATE, button, claimLeft, field, fmtInt, fmtTokens, harnessColor,
   liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus,
@@ -230,6 +231,18 @@ function TaskList() {
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
 
+  // The table draws this INSIDE its own toolbar row (`toolbarStart`); the board keeps it above.
+  const searchBox = (
+    <div style={{ position: 'relative', maxWidth: 380 }}>
+      <Search size={14} style={{ position: 'absolute', left: 11, top: isMobile ? 15 : 8, color: 'var(--text-tertiary)' }} />
+      <input
+        style={{ ...field(isMobile), paddingLeft: 32, ...(isMobile ? {} : { height: 28 }) }}
+        value={q} placeholder={lang === 'pt' ? 'Buscar' : 'Search'}
+        onChange={e => setQ(e.target.value)}
+      />
+    </div>
+  )
+
   return (
     <div style={{
       padding: isMobile ? 12 : 18,
@@ -299,24 +312,20 @@ function TaskList() {
           initialTask={starting.title}
           initialTaskId={starting.taskId}
           onClose={() => setStarting(null)}
-          onStarted={async () => {
+          onStarted={async (id, started) => {
             const to = starting.taskId
             setStarting(null)
+            // This page navigates to the TASK, not the session — but the sessions aside is the
+            // same persistent sidebar the reader may open next, so it gets the same placeholder
+            // row every other `NewSessionModal` caller publishes.
+            if (id) markSessionPending({ id, ...started })
             await reload()
             navigate(`/tasks/${encodeURIComponent(to)}`)
           }}
         />
       )}
 
-      {view !== 'overview' && (
-      <div style={{ position: 'relative', maxWidth: 380 }}>
-        <Search size={14} style={{ position: 'absolute', left: 11, top: isMobile ? 15 : 10, color: 'var(--text-tertiary)' }} />
-        <input
-          style={{ ...field(isMobile), paddingLeft: 32 }} value={q} placeholder="Search"
-          onChange={e => setQ(e.target.value)}
-        />
-      </div>
-      )}
+      {view === 'board' && searchBox}
 
       {rows === null && <div style={{ color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>}
 
@@ -341,6 +350,7 @@ function TaskList() {
       {view === 'board' && shown.length > 0 && (
         <>
           <BoardArrange
+            lang={lang}
             sort={sort} onSort={setSort}
             columnSorts={columnSort} onColumnSorts={setColumnSort}
             lanes={lanes} onLanes={setLanes}
@@ -394,6 +404,8 @@ function TaskList() {
             const body = await res.json() as { task: TaskDetail }
             setDetails(m => new Map(m).set(id, body.task))
           }}
+          onRefreshDetail={refreshDetail}
+          toolbarStart={searchBox}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
           onPatchSubtask={async (ref, sid, patch) => {
             // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show

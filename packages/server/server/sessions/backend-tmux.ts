@@ -3,11 +3,14 @@
  * lives in the pure `tmux-cli.ts` beside it.
  */
 
+import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
+import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
+import type { RewindOutcome } from './types'
 import {
   attachArgs, capturePaneArgs, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
   tmuxListIsEmptyState,
-  resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs,
+  resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
   clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
   showPrefixArgs, trimCapture,
   type TerminalProfile,
@@ -133,7 +136,87 @@ async function sendTextTo(id: string, text: string): Promise<boolean> {
   return writeToPane(id, () => typeAndSubmit(id, text))
 }
 
+/**
+ * Bring the keyboard focus back to the input box before typing — see `input-focus.ts`.
+ *
+ * With background agents running, one ↓ in claude's terminal moves the focus into the agents list;
+ * a prompt typed then is lost and its Enter opens an agent's detail view, while this function used
+ * to report it delivered. Esc was measured to return the focus without interrupting a running
+ * turn. Nothing is sent when the focus is already on the input — an Esc there is not harmless.
+ * `false` when the focus could not be brought back, so the caller says "not delivered" instead of
+ * typing into a screen that will swallow it.
+ */
+async function focusInput(id: string): Promise<boolean> {
+  for (let attempt = 0; attempt < FOCUS_ATTEMPTS; attempt++) {
+    if (inputFocusOf(await captureFrame(id)) === 'input') return true
+    if ((await tmux(sendKeysNamedArgs(id, 'Escape'))).code !== 0) return false
+    await sleep(SUBMIT_SETTLE_MS)
+  }
+  return inputFocusOf(await captureFrame(id)) === 'input'
+}
+
+/**
+ * Empty the input box — one `C-u` per line, since claude's `C-u` deletes the CURRENT line only
+ * (measured: a two-line input needed two). It stops as soon as a press changes nothing, which also
+ * ends it on claude's grey prompt SUGGESTION: that is drawn in the box, reads exactly like typed text
+ * on a capture, and no key deletes it — nor does it need deleting, since typing replaces it.
+ */
+async function clearInput(id: string): Promise<void> {
+  let before = await captureFrame(id)
+  for (let i = 0; i < 12; i++) {
+    if ((await tmux(sendKeysNamedArgs(id, 'C-u'))).code !== 0) return
+    await sleep(SUBMIT_POLL_MS)
+    const after = await captureFrame(id)
+    if (!frameChanged(before, after)) return
+    before = after
+  }
+}
+
+/** See `SessionBackend.rewindTo` and `claude-rewind.ts`. Runs under the pane's write lock. */
+async function rewindDriver(id: string, text: string, occurrence: number): Promise<RewindOutcome> {
+  if (!(await focusInput(id))) return 'failed'
+  await clearInput(id)
+  // ONE burst — two Esc sent 300 ms apart did not open the menu in the measurement.
+  if ((await tmux(sendKeysNamedSequenceArgs(id, ['Escape', 'Escape']))).code !== 0) return 'failed'
+  await sleep(SUBMIT_SETTLE_MS * 2)
+  let menu = parseRewindMenu(await captureFrame(id))
+  if (!menu) return 'no-menu'
+  let seen = 0
+  for (let step = 0; step < REWIND_MAX_STEPS; step++) {
+    if ((await tmux(sendKeysNamedArgs(id, 'Up'))).code !== 0) break
+    await sleep(SUBMIT_POLL_MS)
+    const next = parseRewindMenu(await captureFrame(id))
+    if (!next) { await tmux(sendKeysNamedArgs(id, 'Escape')); return 'unexpected' }
+    const row = highlightedRow(next)
+    // The top of the list: the cursor did not move and nothing is hidden above it.
+    const stuck = row !== null && highlightedRow(menu) === row && next.cursor === menu.cursor && !next.moreAbove
+    menu = next
+    if (row !== null && rewindRowMatches(row, text)) {
+      if (seen === occurrence) {
+        if ((await tmux(sendKeysNamedArgs(id, 'Enter'))).code !== 0) return 'failed'
+        await sleep(SUBMIT_SETTLE_MS * 3)
+        // Still a menu of some kind after the choice: a screen nobody measured. Cancel, never guess.
+        const after = await captureFrame(id)
+        if (parseRewindMenu(after) || /Enter to continue · Esc to cancel/.test(after.join('\n'))) {
+          await tmux(sendKeysNamedArgs(id, 'Escape'))
+          await sleep(SUBMIT_POLL_MS)
+          await tmux(sendKeysNamedArgs(id, 'Escape'))
+          return 'unexpected'
+        }
+        // The restored prompt is put back in the box; the next message must not be typed after it.
+        await clearInput(id)
+        return 'done'
+      }
+      seen++
+    }
+    if (stuck) break
+  }
+  await tmux(sendKeysNamedArgs(id, 'Escape'))
+  return 'not-found'
+}
+
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
+  if (!(await focusInput(id))) return false
   const typed = await tmux(sendKeysLiteralArgs(id, text))
   if (typed.code !== 0) return false
 
@@ -172,6 +255,14 @@ async function typeAndSubmit(id: string, text: string): Promise<boolean> {
     // way — so this buys one more return rather than a verdict. An extra return on an emptied input
     // does nothing; a missing one strands the message until somebody opens the terminal.
     await tmux(sendKeysNamedArgs(id, 'Enter'))
+  }
+  // THE ENTER MAY HAVE OPENED A SCREEN INSTEAD OF SENDING. The movement check above cannot tell —
+  // opening a detail view moves the frame too — so the focus is read once more: a detail view open
+  // now is this Enter's doing. It is closed again and the send is reported as NOT delivered, which
+  // is the truth; "delivered" over a message that reached nobody is the defect being fixed.
+  if (inputFocusOf(await captureFrame(id)) === 'overlay') {
+    await tmux(sendKeysNamedArgs(id, 'Escape'))
+    return false
   }
   return true
 }
@@ -267,7 +358,7 @@ export const tmuxBackend: SessionBackend = {
     // does not start a server — see `spawnArgs`.
     const profile = await terminalProfile()
     const { code, out } = await tmux(
-      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv }),
+      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: process.env.PATH }),
     )
     if (code !== 0) throw new Error(out.trim() || `tmux new-session failed (code ${code})`)
     if (req.initialPrompt) {
@@ -386,6 +477,20 @@ export const tmuxBackend: SessionBackend = {
         await tmux(clearHistoryArgs(id))
       }
       return ok
+    })
+  },
+
+  async rewindTo(id: string, text: string, occurrence: number) {
+    return writeToPane(id, () => rewindDriver(id, text, occurrence))
+  },
+
+  async sendQueuedNow(id: string) {
+    return writeToPane(id, async () => {
+      // claude's own "ctrl+x ctrl+s to send now" — measured: it cut the running reply and sent BOTH
+      // queued messages as one turn, in order.
+      if ((await tmux(sendKeysNamedArgs(id, 'C-x'))).code !== 0) return false
+      await sleep(SUBMIT_POLL_MS)
+      return (await tmux(sendKeysNamedArgs(id, 'C-s'))).code === 0
     })
   },
 

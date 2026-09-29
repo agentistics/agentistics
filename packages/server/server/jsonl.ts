@@ -4,7 +4,7 @@ import { activeMinutesOf, charCount, emptyActiveTime, foldActiveTime, finishActi
 import type { ActiveTimeState } from '@agentistics/core'
 import { getSessionFileStats } from './git'
 import { countGitCommands } from './harness-activity'
-import { countUsage } from './usage-dedupe'
+import { resolveUsage, type UsageContribution } from './usage-dedupe'
 import { emptyAgentMetrics, foldAgentEntry, finishAgentMetrics, type AgentMetricsState } from './agent-metrics'
 import { enrichFromSubagentTranscripts } from './subagent-metrics'
 import { addDelta, editDelta, type EditDelta } from './edit-lines'
@@ -241,7 +241,9 @@ export function makeEmptySession(
     session_id: sessionId,
     project_path: projectPath,
     start_time: startTime,
-    duration_minutes: 0,
+    // Absent, not 0 — this session's file could not even be OPENED (see the `readFile` catch in
+    // `parseSessionJsonl`), which is the same "nothing was walked" class of bug DEFECT M-3 fixed in
+    // `finishClaudeSession`: there is no first-and-last event here at all.
     user_message_count: 0,
     assistant_message_count: 0,
     tool_counts: {},
@@ -385,9 +387,43 @@ export function foldModelSeen(state: ClaudeParseState, e: Record<string, unknown
  * loop — four `JSON.parse` of every line of the same file — and `cachedEnrich` ran five more over
  * a second copy. They fold off the entry this walk has already parsed.
  */
+/**
+ * What one counted `message.id` contributed to `ClaudeParseState` — the four base counters plus
+ * every EXTRA sink this walk feeds from the same usage record, so a later repeat of the id can be
+ * retracted from all of them, not only the four counters `usage-dedupe.ts`'s base type knows about.
+ *
+ * `dayKey` is the day the contribution landed on (or `undefined` when the line had no usable
+ * timestamp) — retracting must subtract from THAT day's bucket, not from whatever day the
+ * SUPERSEDING record falls on; a repeat spanning a UTC midnight is unlikely but not impossible, and
+ * "which bucket has these tokens" must never depend on which occurrence is being processed.
+ *
+ * `ttl1h`/`ttl5m`/`hadTtl` are the record's own cache-creation TTL split, applied and retracted in
+ * lockstep with `cache_creation_input_tokens` so the finish-time reconciliation check
+ * (`cacheCreation1hTokens + cacheCreation5mTokens === cacheCreationTokens`) can never observe a
+ * half-retracted state.
+ */
+interface ClaudeUsageContribution extends UsageContribution {
+  ttl1h: number
+  ttl5m: number
+  hadTtl: boolean
+  dayKey: string | undefined
+}
+
 export interface ClaudeParseState {
   /** How many lines have been folded. Only `modelFirst200` reads it — see its note. */
   lineNo: number
+  /**
+   * Did any line ever parse into a JSON entry? — see the note on `finishClaudeSession`'s
+   * measured-zero fields (`duration_minutes`, `compact_count`/`compact_ms`, `skill_uses`).
+   *
+   * `lineNo` alone cannot answer this: it counts every raw line, including a blank one or one
+   * that failed `JSON.parse` (DEFECT M-3 — a 0-byte transcript, or one whose every line is blank
+   * or unparseable, is a walk that saw no ENTRY, and reported `duration_minutes: 0` /
+   * `compact_count: 0` regardless). This is set the moment ONE line parses, whatever it turns out
+   * to say — the same "was anything read at all" question `cachedEnrich` answers with `null`
+   * rather than a zeroed `EnrichResult` for the identical case.
+   */
+  sawAnyEntry: boolean
   cwd: string
   lastCwd: string
   startTime: string
@@ -423,17 +459,22 @@ export interface ClaudeParseState {
    * The same gauge under `contextTokensFromClaudeJsonl`'s rule: the last reading, WITHOUT the
    * usage dedupe.
    *
-   * Two readings of one number, kept apart on purpose. `contextTokens` above is taken only from a
-   * `usage` record this walk actually counted (`countUsage`), which is the rule `parseSessionJsonl`
-   * has always applied; the standalone reader `cachedEnrich` calls applies neither. They agree on
-   * every transcript measured — a repeated `message.id` repeats its usage byte for byte, so "the
-   * last counted reading" and "the last reading" are the same number — and agreeing is not the same
-   * as being one rule. Two integers is what it costs to keep both callers answering exactly what
-   * they answered before this state existed.
+   * Two readings of one number, kept apart on purpose. `contextTokens` above is assigned from every
+   * usage-bearing line this walk sees, dedup or not — a gauge is reassigned, never accumulated, so
+   * running the assignment unconditionally already lands on the true LAST reading in file order,
+   * whether or not `resolveUsage` (`usage-dedupe.ts`) says the line's four counters are a repeat.
+   * `contextTokensFromClaudeJsonl`, which `cachedEnrich` calls, applies no dedupe rule at all — there
+   * is none left to apply for a gauge. They agree on every transcript measured — a repeated
+   * `message.id` repeats its usage byte for byte on every MAIN transcript sampled here — and
+   * agreeing is not the same as being one rule. Two integers is what it costs to keep both callers
+   * answering exactly what they answered before this state existed.
    */
   contextTokensAny: number
-  /** The message ids whose usage has already been counted — see `usage-dedupe.ts`. */
-  countedUsageIds: Set<string>
+  /**
+   * Every counted message id's LAST-applied contribution — see `usage-dedupe.ts`'s `resolveUsage`.
+   * A repeat of an id retracts this record from every sink it fed (below) before adding its own.
+   */
+  countedUsage: Map<string, ClaudeUsageContribution>
   gitCommits: number
   gitPushes: number
   toolErrors: number
@@ -497,6 +538,7 @@ function dayOf(daily: Map<string, SessionDayUsage>, iso: string | undefined): Se
 export function emptyClaudeParse(): ClaudeParseState {
   return {
     lineNo: 0,
+    sawAnyEntry: false,
     cwd: '', lastCwd: '', startTime: '', lastTime: '', firstPrompt: '', modelId: '', sessionTitle: '',
     userChars: 0, userCharMsgs: 0, assistantChars: 0, assistantCharMsgs: 0,
     userMsgs: 0, assistantMsgs: 0, inputTokens: 0, outputTokens: 0,
@@ -504,7 +546,7 @@ export function emptyClaudeParse(): ClaudeParseState {
     cacheReadTokens: 0, cacheCreationTokens: 0,
     cacheCreation1hTokens: 0, cacheCreation5mTokens: 0, sawCacheCreationBreakdown: false,
     contextTokens: 0, contextTokensAny: 0,
-    countedUsageIds: new Set(),
+    countedUsage: new Map(),
     gitCommits: 0, gitPushes: 0,
     toolErrors: 0, userInterruptions: 0,
     hasMcp: false, sawAgentLaunch: false,
@@ -546,7 +588,10 @@ export function cloneClaudeParseState(state: ClaudeParseState): ClaudeParseState
   return {
     ...state,
     daily,
-    countedUsageIds: new Set(state.countedUsageIds),
+    // Shallow copy is sound: `resolveUsage` never mutates a stored contribution in place, it always
+    // replaces the map entry with a brand new object — so a clone's `.set()` on a repeat can never
+    // reach back and corrupt a value the original state's map still points at.
+    countedUsage: new Map(state.countedUsage),
     claudeFilesModified: new Set(state.claudeFilesModified),
     languageSet: new Set(state.languageSet),
     toolUseIdToName: new Map(state.toolUseIdToName),
@@ -571,6 +616,21 @@ export function cloneClaudeParseState(state: ClaudeParseState): ClaudeParseState
 }
 
 /**
+ * A caller that wants the entries this walk already parsed, without paying for a second
+ * `JSON.parse` of the same file — the canonical-events replay fold is exactly this caller (see
+ * `integrations/claude/replay.ts`). It is called once per successfully parsed line, with the SAME
+ * 1-based `lineNo` this walk counts every raw line by (blanks included), so a record this sink
+ * names by line number and a record `lineRef()` names by the same number are the same line.
+ *
+ * It observes; it must never influence what is parsed. A blank line and a line that fails to parse
+ * are never delivered — there is no entry to hand it — and a sink that THROWS is caught and
+ * ignored, silently and per line, because a bug in an optional observer must not be the reason a
+ * session's own metrics stop being computed. It receives the walk's own parsed object and must not
+ * MUTATE it: the folds below read the same object after it.
+ */
+export type ClaudeParseSink = (entry: Record<string, unknown>, lineNo: number) => void
+
+/**
  * Advance `state` over `lines`, in transcript order. Mutates `state`; returns nothing.
  *
  * The body is `parseSessionJsonl`'s own loop, unchanged except that its locals now live on
@@ -582,7 +642,8 @@ export function cloneClaudeParseState(state: ClaudeParseState): ClaudeParseState
  * marks the event it arrived on), so the events of one chunk cannot be folded until the chunk is
  * done. Its length is the length of THIS chunk, never of the file.
  */
-export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>): void {
+
+export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>, sink?: ClaudeParseSink): void {
   const turnEvents: TurnEvent[] = []
   for (const raw of lines) {
     state.lineNo++
@@ -590,6 +651,9 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
     if (!line) continue
     let e: Record<string, unknown>
     try { e = JSON.parse(line) } catch { continue }
+    state.sawAnyEntry = true
+
+    if (sink) { try { sink(e, state.lineNo) } catch { /* an observer's bug must not break parsing */ } }
 
     // The passes this walk replaces. Each used to re-read the whole file and re-`JSON.parse` every
     // line of it to answer one question; each now folds off the entry already in hand. They are
@@ -717,39 +781,101 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
       if (!state.modelId && typeof msg?.model === 'string' && msg.model.startsWith('claude-')) state.modelId = msg.model
       const msgOutputTokens = (msg?.usage as Record<string, number> | undefined)?.output_tokens ?? 0
       { const d = dayOf(state.daily, ts); if (d) d.messages++ }
-      // ONE BILLED RESPONSE IS COUNTED ONCE. Claude Code writes an assistant turn as several lines
-      // when its content has several blocks, and every one repeats the SAME `message.usage`. This
-      // walk summed per LINE, so a real session's tokens — and the cost priced from them — read
-      // 60-90 % high; see `usage-dedupe.ts` for the three sessions that proved it.
-      if (msg?.usage && countUsage(msg.id, state.countedUsageIds)) {
-        const u = msg.usage as Record<string, number> & { cache_creation?: Record<string, unknown> }
-        state.inputTokens         += u.input_tokens ?? 0
-        state.outputTokens        += u.output_tokens ?? 0
-        state.cacheReadTokens     += u.cache_read_input_tokens ?? 0
-        state.cacheCreationTokens += u.cache_creation_input_tokens ?? 0
-        // The TTL split of THIS line's cache-write portion, when the record states it — see
-        // `usage.cache_creation` on `message.usage`. Under the SAME dedupe gate as every other
-        // counter here, so a repeated line cannot double either portion.
-        const ttl = u.cache_creation
-        if (ttl && typeof ttl === 'object') {
+      // ONE BILLED RESPONSE IS COUNTED ONCE, and the LAST record for an id wins — see
+      // `usage-dedupe.ts`. Claude Code writes an assistant turn as several lines when its content
+      // has several blocks, and every one repeats the SAME `message.usage` — measured byte-identical
+      // on every MAIN transcript sampled, but NOT guaranteed to be: a subagent transcript can carry a
+      // PARTIAL usage on an early line and the FINAL one later, on the same id, and first-wins
+      // silently kept the partial. A repeat therefore RETRACTS whatever its predecessor contributed
+      // (the four counters below, the TTL split, and the day bucket it landed on) before this
+      // record's own numbers are added — the only way a resumable fold that sees the partial line in
+      // one poll and the final line in a LATER one still ends up where a single whole-file read would.
+      //
+      // AN API-ERROR LINE IS NOT A BILLED RESPONSE. Claude Code writes a SYNTHETIC assistant line
+      // when a call could not be completed (`isApiErrorMessage: true`, `message.model:
+      // '<synthetic>'`, and a `message.usage` whose four counters AND nested `cache_creation`
+      // object are all zero). Letting it through here does not move the token totals (its counters
+      // are zero) but it DOES set `sawCacheCreationBreakdown`, so a session whose only usage line is
+      // this record reported an OBSERVED `0`/`0` cache-write TTL split instead of ABSENT — a
+      // confident zero for a split that was never read, the exact defect `HARNESS_CAPABILITIES`
+      // exists to prevent for a whole harness, here at the level of one line. Measured on four real
+      // sessions (2026-09-26) whose only usage-bearing line was exactly this shape. The canonical
+      // replay (`integrations/claude/replay-model.ts`) agrees: it emits no `model.completed` for
+      // this line at all, only a separate `model.failed`.
+      if (msg?.usage && e.isApiErrorMessage !== true) {
+        const raw = msg.usage as Record<string, number> & { cache_creation?: Record<string, unknown> }
+        const ttl = raw.cache_creation
+        const hadTtl = !!(ttl && typeof ttl === 'object')
+        const next: ClaudeUsageContribution = {
+          input_tokens: raw.input_tokens ?? 0,
+          output_tokens: raw.output_tokens ?? 0,
+          cache_read_input_tokens: raw.cache_read_input_tokens ?? 0,
+          cache_creation_input_tokens: raw.cache_creation_input_tokens ?? 0,
+          ttl1h: hadTtl && typeof ttl!.ephemeral_1h_input_tokens === 'number' ? ttl!.ephemeral_1h_input_tokens : 0,
+          ttl5m: hadTtl && typeof ttl!.ephemeral_5m_input_tokens === 'number' ? ttl!.ephemeral_5m_input_tokens : 0,
+          hadTtl,
+          // The day this turn happened on, exactly as `dayOf` keys it — a turn with no readable
+          // timestamp contributes to the lifetime totals and to no day, and retracting it later must
+          // touch no bucket either.
+          dayKey: ts && ts.length >= 10 ? ts.slice(0, 10) : undefined,
+        }
+
+        const decision = resolveUsage(msg.id, state.countedUsage, next)
+        if (decision.replace) {
+          const prev = decision.previous
+          // A response belongs to the day it STARTED: its final usage replaces the partial one, but
+          // on the FIRST record's day — the canonical replay stamps a response with its first
+          // record's timestamp and its last record's usage. Moving it to the final line's day split
+          // one response's tokens across midnight differently from the replay (measured 2026-09-26
+          // on two real sessions, cfd203d2 and 64f54029). `next` is the object `resolveUsage` just
+          // stored, so the next repeat retracts from this same day.
+          next.dayKey = prev.dayKey ?? next.dayKey
+          state.inputTokens         -= prev.input_tokens ?? 0
+          state.outputTokens        -= prev.output_tokens ?? 0
+          state.cacheReadTokens     -= prev.cache_read_input_tokens ?? 0
+          state.cacheCreationTokens -= prev.cache_creation_input_tokens ?? 0
+          // `sawCacheCreationBreakdown` is never unset here: it answers "has a breakdown EVER been
+          // seen on a counted line", and downstream (`finishClaudeSession`) only trusts it in
+          // combination with the sums it gates actually reconciling against the total — which
+          // retracting the OLD ttl figures alongside the old totals keeps true regardless.
+          if (prev.hadTtl) {
+            state.cacheCreation1hTokens -= prev.ttl1h
+            state.cacheCreation5mTokens -= prev.ttl5m
+          }
+          if (prev.dayKey) {
+            const pd = state.daily.get(prev.dayKey)
+            if (pd) {
+              pd.input_tokens                -= prev.input_tokens ?? 0
+              pd.output_tokens               -= prev.output_tokens ?? 0
+              pd.cache_read_input_tokens     -= prev.cache_read_input_tokens ?? 0
+              pd.cache_creation_input_tokens -= prev.cache_creation_input_tokens ?? 0
+            }
+          }
+        }
+
+        state.inputTokens         += next.input_tokens ?? 0
+        state.outputTokens        += next.output_tokens ?? 0
+        state.cacheReadTokens     += next.cache_read_input_tokens ?? 0
+        state.cacheCreationTokens += next.cache_creation_input_tokens ?? 0
+        if (next.hadTtl) {
           state.sawCacheCreationBreakdown = true
-          state.cacheCreation1hTokens += typeof ttl.ephemeral_1h_input_tokens === 'number' ? ttl.ephemeral_1h_input_tokens : 0
-          state.cacheCreation5mTokens += typeof ttl.ephemeral_5m_input_tokens === 'number' ? ttl.ephemeral_5m_input_tokens : 0
+          state.cacheCreation1hTokens += next.ttl1h
+          state.cacheCreation5mTokens += next.ttl5m
         }
-        // The SAME four counters, against the day this turn happened on. A turn with no readable
-        // timestamp contributes to the lifetime totals and to no day — it cannot be placed, and
-        // placing it on the session's start day would be inventing the one fact this exists to
-        // stop inventing.
-        const d = dayOf(state.daily, ts)
+        // The SAME four counters, against the day this response STARTED on — see `next.dayKey` above.
+        const d = next.dayKey ? dayOf(state.daily, next.dayKey) : null
         if (d) {
-          d.input_tokens              += u.input_tokens ?? 0
-          d.output_tokens             += u.output_tokens ?? 0
-          d.cache_read_input_tokens   += u.cache_read_input_tokens ?? 0
-          d.cache_creation_input_tokens += u.cache_creation_input_tokens ?? 0
+          d.input_tokens              += next.input_tokens ?? 0
+          d.output_tokens             += next.output_tokens ?? 0
+          d.cache_read_input_tokens   += next.cache_read_input_tokens ?? 0
+          d.cache_creation_input_tokens += next.cache_creation_input_tokens ?? 0
         }
-        // LAST wins, and only when the record actually carries an input side. A synthetic record of
-        // all zeros would otherwise reset a real reading to "context empty" on the final turn.
-        const sent = contextOfUsage(u)
+        // The context GAUGE needs no retraction: it is REASSIGNED, never summed, so running this on
+        // every usage-bearing line — whether this walk counted it as new, a replace, or (previously)
+        // would have skipped it outright — already lands on the true last reading in file order.
+        // Only when the record actually carries an input side, so a synthetic all-zero record never
+        // resets a real reading to "context empty" on the final turn.
+        const sent = contextOfUsage(raw)
         if (sent > 0) state.contextTokens = sent
       }
       // Collect tool names in this message for token attribution
@@ -872,9 +998,14 @@ export async function finishClaudeSession(
   fallbackPath: string,
   source: 'jsonl' | 'subdir',
 ): Promise<SessionMeta> {
+  // DEFECT M-3: absent, never a confident 0, when there is no first-and-last event to subtract —
+  // which is exactly the case for a walk that saw no entry at all (a 0-byte transcript, or one
+  // whose every line was blank/unparseable; proven on real session f455dc9a). The canonical
+  // replay (`projections/session-meta.ts`) agrees: `duration_minutes` is absent unless a
+  // `session.started`/`session.ended` pair was actually seen.
   const durationMinutes = (state.startTime && state.lastTime)
     ? Math.max(0, Math.round((new Date(state.lastTime).getTime() - new Date(state.startTime).getTime()) / 60000))
-    : 0
+    : undefined
 
   const projectPath = state.cwd || fallbackPath
   /**
@@ -897,9 +1028,11 @@ export async function finishClaudeSession(
   // The parse alone can no longer produce the NUMBERS: since Claude Code made the Agent tool
   // asynchronous the parent transcript names the subagent and nothing else, so the invocations come
   // back marked `unmeasured` and are filled in from each subagent's own transcript, which sits
-  // beside this file. See `subagent-metrics.ts`.
+  // beside this file. See `subagent-metrics.ts`. The main transcript's own message ids go with
+  // them: a forked subagent replays responses this transcript already counted, and one billed
+  // response is counted ONCE per session (`claimSessionUsage`).
   const agentMetrics = (state.toolCounts['Agent'] || state.sawAgentLaunch)
-    ? await enrichFromSubagentTranscripts(finishAgentMetrics(state.agents, state.modelId), filePath, sessionId)
+    ? await enrichFromSubagentTranscripts(finishAgentMetrics(state.agents, state.modelId), filePath, sessionId, new Set(state.countedUsage.keys()))
     : undefined
 
   const compaction = finishCompacts(state.compact)
@@ -934,7 +1067,13 @@ export async function finishClaudeSession(
     // and a subagent runs its own context and compacts on its own (5 of this machine's 255 subagent
     // transcripts carry a `compact_boundary`). Stamping its count on the session would be a
     // confident wrong number where the honest answer is that the evidence is gone.
-    ...(source === 'jsonl'
+    //
+    // DEFECT M-3: `source === 'jsonl'` alone is not "this session's own transcript was read" — a
+    // 0-byte file (or one whose every line is blank/unparseable) is `source === 'jsonl'` too, and
+    // `state.sawAnyEntry` is what actually answers "did the walk fold anything". Without it a
+    // transcript nobody could read was reported as one that compacted zero times and invoked no
+    // skill, which is a claim about a session this walk never saw.
+    ...(source === 'jsonl' && state.sawAnyEntry
       ? {
           compact_count: compaction.count,
           compact_ms: compaction.ms,

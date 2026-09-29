@@ -27,10 +27,11 @@ import { getMongoDb } from './mongo'
 import { toBsonDate, fromBsonDate, type StoredDate } from './mongo-dates'
 import type { Collection } from 'mongodb'
 
-type StoredRecord = Omit<SharedTaskRecord, 'createdAt' | 'updatedAt' | 'deliveredAt'>
+type StoredRecord = Omit<SharedTaskRecord, 'createdAt' | 'updatedAt' | 'deliveredAt' | 'startedAt'>
 type StoredComment = Omit<SharedTaskComment, 'createdAt'> & { createdAt: Date | null }
-type StoredSubtask = Omit<SharedSubtask, 'createdAt' | 'updatedAt'> & {
+type StoredSubtask = Omit<SharedSubtask, 'createdAt' | 'updatedAt' | 'startedAt' | 'deliveredAt'> & {
   createdAt: Date | null; updatedAt: Date | null
+  startedAt?: Date | null; deliveredAt?: Date | null
 }
 type StoredFile = Omit<SharedTaskFile, 'createdAt'> & { createdAt: Date | null }
 
@@ -44,6 +45,7 @@ export type TeamTaskDoc = StoredRecord & {
   createdAt: Date | null
   updatedAt: Date | null
   deliveredAt?: Date | null
+  startedAt?: Date | null
   comments: StoredComment[]
   subtasks: StoredSubtask[]
   files: StoredFile[]
@@ -73,7 +75,7 @@ export function toTeamTaskDoc(
   shared: SharedTask, org: string, memberId: string, user: string,
 ): TeamTaskDoc {
   const safe = redactSharedTask(shared)
-  const { createdAt, updatedAt, deliveredAt, ...rest } = safe.task
+  const { createdAt, updatedAt, deliveredAt, startedAt, ...rest } = safe.task
   return {
     ...rest,
     org,
@@ -83,10 +85,16 @@ export function toTeamTaskDoc(
     createdAt: toBsonDate(createdAt),
     updatedAt: toBsonDate(updatedAt),
     ...(deliveredAt !== undefined ? { deliveredAt: toBsonDate(deliveredAt) } : {}),
+    ...(startedAt !== undefined ? { startedAt: toBsonDate(startedAt) } : {}),
     comments: safe.comments.map(c => ({ ...c, createdAt: toBsonDate(c.createdAt) })),
-    subtasks: safe.subtasks.map(s => ({
-      ...s, createdAt: toBsonDate(s.createdAt), updatedAt: toBsonDate(s.updatedAt),
-    })),
+    subtasks: safe.subtasks.map(s => {
+      const { startedAt: sStarted, deliveredAt: sDelivered, ...sRest } = s
+      return {
+        ...sRest, createdAt: toBsonDate(s.createdAt), updatedAt: toBsonDate(s.updatedAt),
+        ...(sStarted !== undefined ? { startedAt: toBsonDate(sStarted) } : {}),
+        ...(sDelivered !== undefined ? { deliveredAt: toBsonDate(sDelivered) } : {}),
+      }
+    }),
     files: safe.files.map(f => ({ ...f, createdAt: toBsonDate(f.createdAt) })),
     sessionIds: [...safe.sessionIds],
     sessionsWithheld: safe.sessionsWithheld,
@@ -94,19 +102,22 @@ export function toTeamTaskDoc(
 }
 
 /** As read back: every stored date may still be a string in a doc an older build wrote. */
-type ReadableTaskDoc = Omit<TeamTaskDoc, 'createdAt' | 'updatedAt' | 'deliveredAt' | 'comments' | 'subtasks' | 'files'> & {
+type ReadableTaskDoc = Omit<TeamTaskDoc, 'createdAt' | 'updatedAt' | 'deliveredAt' | 'startedAt' | 'comments' | 'subtasks' | 'files'> & {
   createdAt?: StoredDate
   updatedAt?: StoredDate
   deliveredAt?: StoredDate
+  startedAt?: StoredDate
   comments?: (Omit<StoredComment, 'createdAt'> & { createdAt?: StoredDate })[]
-  subtasks?: (Omit<StoredSubtask, 'createdAt' | 'updatedAt'> & { createdAt?: StoredDate; updatedAt?: StoredDate })[]
+  subtasks?: (Omit<StoredSubtask, 'createdAt' | 'updatedAt' | 'startedAt' | 'deliveredAt'> & {
+    createdAt?: StoredDate; updatedAt?: StoredDate; startedAt?: StoredDate; deliveredAt?: StoredDate
+  })[]
   files?: (Omit<StoredFile, 'createdAt'> & { createdAt?: StoredDate })[]
 }
 
 /** Map a Mongo doc back to the wire shape. Pure. Reads a legacy string date identically. */
 export function fromTeamTaskDoc(doc: ReadableTaskDoc): SharedTask {
   const {
-    _id, org, memberId, user, createdAt, updatedAt, deliveredAt,
+    _id, org, memberId, user, createdAt, updatedAt, deliveredAt, startedAt,
     comments, subtasks, files, sessionIds, sessionsWithheld, ...rest
   } = doc
   void _id; void org; void memberId; void user
@@ -116,11 +127,17 @@ export function fromTeamTaskDoc(doc: ReadableTaskDoc): SharedTask {
       createdAt: fromBsonDate(createdAt),
       updatedAt: fromBsonDate(updatedAt),
       ...(deliveredAt !== undefined ? { deliveredAt: fromBsonDate(deliveredAt) } : {}),
+      ...(startedAt !== undefined ? { startedAt: fromBsonDate(startedAt) } : {}),
     },
     comments: (comments ?? []).map(c => ({ ...c, createdAt: fromBsonDate(c.createdAt) })),
-    subtasks: (subtasks ?? []).map(s => ({
-      ...s, createdAt: fromBsonDate(s.createdAt), updatedAt: fromBsonDate(s.updatedAt),
-    })),
+    subtasks: (subtasks ?? []).map(s => {
+      const { startedAt: sStarted, deliveredAt: sDelivered, ...sRest } = s
+      return {
+        ...sRest, createdAt: fromBsonDate(s.createdAt), updatedAt: fromBsonDate(s.updatedAt),
+        ...(sStarted !== undefined ? { startedAt: fromBsonDate(sStarted) } : {}),
+        ...(sDelivered !== undefined ? { deliveredAt: fromBsonDate(sDelivered) } : {}),
+      }
+    }),
     files: (files ?? []).map(f => ({ ...f, createdAt: fromBsonDate(f.createdAt) })),
     sessionIds: sessionIds ?? [],
     sessionsWithheld: sessionsWithheld ?? 0,

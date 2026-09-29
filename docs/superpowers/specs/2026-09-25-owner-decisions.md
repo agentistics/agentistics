@@ -1,0 +1,271 @@
+# Owner decisions — 2026-09-25
+
+**The record of what the owner decided, and when.** On 2026-09-25 the owner reviewed the
+recommendations for every open question in `2026-09-19-agentistics-runtime-master.md` §50 and in
+`2026-09-20-runtime-b3-tool-catalogue.md` (D-T5/6/7) and answered: *"toma as decisões de acordo com
+sua recomendação"* — take the decisions according to the recommendation — then *"pode fazer"*.
+
+So every entry below is **decided**, by the owner, on 2026-09-25. Each one carries the reason and the
+alternative that was rejected, because a decision with no rejected alternative is a preference and
+six months from now nobody can tell which it was. Subtask A1.0 (`s-52b0265e56`) applies this record
+to the spec text: it replaces §50's open questions with these answers and removes every hedge in the
+spec that these answers settle.
+
+## Blocking A1
+
+**D1 · What is a "Session".** A Session is the runtime's unit of work; a harness conversation is a
+**Run** inside it. Legacy data projects 1 Session → 1 Run, so nothing on screen changes until
+somebody groups two runs. *Reason:* it is the only option that delivers the brief's objective C — one
+session continued across Web, CLI and TUI. *Rejected:* (b) Session stays the conversation with a new
+entity above it — inverts the brief's Session → Run hierarchy, and every later document would have to
+re-explain it; (c) Task as the only grouping — gives up the shared multi-surface session outright.
+*Cost accepted:* "session" means slightly more inside the canonical model than on today's screens;
+the docs say so in one place.
+
+**D2 · Journal storage.** **SQLite WAL, one journal per machine.** *Reason:* measured on this machine
+(`docs/superpowers/research/15-sqlite-journal-measurement.md`): 1/2/4/8 concurrent writer processes,
+zero loss, zero duplication, zero surfaced `SQLITE_BUSY`, 29k → 60k rows/s; idempotency is structural
+(`UNIQUE(event_id)`). *Rejected:* (b) JSONL segments + index — idempotency would become code instead
+of a constraint; (c) Mongo everywhere — forces a database on every solo install of a local-first
+product.
+
+## Before B1 — the native harness
+
+**D3 · Native harness base.** **Our own runtime**, with the provider layer built on the Vercel AI
+SDK (Apache-2.0) **behind our own interface**, under the four conditions of master spec §22.1.1
+(capture raw per step, read Anthropic's `iterations`, usage per step, own the retry with
+`maxRetries: 0`). OpenCode (MIT) is read as architectural reference only; **no code derived from the
+leaked Claude Code source, under any option** (§54). *Reason:* the architecture — session, loop,
+tools, policy, journal, context manager — is ours; the SDK is only the narrowest layer, the HTTP
+dialect of each provider, and it is swappable. *Rejected:* (b) fork OpenCode — inherits their session
+and event model, which collides with the canonical journal, and a fast-moving dependency; (c)
+everything from scratch including provider clients — five clients to maintain for no telemetry gain.
+
+**API cost and the first provider.** B1 starts with **Anthropic only, on the owner's own API key,
+with a spend limit set in the provider console**. Other providers arrive in B5, once the usage model
+has been reconciled against one real bill. *Reason:* a subscription cannot be used by our own loop
+for Anthropic (master spec §22.3/§22.4); B1's own delivery is recording the exact cost of each call,
+so the first thing it proves is that number.
+
+**D4 · Live ingestion.** **Hooks + a local OTLP receiver, with file-tail as the floor.** *Rejected:*
+(b) ACP first — spawn-only, and lossy for Gemini's usage today; (c) file-tail only — stays post-hoc.
+*Note:* installing a hook into a harness's settings remains an explicit act of the user (CLAUDE.md,
+"Anything agentop writes OUTSIDE its own directories").
+
+## Before B3 — the tools
+
+**D-T5 · Sandbox.** **Optional in v1:** `setrlimit` + a capability probe + **Docker as the opt-in
+sandbox**; bubblewrap / Landlock via `bun:ffi` / Seatbelt later; native Windows last. The screen
+states one of four states in plain words — no sandbox · filesystem only · full container · requested
+but unavailable. *Reason:* of five surveyed harnesses only Codex sandboxes by default, and its own
+sandbox fails intermittently under WSL; a mandatory sandbox here would be an agent that sometimes
+refuses to run. *Rejected:* a mandatory sandbox from day one — on WSL the sandbox of Codex itself intermittently refuses to run (their issue #1039). *Accepted by the owner, consciously:* with no sandbox the agent reads anything the
+account can read and reaches the network; every write and shell still goes through the policy (D-T3).
+
+**D-T6 · git.** Read verbs as tools in v1 (cheap, and they feed metrics); write verbs as tools in v2. *Rejected:* `git` through the shell only — no attributable git events.
+
+**D-T7 · Browser.** A gated runtime, reached through delegation — not an ordinary tool. *Rejected:* the browser as an ordinary tool — reach without a gate.
+
+## Data and privacy
+
+**D5 · Conversation text in the journal.** Metadata + tool summaries by default for external
+harnesses. For NATIVE executions the full raw content is stored locally in the content store, under
+the context-manager design's §8 rules (never to a central, not in a backup by default, never into
+memory without consent, redacted only where it leaves scope, `sensitive` executions excluded from
+every exit). *Rejected:* full text for external harnesses — the harness already stores it, and a copy
+doubles the sensitive surface.
+
+**D6 · Retention.** **Events are kept forever**, with a size budget and a stated compaction rule.
+Raw native content follows the context manager's retention (lives while the session can be resumed,
+then expires by age or disk budget; an expired part says so). *Rejected:* a default window with
+opt-out — it would delete history nobody asked to delete.
+
+**D7 · Does the central receive events?** **Not in the first phases.** Members keep pushing computed
+metrics; an event delta push is phase 4+, behind its own flag, under the same sharing rules.
+*Rejected:* an early event push — every privacy rule would need a second implementation.
+
+**D10 · A shared Session in team mode.** **Local-only.** *Rejected:* relayed through a central — a
+central-hosted session is a security model this product has never had.
+
+**D14 · Repository memory to a central.** **No, for now** — memory stays on the machine until a need
+is stated. *Rejected:* opt-in per repository — memory facts are freer text than task metadata, and
+inheriting `Task.shared`'s rule without its own redaction decision is the lenient default by another
+door.
+
+**D16 · A central seeing a machine's fleet in real time (issue #215).** **Keep the existing relay and
+add a push of state transitions only** — a small, bounded widening, under the same consent switches
+and sharing rules. *Rejected:* (b) waiting for D7's event push; (c) leaving it unanswered.
+
+## Before B6 — memory
+
+**D13 · The memory-write consent switch.** Its **own** `preferences.memoryEnabled`, absent reads as
+off for inferred writes. *Rejected:* a fourth `archiveMode` value — retaining raw chat and deriving a
+durable fact are different questions and deserve different switches.
+
+**D15 · Semantic retrieval in v1.** **No.** Ship structured facts, measure what they answer, add
+retrieval deliberately with the reconciliation written down. *Rejected:* retrieval from the start
+behind `archiveMode: 'full'`.
+
+## Later
+
+**D8 · Gemini tokens/cost.** Declare the capability **`partial`** and keep the money, with the
+reconciliation against a bill written down. **First step, before anything is flipped:** the master
+spec says the code already reports `true` while CLAUDE.md says the flags were deliberately left off —
+read the code and record which is true. *Rejected:* turning the figures off until a bill is reconciled.
+
+**D9 · Plugin sandboxing.** Define the contract now; ship the loader when there is demand. *Rejected:* in-process plugins now (trusted only, no isolation) and a child-process loader now (a cost paid before any demand).
+
+**D11 · Provider gateway.** Spec it, build it last — the direct path already produces every number. *Rejected:* building the gateway early — it duplicates what the direct path already measures.
+
+**D12 · Browser implementation.** Playwright as the default; the contract stays implementation-agnostic. *Rejected:* a browser extension or a remote browser service as the default — the extension ties the runtime to one browser and to the user's profile; the remote service sends pages off the machine.
+
+## Added later on 2026-09-25 (owner, via the specification session)
+
+**D17 · One confidence vocabulary.** **`exact | estimated | inferred`, everywhere; `derived` is
+removed.** A value derived from exact inputs by a deterministic rule is `exact`; it becomes
+`estimated` when the rule introduces an estimate (a price table, a token approximation). The
+confidence of a number is the weakest of its inputs (P3 §2 already says so). Applied to master §14
+and §16 and to P2. *Rejected:* keeping `derived` as a fourth level — it mixes how a value was
+computed with how certain it is.
+
+**D18 · Model policy for this week (2026-09-25).** Opus 5.5 costs less than Opus 5, and its cache
+read costs the same as Sonnet 5's (US$0,20/MTok; source platform.claude.com/docs/en/about-claude/
+pricing, read 2026-09-25). So: integrating sessions run on `claude-opus-5-5`; an item that writes a
+file runs on Sonnet 5 or Opus 5.5; Haiku only on a read-only item (two Haiku subagents of the A1.0
+session itself reported edits that were not on disk); the per-item approval for Opus now applies to
+Opus 5.5 — the model and the reason are still recorded per item. Applied as a dated note in
+delivery-breakdown §2.
+
+**D19 · Commit approval.** The coordinator may release a commit on a feature branch after checking
+the evidence (a red → green test, `tsc`, the handback). A PR into `dev` stays the owner's, approved
+in one batch once a day. Applied to delivery-breakdown §5 rule 4.
+
+**D20 · The measured fields of a model call join the canonical contract.** Taken on 2026-09-25 by
+the specification session under the owner's delegation ("toma as decisões de acordo com sua
+recomendação"); the owner may veto. `ModelInvocation` and `model.completed` gain, all OPTIONAL and
+additive: `stopReason` (the provider's verbatim value plus B1.1's normalised `StopReason`, not a
+second enum), `modelRequested` + `modelServed` (they differ under aliases and routing, and only the
+served one prices the call), `attemptId` + `attempt` (1-based — the runtime owns the retry, so each
+retry is its own attempt; the billed response is still ONE event keyed on the provider's response
+id, and the attempts link to it), `iterations` (master §22.1.1 condition #2 — losing them loses
+tokens) and `agentId?` (optional on `ModelInvocation`, O-6: a bare call has no agent). Optional and
+additive because nothing A1/A2 already built may break, the session-meta projection ignores them,
+and a source that cannot produce a field leaves it ABSENT — never zero (the `HARNESS_CAPABILITIES`
+rule). Applied by B1.6 to `canonical/event.ts` / `entities.ts` (a type test proves A1.1's events
+still compile unchanged) and to master §13/§14. *Rejected:* (a) a separate B1-only event type — two
+shapes for one billed call is the duplication the journal exists to end; (b) an untyped `extra` bag
+— unqueryable, and a field nobody types is a field nobody validates.
+
+## Added on 2026-09-26 (specification session, under the owner's delegation)
+
+**D21 · A `model.completed` carries the REAL counters; a counter that could not be produced is
+ABSENT (2026-09-26).** Taken by the specification session under the owner's delegation (task
+t-e1dea7cd6f, comment "DECISIONS 2026-09-26"); the owner may veto. Native path: the provider
+response's usage through B1.1's mapping (all four counters plus the reasoning `billing`
+discriminator). Replay path: the transcript's usage, last-wins per `message.id` (consistent with
+M-1). Each of the four counters on `ModelCompletedData.usage` — and on `ModelInvocation.usage`,
+which mirrors it — becomes individually OPTIONAL (`ModelUsageCounters = Partial<TokenBreakdown>`),
+and an absent counter means exactly "the source did not report it". No `missing` array is added:
+the absence IS the statement, and a second list could disagree with the numbers beside it.
+`provider/emit.ts` writes only the counters the provider reported and marks the event `exact` for
+what is present. Every reader of that usage treats an absent counter as absent: a total over events
+that met one is partial (`absentUsageCounters()`), the cost priced from it too, never a measured
+sum. Additive for every reader that already handled absence; `canonical/d21-absent-counters.test.ts`
+proves an event in the pre-D21 shape still compiles. Applied by B1.7a to `canonical/event.ts` /
+`entities.ts`, `provider/emit.ts`, the session-meta projection and master §14.2. Unblocks B1.7.
+The replay path was applied by A2.7 (Claude adapter 1.4.0): `integrations/claude/replay-model.ts`
+read each transcript counter through `num()`, which turned a missing one into 0 — now it is absent,
+and the context gauge is omitted unless all three input-side counters were reported.
+*Rejected:* keeping B1.6's placeholders (four required numbers, the missing ones zero, the event
+lowered to `inferred`) until B5 — a zero with a confidence label is still a confident zero on every
+surface that sums it, which is the `HARNESS_CAPABILITIES` rule applied to one counter.
+
+**D22 · A human turn is an event.** Taken on 2026-09-26 by the specification session under the
+owner's delegation; the owner may veto. Implemented by A2.7. The canonical vocabulary gains
+`turn.started` with data `{ by: 'user' }` — OPTIONAL and additive, not in the required set. An
+adapter emits one per entry the legacy parser counts as a person's turn, from the SAME predicate
+(`isHumanUserEntry` in `jsonl.ts`, which refuses `isMeta` and `isCompactSummary`), keyed by
+`deriveEventId` on the source line. It carries WHO and nothing else: when is the envelope's
+timestamp, which line is its `sourceRef`, and there is no text and no text size (D5). *Reason:*
+`rounds` and `user_message_count` are counted from that predicate today, and it opens the turns
+`active_minutes` is measured over, so without the event the projection cannot reproduce them and P1
+§12.3 cannot close; emitting from the same predicate makes the two counts agree by construction.
+*Outcome, measured by A2.7:* `rounds`, `user_message_count`, `user_interruptions` and
+`user_message_timestamps` project EQUAL to legacy (479 real sessions, 0 bug rows). The decision's
+expectation that `message_hours` and `active_minutes` would follow did NOT hold: legacy reads the
+hour of every line and Claude's own `turn_duration`, neither of which a turn event carries, so they
+stay not-projectable with that reason, and P1 §12.3 stays open for `active_minutes`. Applied to
+`canonical/event.ts` (a type test proves the shape is closed and A1.1's events still compile) and to
+master §13.2/§14.1 and P1 §12.3. *Rejected:* deriving turns in the projection from gaps between
+`model.invoked` events — that is the idle-gap inference `docs/harness-contract.md` § 1 forbids.
+
+**D23 · The native harness is its own package (2026-09-26).** Decided by the owner directly (task
+t-e1dea7cd6f, comment "OWNER DECISIONS 2026-09-26") — not taken under delegation like D17-D22, and
+held as a blocker: C1 (the package) and B4.4 (the terminal command) both waited for this answer
+before they could be filed. `packages/runtime` (`@agentistics/runtime`) is compiled into the single
+`agentop` binary AND kept publishable on its own; it may **never** import from `packages/server` or
+`packages/web`, and `packages/runtime/runtime-boundary.lint.test.ts` fails the build if it does (the
+`tokens.lint.test.ts` shape). The server only **hosts** it: it holds the credential (0600 files
+under its data dir) and passes in a `CredentialResolver` returning the opaque `CredentialHandle`,
+the capture directory, and a journal sink typed by an interface the runtime owns — no global inside
+the runtime reads a host path. Web, terminal and VS Code are windows onto the same session. What
+moved out of `packages/server/server/provider/`: `client.ts` (`ProviderClient` + registry),
+`anthropic/{client,raw}.ts`, `retry.ts`, `capture.ts`, `emit.ts`. What stayed in the host:
+`credentials.ts`, `credential-plan.ts`, `cli-provider.ts`, `config.ts`. *Reason:* the loop, its
+provider layer and its capture/emit plumbing are the reusable core the brief's objective B asks for
+— a runtime shared by Web, CLI, TUI, VS Code and API — and a package boundary enforced by a lint
+test is the only way "never imports server/web" survives a refactor instead of eroding one import at
+a time; publishing it standalone later needs the boundary to already be true, not retrofitted.
+*Rejected:* keep the loop inside `packages/server` — it can drift into calling server-only globals
+(`config.ts`'s `AGENTISTICS_DATA_DIR`, the credential store) with no lint to catch it, and standalone
+publication would then need this exact same extraction later, under more code depending on the
+violation. Applied by C1 to the new `packages/runtime` package and to the master spec's architecture
+and where-code-goes sections.
+
+**D24 · The terminal command is `agentop code` (2026-09-26).** Decided by the owner directly (task
+t-e1dea7cd6f, comment "OWNER DECISIONS 2026-09-26"). *Rejected:* `agentop chat` — it already names
+the feature that runs Claude/Codex/… inside the web (the Sessions workspace's in-browser chat), and
+reusing it for the terminal front door would make one word name two different surfaces. Applied by
+B4.4 (title only at the time of C1; the terminal entry point itself lands with B4).
+
+**D25 · A human turn CLOSES as an event, and a prompt names the instant its response time is
+measured from.** Taken on 2026-09-26; approved by the leader (688e4a0205) under the owner's
+delegation; the owner may veto. Implemented by A2.8. The canonical vocabulary gains `turn.ended`
+with data `{ close: 'measured' | 'last-line'; durationMs?: number }` — OPTIONAL and additive, not in
+the required set — and `turn.started` gains an optional `previousAssistantAt` (the verbatim
+timestamp of the last assistant line before the prompt). `turn.ended` is emitted only for an OPEN
+turn, where legacy's active-time rule closes it: `'measured'` on Claude's own `system/turn_duration`
+line (its `durationMs` wins), `'last-line'` at the last timestamped line of any kind before the next
+prompt or the end of the transcript. `durationMs` is absent unless the harness stated it (D21), and
+neither shape carries text or a text size (D5). `previousAssistantAt` sits on `turn.started`, not on
+`turn.ended`, because legacy's `lastAssistantTs` persists across turns and a prompt with no open
+turn gets no `turn.ended`, while every prompt gets a `turn.started`. *Reason:* a projection that
+cannot reproduce a legacy figure keeps P1 §12.3 open forever, and a duration the harness measured
+itself is the contract's preferred time source (`docs/harness-contract.md` § 1) — A2.7 measured
+`active_minutes` at 305/477 and `user_response_times` at 381/477 from `turn.started` alone, because
+legacy closes a turn with `turn_duration` or the last line of any kind and measures response time
+from the LAST assistant line while `model.completed` carries the first. `message_hours` stays
+LEGACY-ONLY: legacy takes the hour of every timestamped line, which a stream of turns cannot
+reproduce (measured 1/477). Applied to `canonical/event.ts` (type tests prove both closes, the
+optional duration, the closed union and the absence of text; every pre-D25 literal still compiles)
+and to master §13.2/§14.1. *Rejected:* deriving turn ends from the gaps between `turn.started`
+events — the idle-gap inference `docs/harness-contract.md` § 1 forbids, measured by A2.7 at 305/477
+equal.
+*Measured outcome (A2.8, 2026-09-26):* Claude adapter 1.5.0; the differential over this machine's real
+store (read-only, isolated `AGENTISTICS_DIR`) reads "sessions compared: 484 · with at least one bug row:
+0 · skipped: 2 live". `active_minutes` 484 equal / 0 bug; `user_response_times` 483 equal / 1 explained
+(the known 0-byte transcript, where legacy writes `[]`) / 0 bug; `message_hours` 484 not-projectable, by
+this decision. Both fields left `NOT_PROJECTABLE`; P1 §12.3 is closed.
+
+## Also decided on 2026-09-25
+
+- **The native context manager** — every decision is in `2026-09-25-runtime-context-manager-design.md`.
+- **Other harnesses as tools of the native loop, and the three engines** — master spec §22.4 and §24.7.
+- **Opus in wave A1:** none; every item is Sonnet or Haiku.
+- **Issue #248** is closed with a comment pointing at its fix (`versionBump.ts` + its lint).
+- **The seven RE-SCOPE issues** from the triage: comments are drafted for the owner's review before
+  anything is posted.
+- **`PROMPTS NOVO CORE/`**: `Completo.md`, `execucao.md` and the mermaid diagram are committed
+  verbatim under `docs/superpowers/briefs/` (the specs cite them; they stay in Portuguese as the
+  owner's own text); `findings/` is dropped — it is already in `docs/superpowers/research/`. The loose
+  screenshots at the repository root move out of the repository.

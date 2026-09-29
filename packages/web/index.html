@@ -9,8 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Agentistics" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#D97706" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="theme-color" content="#FD8924" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Agentistics</title>
     <!-- Inter is self-hosted (see src/index.css @font-face + public/fonts). No external
          origin here, so the CSP can stay strict and no visitor IP leaves the instance. -->
@@ -30,28 +30,19 @@
         background: #0a0a0f;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       }
-      #ag-preboot .ag-preboot-bars { display: flex; align-items: flex-end; gap: 5px; height: 34px; }
-      #ag-preboot .ag-preboot-bars span {
-        width: 5px; height: 100%; border-radius: 3px;
-        background: #D97706; transform-origin: bottom;
-        animation: ag-preboot-pulse 1s ease-in-out infinite;
-      }
-      #ag-preboot .ag-preboot-bars span:nth-child(2) { animation-delay: .12s; }
-      #ag-preboot .ag-preboot-bars span:nth-child(3) { animation-delay: .24s; }
-      #ag-preboot .ag-preboot-bars span:nth-child(4) { animation-delay: .36s; }
-      #ag-preboot .ag-preboot-bars span:nth-child(5) { animation-delay: .48s; }
+      #ag-preboot .ag-preboot-mark { width: 56px; height: 56px; animation: ag-preboot-pulse 1.2s ease-in-out infinite; }
       #ag-preboot .ag-preboot-label {
         font-size: 13px; font-weight: 600; letter-spacing: .02em; color: rgba(255, 255, 255, .55);
       }
       @keyframes ag-preboot-pulse {
-        0%, 100% { transform: scaleY(.4); opacity: .5; }
-        50%      { transform: scaleY(1);  opacity: 1;  }
+        0%, 100% { transform: scale(.94); opacity: .55; }
+        50%      { transform: scale(1);   opacity: 1;   }
       }
       /* The moment React commits any content into #root it stops being :empty, and the following
          sibling loader is hidden. `:not(:empty)` + `~` are universally supported — no `:has` needed. */
       #root:not(:empty) ~ #ag-preboot { display: none; }
       @media (prefers-reduced-motion: reduce) {
-        #ag-preboot .ag-preboot-bars span { animation: none; opacity: .85; }
+        #ag-preboot .ag-preboot-mark { animation: none; opacity: .9; }
       }
     </style>
   </head>
@@ -60,7 +51,7 @@
     <!-- Sibling AFTER #root (not a child) so React's createRoot never warns about pre-existing
          children, and the `:has` rule above can hide it once #root holds real content. -->
     <div id="ag-preboot" role="status" aria-label="Loading agentistics">
-      <div class="ag-preboot-bars" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+      <svg class="ag-preboot-mark" aria-hidden="true" viewBox="1 1 54 54" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#FD8924" stroke-width="3"/><path d="M54 37.0665L50 39.2002V20.2002L54 22.664V37.0665Z" fill="#FD8924"/><path d="M3 36.8663L7 39V20L3 22.4638V36.8663Z" fill="#FD8924"/><path d="M16 26.5L20 19.5L24 26.5" stroke="#FD8924" stroke-width="2"/><path d="M33 26.5L37 19.5L41 26.5" stroke="#FD8924" stroke-width="2"/></svg>
       <div class="ag-preboot-label">agentistics</div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

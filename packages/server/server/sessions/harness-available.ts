@@ -11,11 +11,15 @@
  * offers `codex` where no codex exists teaches a command that fails. It lives here now so the two
  * cannot drift — the same reason `task-reopen.ts` exists.
  *
- * The FALLBACK is the part to keep. When nothing resolves — a PATH-less environment, a service
- * started from a unit file with a minimal `Environment=` — the honest answer is "this machine
- * cannot tell", and a wizard offering an empty list is indistinguishable from a broken one. So an
- * empty result yields every startable harness rather than nothing, which is the same
- * N/A-versus-a-confident-0 rule the dashboard applies to a metric no harness can produce.
+ * WHEN NOTHING RESOLVES the answer is a FACT, not "unknown". This used to fall back to every
+ * startable harness, on the reasoning that an empty wizard is indistinguishable from a broken one.
+ * But zero assistants on a PATH is the signature of a broken PATH — a service started from a unit
+ * that predates `Environment=PATH` sees systemd's minimal one — and offering all six there meant
+ * every pick spawned a pane that died in the same second. So `ids` keeps the old fallback for the
+ * callers that only need a list to TEACH (the skill `cli-hooks.ts` writes, from an interactive
+ * shell), while `blind` says it happened, and the session wizard offers NOTHING and says why
+ * (`cli-i18n`'s `sessNoHarnessOnPath`, naming the PATH). An empty list with a sentence is not a
+ * broken wizard; a full list whose every entry fails is.
  */
 
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
@@ -31,22 +35,27 @@ export function startableHarnessIds(): HarnessId[] {
  * PATH mid-process is not a thing that happens. `Bun.which` is a filesystem walk per harness.
  */
 let cached: HarnessId[] | null = null
+/** Set with `cached`: true when not one startable CLI resolved on this process's PATH. */
+let blind = false
 
 /**
  * The startable harnesses whose CLI is on PATH — or, when none of them are, all of them.
  *
- * `narrowed` says which of the two answers this is, so a caller that wants to explain itself can.
+ * `narrowed` says which of the two answers this is; `blind` says NONE resolved, which a caller that
+ * STARTS something must treat as "offer nothing", never as "offer everything" — see the header.
  */
-export function availableHarnesses(): { ids: HarnessId[]; narrowed: boolean } {
+export function availableHarnesses(): { ids: HarnessId[]; narrowed: boolean; blind: boolean } {
   if (cached === null) {
     const startable = startableHarnessIds()
-    const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin))
+    const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin, { PATH: process.env.PATH ?? '' }))
     cached = installed.length > 0 ? installed : startable
+    blind = installed.length === 0
   }
-  return { ids: cached, narrowed: cached.length !== startableHarnessIds().length }
+  return { ids: cached, narrowed: cached.length !== startableHarnessIds().length, blind }
 }
 
 /** Test seam — the memo is per process, and a test that changes PATH must be able to clear it. */
 export function resetHarnessAvailability(): void {
   cached = null
+  blind = false
 }

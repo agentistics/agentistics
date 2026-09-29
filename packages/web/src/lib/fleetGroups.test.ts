@@ -171,3 +171,39 @@ describe('applyManualOrder', () => {
     expect(new Set(out.map(g => g.key))).toEqual(new Set(['x', 'y', 'z']))
   })
 })
+
+describe('asideGroups — the chosen order applies INSIDE each group', () => {
+  const rows = [
+    row({ id: 'z-late', title: 'Zeta', project: 'p', state: 'working', startedAt: 300 }),
+    row({ id: 'a-early', title: 'Alpha', project: 'p', state: 'working', startedAt: 100 }),
+    row({ id: 'm-mid', title: 'Mid', project: 'p', state: 'working', startedAt: 200 }),
+  ]
+
+  test('by name, A to Z', () => {
+    const out = asideGroups(rows, 'project', 'en', [], { by: 'name', dir: 'desc' })
+    expect(out[0]!.sessions.map(s => s.title)).toEqual(['Alpha', 'Mid', 'Zeta'])
+  })
+
+  test('reversing flips it', () => {
+    const out = asideGroups(rows, 'project', 'en', [], { by: 'name', dir: 'asc' })
+    expect(out[0]!.sessions.map(s => s.title)).toEqual(['Zeta', 'Mid', 'Alpha'])
+  })
+
+  test('by start date, newest first', () => {
+    const out = asideGroups(rows, 'project', 'en', [], { by: 'started', dir: 'desc' })
+    expect(out[0]!.sessions.map(s => s.id)).toEqual(['z-late', 'm-mid', 'a-early'])
+  })
+
+  test('the default is unchanged: what is waiting on you leads', () => {
+    const mixed = [row({ id: 'w', state: 'working' }), row({ id: 'n', state: 'waiting-approval' })]
+    expect(asideGroups(mixed, 'project', 'en')[0]!.sessions[0]!.id).toBe('n')
+  })
+
+  test('choosing a name order never buries the group holding a waiting session', () => {
+    const out = asideGroups([
+      row({ id: 'a', project: 'aaa', state: 'working' }),
+      row({ id: 'z', project: 'zzz', state: 'waiting' }),
+    ], 'project', 'en', [], { by: 'name', dir: 'desc' })
+    expect(out[0]!.label).toBe('zzz')
+  })
+})

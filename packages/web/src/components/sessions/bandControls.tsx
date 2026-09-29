@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ArrowDown, ArrowRight, EyeOff, Maximize2, Minimize2, Minus, MoreHorizontal, Pin, Settings, X,
+  ArrowDown, ArrowRight, ChevronUp, EyeOff, Maximize2, Minimize2, Minus, MoreHorizontal, Pin, Settings, X,
 } from 'lucide-react'
 import type { PanelBarEntry, PanelBarId } from '../../lib/panelBar'
 import { hasDragPayload, readDragPayload, setDragPayload } from '../../lib/dragReorder'
 import { panelMoveEntry, type PanelMenuIconId } from '../../lib/panelMenu'
 import type { PanelDropTarget } from '../../lib/panelSlots'
 import { resolveBandDrag, resolveBandHeight } from '../../lib/shellBand'
+import { isDragEndEvent, PANEL_GAP } from '../../lib/panelLayout'
 import { targetLabel } from '../../lib/terminalTarget'
 import { panelIconFor } from '../../lib/panelIcons'
 import { panelTitle } from '../../lib/panelMeta'
-import { ResizeGrip } from '../ResizeGrip'
+import { PanelGapDots } from './PanelGap'
 
 /**
  * bandControls.tsx — ONE height, ONE padding, ONE icon/label size for every control drawn on the
@@ -55,6 +56,14 @@ import { ResizeGrip } from '../ResizeGrip'
  * Presentation only — `useBandDrag` below is the one state machine that decides WHAT a drag on it
  * means; this component never reads `columnHeight` or persists anything itself, so a caller cannot
  * forget to gate it on `open`/`fullscreen` and get away with a HANDLE that draws but does nothing.
+ *
+ * FLOATING-PANELS DESIGN (`sdd/brief.md`): the bottom band is now its OWN panel, no longer docked
+ * INSIDE the conversation's card, so this handle is rendered as the GAP between the two panels — a
+ * sibling BEFORE the band's own bordered box, never its first child — and wears the same three-dot
+ * grip (`PanelGapDots`/`.ag-panel-gap`) every other gap in the workspace does, in place of the
+ * single pill this used to share with `AsideResizer`'s own edge. The hit area's height is `PANEL_GAP`
+ * (`lib/panelLayout.ts`), the same figure every inner seam in the workspace uses, full width —
+ * only the visual and its position moved.
  */
 export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }: {
   /** The full sentence — this handle's accessible name, band-specific ("Resize the Studio", "Resize
@@ -70,15 +79,18 @@ export function BandResizeHandle({ label, onMouseDown, onTouchStart, onKeyDown }
       aria-orientation="horizontal"
       aria-label={label}
       tabIndex={0}
-      className="ag-resize-handle"
+      className="ag-panel-gap"
+      // A stable id — the ONE thing a T-junction (`PanelGap.tsx`'s `armGap`) needs to replay a
+      // synthetic `mousedown` on THIS band's own resize handle, arming its window-level listener
+      // exactly as a genuine press would. Whichever band is docked right now (Studio/Shell/a
+      // SimpleDockedBand tab) renders its own `BandResizeHandle`, so this id always names whichever
+      // one is actually on screen — never a specific band type's own handle.
+      id="ag-gap-band-height"
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onKeyDown={onKeyDown}
-      // Hit area UNCHANGED from before this fix (6px tall, full band width — well over the 44px
-      // mobile floor already) — only the visual grip inside it is drawn by `ResizeGrip`, which adds
-      // no size of its own. Never narrower than this.
-      style={{ height: 6, cursor: 'ns-resize', background: 'transparent' }}
-    ><ResizeGrip orientation="horizontal" /></div>
+      style={{ height: PANEL_GAP, flexShrink: 0, cursor: 'row-resize', background: 'transparent' }}
+    ><PanelGapDots orientation="horizontal" /></div>
   )
 }
 
@@ -137,17 +149,31 @@ export function useBandDrag({
   // that would tear the drag's own `useEffect` down and rebuild it on every pixel of movement.
   const startRef = useRef(renderedHeight)
   startRef.current = renderedHeight
+  /**
+   * LATEST-REF PATTERN, same reasoning as `PanelGap.tsx`'s own copy of it: `columnHeight`/`apply`/
+   * `onFullscreen` are read through a ref so the effect below can stay REGISTERED ONCE for the whole
+   * gesture — every caller passes a fresh `apply` closure each render, and `apply` itself triggers
+   * the state update that causes that re-render, so keeping them as effect DEPENDENCIES tore this
+   * effect's window listeners down and rebuilt them on every single `mousemove`. Harmless for an
+   * ordinary drag (teardown and resubscribe happen back to back); the shape of bug it exposes is a
+   * T-junction (`PanelGap.tsx`'s `armGap`) arming this band drag alongside an aside drag off one
+   * synthetic `mousedown` — a release landing in the gap between one side's teardown and its
+   * resubscribe left the band height still tracking the pointer after the button came up.
+   */
+  const propsRef = useRef({ columnHeight, apply, onFullscreen })
+  propsRef.current = { columnHeight, apply, onFullscreen }
   useEffect(() => {
     if (!enabled) return
     const move = (clientY: number) => {
       const d = dragRef.current
       if (!d) return
+      const p = propsRef.current
       // Grows UPWARD: every band this hook serves is docked at the bottom, so dragging up must
       // make it taller.
-      const resolved = resolveBandDrag(d.startH + (d.startY - clientY), columnHeight)
-      apply(resolved)
-      if (resolved.fullscreen && onFullscreen) {
-        onFullscreen()
+      const resolved = resolveBandDrag(d.startH + (d.startY - clientY), p.columnHeight)
+      p.apply(resolved)
+      if (resolved.fullscreen && p.onFullscreen) {
+        p.onFullscreen()
         // The gesture is SPENT — nulling here is what makes every later `move` in this same drag a
         // no-op, so neither `apply` nor `onFullscreen` fires twice for one crossing.
         dragRef.current = null
@@ -155,18 +181,31 @@ export function useBandDrag({
     }
     const onMouse = (e: MouseEvent) => move(e.clientY)
     const onTouch = (e: TouchEvent) => { const p = e.touches[0]; if (p) move(p.clientY) }
-    const end = () => { dragRef.current = null }
+    // Every event that must end a drag (`isDragEndEvent`), not `mouseup`/`touchend` alone — a
+    // `pointercancel` or the window losing focus mid-drag left this exact ref non-null forever
+    // before this was added.
+    const end = (e: Event) => { if (isDragEndEvent(e.type)) dragRef.current = null }
     window.addEventListener('mousemove', onMouse)
     window.addEventListener('mouseup', end)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    window.addEventListener('blur', end)
     window.addEventListener('touchmove', onTouch)
     window.addEventListener('touchend', end)
+    window.addEventListener('touchcancel', end)
     return () => {
       window.removeEventListener('mousemove', onMouse)
       window.removeEventListener('mouseup', end)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('blur', end)
       window.removeEventListener('touchmove', onTouch)
       window.removeEventListener('touchend', end)
+      window.removeEventListener('touchcancel', end)
     }
-  }, [enabled, columnHeight, apply, onFullscreen])
+    // Registered ONCE per `enabled` — never on `columnHeight`/`apply`/`onFullscreen`, which is the
+    // whole point of the latest-ref pattern above.
+  }, [enabled])
   return {
     onMouseDown: e => { e.preventDefault(); dragRef.current = { startY: e.clientY, startH: startRef.current } },
     onTouchStart: e => {
@@ -758,18 +797,24 @@ export function BandOverflowMenu({ label, entries, isMobile = false, icon }: {
  * the Studio's own toolbar in the right slot (`Studio.tsx`) — renders THIS, in THIS fixed order,
  * so a reader never has to relearn where a control lives from one panel to the next:
  *
- *   [full screen, only where offered] → [minimize, ALWAYS] → [pin, right-slot panels only]
- *   → [gear, only with something to say]
+ *   [gear, only with something to say] → [pin, right-slot panels only]
+ *   → [full screen, only where offered] → [minimize, ALWAYS, and ALWAYS LAST]
  *
- * PIN (narrow-overlay pass, 2026-09-22, spec §11) — "quero em todos um botao de pin que fica ativo
- * e salvo como preferencia". `pinned` is `undefined` wherever this cluster is NOT drawing a
- * right-slot header — the bottom band's own bar (`ShellBand`, `SimpleDockedBand`) and the Studio's
- * bottom-docked toolbar never pass it, because §11 item 4 is explicit: "The rail only. The bottom
- * band keeps today's behaviour exactly." Present, it is a toggle whose PRESSED state is the pin's
- * own glyph swap (`Pin`, filled when active via `fill: currentColor` — never colour alone, which a
- * colour-blind reader could miss) so pinned-ness is visible at a glance on the row itself, not only
- * in the tooltip. `panelSlots.ts`'s own `pinned` record is what this reads/writes; see that
- * module's header for what CLEARS it (moving the panel off the rail).
+ * MINIMIZE IS THE RIGHTMOST CONTROL, ALWAYS (owner, 2026-09-25: "quando eu subo a barra, o botao de
+ * minimizar vai pra esquerda ... o usuario instintivamente vai subir reto pra minimizar, ele deve se
+ * manter a direita no mesmo local"). A collapsed band shows only its reopen chevron, at the far
+ * right; the open band used to put the gear to the RIGHT of the minus, so opening the band moved
+ * the control the pointer had just used one slot to the left. With minimize last it occupies the
+ * same pixel collapsed and open, and the pointer that opened the band can close it without moving.
+ * The owner's own order is "config, maximizar, minimizar"; pin, which only a right-slot header
+ * draws, sits beside the gear so it never comes between the pointer and minimize either.
+ *
+ * PIN = FLOAT (owner, 2026-09-27; it replaced the narrow-overlay pass's "keep this overlay open").
+ * Pressed on a docked panel — right slot or bottom band — it turns the panel into a floating window
+ * over the session area (`lib/floatingPanels.ts`); pressed on that window's header (`active`) it
+ * docks the panel back. `pinned` is `undefined` wherever there is nothing to float: on a phone,
+ * where nothing floats. The PRESSED state is the pin's own glyph swap (`Pin`, filled when active
+ * via `fill: currentColor` — never colour alone, which a colour-blind reader could miss).
  *
  * FULL SCREEN IS NEVER A MENU ROW ANY MORE. It used to be a row inside the same "⋯"/gear menu that
  * also offered move and close, which is what let a reader miss it entirely under two clicks for a
@@ -777,9 +822,13 @@ export function BandOverflowMenu({ label, entries, isMobile = false, icon }: {
  * genuinely has nowhere to send it (never present and refusing) — see `fullscreenModeFor` in
  * `lib/panelMenu.ts` for which panels can and cannot.
  *
- * MINIMIZE IS ALWAYS THE SAME LITERAL `−` (addendum item 4: "o minimizar laranja vira um `−`
- * literal" — replacing the ChevronDown/ChevronUp pair this used to alternate by `collapsed`, the OS
- * window-control convention where minimize never itself signals current state), ALWAYS THE ACCENT
+ * MINIMIZE IS THE LITERAL `−` WHILE THE PANEL IS OPEN, AND AN UP CHEVRON WHILE IT IS COLLAPSED.
+ * The `−` came from the owner ("o minimizar laranja vira um `−` literal"), and for one release it was
+ * drawn in BOTH states on the window-control reading that minimize never signals current state. On
+ * a collapsed bottom band that meant a minimize button on a bar that was already minimized, which
+ * the owner reported twice ("o - ainda aparece na barra mesmo com ela fechada"). The callers already
+ * switched the LABEL to "Expandir" while collapsed; the glyph now agrees with its own label, and
+ * matches what the owner asked for before the `−` existed: "setinha pra cima pra abrir". ALWAYS THE ACCENT
  * ORANGE — never the neutral secondary-text colour every other icon in this file uses, and never
  * buried in the gear. `collapsed` is kept as a prop (some callers still read it for their OWN
  * layout) but no longer changes this glyph. It does NOT decide whether the control is
@@ -830,6 +879,22 @@ export function PanelFixedControls({
   }
   return (
     <>
+      <BandOverflowMenu label={gearLabel} icon={<Settings size={14} />} entries={gearEntries} isMobile={isMobile} />
+      {pinned && (
+        <button
+          className="ag-tap-icon"
+          type="button"
+          aria-pressed={pinned.active}
+          onClick={e => { e.stopPropagation(); pinned.onToggle() }}
+          title={pinned.active
+            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
+            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
+          aria-label={pinned.active
+            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
+            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
+          style={{ ...iconBtn, color: pinned.active ? 'var(--anthropic-orange)' : 'var(--text-secondary)' }}
+        ><Pin size={14} {...(pinned.active ? { fill: 'currentColor' } : {})} /></button>
+      )}
       {fullscreen && (
         <button
           className="ag-tap-icon"
@@ -852,24 +917,8 @@ export function PanelFixedControls({
           title={minimizeLabel}
           aria-label={minimizeLabel}
           style={{ ...iconBtn, color: 'var(--anthropic-orange)' }}
-        ><Minus size={14} /></button>
+        >{collapsed ? <ChevronUp size={14} /> : <Minus size={14} />}</button>
       )}
-      {pinned && (
-        <button
-          className="ag-tap-icon"
-          type="button"
-          aria-pressed={pinned.active}
-          onClick={e => { e.stopPropagation(); pinned.onToggle() }}
-          title={pinned.active
-            ? (pt ? `Desafixar ${panelName}` : `Unpin ${panelName}`)
-            : (pt ? `Fixar ${panelName}` : `Pin ${panelName}`)}
-          aria-label={pinned.active
-            ? (pt ? `Desafixar ${panelName}` : `Unpin ${panelName}`)
-            : (pt ? `Fixar ${panelName}` : `Pin ${panelName}`)}
-          style={{ ...iconBtn, color: pinned.active ? 'var(--anthropic-orange)' : 'var(--text-secondary)' }}
-        ><Pin size={14} {...(pinned.active ? { fill: 'currentColor' } : {})} /></button>
-      )}
-      <BandOverflowMenu label={gearLabel} icon={<Settings size={14} />} entries={gearEntries} isMobile={isMobile} />
     </>
   )
 }

@@ -177,6 +177,157 @@ There is deliberately **no change** to the consolidate store, the wire, the API 
 **If the shadow build exceeds its budget, P1 does not ship** — a journal that makes the dashboard
 slower is a journal nobody will leave on.
 
+### 9.1 What A1 measured (2026-09-25, A1.6)
+
+Two of the four budgets can be measured before anything emits events; two cannot. Both benchmarks
+are gated behind `AGENTISTICS_BUDGETS=1` so the pre-commit suite does not time a loaded machine;
+with the variable unset they report as skipped.
+
+| Budget | Status in A1 | Result |
+|---|---|---|
+| journal append ≤ 2 ms p95 / 100 events | **measured — MISSED** | p95 **14.0–20.8 ms** over 4 runs; p50 1.4–1.7 ms |
+| shadow ingestion ≤ 10 % of `buildApiResponse` | **not measurable in A1** | the shadow writer does not exist until A2.3; there is nothing to add to a build |
+| no unbounded accumulation (1 M events) | **measured — met, for the journal's append only** | +17 MiB JS heap, +27 MiB RSS over baseline; ceilings 64 / 128 MiB |
+| journal size ≤ 2 KB/session/day | **not measurable in A1** | nothing writes events for real sessions until A2.2; a synthetic size would be a number about the fixture, not about a session |
+
+**Append** (`journal/journal-budget-append.test.ts`). 1000 batches of 100 unique events on a fresh
+journal, so the table and its indexes grow to 100 000 rows during the run. The events are a
+Claude-like mix: about 60 % `model.completed` with full usage, the rest tool lifecycle plus rarer
+session, run and context events. Every batch is built before timing, and each one must return
+`written === 100` or the run fails: a journal that silently disabled itself would otherwise time a
+no-op. Only `await append()` is timed. p95 is nearest-rank over **all** 1000 batches, **including the
+first** after open, because every process pays that cost once. The first batch alone costs
+1.6–2.1 ms, and removing it leaves p95 unchanged. Held constant: the journal's own pragmas
+(WAL, `synchronous=NORMAL`, default autocheckpoint, none changed), a warm OS page cache, one
+process, no concurrent reader or writer, no recovery path, a batch of exactly 100, the same ext4
+filesystem as the real `JOURNAL_PATH`, WSL2 on this machine at a load average of about 6
+(ten other sessions were running), and Bun 1.3.14.
+
+*Why it misses:* a diagnostic tagged each batch by whether its commit triggered the WAL
+autocheckpoint, read from the `-wal` header's checkpoint sequence. The diagnostic is kept outside
+the repo because it only diagnoses and does not measure a budget. In the run it tagged:
+- 121 of the 1000 batches (12 %) triggered a checkpoint, with a median of **14.2 ms**.
+- All 121 were slow (> 5 ms). Because they exceed 5 % of the batches, p95 lands inside them.
+- Excluding the checkpointing batches, p95 is **3.1 ms**, which **also** misses the budget, on this
+  loaded machine.
+
+So the budget fails for two reasons. The checkpoint cost sits in the append path at a frequency
+above 5 %, and even without it the tail is over 2 ms here. Nothing was tuned. Moving checkpoints
+off the append path, changing the batch size, and revising the budget are all decisions for the
+owner of §9.
+
+**Heap** (`journal/journal-budget-heap.test.ts`). A generator streams 1 000 000 events through
+`append` in 10 000 batches of 100 and keeps no batch. The test asserts
+`written = counters.written = stats().rows = 1 000 000` with nothing dropped. Memory is sampled every
+100 batches **without** forcing GC, against a baseline taken after 100 warm-up batches. The
+un-collected heap includes garbage, so the ceiling is conservative.
+
+The assertion is the **ceiling**: growth of at most 64 MiB of JS heap and at most 128 MiB of RSS,
+plus a trend check that the last 10 % of samples sit no more than 32 MiB above the first 10 %.
+Duration is reported and never asserted. A control test shows the ceiling can fail: a retained
+event costs about 428 B, so a producer that collected the stream into one array would hold about
+408 MiB, above the 64 MiB ceiling.
+
+Measured over 3 runs: heap +17.0–17.3 MiB, RSS +26.4–27.7 MiB, trend +14.9–15.3 MiB, 13–17 s.
+
+*Finding:* on Bun 1.3.14, `process.memoryUsage().heapUsed` did not move while 20 000 objects were
+allocated and retained, so a ceiling on it would always pass. The ceiling therefore reads
+`bun:jsc` `heapStats().heapSize`, and the test refuses to run if that is unavailable. `heapUsed`
+is printed and not asserted.
+
+**Scope:** this covers the JOURNAL's append path only. Whether the A2.3 shadow writer batches and
+flushes instead of collecting is A2.3's to prove. The trend figure of about 15 MiB is inside its
+bound, but a 1 M run cannot tell GC timing from a slow leak. A longer run would settle it.
+
+A side figure, which is not the size budget: the synthetic 1 M-event database was 430 MB on disk,
+about 430 B per event. It sizes the fixture and says nothing about KB/session/day.
+
+### 9.2 What A1.7 found and changed (2026-09-26)
+
+The owner's rule for this pass: find the cause, fix it, re-measure with the same method, and propose
+a new target only with a measured number and a reason. All measurements below come from ONE session
+on the same machine (WSL2 ext4, Bun 1.3.14, load average 3.5–4.6 at 1 minute). The base (`1bb97ae6`)
+and the change ran back to back, each in an isolated `AGENTISTICS_DIR` and journal directory. The
+store-based ones (ingest, size, parity) ran over the same FROZEN copy of `~/.claude/projects`
+(487 transcripts, 2.4 GB), so both sides read the same bytes.
+
+| Budget | Before | After | Status |
+|---|---|---|---|
+| append ≤ 2 ms p95 / 100 events | p95 **14.4 / 13.2 / 14.8 ms** | p95 **1.85 / 1.95 / 1.67 ms** | **MET**, with a small margin (see below) |
+| shadow ingest, steady state | 42 ms, 1.2 % | 53 ms, 1.3 % | **MET** |
+| shadow ingest, first ingest into an empty journal | 34.9 / 35.7 s | **18.6 / 18.1 s** | **re-baseline proposed** |
+| no unbounded accumulation (1 M events) | +17 MiB heap | +16.7 MiB heap, +25.6 MiB RSS | **MET** |
+| size ≤ 2 KB / session / day | **419.5 KB**, 650 B/event | **113.5 KB**, 176 B/event | **re-baseline proposed** |
+
+Parity: the A2.5/A2.6 differential over the same snapshot gives 487 sessions and 0 with a bug row,
+before and after. The rendered report is byte-identical. Every one of the 410 105 journal rows reads
+back through `readFrom` equal to the event first appended under its id (0 mismatched).
+
+**Append — cause and fix.**
+- **Cause 1: WAL autocheckpoint.** It ran inside the append's COMMIT, and its cost is fsync: a PASSIVE
+  checkpoint took a median of 14.2 ms at `synchronous=NORMAL` against 1.15 ms at `OFF`. With random
+  sha256 event ids, the UNIQUE index dirties ~100 leaf pages per batch, so the default 1000-page WAL
+  filled every ~7 batches.
+- **Why research 15 did not see it:** its ids were prefix-clustered and its table held 2 000 rows, so
+  the WAL never reached the threshold.
+- **Fix 1: checkpoint moved off the append path.** A write arms one deferred PASSIVE checkpoint 250 ms
+  later. It is a throttle, not a debounce, and its timer is `unref`'d. `wal_autocheckpoint = 10000`
+  stays as a ceiling for a producer that never yields, and `close()` checkpoints.
+- **Cause 2: two secondary indexes.** `events_run` and `events_type` were read by nothing: the only
+  queries are the rowid cursor and `stats()`.
+- **Fix 2: indexes dropped in v2.** An interleaved A/B measured them at ~0.3–0.7 ms of p95 and ~45 ms
+  of p99, plus 16 MB of file after encoding. They are dropped in v2, and the projection that first
+  needs an index adds it in its own migration.
+- **Fix 3: planning cost.** `data` is stringified once, a timestamp already in canonical form skips
+  the Date round trip, and the insert binds positionally. Together these took planning from ~0.37 to
+  ~0.11 ms per batch.
+- **Margin.** The row encoding below adds ~0.3 ms per batch back. The pass has little margin: at load
+  5–6, earlier runs gave p95 2.2–2.9 ms with the indexes and 1.8–2.3 ms without them. The p95 floor
+  that remains is the fsync of the WAL header on the first commit after a checkpoint, plus the
+  random-key index writes. Both are inherent to power-loss safety and to hashed ids.
+
+**First ingest — cause, fix, and the proposed target.**
+- **Cause.** Before: ~40 s of replay work (a serial profile found 17 % in re-searching every
+  transcript's path that `discover()` had just found, 13 % in the pure-TypeScript SHA-256, and ~41 %
+  in reading and parsing) plus ~29 s of appends dominated by checkpoint fsync.
+- **Fix.** `discover()` seeds the path memo. Server-side ids hash through `node:crypto`: the same
+  function, pinned by a test, and 401 471 replayed events were compared byte-identical before and
+  after. Discovery also runs beside the stamp scan. The append fix above applies too.
+- **After.** 18.1–18.6 s, of which appends are 6.3 s. The rest is decoding and parsing the transcripts.
+- **Why the target cannot be met.** The 10 % target cannot be met for this case on this machine. A
+  first ingest must read and parse 2.4 GB and insert ~410 k rows. That floor, ~5 s of parsing plus
+  ~6 s of inserts, already exceeds 10 % of the COLD build (31–35 s, 3.1–3.5 s) and is far beyond 10 %
+  of the WARM build (3.4–4.5 s, since the parse cache means a normal build no longer reads
+  transcripts).
+- **PROPOSED:** keep ≤ 10 % for the steady state, where it is met. Budget the one-time backfill
+  separately at **≤ 1× a cold full build, never awaited**. Measured: 0.58–0.60×.
+
+**Size — cause, fix, and the proposed target.**
+- **Cause.** The envelope repeated ~200 B of identical text on every row: ids, the source path, and
+  the harness/mode/version words. JSON keys took ~150 of `model.completed`'s 270 data bytes. Ids and
+  timestamps were stored as text, and the two unused indexes cost 51 MB of 267 MB.
+- **Fix, schema v2 (lossless).** Repeated strings are interned into `event_strings`, written in the
+  batch's own transaction. `source_ref` is split into a base and a line number. Timestamps are epoch
+  ms, a hex event id is 16 raw bytes, and `data` is stored as an interned key shape plus a value array
+  that decodes to the same JSON text. A v1 file migrates in place, keeping every rowid and the
+  AUTOINCREMENT mark.
+- **Payload trim.** One field was trimmed: `model.invoked.providerRequestId`. No projection reads it,
+  the paired `model.completed` carries the same id, and it still keys the event id.
+  `CLAUDE_ADAPTER_VERSION` moved 1.1.0 → 1.2.0 with a changelog line.
+- **After.** 113.5 KB per session-day, 176 B/event. A median session-day of ~282 events is ~50 KB.
+- **Why encoding alone cannot reach 2 KB.** 2 KB per session-day allows ~3 B per event at today's
+  granularity, and per-response usage figures alone are ~5 KB per session-day.
+- **Measured levers that are NOT implemented** (granularity and retention are D6, not this task's):
+
+  | lever | saves | reads lost |
+  |---|---|---|
+  | drop replayed `model.invoked` | ~20 % | none today |
+  | drop `tool.completed` rows that carry only their id, or merge them into `tool.requested` | ~18 % | none today |
+  | a retention tier that rolls per-call events into per-session-day totals | reaches 2 KB | per-call order, source pointers, provider ids, command summaries, and re-projecting old days after Claude deletes the transcript |
+
+- **PROPOSED:** re-baseline the raw per-call journal to **≤ 120 KB per session-day** (measured 113.5).
+  Keep 2 KB as the target of the rolled-up tier that D6's retention decides.
+
 ## 10. Observability
 
 `agentop journal status` prints: rows, bytes, first/last event, events written/deduped/rejected by
@@ -197,6 +348,20 @@ product knows the file exists; no data that any surface reads was written or cha
 3. The projection reproduces `legacy(SessionMeta)` on every fixture, field by field, with no
    unexplained difference — including the four token counters, `active_minutes`, rounds,
    `tool_counts`, the agent rollup and the context gauge.
+   The human-turn half of this is carried by `turn.started { by: 'user' }` (D22, 2026-09-26;
+   master §13.2, §14.1), emitted from the same `isHumanUserEntry` predicate the legacy parser counts
+   with. **Status after A2.7 (2026-09-26): rounds is CLOSED.** `rounds`, `user_message_count`,
+   `user_interruptions` and `user_message_timestamps` are EQUAL on every fixture and on this
+   machine's real store (479 sessions, 0 bug rows, the one 0-byte transcript explained).
+   **Status after A2.8 (2026-09-26): CLOSED.** `active_minutes` and `user_response_times` are
+   carried by `turn.ended { close: 'measured' | 'last-line', durationMs? }` and
+   `turn.started.previousAssistantAt` (D25; master §13.2, §14.1; Claude adapter 1.5.0), and the
+   projection computes `active_minutes` through `activeMinutesOf` (`core/activeTime.ts`) — no second
+   implementation. Both are EQUAL on every fixture and on the real store: 484 sessions compared, 0 bug
+   rows (`active_minutes` 484 equal; `user_response_times` 483 equal, 1 explained — the 0-byte
+   transcript). `message_hours` stays legacy-only by decision D25 (legacy takes the hour of every
+   line; a stream of turn events cannot reproduce it, measured 1/477) and remains in
+   `NOT_PROJECTABLE` with that reason.
 4. Every event carries a non-empty `adapterVersion`, a `confidence` and a `sourceRef` that can be
    re-read.
 5. Every budget in §9 is met and the measurement is in the PR.
@@ -205,10 +370,13 @@ product knows the file exists; no data that any surface reads was written or cha
 7. The five not-yet-implemented integrations are declared absences, and the build fails if one is
    removed from the registry.
 
-## 13. Open questions that P1 must not decide alone
+## 13. Decisions P1 encodes, and the ones it defers
 
-- **D1** (Session/Run vocabulary) and **D2** (storage) from the master spec's §50 must be answered
-  before the types and the DDL are written: they are the two decisions P1 encodes.
+- **D1** (Session/Run vocabulary) and **D2** (storage) from the master spec's §50 were **DECIDED
+  2026-09-25 by the owner** (`2026-09-25-owner-decisions.md`): a Session is the runtime's unit of work
+  and a harness conversation is a Run inside it, with legacy data projecting 1 Session → 1 Run; the
+  journal is SQLite WAL, one per machine. They are the two decisions P1 encodes — the types and the
+  DDL are written against them.
 - **D5/D6** (what text is stored, retention) can be deferred: P1 writes **no** conversation text —
   only counters, ids, names and summaries — which is the strictest reading and can only be widened
   later, deliberately.

@@ -11,42 +11,17 @@
  */
 
 import path from 'node:path'
+import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { HOME_DIR } from '../config'
-import type { ChatDriver, ChatDriverModel } from './types'
+import type { ChatDriver } from './types'
 import { findCli } from './cli-detect'
 
-const AGENTISTICS_ROOT = path.resolve(import.meta.dir, '..', '..', '..', '..')
 
 // MCP config file path for copilot
 const COPILOT_MCP_CONFIG = path.join(HOME_DIR, '.copilot', 'mcp-config.json')
 
-// Copilot's concrete model availability is plan-dependent, and explicit
-// --model ids (claude-haiku-4.5, gpt-4.1, ...) are frequently REJECTED by the
-// CLI ("Model ... is not available"). 'auto' (no --model flag) always works and
-// lets Copilot pick — so it is the default and listed first. The explicit ids
-// are kept as best-effort options that may or may not resolve per subscription.
-export const COPILOT_MODELS: ChatDriverModel[] = [
-  {
-    id: 'auto',
-    label: 'Auto (Copilot picks)',
-    badge: 'Auto',
-    desc: "Let Copilot choose the best available model",
-  },
-  {
-    id: 'gpt-5.4',
-    label: 'GPT-5.4',
-    badge: 'OpenAI',
-    desc: 'OpenAI GPT-5.4 via Copilot (if your plan allows)',
-  },
-  {
-    id: 'claude-haiku-4.5',
-    label: 'Claude Haiku 4.5',
-    badge: 'Fast',
-    desc: 'Claude Haiku via Copilot (if your plan allows)',
-  },
-]
 
 function copilotIsAvailable(): boolean {
   return findCli('copilot')
@@ -58,12 +33,13 @@ function copilotIsAvailable(): boolean {
  */
 async function ensureCopilotMcp(port: number): Promise<void> {
   const apiUrl = `http://localhost:${port}`
-  const mcpScript = path.join(AGENTISTICS_ROOT, 'packages', 'mcp', 'agentistics-mcp.ts')
+  // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
+  const launch = agentisticsMcpLaunch()
 
   const entry = {
     type: 'stdio' as const,
-    command: 'bun',
-    args: ['run', mcpScript],
+    command: launch.command,
+    args: launch.args,
     env: { AGENTISTICS_API: apiUrl },
   }
 
@@ -80,11 +56,10 @@ async function ensureCopilotMcp(port: number): Promise<void> {
   }
 
   const servers = config['mcpServers'] as Record<string, unknown>
-  const existing = servers['agentistics'] as { env?: Record<string, string>; args?: string[] } | undefined
+  const existing = servers['agentistics'] as { env?: Record<string, string>; command?: unknown; args?: unknown } | undefined
   const urlOk = existing?.env?.['AGENTISTICS_API'] === apiUrl
-  const pathOk = Array.isArray(existing?.args) && existing.args.some(a => a.includes(mcpScript))
 
-  if (urlOk && pathOk) return // already up to date
+  if (urlOk && sameMcpLaunch(existing, launch)) return // already up to date
 
   servers['agentistics'] = entry
   await mkdir(path.dirname(COPILOT_MCP_CONFIG), { recursive: true })
@@ -133,10 +108,6 @@ export const copilotDriver: ChatDriver = {
     docUrl: 'https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line',
     note: 'Requires a GitHub Copilot subscription. After installing the CLI, run "gh auth login" to authenticate.',
   },
-
-  models: COPILOT_MODELS,
-
-  defaultModel: 'auto',
 
   async ensureMcp(port: number) {
     await ensureCopilotMcp(port)

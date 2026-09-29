@@ -23,7 +23,7 @@
  * Two rules this module exists to keep:
  *
  * - **A NESTED transcript never becomes its own row.** It is already counted inside the invocation
- *   that spawned it (`descendantsOf` in `subagent-metrics.ts`), so pairing it again would report
+ *   that spawned it (`planSubtrees` below), so pairing it again would report
  *   the same tokens twice. It is excluded from the candidate pool outright rather than by relying
  *   on no invocation happening to match it.
  * - **A top-level transcript nobody claims is REPORTED, never silently dropped.** Today those are
@@ -175,4 +175,67 @@ export function planAgentJoin(
     reads: invocations.map(invocation => ({ invocation, agentId: paired.get(invocation) ?? null })),
     unclaimed: candidates.filter(e => !claimed.has(e.agentId)),
   }
+}
+
+/** One file of an invocation's subtree: the root itself at `depth` 0, its descendants below it. */
+export interface SubtreeMember {
+  agentId: string
+  depth: number
+}
+
+/**
+ * Which transcripts count inside which invocation — the subtree under each ROOT, by BOTH routes.
+ *
+ * Nesting used to be found only by scanning each transcript for a `toolUseResult.agentId`
+ * (`named`, the child ids a file's own content names). A BACKGROUND FORK that no parent's content
+ * names was missed: its only link is its own `meta.parentAgentId`, which is the route the canonical
+ * replay follows. Both routes are followed here; a child either one names is a child.
+ *
+ * Rules:
+ *
+ * - **Every root is its own, first.** A root one of whose siblings happens to name it is still its
+ *   own invocation, and is never also counted inside the other.
+ * - **A transcript belongs to at most ONE subtree** — the first root, in the PARENT's invocation
+ *   order, whose walk reaches it. Before, each root walked with its own visited set, so a transcript
+ *   reachable from two roots was counted under both.
+ * - **Order-independent of the directory listing.** Children are visited in sorted order and the
+ *   roots in the order the caller gives (the parent transcript's), so the plan is a function of the
+ *   files, never of `readdir`.
+ * - **Cycle-safe** by the one visited set.
+ *
+ * A child named by either route but with no transcript on disk is skipped, as before.
+ */
+export function planSubtrees(
+  roots: readonly string[],
+  entries: readonly AgentEntry[],
+  named: ReadonlyMap<string, readonly string[]>,
+): Map<string, SubtreeMember[]> {
+  const exists = new Set(entries.map(e => e.agentId))
+  const byParent = new Map<string, string[]>()
+  for (const e of entries) {
+    const p = e.meta?.parentAgentId
+    if (!p) continue
+    const list = byParent.get(p) ?? []
+    list.push(e.agentId)
+    byParent.set(p, list)
+  }
+  const childrenOf = (id: string): string[] =>
+    [...new Set([...(named.get(id) ?? []), ...(byParent.get(id) ?? [])])].sort()
+
+  const visited = new Set<string>(roots.filter(r => exists.has(r)))
+  const out = new Map<string, SubtreeMember[]>()
+  for (const root of roots) {
+    if (!exists.has(root) || out.has(root)) continue
+    const members: SubtreeMember[] = [{ agentId: root, depth: 0 }]
+    for (let i = 0; i < members.length; i++) {
+      const { agentId, depth } = members[i]!
+      for (const child of childrenOf(agentId)) {
+        if (visited.has(child) || !exists.has(child)) continue
+        visited.add(child)
+        members.push({ agentId: child, depth: depth + 1 })
+      }
+    }
+    out.set(root, members)
+  }
+  return out
 }

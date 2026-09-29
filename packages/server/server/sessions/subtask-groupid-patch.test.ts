@@ -121,12 +121,12 @@ test('a patch that does not mention groupId leaves it alone', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "groupId: 'g-abc',")}
-    const result = await web.patchSubtask('s1', { assignee: 'alguem' })
+    const result = await web.patchSubtask('s1', { notes: 'alguem' })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
-    console.log(JSON.stringify({ result, groupId: row.groupId ?? null, assignee: row.assignee }))
+    console.log(JSON.stringify({ result, groupId: row.groupId ?? null, notes: row.notes }))
   `)
-  expect(out).toEqual({ result: { ok: true }, groupId: 'g-abc', assignee: 'alguem' })
+  expect(out).toEqual({ result: { ok: true }, groupId: 'g-abc', notes: 'alguem' })
 })
 
 /**
@@ -181,12 +181,12 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
     const out = await run(`
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
-      const result = await web.patchSubtask('g1', { assignee: 'alguem' })
+      const result = await web.patchSubtask('g1', { notes: 'alguem' })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 'g1')
-      console.log(JSON.stringify({ result, assignee: row.assignee }))
+      console.log(JSON.stringify({ result, notes: row.notes }))
     `)
-    expect(out).toEqual({ result: { ok: true }, assignee: 'alguem' })
+    expect(out).toEqual({ result: { ok: true }, notes: 'alguem' })
   })
 
   test('control: clearing groupId to null on a group member does not conflict with itself', async () => {

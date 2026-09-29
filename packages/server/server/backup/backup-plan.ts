@@ -83,6 +83,11 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       restoreWith: 'claude login',
       why: 'Claude Code OAuth credentials — a live session token.',
     },
+    {
+      pattern: '.claude/agentistics-preferences.json', match: 'prefix', reason: 'secret',
+      restoreWith: 'agentop member connect <url> <token>',
+      why: 'A copy of the agentistics preferences that sits under the Claude directory and holds `team.token`, the member token for a central. The redacted `.agentistics/preferences.json` travels instead (see ALWAYS); this copy is not staged, so it would carry the token verbatim.',
+    },
   ],
   codex: [
     {
@@ -119,6 +124,11 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       restoreWith: 're-authorise each MCP server from inside copilot',
       why: 'Per-MCP-server OAuth tokens. The `.copilot/token` rule does not reach `mcp-oauth-config/<x>.tokens.json`.',
     },
+    {
+      pattern: '.copilot/config.json', match: 'prefix', reason: 'secret',
+      restoreWith: 'copilot  (sign in on first run)',
+      why: 'Holds `copilotTokens` (a credential) alongside ordinary settings. The whole file is excluded: over-excluding costs the user their Copilot settings, which are recoverable, while under-excluding costs them a token, which is not. Neither `.copilot/token` nor `.copilot/mcp-oauth-config` reaches it.',
+    },
   ],
   antigravity: [
     {
@@ -132,6 +142,25 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       pattern: '.kimi-code/config.toml', match: 'prefix', reason: 'secret',
       restoreWith: 'restore your api_key in ~/.kimi-code/config.toml',
       why: 'Holds `api_key` alongside ordinary settings. The whole file is excluded: over-excluding costs the user their Kimi settings, which are recoverable, while under-excluding costs them a key, which is not.',
+    },
+  ],
+  // opencode's OWN store (`opencode.db`, under RAW_DIR below) has `account`/`control_account`/
+  // `credential` tables with `access_token`/`refresh_token`/`value` columns — a live OAuth token,
+  // in the SAME file as the conversation history this backup exists to carry. Both real
+  // sessions/tables measured for this integration were 0 rows, so there is nothing to redact on
+  // THIS machine, but the exclusion model here is per-FILE (a path pattern) and a single SQLite
+  // file mixing valuable history with a credential table cannot be split by one — so, following
+  // this module's own stated bias ("a file wrongly kept out of a backup is recoverable, a
+  // credential wrongly let in is not"), the WHOLE file is excluded rather than guessed at, exactly
+  // as the whole of kimi's config.toml is excluded above for the same reason. This costs the
+  // opencode conversation history a backup captures for every other harness — a real product
+  // trade-off, stated here for a human owner to revisit once/if this is worth a finer-grained
+  // (row-level) redaction step.
+  opencode: [
+    {
+      pattern: '.local/share/opencode/opencode.db', match: 'prefix', reason: 'secret',
+      restoreWith: 'opencode auth login (re-authenticate any provider you had connected)',
+      why: 'The whole session-history database, because its account/credential tables carry OAuth tokens and this exclusion model cannot split one file into a safe part and a secret part. Over-excluding costs the user their opencode conversation history, which is recoverable by using opencode again; under-excluding costs them a live token, which is not.',
     },
   ],
 }
@@ -163,6 +192,19 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'The GitHub PAT used to upload versioned backups (github-store.ts, 0600). A backup-'
       + 'configuration file holding a key and living where the backups live is exactly what this '
       + 'table exists to keep out of an archive.',
+  },
+  {
+    pattern: '.agentistics/provider-keys', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop provider key set anthropic',
+    why: 'Provider API keys entered for the native runtime (credentials.ts, 0600, never logged).',
+  },
+  {
+    pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
+    restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
+    why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '
+      + 'attempt by @agentistics/runtime (provider/capture.ts), 0600. Raw model output can echo anything the model read — a '
+      + 'token printed by a tool included — so it is excluded by default like a credential, not '
+      + 'carried and hoped clean.',
   },
   // `.claude/sessions/<pid>.<hash>.key` (141 files on the reference machine) and
   // `.claude/daemon/control.key` are local control-socket tokens for the session manager and the
@@ -246,6 +288,28 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'not have.',
   },
   {
+    pattern: '.agentistics/journal.db.stamps.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the shadow writer re-derives it by re-reading its sources',
+    why: 'Which source versions the shadow writer already folded into the journal. Restored beside a '
+      + 'journal that is not the one it describes, it would make the writer SKIP sources it never '
+      + 'ingested there; absent, it re-reads and the journal dedupes.',
+  },
+  {
+    pattern: '.agentistics/journal.db.import.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — `agentop journal import` re-derives it by re-reading its sources',
+    why: "`agentop journal import`'s resume state: a cursor per replayed source and the store entries "
+      + 'already imported, bound to the identity of the journal file it describes. Restored beside a '
+      + 'different journal it is ignored; absent, the import re-reads and the journal dedupes.',
+  },
+  {
+    pattern: '.agentistics/projections.db', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the next catch-up pass rebuilds every projection from the journal',
+    why: 'The materialised projections (P3): fold states, finished rows and cursors DERIVED from '
+      + '`journal.db`, which IS carried. Its cursors are rowids of THIS machine\'s journal, so restored '
+      + 'beside another they would describe events that are not there; absent, a rebuild re-derives it. '
+      + 'The prefix also catches its `-wal` / `-shm`.',
+  },
+  {
     pattern: '.agentistics/auto-upgrade.log', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'A log.',
@@ -307,6 +371,11 @@ const RUNTIME: ExcludeRule[] = [
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },
   {
+    pattern: '.agentistics/journal.db.status.json', match: 'prefix', reason: 'runtime',
+    why: 'A live process\'s counters since its boot, read by `agentop journal status` from another '
+      + 'process. Meaningless on a machine whose writer never ran.',
+  },
+  {
     pattern: '.agentistics/server.lock', match: 'prefix', reason: 'runtime',
     why: 'The instance claim, held by a process on the old machine. Restoring it would make a fresh machine believe a server it does not have is already running.',
   },
@@ -343,6 +412,10 @@ const RAW_DIR: Record<HarnessId, string> = {
   copilot: '.copilot',
   antigravity: '.gemini/antigravity-cli',
   kimi: '.kimi-code',
+  // Its DATA lives here; the CLI's own binary install (~/.opencode/bin) is a separate directory
+  // this backup has no reason to carry (a binary is reinstallable; the auth.json beside it there is
+  // also outside this dir, so this raw dir does not reach it either).
+  opencode: '.local/share/opencode',
 }
 
 /** Cross-harness data. Always included: a backup without these restores metrics that no filter,
@@ -385,6 +458,16 @@ const ALWAYS: string[] = [
   // `[Image #N]` back to a chip on the restored machine, which is the defect the record
   // exists to fix. Kilobytes: one line per file.
   '.agentistics/attachment-sends.jsonl',
+  // The durable event journal (P1 §6, decision D2). `metrics`, included: its whole point is
+  // surviving the harness's own 30-day cleanup, so once a transcript is gone the journal is the
+  // ONLY copy of those events — nothing regenerates it. STATED LIMITS, both for a follow-up rather
+  // than A1.3: (1) `walkSources` copies a file source as exactly that file, so events committed to
+  // `journal.db-wal` and not yet checkpointed into the main file (SQLite checkpoints every ~1000
+  // pages) are NOT in the archive; (2) it is a file copy of a live WAL database, not an SQLite
+  // online backup, so a copy racing a checkpoint can be torn. A consistent snapshot (`VACUUM INTO`
+  // staged like `preferences.json`) answers both. A journal moved by `AGENTISTICS_JOURNAL_DIR`
+  // outside the data dir is not under this path and does not travel.
+  '.agentistics/journal.db',
   // Claude's deep aggregate. It is the only surviving source of pre-30-day totals once Claude
   // Code's own cleanup has run, and it is 24 KB.
   '.claude/stats-cache.json',

@@ -221,6 +221,12 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     efforts: ['low', 'medium', 'high'],
     resume: id => ['--conversation', id], // `--conversation  Resume a previous conversation by ID`
   },
+  // opencode is not spawnable through the session manager — no adapter exists to link a spawned
+  // conversation back into `SessionMeta` at all (CLAUDE.md step 4, skipped by scope), so there is
+  // no point verifying its CLI's own flags for this table. `agentop session new` therefore never
+  // offers it (`Record<HarnessId, SpawnSpec|null>`'s own contract: a harness with no spec is ABSENT
+  // from the wizard, never offered and failing).
+  opencode: null,
 }
 
 /**

@@ -278,6 +278,84 @@ describe('Task 13 — the two resync notification codes (member.resync_started /
   })
 })
 
+describe('Task 5 — sessions.idle: meta is language-neutral, {more}/{freed} are composed wording', () => {
+  test('more=0 renders no "more" text in either language', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 2, names: 'A, B', more: 0 } })
+    for (const lang of ['pt', 'en'] as const) {
+      const msg = s.resolveNotification(n, lang).message!
+      expect(msg).not.toContain('more')
+      expect(msg).not.toContain('mais')
+      expect(msg).not.toContain('{more}')
+    }
+  })
+
+  test('more=2 renders "and 2 more" / "e mais 2"', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 5, names: 'A, B, C', more: 2 } })
+    expect(s.resolveNotification(n, 'en').message).toContain('and 2 more')
+    expect(s.resolveNotification(n, 'pt').message).toContain('e mais 2')
+  })
+
+  test('a present freed amount renders the localized sentence', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 1, names: 'A', more: 0, freed: '2.1 GB' } })
+    expect(s.resolveNotification(n, 'en').message).toContain('Frees ~2.1 GB.')
+    expect(s.resolveNotification(n, 'pt').message).toContain('Libera ~2.1 GB.')
+  })
+
+  test('an absent freed amount drops the sentence entirely — never "Frees ~. "', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 1, names: 'A', more: 0 } })
+    for (const lang of ['pt', 'en'] as const) {
+      const msg = s.resolveNotification(n, lang).message!
+      expect(msg).not.toContain('Frees')
+      expect(msg).not.toContain('Libera')
+      expect(msg).not.toContain('{freed}')
+    }
+  })
+
+  test('re-rendering in the other language re-translates the whole sentence, nothing is baked in', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 3, names: 'Fix bug, Add tests', more: 1, freed: '1.2 GB' } })
+    const pt = s.resolveNotification(n, 'pt').message!
+    const en = s.resolveNotification(n, 'en').message!
+    expect(pt).toBe('3 sessões sem mensagem sua há um tempo: Fix bug, Add tests e mais 1. Libera ~1.2 GB. Clique para revisar.')
+    expect(en).toBe('3 sessions you have not messaged in a while: Fix bug, Add tests and 1 more. Frees ~1.2 GB. Click to review.')
+  })
+
+  test('a single idle session gets proper singular copy, not "1 session(s)"', async () => {
+    const s = await freshStore()
+    const n = note('a', { code: 'sessions.idle', meta: { count: 1, names: 'A', more: 0 } })
+    expect(s.resolveNotification(n, 'en').message).toStartWith('1 session you have not messaged')
+    expect(s.resolveNotification(n, 'pt').message).toStartWith('1 sessão sem mensagem')
+  })
+
+  test('no placeholder survives in either language, with or without freed/more', async () => {
+    const s = await freshStore()
+    const withBoth = note('a', { code: 'sessions.idle', meta: { count: 4, names: 'A, B, C', more: 1, freed: '500 MB' } })
+    const withNeither = note('b', { code: 'sessions.idle', meta: { count: 1, names: 'A' } })
+    for (const n of [withBoth, withNeither]) {
+      for (const lang of ['pt', 'en'] as const) {
+        const msg = s.resolveNotification(n, lang).message!
+        expect(msg).not.toMatch(/\{[a-zA-Z]+\}/)
+      }
+    }
+  })
+
+  test('idleMoreSuffix/idleFreedSentence are pure and directly testable', async () => {
+    const s = await freshStore()
+    expect(s.idleMoreSuffix(0, 'en')).toBe('')
+    expect(s.idleMoreSuffix(-1, 'en')).toBe('')
+    expect(s.idleMoreSuffix(3, 'en')).toBe(' and 3 more')
+    expect(s.idleMoreSuffix(3, 'pt')).toBe(' e mais 3')
+    expect(s.idleFreedSentence(null, 'en')).toBe('')
+    expect(s.idleFreedSentence(undefined, 'pt')).toBe('')
+    expect(s.idleFreedSentence('2 GB', 'en')).toBe('Frees ~2 GB. ')
+    expect(s.idleFreedSentence('2 GB', 'pt')).toBe('Libera ~2 GB. ')
+  })
+})
+
 describe('every {placeholder} is interpolated, not only the hand-listed ones', () => {
   test('a placeholder with no hand-written case still resolves from meta', async () => {
     // Seen on screen: a toast reading "Salvando {layers}." and another "Motivo: {reason}".

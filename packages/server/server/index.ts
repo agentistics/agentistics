@@ -13,8 +13,10 @@ import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
   dismissStoredNotification, clearStoredNotifications, localViewer, type NotificationInput,
 } from './notifications-store'
-import { streamViaClaude, execCommand, ensureNayChat, ensureClaudeChat, CLAUDE_CHAT_DIR, type ChatMessage, type ChatModelId, type ChatAttachment } from './chat-tty'
-import { getChatDriver, chatHarnessStatus } from './chat-drivers/index'
+import { streamViaClaude, execCommand, ensureNayChat, ensureClaudeChat, CLAUDE_CHAT_DIR, type ChatMessage, type ChatAttachment } from './chat-tty'
+import { getChatDriver, chatHarnessStatus, chatDefaultModel } from './chat-drivers/index'
+import { modelCatalog } from './model-catalog'
+import { resolveChatModel } from './model-catalog-parse'
 import { listNaySessions, getNaySessionMessages } from './nay-sessions'
 import { listClaudeSessions, getClaudeSessionMessages, type ClaudeSessionSummary, type ClaudeSessionMessage } from './claude-sessions'
 import { listCodexSessions, getCodexSessionMessages, type CodexSessionSummary, type CodexSessionMessage } from './codex-sessions'
@@ -26,6 +28,7 @@ import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
+import { hostGate, currentHostAllowlist, startHostAllowlistRefresh, badRequestTarget } from './host-allow'
 
 /**
  * The LOCAL half of a live snapshot: which assistants are running on THIS host.
@@ -176,9 +179,11 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
     )
     process.exit(1)
   }
-  // Best-effort release. A lock left behind by a hard kill is reclaimed as stale by the next
-  // start, so an unreleased lock costs nothing.
-  const release = () => { void lock.release() }
+  // SYNCHRONOUS release: both signal handlers call `process.exit` on the next line, and an async
+  // release never got past its first `await`, so every clean stop left the lock on disk. A lock left
+  // behind by a hard kill (or a reboot) is still reclaimed as stale by the next start —
+  // `claimInstanceLock` checks that the holder is the process that WROTE it, not merely a live pid.
+  const release = () => { lock.releaseSync() }
   process.on('exit', release)
   process.on('SIGINT', () => { release(); process.exit(130) })
   process.on('SIGTERM', () => { release(); process.exit(143) })
@@ -333,6 +338,23 @@ try { startVersionRecheck() } catch (err) { console.warn('[version] recheck fail
 // report, not to every boot.
 ensureNayChat(PORT).catch(err => console.warn('[nay-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
 ensureClaudeChat().catch(err => console.warn('[claude-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
+// THE MCP COMES UP WITH THE SERVER, for every assistant installed here — not only Claude (which
+// `ensureNayChat` registers) and not only once somebody opens a chat with that driver, which is when
+// codex/gemini/copilot used to be registered. Each registration launches THIS binary's own
+// `agentop mcp` (see `mcp-launch.ts`), so the tools an assistant sees always match the version
+// installed, and each is idempotent: an up-to-date entry is left alone.
+void (async () => {
+  const { ALL_DRIVERS } = await import('./chat-drivers')
+  for (const driver of ALL_DRIVERS) {
+    if (driver.id === 'claude' || !driver.isAvailable()) continue
+    await driver.ensureMcp(PORT).catch(err =>
+      console.warn(`[mcp] could not register for ${driver.id}:`, err instanceof Error ? err.message : String(err)))
+  }
+})()
+// The model pickers read the CLIs' own lists (`model-catalog.ts`); warm the ones that are COMMANDS
+// (`agy models` goes to the network) so the first wizard open already offers them. A central neither
+// spawns sessions nor chats, so it asks no CLI anything.
+if (!TEAM_CENTRAL) void import('./model-catalog').then(m => m.warmModelCatalogs())
 
 
 // ---------------------------------------------------------------------------
@@ -389,6 +411,15 @@ const _wsHandlers = {
  * mutating `res.headers` afterwards is still safe.
  */
 async function handleRequest(req: Request, server: Server<WSData>): Promise<Response | undefined> {
+  // A request with no usable Host has no URL to route by: Bun builds `req.url` from the Host, and
+  // without one it is a bare path that every URL parse below throws on — which used to
+  // answer 500 on every route. Answered 400 with a sentence here, before anything parses it, and
+  // given the same baseline headers as every other response.
+  const unroutable = badRequestTarget(req.url, req.headers.get('host'))
+  if (unroutable) {
+    applyBaselineHeaders(unroutable, { tls: TEAM_TLS, dev: !SERVE_STATIC, isApi: true, embed: false })
+    return unroutable
+  }
   const res = await handleRequestInner(req, server)
   if (!res) return res // WebSocket upgrade handed off
   const isApi = new URL(req.url).pathname.startsWith('/api/')
@@ -544,6 +575,28 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // DNS-rebinding gate (see host-allow.ts). The `localShell` routes are shell access under other
+    // names and the `local` profile answers them with no auth, so a web page whose name resolves to
+    // 127.0.0.1 could otherwise drive them from the person's own browser: to the browser that is a
+    // same-origin request, so neither CORS nor the CSRF check objects. The one thing such a page
+    // cannot change is the Host it sends, so a Host that does not name this machine is refused
+    // (421). Placed here — after the capability guard, before auth and before EVERY route handler —
+    // so it covers the WebSocket handshakes too (`/api/fleet/input`, `/api/shell/input`), which are
+    // upgraded further down. With `localShell` off it returns null and the 403 above already
+    // answered. The allowlist is built at startup and on a timer, never per request.
+    // ---------------------------------------------------------------------------
+    {
+      const misdirected = hostGate(url.pathname, req.headers.get('host'), currentHostAllowlist(), CAPS)
+      if (misdirected) {
+        void writeAudit({ action: 'host.misdirected', ip: clientIp, meta: { path: url.pathname, host: req.headers.get('host')?.slice(0, 256) ?? null } })
+        return new Response(misdirected.body, {
+          status: misdirected.status,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
       }
     }
 
@@ -1596,6 +1649,86 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE PROJECTION QUERY (P3 §3, A4.3) — `GET /api/runtime/metrics`. `capability-guard.ts` has
+    // already required `localTranscripts`; the handler reads `AGENTISTICS_PROJECTIONS` PER REQUEST and,
+    // while it is off, answers `projections_disabled` without touching anything. A central is refused
+    // in the handler (its facts carry no machine attribution to scope a viewer by).
+    if (url.pathname === '/api/runtime/metrics') {
+      try {
+        const { handleRuntimeMetricsRequest, liveRuntimeMetricsDeps } = await import('./runtime-metrics-web')
+        const out = await handleRuntimeMetricsRequest(req, url, await liveRuntimeMetricsDeps(TEAM_CENTRAL))
+        return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return json(safe.body, 500)
+      }
+    }
+
+    // THE NATIVE RUNTIME'S PROVIDERS (UI.1) — `/api/provider`, `/api/provider/:id`, and its `/test`
+    // and `/models` sub-resources, all matched inside `provider-web.ts` (sub-resources explicitly,
+    // so an id can never be read as `test`). `capability-guard.ts` has already required
+    // `localShell`; the handler refuses a central on its own too. A PUT body carries a key, so an
+    // unexpected failure is rendered NON-verbose regardless of profile — the `/api/backup/github/
+    // setup` rule.
+    if (url.pathname === '/api/provider' || url.pathname.startsWith('/api/provider/')) {
+      try {
+        const { handleProviderRequest } = await import('./provider-web')
+        const out = await handleProviderRequest(req, url.pathname, clientIp, { dev: !SERVE_STATIC })
+        if (out !== null) return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json({
+          code: safe.body.error,
+          sentence: `an unexpected error occurred — see the server log (ref ${safe.body.ref}).`,
+          ref: safe.body.ref,
+        }, 500)
+      }
+    }
+
+    // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
+    // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
+    if (url.pathname === '/api/session-groups' && req.method === 'GET') {
+      const { listGroups } = await import('./sessions/session-groups-web')
+      return json(await listGroups())
+    }
+    if (url.pathname === '/api/session-groups' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { name?: string; sessions?: unknown }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({
+        op: 'create', name: String(body.name ?? ''),
+        ...(Array.isArray(body.sessions) ? { sessions: body.sessions.map(String) } : {}),
+      })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname === '/api/session-groups/ungroup' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { session?: string }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'remove', session: String(body.session ?? '') })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
+      const rest = url.pathname.slice('/api/session-groups/'.length).split('/')
+      const group = decodeURIComponent(rest[0] ?? '')
+      const body = await req.json().catch(() => ({})) as { name?: string; session?: string; parent?: string | null }
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      // `/:group/sessions` files a session into the group; `/:group/parent` nests it (or, with
+      // `parent: null`, moves it back to the top level — "Tirar da pasta"); `/:group` renames it.
+      const out = rest[1] === 'sessions'
+        ? await groupOp({ op: 'add', group, session: String(body.session ?? '') })
+        : rest[1] === 'parent'
+          ? await groupOp({ op: 'nest', group, parent: body.parent === null ? null : String(body.parent ?? '') })
+          : await groupOp({ op: 'rename', group, name: String(body.name ?? '') })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname.startsWith('/api/session-groups/') && req.method === 'DELETE') {
+      const group = decodeURIComponent(url.pathname.slice('/api/session-groups/'.length))
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'delete', group })
+      return json(out, groupStatus(out))
+    }
+
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
       return json(await listTasks(taskFilterOf(url)))
@@ -1843,7 +1976,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const result = await mod.patchSubtask(body.id, {
             ...(typeof body.title === 'string' ? { title: body.title } : {}),
             ...(typeof body.status === 'string' ? { status: body.status as never } : {}),
-            ...(typeof body.assignee === 'string' ? { assignee: body.assignee } : {}),
             ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
             ...(typeof body.startDate === 'string' ? { startDate: body.startDate } : {}),
             ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
@@ -1923,7 +2055,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         })
         return json(out, out.ok ? 200 : 404)
       }
-      const FIELDS = ['title', 'detail', 'priority', 'assignee', 'dueDate', 'startDate'] as const
+      const FIELDS = ['title', 'detail', 'priority', 'dueDate', 'startDate'] as const
       // `shared` is a BOOLEAN and is therefore tested separately: it is the one field of this patch
       // whose `false` is a decision rather than an absence, and a truthiness test would make
       // turning sharing OFF indistinguishable from not asking.
@@ -2158,7 +2290,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           })
         }
         const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), body.value)
+        // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
+        // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
+        // Conflict, because the request is well-formed and refused only by the state of the machine
+        // right now, which a retry with `force: true` or fewer sessions can resolve.
         return new Response(JSON.stringify(out), {
+          status: out.code === 'memory_budget' ? 409 : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -2840,7 +2977,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/chat-harnesses' && req.method === 'GET') {
-      return new Response(JSON.stringify(chatHarnessStatus()), {
+      return new Response(JSON.stringify(await chatHarnessStatus()), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
@@ -2874,12 +3011,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         const driver = (requestedDriver?.isAvailable() ? requestedDriver : undefined) ?? getChatDriver('claude')!
 
-        // The model MUST belong to the resolved driver — a model from another
-        // harness (or none) would be rejected by that CLI. Fall back to the
-        // driver's defaultModel when the requested model isn't one of its own.
-        const model = (requestedModel && driver.models.some(m => m.id === requestedModel))
-          ? requestedModel
-          : driver.defaultModel
+        // The model MUST belong to the resolved driver — a model from another harness would be
+        // rejected by that CLI. A listed id is taken as asked; an unlisted one only where the list
+        // is the incomplete fallback table AND it is a safe argv value; otherwise the machine's
+        // configured default, and `''` means no --model at all (the CLI's own default).
+        const model = resolveChatModel(requestedModel, await modelCatalog(driver.id), await chatDefaultModel(driver.id))
 
         // Ensure MCP is registered for the selected driver
         await driver.ensureMcp(PORT)
@@ -2936,8 +3072,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/claude-chat' && req.method === 'POST') {
       try {
-        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: ChatModelId; sessionId?: string | null; thinkingBudget?: number; projectPath?: string; attachments?: ChatAttachment[] }
-        const { message, history = [], model = 'claude-sonnet-4-6', sessionId = null, thinkingBudget, projectPath, attachments } = body
+        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: string; sessionId?: string | null; thinkingBudget?: number; projectPath?: string; attachments?: ChatAttachment[] }
+        const { message, history = [], model: requestedModel, sessionId = null, thinkingBudget, projectPath, attachments } = body
+        // Same rule as /api/chat-tty: never hand an unvalidated value to the CLI's argv.
+        const model = resolveChatModel(requestedModel, await modelCatalog('claude'), await chatDefaultModel('claude'))
         const enc = new TextEncoder()
         const stream = new ReadableStream<Uint8Array>({
           start(ctrl) {
@@ -4050,7 +4188,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     // Serve embedded frontend assets (binary mode only)
     if (!url.pathname.startsWith('/api')) {
-      const asset = serveStatic(url.pathname)
+      const asset = serveStatic(url.pathname, req.headers.get('if-none-match'))
       if (asset) return asset
       // SPA fallback — any unknown path gets index.html
       const fallback = serveStatic('/index.html')
@@ -4064,6 +4202,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 }
 
 try {
+// Build the DNS-rebinding allowlist before the first request can arrive, and keep it fresh (an
+// interface that comes up later — a VPN, a tailnet — joins within a minute). Never per request.
+startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleRequest })
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.

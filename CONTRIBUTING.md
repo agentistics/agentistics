@@ -128,6 +128,16 @@ Two rules exist because getting them wrong published v1.23.1 for a feature (#248
 4. Run `bun test` to verify nothing broke.
 5. Fill in the PR template for real: summary, motivation, and how you tested it.
 
+## Licensing of contributions
+
+Agentistics is licensed under [FSL-1.1-ALv2](LICENSE) (see [LICENSING.md](LICENSING.md)).
+Contributions are accepted under the [Contributor License Agreement](CLA.md): you keep the copyright
+in your contribution, and you give the maintainer permission to license it on any terms. That
+permission is what lets the project be offered under both FSL and commercial licences.
+
+By opening a pull request, you confirm that you have read [CLA.md](CLA.md) and that it applies to
+your contribution. The pull-request template asks you to tick that box.
+
 ## Reporting bugs
 
 Use the [bug report template](https://github.com/blpsoares/agentistics/issues/new?template=bug_report.yml).

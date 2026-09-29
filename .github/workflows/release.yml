@@ -39,6 +39,7 @@ jobs:
       PKG_FILES: >-
         package.json
         packages/core/package.json
+        packages/runtime/package.json
         packages/server/package.json
         packages/web/package.json
         packages/mcp/package.json
@@ -355,15 +356,34 @@ jobs:
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # NEVER FATAL. Features now reach `main` straight from their work branches as well as `dev`,
+        # so `dev` routinely moves while a release is running, and the push below was rejected as a
+        # non-fast-forward — which failed the whole job AFTER the version was bumped and tagged, so
+        # the release (binary, npm, image) was never published. Refetch and retry a few times; if
+        # it still cannot land, warn and let the release publish — a lagging version number on `dev`
+        # is the cost this step's own comment above already accepts.
         run: |
-          git fetch origin dev
-          git checkout -B dev origin/dev
-          if git merge --no-edit main; then
-            git push origin dev
-            echo "▶ carried ${{ steps.version.outputs.next }} back to dev"
-          else
-            git merge --abort
-            echo "::warning::could not merge main into dev — dev keeps its old version number until somebody merges it by hand"
+          carried=false
+          for attempt in 1 2 3; do
+            git fetch origin dev
+            git checkout -B dev origin/dev
+            if git merge --no-edit main; then
+              if git push origin dev; then
+                echo "▶ carried ${{ steps.version.outputs.next }} back to dev"
+                carried=true
+                break
+              fi
+              echo "push to dev rejected (attempt $attempt) — dev moved; refetching"
+              sleep $((attempt * 5))
+            else
+              git merge --abort
+              echo "::warning::could not merge main into dev — dev keeps its old version number until somebody merges it by hand"
+              carried=true
+              break
+            fi
+          done
+          if [ "$carried" != true ]; then
+            echo "::warning::could not push the version bump to dev after 3 attempts — dev keeps its old version number until somebody merges main into it"
           fi
           git checkout main
 

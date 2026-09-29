@@ -25,6 +25,7 @@
  */
 
 import type { StartHost } from '../cli-start'
+import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ChatTurn } from './chat-turn'
@@ -222,6 +223,14 @@ export async function readSessionChat(
         : 'This conversation’s transcript was found on this machine, but could not be read.',
       live,
     }
+  }
+  // A REWIND agentop just drove is not in the transcript until the conversation continues — the
+  // turns it undid are cut here until then. See `rewind-pending.ts`.
+  const rewound = pendingRewindFor(conversationId, Date.now())
+  if (rewound) {
+    const cut = applyPendingRewind(read.turns, rewound)
+    if (cut.stale) forgetRewind(conversationId)
+    else read.turns = cut.turns
   }
   // What is still waiting, judged against the user turns THIS read returned. The window matters and
   // is the right one: a message queued a minute ago cannot be older than the last 400 turns, and

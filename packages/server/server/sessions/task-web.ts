@@ -20,8 +20,9 @@ import { scopeMetas, type TaskFilter } from './task-filter'
 import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
 import {
-  isGroupMember, legacyTaskId, migratePriority, newCommentId, newEventId, newFileId, newLinkId,
-  newSubtaskId, newTaskId, statusAfterAttach, statusAfterSubtaskProgress, subtaskDone,
+  isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
+  newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach,
+  statusAfterSubtaskProgress, subtaskDone,
   type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
@@ -128,7 +129,6 @@ export async function editTask(
     title?: string
     detail?: string
     priority?: string
-    assignee?: string
     dueDate?: string
     startDate?: string
     labels?: string[]
@@ -151,7 +151,6 @@ export async function editTask(
     // an empty string CLEARS, an absent key leaves the value alone.
     ...(patch.detail !== undefined ? { detail: patch.detail.trim() } : {}),
     ...(priority !== undefined ? { priority } : {}),
-    ...(patch.assignee !== undefined ? { assignee: patch.assignee.trim() } : {}),
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate.trim() } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate.trim() } : {}),
     ...(patch.labels !== undefined
@@ -176,11 +175,6 @@ export async function editTask(
     changes.push(event(task.id, actor, 'shared', {
       from: task.shared === true ? 'shared' : 'not shared',
       to: patch.shared === true ? 'shared' : 'not shared',
-    }))
-  }
-  if (patch.assignee !== undefined && patch.assignee.trim() !== (task.assignee ?? '')) {
-    changes.push(event(task.id, actor, 'assign', {
-      from: task.assignee ?? '', to: patch.assignee.trim() || 'nobody',
     }))
   }
   await w.store.logEvents(changes)
@@ -449,11 +443,25 @@ export async function addSubtask(
  * `parentGroupId` (`nextParentGroupId`) for the same reason the `done` gate below is. CLEARING the
  * draft (`stagedSession: null`) is never refused this way — a stale draft left over from before a
  * subtask joined a group must still be removable.
+ *
+ * **`startedAt`/`deliveredAt` are never taken from the caller** — there is no field for either in
+ * this patch, on purpose (a product owner asked for these to be system facts, never something a
+ * person types). They are stamped HERE, after the write, on an ACTUAL transition
+ * (`found.status !== status`): `marksStart` stamps this subtask's own `startedAt` the first time it
+ * leaves `backlog`/`todo` for real progress, and the SAME transition bubbles the stamp up to the
+ * PARENT task's own `startedAt` too (only if the parent does not already have one — the task's is
+ * the EARLIEST such moment across itself and every subtask, and time only moves forward, so "not
+ * already set" is exactly "earlier than anything stamped since"). `subtaskDone(status)` stamps this
+ * subtask's own `deliveredAt` the moment it reaches `done`. Once ALL of a task's TOP-LEVEL subtasks
+ * (loose subtasks and groups; a group's MEMBERS are excluded — `statusAfterAllSubtasksDone`'s own
+ * note explains why) are `done`, the parent is walked through `markTask` itself — the very same
+ * `done_needs_session` gate a manual move to `done` goes through, never a second, looser path (and
+ * it always passes here, because every top-level item that just reached `done` already needed a
+ * session filed on IT to get there).
  */
 export async function patchSubtask(subtaskId: string, patch: {
   title?: string
   status?: TaskStatus
-  assignee?: string
   dueDate?: string
   startDate?: string
   sessionId?: string
@@ -565,16 +573,26 @@ export async function patchSubtask(subtaskId: string, patch: {
     return { ok: false, message: 'subtask_in_group' }
   }
 
+  const now = new Date().toISOString()
+  // `marksStart`/`subtaskDone` are judged on the ACTUAL transition (`found.status` -> `status`),
+  // never on the patch merely repeating the status it already had — see this function's own
+  // docblock. Both stamps are written ONLY when not already set, which is what makes them "first
+  // time only, frozen forever" rather than something a later patch could quietly bump.
+  const startsNow = !found.startedAt && marksStart(found.status, status)
+  const finishesNow = !found.deliveredAt && subtaskDone(status) && !subtaskDone(found.status)
+
   await w.store.upsertSubtask({
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
     status,
     done: subtaskDone(status),
-    // An empty string CLEARS the column — that is how a date or an assignee is removed, and it is
-    // why these are not filtered out the way an empty title is.
-    ...(patch.assignee !== undefined ? { assignee: patch.assignee } : {}),
+    // An empty string CLEARS the column — that is how a date is removed, and it is why these are
+    // not filtered out the way an empty title is. `startedAt`/`deliveredAt` are NEVER taken from
+    // the caller (there is no field for either above) — only ever stamped here, by the system.
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate } : {}),
+    ...(startsNow ? { startedAt: now } : {}),
+    ...(finishesNow ? { deliveredAt: now } : {}),
     ...(patch.sessionId !== undefined ? { sessionId: patch.sessionId } : {}),
     ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
     ...(patch.blockedBy !== undefined ? {
@@ -596,23 +614,47 @@ export async function patchSubtask(subtaskId: string, patch: {
     ...(patch.stagedSession !== undefined
       ? { stagedSession: patch.stagedSession ?? undefined }
       : {}),
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   })
 
-  // See `statusAfterSubtaskProgress` — a subtask (or group member, §F.1) that actually STARTS work
-  // is the same kind of evidence `statusAfterAttach` already reacts to when a session is filed
-  // directly on the task: real progress on a piece of a delivery still sitting in
-  // `backlog`/`todo` is exactly the confusion this fixes ("mudei uma subtask pra 'em andamento' e
-  // o status da task pai simplesmente continuou em 'a fazer'"). Guarded on an ACTUAL transition
-  // (`found.status !== status`) so a patch that leaves the status alone — or repeats the one it
-  // already had — never re-triggers a write nobody asked for. `markTask` re-reads the task world
-  // itself, so this always judges the task's CURRENT status, never a value cached before this
-  // subtask's own write landed.
-  if (patch.status !== undefined && status !== found.status) {
-    const parent = w.book.tasks.find(t => t.id === found.taskId)
-    if (parent) {
+  const parent = w.book.tasks.find(t => t.id === found.taskId)
+  if (parent) {
+    // The task's OWN `startedAt` is the EARLIEST such moment across itself and every subtask, and
+    // time only moves forward — so "not already set" is exactly "earlier than anything stamped
+    // since". Bubbled independently of whether this subtask's start also nudges the parent's
+    // STATUS forward (below): a task already `in_progress` still needs its `startedAt` filled the
+    // first time real work is actually observed anywhere under it.
+    if (startsNow && !parent.startedAt) {
+      await w.store.patchTask(parent.id, { startedAt: now, updatedAt: now })
+    }
+
+    // See `statusAfterSubtaskProgress` — a subtask (or group member, §F.1) that actually STARTS
+    // work is the same kind of evidence `statusAfterAttach` already reacts to when a session is
+    // filed directly on the task: real progress on a piece of a delivery still sitting in
+    // `backlog`/`todo` is exactly the confusion this fixes ("mudei uma subtask pra 'em andamento'
+    // e o status da task pai simplesmente continuou em 'a fazer'"). Guarded on an ACTUAL
+    // transition (`found.status !== status`) so a patch that leaves the status alone — or repeats
+    // the one it already had — never re-triggers a write nobody asked for. `markTask` re-reads the
+    // task world itself, so this always judges the task's CURRENT status, never a value cached
+    // before this subtask's own write landed.
+    if (patch.status !== undefined && status !== found.status) {
       const advanced = statusAfterSubtaskProgress(parent.status, status)
       if (advanced) await markTask(parent.id, advanced, found.title || found.id)
+    }
+
+    // ALL of the task's TOP-LEVEL subtasks (loose subtasks and groups; a group's own MEMBERS never
+    // count separately — see `statusAfterAllSubtasksDone`'s own note) just reached `done` → the
+    // task auto-delivers through the very same `markTask` a manual move to `done` goes through,
+    // never a second, looser path. Re-checked on any write that could change WHICH subtasks are
+    // top-level (a status change, or joining/leaving a group), against the EFFECTIVE post-patch
+    // view — the same `nextParentGroupId` the membership gate above already judged, not `found`'s
+    // stale one.
+    if (patch.status !== undefined || patch.parentGroupId !== undefined) {
+      const topLevel = w.book.subtasks
+        .map(s => (s.id === found.id ? { ...s, status, parentGroupId: nextParentGroupId } : s))
+        .filter(s => s.taskId === found.taskId && !isGroupMember(s))
+      const allDone = statusAfterAllSubtasksDone(parent.status, topLevel)
+      if (allDone) await markTask(parent.id, allDone, found.title || found.id)
     }
   }
 
@@ -1088,11 +1130,20 @@ export async function markTask(
 
   // `done` is the ONE status that stamps a delivery. Every other move is a change of where the work
   // stands, and stamping one of those would close rounds-to-delivery on work that is not delivered.
+  // `!task.deliveredAt` is what makes it "first time only, frozen forever" — see `Task.startedAt`'s
+  // own note on why a stamp is never overwritten once set: re-marking an already-delivered task
+  // `done` (or a person moving it away and back) must not slide the figure that closes
+  // rounds-to-delivery to a later moment.
   const done = to === 'done'
+  // See `marksStart` — the task's OWN transition is the same evidence a subtask starting already
+  // bubbles up through `patchSubtask`, and it is judged and stamped here rather than there so a
+  // task moved straight from the board (never touching a subtask at all) still gets one.
+  const startsNow = !task.startedAt && marksStart(task.status, to)
   await w.store.patchTask(task.id, {
     status: to,
     updatedAt: now,
-    ...(done ? { deliveredAt: now } : {}),
+    ...(done && !task.deliveredAt ? { deliveredAt: now } : {}),
+    ...(startsNow ? { startedAt: now } : {}),
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),

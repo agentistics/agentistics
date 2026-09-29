@@ -55,8 +55,14 @@ export interface HorizontalEdges {
   right: number
 }
 
-/** The panel's preferred width when there is room for it — the old fixed cap, now a ceiling. */
-export const FILTROS_PANEL_PREFERRED_WIDTH = 440
+/**
+ * The panel's preferred width when there is room for it — the old fixed cap, now a ceiling.
+ * 460, not 440 (owner, 2026-09-27): the trigger moved off the header and into the aside's own
+ * button row, so the panel is no longer squeezed between two asides on its usual side — it opens
+ * with the FiltersBar's own natural width available (roughly 460px before its date row/chips wrap),
+ * and 440 read narrower than that content wants, forcing an unnecessary inner scroll.
+ */
+export const FILTROS_PANEL_PREFERRED_WIDTH = 460
 
 /**
  * The panel's floor — narrow enough that it is reached only when the room between the two asides
@@ -201,4 +207,30 @@ export function metricsTabBoundsRight(
   const available = Math.max(0, farEdge - right)
   const panelMaxWidth = Math.max(METRICS_PANEL_MIN_WIDTH, Math.min(METRICS_PANEL_PREFERRED_WIDTH, available))
   return { right, panelMaxWidth }
+}
+
+/**
+ * The panel's `overflow`, decided — PURE.
+ *
+ * It was `hidden` while collapsed or animating and `auto` otherwise, while the comment above it
+ * promised `visible` once settled. `auto` makes the box a SCROLL CONTAINER, and a scroll container
+ * clips its absolutely positioned descendants — which is every popover `FiltersBar` draws in flow:
+ * the "+ Filtro" menu, the value pickers, the date calendar. So opening one opened it INSIDE the
+ * panel, behind a vertical and a horizontal scrollbar, reported with a screenshot of exactly that.
+ *
+ * `visible` whenever the card FITS (the ordinary case), so every popover escapes; `auto` only when
+ * the card itself is taller than the room measured for it, where scrolling it is the lesser evil;
+ * `hidden` while collapsed or mid-animation, which the grid-rows collapse needs. `contentHeight` is
+ * the CARD's own height — an absolutely positioned popover does not change it, so opening a menu
+ * can never flip the panel into clipping that very menu. `null` (not measured yet) reads as fitting.
+ */
+export function filtrosPanelOverflow(o: {
+  open: boolean
+  animating: boolean
+  contentHeight: number | null
+  maxHeight: number | null
+}): 'hidden' | 'visible' | 'auto' {
+  if (!o.open || o.animating) return 'hidden'
+  if (o.contentHeight === null || o.maxHeight === null) return 'visible'
+  return o.contentHeight > o.maxHeight ? 'auto' : 'visible'
 }

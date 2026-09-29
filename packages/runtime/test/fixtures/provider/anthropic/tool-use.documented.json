@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "provenance": "documented-shape",
+    "scenario": "tool-use",
+    "source": "docs/superpowers/research/12-provider-apis.md §1.4 (tool_use content block), §1.8 (stop_reason tool_use). Counters and tool illustrative."
+  },
+  "status": 200,
+  "headers": {
+    "request-id": "req_documented_tool_use_0001",
+    "content-type": "application/json",
+    "date": "Thu, 25 Sep 2026 12:00:00 GMT",
+    "anthropic-ratelimit-requests-limit": "4000",
+    "anthropic-ratelimit-requests-remaining": "3999",
+    "anthropic-ratelimit-tokens-limit": "400000",
+    "anthropic-ratelimit-tokens-remaining": "399000"
+  },
+  "body": "{\"id\":\"msg_documented_tool_use_0001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"Let me look.\"},{\"type\":\"tool_use\",\"id\":\"toolu_documented_0001\",\"name\":\"get_weather\",\"input\":{\"city\":\"Lisbon\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":300,\"output_tokens\":45,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}"
+}

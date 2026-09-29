@@ -77,6 +77,9 @@ export const MENTION_SPECS: Record<HarnessId, MentionSpec | null> = {
   copilot: null,
   kimi: null,
   antigravity: null,
+  // No spawn-spec support (CLAUDE.md step 4, skipped by scope): agentop never composes a prompt for
+  // opencode, so there is no @-mention syntax to verify.
+  opencode: null,
 }
 
 /** The spec for a harness, or the plain fallback — never `null` to a caller, so nothing has to re-check. */

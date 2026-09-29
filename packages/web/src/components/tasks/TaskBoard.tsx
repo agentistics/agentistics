@@ -33,7 +33,7 @@ function Facts({ row }: { row: TaskListRow }) {
   const r = row.rollup
   const money = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD)
+    : fmt(r.costUSD, r.costByHarness)
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
       <span style={{ minWidth: 0 }}>
@@ -83,7 +83,7 @@ function Card({ row, onOpen, live, nowMs, statuses }: {
       {/* The status stripe: the same colour the column header and the table cell use. */}
       <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: s.color }} />
       <div style={{ paddingLeft: 6, display: 'grid', gap: 8 }}>
-        {(priority || row.task.assignee || row.task.dueDate) && (
+        {(priority || row.task.dueDate) && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {priority && (
               <span style={{
@@ -92,7 +92,6 @@ function Card({ row, onOpen, live, nowMs, statuses }: {
                 border: `1px solid ${priority.color}`,
               }}>{priority.label}</span>
             )}
-            {row.task.assignee && <span style={pill()}>{row.task.assignee}</span>}
             {row.task.dueDate && (
               <span
                 style={{
@@ -251,7 +250,6 @@ export interface BoardViewProps {
 function laneOf(row: TaskListRow, key: LaneKey): string {
   switch (key) {
     case 'repo': return row.task.repo || 'no repository'
-    case 'assignee': return row.task.assignee || 'unassigned'
     case 'harness': return row.harnesses[0] ?? 'no harness yet'
     case 'priority': return row.task.priority ?? 'none'
     case 'none': return ''

@@ -46,3 +46,26 @@ describe('boardPrefs.columnSort', () => {
     expect(() => writeBoardPrefs({ columnSort: {} })).not.toThrow()
   })
 })
+
+describe('boardPrefs.subtaskColumns', () => {
+  it('defaults to null (every column, in the fixed order)', () => {
+    expect(readBoardPrefs().subtaskColumns).toBeNull()
+  })
+
+  it('round-trips a picked/reordered set, separately from the delivery table\'s own columns', () => {
+    writeBoardPrefs({ columns: ['status', 'cost'], subtaskColumns: ['model', 'status'] })
+    const p = readBoardPrefs()
+    expect(p.subtaskColumns).toEqual(['model', 'status'])
+    expect(p.columns).toEqual(['status', 'cost'])
+  })
+
+  it('keeps an empty stored list as a real choice', () => {
+    writeBoardPrefs({ subtaskColumns: [] })
+    expect(readBoardPrefs().subtaskColumns).toEqual([])
+  })
+
+  it('falls back to null for anything that is not an array', () => {
+    store.set('agentistics-task-board-v1', JSON.stringify({ subtaskColumns: 'model' }))
+    expect(readBoardPrefs().subtaskColumns).toBeNull()
+  })
+})

@@ -53,7 +53,7 @@ export interface StatsCache {
   totalSpeculationTimeSavedMs: number
 }
 
-export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi'
+export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode'
 
 export interface HarnessCapabilities {
   tokens: boolean
@@ -152,6 +152,19 @@ export const HARNESS_CAPABILITIES: Record<HarnessId, HarnessCapabilities> = {
   // Kimi's wire carries `tool.call` with `args`, and its own tool schema declares Bash's
   // `command` — so tools and commits are both real, read from what it actually ran.
   kimi: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: true },
+  // opencode has NO legacy adapter (CLAUDE.md "Adding a harness" step 4, skipped by scope) — there
+  // is no `adapters/opencode.ts`/`opencode-parse.ts`, so it never produces a `SessionMeta` and
+  // `AppData.harnesses` never lists it. EVERY cell here is `false` for exactly that reason: this
+  // table gates what today's SURFACES may render, and a surface can never receive an opencode
+  // session to render in the first place — a `true` cell would be a capability claim about a data
+  // path that structurally cannot be exercised, which is the "confident lie" this table exists to
+  // refuse. This is NOT a statement that opencode's own store lacks the data: its SQLite database
+  // (`~/.local/share/opencode/opencode.db`) carries real per-message tokens/cost/model and real tool
+  // calls, verified against the live store and proven equal to an independent recount by
+  // `projections/differential-opencode.ts` — see `CAPABILITY_REFINEMENTS.opencode` in
+  // `canonical/capabilities.ts`, where those same metrics are honestly upgraded to `partial` in the
+  // CANONICAL vocabulary (the one gate that is not tied to a legacy adapter existing).
+  opencode: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
 }
 
 /** Display order for harness lists, and the single source of truth for "every harness".
@@ -161,7 +174,7 @@ export const HARNESS_CAPABILITIES: Record<HarnessId, HarnessCapabilities> = {
  *  member missing — adding a harness left it silently absent from the Compare page, the filter bar,
  *  the data-source list and, worse, the consolidate store, so its sessions were never persisted. */
 const HARNESS_SORT: Record<HarnessId, number> = {
-  claude: 0, codex: 1, gemini: 2, copilot: 3, antigravity: 4, kimi: 5,
+  claude: 0, codex: 1, gemini: 2, copilot: 3, antigravity: 4, kimi: 5, opencode: 6,
 }
 
 export const HARNESS_ORDER: HarnessId[] = (Object.keys(HARNESS_SORT) as HarnessId[])
@@ -205,8 +218,12 @@ export interface SessionMeta {
   start_time: string
   end_time?: string
   /** WALL CLOCK: last event − first event. A session reopened over three weeks reports ~500h here,
-   *  which is true and says nothing about how long it was worked on. Use `active_minutes` for that. */
-  duration_minutes: number
+   *  which is true and says nothing about how long it was worked on. Use `active_minutes` for that.
+   *  `undefined` when no transcript was ever walked for this session (a 0-byte file, or one whose
+   *  every line was blank/unparseable) — there is no first or last event to subtract, so `0` would
+   *  be a measurement this session never produced. Present sessions still write a real `0` when the
+   *  walk found two events a minute or less apart. */
+  duration_minutes?: number
   /** Time the session was actually being worked on: Σ per-turn duration (human prompt → the
    *  harness's last event for that turn), preferring a duration the harness measured itself.
    *  Computed by `computeActiveTime()` in activeTime.ts — one rule for every harness.
@@ -841,10 +858,14 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'claude-fable-5':             { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   'claude-mythos-5':            { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   'claude-opus-5':              { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
+  // Opus 5.5 is cheaper than Opus 5: verified against platform.claude.com/docs/en/about-claude/pricing,
+  // read 2026-09-25 (cacheWrite is the 5-minute TTL). Without this row the prefix fallback matches
+  // `claude-opus-5` and bills it at double.
+  'claude-opus-5-5':            { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5     },
   'claude-opus-4-8':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-opus-4-7':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
-  // Sonnet 5 is on introductory pricing ($2/$10) through 2026-08-31, then $3/$15. The introductory
-  // rate is what applies today; revisit on that date.
+  // Sonnet 5: the introductory $2/$10 became the standard price. The increase to $3/$15 announced for
+  // 2026-09-01 was cancelled (platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25).
   'claude-sonnet-5':            { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50  },
   'claude-opus-4-6':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-sonnet-4-6':          { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75  },

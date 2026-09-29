@@ -313,11 +313,8 @@ extension host is the process that sits beside the fleet, so it is the process t
 
 - **`media/icon.png`** is the gallery image — the one on the extension's marketplace page. It is
   the full-colour agentistics mark, squared, so the card does not letterbox a 323x441 image.
-  Regenerate it from the vector source beside it:
-
-  ```bash
-  convert media/logo.svg -background none -gravity center -extent 441x441 -resize 256x256 media/icon.png
-  ```
+  It is generated with the rest of the brand assets — edit the SVGs in `packages/web/branding/`
+  and run `bun packages/web/scripts/gen-brand-assets.ts`.
 
 - **`media/icon.svg`** is the activity-bar icon and is deliberately MONOCHROME (`currentColor`).
   VS Code tints that one itself — dim when the view is inactive, the theme's foreground when it is

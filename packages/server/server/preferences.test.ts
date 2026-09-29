@@ -766,3 +766,24 @@ test('search scopes: unknown values are dropped rather than crashing', () => {
   const p = { sessionView: { grouping: 'none', showClosed: false, showExited: false, showUnfiled: false, searchScopes: ['name', 'bogus', 'folder'] } } as never
   expect(resolveSessionSearchScopes(p)).toEqual(['name', 'folder'])
 })
+
+test('updatePreferencesAt: two concurrent updates to the same key both survive (neither writes a stale read)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentistics-prefs-upd-'))
+  const file = join(dir, 'preferences.json')
+  const { updatePreferencesAt, writePreferencesTo, readPreferencesFrom } = await import('./preferences')
+  await writePreferencesTo(file, null, { pinnedSessions: [] })
+  await Promise.all(
+    Array.from({ length: 20 }, (_, i) =>
+      updatePreferencesAt(file, null, cur => ({ pinnedSessions: [...(cur.pinnedSessions ?? []), `k${i}`] }))),
+  )
+  const out = await readPreferencesFrom(file, null)
+  expect([...(out.pinnedSessions ?? [])].sort()).toEqual(Array.from({ length: 20 }, (_, i) => `k${i}`).sort())
+})
+
+test('updatePreferencesAt: returning undefined writes nothing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentistics-prefs-upd-'))
+  const file = join(dir, 'preferences.json')
+  const { updatePreferencesAt } = await import('./preferences')
+  await updatePreferencesAt(file, null, () => undefined)
+  expect(await Bun.file(file).exists()).toBe(false)
+})

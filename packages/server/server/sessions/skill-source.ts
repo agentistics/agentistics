@@ -61,6 +61,10 @@ export const HARNESS_SKILLS: Record<HarnessId, SkillSource | null> = {
   gemini: null,
   copilot: null,
   kimi: null,
+  // opencode DOES have a `skill` tool part naming the skill by `input.name` (measured on the real
+  // store), but this table is about ON-DISK skill directories agentop can list, not about a tool
+  // call it read — unverified/unprobed, so `null` rather than a guessed directory layout.
+  opencode: null,
 }
 
 /** Why the picker is absent, so the menu says it instead of leaving a hole. */

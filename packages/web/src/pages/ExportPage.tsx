@@ -11,6 +11,7 @@ import {
   runPDFCapture, PDFContent, COLORS, SECTIONS, DATE_OPTIONS,
 } from '../components/PDFExportModal'
 import type { PDFTheme, SectionId, ChartMetric } from '../components/PDFExportModal'
+import { brandAsset } from '../lib/brand'
 
 // Config group helpers
 
@@ -62,9 +63,9 @@ export default function ExportPage() {
   const contentRef = useRef<HTMLDivElement>(null)
 
   // Logo prefetch (same as modal — html2canvas needs base64 data URI)
-  const [logoDataUri, setLogoDataUri] = useState('/logo.png')
+  const [logoDataUri, setLogoDataUri] = useState(brandAsset('/logo.png'))
   useEffect(() => {
-    fetch('/logo.png')
+    fetch(brandAsset(pdfTheme === 'light' ? '/logo-light.png' : '/logo.png'))
       .then(r => r.blob())
       .then(blob => new Promise<string>(resolve => {
         const reader = new FileReader()
@@ -73,7 +74,7 @@ export default function ExportPage() {
       }))
       .then(setLogoDataUri)
       .catch(() => {})
-  }, [])
+  }, [pdfTheme])
 
   // Whether the "Comparação" section is even offered (needs >1 harness in the data)
   const compareAvailable = data.harnesses.length > 1

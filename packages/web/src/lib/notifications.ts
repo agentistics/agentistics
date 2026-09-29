@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { idleSessionNoun } from './idleExecution'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -170,6 +171,57 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Hardware sob pressão', message: '{detail}.' },
     en: { title: 'Hardware under pressure', message: '{detail}.' },
   },
+  // The idle-sessions watch (`useIdleSessions.ts`), fired once per newly-idle batch. `meta` is
+  // deliberately LANGUAGE-NEUTRAL — `count` (number), `names` (the first 3 titles joined by ", "),
+  // `more` (how many were left out, 0 when none) and `freed` (a pre-formatted amount like "2.1 GB",
+  // or absent when unknown) — so a notification fired in one language still reads correctly after
+  // the language toggle flips. `{sessionsNoun}`, `{more}` and `{freed}` cannot be plain
+  // placeholders: the singular/plural noun, "and N more" and an optional "Frees ~X. " sentence are
+  // WORDING, not a bare value, so `resolveNotification` fills them through
+  // `idleSessionNoun`/`idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
+  'sessions.idle': {
+    pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
+    en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },
+  },
+  // Client-originated, from the three `/api/fleet/new` callers (`NewSessionModal.tsx`,
+  // `SessionsPage.tsx`'s `confirmPresetLaunch`, `DeliveryDetail.tsx`'s `confirmFire`) — raised only
+  // when a session was started with `force: true` over the machine's own memory-budget refusal
+  // (`spawnAdmission.ts`'s `forcedNote`). `{note}` is the server's own already-localized sentence
+  // naming what was overridden (available RAM, swap, per-session cost) — never composed here, the
+  // same reason `hardware.pressure`'s `{detail}` is not.
+  'sessions.forced_start': {
+    pt: { title: 'Sessão iniciada apesar do aviso de memória', message: '{note}' },
+    en: { title: 'Session started despite the memory warning', message: '{note}' },
+  },
+  // A staged session fired from the task TABLE started, but its filing under the subtask was
+  // refused because the subtask is blocked. The session runs either way; this says where it is NOT.
+  'tasks.fire_filing_blocked': {
+    pt: { title: 'Sessão iniciada, mas não arquivada', message: 'A subtarefa está bloqueada por {blockedBy} — arquive a sessão quando o bloqueio sair.' },
+    en: { title: 'Session started, but not filed', message: 'The subtask is blocked by {blockedBy} — file the session once the block lifts.' },
+  },
+}
+
+/**
+ * `sessions.idle`'s `{more}` — "and N more"/"e mais N", never rendered for `more <= 0`.
+ *
+ * Exported (not inlined into `resolveNotification`) so the wording is one function both this
+ * module's placeholder fill and its own test can check — a hand-duplicated "and N more" in two
+ * places is exactly how `member.rules_proposed`'s `{count}` drifted before the generic pass existed.
+ */
+export function idleMoreSuffix(more: number, lang: 'pt' | 'en'): string {
+  if (!Number.isFinite(more) || more <= 0) return ''
+  return lang === 'pt' ? ` e mais ${more}` : ` and ${more} more`
+}
+
+/**
+ * `sessions.idle`'s `{freed}` — the optional "this frees ~X" sentence. `null`/absent means the hook
+ * could not measure any candidate's memory (`freedBytes` in `@agentistics/core` returns `null` on an
+ * empty sample rather than a confident `0`), and the sentence disappears entirely rather than
+ * printing "Frees ~. ".
+ */
+export function idleFreedSentence(freed: string | null | undefined, lang: 'pt' | 'en'): string {
+  if (!freed) return ''
+  return lang === 'pt' ? `Libera ~${freed}. ` : `Frees ~${freed}. `
 }
 
 /** Resolve a notification to display strings in the CURRENT language. Localizes by
@@ -233,6 +285,19 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   // Append the HTTP status to the auth-rejected message when the central provided one.
   if (n.code === 'member.auth_rejected' && n.meta?.status && message) {
     message = `${message} (HTTP ${n.meta.status})`
+  }
+  // sessions.idle's {sessionsNoun}/{more}/{freed}: WORDING, not a bare value, so they are composed
+  // here rather than left to the generic pass below — see idleSessionNoun/idleMoreSuffix/
+  // idleFreedSentence for why. `{sessionsNoun}` is the proper singular/plural noun for `count`
+  // ("session"/"sessions", "sessão"/"sessões") — the literal "{count} session(s)" this replaced
+  // never read right for a single idle session.
+  if (message && n.code === 'sessions.idle') {
+    const count = typeof n.meta?.count === 'number' ? n.meta.count : 0
+    message = message.replace('{sessionsNoun}', idleSessionNoun(count, lang))
+    const more = typeof n.meta?.more === 'number' ? n.meta.more : 0
+    message = message.replace('{more}', idleMoreSuffix(more, lang))
+    const freed = typeof n.meta?.freed === 'string' ? n.meta.freed : null
+    message = message.replace('{freed}', idleFreedSentence(freed, lang))
   }
 
   // EVERY remaining {placeholder}, from `meta` under the same name.

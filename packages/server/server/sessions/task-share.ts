@@ -33,8 +33,8 @@ function shareRecord(t: Task): SharedTaskRecord {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     ...(t.deliveredAt !== undefined ? { deliveredAt: t.deliveredAt } : {}),
+    ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
     ...(t.priority !== undefined ? { priority: t.priority } : {}),
-    ...(t.assignee !== undefined ? { assignee: t.assignee } : {}),
     ...(t.dueDate !== undefined ? { dueDate: t.dueDate } : {}),
     ...(t.startDate !== undefined ? { startDate: t.startDate } : {}),
     ...(t.labels !== undefined ? { labels: [...t.labels] } : {}),
@@ -50,9 +50,10 @@ const shareComment = (c: TaskComment): SharedTaskComment =>
 const shareSubtask = (s: Subtask): SharedSubtask => ({
   id: s.id, title: s.title, done: s.done, status: s.status,
   createdAt: s.createdAt, updatedAt: s.updatedAt,
-  ...(s.assignee !== undefined ? { assignee: s.assignee } : {}),
   ...(s.dueDate !== undefined ? { dueDate: s.dueDate } : {}),
   ...(s.startDate !== undefined ? { startDate: s.startDate } : {}),
+  ...(s.startedAt !== undefined ? { startedAt: s.startedAt } : {}),
+  ...(s.deliveredAt !== undefined ? { deliveredAt: s.deliveredAt } : {}),
   ...(s.notes !== undefined ? { notes: s.notes } : {}),
 })
 

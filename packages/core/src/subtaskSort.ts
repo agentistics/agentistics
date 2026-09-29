@@ -24,10 +24,11 @@
  * shattered by it. `subtaskGroups.test.ts` pins that composition.
  */
 
+import { elapsedMs } from './format'
 import { statusRank, type SortDir } from './taskSort'
 
 export type SubtaskSortKey =
-  | 'title' | 'status' | 'assignee' | 'start' | 'due' | 'sessions' | 'cost' | 'tokens'
+  | 'title' | 'status' | 'started' | 'completed' | 'duration' | 'sessions' | 'rounds' | 'cost' | 'tokens'
 
 export interface SubtaskSortSpec {
   key: SubtaskSortKey
@@ -39,9 +40,9 @@ export interface SortableSubtask {
   id: string
   title: string
   status: string
-  assignee?: string
-  startDate?: string
-  dueDate?: string
+  /** System-stamped, read-only — see `task-model.ts`'s `Subtask.startedAt`/`deliveredAt`. */
+  startedAt?: string
+  deliveredAt?: string
 }
 
 /**
@@ -54,6 +55,7 @@ export interface SortableSubtask {
  */
 export interface SubtaskMeasure {
   sessions: number | null
+  rounds: number | null
   costUSD: number | null
   tokens: number | null
 }
@@ -71,10 +73,15 @@ function valueOf<T extends SortableSubtask>(
   switch (key) {
     case 'title': return s.title.toLowerCase()
     case 'status': return ctx?.statusOrder ? statusRank(ctx.statusOrder, s.status) : s.status
-    case 'assignee': return s.assignee?.toLowerCase() || null
-    case 'start': return s.startDate || null
-    case 'due': return s.dueDate || null
+    case 'started': return s.startedAt || null
+    case 'completed': return s.deliveredAt || null
+    // `deliveredAt − startedAt` — the board's Duration column. See `elapsedMs`'s own note: `null`
+    // (never a negative or NaN figure) whenever either timestamp is missing or the pair cannot
+    // produce a non-negative span, so bad data reads as "no answer" here exactly like an unmeasured
+    // cost, never a confident but wrong duration.
+    case 'duration': return elapsedMs(s.startedAt, s.deliveredAt)
     case 'sessions': return ctx?.measureOf?.(s)?.sessions ?? null
+    case 'rounds': return ctx?.measureOf?.(s)?.rounds ?? null
     case 'cost': return ctx?.measureOf?.(s)?.costUSD ?? null
     case 'tokens': return ctx?.measureOf?.(s)?.tokens ?? null
   }

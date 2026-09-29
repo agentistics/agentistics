@@ -81,6 +81,39 @@ function unwrap(lines: readonly string[], boxWidth: number): string[] {
   return out.map(o => o.text)
 }
 
+/**
+ * The IDENTITY of the dialog currently on screen — what makes "this is still the same question"
+ * true across two reads, and what makes "this is a DIFFERENT question" true too.
+ *
+ * MEASURED ROOT CAUSE (2026-09-28): both `ApprovalCard`'s "already answered from here" guard and
+ * the composer's "still answering this dialog" check used to compare OPTIONS ALONE
+ * (`options.map(o => \`${o.number}:${o.label}\`).join('\n')`). That is not an identity for claude's
+ * commonest dialog: its PERMISSION PROMPT is the fixed template `1. Yes / 2. Yes, allow all edits
+ * during this session (shift+tab) / 3. No` on every Bash/Edit/Write call, whatever the command —
+ * `approval-spec.ts` documents that exact wording. So the FIRST permission prompt answered from a
+ * session set `answeredShape` to that template, and EVERY LATER ONE — a wholly different command —
+ * compared equal to it forever, because nothing in the session ever changes `answeredShape` back.
+ * The buttons went inert and stayed inert, which reads as the card ignoring every click and is
+ * reported exactly that way: "sometimes it just keeps showing the interactive question" (it was a
+ * NEW question, disabled by the memory of the last one) and, silently, "sometimes it doesn't send
+ * at all" (a disabled button throws no error and shows no message).
+ *
+ * The fix folds the QUESTION half back in — everything `splitApprovalFrame` puts above `1.`, which
+ * on a permission prompt is the actual command and is exactly what differs between two prompts that
+ * share a template. The OPTION rows are still summarised by number and label rather than included
+ * verbatim, so a cursor merely moving between them (no keystroke of ours involved on a marker-style
+ * dialog mid-resolution) cannot flip the identity — see `ApprovalCard`'s own `DialogOption.selected`,
+ * which this deliberately ignores.
+ */
+export function approvalIdentity(
+  lines: readonly string[],
+  options: readonly { number: number; label: string }[],
+): string {
+  const { question } = splitApprovalFrame(lines)
+  const optionsShape = options.map(o => `${o.number}:${o.label}`).join('\n')
+  return `${question.join('\n')}\n---\n${optionsShape}`
+}
+
 export function splitApprovalFrame(lines: readonly string[]): ApprovalFrame {
   const raw = [...lines]
   const at = raw.findIndex(l => FIRST_OPTION.test(l.trim()))

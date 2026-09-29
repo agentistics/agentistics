@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
 import { usePlanBasis } from './hooks/usePlanBasis'
-import { planScopeHarnesses, planScopeNote, sessionPlanFactor } from './lib/costBasis'
+import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'
@@ -73,19 +73,24 @@ import { ModeSwitch } from './components/nav/ModeSwitch'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
-import { isPanelShown, usePanelSlots } from './lib/panelSlots'
+import { getPanelLayout, isPanelShown, setBandOpen, setSlotRightOpen, showPanel, usePanelSlots } from './lib/panelSlots'
 import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
+import { matchPanelShortcut, shouldHandlePanelShortcut } from './lib/panelShortcuts'
 import { SessionsAside } from './components/nav/SessionsAside'
 import { SessionsRail } from './components/nav/SessionsRail'
+import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs } from './lib/sharedPref'
+import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
 } from '@agentistics/tui/control/session-fleet'
 import { AsideResizer } from './components/nav/AsideResizer'
 import { modeOfPath } from './lib/workspaceMode'
-import { ASIDE_DEFAULT } from './lib/asideWidth'
+import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
+import { PanelGap } from './components/sessions/PanelGap'
+import { PANEL_GAP } from './lib/panelLayout'
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
@@ -95,7 +100,6 @@ import { ChangePassword } from './components/ChangePassword'
 import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
-import { type ChatModelId } from './lib/chatModels'
 import { HARNESS_LABELS } from './lib/harness'
 import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
@@ -103,18 +107,19 @@ import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/flee
 import { runningConversationIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
 import {
-  filtrosPanelInert, sessionsFiltersShouldReturnFocus, filtrosPanelBoundsRight, metricsTabBoundsRight,
+  filtrosPanelInert, filtrosPanelOverflow, sessionsFiltersShouldReturnFocus, filtrosPanelBounds,
 } from './lib/sessionsFiltersPanel'
 import { useRightAsideEdge } from './lib/rightAsideEdge'
 import { setLeftAsideEdge } from './lib/leftAsideEdge'
+import { setLeftAsideOpen } from './lib/leftAsideOpen'
 import { CentralSessions } from './components/sessions/CentralSessions'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
-import { PAGE_INSET, PAGE_MAX_WIDTH } from './components/sessions/FleetOverview'
+import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
-import { SessionStatsMenu } from './components/sessions/SessionStatsMenu'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { brandAsset } from './lib/brand'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -226,23 +231,13 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
           from{opacity:0;transform:translateY(10px)}
           to{opacity:1;transform:translateY(0)}
         }
-        @keyframes loadIconGlow {
-          0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,0),0 0 10px 2px rgba(217,119,6,0.2)}
-          50%{box-shadow:0 0 0 6px rgba(217,119,6,0),0 0 20px 5px rgba(217,119,6,0.35)}
-        }
       `}</style>
 
       {/* Icon */}
       <div style={{ animation: 'loadFadeUp 0.35s ease-out both' }}>
-        <div style={{
-          width: 48, height: 48,
-          background: 'var(--anthropic-orange-dim)',
-          borderRadius: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          animation: 'loadIconGlow 2.2s ease-in-out infinite',
-        }}>
-          <BarChart2 size={22} color="var(--anthropic-orange)" />
-        </div>
+        {/* The product's own mark (teal on a central), not a generic chart icon. */}
+        <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true"
+          style={{ width: 48, height: 48, objectFit: 'contain', display: 'block' }} />
       </div>
 
       {/* Title + subtitle */}
@@ -1021,12 +1016,14 @@ function MobileBottomNav({
 }
 
 /**
- * The fixed strip holding the mark, search and the sidebar toggle. The aside starts beneath it, so
- * those three controls never move when the sidebar changes width, changes body, or is collapsed.
+ * The fixed strip along the top of the page, to the right of the aside. The aside runs the full
+ * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
  */
 const TOPBAR_H = 44
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
+/** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
+const FILTROS_ASIDE_GAP = 12
 
 const FILTROS_PANEL_ID = 'sessions-filtros-panel'
 
@@ -1059,7 +1056,11 @@ function CollapsedTip({ label, show, children }: { label: string; show: boolean;
   )
 }
 
-function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle, theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly }: {
+function SideNav({
+  lang, harnesses, isCentral, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle,
+  theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
+  filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
+}: {
   lang: Lang; harnesses?: HarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
   /** The width in force. Fixed in the dashboard workspace, user-set in the sessions one. */
@@ -1072,6 +1073,17 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
    *  `SideNav` only reads them, to hand to `SessionsAside`; it owns neither. */
   sessionsFilters: Filters
   sessionsActiveOnly: boolean
+  /**
+   * THE FILTROS TRIGGER (design item 4) — `App.tsx` owns the open/close state and the panel that
+   * opens from it; `SideNav` only carries the button down to `SessionsAside`/`SessionsRail`, the
+   * same read-only relationship it already has with `sessionsFilters`/`sessionsActiveOnly` above.
+   * `filtersButtonRef` is how `App.tsx` measures where to anchor the panel — see its own
+   * `setFiltrosButtonEl` header.
+   */
+  filtersOpen: boolean
+  filtersCount: number
+  onToggleFilters: () => void
+  filtersButtonRef: (el: HTMLButtonElement | null) => void
 }) {
   const location = useLocation()
   // Which session is open, for the collapsed rail's selected highlight.
@@ -1165,12 +1177,139 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
     color: 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.15s',
   }
+  /**
+   * THE FOOTER — account row + config actions, computed ONCE so it can render either inside the
+   * dashboard nav's own flow (`mode !== 'sessions'`, unchanged) or inside the sessions workspace's
+   * new floating panel (`mode === 'sessions'`, see the return below) without being two copies of
+   * the same JSX that could drift from each other.
+   */
+  const footer = (
+    <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid var(--border)' }}>
+      {/* Row A — account: a single profile button (avatar) opening a popover menu */}
+      {principal && (
+        <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'stretch', paddingBottom: 10 }}>
+          <CollapsedTip label={principal.name} show={collapsed}>
+            <button ref={avatarRef} onClick={openMenu} aria-haspopup="menu" aria-expanded={menuOpen}
+              title={collapsed ? undefined : principal.name}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, width: collapsed ? 'auto' : '100%',
+                padding: collapsed ? 0 : '4px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                border: '1px solid transparent', background: menuOpen ? 'var(--bg-elevated)' : 'transparent', transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
+              onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
+              <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
+              {!collapsed && (
+                <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
+                  <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
+                </span>
+              )}
+              {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
+            </button>
+          </CollapsedTip>
+        </div>
+      )}
+
+      {/* Profile popover — rendered via portal so it escapes the sidebar's overflow clip */}
+      {principal && menuOpen && menuPos && createPortal(
+        <div ref={menuRef} role="menu"
+          style={{
+            position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)',
+            minWidth: 220, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
+            boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
+          }}>
+          <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
+            <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
+          </div>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
+          </button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
+          </button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
+            <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {/* Self-service change-password modal */}
+      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
+      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
+
+      {/* Thin divider between account and actions */}
+      {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
+
+      {/* Row B — config actions (theme · language · export · settings), evenly spaced */}
+      <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
+        <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
+          <button onClick={onToggleTheme} aria-label={pt ? 'Tema' : 'Theme'} title={collapsed ? undefined : (theme === 'dark' ? (pt ? 'Tema claro' : 'Light theme') : (pt ? 'Tema escuro' : 'Dark theme'))} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Idioma' : 'Language'} show={collapsed}>
+          <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
+            <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
+          <button onClick={onExport} aria-label={pt ? 'Exportar relatório PDF' : 'Export PDF report'} title={collapsed ? undefined : (pt ? 'Exportar relatório PDF' : 'Export PDF report')}
+            style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, borderColor: 'var(--anthropic-orange)50', color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
+            <Download size={15} />
+          </button>
+        </CollapsedTip>
+        <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
+          <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
+            <SlidersHorizontal size={15} />
+          </NavLink>
+        </CollapsedTip>
+      </div>
+    </div>
+  )
   return (
     <aside style={{
-      position: 'fixed', top: 'var(--ag-topbar-h)', left: 0, bottom: 0,
+      position: 'fixed', top: 0, left: 0, bottom: 0,
       width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
-      background: 'var(--bg-surface)', borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column', padding: collapsed ? '12px 8px' : '14px 12px', boxSizing: 'border-box',
+      // FLOATING-PANELS DESIGN (`sdd/brief.md`): in the sessions workspace this element is the
+      // FRAME, not a panel — its own background reads as the frame's ground colour, and the actual
+      // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
+      // the bordered box a reader sees. Every OTHER workspace keeps the plain elevated-surface aside
+      // it always had — this is a `mode === 'sessions'` styling branch, nothing else.
+      background: mode === 'sessions' ? 'var(--bg-base)' : 'var(--bg-surface)',
+      borderRight: mode === 'sessions' ? 'none' : '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column',
+      // OUTER FRAME GAPS (`sdd/brief.md`, task 2): the sessions-workspace panel's LEFT edge sits
+      // exactly 6px from the window's left edge and its BOTTOM edge 6px from the window's bottom —
+      // OUTER edges, unchanged by the inner-gap bump below. The RIGHT side is the INNER gap instead
+      // (`PANEL_GAP`, `lib/panelLayout.ts`) — the panel's own right border sits `PANEL_GAP` inside
+      // this aside's own right edge (`x = asideWidth`), which is exactly where the content area's
+      // own `paddingLeft` begins — the vertical gap element (`right: -PANEL_GAP` on the panel host,
+      // below) straddles that boundary and is the ONLY space between this panel and the conversation
+      // panel next to it. Every other workspace, and the collapsed 64px rail, keep their old figures.
+      padding: mode === 'sessions'
+        // Collapsed, the rail panel ends at the same 6px floor as every other panel on the board.
+        ? (collapsed ? `0 ${PANEL_GAP}px 6px 6px` : `0 ${PANEL_GAP}px 6px 6px`)
+        : (collapsed ? '0 8px 12px' : '0 12px 14px'),
+      boxSizing: 'border-box',
       // `fixed` is already a positioning context, so the resize handle on the edge places against
       // it. Visible overflow, because that handle straddles the border by design and clipping it
       // would leave half the hit area.
@@ -1179,42 +1318,103 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
       // a transition on it makes the edge lag behind the cursor and then catch up.
       transition: dragging ? 'none' : 'width 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
-      {/* The workspace switch, PINNED above the scrolling body. */}
+      {/* The aside is the full height of the window, so it carries its own mark and fold control —
+          this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
+      <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
+      {/* The workspace switch, PINNED above the scrolling body — frame chrome too, same reason. */}
       <div style={{ padding: '0 2px 10px' }}>
         <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
         {/* Member machine: live connection status + latency to the central. Null unless connected. */}
         {!collapsed && !isCentral && <div style={{ marginTop: 8 }}><MemberConnectionStatus lang={lang} compact /></div>}
       </div>
 
-      {/* ONE aside, two bodies — never two asides. The shell above and the footer below are the
-          same in both workspaces; only what sits between them changes. Collapsed, the sessions
-          workspace draws the RAIL — sessions, not the dashboard's Home/Costs/Tools nav, which is
-          the one thing this workspace certainly is not. */}
+      {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
+          it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
+          dashboard's Home/Costs/Tools nav, which is the one thing this workspace certainly is not. */}
       {mode === 'sessions' ? (
-        collapsed ? (
-          <SessionsRail rows={railRows} {...(sessionId ? { selectedId: sessionId } : {})} />
-        ) : (
-        <>
-        {/* On a central the workspace is ABOUT a machine, so the choice sits above the list it
-            governs. Absent on a machine, which is its own. */}
-        {isCentral && <div style={{ padding: '0 2px 8px' }}><CentralSessions lang={pt ? 'pt' : 'en'} /></div>}
-        <SessionsAside
-          lang={pt ? 'pt' : 'en'}
-          rows={fleet.rows}
-          finishedTasks={fleet.finishedTasks}
-          loading={fleetLoading}
-          unsupported={fleetUnsupported}
-          filters={sessionsFilters}
-          activeOnly={sessionsActiveOnly}
-          {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
-          stale={fleetStale}
-          {...(isCentral ? { hideNew: true } : {})}
-          rowsById={asideRowIndex}
-          act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
-        />
-        </>
-        )
+        /**
+         * THE LEFT SESSIONS-LIST PANEL (`sdd/brief.md`, region 1) — a POSITIONING HOST (no clip of
+         * its own) holding the visually-bordered panel box, with the resize gap as a SEPARATE
+         * absolutely-positioned sibling: the gap's own hit area must sit OUTSIDE the panel's
+         * `overflow: hidden` clip (`sdd/52a454c6-image.png`/`b6a3778b-image.png`), or it would be
+         * cut off at the panel's own border the instant the pointer moved past it.
+         *
+         * The FOOTER (account + config actions) moves INSIDE this panel, at its own foot — it used
+         * to be a sibling of the list, flush against the aside's own (now removed) edge line; folding
+         * it into the panel is what keeps "no panel sits inside another, no line doubles the gap" —
+         * the alternative (a second bordered box under this one, for the footer alone) would be
+         * exactly the extra divider design item 2 exists to remove.
+         *
+         * COLLAPSED (the existing 64px icon rail — untouched functionality, `SessionsRail`) still
+         * gets the panel treatment, just narrower: the brief's "closed" state (panel and gap both
+         * gone, neighbour takes the space) is a DIFFERENT lever from this one, and nothing here asks
+         * for that third state — `Today's collapse/expand controls keep working` unchanged. Only the
+         * RESIZE GAP is withheld while collapsed (`!collapsed` below): a fixed 64px rail has nothing
+         * to resize.
+         */
+        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+            border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+            background: 'var(--bg-surface)',
+            // Inner breathing room: the search, buttons and rows no longer touch the panel's edges.
+            // Collapsed keeps vertical room too, so the footer's last button never sits on the edge.
+            padding: collapsed ? '6px 0' : 8,
+          }}>
+            {collapsed ? (
+              <SessionsRail
+                rows={railRows} allRows={fleet.rows} lang={pt ? 'pt' : 'en'}
+                {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})}
+                filtersOpen={filtersOpen} filtersCount={filtersCount}
+                onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
+              />
+            ) : (
+              <>
+                {/* On a central the workspace is ABOUT a machine, so the choice sits above the list
+                    it governs. Absent on a machine, which is its own. */}
+                {isCentral && <div style={{ padding: '8px 2px 0' }}><CentralSessions lang={pt ? 'pt' : 'en'} /></div>}
+                <SessionsAside
+                  lang={pt ? 'pt' : 'en'}
+                  rows={fleet.rows}
+                  finishedTasks={fleet.finishedTasks}
+                  loading={fleetLoading}
+                  unsupported={fleetUnsupported}
+                  filters={sessionsFilters}
+                  activeOnly={sessionsActiveOnly}
+                  {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
+                  stale={fleetStale}
+                  {...(isCentral ? { hideNew: true } : {})}
+                  rowsById={asideRowIndex}
+                  act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
+                  filtersOpen={filtersOpen} filtersCount={filtersCount}
+                  onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
+                />
+              </>
+            )}
+            {footer}
+          </div>
+          {/* THE GAP IS THE HANDLE — see `PanelGap`'s own header. `sign={1}`: the pointer moving
+              RIGHT grows this panel, the same convention `AsideResizer`'s own keyboard handler
+              already used for this exact edge. `clampAsideWidth` is the SAME existing resolver
+              `AsideResizer` calls — reused exactly, never re-implemented; only the hit area and the
+              visuals moved into the gap. */}
+          {!collapsed && (
+            <PanelGap
+              orientation="vertical"
+              label={pt ? 'Redimensionar lista de sessões' : 'Resize sessions list'}
+              // A stable id — the bottom-left T-junction (`SessionsPage.tsx`, via `PanelGap.tsx`'s
+              // `armGap`) replays a synthetic `mousedown` on this exact element to arm its own
+              // window-level drag listener, reusing this gap's own clamp/persistence verbatim.
+              id="ag-gap-aside-left"
+              value={width} min={ASIDE_MIN} max={ASIDE_MAX} sign={1}
+              onChange={w => { setDragging(true); onResize(clampAsideWidth(w, window.innerWidth)) }}
+              onCommit={w => { setDragging(false); onCommitWidth(clampAsideWidth(w, window.innerWidth)) }}
+              style={{ position: 'absolute', top: 0, bottom: 0, right: -PANEL_GAP }}
+            />
+          )}
+        </div>
       ) : (
+      <>
       <nav className="ag-noscroll" style={{ display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
         {items.map(item => {
           const active = item.to === '/'
@@ -1253,11 +1453,10 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
           )
         })}
       </nav>
-      )}
 
-      {/* The resize handle. In BOTH workspaces — the dashboard's labels benefit from a wider
-          column too, and a control that exists on one screen and vanishes on the next reads as
-          broken. Only while the sidebar is open: there is nothing to resize about a 64px rail. */}
+      {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-
+          as-handle model is the sessions workspace's alone. Only while the sidebar is open: there is
+          nothing to resize about a 64px rail. */}
       {!collapsed && (
         <AsideResizer
           width={width}
@@ -1267,107 +1466,9 @@ function SideNav({ lang, harnesses, isCentral, hasWorkflows, collapsed, width, o
         />
       )}
 
-      {/* Footer — Row A account · thin divider · Row B config actions */}
-      <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid var(--border)' }}>
-        {/* Row A — account: a single profile button (avatar) opening a popover menu */}
-        {principal && (
-          <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'stretch', paddingBottom: 10 }}>
-            <CollapsedTip label={principal.name} show={collapsed}>
-              <button ref={avatarRef} onClick={openMenu} aria-haspopup="menu" aria-expanded={menuOpen}
-                title={collapsed ? undefined : principal.name}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, width: collapsed ? 'auto' : '100%',
-                  padding: collapsed ? 0 : '4px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-                  border: '1px solid transparent', background: menuOpen ? 'var(--bg-elevated)' : 'transparent', transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
-                onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
-                <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
-                {!collapsed && (
-                  <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-                    <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-                  </span>
-                )}
-                {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
-              </button>
-            </CollapsedTip>
-          </div>
-        )}
-
-        {/* Profile popover — rendered via portal so it escapes the sidebar's overflow clip */}
-        {principal && menuOpen && menuPos && createPortal(
-          <div ref={menuRef} role="menu"
-            style={{
-              position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)',
-              minWidth: 220, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
-            }}>
-            <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
-              <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
-            </div>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
-            </button>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
-            </button>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-              onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-              <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
-            </button>
-          </div>,
-          document.body,
-        )}
-
-        {/* Self-service change-password modal */}
-        {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
-
-        {/* Thin divider between account and actions */}
-        {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
-
-        {/* Row B — config actions (theme · language · export · settings), evenly spaced */}
-        <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
-          <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
-            <button onClick={onToggleTheme} aria-label={pt ? 'Tema' : 'Theme'} title={collapsed ? undefined : (theme === 'dark' ? (pt ? 'Tema claro' : 'Light theme') : (pt ? 'Tema escuro' : 'Dark theme'))} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1 }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Idioma' : 'Language'} show={collapsed}>
-            <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
-              <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
-            <button onClick={onExport} aria-label={pt ? 'Exportar relatório PDF' : 'Export PDF report'} title={collapsed ? undefined : (pt ? 'Exportar relatório PDF' : 'Export PDF report')}
-              style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, borderColor: 'var(--anthropic-orange)50', color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
-              <Download size={15} />
-            </button>
-          </CollapsedTip>
-          <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
-            <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
-              <SlidersHorizontal size={15} />
-            </NavLink>
-          </CollapsedTip>
-        </div>
-      </div>
+      {footer}
+      </>
+      )}
     </aside>
   )
 }
@@ -1560,7 +1661,20 @@ export default function AppLayout() {
       body: JSON.stringify({ theme: t }),
     }).catch(() => { /* the local copy still holds for this browser */ })
   }, [])
-  const setCurrency = useCallback((c: 'USD' | 'BRL') => setCurrencyState(c), [])
+  /**
+   * Set the currency AND remember it — the same defect `setTheme` above had. It only set state, so
+   * Home's USD/BRL button (and the language switch, which flips currency with it) held for as long
+   * as the tab lived: a reload, a PWA reopen or opening `/tasks` directly came back in whatever
+   * `preferences.json` said, and the board read as "the currency does not switch". Reported.
+   */
+  const setCurrency = useCallback((c: 'USD' | 'BRL') => {
+    setCurrencyState(c)
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currency: c }),
+    }).catch(() => { /* this tab still holds it */ })
+  }, [])
 
   // How this machine is actually billed. Local only — it never travels to a central.
   const [billing, setBilling] = useState<BillingSettings>({ profiles: {} })
@@ -1686,6 +1800,10 @@ export default function AppLayout() {
   // for a full-screen surface to avoid, and mobile panels cover the viewport by design anyway.
   useEffect(() => {
     setLeftAsideEdge(isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth))
+    // Alongside it — see `leftAsideOpen.ts`'s own header for why this needs to be a SEPARATE
+    // boolean rather than a comparison against the edge above (a genuinely narrow expanded list can
+    // coincide with `SIDEBAR_W_COLLAPSED`'s own width).
+    setLeftAsideOpen(!isMobile && !sidebarCollapsed)
   }, [isMobile, sidebarCollapsed, liveAsideWidth])
 
   /**
@@ -2027,6 +2145,22 @@ export default function AppLayout() {
   /** The panel's own clipped wrapper (carries `inert` while collapsed) and its trigger — both
    *  needed to answer "is focus inside the thing about to become unreachable" on collapse. */
   const sessionsFiltersPanelRef = useRef<HTMLDivElement | null>(null)
+  /*
+   * The CARD's own height, for `filtrosPanelOverflow`: the panel may only become a scroll container
+   * when the card genuinely outgrows its room, or it clips every popover drawn inside it. Observed
+   * rather than read once, because the chip rows below the bar grow as filters are picked. An
+   * absolutely positioned menu does not change this box, so opening one cannot flip the decision.
+   */
+  const sessionsFiltersCardRef = useRef<HTMLDivElement | null>(null)
+  const [sessionsFiltersCardHeight, setSessionsFiltersCardHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const el = sessionsFiltersCardRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setSessionsFiltersCardHeight(el.offsetHeight))
+    ro.observe(el)
+    setSessionsFiltersCardHeight(el.offsetHeight)
+    return () => ro.disconnect()
+  }, [])
   const sessionsFiltersTriggerRef = useRef<HTMLButtonElement | null>(null)
   /**
    * NOT a functional `setState` updater with side effects inside it (the shape `toggleFleet` below
@@ -2050,84 +2184,101 @@ export default function AppLayout() {
     setSessionsFiltersClip(true)
     try { localStorage.setItem(SESSIONS_FILTERS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
   }
+  /**
+   * CLOSE-ONLY (owner, 2026-09-27: "clicking OUTSIDE does not close it") — the toggle above is right
+   * for the trigger's own click (open when closed, close when open), but the overlay/backdrop below
+   * and the Escape key only ever mean ONE thing: close, never re-open. A shared `toggleSessionsFilters`
+   * call from those two would flip a closed panel back OPEN on a `mousedown` outside a panel that
+   * was already collapsed for some other reason, which is not what either gesture asks for.
+   * Idempotent — closing an already-closed panel does nothing, so a stray Escape or backdrop click
+   * with nothing open costs no `localStorage` write.
+   */
+  const closeSessionsFilters = useCallback(() => {
+    setSessionsFiltersOpen(current => {
+      if (!current) return current
+      const focusInsidePanel = !!(
+        sessionsFiltersPanelRef.current
+        && document.activeElement
+        && sessionsFiltersPanelRef.current.contains(document.activeElement)
+      )
+      if (sessionsFiltersShouldReturnFocus(false, focusInsidePanel)) {
+        sessionsFiltersTriggerRef.current?.focus()
+      }
+      setSessionsFiltersClip(true)
+      try { localStorage.setItem(SESSIONS_FILTERS_OPEN_KEY, '0') } catch { /* ignore */ }
+      return false
+    })
+  }, [])
+  /**
+   * ESCAPE CLOSES IT — the same key every dropdown/modal in this app answers to. Registered only
+   * while open, on `document`, so it never competes with an Escape meaning something else inside a
+   * DIFFERENT open surface (a modal, another popover) when this panel is collapsed.
+   */
+  useEffect(() => {
+    if (!sessionsFiltersOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSessionsFilters() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [sessionsFiltersOpen, closeSessionsFilters])
   // The tab's own badge — the same count `FiltersBar` shows on its "Ver filtros ativos" chip once
   // the panel is open. See `activeFilterCount.ts` for why this cannot simply be read off the
   // component instead.
   const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly)
 
   /**
-   * WHERE THE FILTROS PANEL MAY SIT — see `filtrosPanelBounds`'s own doc comment for the review
-   * finding this replaces (a fixed 440px cap that overlapped the artifacts aside's tabs at
-   * 1024×768, because that aside renders narrower there than its own 620px default).
+   * WHERE THE FILTROS PANEL MAY SIT (design item 4, owner 2026-09-27: "Filtros na linha de botões
+   * da lista, visível também com ela minimizada") — the trigger moved OFF the header entirely and
+   * into the sessions-list aside's own button row (`SessionsAside`'s "+ / send / arrange" row, and
+   * `SessionsRail`'s icon rail while collapsed), so the panel now opens as a POPOVER anchored to
+   * THAT button rather than a pill hanging under the fixed header strip.
    *
-   * The LEFT edge is exact today — this file owns the fleet aside's width as state, the same
-   * figure `sessionTopBar`'s left-anchor already used — so there is nothing to measure for it.
-   * The RIGHT edge is the one this file has no live figure for: `useRightAsideEdge` reads it from
-   * `SessionsPage`'s own `ResizeObserver`, `null` meaning "no aside on screen" (closed, or a route
-   * with no `SessionsPage` mounted), which `filtrosPanelBounds` falls back to the viewport for.
+   * `useRightAsideEdge` is unchanged from the old placement — it still reads the artifacts aside's
+   * live left edge (`null` while that aside is closed or off-route), and `filtrosPanelBounds`
+   * (`lib/sessionsFiltersPanel.ts`, the LEFT-anchored original — never the `…Right` mirror, which
+   * assumed a trigger flush against that aside and no longer applies) clamps the panel's width to
+   * the room between the button and that edge, exactly as it always has.
    *
-   * `viewportW` needs its own listener — `useIsMobile` only answers a boolean at its own
-   * breakpoint, not the width this arithmetic needs at every size above it.
+   * `sessionsFiltersAnchor` is MEASURED off the button's own `getBoundingClientRect()` — a callback
+   * ref, deliberately not a plain `useRef` + an effect keyed on unrelated deps, for the exact reason
+   * `filtrosTabW`'s own retired version of this comment gave: this component returns an early
+   * `<LoadingScreen>` on its first several renders, so an effect gated on `lang`/the filter count
+   * never re-fires once the real button exists — a callback ref fires exactly when THAT node
+   * attaches, on whichever render that is. It ALSO fires on `Ctrl/Cmd+B` (the aside collapses to
+   * `SessionsRail`, a DIFFERENT button, so the ref detaches and reattaches) and is re-measured on
+   * window resize while the panel is open, the same reactive shape `SessionStatsMenu`'s own
+   * `maxPanelHeight` already uses.
    */
   const rightAsideEdge = useRightAsideEdge()
-  // RIGHT-ANCHORED (owner: "você vai mover os dois itens 'Filtros' e os stats da sessão pra
-  // direita... eles nunca vao ficar por cima dele [do aside]") — `filtrosPanelBoundsRight` is the
-  // exact same clamp `filtrosPanelBounds` computed, over the exact same two neighbours; only the
-  // returned offset is a CSS `right` value (flush against the artifacts aside, or the viewport's
-  // own edge while it is closed) instead of a `left` one. See its own header in
-  // `sessionsFiltersPanel.ts`.
-  const filtrosBounds = filtrosPanelBoundsRight(
-    { left: 0, right: (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + PAGE_INSET },
-    rightAsideEdge === null ? null : { left: rightAsideEdge, right: viewportW },
+  const filtrosButtonElRef = useRef<HTMLButtonElement | null>(null)
+  const [sessionsFiltersAnchor, setSessionsFiltersAnchor] = useState<
+    { left: number; top: number; maxHeight: number } | null
+  >(null)
+  const measureFiltrosAnchor = useCallback(() => {
+    const el = filtrosButtonElRef.current
+    if (!el) { setSessionsFiltersAnchor(null); return }
+    const r = el.getBoundingClientRect()
+    setSessionsFiltersAnchor({
+      left: r.left,
+      top: r.bottom + 6,
+      maxHeight: Math.max(160, window.innerHeight - (r.bottom + 6) - 16),
+    })
+  }, [])
+  const setFiltrosButtonEl = useCallback((el: HTMLButtonElement | null) => {
+    filtrosButtonElRef.current = el
+    sessionsFiltersTriggerRef.current = el
+    if (el) measureFiltrosAnchor()
+  }, [measureFiltrosAnchor])
+  useEffect(() => {
+    if (!sessionsFiltersOpen) return
+    measureFiltrosAnchor()
+    window.addEventListener('resize', measureFiltrosAnchor)
+    return () => window.removeEventListener('resize', measureFiltrosAnchor)
+  }, [sessionsFiltersOpen, measureFiltrosAnchor, sidebarCollapsed, liveAsideWidth])
+  const filtrosBounds = filtrosPanelBounds(
+    { left: 0, right: sessionsFiltersAnchor?.left ?? 0 },
+    rightAsideEdge === null ? null : { left: rightAsideEdge - FILTROS_ASIDE_GAP, right: viewportW },
     viewportW,
   )
-  /**
-   * THE SESSION-METRICS TAB, hanging beside "Filtros" (design item 4, screenshot 7) — its own
-   * left edge and its dropdown's ceiling, both derived from `filtrosBounds` through
-   * `metricsTabBounds` (`lib/sessionsFiltersPanel.ts`), never re-measured independently: the two
-   * tabs share one room, clear of both asides, and a second computation of that room is a second
-   * place for it to disagree with the first.
-   *
-   * `filtrosTabW` is MEASURED off the Filtros trigger's own box (`sessionsFiltersTriggerRef`,
-   * already attached there for focus-return) rather than estimated from its label — the badge's
-   * digit count and the EN/PT label both shift it, and a guessed width is exactly the fixed-cap
-   * mistake `filtrosPanelBounds`'s own header already tells this story about, one level down.
-   */
-  const [filtrosTabW, setFiltrosTabW] = useState(0)
-  /**
-   * A CALLBACK ref, deliberately not a plain `useRef` + `useEffect` keyed on unrelated deps
-   * (`lang`, the filter count). This component returns an early `<LoadingScreen>` on its first
-   * several renders (`bootLoading` and the team-session gates, above) — the button this measures
-   * does not exist in the DOM at all until data has loaded, and an effect gated on `lang`/the
-   * filter count never fires again once THAT render finally reaches this JSX, because neither
-   * dependency happens to have changed between "loading" and "loaded". Measured live: the effect
-   * ran twice during the loading phase, both times against a `null` ref, and the tab it feeds sat
-   * at `filtrosTabW = 0` — overlapping the Filtros button — for the rest of the session. A
-   * callback ref fires exactly when THIS node attaches or detaches, on whichever render that is,
-   * the same pattern `Studio.tsx`'s own `measure` uses for its tree/editor split.
-   */
-  const filtrosTriggerObserver = useRef<ResizeObserver | null>(null)
-  const setFiltrosTriggerEl = useCallback((el: HTMLButtonElement | null) => {
-    sessionsFiltersTriggerRef.current = el
-    filtrosTriggerObserver.current?.disconnect()
-    filtrosTriggerObserver.current = null
-    if (el === null) return
-    // `getBoundingClientRect().width` (the BORDER box) on every callback — never
-    // `entries[0].contentRect.width`, which is the CONTENT box and reads ~22px narrower on this
-    // button (10px+1px of padding/border per side). A `ResizeObserver` fires once synchronously
-    // on `.observe()`, so that narrower figure overwrote the correct one from the very first
-    // frame: the metrics tab measured live at x394 instead of x410, OVERLAPPING the Filtros
-    // button — silent because nothing here ever changes size again, so it never re-corrects.
-    const measure = () => setFiltrosTabW(el.getBoundingClientRect().width)
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    filtrosTriggerObserver.current = ro
-  }, [])
-  useEffect(() => () => filtrosTriggerObserver.current?.disconnect(), [])
-  const METRICS_TAB_GAP = 6
-  const metricsBounds = metricsTabBoundsRight(filtrosBounds, filtrosTabW, METRICS_TAB_GAP)
 
   /**
    * The selected session's title/tabs/actions row, lifted UP into this shared header from
@@ -2162,10 +2313,6 @@ export default function AppLayout() {
     ? headerFleet.rows.find(r => r.id === selectedSessionId || r.conversationId === selectedSessionId)
     : undefined
   const selectedSessionRow = selectedFleetSession ? headerFleetIndex.get(selectedFleetSession.id) : undefined
-  /** The store's record for the open conversation — the metrics card, and the link into its tab. */
-  const headerSessionMeta = selectedFleetSession?.conversationId !== undefined
-    ? data?.sessions?.find(x => x.session_id === selectedFleetSession.conversationId)
-    : undefined
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -2197,6 +2344,16 @@ export default function AppLayout() {
   useEffect(() => {
     if (!inSessionsWorkspace || !selectedFleetSession) return
     const onKey = (e: KeyboardEvent) => {
+      // Bare Ctrl/Cmd+B is now the workspace's own panel shortcut — TOGGLE THE LEFT SESSIONS LIST
+      // (owner addition, `lib/panelShortcuts.ts`). It shares that one combo with this Studio toggle,
+      // and the owner named it for the sessions list explicitly, so it wins here: this effect skips
+      // it entirely rather than also acting on it. `Ctrl+Shift+F` (search) shares no combo with the
+      // panel shortcuts and is unaffected.
+      const asPanelShortcut = matchPanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal: false,
+      })
+      if (asPanelShortcut === 'toggle-left') return
       const shortcut = shouldHandleGlobally(e, e.target as { tagName?: string; isContentEditable?: boolean } | null)
       if (shortcut === null) return
       e.preventDefault()
@@ -2205,6 +2362,52 @@ export default function AppLayout() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, selectedFleetSession])
+
+  /**
+   * THE THREE WORKSPACE PANEL SHORTCUTS (owner addition, VS-Code style) — `Ctrl/Cmd+B` toggles the
+   * LEFT sessions list (the same `sidebarCollapsed` state `AsideHeader`'s own collapse button already
+   * drives — see that component's "Ctrl+B" tooltip, which this makes true rather than aspirational),
+   * `Ctrl/Cmd+Shift+B` toggles the RIGHT aside, and `Ctrl/Cmd+'` / `` Ctrl/Cmd+` `` toggle the BOTTOM
+   * band. Desktop only (`!isMobile`) and only on the Sessions workspace route — a phone has no such
+   * panels and every other route has no floating-panel frame for these to act on.
+   *
+   * `matchPanelShortcut`/`shouldHandlePanelShortcut` (`lib/panelShortcuts.ts`) decide EVERYTHING
+   * about which keystroke means what and whether it may be stolen from the current focus target —
+   * never re-derived here. `focusInTerminal` is read the same way `MagnifierLayer.tsx` already
+   * detects a terminal surface (`closest('.xterm')`), because xterm's own hidden input is an
+   * ordinary `<textarea>` by tag and would otherwise be caught by the generic typing-target guard.
+   *
+   * The RIGHT AND BOTTOM toggles go straight through `panelSlots.ts`'s own module-level setters
+   * (`setSlotRightOpen`/`setBandOpen`), which flip only the `rightOpen`/`bottomOpen` flags and never
+   * touch which panel occupies the slot — so reopening always restores the tab that was showing when
+   * it closed, for free. Opening the right aside for the FIRST time (nothing ever assigned) shows the
+   * Live panel, since a bare `rightOpen: true` with no occupant has nothing to reveal.
+   */
+  useEffect(() => {
+    if (!inSessionsWorkspace || isMobile) return
+    const onKey = (e: KeyboardEvent) => {
+      const focusInTerminal = document.activeElement instanceof Element
+        && document.activeElement.closest('.xterm') !== null
+      const shortcut = shouldHandlePanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal,
+      }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
+      if (shortcut === null) return
+      // `Ctrl+Shift+B` is Chrome's own bookmarks-bar toggle — the page must win it.
+      e.preventDefault()
+      if (shortcut === 'toggle-left') { setSidebarCollapsed(c => !c); return }
+      if (shortcut === 'toggle-right') {
+        const layout = getPanelLayout()
+        if (layout.right === null) showPanel('live')
+        else setSlotRightOpen(!layout.rightOpen)
+        return
+      }
+      // toggle-band
+      setBandOpen(!getPanelLayout().bottomOpen)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [inSessionsWorkspace, isMobile])
 
   // The Chat/Terminal choice lives in the URL (`?view=`) rather than in state here or in
   // `SessionPanel`, so the ONE control (now in this shared header) and the ONE reader (the panel,
@@ -2332,7 +2535,7 @@ export default function AppLayout() {
     installModalShownRef.current = true
     setShowInstallModal(true)
   }, [data, loading, pwaInstalled, installDismissedPref, isCentral])
-  const [chatModel, setChatModel] = useState<ChatModelId | null>(null)
+  const [chatModel, setChatModel] = useState<string | null>(null)
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState('ping')
   // The repository explorer's autosave switch. A plain preference, loaded with the rest below and
@@ -2407,7 +2610,7 @@ export default function AppLayout() {
       }
       if (prefs.currency) setCurrencyState(prefs.currency)
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
-      if (prefs.chatModel) setChatModel(prefs.chatModel as ChatModelId)
+      if (prefs.chatModel) setChatModel(prefs.chatModel)
       if (prefs.chatSoundEnabled !== undefined) setChatSoundEnabled(prefs.chatSoundEnabled)
       // Absent reads as OFF, so this is `=== true` rather than the `!== undefined` guard above —
       // autosave was never on before it had a switch, and an upgrade must not turn it on.
@@ -3404,6 +3607,12 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
+        <NotificationBell lang={lang} buttonStyle={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32, borderRadius: 8,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
+        }} />
       </div>
 
       {/* THE `Conversa | Terminal` TOGGLE IS GONE FROM THE HEADER, and its absence is the design.
@@ -3455,51 +3664,14 @@ export default function AppLayout() {
         />
       )}
 
-      {/* THE FILTROS TAB — hangs BELOW the strip, the exact technique `dashboardTopBar`'s own
-          "Estatísticas" tab uses: `position: absolute; top: 100%`, `borderTop: none`, rounded
-          bottom corners, a small pill rather than a row-width control. It anchors to the fixed
-          `<TopBar>` div this whole bar rides inside (that div's `position: fixed` is the nearest
-          POSITIONED ancestor, so `top: 100%` lands on the strip's own bottom edge no matter what
-          this row's own layout is doing) — same anchor, same reasoning as Estatísticas.
-
-          MOVED TO THE TOP RIGHT (owner: "você vai mover os dois itens 'Filtros' e os stats da
-          sessão pra direita, quando o aside da direita abrir eles devem vir mais pra esquerda
-          junto, eles nunca vao ficar por cima dele") — it used to hang off the FLEET aside's own
-          right edge (`left: filtrosBounds.left`); it now hangs off the ARTIFACTS aside's own left
-          edge instead, flush against it (or the viewport's own edge while that aside is closed),
-          through `right: filtrosBounds.right`. `alignItems: 'flex-end'` moved with it — the column
-          used to align `flex-start` (left) because the anchor and the alignment were the SAME side;
-          keeping `flex-start` here would have pinned the wide DROPDOWN's right edge at the anchor
-          while the narrower TRIGGER button, aligned to the column's opposite side, drifted away
-          from the aside it is meant to sit flush against.
-
-          BOUNDED BY THE ROOM THAT IS ACTUALLY THERE, never a fixed span or a fixed cap — both were
-          tried and both broke, for the LEFT-anchored version this replaces. `TopBar`'s own root is
-          `left: 0; right: 0`, the whole viewport, and an earlier version of this panel inherited
-          that same span: reproduced by review at 1440, the card ran x 52→1388, painting over the
-          fleet aside's own search field, over the open conversation, and over the artifacts aside's
-          tab row. The FIX AFTER THAT one anchored correctly but capped the width at a fixed 440px,
-          reasoning that the artifacts aside's DEFAULT drag width (620px) would always leave that
-          much clear — re-review at 1024×768 found that aside renders at 439px there, not 620px, so
-          the fixed cap overlapped its "Studio" and "Live" tabs by 15px. `filtrosBounds`
-          (`lib/sessionsFiltersPanel.ts`'s `filtrosPanelBoundsRight`) is the durable answer: the
-          fleet aside's own live width is still this file's own exact figure (now the FAR bound, on
-          the room's other side), and the near edge is `useRightAsideEdge()` — the artifacts aside's
-          LIVE left edge, measured in `SessionsPage.tsx` with a `ResizeObserver` and reported through
-          `rightAsideEdge.ts` (a different file, no ancestor of this one, the same bridge
-          `artifactsStore.ts` already is for that aside's open flag) — falling back to the
-          viewport's own width when the aside is not on screen at all. Re-measured on every drag,
-          open/close and window resize; see that module's own comment for what the two triggers
-          cover between them.
-
-          zIndex 10, not 300: `TopBar` itself is the z-300 stacking context this whole bar lives
-          inside, so a CHILD's z-index only orders it among the STRIP'S OWN other floating pieces —
-          `SessionActions`'s dropdown (z 21), the stats menu, the hardware popover — never against
-          the page or the asides, which is decided by `TopBar`'s OWN z 300 regardless of what is set
-          here. At 300 this panel painted OVER those three; reproduced by review pressing "Ações da
-          sessão" with the panel open and seeing only its last two rows, the ones below the panel's
-          lower edge. At 10 it still floats above the page and both asides while those three menus
-          reliably paint above IT.
+      {/* THE FILTROS TRIGGER MOVED INTO THE LIST (design item 4, owner 2026-09-27: "Filtros na
+          linha de botões da lista, visível também com ela minimizada") — `SessionsAside`'s own
+          "+ / send / arrange" row now carries a fourth button, and `SessionsRail` carries an icon
+          for it while the aside is collapsed, both driven by the SAME `sessionsFiltersOpen` /
+          `toggleSessionsFilters` / `sessionsActiveFilterCount` state this file has always owned
+          (threaded down through `SideNav`'s `filtersOpen`/`onToggleFilters`/`filtersCount`/
+          `filtersButtonRef` props). What is LEFT here is only the PANEL — the animated card the
+          button opens — reachable from either trigger because there is exactly one of it.
 
           Always MOUNTED, never conditionally rendered: the grid-rows animation (0fr↔1fr, the same
           curve the mobile filter band uses) needs the collapsed state to still be in the DOM to
@@ -3518,159 +3690,130 @@ export default function AppLayout() {
           clears every dimension AND turns "Só ativas" off, filling the list with everything on
           record. If focus was inside the panel at the moment it collapses (`toggleSessionsFilters`,
           above), it is moved back to the trigger rather than left to fall wherever the browser
-          resets an `inert`ed focus to. */}
-      <div style={{
-        position: 'absolute', top: '100%',
-        right: filtrosBounds.right,
-        zIndex: 10, pointerEvents: 'none',
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
-          <button
-            ref={setFiltrosTriggerEl}
-            onClick={toggleSessionsFilters}
-            aria-expanded={sessionsFiltersOpen}
-            aria-controls={FILTROS_PANEL_ID}
-            title={lang === 'pt' ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
-              border: '1px solid var(--border)', borderTop: 'none',
-              borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
-              color: sessionsFiltersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
-            }}
-          >
-            {lang === 'pt' ? 'Filtros' : 'Filters'}
-            {sessionsActiveFilterCount > 0 && (
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                background: 'var(--anthropic-orange)', color: '#fff',
-                fontSize: 9.5, fontWeight: 700,
-              }}>
-                {sessionsActiveFilterCount}
-              </span>
-            )}
-            {sessionsFiltersOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
+          resets an `inert`ed focus to.
 
-          <div
-            id={FILTROS_PANEL_ID}
-            style={{
-              display: 'grid',
-              gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
-              transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
-              width: filtrosBounds.width, maxWidth: 'calc(100vw - 48px)',
-            }}
-            onTransitionEnd={e => {
-              if (e.target !== e.currentTarget) return
-              if (sessionsFiltersOpen) setSessionsFiltersClip(false)
-            }}
-          >
+          A PORTAL TO `document.body`, `position: fixed` off `sessionsFiltersAnchor` — the trigger
+          now lives inside the LEFT aside's own DOM subtree (`SessionsAside`/`SessionsRail`, both
+          rendered from `SideNav`, a sibling component with no shared positioned ancestor with this
+          one), so an `absolute` panel anchored to a box in THIS file could never sit next to it.
+          `zIndex: 1200` matches this workspace's other portaled popovers (`SessionsGroupMenu`,
+          `SessionStatsMenu`'s own gauge card) — comfortably above the fixed header/asides without
+          competing with a specific stacking context the way the old in-flow `zIndex: 10` had to.
+          Positioned off-screen (`-9999`) whenever `sessionsFiltersAnchor` has not been measured yet
+          (the trigger not yet mounted) rather than being left unrendered, so the "always mounted"
+          rule above still holds. */}
+      {createPortal(
+        <>
+          {/* THE BACKDROP (owner, 2026-09-27: "clicking OUTSIDE does not close it") — an invisible,
+              full-viewport click-catcher UNDER the panel, the same trigger+overlay pattern
+              `SessionsGroupMenu`'s own dropdown already uses. This is what makes "outside" work
+              correctly ACROSS PORTALS without walking DOM containment at all: `FiltersBar`'s own
+              "+ Filtro" dimension menu and `ProjectsModal` (a nested portal of a portal) both paint
+              at a higher z-index than this backdrop, so a click on either of them is consumed by
+              THAT element and never reaches this div in the first place — there is nothing to
+              special-case. Only present while genuinely open, so it costs nothing collapsed. */}
+          {sessionsFiltersOpen && (
             <div
-              ref={sessionsFiltersPanelRef}
-              inert={filtrosPanelInert(sessionsFiltersOpen)}
+              onClick={closeSessionsFilters}
+              style={{ position: 'fixed', inset: 0, zIndex: 1199 }}
+            />
+          )}
+          <div style={{
+            position: 'fixed',
+            left: sessionsFiltersAnchor?.left ?? -9999, top: sessionsFiltersAnchor?.top ?? -9999,
+            zIndex: 1200, pointerEvents: 'none',
+          }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <div
+              id={FILTROS_PANEL_ID}
               style={{
-                overflow: (!sessionsFiltersOpen || sessionsFiltersClip) ? 'hidden' : 'visible',
-                minHeight: 0,
+                display: 'grid',
+                gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
+                transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+                width: filtrosBounds.width, maxWidth: 'calc(100vw - 16px)',
+              }}
+              onTransitionEnd={e => {
+                if (e.target !== e.currentTarget) return
+                if (sessionsFiltersOpen) setSessionsFiltersClip(false)
               }}
             >
-              <div style={{
-                marginTop: 6, padding: '10px 12px', borderRadius: 10,
-                border: '1px solid var(--border)', background: 'var(--bg-surface)',
-                boxShadow: '0 10px 28px rgba(0,0,0,0.3)',
-              }}>
-                <FiltersBar
-                  only={SESSIONS_FILTER_DIMS}
-                  activeOnly={activeOnly}
-                  onActiveOnlyChange={setActiveOnly}
-                  filters={filters}
-                  onChange={setFilters}
-                  projects={availableProjects}
-                  sessionCountByProject={sessionCountByProject}
-                  models={models}
-                  modelGroups={modelGroups}
-                  modelsInProject={modelsInProject}
-                  users={[]}
-                  /* HARNESSES come from the FLEET here and from the metrics everywhere else. The bar
-                     offered all six the metrics know while the list it filters holds whatever is
-                     running — three on this machine — so picking "antigravity" emptied the list.
-                     Nothing was broken; there were genuinely no antigravity rows. But a filter that
-                     can only ever answer "nothing" is indistinguishable from one that is failing,
-                     and it was reported as exactly that. An option is a promise that something might
-                     be behind it. The WHOLE fleet's assistants, not just the ones the current
-                     switches can show — see `fleetFilterOptions`. The ones being withheld are MARKED
-                     rather than dropped, because a dimension that disappears reads as "this product
-                     does not know about my other assistants", which the Compare page contradicts two
-                     clicks away. */
-                  harnesses={fleetOptions.harnessesAll as typeof availableHarnesses}
-                  harnessesOutOfView={fleetOptions.harnessesAll.filter(h => !fleetOptions.harnesses.includes(h))}
-                  lang={lang}
-                />
+              {/* SIZING (owner, 2026-09-27: "creates ugly nested scrollbars") — ONE scroll region,
+                  on THIS box, never a second one on the card below it. The card's own `maxHeight:
+                  '100%'` used to sit against a parent (this one) whose OWN height was in turn sized
+                  BY that very card's content — a circular reference Chrome resolves with a stray
+                  1px shortfall, which is a permanent, invisible-content scrollbar on a card that
+                  fits. `sessionsFiltersAnchor.maxHeight` is a REAL pixel ceiling (measured off the
+                  viewport, `App.tsx`'s own `measureFiltrosAnchor`), so `overflow-y: auto` HERE only
+                  ever shows a scrollbar when the content genuinely cannot fit the screen — normal
+                  content, well under that ceiling, gets its own natural height and no scrollbar at
+                  all, which is also what lets `FiltersBar`'s own "+ Filtro" menu (rendered IN FLOW,
+                  not portaled, unlike `ProjectsModal`) escape this box instead of being clipped by
+                  it: `visible` in the settled state, `hidden` only while the grid-rows collapse
+                  animation is actually running (`sessionsFiltersClip`). */}
+              <div
+                ref={sessionsFiltersPanelRef}
+                inert={filtrosPanelInert(sessionsFiltersOpen)}
+                style={{
+                  // `visible` once settled while the card fits, so the popovers FiltersBar draws in
+                  // flow escape this box; `auto` only when the card itself outgrows the measured room.
+                  // See `filtrosPanelOverflow` for why `auto` clipped every one of them.
+                  overflow: filtrosPanelOverflow({
+                    open: sessionsFiltersOpen,
+                    animating: sessionsFiltersClip,
+                    contentHeight: sessionsFiltersCardHeight,
+                    maxHeight: sessionsFiltersAnchor?.maxHeight ?? null,
+                  }),
+                  minHeight: 0,
+                  ...(sessionsFiltersAnchor ? { maxHeight: sessionsFiltersAnchor.maxHeight } : {}),
+                }}
+              >
+                <div ref={sessionsFiltersCardRef} style={{
+                  padding: '10px 12px', borderRadius: 10,
+                  border: '1px solid var(--border)', background: 'var(--bg-surface)',
+                  boxShadow: '0 10px 28px rgba(0,0,0,0.3)', boxSizing: 'border-box',
+                }}>
+                  <FiltersBar
+                    only={SESSIONS_FILTER_DIMS}
+                    activeOnly={activeOnly}
+                    onActiveOnlyChange={setActiveOnly}
+                    filters={filters}
+                    onChange={setFilters}
+                    projects={availableProjects}
+                    sessionCountByProject={sessionCountByProject}
+                    models={models}
+                    modelGroups={modelGroups}
+                    modelsInProject={modelsInProject}
+                    users={[]}
+                    /* HARNESSES come from the FLEET here and from the metrics everywhere else. The bar
+                       offered all six the metrics know while the list it filters holds whatever is
+                       running — three on this machine — so picking "antigravity" emptied the list.
+                       Nothing was broken; there were genuinely no antigravity rows. But a filter that
+                       can only ever answer "nothing" is indistinguishable from one that is failing,
+                       and it was reported as exactly that. An option is a promise that something might
+                       be behind it. The WHOLE fleet's assistants, not just the ones the current
+                       switches can show — see `fleetFilterOptions`. The ones being withheld are MARKED
+                       rather than dropped, because a dimension that disappears reads as "this product
+                       does not know about my other assistants", which the Compare page contradicts two
+                       clicks away. */
+                    harnesses={fleetOptions.harnessesAll as typeof availableHarnesses}
+                    harnessesOutOfView={fleetOptions.harnessesAll.filter(h => !fleetOptions.harnesses.includes(h))}
+                    lang={lang}
+                  />
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* THE SESSION-METRICS TAB (design item 4, screenshot 7) — the header's old "66%" button, now
-          hanging beside "Filtros" instead of sitting in the strip. `variant="tab"` is the ONLY thing
-          that changed on `SessionStatsMenu`: same props, same dropdown, same content — see that
-          component's own header. Absent exactly when the button was: no selected session, or
-          (inside the component) no context figure to show.
-
-          MOVED TO THE TOP RIGHT WITH FILTROS (owner, 2026-09-20) — it now sits immediately BEFORE
-          "Filtros" (further from the artifacts aside), rather than after it, so it stays adjacent to
-          Filtros' own trigger on whichever side that trigger sits.
-
-          ITS OWN `position: absolute` SIBLING of the Filtros wrapper above — NOT a flex child beside
-          it. A flex row was tried first and put 356px of dead air between the two: the Filtros
-          COLUMN's flex-item width follows its widest DESCENDANT, and the collapsed filter panel
-          keeps its full `filtrosBounds.width` (~440px) the whole time — `grid-template-rows: 0fr`
-          collapses HEIGHT, never width — so the column occupied that width even while showing only
-          its own button. `metricsBounds.right` (`metricsTabBoundsRight`,
-          `lib/sessionsFiltersPanel.ts`) is computed against the FILTROS BUTTON's own measured width
-          instead, which is what actually puts this tab immediately beside it regardless of whether
-          the filter panel is open. */}
-      {selectedFleetSession && (
-        <div style={{
-          position: 'absolute', top: '100%',
-          right: metricsBounds.right,
-          zIndex: 10, pointerEvents: 'none',
-        }}>
-          <div style={{ pointerEvents: 'auto' }}>
-            <SessionStatsMenu
-              variant="tab"
-              panelMaxWidth={metricsBounds.panelMaxWidth}
-              harness={selectedFleetSession.harness}
-              sessionId={selectedFleetSession.conversationId ?? selectedFleetSession.id}
-              meta={headerSessionMeta}
-              lang={lang === 'pt' ? 'pt' : 'en'}
-              currency={currency}
-              brlRate={brlRate}
-              costBasis={costBasis}
-              planFactor={sessionPlanFactor(planBasis.basis, selectedFleetSession.harness)}
-              /* THE FULL READING opens as a TAB in the right aside (`SessionsPage` supplies it),
-                 not as a second dialog over the session. Withheld when the store has no record —
-                 the same fact that decides whether that tab exists at all, read here from the same
-                 lookup so the link and the tab can never disagree. */
-              {...(headerSessionMeta ? { onOpenFull: () => openArtifacts('metrics') } : {})}
-              {...(selectedFleetSession.model ? { startedModel: selectedFleetSession.model } : {})}
-              {...(selectedFleetSession.effort ? { startedEffort: selectedFleetSession.effort } : {})}
-              /* THE DELIVERY this session is filed under, one click from the figures it spent. The
-                 fleet row carries the NAME, and the name is a ref the board resolves — see
-                 `lib/sessionTaskLink.ts`, which is why this costs no id lookup. */
-              {...(selectedFleetSession.task ? { task: selectedFleetSession.task } : {})}
-              onOpenTask={ref => navigate(`/tasks/${encodeURIComponent(ref)}`)}
-              /* THE LIVE REFERENCE — the aside's Live tab, on the step that is running when there is
-                 one. What is running is read by the card itself from `artifactsStore` under this
-                 row's id (`SessionsPage` publishes it), so this component does not subscribe. The
-                 aside always has a Live tab while a session is selected. */
-              rowId={selectedFleetSession.id}
-              onOpenLive={ref => openArtifacts('live', ref)}
-            />
           </div>
-        </div>
+        </>,
+        document.body,
       )}
+
+      {/* THE SESSION-METRICS TAB IS GONE (design item 3, owner 2026-09-27) — it moved into the
+          composer as a circular context gauge (`SessionChat.tsx`, right after the microphone
+          button), which is where "what this conversation has spent" belongs: beside the field
+          where the next turn is written, not hanging off the header. `SessionStatsMenu`'s
+          `variant="tab"` stays in that component only as a retired option nothing here calls any
+          more — see its own header. */}
     </div>
   ) : null
 
@@ -3832,15 +3975,15 @@ export default function AppLayout() {
         const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
         return (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ maxWidth: PAGE_MAX_WIDTH, width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: PAGE_INSET, boxSizing: 'border-box', pointerEvents: 'none' }}>
+            <div style={{ maxWidth: pageMaxWidth(location.pathname), width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: PAGE_INSET, boxSizing: 'border-box', pointerEvents: 'none' }}>
               <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                 <button
                   onClick={toggleFleet}
                   title={fleetOpen ? (lang === 'pt' ? 'Minimizar' : 'Collapse') : (lang === 'pt' ? 'Mostrar estatísticas' : 'Show stats')}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
-                    border: '1px solid var(--border)', borderTop: 'none',
-                    borderRadius: '0 0 8px 8px', background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 7, background: 'var(--bg-surface)',
                     color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
                   }}
                 >
@@ -4059,14 +4202,12 @@ export default function AppLayout() {
       {/* The fixed strip above the aside — desktop only. */}
       {!isMobile && (
         <TopBar
-          lang={lang === 'pt' ? 'pt' : 'en'}
           height={TOPBAR_H}
           asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
-          collapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
-          {...(modeOfPath(location.pathname) === 'sessions'
-            ? { onSearch: () => window.dispatchEvent(new CustomEvent('agentistics:focus-session-search')) }
-            : {})}
+          // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
+          // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
+          // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
+          noBottomBorder={inSessionsWorkspace}
           {...(stripTrailing ? { trailing: stripTrailing, trailingFlush: true } : {})}
         />
       )}
@@ -4088,6 +4229,10 @@ export default function AppLayout() {
         principal={iam?.account}
         sessionsFilters={filters}
         sessionsActiveOnly={activeOnly}
+        filtersOpen={sessionsFiltersOpen}
+        filtersCount={sessionsActiveFilterCount}
+        onToggleFilters={toggleSessionsFilters}
+        filtersButtonRef={setFiltrosButtonEl}
       />}
       {/* Header */}
       {/* Page chrome — the MOBILE dashboard's, and only that.
@@ -4129,7 +4274,8 @@ export default function AppLayout() {
             maxWidth: 1400, margin: '0 auto', padding: '0 16px', height: 48,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <img src='/minimalistLogo.png' alt="agentistics" style={{ height: 44, width: 'auto' }} />
+            {/* 60% of the 48px band, the same proportion the desktop strip uses. */}
+            <img src={brandAsset('/minimalistLogo.png')} alt="agentistics" style={{ height: 28, width: 'auto' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <MagnifierButton ctx={appCtx} />
               <HideLensesButton ctx={appCtx} />
@@ -4331,7 +4477,8 @@ export default function AppLayout() {
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
           : {
-              maxWidth: 1400,
+              // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
+              maxWidth: pageMaxWidth(location.pathname),
               margin: '0 auto',
               width: '100%',
               boxSizing: 'border-box',
@@ -4529,18 +4676,17 @@ export default function AppLayout() {
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-surface)',
       }}>
-        <div style={{ maxWidth: 1400, margin: '0 auto', padding: '56px 32px 36px' }}>
+        <div style={{ maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', padding: '56px 32px 36px' }}>
 
           {/* Main row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 80, flexWrap: 'wrap', marginBottom: 48 }}>
 
             {/* Logo only — no text */}
             <div style={{ flexShrink: 0 }}>
-              <img
-                src='/logo.png'
-                alt="agentistics"
-                style={{ height: 180, width: 'auto', display: 'block' }}
-              />
+              {/* Two plates, one visible: the theme is an attribute on <html>, so CSS picks the one
+                  that suits the surface (index.css `.ag-logo-*`). */}
+              <img className="ag-logo-dark" src={brandAsset('/logo.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
+              <img className="ag-logo-light" src={brandAsset('/logo-light.png')} alt="agentistics" style={{ height: 88, width: 'auto' }} />
             </div>
 
             {/* Description + stats + version — middle */}
@@ -4660,9 +4806,6 @@ export default function AppLayout() {
               >
                 Bryan Soares
               </a>
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-              {lang === 'pt' ? 'Não afiliado à Anthropic' : 'Not affiliated with Anthropic'}
             </span>
           </div>
         </div>

@@ -120,12 +120,14 @@ export const DATE_FIELDS: readonly DateFieldSpec[] = [
   { collection: 'teams', fields: ['createdAt'] },
   { collection: 'tags', fields: ['createdAt', 'updatedAt'] },
   { collection: 'repos', fields: ['createdAt'] },
-  // The shared delivery board. Only the TASK's own three timestamps live at the top level; the
+  // The shared delivery board. Only the TASK's own timestamps live at the top level; the
   // ones inside its comments, subtasks and files are written as Dates by `toTeamTaskDoc`, the
   // collection's only writer, so there is no legacy string in there for a migration to find —
   // and a `$convert` cannot reach into an array of subdocuments anyway. `dueDate`/`startDate` are
-  // `yyyy-MM-dd` days rather than instants and stay strings, like `TagDoc.window`.
-  { collection: 'tasks', fields: ['createdAt', 'updatedAt', 'deliveredAt'] },
+  // `yyyy-MM-dd` days rather than instants and stay strings, like `TagDoc.window`. `startedAt` is
+  // the system-stamped "real work began" fact (§ task board — never user-editable), listed here on
+  // principle even though it is brand new and every writer already emits a proper Date.
+  { collection: 'tasks', fields: ['createdAt', 'updatedAt', 'deliveredAt', 'startedAt'] },
   // `updatedAt` only — see the statsCache carve-out above.
   { collection: 'memberStats', fields: ['updatedAt'] },
   // The `audit` collection is written by a deployment outside this branch (nothing here creates
@@ -207,7 +209,7 @@ export function convertArrayFieldStage(field: string): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /** Bump when DATE_FIELDS gains a field, so an already-migrated deployment re-runs for the new one. */
-export const DATE_MIGRATION_VERSION = 4
+export const DATE_MIGRATION_VERSION = 5
 
 const MIGRATION_COLLECTION = 'config'
 const MIGRATION_DOC_ID = 'migrations'

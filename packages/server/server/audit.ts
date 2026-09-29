@@ -33,6 +33,9 @@ export type AuditAction =
   | 'repo.register' | 'repo.unregister'
   | 'config.update' | 'bootstrap.consume'
   | 'capability.denied' | 'authz.denied' | 'rate.blocked'
+  // A `localShell` route reached by a Host that does not name this machine — the signature of a DNS
+  // rebinding attempt (host-allow.ts). Carries the path and the refused Host, never a credential.
+  | 'host.misdirected'
   | 'stepup.granted' | 'stepup.failure' | 'stepup.missing'
   // A live-terminal WRITE channel was opened (a keyboard attached to a session) or refused — ONE
   // entry per channel, never per keystroke. `fleet.input.denied` records a rejected WS upgrade
@@ -47,6 +50,9 @@ export type AuditAction =
   // one widens what the shell routes will answer for the rest of the process, not one channel.
   | 'shell.override.enabled'
   | 'upgrade.started' | 'upgrade.denied'
+  // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
+  // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
+  | 'provider.set' | 'provider.remove'
 
 export interface AuditEvent {
   action: AuditAction

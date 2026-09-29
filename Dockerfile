@@ -14,6 +14,7 @@ WORKDIR /app
 # Copy workspace manifests first for layer-cache efficiency
 COPY package.json bun.lock ./
 COPY packages/core/package.json      ./packages/core/
+COPY packages/runtime/package.json   ./packages/runtime/
 COPY packages/server/package.json    ./packages/server/
 COPY packages/web/package.json       ./packages/web/
 COPY packages/mcp/package.json       ./packages/mcp/
@@ -37,6 +38,9 @@ RUN bun run build:assets
 
 # ---- Stage 2: runtime -----------------------------------------------------
 FROM oven/bun:1-slim AS runner
+
+LABEL org.opencontainers.image.licenses="FSL-1.1-ALv2" \
+      org.opencontainers.image.source="https://github.com/blpsoares/agentistics"
 
 WORKDIR /app
 
@@ -76,6 +80,7 @@ RUN apt-get update \
 # Copy workspace manifests + lock
 COPY package.json bun.lock ./
 COPY packages/core/package.json      ./packages/core/
+COPY packages/runtime/package.json   ./packages/runtime/
 COPY packages/server/package.json    ./packages/server/
 COPY packages/web/package.json       ./packages/web/
 COPY packages/mcp/package.json       ./packages/mcp/

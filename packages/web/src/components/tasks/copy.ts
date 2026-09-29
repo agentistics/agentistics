@@ -18,6 +18,9 @@
  * no sentence of its own: a string written inline is a string the other language never gets.
  */
 
+import type { ColumnId } from './board'
+import type { SubtaskColumnId } from './subtaskColumnDefs'
+
 export type Lang = 'pt' | 'en'
 
 export interface BoardCopy {
@@ -53,10 +56,15 @@ export interface BoardCopy {
    * closely and were the last English left on a Portuguese board.
    */
   subtasks: string
-  owner: string
-  start: string
-  due: string
+  /** System-stamped, read-only facts — see `Subtask.startedAt`/`deliveredAt`'s own note. */
+  started: string
+  completed: string
+  /** `deliveredAt − startedAt`, shown only when both are stamped — see `fmtElapsed`. */
+  duration: string
   sessions: string
+  /** The main table's Sessions cell qualifier — "N · M priced" when fewer sessions could be priced
+   *  than were used. A short WORD, never a phrase: the cell must stay one line. */
+  sessionsPriced: string
   addSubtask: string
   nothingBrokenOut: string
   remove: string
@@ -89,22 +97,14 @@ export interface BoardCopy {
   wholeDelivery: string
   deleteDelivery: string
   /**
-   * `PlanCard`'s own fields — status/priority/owner/dates/claim — and the `Rollup` stat row beside
-   * it. These were the last English left on an otherwise-translated delivery page: the tab bar
-   * above them and the rail sections around them already read Portuguese, so a plain "Cost" /
-   * "Working on it" sitting between two Portuguese headings read as broken rather than untranslated.
+   * `PlanCard`'s own fields — status/priority/dates — and the `Rollup` stat row beside it. These
+   * were the last English left on an otherwise-translated delivery page: the tab bar above them and
+   * the rail sections around them already read Portuguese, so a plain "Cost" sitting between two
+   * Portuguese headings read as broken rather than untranslated.
    */
   priority: string
   dates: string
-  clearDates: string
   waitingOn: string
-  workingOnIt: string
-  free: string
-  takeIt: string
-  takeItTitle: string
-  release: string
-  releaseTitleExpired: string
-  releaseTitle: string
   cost: string
   yourPrompts: string
   yourPromptsTitle: string
@@ -167,6 +167,9 @@ export interface BoardCopy {
     launchIntro: string
     launch: string
     launching: string
+    /** The deliberate second button offered only after a memory-budget refusal — see
+     *  `spawnAdmission.ts`'s `isAdmissionRefusal`. Re-sends the same request with `force: true`. */
+    startAnyway: string
     preparing: string
     networkError: string
     /** The read-only summary — the gear menu's own row label, and that dialog's own title prefix. */
@@ -180,6 +183,36 @@ export interface BoardCopy {
     attachNetworkError: string
   }
   /**
+   * The MAIN table's column headers (`TaskTable.tsx`'s `COLUMNS`) — and the SAME record feeds the
+   * "Columns" picker's option labels, so the picker and the headers can never name a column two
+   * different ways. Reuses the exact words used elsewhere for the same concept (`cost`, `tokens`,
+   * `sessions`, `subtasks`, `files`, `links`, `blockedBy`, `priority` above; `list.keys` for the
+   * sort note) rather than inventing a second translation of the same idea.
+   */
+  columns: Record<ColumnId, string>
+  /**
+   * The subtask grid's own column headers — the SAME record feeds its "Columns" picker's option
+   * labels (t-63b7d3b2b0 #1), the same relationship `columns` above has with the delivery table.
+   * A separate record from `columns`: the two grids show different facts, and `model` in particular
+   * exists only here.
+   */
+  subtaskColumns: Record<SubtaskColumnId, string>
+  /**
+   * The subtask grid's own column filter — status, harness and model (t-63b7d3b2b0 #2). `all` is
+   * the resting option of each dropdown ("no filter on this dimension"), never a real value.
+   */
+  subtaskFilter: {
+    trigger: string
+    title: string
+    status: string
+    harness: string
+    model: string
+    all: string
+    clear: string
+    /** The empty state when the filter, not an empty delivery, is why nothing is on screen. */
+    noMatch: string
+  }
+  /**
    * The lists' own controls: Select mode, the open-the-task button, and sorting by a column title.
    * `{column}` / `{key}` are replaced by the caller — a sentence built by concatenating a translated
    * word onto an English frame is the bug this file exists to end.
@@ -190,6 +223,10 @@ export interface BoardCopy {
     selectAllInGroup: string
     selectRow: string
     openTask: string
+    /** The main table's leading, always-present column — the task's own name. Kept as its own key
+     *  (never `columns` above, which only covers the `+`-menu columns) because this one column
+     *  can never be hidden. */
+    taskColumn: string
     showSubtasks: string
     hideSubtasks: string
     sortBy: string
@@ -202,8 +239,44 @@ export interface BoardCopy {
     columnSortTitle: string
     columnReorderOff: string
     columnUseHand: string
+    /** The "sorted by {key} · reset" note drawn above the table when a non-default sort is
+     *  active — `{key}` is one of `keys` below. Used to be two English literals hardcoded around
+     *  it regardless of `lang`, so a Portuguese board read "sorted by custo ↓ · reset". */
+    sortedByPrefix: string
+    resetSort: string
     /** Every key a list can be ordered by, in words. */
     keys: Record<string, string>
+  }
+  /**
+   * The "Columns"/"Groups" pickers' own chrome (`PickerMenu.tsx`) — the popover title, the note
+   * under the list, the trigger's own label, and the ▲▼ reorder buttons. This was the one piece of
+   * chrome around an otherwise-translated table/kanban that never read `lang` at all: the table's
+   * "Show groups" and "Columns" pickers (`TaskTable.tsx`) and the kanban's own "Columns on the
+   * board" one (`BoardArrange.tsx`) all wrote English straight into their JSX regardless of the
+   * toggle. Everything else a `PickerMenu` draws (the item labels, the hint counts) is supplied by
+   * the caller from elsewhere in this file, never from here.
+   */
+  pickers: {
+    moveUp: string
+    moveDown: string
+    groupsTitle: string
+    groupsTrigger: string
+    groupsNote: string
+    columnsTitle: string
+    columnsTrigger: string
+    columnsNote: string
+    /** `TaskTable.tsx`'s OWN second picker (t-63b7d3b2b0 #1) — every expanded delivery's inline
+     *  subtask grid shares this one arrangement, distinct wording from `columnsTitle`/`columnsTrigger`
+     *  above (the delivery table's own columns) so the two buttons sitting side by side never read
+     *  as the same control twice. */
+    subtaskColumnsTrigger: string
+    subtaskColumnsNote: string
+    /** The two tabs of the task table's single "Columns" menu. */
+    deliveriesTab: string
+    subtasksTab: string
+    boardColumnsTitle: string
+    boardColumnsTrigger: string
+    boardColumnsNote: string
   }
 }
 
@@ -236,10 +309,11 @@ const EN: BoardCopy = {
   searchOrCreate: 'Search deliveries, or type a new name',
   newWithDetails: 'New delivery with all the details…',
   subtasks: 'Subtasks',
-  owner: 'Owner',
-  start: 'Start',
-  due: 'Due',
+  started: 'Started',
+  completed: 'Completed',
+  duration: 'Duration',
   sessions: 'Sessions',
+  sessionsPriced: 'priced',
   addSubtask: 'Add a subtask, then Enter',
   nothingBrokenOut:
     'Nothing broken out yet. A session is filed under a SUBTASK, never under the delivery itself — '
@@ -268,15 +342,7 @@ const EN: BoardCopy = {
   deleteDelivery: 'Delete this delivery',
   priority: 'Priority',
   dates: 'Dates',
-  clearDates: 'Clear both dates',
   waitingOn: 'Waiting on',
-  workingOnIt: 'Working on it',
-  free: 'Free — nobody has taken it.',
-  takeIt: 'Take it',
-  takeItTitle: 'Take it, so an agent asking what to work on is told somebody has this',
-  release: 'Release',
-  releaseTitleExpired: 'The lease has run out — clear the holder',
-  releaseTitle: 'Give the task back to the board',
   cost: 'Cost',
   yourPrompts: 'Your prompts',
   yourPromptsTitle: 'How many times you prompted, across every session filed here',
@@ -302,6 +368,46 @@ const EN: BoardCopy = {
   blockedBy: 'Blocked by',
   showAllDescription: 'Show all',
   showLessDescription: 'Show less',
+  columns: {
+    status: 'Status',
+    priority: 'Priority',
+    due: 'Due',
+    claim: 'Working on it',
+    progress: 'Progress',
+    attempts: 'Attempts',
+    sessions: 'Sessions',
+    rounds: 'Your prompts',
+    tokens: 'Tokens',
+    cost: 'Cost',
+    harnesses: 'Harnesses',
+    subtasks: 'Subtasks',
+    comments: 'Comments',
+    files: 'Files',
+    links: 'Links',
+    blockedBy: 'Blocked by',
+    created: 'Created',
+    updated: 'Updated',
+  },
+  subtaskColumns: {
+    status: 'Status',
+    started: 'Started',
+    completed: 'Completed',
+    duration: 'Duration',
+    sessions: 'Sessions',
+    model: 'Model',
+    cost: 'Cost',
+    tokens: 'Tokens',
+  },
+  subtaskFilter: {
+    trigger: 'Filter',
+    title: 'Filter subtasks',
+    status: 'Status',
+    harness: 'Assistant',
+    model: 'Model',
+    all: 'All',
+    clear: 'Clear filter',
+    noMatch: 'No subtask matches this filter.',
+  },
   staged: {
     compose: 'Stage a session',
     edit: 'Edit staged session',
@@ -330,6 +436,7 @@ const EN: BoardCopy = {
     launchIntro: 'This starts a real assistant now, billed like any other session, and files it under this exact subtask automatically.',
     launch: 'Fire',
     launching: 'Starting…',
+    startAnyway: 'Start anyway',
     preparing: 'Preparing attachments…',
     networkError: 'Network error talking to this machine.',
     view: 'View staged session',
@@ -344,6 +451,7 @@ const EN: BoardCopy = {
     selectAllInGroup: 'Select every task in this group',
     selectRow: 'Select this task',
     openTask: 'Open task',
+    taskColumn: 'Task',
     showSubtasks: 'Show the subtasks',
     hideSubtasks: 'Hide the subtasks',
     sortBy: 'Sort by',
@@ -355,13 +463,33 @@ const EN: BoardCopy = {
     columnSortTitle: 'Order the cards in this column',
     columnReorderOff: 'Ordered by {key}. Dragging to reorder is off in this column.',
     columnUseHand: 'Use hand order',
+    sortedByPrefix: 'sorted by',
+    resetSort: 'reset',
     keys: {
       manual: 'Hand order', priority: 'Priority', title: 'Title', status: 'Status',
-      created: 'Newest', updated: 'Last touched', due: 'Due date', assignee: 'Owner',
+      created: 'Newest', updated: 'Last touched', due: 'Due date',
       cost: 'Cost', tokens: 'Tokens', rounds: 'Your prompts', sessions: 'Sessions',
       attempts: 'Attempts', comments: 'Comments', subtasks: 'Subtasks', progress: 'Progress', harnesses: 'Harnesses',
-      delivered: 'Delivered', start: 'Start',
+      delivered: 'Delivered', started: 'Started',
     },
+  },
+  pickers: {
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    groupsTitle: 'Show groups',
+    groupsTrigger: 'Groups',
+    groupsNote: 'Drag a ticked group, or use ▲▼, to reorder the bands. A hidden group’s tasks are still there.',
+    columnsTitle: 'Columns',
+    columnsTrigger: 'Columns',
+    columnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — the table follows this order.',
+    subtaskColumnsTrigger: 'Subtask columns',
+    subtaskColumnsNote: 'Drag a ticked column, or use ▲▼, to reorder it — every expanded delivery\'s subtasks follow this order.',
+    deliveriesTab: 'Deliveries',
+    subtasksTab: 'Subtasks',
+    boardColumnsTitle: 'Columns on the board',
+    boardColumnsTrigger: 'Columns',
+    boardColumnsNote:
+      'Drag a ticked column, or use ▲▼, to reorder the pipeline. A hidden column’s tasks are still there.',
   },
 }
 
@@ -396,10 +524,11 @@ const PT: BoardCopy = {
   searchOrCreate: 'Buscar entregas, ou digitar um nome novo',
   newWithDetails: 'Nova entrega, com todos os detalhes…',
   subtasks: 'Subtarefas',
-  owner: 'Responsável',
-  start: 'Início',
-  due: 'Prazo',
+  started: 'Início',
+  completed: 'Concluído em',
+  duration: 'Duração',
   sessions: 'Sessões',
+  sessionsPriced: 'com custo',
   addSubtask: 'Adicionar subtarefa e apertar Enter',
   nothingBrokenOut:
     'Nada dividido ainda. Uma sessão se filia a uma SUBTAREFA, nunca à entrega em si — divida o '
@@ -428,15 +557,7 @@ const PT: BoardCopy = {
   deleteDelivery: 'Excluir esta entrega',
   priority: 'Prioridade',
   dates: 'Datas',
-  clearDates: 'Limpar as duas datas',
   waitingOn: 'Aguardando',
-  workingOnIt: 'Em andamento',
-  free: 'Livre — ninguém pegou ainda.',
-  takeIt: 'Pegar',
-  takeItTitle: 'Pegar, para dizer a um agente perguntando o que fazer que alguém já está nisso',
-  release: 'Liberar',
-  releaseTitleExpired: 'O prazo da posse expirou — limpar o responsável',
-  releaseTitle: 'Devolver a tarefa para o quadro',
   cost: 'Custo',
   yourPrompts: 'Seus prompts',
   yourPromptsTitle: 'Quantas vezes você fez um prompt, em todas as sessões filiadas aqui',
@@ -462,6 +583,46 @@ const PT: BoardCopy = {
   blockedBy: 'Bloqueada por',
   showAllDescription: 'Mostrar tudo',
   showLessDescription: 'Mostrar menos',
+  columns: {
+    status: 'Status',
+    priority: 'Prioridade',
+    due: 'Prazo',
+    claim: 'Trabalhando',
+    progress: 'Progresso',
+    attempts: 'Tentativas',
+    sessions: 'Sessões',
+    rounds: 'Seus prompts',
+    tokens: 'Tokens',
+    cost: 'Custo',
+    harnesses: 'Harnesses',
+    subtasks: 'Subtarefas',
+    comments: 'Comentários',
+    files: 'Arquivos',
+    links: 'Links',
+    blockedBy: 'Bloqueada por',
+    created: 'Criada em',
+    updated: 'Atualizada em',
+  },
+  subtaskColumns: {
+    status: 'Status',
+    started: 'Início',
+    completed: 'Concluída',
+    duration: 'Duração',
+    sessions: 'Sessões',
+    model: 'Modelo',
+    cost: 'Custo',
+    tokens: 'Tokens',
+  },
+  subtaskFilter: {
+    trigger: 'Filtro',
+    title: 'Filtrar subtarefas',
+    status: 'Status',
+    harness: 'Assistente',
+    model: 'Modelo',
+    all: 'Todos',
+    clear: 'Limpar filtro',
+    noMatch: 'Nenhuma subtarefa corresponde a este filtro.',
+  },
   staged: {
     compose: 'Preparar sessão',
     edit: 'Editar sessão em espera',
@@ -490,6 +651,7 @@ const PT: BoardCopy = {
     launchIntro: 'Isso inicia um assistente de verdade agora, cobrado como qualquer outra sessão, e a filia automaticamente a esta subtarefa.',
     launch: 'Disparar',
     launching: 'Iniciando…',
+    startAnyway: 'Iniciar mesmo assim',
     preparing: 'Preparando anexos…',
     networkError: 'Erro de rede ao falar com esta máquina.',
     view: 'Ver sessão em espera',
@@ -504,6 +666,7 @@ const PT: BoardCopy = {
     selectAllInGroup: 'Selecionar todas as tarefas deste grupo',
     selectRow: 'Selecionar esta tarefa',
     openTask: 'Abrir tarefa',
+    taskColumn: 'Tarefa',
     showSubtasks: 'Mostrar as subtarefas',
     hideSubtasks: 'Esconder as subtarefas',
     sortBy: 'Ordenar por',
@@ -515,13 +678,33 @@ const PT: BoardCopy = {
     columnSortTitle: 'Ordenar os cards desta coluna',
     columnReorderOff: 'Ordenada por {key}. Arrastar para reordenar está desligado nesta coluna.',
     columnUseHand: 'Usar ordem manual',
+    sortedByPrefix: 'ordenada por',
+    resetSort: 'redefinir',
     keys: {
       manual: 'Ordem manual', priority: 'Prioridade', title: 'Título', status: 'Status',
-      created: 'Mais recentes', updated: 'Última alteração', due: 'Prazo', assignee: 'Responsável',
+      created: 'Mais recentes', updated: 'Última alteração', due: 'Prazo',
       cost: 'Custo', tokens: 'Tokens', rounds: 'Seus prompts', sessions: 'Sessões',
       attempts: 'Tentativas', comments: 'Comentários', subtasks: 'Subtarefas', progress: 'Progresso', harnesses: 'Harnesses',
-      delivered: 'Entregue em', start: 'Início',
+      delivered: 'Entregue em', started: 'Início',
     },
+  },
+  pickers: {
+    moveUp: 'Mover para cima',
+    moveDown: 'Mover para baixo',
+    groupsTitle: 'Mostrar grupos',
+    groupsTrigger: 'Grupos',
+    groupsNote: 'Arraste um grupo marcado, ou use ▲▼, para reordenar as faixas. As tarefas de um grupo oculto continuam lá.',
+    columnsTitle: 'Colunas',
+    columnsTrigger: 'Colunas',
+    columnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — a tabela segue essa ordem.',
+    subtaskColumnsTrigger: 'Colunas das subtarefas',
+    subtaskColumnsNote: 'Arraste uma coluna marcada, ou use ▲▼, para reordená-la — as subtarefas de toda entrega expandida seguem essa ordem.',
+    deliveriesTab: 'Entregas',
+    subtasksTab: 'Subtarefas',
+    boardColumnsTitle: 'Colunas do quadro',
+    boardColumnsTrigger: 'Colunas',
+    boardColumnsNote:
+      'Arraste uma coluna marcada, ou use ▲▼, para reordenar o fluxo. As tarefas de uma coluna oculta continuam lá.',
   },
 }
 

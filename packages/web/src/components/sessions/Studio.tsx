@@ -1390,11 +1390,9 @@ export function Studio({
           minimizeLabel: pt ? 'Minimizar o Studio' : 'Minimize the Studio',
         }
         : {})}
-      // PIN (spec §11 item 3) — right-slot only, same `slot === 'right'` gate as the minimize icon
-      // immediately above. `pinned` is already conditionally absent at the bottom (the call site
-      // never passes it there), but the explicit slot check is what keeps this correct even if a
-      // future caller stops bothering to omit it.
-      {...(slot === 'right' && pinned ? { pinned } : {})}
+      // PIN = FLOAT (`lib/floatingPanels.ts`) — offered in any slot and on the floating window
+      // itself (where it docks back); the caller omits it on a phone.
+      {...(pinned ? { pinned } : {})}
       gearLabel={pt ? 'Opções do Studio' : 'Studio options'}
       gearEntries={gearEntries}
       isMobile={isMobile}
@@ -1476,9 +1474,9 @@ export function Studio({
             {toolbarFit.beta !== 'hidden' && (
               <BetaTag what={pt ? 'O Studio' : 'The Studio'} compact={toolbarFit.beta === 'compact'} />
             )}
-            {/* THE FIXED TRIO — full screen, minimize (right slot only), gear — see
-                `fixedControls`' own header for the order and for why minimize is absent here at
-                the bottom. NEVER negotiated away by `toolbarFit` — see that function's own
+            {/* THE FIXED TRIO — gear, full screen, minimize (right slot only, and always LAST, so
+                it keeps one position whether the panel is open or not) — see `fixedControls`' own
+                header for why minimize is absent here at the bottom. NEVER negotiated away by `toolbarFit` — see that function's own
                 header for why. */}
             {fixedControls}
           </>}

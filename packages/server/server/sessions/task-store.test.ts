@@ -299,13 +299,38 @@ describe('a subtask is a row, not a checkbox', () => {
     await s.upsertSubtask({
       id: 's-1', taskId: 't-1', title: 'the half that is blocked',
       status: 'blocked', done: false,
-      assignee: 'claude:3f5f', dueDate: '2026-09-12', startDate: '2026-09-06',
-      sessionId: 'sess-1', notes: 'waiting on the API',
+      dueDate: '2026-09-12', startDate: '2026-09-06',
+      startedAt: '2026-09-06T10:00:00.000Z', sessionId: 'sess-1', notes: 'waiting on the API',
       createdAt: 'a', updatedAt: 'b',
     })
     const t = (await s.read()).subtasks[0]!
-    expect([t.status, t.assignee, t.dueDate, t.sessionId, t.notes])
-      .toEqual(['blocked', 'claude:3f5f', '2026-09-12', 'sess-1', 'waiting on the API'])
+    expect([t.status, t.dueDate, t.startedAt, t.sessionId, t.notes])
+      .toEqual(['blocked', '2026-09-12', '2026-09-06T10:00:00.000Z', 'sess-1', 'waiting on the API'])
+  })
+
+  it('reads a task and a subtask carrying an old `assignee` field without crashing, and drops it', async () => {
+    // `assignee` was removed everywhere ("responsável não vai existir") — a board written by an
+    // older build still has it on disk, and a read must neither throw nor surface it, the same
+    // "never break old data" rule the rest of this file already tests for `groupId`/`isGroup`.
+    const { file, s } = await store()
+    await writeFile(file, JSON.stringify({
+      tasks: [{
+        id: 't-1', title: 'old task', status: 'todo',
+        createdAt: 'a', updatedAt: 'b', assignee: 'claude:old',
+      }],
+      attempts: [],
+      subtasks: [{
+        id: 's-1', taskId: 't-1', title: 'old subtask', status: 'todo', done: false,
+        createdAt: 'a', updatedAt: 'b', assignee: 'claude:old',
+      }],
+    }), 'utf8')
+    const book = await s.read()
+    expect(book.tasks).toHaveLength(1)
+    expect(book.subtasks).toHaveLength(1)
+    expect(book.tasks[0]!.title).toBe('old task')
+    expect(book.subtasks[0]!.title).toBe('old subtask')
+    expect((book.tasks[0] as unknown as { assignee?: string }).assignee).toBeUndefined()
+    expect((book.subtasks[0] as unknown as { assignee?: string }).assignee).toBeUndefined()
   })
 
   it('removes one and reports false for an id nobody carries', async () => {

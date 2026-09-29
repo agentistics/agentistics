@@ -1,0 +1,70 @@
+{
+  "sessionId": "fixture-session-0001",
+  "projectHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "startTime": "2026-03-01T10:00:00.000Z",
+  "lastUpdated": "2026-03-01T10:05:00.000Z",
+  "messages": [
+    {
+      "id": "msg-u1",
+      "timestamp": "2026-03-01T10:00:00.000Z",
+      "type": "user",
+      "content": [{ "text": "<redacted>" }],
+      "displayContent": [{ "text": "<redacted>" }]
+    },
+    {
+      "id": "msg-g1",
+      "timestamp": "2026-03-01T10:00:10.000Z",
+      "type": "gemini",
+      "content": "<redacted>",
+      "tokens": { "input": 1000, "output": 50, "cached": 200, "thoughts": 30, "tool": 0, "total": 1280 },
+      "model": "gemini-3-flash-preview",
+      "toolCalls": [
+        {
+          "id": "tc-shell-1",
+          "name": "run_shell_command",
+          "args": { "command": "echo <redacted>" },
+          "status": "success",
+          "timestamp": "2026-03-01T10:00:12.000Z"
+        },
+        {
+          "id": "tc-read-1",
+          "name": "read_file",
+          "args": { "file_path": "<redacted>" },
+          "status": "success",
+          "timestamp": "2026-03-01T10:00:13.000Z"
+        }
+      ]
+    },
+    {
+      "id": "msg-g2",
+      "timestamp": "2026-03-01T10:02:00.000Z",
+      "type": "gemini",
+      "content": "<redacted>",
+      "tokens": { "input": 2000, "output": 80, "cached": 0, "thoughts": 0, "tool": 0, "total": 2080 },
+      "model": "gemini-3-flash-preview",
+      "toolCalls": [
+        {
+          "id": "tc-edit-1",
+          "name": "replace",
+          "args": { "file_path": "<redacted>" },
+          "status": "error",
+          "timestamp": "2026-03-01T10:02:05.000Z"
+        },
+        {
+          "id": "tc-edit-2",
+          "name": "replace",
+          "args": { "file_path": "<redacted>" },
+          "status": "cancelled",
+          "timestamp": "2026-03-01T10:02:10.000Z"
+        }
+      ]
+    },
+    {
+      "id": "msg-u2",
+      "timestamp": "2026-03-01T10:05:00.000Z",
+      "type": "user",
+      "content": [{ "text": "<redacted>" }],
+      "displayContent": [{ "text": "<redacted>" }]
+    }
+  ]
+}

@@ -19,7 +19,9 @@
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
-import { modelsFor, type ModelOption } from '@agentistics/core'
+import type { HarnessId, ModelOption } from '@agentistics/core'
+import { modelCatalog } from '../model-catalog'
+import { catalogFields, type CatalogFieldsInput } from '../model-catalog-fields'
 
 export interface WebHarnessOption {
   id: string
@@ -31,6 +33,10 @@ export interface WebHarnessOption {
   modelSuggestions: string[]
   /** The same models, each with the NAME the harness prints. See `harnessModels.ts`. */
   models: ModelOption[]
+  /** Where `models` came from — see `FleetNewOptions`. */
+  modelsSource: 'cli' | 'table'
+  /** The picker must also accept a typed id. */
+  modelFreeText: boolean
   supportsModel: boolean
   efforts: string[]
 }
@@ -61,10 +67,14 @@ export interface SpawnWebResult {
 }
 
 /** What this machine can start, and which questions each one earns. */
-export async function webHarnesses(host: StartHost): Promise<WebHarnessOption[]> {
+export async function webHarnesses(
+  host: StartHost,
+  /** The model catalog; injectable so a test does not read this machine's CLIs. */
+  catalogOf: (h: HarnessId) => Promise<CatalogFieldsInput> = modelCatalog,
+): Promise<WebHarnessOption[]> {
   if (!host.startableHarnesses) return []
   const found = await host.startableHarnesses()
-  return found.map(h => ({ ...h, models: modelsFor(h.id) }))
+  return Promise.all(found.map(async h => ({ ...h, ...catalogFields(h.modelSuggestions, await catalogOf(h.id as HarnessId)) })))
 }
 
 /** Directories to offer, from the LOCAL store — so the picker works with the server's data cold. */

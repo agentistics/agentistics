@@ -114,6 +114,26 @@ export function subtaskSignalsProgress(status: TaskStatus): boolean {
 }
 
 /**
+ * Does THIS transition mark the FIRST real work on a task or subtask — the moment `startedAt`
+ * should be stamped?
+ *
+ * Reuses `subtaskSignalsProgress`'s exact reading of "real progress" (an ordinary move into
+ * `in_progress`, or a one-hop jump straight to `done`) rather than restating it: a record that
+ * skips `in_progress` entirely still plainly started at some point, and a record that can reach
+ * `done` cannot have done so without starting — see `subtaskSignalsProgress`'s own note for why
+ * `done` counts. The `before` side is deliberately narrow (`backlog`/`todo` only, the same two
+ * words `statusAfterAttach` moves out of): a record already sitting in `blocked`/`in_review` and
+ * then moved to `in_progress` has ALREADY started (something happened before the block), so this
+ * only fires on the very first departure from "nothing started yet".
+ *
+ * One-directional like every other rule on this board: a record moving AWAY from `in_progress`/
+ * `done` back toward `backlog`/`todo` never un-stamps a start that already happened.
+ */
+export function marksStart(before: TaskStatus, after: TaskStatus): boolean {
+  return (before === 'backlog' || before === 'todo') && subtaskSignalsProgress(after)
+}
+
+/**
  * The status a task should move to because one of ITS SUBTASKS (or a group member — §F.1, the two
  * share the same `status` column) just started real work, or `null` when this subtask's status
  * change should leave the parent task's own status untouched.
@@ -133,6 +153,48 @@ export function statusAfterSubtaskProgress(
 ): TaskStatus | null {
   if (!subtaskSignalsProgress(subtaskStatus)) return null
   return statusAfterAttach(taskStatus)
+}
+
+/**
+ * The status a task should move to because EVERY one of its TOP-LEVEL subtasks just reached
+ * `done`, or `null` when nothing here should change the task.
+ *
+ * "Top-level" is deliberate: a GROUP counts as ONE item through its own `status` (which needs a
+ * session filed on the group itself to reach `done` — see `patchSubtask`'s own note), never
+ * through `groupProgress` over its members. A member's own completion is internal to its group and
+ * is not a separate piece of the delivery — counting it here as well as the group would make a
+ * task with one three-member group need four `done` rows instead of one. The caller is therefore
+ * expected to have already filtered `topLevel` to loose subtasks and groups, excluding every
+ * `isGroupMember` row (`task-web.ts`'s `patchSubtask` does this over the SAME post-patch view it
+ * uses for the `done_needs_session` gate, so the two never disagree about what just changed).
+ *
+ * A task with NO subtasks at all returns `null` — "nobody broke this up" is answered by the
+ * ORDINARY manual `done` move (`markTask`), not by this rule; a task cannot have "all zero of its
+ * parts done" mean anything.
+ *
+ * Fires from ANY status that is not already closed — including `blocked`/`in_review`, unlike
+ * `statusAfterAttach`'s narrower `backlog`/`todo` gate. The two rules answer different STRENGTHS of
+ * evidence: "somebody started a piece" is ambiguous (a task can be triaged into `blocked` before
+ * anyone has touched it, so `statusAfterAttach` only ever nudges out of "nothing started yet"), but
+ * "literally every piece of this delivery is done" is not — a task cannot still be waiting on
+ * something (`blocked`) or still under review (`in_review`) once nothing is left to review or wait
+ * on. `isClosed` guards the only case that would be wrong: a task already `done` or `abandoned`
+ * must never be reopened by a stray later write.
+ *
+ * `done_needs_session` is never a separate concern here: every top-level item that reached `done`
+ * already needed a session filed on IT (a loose subtask directly, a group on itself), so by the
+ * time this returns `'done'` the task's own `rowsOfTask` (which counts a session anywhere under the
+ * task) is guaranteed non-empty — the SAME gate `markTask` applies to a manual move into `done`
+ * therefore always passes for this automatic one too, with no second, looser path.
+ */
+export function statusAfterAllSubtasksDone(
+  taskStatus: TaskStatus,
+  topLevel: readonly Pick<Subtask, 'status'>[],
+): TaskStatus | null {
+  if (isClosed(taskStatus)) return null
+  if (topLevel.length === 0) return null
+  if (topLevel.some(s => s.status !== 'done')) return null
+  return 'done'
 }
 
 /**
@@ -230,11 +292,25 @@ export interface Task {
   createdAt: string
   updatedAt: string
   deliveredAt?: string
+  /**
+   * When real work actually began, ISO — system-stamped, NEVER user-editable (no route/MCP
+   * parameter sets it directly). Stamped once, by `marksStart`, the first time the task's own
+   * status or any of its subtasks' status leaves `backlog`/`todo` for real progress; never
+   * overwritten afterward, so it is the EARLIEST such moment across the task and all its subtasks.
+   * Superseded the old user-editable `startDate` — see that field's own note.
+   */
+  startedAt?: string
   /** Absent reads as `none` — see `TaskPriority`. */
   priority?: TaskPriority
-  /** Free text: a person, an agent's label, a session handle. */
-  assignee?: string
-  /** `yyyy-MM-dd`, like `Subtask`. A date, not a timestamp — nobody schedules to the second. */
+  /**
+   * SUPERSEDED by `startedAt`/`deliveredAt` — a product owner asked for the plan-your-own dates to
+   * be replaced by system-observed facts ("quando o trabalho realmente começou/terminou") rather
+   * than a date someone typed. Kept, and still round-tripped by `task-store.ts`, only so old
+   * records are not silently truncated; no UI in the ALM offers a way to set either any more, and
+   * no new code should read or write them. `yyyy-MM-dd`, like `Subtask`'s own pair — a date, not a
+   * timestamp, which is exactly why they could never express "the moment it happened" the way
+   * `startedAt`/`deliveredAt` do.
+   */
   dueDate?: string
   startDate?: string
   /** Free-text labels. Filtering and grouping only; they carry no rule. */
@@ -334,7 +410,7 @@ export interface TaskComment {
 /**
  * A subtask is a ROW, not a checkbox.
  *
- * It carries the same columns its parent does — status, dates, assignee, a linked session — because
+ * It carries the same columns its parent does — status, dates, a linked session — because
  * the thing people actually break a task into is smaller pieces of the SAME kind of work, and a
  * checkbox cannot say "this half is blocked and that half shipped on Tuesday".
  *
@@ -358,11 +434,27 @@ export interface Subtask {
   status: TaskStatus
   createdAt: string
   updatedAt: string
-  /** Free text, like `TaskComment.author` — a person, a session handle, an agent's label. */
-  assignee?: string
-  /** `yyyy-MM-dd`. A date the work is due, not a timestamp: nobody schedules to the second. */
+  /**
+   * SUPERSEDED by `startedAt`/`deliveredAt` — see `Task.dueDate`'s own note; the same
+   * user-editable-plan-date-to-system-observed-fact change applies at this level too. Kept,
+   * round-tripped by `task-store.ts`, and no longer offered by any UI.
+   */
   dueDate?: string
   startDate?: string
+  /**
+   * When real work actually began on THIS piece, ISO — system-stamped, never user-editable. Stamped
+   * once by `marksStart`, the first time this subtask's own status leaves `backlog`/`todo` for real
+   * progress; never overwritten afterward. Independent of the task's own `startedAt` (the task's is
+   * the EARLIEST across itself and every subtask; this one is about this piece alone).
+   */
+  startedAt?: string
+  /**
+   * When this piece reached `done`, ISO — system-stamped, never user-editable, mirroring
+   * `Task.deliveredAt` at the subtask level. Stamped once, the moment `status` becomes `done`
+   * (`subtaskDone`), whether by a direct move or a rule such as a group member reaching `done` with
+   * no session of its own.
+   */
+  deliveredAt?: string
   /** One session filed under this specific piece. The task's own sessions stay on the task. */
   sessionId?: string
   notes?: string
@@ -413,7 +505,7 @@ export interface Subtask {
    * rule). A member NEVER receives a session of its own (refused at filing time,
    * `subtask_in_group`) and therefore gets no rollup bucket of its own either — `subtaskViews`
    * (`task-report.ts`) excludes it entirely rather than publishing an always-empty one. It still has
-   * its own `status`, `assignee`, dates, comments and files: those exist independently of whether it
+   * its own `status`, dates, comments and files: those exist independently of whether it
    * ever accounted for a session, and its `status` is what the group's own progress percentage
    * (`groupProgress`, `@agentistics/core`) is computed from.
    *

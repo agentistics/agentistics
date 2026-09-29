@@ -12,21 +12,18 @@ import {
   sessionHarness,
   sessionMessages,
   sessionTokens,
+  statsCacheTotals,
+  harnessParam,
+  HARNESS_IDS,
 } from "./session-tokens.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
 // Multi-harness helpers
-// agentistics tracks several harnesses (Claude Code, Codex CLI, Gemini CLI,
-// Copilot CLI, Antigravity CLI). Sessions carry a `harness` field; legacy/missing defaults to claude.
+// agentistics tracks sessions from every registered harness (Claude Code, Codex CLI, Gemini CLI,
+// Copilot CLI, Antigravity CLI, Kimi Code). Sessions carry a `harness` field; legacy/missing defaults to claude.
 
-const HARNESS_IDS = ["claude", "codex", "gemini", "copilot", "antigravity"] as const;
-const HARNESS_PARAM = {
-  type: "string",
-  enum: ["all", ...HARNESS_IDS],
-  description:
-    "Scope to one harness (claude | codex | gemini | copilot | antigravity), or 'all' (default) for the unified view across every harness.",
-} as const;
+const HARNESS_PARAM = harnessParam();
 
 // Static mirror of src/lib/componentCatalog.tsx — keep in sync when adding components
 const CATALOG = [
@@ -264,7 +261,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_subtask",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `assignee`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/assignee/dates/comments still exist and feed the group's progress percentage.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
     inputSchema: {
       type: "object",
       properties: {
@@ -280,7 +277,6 @@ const TOOLS: Tool[] = [
           type: "string",
           enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
         },
-        assignee: { type: "string" },
         dueDate: { type: "string" },
         startDate: { type: "string" },
         blockedBy: {
@@ -364,7 +360,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_activity",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. What has been HAPPENING, newest first — status moves, claims, releases, priority and assignee changes, sessions filed. Pass `ref` for one task, or nothing for the whole board. On a board several agents drive this is how you find out what the others did without asking them.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. What has been HAPPENING, newest first — status moves, claims, releases, priority changes, sessions filed. Pass `ref` for one task, or nothing for the whole board. On a board several agents drive this is how you find out what the others did without asking them.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string" }, limit: { type: "number" } },
@@ -374,7 +370,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "BETA — the task board is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low | none), `assignee`, `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `none`, which means 'nobody has said' and is not the same as `low`. Pass `actor` so the change is recorded against you in the activity log.",
+      "BETA — the task board is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low | none), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `none`, which means 'nobody has said' and is not the same as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -382,7 +378,6 @@ const TOOLS: Tool[] = [
         title: { type: "string" },
         detail: { type: "string" },
         priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
-        assignee: { type: "string" },
         dueDate: { type: "string" },
         startDate: { type: "string" },
         labels: { type: "array", items: { type: "string" } },
@@ -431,6 +426,40 @@ const TOOLS: Tool[] = [
     description:
       "BETA — the task board is new and still changing; its shapes may move between releases. Delete a task and its comments, subtasks, files and links. The SESSIONS filed under it are kept — deleting a board entry never deletes work.",
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
+  },
+  {
+    name: "agentistics_session_groups",
+    description:
+      "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_session_group_create",
+    description:
+      "Create a session group, optionally filing sessions into it in the same call. Use it to keep the assistants you start organised: start a session (for example `agentop session start …`, which prints its id), then create or reuse a group and file it. `sessions` takes session REFERENCES — a managed id (the `agentop-…` id `agentistics_session_groups` and `agentop session ls` print), a conversation id, an exact title, or a unique id prefix; any reference that matches nothing or more than one refuses the WHOLE call (404 / 409) and creates nothing, so a group is never half-filled. Filing moves a session out of any other group and unpins it if it was pinned. Duplicate group names are allowed, but they make later calls ambiguous — check `agentistics_session_groups` first and reuse a group when one fits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The group's name. Must not be blank." },
+        sessions: { type: "array", items: { type: "string" }, description: "Session references to file into the new group." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "agentistics_session_group_edit",
+    description:
+      "Change a session group. `action` is one of: `add` — file `session` under `group` (moves it out of any other group, unpins it if pinned); `remove` — take `session` out of whichever group holds it (the session itself is untouched); `rename` — give `group` a new `name`; `delete` — delete `group` (its sessions are NOT deleted, they only leave it). `group` is a group id OR its exact name (case-insensitive); a name shared by two groups answers 409 with the ids, so use the id. `session` is a managed id, a conversation id, an exact title or a unique id prefix. Refusals name what was wrong: 404 for a group or session that matches nothing, 409 for an ambiguous one, 400 for a blank name or a missing argument.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["add", "remove", "rename", "delete"] },
+        group: { type: "string", description: "A group id or name. Required for add, rename and delete." },
+        session: { type: "string", description: "A session reference. Required for add and remove." },
+        name: { type: "string", description: "The new name. Required for rename." },
+      },
+      required: ["action"],
+    },
   },
   {
     name: "agentistics_summary",
@@ -725,7 +754,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         // `parentGroupId` is here too (§F.1: joining/leaving a group) — it is typed as a plain
         // string in the tool schema, with `""` meaning "leave", so it matches the same
         // `typeof === "string"` filter as every other column and needs no special casing.
-        const cols = ["status", "assignee", "dueDate", "startDate", "title", "parentGroupId"] as const;
+        const cols = ["status", "dueDate", "startDate", "title", "parentGroupId"] as const;
         const named = cols.filter(c => typeof a?.[c] === "string");
         // `blockedBy` is an ARRAY, so it never matches the string-valued `cols` filter above and
         // was silently dropped — a subtask genuinely can be blocked by a sibling (`Subtask.blockedBy`,
@@ -734,7 +763,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         // NOTE: when ANY named column (incl. `parentGroupId`) is present, this branch never
         // forwards `done` at all — a caller combining `parentGroupId` with `done: true` in one call
         // gets no error and `done` is just dropped. The same is true of every other named column
-        // (`status`, `assignee`, …); fixing that general mechanism is a bigger, separate change and
+        // (`status`, `dueDate`, …); fixing that general mechanism is a bigger, separate change and
         // deliberately out of scope here. The `parentGroupId`/`done` case is instead documented as a
         // limitation on both fields' own tool-schema descriptions above: callers are told to send
         // them as two separate calls.
@@ -797,7 +826,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
         const patch: Record<string, unknown> = {};
-        for (const f of ["title", "detail", "priority", "assignee", "dueDate", "startDate", "actor"]) {
+        for (const f of ["title", "detail", "priority", "dueDate", "startDate", "actor"]) {
           if (typeof a?.[f] === "string") patch[f] = a[f];
         }
         if (Array.isArray(a?.labels)) patch.labels = a.labels;
@@ -836,12 +865,47 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_session_groups": {
+        const body = await apiGet("/api/session-groups");
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_group_create": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-groups", {
+          name: a?.name,
+          ...(Array.isArray(a?.sessions) ? { sessions: a.sessions } : {}),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_group_edit": {
+        const a = args as any;
+        const group = encodeURIComponent(String(a?.group ?? ""));
+        let body: unknown;
+        switch (a?.action) {
+          case "add":
+            body = await apiSend("POST", `/api/session-groups/${group}/sessions`, { session: a?.session });
+            break;
+          case "remove":
+            body = await apiSend("POST", "/api/session-groups/ungroup", { session: a?.session });
+            break;
+          case "rename":
+            body = await apiSend("POST", `/api/session-groups/${group}`, { name: a?.name });
+            break;
+          case "delete":
+            body = await apiSend("DELETE", `/api/session-groups/${group}`);
+            break;
+          default:
+            throw new Error("agentistics_session_group_edit: `action` must be add, remove, rename or delete");
+        }
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_summary": {
         const harness = (args as any)?.harness as string | undefined;
         const unified = !harness || harness === "all";
         const data = await apiGet("/api/data");
         const sc = data.statsCache ?? {};
-        const totals = sc.allTimeTotals ?? {};
+        // statsCache is Claude-only; its modelUsage is the whole-history fallback (see statsCacheTotals).
+        const totals = statsCacheTotals(sc);
 
         // Aggregate from sessions (the only harness-aware source). statsCache is
         // Claude-only, so it's used as a fallback ONLY for the unified/claude view.
@@ -862,10 +926,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const claudeFallback = unified || harness === "claude";
         const topModel =
           Object.entries(modelTokens).sort(([, a], [, b]) => b - a)[0]?.[0]
-          ?? (claudeFallback
-            ? Object.entries((sc.modelUsage ?? {}) as Record<string, { totalTokens?: number }>)
-                .sort(([, a], [, b]) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))[0]?.[0] ?? "—"
-            : "—");
+          ?? (claudeFallback ? totals.topModel ?? "—" : "—");
         const topProject = Object.entries(projectSessions).sort(([, a], [, b]) => b - a)[0]?.[0] ?? "—";
 
         return {
@@ -873,11 +934,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             type: "text",
             text: JSON.stringify({
               harness: unified ? "all" : harness,
-              totalInputTokens:      totalInput    || (claudeFallback ? totals.inputTokens      ?? 0 : 0),
-              totalOutputTokens:     totalOutput   || (claudeFallback ? totals.outputTokens     ?? 0 : 0),
-              totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheReadTokens  ?? 0 : 0),
-              totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWriteTokens ?? 0 : 0),
-              estimatedCostUSD:      Math.round(totalCostUSD * 100) / 100,
+              totalInputTokens:      totalInput    || (claudeFallback ? totals.input : 0),
+              totalOutputTokens:     totalOutput   || (claudeFallback ? totals.output : 0),
+              totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheRead : 0),
+              totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWrite : 0),
+              estimatedCostUSD:      Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
               totalSessions: allSessions.length,
               topModel,
               topProject,

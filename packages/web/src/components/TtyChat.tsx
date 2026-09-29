@@ -1,5 +1,8 @@
+import { versionedAsset } from '../lib/brand'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { findChatSound } from '../lib/chatSounds'
+import { getNotificationSettings } from '../lib/sessionNotifications'
+import { chatSoundActive } from '../lib/soundVolume'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -20,7 +23,7 @@ type NayAttachment = {
   isImage: boolean
   preview?: string
 }
-import { CHAT_MODELS, type ChatModelId, DEFAULT_CHAT_MODEL } from '../lib/chatModels'
+import { chatModelLabel, resolveChatModel, typedModelId } from '../lib/chatModel'
 import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { formatToolName, fmtTime, NAV_LINK_RE, PDF_LINK_RE } from '@agentistics/core'
@@ -158,33 +161,6 @@ const BADGE_COLORS: Record<string, string> = {
   Fast:     'var(--accent-green)',
   Balanced: 'var(--anthropic-orange)',
   Powerful: 'var(--accent-purple)',
-}
-
-// Audio
-
-function createPlayFn(ctxRef: React.MutableRefObject<AudioContext | null>) {
-  return function playNotification() {
-    const ctx = ctxRef.current
-    if (!ctx) return
-    ctx.resume().then(() => {
-      const now = ctx.currentTime
-      const playTone = (freq: number, start: number, dur: number) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        gain.gain.setValueAtTime(0, start)
-        gain.gain.linearRampToValueAtTime(0.18, start + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.001, start + dur)
-        osc.start(start)
-        osc.stop(start + dur)
-      }
-      playTone(880,  now,        0.25)
-      playTone(1100, now + 0.12, 0.25)
-    }).catch(() => {/* ignore */})
-  }
 }
 
 // Markdown renderer
@@ -602,7 +578,7 @@ function Message({
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden', marginTop: 2,
       }}>
-        <img src="/minimalistLogo.png" alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
+        <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
       </div>
 
       {/* Content column */}
@@ -639,8 +615,11 @@ function Message({
 
 // Model picker
 
-function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) => void }) {
-  const [selected, setSelected] = useState<ChatModelId>(DEFAULT_CHAT_MODEL)
+function ModelPicker({ lang, models, onPick }: { lang: Lang; models: { id: string; label: string }[]; onPick: (id: string) => void }) {
+  // The list is the server's (`/api/chat-harnesses`, the ONE model catalog), so it names what this
+  // machine's CLI actually offers. Until it arrives nothing is offered, never a stale guess.
+  const [picked, setPicked] = useState<string | null>(null)
+  const selected = picked ?? models[0]?.id ?? ''
   const pt = lang === 'pt'
   return (
     <div style={{
@@ -651,7 +630,7 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
       animation: 'ttyChatFadeIn 0.2s ease-out',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <img src="/minimalistLogo.png" alt="Nay" style={{ width: 32, height: 32, borderRadius: 9, objectFit: 'cover' }} />
+        <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 32, height: 32, borderRadius: 9, objectFit: 'cover' }} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
             {pt ? 'Olá! Sou Nay 👋' : 'Hi! I\'m Nay 👋'}
@@ -663,13 +642,17 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {CHAT_MODELS.map(m => {
+        {models.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 2px' }}>
+            {pt ? 'Carregando os modelos do assistente…' : "Loading the assistant's models…"}
+          </div>
+        )}
+        {models.map(m => {
           const active = selected === m.id
-          const badgeColor = BADGE_COLORS[m.badge] ?? 'var(--text-tertiary)'
           return (
             <button
               key={m.id}
-              onClick={() => setSelected(m.id)}
+              onClick={() => setPicked(m.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 padding: '12px 14px', borderRadius: 10, textAlign: 'left',
@@ -678,34 +661,13 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
                 cursor: 'pointer', transition: 'all 0.15s', fontFamily: 'inherit',
               }}
             >
-              <div style={{
-                width: 36, height: 36, borderRadius: 9, flexShrink: 0,
-                background: active ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)' : 'var(--bg-card)',
-                border: `1px solid ${active ? 'color-mix(in srgb, var(--accent-purple) 40%, transparent)' : 'var(--border)'}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                overflow: 'hidden',
-              }}>
-                <img src="/minimalistLogo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', opacity: active ? 1 : 0.5 }} />
-              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: active ? 'var(--accent-purple)' : 'var(--text-primary)' }}>
-                    {m.label}
-                  </span>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, color: badgeColor,
-                    background: `color-mix(in srgb, ${badgeColor} 12%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${badgeColor} 30%, transparent)`,
-                    padding: '1px 6px', borderRadius: 4,
-                  }}>
-                    {m.badge}
-                  </span>
+                <div style={{ fontSize: 13, fontWeight: 700, color: active ? 'var(--accent-purple)' : 'var(--text-primary)' }}>
+                  {m.label}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{m.desc}</div>
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', textAlign: 'right', flexShrink: 0, lineHeight: 1.7 }}>
-                <div>${m.inputPer1M}/1M in</div>
-                <div>${m.outputPer1M}/1M out</div>
+                {m.label !== m.id && (
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono, monospace)' }}>{m.id}</div>
+                )}
               </div>
             </button>
           )
@@ -714,18 +676,55 @@ function ModelPicker({ lang, onPick }: { lang: Lang; onPick: (id: ChatModelId) =
 
       <button
         onClick={() => onPick(selected)}
+        disabled={models.length === 0}
         style={{
           marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700,
           border: '1px solid var(--accent-purple)',
           background: 'color-mix(in srgb, var(--accent-purple) 12%, transparent)', color: 'var(--accent-purple)',
-          cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+          cursor: models.length === 0 ? 'default' : 'pointer', opacity: models.length === 0 ? 0.5 : 1,
+          fontFamily: 'inherit', transition: 'all 0.15s',
         }}
       >
         {pt ? 'Começar a conversar' : 'Start chatting'}
         <ChevronRight size={14} />
       </button>
     </div>
+  )
+}
+
+/**
+ * A typed model id, offered only where the harness's list is the incomplete fallback table (copilot,
+ * gemini): those CLIs accept ids no list here can name, so a closed picker would forbid models that
+ * work. The server re-validates every id before it reaches an argv.
+ */
+function TypedModelRow({ lang, onPick }: { lang: Lang; onPick: (id: string) => void }) {
+  const [text, setText] = useState('')
+  const id = typedModelId(text)
+  const pt = lang === 'pt'
+  return (
+    <form
+      onSubmit={e => { e.preventDefault(); if (id) onPick(id) }}
+      style={{ display: 'flex', gap: 6, padding: '8px 10px', alignItems: 'center' }}
+    >
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder={pt ? 'outro id de modelo…' : 'other model id…'}
+        aria-label={pt ? 'Id de modelo' : 'Model id'}
+        style={{
+          flex: 1, minWidth: 0, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)',
+          background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12,
+        }}
+      />
+      <button type="submit" disabled={!id} className="tty-icon-btn" style={{
+        padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11,
+        background: 'transparent', color: id ? 'var(--text-primary)' : 'var(--text-tertiary)',
+        cursor: id ? 'pointer' : 'default', fontFamily: 'inherit',
+      }}>
+        {pt ? 'Usar' : 'Use'}
+      </button>
+    </form>
   )
 }
 
@@ -904,10 +903,10 @@ function saveNaySize(size: { w: number; h: number }) {
 
 interface TtyChatProps {
   lang: Lang
-  chatModel: ChatModelId | null
+  chatModel: string | null
   chatSoundEnabled: boolean
   chatSoundId?: string
-  onModelSet: (model: ChatModelId) => void
+  onModelSet: (model: string) => void
   filters: Filters
   setFilters: React.Dispatch<React.SetStateAction<Filters>>
   isMobile?: boolean
@@ -1025,7 +1024,15 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
   const playNotification = useCallback(() => {
     const ctx = audioCtxRef.current
     if (!ctx) return
-    findChatSound(soundIdRef.current).play(ctx)
+    // Read the shared Notifications settings FRESH on every call — never a value captured at
+    // mount or held in a ref — so turning the global "Efeitos Sonoros Globais" switch off, or
+    // dragging its volume slider, is heard on the very next reply with no reload. `chatSoundEnabled`
+    // (this widget's own switch) can only ever NARROW what that global switch allows; it cannot
+    // re-enable a sound the user turned off there. See `lib/soundVolume.ts`'s header for the defect
+    // this replaced: this sound used to ignore both the global switch and the volume entirely.
+    const settings = getNotificationSettings()
+    if (!chatSoundActive({ globalSoundEnabled: settings.soundEnabled, chatSoundEnabled: soundRef.current })) return
+    findChatSound(soundIdRef.current).play(ctx, settings.soundVolume)
   }, [])
 
   useEffect(() => { openRef.current = open }, [open])
@@ -1408,10 +1415,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
 
     // Resolve effective model for the chosen backend harness
     const currentHarness = nayBackendHarnesses.find(h => h.id === nayBackendHarnessId)
-    const harnessModels = currentHarness?.models ?? []
-    const model = (chatModel && harnessModels.some(m => m.id === chatModel))
-      ? chatModel
-      : (currentHarness?.defaultModel ?? chatModel ?? DEFAULT_CHAT_MODEL)
+    const model = resolveChatModel(chatModel, currentHarness ?? null)
     const userMsg: ChatMessage = {
       role: 'user', content: text, timestamp: Date.now(),
       images: pendingAttachments.filter(a => a.isImage).map(a => a.preview!),
@@ -1493,7 +1497,9 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
               setStreaming(false)
               if (!openRef.current) {
                 setHasUnread(true)
-                if (soundRef.current) playNotification()
+                // `playNotification` decides for itself whether to actually sound anything — see
+                // its own comment — so the unread badge above is unconditional but the ding is not.
+                playNotification()
               }
               return
             }
@@ -1532,15 +1538,16 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
   }
 
   const pt = lang === 'pt'
-  const effectiveModel = chatModel ?? DEFAULT_CHAT_MODEL
-  const modelInfo = CHAT_MODELS.find(m => m.id === effectiveModel)
 
   // Nay backend harness helpers
   const nayBackendHarness: HarnessChatStatus | null = nayBackendHarnesses.find(h => h.id === nayBackendHarnessId) ?? null
-  // When harness info is loaded, use its models; otherwise fall back to CHAT_MODELS (claude)
-  const nayHarnessModels = nayBackendHarness?.models ?? CHAT_MODELS.map(m => ({ id: m.id, label: m.label, badge: m.badge }))
-  const nayEffectiveModel = (chatModel && nayHarnessModels.some(m => m.id === chatModel)) ? chatModel : (nayBackendHarness?.defaultModel ?? effectiveModel)
-  const nayModelInfo = nayHarnessModels.find(m => m.id === nayEffectiveModel) ?? CHAT_MODELS.find(m => m.id === nayEffectiveModel)
+  // The models come from the server's ONE catalog (`/api/chat-harnesses`) — what this machine's
+  // CLI actually offers. Before it arrives there is nothing to list, never a stale guess.
+  const nayHarnessModels = nayBackendHarness?.models ?? []
+  const nayEffectiveModel = resolveChatModel(chatModel, nayBackendHarness)
+  const nayModelInfo = nayHarnessModels.find(m => m.id === nayEffectiveModel)
+  const nayModelName = chatModelLabel(nayEffectiveModel, nayBackendHarnesses, lang)
+  const claudeModels = nayBackendHarnesses.find(h => h.id === 'claude')?.models ?? []
   // Total harnesses count (all, not just ready) — show selector when >1 known harness
   const totalHarnessCount = nayBackendHarnesses.length
   // For the error panel: active harness's setup info (for runtime-error "How to fix" guidance)
@@ -1635,7 +1642,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
         }}>
 
           {chatModel === null && (
-            <ModelPicker lang={lang} onPick={onModelSet} />
+            <ModelPicker lang={lang} models={claudeModels} onPick={onModelSet} />
           )}
 
           {/* Header */}
@@ -1650,7 +1657,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
@@ -1674,7 +1681,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                           {nayBackendHarness.label}·
                         </span>
                       )}
-                      <span>{nayModelInfo?.label ?? nayEffectiveModel}</span>
+                      <span>{nayModelName}</span>
                       {nayModelInfo?.badge && (
                         <span style={{
                           fontSize: 9, fontWeight: 700,
@@ -1814,7 +1821,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                         {convo.model && (
                           <>
                             <span>·</span>
-                            <span>{CHAT_MODELS.find(m => m.id === convo.model)?.label ?? convo.model}</span>
+                            <span>{chatModelLabel(convo.model, nayBackendHarnesses, lang)}</span>
                           </>
                         )}
                       </div>
@@ -1860,7 +1867,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 alignItems: 'center', justifyContent: 'center',
                 gap: 10, color: 'var(--text-tertiary)', textAlign: 'center', padding: '0 20px',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
                   {pt ? 'Olá! Sou a Nay' : 'Hi! I\'m Nay'}
                 </div>
@@ -2000,7 +2007,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                             onClick={() => {
                               setNayBackendHarnessId(h.id)
                               saveNayHarnessId(h.id)
-                              if (h.ready) onModelSet(h.defaultModel as ChatModelId)
+                              if (h.ready) onModelSet(resolveChatModel(null, h))
                               setShowNayHarnessPicker(false)
                             }}
                             onMouseEnter={() => setHoveredHarnessId(h.id)}
@@ -2046,21 +2053,22 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 title="Change model"
                 style={{ ...iconBtnStyle, width: 'auto', padding: '0 6px', gap: 4, fontSize: 10, maxWidth: isMobile ? 140 : 'none' }}
               >
-                <span style={{ maxWidth: isMobile ? 110 : 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nayModelInfo?.label ?? nayEffectiveModel}</span>
+                <span style={{ maxWidth: isMobile ? 110 : 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nayModelName}</span>
                 <ChevronDown size={9} />
               </button>
               {showNayModelPicker && (
                 <div style={{
-                  position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 180,
+                  position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 200,
+                  maxHeight: 320, overflowY: 'auto',
                   background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.3)', overflow: 'hidden',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                 }}>
                   {nayHarnessModels.map(m => {
                     const active = nayEffectiveModel === m.id
                     const badgeColor = m.badge ? (BADGE_COLORS[m.badge] ?? 'var(--text-tertiary)') : 'var(--text-tertiary)'
                     return (
                       <button key={m.id} className="tty-icon-btn"
-                        onClick={() => { onModelSet(m.id as ChatModelId); setShowNayModelPicker(false) }}
+                        onClick={() => { onModelSet(m.id); setShowNayModelPicker(false) }}
                         style={{
                           width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
                           background: active ? 'var(--bg-elevated)' : 'transparent', border: 'none',
@@ -2078,6 +2086,9 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                       </button>
                     )
                   })}
+                  {nayBackendHarness?.modelFreeText && (
+                    <TypedModelRow lang={lang} onPick={id => { onModelSet(id); setShowNayModelPicker(false) }} />
+                  )}
                 </div>
               )}
             </div>
@@ -2184,7 +2195,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden', pointerEvents: 'none',
           }}>
-            <img src="/minimalistLogo.png" alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
+            <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 26, height: 26, objectFit: 'contain' }} />
           </div>
           <span style={{ fontSize: 9, color: 'var(--text-tertiary)', lineHeight: 1, pointerEvents: 'none' }}>Nay</span>
         </div>
@@ -2227,7 +2238,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 22, height: 22, objectFit: 'contain' }} />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
@@ -2251,7 +2262,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                           {nayBackendHarness.label}·
                         </span>
                       )}
-                      <span>{nayModelInfo?.label ?? nayEffectiveModel}</span>
+                      <span>{nayModelName}</span>
                       {nayModelInfo?.badge && (
                         <span style={{
                           fontSize: 9, fontWeight: 700,
@@ -2389,7 +2400,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                         {convo.model && (
                           <>
                             <span>·</span>
-                            <span>{CHAT_MODELS.find(m => m.id === convo.model)?.label ?? convo.model}</span>
+                            <span>{chatModelLabel(convo.model, nayBackendHarnesses, lang)}</span>
                           </>
                         )}
                       </div>
@@ -2435,7 +2446,7 @@ export function TtyChat({ lang, chatModel, chatSoundEnabled, chatSoundId = 'ping
                 alignItems: 'center', justifyContent: 'center',
                 gap: 10, color: 'var(--text-tertiary)', textAlign: 'center', padding: '0 20px',
               }}>
-                <img src="/minimalistLogo.png" alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
+                <img src={versionedAsset('/minimalistLogo.png')} alt="Nay" style={{ width: 36, height: 36, objectFit: 'contain', opacity: 0.3 }} />
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
                   {pt ? 'Olá! Sou a Nay' : 'Hi! I\'m Nay'}
                 </div>

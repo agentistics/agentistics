@@ -91,3 +91,57 @@ export function readDragPayload(e: { dataTransfer: DataTransfer | null }): strin
 export function hasDragPayload(e: { dataTransfer: DataTransfer | null }): boolean {
   return e.dataTransfer !== null && Array.from(e.dataTransfer.types).includes(DRAG_KEY_TYPE)
 }
+
+/**
+ * A SECOND, DISTINCT MIME type for dragging a whole user-created GROUP by its own header, to
+ * reorder the groups themselves (never a session). It cannot share `DRAG_KEY_TYPE`: the sessions
+ * aside's group heading is already a drop target for a SESSION key (dropped there, that session
+ * joins the group), so a group-drag carrying the same type would be read as "add this group id as
+ * a session" the instant it landed on another group's heading. Two independent types on the SAME
+ * native drag event is exactly what `dataTransfer.setData` supports, and it is what lets a drop
+ * handler tell which of the two gestures it just received before deciding what to do with it.
+ */
+export const GROUP_DRAG_KEY_TYPE = 'application/x-agentistics-drag-group-key'
+
+export function setGroupDragPayload(e: { dataTransfer: DataTransfer }, id: string): void {
+  e.dataTransfer.setData(GROUP_DRAG_KEY_TYPE, id)
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+export function readGroupDragPayload(e: { dataTransfer: DataTransfer | null }): string | null {
+  if (!e.dataTransfer) return null
+  return e.dataTransfer.getData(GROUP_DRAG_KEY_TYPE) || null
+}
+
+export function hasGroupDragPayload(e: { dataTransfer: DataTransfer | null }): boolean {
+  return e.dataTransfer !== null && Array.from(e.dataTransfer.types).includes(GROUP_DRAG_KEY_TYPE)
+}
+
+/**
+ * A THIRD, DISTINCT MIME type for dragging a folder by its own BODY (its name, its row — anywhere
+ * but the grip) rather than its grip handle. It cannot share `GROUP_DRAG_KEY_TYPE`: the grip drag
+ * REORDERS the top-level list, the body drag NESTS the folder inside whatever it lands on, and a
+ * drop handler has to tell the two apart before it knows which one it received — exactly the reason
+ * `GROUP_DRAG_KEY_TYPE` itself does not share `DRAG_KEY_TYPE` (see that constant's own header).
+ * Also note what native drag-and-drop does NOT allow: `dataTransfer.getData()` only returns real
+ * values on `drop` (and on the source's own `dragstart`/`dragend`) — during `dragover` only
+ * `dataTransfer.types` can be read. So a `dragover` handler can tell THAT a folder is being body-
+ * dragged (`hasGroupNestDragPayload`), never WHICH one — the caller tracks the dragged folder's own
+ * id in component state, set at `dragstart` where it already has it, precisely so a hover preview
+ * can still call `canNestGroup` before the drop ever happens.
+ */
+export const GROUP_NEST_DRAG_KEY_TYPE = 'application/x-agentistics-drag-group-nest'
+
+export function setGroupNestDragPayload(e: { dataTransfer: DataTransfer }, id: string): void {
+  e.dataTransfer.setData(GROUP_NEST_DRAG_KEY_TYPE, id)
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+export function readGroupNestDragPayload(e: { dataTransfer: DataTransfer | null }): string | null {
+  if (!e.dataTransfer) return null
+  return e.dataTransfer.getData(GROUP_NEST_DRAG_KEY_TYPE) || null
+}
+
+export function hasGroupNestDragPayload(e: { dataTransfer: DataTransfer | null }): boolean {
+  return e.dataTransfer !== null && Array.from(e.dataTransfer.types).includes(GROUP_NEST_DRAG_KEY_TYPE)
+}

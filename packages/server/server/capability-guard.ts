@@ -77,9 +77,19 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having
   // been added at all, never by having remembered a second table.
   ['/api/tasks', 'localShell'],
+  // User session groups: the routes behind the MCP tools that file a session under a group. They
+  // resolve a session reference against THIS machine's fleet, so they read host state the same way
+  // `/api/fleet` does, and they are refused on a central for the same reason.
+  ['/api/session-groups', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],
+  // The native runtime's provider settings (`provider-web.ts`, UI.1): the list, PUT/DELETE of one
+  // provider's base URL and key, and its `/test` and `/models` sub-resources. Registered as a PREFIX
+  // ahead of the routes, so each one is guarded by having been ADDED, never by having remembered a
+  // second table. They touch a host secret (the stored API key, credentials.ts) and reach out to a
+  // provider on this machine's account — exactly the class of route this table exists to catch.
+  ['/api/provider', 'localShell'],
   // The web dashboard's read of the backup engine and its "run now" button. `status` walks the
   // metrics layer and the backup history; `run` spawns `git bundle`/`git diff` across every known
   // repository and, depending on the configured layers, copies the raw harness directories
@@ -96,7 +106,38 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // hold no MCP servers at all (`~/.claude/settings.json` and `<project>/.claude/settings.json`) —
   // a second lister giving a different, wrong answer is the drift this codebase is built against.
   ['/api/mcp', 'mcpAdmin'],
+  // The projection query (`runtime-metrics-web.ts`, P3 §3). It reads THIS machine's projection store,
+  // which is derived from the host's own transcripts: per-session models, repositories, project PATHS,
+  // task ids and tool usage. That is host transcript data one fold removed, so it rides
+  // `localTranscripts` — the gate the transcript readers ride — and is unreachable on an exposed
+  // profile. A PREFIX so a sub-route added later is guarded by having been added at all; scoped to
+  // `/api/runtime/metrics` rather than all of `/api/runtime`, whose other routes (§28) spawn and
+  // drive sessions and need their own, stronger decision.
+  ['/api/runtime/metrics', 'localTranscripts'],
 ]
+
+/** One registration, as `registeredRoutes()` reports it. */
+export interface RegisteredRoute {
+  readonly path: string
+  readonly match: 'exact' | 'prefix'
+  readonly capability: keyof Capabilities
+}
+
+/**
+ * Every registration in both tables, read-only, in declaration order.
+ *
+ * Exists so a test can WALK the table instead of restating it: `host-allow.test.ts` asserts that
+ * every `localShell` route — and a sub-path under every prefix, including one nobody has written
+ * yet — is refused under a rebinding Host. A route added here is covered by that test by having
+ * been added, which is the same property the prefix table gives the capability check itself.
+ * A copy, so a caller cannot mutate the tables the guard reads.
+ */
+export function registeredRoutes(): readonly RegisteredRoute[] {
+  const out: RegisteredRoute[] = []
+  for (const [path, capability] of EXACT) out.push(Object.freeze({ path, match: 'exact' as const, capability }))
+  for (const [path, capability] of PREFIXES) out.push(Object.freeze({ path, match: 'prefix' as const, capability }))
+  return Object.freeze(out)
+}
 
 export function routeCapability(pathname: string): keyof Capabilities | null {
   const exact = EXACT.get(pathname)

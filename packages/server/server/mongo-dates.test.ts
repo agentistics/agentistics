@@ -121,12 +121,13 @@ describe('DATE_FIELDS', () => {
     expect(ms.arrays ?? []).toEqual([])
   })
 
-  test('the delivery board declares its three instants and not its scheduled DAYS', () => {
+  test('the delivery board declares its instants and not its scheduled DAYS', () => {
     // `dueDate`/`startDate` are `yyyy-MM-dd` — a day somebody scheduled, not an instant. Same
     // treatment `TagDoc.window` gets; converting them would turn a date into a midnight in some
-    // timezone nobody chose.
+    // timezone nobody chose. `startedAt` joined `deliveredAt` as a genuine instant once the board
+    // started stamping when real work began, system-side — see `Task.startedAt`.
     const tasks = DATE_FIELDS.find(s => s.collection === 'tasks')!
-    expect(tasks.fields).toEqual(['createdAt', 'updatedAt', 'deliveredAt'])
+    expect(tasks.fields).toEqual(['createdAt', 'updatedAt', 'deliveredAt', 'startedAt'])
     expect(tasks.fields).not.toContain('dueDate')
     expect(tasks.fields).not.toContain('startDate')
   })

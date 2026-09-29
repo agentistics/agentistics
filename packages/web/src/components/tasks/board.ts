@@ -36,7 +36,7 @@ export type BoardStatus = string
  * lives here can never close a loop.
  */
 export type ColumnId =
-  | 'status' | 'priority' | 'assignee' | 'due' | 'claim' | 'progress' | 'attempts' | 'sessions'
+  | 'status' | 'priority' | 'due' | 'claim' | 'progress' | 'attempts' | 'sessions'
   | 'rounds' | 'tokens' | 'cost' | 'harnesses' | 'subtasks' | 'comments' | 'files' | 'links'
   | 'blockedBy' | 'created' | 'updated'
 
@@ -271,6 +271,60 @@ export const fmtInt = (n: number | null | undefined): string =>
 // board came to answer in dollars on a dashboard set to BRL.
 export const fmtBytes = (n: number): string =>
   (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
+
+/**
+ * `startedAt`/`deliveredAt` (`Task`/`Subtask`) are SYSTEM facts, not a date somebody typed — so
+ * they are read as a full MOMENT (date and time), never as a bare `yyyy-MM-dd` day. Lives here
+ * rather than on `DeliveryDetail.tsx` specifically so `SubtaskTable.tsx` and `TaskTable.tsx` (both
+ * imported BY `DeliveryDetail.tsx`) can read it too without a circular import — this file imports
+ * nothing local, so a name that lives here can never close a loop (see this file's own header).
+ */
+export function fmtStamp(iso: string | undefined, lang: 'pt' | 'en'): string {
+  if (!iso) return NA
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return NA
+  return d.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+/**
+ * The compact half of `fmtStamp` — DATE and TIME, one line, locale-aware: PT `DD/MM HH:mm` (24h),
+ * EN `MM/DD h:mm AM/PM`. The YEAR is shown only when `iso` falls in a DIFFERENT calendar year from
+ * `nowMs` (owner refinement, 2026-09-27: "nothing huge and nothing that breaks lines" — a board read
+ * day to day names the year on almost no row, so carrying it always was pure width for no
+ * information) — PT `DD/MM/AAAA HH:mm`, EN `MM/DD/YYYY h:mm AM/PM`.
+ *
+ * `startedAt`/`deliveredAt` used to render through `fmtStamp` alone ("25 de set. de 2026, 16:31"),
+ * which wraps onto three lines in a table cell that has room for one, then through a date-only
+ * `fmtDateOnly` that dropped the TIME half the owner asked to see back. The full moment is never
+ * thrown away either way — every call site keeps it as the cell's `title` tooltip (`fmtStamp`, same
+ * language) — this is only what is PAINTED, and the caller is responsible for `white-space: nowrap`
+ * on whatever it paints it into. Manual digits rather than `toLocaleDateString`'s own default:
+ * `en-US` prints the month with no leading zero ("9/25/2026"), and the brief's own EN example
+ * ("09/25/2026") needs one. `nowMs` is a parameter rather than a read of the clock so the "same
+ * year" test is deterministic under a fixed value. Invalid or absent input renders the board's
+ * existing N/A convention, never "Invalid Date" — the same guard `fmtStamp` already applies to the
+ * same two fields.
+ */
+export function fmtDateTime(iso: string | undefined, lang: 'pt' | 'en', nowMs: number): string {
+  if (!iso) return NA
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return NA
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const showYear = yyyy !== new Date(nowMs).getFullYear()
+  const hh24 = d.getHours()
+  const min = String(d.getMinutes()).padStart(2, '0')
+  if (lang === 'pt') {
+    const hh = String(hh24).padStart(2, '0')
+    return showYear ? `${dd}/${mm}/${yyyy} ${hh}:${min}` : `${dd}/${mm} ${hh}:${min}`
+  }
+  const h12 = hh24 % 12 === 0 ? 12 : hh24 % 12
+  const ampm = hh24 < 12 ? 'AM' : 'PM'
+  return showYear
+    ? `${mm}/${dd}/${yyyy} ${h12}:${min} ${ampm}`
+    : `${mm}/${dd} ${h12}:${min} ${ampm}`
+}
 
 /**
  * Cap a list for display, truthfully: `shown` is what fits, `extra` is what does not — never

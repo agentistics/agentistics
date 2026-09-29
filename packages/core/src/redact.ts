@@ -188,7 +188,6 @@ export function redactSharedTask(shared: SharedTask): SharedTask {
     ...t,
     title: redactSecrets(t.title),
     ...(t.detail !== undefined ? { detail: redactSecrets(t.detail) } : {}),
-    ...(t.assignee !== undefined ? { assignee: redactSecrets(t.assignee) } : {}),
     ...(t.blockedReason !== undefined ? { blockedReason: redactSecrets(t.blockedReason) } : {}),
     ...(t.labels !== undefined ? { labels: t.labels.map(redactSecrets) } : {}),
   }
@@ -198,7 +197,6 @@ export function redactSharedTask(shared: SharedTask): SharedTask {
   const subtasks = shared.subtasks.map(s => ({
     ...s,
     title: redactSecrets(s.title),
-    ...(s.assignee !== undefined ? { assignee: redactSecrets(s.assignee) } : {}),
     ...(s.notes !== undefined ? { notes: redactSecrets(s.notes) } : {}),
   }))
   // A file's NAME is text somebody chose, and a pasted screenshot can be named anything at all.

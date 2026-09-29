@@ -33,6 +33,8 @@ export interface AttemptRollup {
   activeMinutes: number | null
   tokens: number | null
   costUSD: number | null
+  /** `costUSD` by harness — see the server's `AttemptRollup`. Optional: an older server omits it. */
+  costByHarness?: Record<string, number> | null
   costMeasuredSessions: number
   costEstimatedSessions: number
   credits: { nanoAiu: number; premiumRequests: number } | null
@@ -71,13 +73,18 @@ export interface TaskRecord {
   createdAt: string
   updatedAt: string
   deliveredAt?: string
+  /**
+   * When real work actually began, ISO — system-stamped, never user-editable. See the server's
+   * `Task.startedAt` for the full rule.
+   */
+  startedAt?: string
   repo?: string
   /** Task ids that must finish first. */
   blockedBy?: string[]
   links?: TaskLink[]
   /** Absent reads as `none` — "nobody has said", which is not the same as `low`. */
   priority?: TaskPriorityId
-  assignee?: string
+  /** SUPERSEDED by `startedAt`/`deliveredAt` — kept only so old records round-trip; no UI sets it. */
   dueDate?: string
   startDate?: string
   labels?: string[]
@@ -143,6 +150,10 @@ export interface BoardOverview {
   delivered: number
   abandoned: number
   totalCostUSD: number | null
+  /** `totalCostUSD` (and so `avgCostPerTask`) split by harness; `null` when it is. */
+  costByHarness?: Record<string, number> | null
+  /** `avgCostPerDelivered`'s sessions split by harness; `null` when nothing delivered carries a cost. */
+  deliveredCostByHarness?: Record<string, number> | null
   avgCostPerTask: number | null
   avgCostPerDelivered: number | null
   /** How many tasks carry no cost at all — the averages above name their own gap. */
@@ -209,6 +220,9 @@ export interface TaskSessionRow {
    * Sessions workspace can open — a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /** Null when the conversation is not in the store, or when its harness never recorded one. Mirror
+   *  of the server's `TaskSessionRow.model` (`task-report.ts`). */
+  model: string | null
   tokens: number | null
   costUSD: number | null
   rounds: number | null
@@ -225,9 +239,13 @@ export interface Subtask {
   status: TaskStatus
   createdAt: string
   updatedAt: string
-  assignee?: string
+  /** SUPERSEDED by `startedAt`/`deliveredAt` — kept only so old records round-trip; no UI sets it. */
   dueDate?: string
   startDate?: string
+  /** System-stamped, never user-editable — mirror of the server's `Subtask.startedAt`. */
+  startedAt?: string
+  /** System-stamped, never user-editable — mirror of the server's `Subtask.deliveredAt`. */
+  deliveredAt?: string
   sessionId?: string
   notes?: string
   /**
@@ -254,7 +272,7 @@ export interface Subtask {
    * The GROUP this subtask is a MEMBER of — the group's own subtask id, from the SAME task. A
    * member never receives a session of its own and therefore has no rollup bucket of its own
    * either (`SubtaskView.groupProgress` lives on the GROUP's own view, not the member's); it still
-   * has its own `status`/`assignee`/dates/comments, and its `status` is what feeds the group's
+   * has its own `status`/dates/comments, and its `status` is what feeds the group's
    * `groupProgress`. Absent reads as "not a member". Mirror of the server's
    * `Subtask.parentGroupId` (`task-model.ts`).
    */
@@ -408,24 +426,39 @@ export function useCentralTasks(enabled: boolean) {
   return { machines, error, reload: load }
 }
 
+export type TaskDetailResult =
+  | { ok: true; detail: TaskDetail }
+  | { ok: false; error: TasksError | 'missing' }
+
+/**
+ * One task's detail, as a plain fetch — the imperative twin of `useTaskDetail` below, for a caller
+ * that needs the answer INSIDE an event handler rather than as hook state (t-63b7d3b2b0 #4: staging
+ * a session from the table view has to know what a task's own subtasks are before it can compose
+ * one, and a row action fires from a click, not a render). `useTaskDetail` is refactored to call this
+ * rather than duplicating the same fetch — two readings of one endpoint is exactly the drift this
+ * file's own header refuses.
+ */
+export async function fetchTaskDetail(ref: string, filters?: Filters): Promise<TaskDetailResult> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}${taskQuery(filters)}`)
+    if (res.status === 404) return { ok: false, error: 'missing' }
+    if (res.status === 403) return { ok: false, error: 'refused' }
+    if (!res.ok) return { ok: false, error: 'down' }
+    const body = await res.json() as { task: TaskDetail }
+    return { ok: true, detail: body.task }
+  } catch {
+    return { ok: false, error: 'down' }
+  }
+}
+
 export function useTaskDetail(ref: string | undefined, filters?: Filters) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [error, setError] = useState<TasksError | 'missing'>(null)
 
   const load = useCallback(async () => {
     if (!ref) return
-    try {
-      const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}${taskQuery(filters)}`)
-      if (res.status === 404) { setError('missing'); setDetail(null); return }
-      if (res.status === 403) { setError('refused'); setDetail(null); return }
-      if (!res.ok) { setError('down'); setDetail(null); return }
-      const body = await res.json() as { task: TaskDetail }
-      setError(null)
-      setDetail(body.task)
-    } catch {
-      setError('down')
-      setDetail(null)
-    }
+    const result = await fetchTaskDetail(ref, filters)
+    if (result.ok) { setError(null); setDetail(result.detail) } else { setError(result.error); setDetail(null) }
   }, [ref, JSON.stringify(filters ?? null)])
 
   useEffect(() => { void load() }, [load])
@@ -515,7 +548,6 @@ export interface TaskFieldPatch {
   title?: string
   detail?: string
   priority?: TaskPriorityId
-  assignee?: string
   dueDate?: string
   startDate?: string
   labels?: string[]
@@ -699,7 +731,7 @@ export const removeComment = (ref: string, id: string) =>
  * group) — so it is typed apart rather than folded into `Partial<Pick<Subtask, …>>`.
  */
 export type SubtaskPatch = Partial<Pick<Subtask,
-  'title' | 'status' | 'assignee' | 'dueDate' | 'startDate' | 'sessionId' | 'notes' | 'blockedBy'
+  'title' | 'status' | 'dueDate' | 'startDate' | 'sessionId' | 'notes' | 'blockedBy'
 >> & {
   /** Join (a group's own subtask id) or leave (`null`) a group — see `checkParentGroup`
    *  (`task-attach.ts`). Absent leaves membership alone. */

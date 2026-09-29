@@ -66,7 +66,10 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
   const a = align ?? (style?.textAlign === 'right' ? 'right' : 'left')
   return (
     <th
-      style={style}
+      // `whiteSpace: 'nowrap'` by default — a header that wraps ("CONCLUÍDO EM" onto two lines) is
+      // never worth breaking a column over; the table already scrolls inside its own container
+      // (`overflow-x: auto`) rather than the page. Every caller may still override it explicitly.
+      style={{ whiteSpace: 'nowrap', ...style }}
       aria-sort={sortKey ? ariaSortOf(current, sortKey) : undefined}
     >
       {sortKey

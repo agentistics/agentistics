@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { CTRL_SHORTCUTS, shortcutDecision } from './terminalShortcuts'
+import { CTRL_SHORTCUTS, guardNoticeText, shortcutDecision } from './terminalShortcuts'
 
 const ev = (over: Partial<Parameters<typeof shortcutDecision>[0]> = {}) => ({
   ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, key: 'c', ...over,
 })
 
 describe('the shortcuts a terminal owns while it has the keyboard', () => {
-  test('every ctrl key the channel accepts is TAKEN from the browser', () => {
+  test('every ctrl key the channel accepts is TAKEN from the browser — except the session-ending two', () => {
     // Reported: "quando eu estiver no terminal, quero que os atalhos funcionem (ctrl l ctrl w etc)".
     // Today `ctrl+w` closes the tab and `ctrl+l` goes to the address bar; neither reaches the pane.
-    for (const key of CTRL_SHORTCUTS) expect(shortcutDecision(ev({ key }))).toBe('take')
+    for (const key of CTRL_SHORTCUTS.filter(k => k !== 'c' && k !== 'd')) {
+      expect(shortcutDecision(ev({ key }))).toBe('take')
+    }
   })
 
   test('a ctrl key the channel does NOT accept is left to the browser', () => {
@@ -22,10 +24,10 @@ describe('the shortcuts a terminal owns while it has the keyboard', () => {
 })
 
 describe('what may NEVER be swallowed', () => {
-  test('ctrl+shift+* stays the browser’s', () => {
+  test('ctrl+shift+* stays the browser’s — except C (copy) and D (the deliberate EOF)', () => {
     // Devtools, the incognito window, reopen-tab. The VS Code extension records the same rule for
     // its panel: swallow these and the editor around the terminal stops working.
-    for (const key of CTRL_SHORTCUTS) {
+    for (const key of CTRL_SHORTCUTS.filter(k => k !== 'c' && k !== 'd')) {
       expect(shortcutDecision(ev({ key, shiftKey: true }))).toBe('leave')
     }
   })
@@ -47,9 +49,10 @@ describe('what may NEVER be swallowed', () => {
     expect(shortcutDecision(ev({ key: 'c', ctrlKey: false }))).toBe('leave')
   })
 
-  test('case does not decide it — a capital arrives with shift, and shift already refuses', () => {
-    expect(shortcutDecision(ev({ key: 'C' }))).toBe('take')
-    expect(shortcutDecision(ev({ key: 'C', shiftKey: true }))).toBe('leave')
+  test('case does not decide it — caps lock on still reads as the letter', () => {
+    expect(shortcutDecision(ev({ key: 'W' }))).toBe('take')
+    expect(shortcutDecision(ev({ key: 'W', shiftKey: true }))).toBe('leave')
+    expect(shortcutDecision(ev({ key: 'C' }))).toBe('blocked-interrupt')
   })
 })
 
@@ -66,9 +69,15 @@ describe('copy — Ctrl+C (and its cousins) with a selection', () => {
     expect(shortcutDecision(ev({ key: 'c' }), true)).toBe('copy')
   })
 
-  test('Ctrl+C with NO selection still interrupts, exactly as before', () => {
-    expect(shortcutDecision(ev({ key: 'c' }), false)).toBe('take')
-    expect(shortcutDecision(ev({ key: 'c' }))).toBe('take') // hasSelection defaults to false
+  test('Ctrl+C with NO selection is REFUSED — it ends the session', () => {
+    // Reported 2026-09-27: "dei ctrl + c no terminal e matei a porra da sessao".
+    expect(shortcutDecision(ev({ key: 'c' }), false)).toBe('blocked-interrupt')
+    expect(shortcutDecision(ev({ key: 'c' }))).toBe('blocked-interrupt') // hasSelection defaults to false
+  })
+
+  test('Ctrl+Shift+C always copies and never interrupts, selection or not', () => {
+    expect(shortcutDecision(ev({ key: 'C', shiftKey: true }), false)).toBe('copy')
+    expect(shortcutDecision(ev({ key: 'c', shiftKey: true }), false)).toBe('copy')
   })
 
   test('Cmd+C with a selection copies too', () => {
@@ -90,5 +99,58 @@ describe('copy — Ctrl+C (and its cousins) with a selection', () => {
 
   test('case does not decide the copy check either', () => {
     expect(shortcutDecision(ev({ key: 'C' }), true)).toBe('copy')
+  })
+})
+
+describe('session-ending keys take Shift, and are announced', () => {
+  test('plain Ctrl+D is refused; Ctrl+Shift+D is the deliberate EOF', () => {
+    expect(shortcutDecision(ev({ key: 'd' }))).toBe('blocked-eof')
+    expect(shortcutDecision(ev({ key: 'D', shiftKey: true }))).toBe('confirmed-eof')
+    expect(shortcutDecision(ev({ key: 'd', metaKey: true }))).toBe('leave')
+  })
+
+  test('every guard has a sentence in both languages, naming the way through', () => {
+    expect(guardNoticeText('blocked-interrupt', 'pt')).toContain('Ctrl+Shift+C')
+    expect(guardNoticeText('blocked-interrupt', 'en')).toContain('Ctrl+Shift+C')
+    expect(guardNoticeText('blocked-eof', 'pt')).toContain('Ctrl+Shift+D')
+    expect(guardNoticeText('blocked-eof', 'en')).toContain('Ctrl+Shift+D')
+    expect(guardNoticeText('confirmed-eof', 'pt')).toContain('encerra')
+  })
+})
+
+describe('paste and the word delete the browser allows', () => {
+  test('Ctrl+V (and Ctrl+Shift+V) is a paste — xterm must not also emit \\x16', () => {
+    expect(shortcutDecision(ev({ key: 'v' }))).toBe('paste')
+    expect(shortcutDecision(ev({ key: 'V', shiftKey: true }))).toBe('paste')
+    expect(shortcutDecision(ev({ key: 'v', ctrlKey: false, metaKey: true }))).toBe('leave')
+  })
+
+  test('Ctrl+Backspace deletes the word, since the browser keeps Ctrl+W', () => {
+    expect(shortcutDecision(ev({ key: 'Backspace' }))).toBe('word-delete')
+    expect(shortcutDecision(ev({ key: 'Backspace', shiftKey: true }))).toBe('leave')
+  })
+
+  test('every confirmation has text in both languages', () => {
+    for (const kind of ['copied', 'copy-empty', 'pasted', 'word-delete', 'C-a', 'C-e', 'C-u', 'C-w', 'C-k', 'C-l'] as const) {
+      expect(guardNoticeText(kind, 'pt', 3).length).toBeGreaterThan(5)
+      expect(guardNoticeText(kind, 'en', 3).length).toBeGreaterThan(5)
+    }
+    expect(guardNoticeText('copied', 'pt', 12)).toContain('12')
+  })
+})
+
+describe('the phone strip: a second press instead of Shift', async () => {
+  const { stripCtrlGuard, STRIP_EOF_CONFIRM_MS } = await import('./keyStrip')
+  test('ctrl+c is refused on an assistant pane, passes in the shell', () => {
+    expect(stripCtrlGuard('C-c', true, null, 1000)).toBe('blocked-interrupt')
+    expect(stripCtrlGuard('C-c', false, null, 1000)).toBe('send')
+  })
+  test('ctrl+d needs a second press within the window', () => {
+    expect(stripCtrlGuard('C-d', true, null, 1000)).toBe('arm-eof')
+    expect(stripCtrlGuard('C-d', true, 1000, 1000 + STRIP_EOF_CONFIRM_MS)).toBe('confirmed-eof')
+    expect(stripCtrlGuard('C-d', true, 1000, 1001 + STRIP_EOF_CONFIRM_MS)).toBe('arm-eof')
+  })
+  test('every other key is sent as before', () => {
+    for (const k of ['C-a', 'C-e', 'C-u', 'C-w', 'C-k', 'C-l'] as const) expect(stripCtrlGuard(k, true, null, 0)).toBe('send')
   })
 })

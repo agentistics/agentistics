@@ -339,9 +339,12 @@ export function createSessionScratch(store: ScratchStore | null): SessionScratch
       }
     },
     readChat(id) {
-      return chats.get(id) ?? null
+      const chat = chats.get(id) ?? null
+      return chat && cacheableChat(chat) ? chat : null
     },
     writeChat(id, chat) {
+      // A REFUSAL IS NOT A CONVERSATION — see `cacheableChat`. The last real one is kept.
+      if (!cacheableChat(chat)) return
       chats = capChats(chats, id, chat)
     },
     migrate(from, to) {
@@ -364,6 +367,22 @@ export function createSessionScratch(store: ScratchStore | null): SessionScratch
       // and clearing it is one more thing that can go wrong for no benefit.
     },
   }
+}
+
+/**
+ * PURE: may this answer be kept as the conversation's FIRST FRAME?
+ *
+ * Never an `unavailable` one. Those answers are statements about a MOMENT — "this session has no
+ * linked conversation yet", "the transcript was not found" — and caching one turned it into the
+ * first thing drawn the next time the conversation was opened. The path was real: the first read
+ * of a just-reopened row can land before its link, it was cached under `row:<id>`, `migrate` then
+ * copied it to `conv:<id>` when the row learned its conversation, and every later open of that
+ * conversation painted "sem conversa vinculada" for the seconds until the fresh read replaced it
+ * (owner, 2026-09-29, with a screenshot, after the server itself had stopped answering that way).
+ * A refusal still reaches the screen — the live read delivers it — it is only never REMEMBERED.
+ */
+export function cacheableChat(chat: { unavailable?: string }): boolean {
+  return !chat.unavailable
 }
 
 /** The one instance the app uses. Built against `sessionStorage` where there is one. */

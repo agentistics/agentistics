@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { BarChart2, Lock, AlertCircle } from 'lucide-react'
+import { Lock, AlertCircle } from 'lucide-react'
+import { brandAsset } from '../lib/brand'
 
 // i18n
 
@@ -88,17 +89,10 @@ export function TeamLogin({ onAuthed }: Props) {
     >
       {/* Brand */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 36 }}>
-        <div
-          style={{
-            width: 48, height: 48,
-            background: 'var(--anthropic-orange-dim)',
-            borderRadius: 14,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 20px rgba(217,119,6,0.25)',
-          }}
-        >
-          <BarChart2 size={22} color="var(--anthropic-orange)" />
-        </div>
+        {/* The central's login is the first thing its users see: its own teal mark, not the
+            generic amber chart icon every other screen had already stopped using. */}
+        <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true"
+          style={{ width: 52, height: 52, objectFit: 'contain', display: 'block' }} />
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
             {t('title', lang)}

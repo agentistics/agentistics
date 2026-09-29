@@ -1,0 +1,866 @@
+flowchart TB
+
+%% ============================================================
+%% AGENTISTICS HARNESS — COMPLETE ARCHITECTURE
+%% ============================================================
+
+%% ------------------------------------------------------------
+%% EXTERNAL ENTRY POINTS
+%% ------------------------------------------------------------
+
+subgraph INTERFACES["INTERFACES / CLIENTS"]
+    WEB["Web Chat"]
+    CLI["CLI"]
+    TUI["TUI"]
+    API["Runtime API"]
+    EXT["External Clients / Integrations"]
+end
+
+
+%% ------------------------------------------------------------
+%% ALM
+%% ------------------------------------------------------------
+
+subgraph ALM["AGENTISTICS ALM"]
+    TASK["Task"]
+
+    GROUP["Subtask Group<br/>(optional)"]
+
+    ST1["Subtask"]
+    ST2["Subtask"]
+    ST3["Subtask"]
+
+    SESSION_PREP["Pre-created Session<br/>Prompt + Model + Harness + Attachments"]
+
+    DISPATCH["DISPATCH"]
+
+    TASK --> GROUP
+    TASK --> ST1
+    TASK --> ST2
+    TASK --> ST3
+
+    GROUP --> ST1
+    GROUP --> ST2
+    GROUP --> ST3
+
+    ST1 --> SESSION_PREP
+    ST2 --> SESSION_PREP
+    ST3 --> SESSION_PREP
+
+    SESSION_PREP --> DISPATCH
+end
+
+
+%% ------------------------------------------------------------
+%% RUNTIME
+%% ------------------------------------------------------------
+
+subgraph RUNTIME["AGENTISTICS RUNTIME"]
+    
+    SESSION["Session Manager"]
+
+    RUN["Run Manager"]
+
+    AGENT["Agent Runtime"]
+
+    SUBAGENT["Subagent Runtime"]
+
+    SCHEDULER["Scheduler"]
+
+    RESOURCE["Resource Manager"]
+
+    CONTEXT["Context Manager"]
+
+    MEMORY["Session State / Memory"]
+
+    POLICY["Policy & Approval Engine"]
+
+    LIFECYCLE["Lifecycle Manager"]
+
+end
+
+
+%% ------------------------------------------------------------
+%% CORE EXECUTION
+%% ------------------------------------------------------------
+
+DISPATCH --> SESSION
+
+WEB --> API
+CLI --> API
+TUI --> API
+EXT --> API
+
+API --> SESSION
+
+SESSION --> RUN
+
+RUN --> LIFECYCLE
+
+LIFECYCLE --> SCHEDULER
+
+SCHEDULER --> RESOURCE
+
+RESOURCE --> RUN
+
+RUN --> AGENT
+
+AGENT --> CONTEXT
+CONTEXT --> MEMORY
+
+AGENT --> POLICY
+
+AGENT --> SUBAGENT
+
+
+%% ------------------------------------------------------------
+%% AGENT LOOP
+%% ------------------------------------------------------------
+
+subgraph AGENT_LOOP["AGENT LOOP"]
+    
+    THINK["Reason / Decide"]
+
+    PLAN["Plan"]
+
+    REQUEST_MODEL["Model Request"]
+
+    RECEIVE_MODEL["Model Response / Stream"]
+
+    DECIDE["Interpret Result"]
+
+    ACTION["Action Required?"]
+
+    THINK --> PLAN
+    PLAN --> REQUEST_MODEL
+    RECEIVE_MODEL --> DECIDE
+    DECIDE --> ACTION
+
+    ACTION -->|No| THINK
+    ACTION -->|Yes| TOOL_REQUEST["Tool Request"]
+
+end
+
+AGENT --> THINK
+
+REQUEST_MODEL --> PROVIDERS
+
+PROVIDERS --> RECEIVE_MODEL
+
+TOOL_REQUEST --> POLICY
+
+POLICY -->|Approved| TOOLS
+
+POLICY -->|Denied| DECIDE
+
+TOOLS --> ACTION
+
+
+%% ------------------------------------------------------------
+%% PROVIDER ARCHITECTURE
+%% ------------------------------------------------------------
+
+subgraph PROVIDERS["PROVIDER ABSTRACTION"]
+    
+    PROVIDER_ROUTER["Provider Router"]
+
+    ANTHROPIC["Anthropic"]
+    OPENAI["OpenAI"]
+    GOOGLE["Google"]
+    OPENROUTER["OpenRouter"]
+    LITELLM["LiteLLM"]
+    OLLAMA["Ollama"]
+    CUSTOM["Custom Provider"]
+
+    PROVIDER_ROUTER --> ANTHROPIC
+    PROVIDER_ROUTER --> OPENAI
+    PROVIDER_ROUTER --> GOOGLE
+    PROVIDER_ROUTER --> OPENROUTER
+    PROVIDER_ROUTER --> LITELLM
+    PROVIDER_ROUTER --> OLLAMA
+    PROVIDER_ROUTER --> CUSTOM
+end
+
+REQUEST_MODEL --> PROVIDER_ROUTER
+
+
+%% ------------------------------------------------------------
+%% OPTIONAL PROVIDER GATEWAY
+%% ------------------------------------------------------------
+
+subgraph GATEWAY["OPTIONAL AGENTISTICS PROVIDER GATEWAY"]
+    
+    GATEWAY_ROUTER["Provider Gateway"]
+
+    REQUEST_CAPTURE["Request Telemetry"]
+
+    RESPONSE_CAPTURE["Response Telemetry"]
+
+    TOKEN_USAGE["Token Usage"]
+
+    LATENCY["Latency"]
+
+    PROVIDER_COST["Provider Cost"]
+
+    CORRELATION["Correlation IDs"]
+
+    GATEWAY_ROUTER --> REQUEST_CAPTURE
+    GATEWAY_ROUTER --> RESPONSE_CAPTURE
+
+    REQUEST_CAPTURE --> CORRELATION
+    RESPONSE_CAPTURE --> TOKEN_USAGE
+    RESPONSE_CAPTURE --> LATENCY
+    RESPONSE_CAPTURE --> PROVIDER_COST
+
+end
+
+PROVIDER_ROUTER -. optional .-> GATEWAY_ROUTER
+
+GATEWAY_ROUTER -.-> ANTHROPIC
+GATEWAY_ROUTER -.-> OPENAI
+GATEWAY_ROUTER -.-> GOOGLE
+GATEWAY_ROUTER -.-> OPENROUTER
+GATEWAY_ROUTER -.-> LITELLM
+GATEWAY_ROUTER -.-> OLLAMA
+
+
+%% ------------------------------------------------------------
+%% TOOLS
+%% ------------------------------------------------------------
+
+subgraph TOOLS["RUNTIME CAPABILITIES / TOOLS"]
+
+    TOOL_ROUTER["Tool Router"]
+
+    FILESYSTEM["Filesystem"]
+
+    SHELL["Shell / Processes"]
+
+    GIT["Git"]
+
+    NETWORK["Network"]
+
+    MCP["MCP"]
+
+    DATABASE["Databases"]
+
+    TOOL_CUSTOM["Custom Tools"]
+
+    TOOL_ROUTER --> FILESYSTEM
+    TOOL_ROUTER --> SHELL
+    TOOL_ROUTER --> GIT
+    TOOL_ROUTER --> NETWORK
+    TOOL_ROUTER --> MCP
+    TOOL_ROUTER --> DATABASE
+    TOOL_ROUTER --> TOOL_CUSTOM
+
+end
+
+TOOLS --> TOOL_ROUTER
+
+
+%% ------------------------------------------------------------
+%% BROWSER RUNTIME
+%% ------------------------------------------------------------
+
+subgraph BROWSER["NATIVE BROWSER RUNTIME"]
+
+    BROWSER_SESSION["Browser Session"]
+
+    BROWSER_TAB["Browser Tab"]
+
+    NAVIGATION["Navigation"]
+
+    CLICK["Click"]
+
+    INPUT["Input"]
+
+    SCROLL["Scroll"]
+
+    SCREENSHOT["Screenshot"]
+
+    DOWNLOAD["Download"]
+
+    TAB_LIFECYCLE["Tab Lifecycle"]
+
+    BROWSER_SESSION --> BROWSER_TAB
+
+    BROWSER_TAB --> NAVIGATION
+    BROWSER_TAB --> CLICK
+    BROWSER_TAB --> INPUT
+    BROWSER_TAB --> SCROLL
+    BROWSER_TAB --> SCREENSHOT
+    BROWSER_TAB --> DOWNLOAD
+    BROWSER_TAB --> TAB_LIFECYCLE
+
+end
+
+TOOL_ROUTER --> BROWSER_SESSION
+
+
+%% ------------------------------------------------------------
+%% SUBAGENTS
+%% ------------------------------------------------------------
+
+subgraph SUBAGENT_SYSTEM["SUBAGENT SYSTEM"]
+
+    DELEGATE["Delegation"]
+
+    SUBAGENT_SESSION["Subagent Session"]
+
+    SUBAGENT_AGENT["Subagent Agent"]
+
+    SUBAGENT_MODEL["Subagent Model"]
+
+    SUBAGENT_TOOLS["Subagent Tools"]
+
+    DELEGATE --> SUBAGENT_SESSION
+    SUBAGENT_SESSION --> SUBAGENT_AGENT
+
+    SUBAGENT_AGENT --> SUBAGENT_MODEL
+    SUBAGENT_AGENT --> SUBAGENT_TOOLS
+
+end
+
+SUBAGENT --> DELEGATE
+
+SUBAGENT_MODEL --> PROVIDER_ROUTER
+
+SUBAGENT_TOOLS --> TOOL_ROUTER
+
+
+%% ------------------------------------------------------------
+%% EVENT ARCHITECTURE
+%% ------------------------------------------------------------
+
+subgraph EVENTS["EVENT INFRASTRUCTURE"]
+
+    EVENT_BUS["Event Bus"]
+
+    EVENT_STREAM["Event Stream"]
+
+    JOURNAL["Durable Event Journal"]
+
+    REPLAY["Replay Engine"]
+
+    RECONCILIATION["Reconciliation Engine"]
+
+    EVENT_BUS --> EVENT_STREAM
+
+    EVENT_STREAM --> JOURNAL
+
+    JOURNAL --> REPLAY
+
+    REPLAY --> RECONCILIATION
+
+end
+
+
+%% ------------------------------------------------------------
+%% TELEMETRY SOURCES
+%% ------------------------------------------------------------
+
+AGENT --> EVENT_BUS
+SUBAGENT_AGENT --> EVENT_BUS
+PROVIDER_ROUTER --> EVENT_BUS
+TOOL_ROUTER --> EVENT_BUS
+BROWSER_SESSION --> EVENT_BUS
+POLICY --> EVENT_BUS
+LIFECYCLE --> EVENT_BUS
+SESSION --> EVENT_BUS
+RUN --> EVENT_BUS
+
+GATEWAY_ROUTER -. telemetry .-> EVENT_BUS
+
+
+%% ------------------------------------------------------------
+%% EVENT TYPES
+%% ------------------------------------------------------------
+
+subgraph EVENT_TYPES["CANONICAL EVENTS"]
+
+    SESSION_EVENTS["Session Events<br/>started / paused / completed / failed"]
+
+    RUN_EVENTS["Run Events<br/>started / completed / failed"]
+
+    AGENT_EVENTS["Agent Events<br/>started / completed"]
+
+    MODEL_EVENTS["Model Events<br/>requested / started / streamed / completed"]
+
+    TOOL_EVENTS["Tool Events<br/>requested / approved / started / completed / failed"]
+
+    MCP_EVENTS["MCP Events"]
+
+    BROWSER_EVENTS["Browser Events"]
+
+    ALM_EVENTS["ALM Events"]
+
+    POLICY_EVENTS["Policy Events"]
+
+end
+
+EVENT_STREAM --> SESSION_EVENTS
+EVENT_STREAM --> RUN_EVENTS
+EVENT_STREAM --> AGENT_EVENTS
+EVENT_STREAM --> MODEL_EVENTS
+EVENT_STREAM --> TOOL_EVENTS
+EVENT_STREAM --> MCP_EVENTS
+EVENT_STREAM --> BROWSER_EVENTS
+EVENT_STREAM --> ALM_EVENTS
+EVENT_STREAM --> POLICY_EVENTS
+
+
+%% ------------------------------------------------------------
+%% CANONICAL DOMAIN
+%% ------------------------------------------------------------
+
+subgraph DOMAIN["CANONICAL AGENTISTICS DOMAIN"]
+
+    D_TASK["Task"]
+
+    D_SESSION["Session"]
+
+    D_RUN["Run"]
+
+    D_AGENT["Agent"]
+
+    D_SUBAGENT["Subagent"]
+
+    D_INVOCATION["Model Invocation"]
+
+    D_TOOL_EXEC["Tool Execution"]
+
+    D_BROWSER["Browser Activity"]
+
+    D_ALM["ALM Activity"]
+
+    D_PROVIDER["Provider"]
+
+    D_MODEL["Model"]
+
+    D_HARNESS["Harness"]
+
+    D_REPOSITORY["Repository / Project"]
+
+end
+
+RECONCILIATION --> DOMAIN
+
+
+%% ------------------------------------------------------------
+%% ANALYTICS
+%% ------------------------------------------------------------
+
+subgraph ANALYTICS["ANALYTICS / PROJECTIONS"]
+
+    PROJECTOR["Projection Engine"]
+
+    SESSION_METRICS["Session Metrics"]
+
+    RUN_METRICS["Run Metrics"]
+
+    AGENT_METRICS["Agent / Subagent Metrics"]
+
+    MODEL_METRICS["Model Metrics"]
+
+    TOOL_METRICS["Tool Metrics"]
+
+    TOKEN_METRICS["Token Metrics"]
+
+    COST_METRICS["Cost Metrics"]
+
+    PERFORMANCE_METRICS["Performance Metrics"]
+
+    PRODUCTIVITY["Productivity / Efficiency"]
+
+    PROJECTOR --> SESSION_METRICS
+    PROJECTOR --> RUN_METRICS
+    PROJECTOR --> AGENT_METRICS
+    PROJECTOR --> MODEL_METRICS
+    PROJECTOR --> TOOL_METRICS
+    PROJECTOR --> TOKEN_METRICS
+    PROJECTOR --> COST_METRICS
+    PROJECTOR --> PERFORMANCE_METRICS
+    PROJECTOR --> PRODUCTIVITY
+
+end
+
+JOURNAL --> PROJECTOR
+
+
+%% ------------------------------------------------------------
+%% COST DIMENSIONS
+%% ------------------------------------------------------------
+
+subgraph COST["COST / USAGE DIMENSIONS"]
+
+    COST_HARNESS["By Harness"]
+
+    COST_PROVIDER["By Provider"]
+
+    COST_MODEL["By Model"]
+
+    COST_SESSION["By Session"]
+
+    COST_RUN["By Run"]
+
+    COST_AGENT["By Agent"]
+
+    COST_SUBAGENT["By Subagent"]
+
+    COST_TASK["By Task"]
+
+    COST_REPOSITORY["By Repository"]
+
+end
+
+COST_METRICS --> COST_HARNESS
+COST_METRICS --> COST_PROVIDER
+COST_METRICS --> COST_MODEL
+COST_METRICS --> COST_SESSION
+COST_METRICS --> COST_RUN
+COST_METRICS --> COST_AGENT
+COST_METRICS --> COST_SUBAGENT
+COST_METRICS --> COST_TASK
+COST_METRICS --> COST_REPOSITORY
+
+
+%% ------------------------------------------------------------
+%% ALM INTEGRATION
+%% ------------------------------------------------------------
+
+subgraph ALM_RUNTIME["ALM ↔ RUNTIME INTEGRATION"]
+
+    ALM_SYNC["ALM Synchronization"]
+
+    TASK_STATE["Task State"]
+
+    ACCEPTANCE["Acceptance Criteria"]
+
+    EVIDENCE["Evidence"]
+
+    COMMENTS["Comments"]
+
+    ATTACHMENTS["Attachments"]
+
+    ALM_SYNC --> TASK_STATE
+    ALM_SYNC --> ACCEPTANCE
+    ALM_SYNC --> EVIDENCE
+    ALM_SYNC --> COMMENTS
+    ALM_SYNC --> ATTACHMENTS
+
+end
+
+ALM_EVENTS --> ALM_SYNC
+
+TASK --> ALM_SYNC
+GROUP --> ALM_SYNC
+ST1 --> ALM_SYNC
+ST2 --> ALM_SYNC
+ST3 --> ALM_SYNC
+
+RUN --> ALM_SYNC
+
+
+%% ------------------------------------------------------------
+%% STORAGE
+%% ------------------------------------------------------------
+
+subgraph STORAGE["PERSISTENCE / STORAGE"]
+
+    EVENT_STORAGE["Event Journal Storage"]
+
+    SESSION_STORAGE["Session Storage"]
+
+    MESSAGE_STORAGE["Message / Transcript Storage"]
+
+    ATTACHMENT_STORAGE["Attachment Storage"]
+
+    METRIC_STORAGE["Analytics / Projection Storage"]
+
+    CACHE["Bounded Cache"]
+
+end
+
+JOURNAL --> EVENT_STORAGE
+
+SESSION --> SESSION_STORAGE
+
+MEMORY --> MESSAGE_STORAGE
+
+ATTACHMENTS --> ATTACHMENT_STORAGE
+
+PROJECTOR --> METRIC_STORAGE
+
+SESSION_STORAGE --> CACHE
+MESSAGE_STORAGE --> CACHE
+
+
+%% ------------------------------------------------------------
+%% STREAMING / PERFORMANCE
+%% ------------------------------------------------------------
+
+subgraph PERFORMANCE["PERFORMANCE / SCALABILITY"]
+
+    STREAMING["Streaming"]
+
+    PAGINATION["Pagination"]
+
+    LAZY["Lazy Loading"]
+
+    VIRTUALIZATION["UI Virtualization"]
+
+    BACKPRESSURE["Backpressure"]
+
+    BOUNDED["Bounded Buffers"]
+
+    RESOURCE_LIMITS["Resource Limits"]
+
+    CONCURRENCY["Concurrency Control"]
+
+    QUEUE["Execution Queue"]
+
+    SNAPSHOT["Snapshots / Compaction"]
+
+end
+
+EVENT_STREAM --> STREAMING
+
+MESSAGE_STORAGE --> PAGINATION
+MESSAGE_STORAGE --> LAZY
+
+WEB --> VIRTUALIZATION
+
+STREAMING --> BACKPRESSURE
+BACKPRESSURE --> BOUNDED
+
+RESOURCE --> RESOURCE_LIMITS
+
+SCHEDULER --> CONCURRENCY
+CONCURRENCY --> QUEUE
+
+JOURNAL --> SNAPSHOT
+
+
+%% ------------------------------------------------------------
+%% UI STREAMING
+%% ------------------------------------------------------------
+
+subgraph UI_STREAM["LIVE UI STREAMING"]
+
+    LIVE_EVENTS["Live Event Stream"]
+
+    MESSAGE_STREAM["Message Stream"]
+
+    TOOL_STREAM["Tool Execution Stream"]
+
+    AGENT_STREAM["Agent / Subagent Stream"]
+
+    BROWSER_STREAM["Browser Activity Stream"]
+
+end
+
+EVENT_STREAM --> LIVE_EVENTS
+EVENT_STREAM --> MESSAGE_STREAM
+EVENT_STREAM --> TOOL_STREAM
+EVENT_STREAM --> AGENT_STREAM
+EVENT_STREAM --> BROWSER_STREAM
+
+LIVE_EVENTS --> WEB
+MESSAGE_STREAM --> WEB
+TOOL_STREAM --> WEB
+AGENT_STREAM --> WEB
+BROWSER_STREAM --> WEB
+
+
+%% ------------------------------------------------------------
+%% EXTERNAL HARNESS ADAPTERS
+%% ------------------------------------------------------------
+
+subgraph EXTERNAL_HARNESSES["EXTERNAL HARNESS INTEGRATION"]
+
+    ADAPTER_CORE["Harness Adapter Layer"]
+
+    CLAUDE["Claude Code"]
+
+    CODEX["Codex CLI"]
+
+    GEMINI["Gemini CLI"]
+
+    COPILOT["GitHub Copilot CLI"]
+
+    ANTIGRAVITY["Antigravity"]
+
+    KIMI["Kimi Code"]
+
+    OTHER["Future Harnesses"]
+
+    CLAUDE --> ADAPTER_CORE
+    CODEX --> ADAPTER_CORE
+    GEMINI --> ADAPTER_CORE
+    COPILOT --> ADAPTER_CORE
+    ANTIGRAVITY --> ADAPTER_CORE
+    KIMI --> ADAPTER_CORE
+    OTHER --> ADAPTER_CORE
+
+    LIVE_ADAPTER["Live Adapter"]
+
+    REPLAY_ADAPTER["Replay Adapter"]
+
+    OBSERVE["Observe"]
+
+    INSTRUMENT["Instrument"]
+
+    ATTACH["Attach"]
+
+    SPAWN["Spawn"]
+
+    ADAPTER_CORE --> LIVE_ADAPTER
+    ADAPTER_CORE --> REPLAY_ADAPTER
+
+    LIVE_ADAPTER --> OBSERVE
+    LIVE_ADAPTER --> INSTRUMENT
+    LIVE_ADAPTER --> ATTACH
+    LIVE_ADAPTER --> SPAWN
+
+end
+
+LIVE_ADAPTER --> EVENT_BUS
+REPLAY_ADAPTER --> REPLAY
+
+
+%% ------------------------------------------------------------
+%% PROVENANCE
+%% ------------------------------------------------------------
+
+subgraph PROVENANCE["DATA PROVENANCE"]
+
+    NATIVE["Native"]
+
+    INSTRUMENTED["Instrumented"]
+
+    OBSERVED["Observed"]
+
+    INFERRED["Inferred"]
+
+    REPLAYED["Replayed"]
+
+end
+
+ADAPTER_CORE --> PROVENANCE
+EVENT_BUS --> PROVENANCE
+
+
+%% ------------------------------------------------------------
+%% DATA FLOW
+%% ------------------------------------------------------------
+
+subgraph DATA_FLOW["CANONICAL DATA FLOW"]
+
+    SOURCE["Execution Sources"]
+
+    NORMALIZE["Normalize"]
+
+    VALIDATE["Validate"]
+
+    JOURNAL_WRITE["Append to Journal"]
+
+    PROJECT["Project"]
+
+    QUERY["Query"]
+
+    DISPLAY["Display"]
+
+    SOURCE --> NORMALIZE
+    NORMALIZE --> VALIDATE
+    VALIDATE --> JOURNAL_WRITE
+    JOURNAL_WRITE --> PROJECT
+    PROJECT --> QUERY
+    QUERY --> DISPLAY
+
+end
+
+EVENT_BUS --> SOURCE
+JOURNAL --> JOURNAL_WRITE
+PROJECTOR --> PROJECT
+
+
+%% ------------------------------------------------------------
+%% KEY RELATIONSHIPS
+%% ------------------------------------------------------------
+
+D_TASK --> D_SESSION
+D_SESSION --> D_RUN
+D_RUN --> D_AGENT
+D_AGENT --> D_SUBAGENT
+D_AGENT --> D_INVOCATION
+D_AGENT --> D_TOOL_EXEC
+D_AGENT --> D_BROWSER
+
+D_INVOCATION --> D_MODEL
+D_MODEL --> D_PROVIDER
+
+D_RUN --> D_HARNESS
+
+D_TASK --> D_ALM
+
+D_RUN --> D_REPOSITORY
+
+
+%% ------------------------------------------------------------
+%% OBSERVABILITY
+%% ------------------------------------------------------------
+
+subgraph OBSERVABILITY["OBSERVABILITY"]
+
+    TRACING["Distributed Tracing"]
+
+    LOGGING["Structured Logs"]
+
+    METRICS["Runtime Metrics"]
+
+    HEALTH["Health / Diagnostics"]
+
+    ERROR["Error Tracking"]
+
+end
+
+RUNTIME --> TRACING
+RUNTIME --> LOGGING
+RUNTIME --> METRICS
+RUNTIME --> HEALTH
+RUNTIME --> ERROR
+
+EVENT_BUS --> TRACING
+EVENT_BUS --> METRICS
+
+
+%% ------------------------------------------------------------
+%% IMPORTANT ARCHITECTURAL BOUNDARY
+%% ------------------------------------------------------------
+
+subgraph AGENTISTICS_HARNESS["AGENTISTICS NATIVE HARNESS"]
+    
+    NATIVE_SESSION["Session"]
+    NATIVE_RUN["Run"]
+    NATIVE_AGENT["Agent"]
+    NATIVE_SUBAGENT["Subagents"]
+    NATIVE_CONTEXT["Context"]
+    NATIVE_SCHEDULER["Scheduler"]
+    NATIVE_POLICY["Policy"]
+    NATIVE_TOOLS["Tools"]
+    NATIVE_BROWSER["Browser"]
+    NATIVE_EVENTS["Events"]
+
+end
+
+SESSION --> NATIVE_SESSION
+RUN --> NATIVE_RUN
+AGENT --> NATIVE_AGENT
+SUBAGENT --> NATIVE_SUBAGENT
+CONTEXT --> NATIVE_CONTEXT
+SCHEDULER --> NATIVE_SCHEDULER
+POLICY --> NATIVE_POLICY
+TOOL_ROUTER --> NATIVE_TOOLS
+BROWSER_SESSION --> NATIVE_BROWSER
+EVENT_BUS --> NATIVE_EVENTS

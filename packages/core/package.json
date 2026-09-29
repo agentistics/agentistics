@@ -1,11 +1,13 @@
 {
   "name": "@agentistics/core",
-  "version": "2.49.2",
+  "version": "2.70.1",
+  "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./gitTestEnv": "./src/gitTestEnv.ts"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

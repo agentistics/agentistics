@@ -101,23 +101,49 @@ test('(a) subtask moved to in_progress advances a `backlog` parent task to in_pr
   expect(out).toEqual({ result: { ok: true }, taskStatus: 'in_progress' })
 })
 
-// --- (b) subtask starts while the task is already in_progress: no-op, no error ---------------
+// --- (b) subtask starts while the task is already in_progress: the STATUS is a no-op ----------
 
-test('(b) subtask moved to in_progress on an already-in_progress task is a no-op', async () => {
+test('(b) subtask moved to in_progress on an already-in_progress task leaves the STATUS alone, but still stamps startedAt the first time', async () => {
   const out = await run(`
     ${task('t1', "status: 'in_progress',")}
     ${subtask('s1', 't1')}
     const result = await web.patchSubtask('s1', { status: 'in_progress' })
     const after = await store.read()
     console.log(JSON.stringify({
-      result, taskStatus: after.tasks[0].status, taskUpdatedAt: after.tasks[0].updatedAt,
+      result, taskStatus: after.tasks[0].status, taskStartedAt: after.tasks[0].startedAt ?? null,
     }))
   `)
-  const parsed = out as { result: unknown; taskStatus: string; taskUpdatedAt: string }
+  // The STATUS nudge is a no-op (`statusAfterAttach` only fires out of backlog/todo) — but
+  // `startedAt` is a SEPARATE fact, stamped the first time real work is observed anywhere under
+  // the task, regardless of whether its status happens to already say `in_progress`. A task that
+  // reached `in_progress` some other way (created that way, or moved there by hand) never had this
+  // stamped until now, so this write is real and intentional — see `marksStart`'s own note. The
+  // stamp is `new Date().toISOString()` at write time, never the seed's fixed `createdAt`, so it
+  // is checked for shape/presence rather than for an exact literal.
+  const parsed = out as { result: unknown; taskStatus: string; taskStartedAt: string | null }
   expect(parsed.result).toEqual({ ok: true })
   expect(parsed.taskStatus).toBe('in_progress')
-  // No redundant write: the task record is untouched, so its `updatedAt` still reads the seed value.
-  expect(parsed.taskUpdatedAt).toBe('2026-09-19T10:00:00.000Z')
+  expect(parsed.taskStartedAt).not.toBeNull()
+  expect(parsed.taskStartedAt).not.toBe('2026-09-19T10:00:00.000Z')
+})
+
+test('(b2) a patch that repeats the status a subtask already had never re-stamps startedAt', async () => {
+  const out = await run(`
+    ${task('t1', "status: 'in_progress', startedAt: '2026-09-19T10:00:00.000Z',")}
+    ${subtask('s1', 't1', "status: 'in_progress', startedAt: '2026-09-19T10:00:00.000Z',")}
+    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const after = await store.read()
+    console.log(JSON.stringify({
+      result, taskUpdatedAt: after.tasks[0].updatedAt, taskStartedAt: after.tasks[0].startedAt,
+    }))
+  `)
+  expect(out).toEqual({
+    result: { ok: true },
+    // Untouched: `status` did not actually change (`found.status === status`), so `marksStart`
+    // never fires and no write happens at all — the record is not even read back with a new
+    // `updatedAt`.
+    taskUpdatedAt: '2026-09-19T10:00:00.000Z', taskStartedAt: '2026-09-19T10:00:00.000Z',
+  })
 })
 
 // --- (c) subtask starts while the task is blocked/in_review/done/abandoned: untouched ---------
@@ -154,15 +180,21 @@ test('(d) a subtask moving back to todo never reverts the parent task it had adv
 })
 
 test('(d) a subtask moving from done back to blocked never reverts the parent task', async () => {
+  // TWO subtasks, deliberately: with only one, `s1` reaching `done` would make it the task's
+  // ONLY top-level piece, all of them done — which now auto-delivers the task
+  // (`statusAfterAllSubtasksDone`) and is exactly what this test is NOT about. `s2` stays open, so
+  // this exercises the plain forward-nudge (`statusAfterSubtaskProgress`) this test was written
+  // for; the auto-deliver case has its own coverage in `task-all-subtasks-done.test.ts`.
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
+    ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
     await web.patchSubtask('s1', { status: 'done' })
     const result = await web.patchSubtask('s1', { status: 'blocked' })
     const after = await store.read()
     console.log(JSON.stringify({
-      result, subtaskStatus: after.subtasks[0].status, taskStatus: after.tasks[0].status,
+      result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
     }))
   `)
   expect(out).toEqual({
@@ -190,14 +222,17 @@ test('(e) a group member moved to in_progress advances the parent task exactly l
 // --- done fast-path: a subtask going straight from todo to done also nudges the parent ---------
 
 test('done-fast-path: a subtask skipping straight from todo to done (done_needs_session satisfied) also advances the parent task', async () => {
+  // TWO subtasks — see (d)'s own note just above: with only one, this would auto-DELIVER the task
+  // instead of merely advancing it to `in_progress`, which is a different rule with its own tests.
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
+    ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
     const result = await web.patchSubtask('s1', { status: 'done' })
     const after = await store.read()
     console.log(JSON.stringify({
-      result, subtaskStatus: after.subtasks[0].status, taskStatus: after.tasks[0].status,
+      result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
     }))
   `)
   expect(out).toEqual({
@@ -206,14 +241,16 @@ test('done-fast-path: a subtask skipping straight from todo to done (done_needs_
 })
 
 test('(f) setSubtaskDone (the tick fast path) advances the parent task too — same underlying patchSubtask call', async () => {
+  // TWO subtasks — same reason as the test just above.
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
+    ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
     const result = await web.setSubtaskDone('s1', true)
     const after = await store.read()
     console.log(JSON.stringify({
-      result, subtaskStatus: after.subtasks[0].status, taskStatus: after.tasks[0].status,
+      result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
     }))
   `)
   expect(out).toEqual({

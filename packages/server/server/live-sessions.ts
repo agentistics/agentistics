@@ -117,6 +117,9 @@ const VERSIONED_INSTALL: Record<HarnessId, RegExp | null> = {
   copilot: null,
   antigravity: null,
   kimi: null,
+  // opencode has no legacy adapter (CLAUDE.md step 4, skipped by scope) and is not detected as a
+  // live session at all — see live-sessions.ts's own header for the general rule this satisfies.
+  opencode: null,
 }
 
 /** The harness an executable PATH belongs to, for installs named after their version — PURE. */
@@ -210,6 +213,8 @@ const NOT_A_SESSION: Record<HarnessId, readonly string[] | null> = {
   copilot: [...MANAGEMENT.copilot],
   antigravity: null,
   kimi: [...MANAGEMENT.kimi],
+  // Not known to be infrastructure — see the header's rule for an absent entry.
+  opencode: null,
 }
 
 /**

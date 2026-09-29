@@ -1,0 +1,10 @@
+{
+  "title": "<redacted>",
+  "workDir": "/redacted/workdir",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000200000,
+  "agents": {
+    "main": { "type": "main" },
+    "worker": { "type": "subagent", "parentAgentId": "main" }
+  }
+}

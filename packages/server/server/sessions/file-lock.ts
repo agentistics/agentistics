@@ -40,10 +40,23 @@
  *   than a live session with no record at all. It says so through `contended`, so a caller can log
  *   it rather than pretend it held the lock.
  * - Release NEVER throws. A failed cleanup becomes a stale lock, which the next acquirer clears.
+ *
+ * **ONLY `EEXIST` IS CONTENTION, and treating every failed `mkdir` as contention wedged the
+ * product.** The lock directory is created WITHOUT `recursive` — it has to be, `mkdir` is atomic
+ * only on its own last segment — so on a machine where the parent does not exist yet (a fresh
+ * `~/.agentistics`) it failed with `ENOENT`. That failure was read as "somebody holds it", the
+ * follow-up `stat` of the lock found nothing, `inspectLock` answered `retry`, and the loop went
+ * round again with no sleep and no deadline — forever. It surfaced as 42 uploader tests timing out
+ * on a CI runner whose home had no `~/.agentistics`, and it is the same hang a real first-time
+ * machine meets: `loadTaskBoard` seeds the task statuses through this lock on every push cycle, so
+ * the push to a central never finished. Measured: `loadTaskBoard()` still pending after 6s under an
+ * empty HOME, instant with the directory present. So the parent is created first, a failure that is
+ * not `EEXIST` never counts as someone else's lock, and even the vanished-lock retry answers to the
+ * deadline.
  */
 
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** A lock older than this is assumed abandoned. Longer than any write; far shorter than a coffee. */
 export const STALE_MS = 15_000
@@ -90,17 +103,38 @@ async function inspectLock(dir: string, nowMs: number): Promise<Blocked> {
 export async function lockFile(file: string, nowMs = () => Date.now()): Promise<LockHandle> {
   const dir = `${file}.lock`
   const deadline = nowMs() + WAIT_MS
+  // The PARENT must exist for the atomic, non-recursive `mkdir` below to mean anything — see the
+  // header's last rule. Best effort: if it cannot be created, the loop's non-EEXIST branch decides.
+  await mkdir(dirname(dir), { recursive: true }).catch(() => undefined)
+  let parentRetried = false
   for (;;) {
     try {
       await mkdir(dir)
       // Best effort, and deliberately not awaited for correctness: the lock is the DIRECTORY.
       void writeFile(join(dir, 'pid'), String(process.pid), 'utf-8').catch(() => undefined)
       return { contended: false, release: () => rm(dir, { recursive: true, force: true }).catch(() => undefined) }
-    } catch {
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code !== 'EEXIST') {
+        // NOT CONTENTION. `ENOENT` means the parent is missing (removed since the check above, or
+        // never creatable): create it once more and try again. Anything else — or a parent that
+        // still cannot be made — is a filesystem that will not grant this lock however long we
+        // wait, so proceed WITHOUT it, exactly as a timed-out wait does.
+        if (code === 'ENOENT' && !parentRetried) {
+          parentRetried = true
+          await mkdir(dirname(dir), { recursive: true }).catch(() => undefined)
+          continue
+        }
+        return { contended: true, release: async () => undefined }
+      }
       const blocked = await inspectLock(dir, nowMs())
       // The lock vanished under us. Just race for it again — the old code DELETED here, which is
-      // the bug this rewrite exists for.
-      if (blocked === 'retry') continue
+      // the bug this rewrite exists for. Bounded by the same deadline as a real wait, so a lock
+      // that keeps vanishing can never spin this loop forever.
+      if (blocked === 'retry') {
+        if (nowMs() >= deadline) return { contended: true, release: async () => undefined }
+        continue
+      }
       if (blocked === 'steal') {
         // ATOMIC TAKEOVER. `rename` is the one operation that lets exactly one racer win: whoever
         // renames the abandoned lock aside owns the right to remove it, and everybody else fails

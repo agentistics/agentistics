@@ -319,10 +319,13 @@ describe('BandOverflowMenu', () => {
  * are asserted structurally (titles, button count, inline style strings) since this package has no
  * jsdom to click through — the same approach every other test in this file already takes.
  */
-describe('PanelFixedControls — full screen, minimize, gear, in that order', () => {
+describe('PanelFixedControls — gear, full screen, minimize, in that order (minimize ALWAYS last)', () => {
   const gearEntries = [{ id: 'move-right', label: 'Move Hardware to the right', icon: <span />, onSelect: () => {} }]
 
-  test('the full trio renders, in order — full screen, then minimize, then the gear', () => {
+  // Owner, 2026-09-25: minimize stays at the far right, where a collapsed band's reopen chevron
+  // sits, so the pointer that opened the band closes it without moving. "config, maximizar,
+  // minimizar".
+  test('the full trio renders, in order — the gear, then full screen, then minimize LAST', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -337,8 +340,8 @@ describe('PanelFixedControls — full screen, minimize, gear, in that order', ()
     expect(fullscreenAt).toBeGreaterThan(-1)
     expect(minimizeAt).toBeGreaterThan(-1)
     expect(gearAt).toBeGreaterThan(-1)
+    expect(gearAt).toBeLessThan(fullscreenAt)
     expect(fullscreenAt).toBeLessThan(minimizeAt)
-    expect(minimizeAt).toBeLessThan(gearAt)
   })
 
   test('full screen is ABSENT — never present and refusing — when the caller offers nowhere to send it', () => {
@@ -435,7 +438,7 @@ describe('PanelFixedControls — full screen, minimize, gear, in that order', ()
  * it (the bottom band's own bars never pass it), present as a fourth control between minimize and
  * the gear, its PRESSED state visible on the row itself (not only in the tooltip).
  */
-describe('PanelFixedControls — pin, between minimize and the gear', () => {
+describe('PanelFixedControls — pin, beside the gear', () => {
   const gearEntries = [{ id: 'move-right', label: 'Move Hardware to the right', icon: <span />, onSelect: () => {} }]
 
   test('absent entirely when the caller offers no pin — the bottom band’s own bars', () => {
@@ -447,11 +450,11 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).not.toContain('Pin Hardware')
-    expect(html).not.toContain('Unpin Hardware')
+    expect(html).not.toContain('Float Hardware as a window')
+    expect(html).not.toContain('Dock Hardware back')
   })
 
-  test('present, and sits between minimize and the gear — full screen, minimize, pin, gear, in that order', () => {
+  test('present, and sits beside the gear — gear, pin, full screen, minimize, in that order', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -463,18 +466,18 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
     )
     const fullscreenAt = html.indexOf('Hardware full screen')
     const minimizeAt = html.indexOf('Minimize Hardware')
-    const pinAt = html.indexOf('Pin Hardware')
+    const pinAt = html.indexOf('Float Hardware as a window')
     const gearAt = html.indexOf('Hardware options')
     expect(fullscreenAt).toBeGreaterThan(-1)
     expect(minimizeAt).toBeGreaterThan(-1)
     expect(pinAt).toBeGreaterThan(-1)
     expect(gearAt).toBeGreaterThan(-1)
+    expect(gearAt).toBeLessThan(pinAt)
+    expect(pinAt).toBeLessThan(fullscreenAt)
     expect(fullscreenAt).toBeLessThan(minimizeAt)
-    expect(minimizeAt).toBeLessThan(pinAt)
-    expect(pinAt).toBeLessThan(gearAt)
   })
 
-  test('unpinned: neutral colour, aria-pressed=false, and the "Pin X" label', () => {
+  test('unpinned: neutral colour, aria-pressed=false, and the "Float X as a window" label', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -482,12 +485,12 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Pin Hardware')
-    expect(html).not.toContain('Unpin Hardware')
+    expect(html).toContain('Float Hardware as a window')
+    expect(html).not.toContain('Dock Hardware back')
     expect(html).toContain('aria-pressed="false"')
   })
 
-  test('pinned: accent orange, aria-pressed=true, and the "Unpin X" label — visible at a glance, not only in the tooltip', () => {
+  test('pinned: accent orange, aria-pressed=true, and the "Dock X back" label — visible at a glance, not only in the tooltip', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="en" panelName="Hardware"
@@ -495,7 +498,7 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Hardware options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Unpin Hardware')
+    expect(html).toContain('Dock Hardware back')
     expect(html).toContain('aria-pressed="true"')
     // The pin glyph itself is FILLED while active (`fill="currentColor"`), not colour alone.
     expect(html).toContain('fill="currentColor"')
@@ -515,7 +518,7 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
     expect(html).toContain('color:var(--anthropic-orange)')
   })
 
-  test('pt labels: "Fixar X" / "Desafixar X"', () => {
+  test('pt labels: "Soltar X como janela" / "Encaixar X de volta"', () => {
     const html = renderToStaticMarkup(
       <PanelFixedControls
         lang="pt" panelName="Hardware"
@@ -523,7 +526,7 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Opções Hardware" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Fixar Hardware')
+    expect(html).toContain('Soltar Hardware como janela')
     const pinnedHtml = renderToStaticMarkup(
       <PanelFixedControls
         lang="pt" panelName="Hardware"
@@ -531,7 +534,7 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Opções Hardware" gearEntries={gearEntries}
       />,
     )
-    expect(pinnedHtml).toContain('Desafixar Hardware')
+    expect(pinnedHtml).toContain('Encaixar Hardware de volta')
   })
 
   test('the panel name appears in the pin’s own label too — same rule as the rest of the trio', () => {
@@ -542,6 +545,36 @@ describe('PanelFixedControls — pin, between minimize and the gear', () => {
         gearLabel="Contents options" gearEntries={gearEntries}
       />,
     )
-    expect(html).toContain('Pin Contents')
+    expect(html).toContain('Float Contents as a window')
+  })
+})
+
+// A COLLAPSED BAND DRAWS THE WAY BACK, NOT A SECOND MINIMIZE. For one release the `−` was drawn in
+// both states, and the owner reported it twice on a bar that was already closed ("o - ainda aparece
+// na barra mesmo com ela fechada"). The label already said "Expandir"; the glyph now agrees.
+describe('the minimize control follows the collapsed state', () => {
+  const render = (collapsed: boolean) => renderToStaticMarkup(
+    <PanelFixedControls
+      lang="pt"
+      panelName="Claude Code"
+      collapsed={collapsed}
+      onMinimize={() => {}}
+      minimizeLabel={collapsed ? 'Expandir Claude Code' : 'Recolher Claude Code'}
+      gearLabel="Opções"
+      gearEntries={[]}
+    />,
+  )
+
+  test('an OPEN band shows the literal minus', () => {
+    const html = render(false)
+    expect(html).toContain('lucide-minus')
+    expect(html).not.toContain('lucide-chevron-up')
+  })
+
+  test('a COLLAPSED band shows the up chevron that reopens it, and no minus', () => {
+    const html = render(true)
+    expect(html).toContain('lucide-chevron-up')
+    expect(html).not.toContain('lucide-minus')
+    expect(html).toContain('aria-label="Expandir Claude Code"')
   })
 })

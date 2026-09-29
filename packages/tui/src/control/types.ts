@@ -890,6 +890,10 @@ export interface ControlSession {
   cpuPercent?: number | null
   /** Resident Set Size memory usage in bytes. */
   rssBytes?: number | null
+  /** Epoch ms of the user's last message, from an EXACT conversation link. Absent = unknown. */
+  lastUserMessageAt?: number
+  /** The task id behind `task` (the label). */
+  taskId?: string
 }
 
 /**
@@ -1538,6 +1542,20 @@ export interface ControlHost {
   interruptSession?(id: string): Promise<ActionResult>
 
   /**
+   * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
+   * harness's own rewind. `occurrence` picks among identical prompts, 0 = the latest. Refused, in a
+   * sentence, where no rewind was measured for the harness, while a dialog is open, or when the
+   * prompt is not in the harness's menu.
+   */
+  rewindSession?(id: string, prompt: string, occurrence: number): Promise<ActionResult>
+
+  /**
+   * Send the messages a busy session is holding in its own queue NOW, instead of when its turn ends.
+   * All of them, in order — the harness's own rule.
+   */
+  sendQueuedNow?(id: string): Promise<ActionResult>
+
+  /**
    * Advance a session's harness to its NEXT mode, without attaching to it.
    *
    * One keystroke, and the harness decides which mode comes next — there is no key that picks one
@@ -1699,6 +1717,14 @@ export interface ControlHost {
   startableHarnesses?(): Promise<SessionHarnessOption[]>
 
   /**
+   * Why `startableHarnesses` came back EMPTY, when that is a fault rather than a fact — already
+   * localized. Set when not one assistant CLI resolves on the host's PATH, which is the signature of
+   * a broken PATH (a service unit that predates `Environment=PATH`), not of a machine with nothing
+   * installed. `undefined` whenever the list is trustworthy.
+   */
+  harnessNotice?(): string | undefined
+
+  /**
    * Places a new session could start, ranked — with HOW MANY of each kind matched.
    *
    * The two travel together because they come from one search. `options` is what fits on screen
@@ -1803,6 +1829,14 @@ export interface SpawnSessionRequest {
   label?: string
   /** Take the terminal now, versus start detached and stay here. */
   attach: boolean
+  /**
+   * Start even if this machine's memory budget refuses. Absent or `false` is gated normally — see
+   * `packages/server/server/sessions/spawn-admission.ts`. The HTTP door this same request travels
+   * through when it arrives from a browser (`fleet-spawn.ts`'s `FleetSpawnBody`) checks
+   * `typeof force === 'boolean' && force` on the wire body for exactly this reason: JSON carries no
+   * guarantee a caller sent a boolean, and a truthy STRING must never read as consent.
+   */
+  force?: boolean
 }
 
 export interface ResumeSessionRequest {
@@ -1838,6 +1872,59 @@ export interface SpawnSessionResult {
    * about which of several rows in the same directory is the one just created.
    */
   id?: string
+  /**
+   * Present ONLY on `ok: false` when this was refused by the memory budget — the DATA behind
+   * `message`, so a surface (the web UI, a future cockpit dialog) can offer "start anyway" without
+   * re-parsing a sentence. See `spawn-admission.ts`'s `AdmissionRefusalBody`.
+   */
+  admission?: AdmissionRefusalBody
+  /**
+   * `ok: true` and this is set exactly when the spawn was FORCED through a refusal (`force: true` on
+   * the request that started it). `note` is the sentence saying so and naming what the check found —
+   * kept as its OWN field rather than folded into `message`, because `message` is "session X
+   * started" and this is "…and here is what was overridden"; a surface may show either, both, or
+   * neither.
+   */
+  overridden?: boolean
+  note?: string
+}
+
+/**
+ * A structural copy of `packages/server/server/sessions/spawn-admission.ts`'s `AdmissionRefusal` /
+ * `AdmissionRefusalBody` — JSON-safe (numbers and strings only). Reproduced here rather than
+ * imported: the dependency direction in this product is server -> tui, and tui must never import
+ * `@agentistics/server`. This package only ever READS these shapes off the wire (inside
+ * `SpawnSessionResult.admission`), never constructs one, so keeping the two declarations in sync by
+ * hand is safe — a field added on the server side and not mirrored here is simply invisible to the
+ * tui reader rather than a compile error, which is the same trade-off `SpawnHarness` in
+ * `fleet-spawn.ts` documents for the reverse direction.
+ */
+export interface AdmissionRefusal {
+  reason: 'swap' | 'no-room'
+  /** How many sessions were asked for. */
+  requested: number
+  /** How many WOULD fit right now. Always 0 for `swap`; the room left for `no-room`. */
+  fits: number
+  /** `MemAvailable`, in bytes. */
+  availableBytes: number
+  swapUsedBytes: number
+  swapTotalBytes: number
+  /** What one session is taken to cost, in bytes. */
+  costBytes: number
+  /** `measured` — averaged over the sessions running here; `assumed` — the declared fallback. */
+  costBasis: 'measured' | 'assumed'
+  /** Sessions running now. */
+  used: number
+  /** Sessions this machine can hold in total at `costBytes`. */
+  max: number
+}
+
+/** The body a spawn route answers with when it refuses over the memory budget (HTTP 409). */
+export interface AdmissionRefusalBody {
+  code: 'memory_budget'
+  refusal: AdmissionRefusal
+  /** Already localized, and always present — a client may render this directly. */
+  message: string
 }
 
 /** Everything the caller needs to hand the terminal over and get the user back afterwards. */

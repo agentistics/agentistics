@@ -51,6 +51,14 @@ export interface AttemptRollup {
   activeMinutes: number | null
   tokens: number | null
   costUSD: number | null
+  /**
+   * `costUSD` split by the HARNESS that spent it — `null` exactly when `costUSD` is. A plan basis
+   * is per harness (`planAllocation(...).byHarness`), so a row priced with the cross-harness factor
+   * rescales an Antigravity-only delivery by what the CLAUDE subscription is worth. The split is
+   * what lets the browser price each slice at its own harness's factor. A cost with no meta to name
+   * its harness is keyed `''`, which no plan covers.
+   */
+  costByHarness: Record<string, number> | null
   costMeasuredSessions: number
   costEstimatedSessions: number
   credits: SessionCredits | null
@@ -86,6 +94,15 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
   }))
 
   const costUSD = sumOrNull(o.sessions.map(s => s.costUSD))
+  let costByHarness: Record<string, number> | null = null
+  if (costUSD !== null) {
+    costByHarness = {}
+    for (const s of o.sessions) {
+      if (typeof s.costUSD !== 'number' || !Number.isFinite(s.costUSD)) continue
+      const h = s.meta ? (s.meta.harness ?? 'claude') : ''
+      costByHarness[h] = (costByHarness[h] ?? 0) + s.costUSD
+    }
+  }
 
   const creditRows = o.sessions.filter(s => s.credits !== undefined)
   const credits = creditRows.length === 0 ? null : {
@@ -101,6 +118,7 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
     activeMinutes: sumOrNull(linked.map(s => s.meta!.active_minutes)),
     tokens,
     costUSD,
+    costByHarness,
     costMeasuredSessions: o.sessions.filter(s => s.costMeasured === true).length,
     costEstimatedSessions: o.sessions.filter(s => s.costUSD !== null && s.costMeasured !== true).length,
     credits,

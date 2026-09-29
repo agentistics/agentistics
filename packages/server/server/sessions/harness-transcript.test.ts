@@ -18,7 +18,7 @@ const step = (idx: number, o: Record<string, unknown>): string => JSON.stringify
 describe('the reader registry', () => {
   it('names every harness, so adding one is a decision here rather than a lookup miss', () => {
     expect(Object.keys(HARNESS_TRANSCRIPTS).sort())
-      .toEqual(['antigravity', 'claude', 'codex', 'copilot', 'gemini', 'kimi'])
+      .toEqual(['antigravity', 'claude', 'codex', 'copilot', 'gemini', 'kimi', 'opencode'])
   })
 
   it('has no nulls left — gemini was the last, and its reason was the LINK', () => {

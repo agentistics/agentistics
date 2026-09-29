@@ -8,6 +8,7 @@ import { sessionTime } from '../lib/sessionTime'
 import { formatModel, formatProjectName, repoShortName, calcCost, sessionCostUSD, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
 import { useDerivedStats, blendedCostPerToken, blendedSessionCost, type BlendedRates, type HarnessSummary } from '../hooks/useData'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
+import { brandAsset } from '../lib/brand'
 
 // Types
 
@@ -753,11 +754,12 @@ export function PDFDirectExporter({ data, range, currentFilters, lang, currency,
     return `claude-stats-${dateStr}.pdf`
   }, [currentFilters.harness])
   const contentRef = useRef<HTMLDivElement>(null)
-  const [logoDataUri, setLogoDataUri] = useState<string>('/logo.png')
+  const [logoDataUri, setLogoDataUri] = useState<string>(brandAsset('/logo.png'))
   const triggered = useRef(false)
 
   useEffect(() => {
-    fetch('/logo.png')
+    // The plate that suits the paper: light plate on the light theme, dark on the dark one.
+    fetch(brandAsset(pdfTheme === 'light' ? '/logo-light.png' : '/logo.png'))
       .then(r => r.blob())
       .then(blob => new Promise<string>(resolve => {
         const reader = new FileReader()
@@ -766,7 +768,7 @@ export function PDFDirectExporter({ data, range, currentFilters, lang, currency,
       }))
       .then(setLogoDataUri)
       .catch(() => {})
-  }, [])
+  }, [pdfTheme])
 
   useEffect(() => {
     if (!contentRef.current || !derived || triggered.current) return

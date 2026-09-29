@@ -3,7 +3,7 @@ import { mkdir, writeFile, readFile } from 'fs/promises'
 import type { SessionMeta, HarnessId } from '@agentistics/core'
 import { CONSOLIDATED_DIR } from './config'
 import { createLimiter, safeReadDir, safeReadJson } from './utils'
-import { HARNESS_ORDER, migrateAgentMetrics, normalizeSessionTimes } from '@agentistics/core'
+import { HARNESS_ORDER, migrateAgentMetrics, normalizeSessionTimes, coerceSessionLists } from '@agentistics/core'
 
 const writeLimit = createLimiter(20)
 const readyDirs = new Set<string>()
@@ -57,8 +57,11 @@ export async function loadConsolidated(): Promise<Map<string, SessionMeta>> {
   for (const { dir, legacy } of roots) {
     const files = await safeReadDir(dir)
     await Promise.all(files.filter(f => f.endsWith('.json')).map(f => limit(async () => {
-      const s = await safeReadJson<SessionMeta>(join(dir, f))
-      if (!s?.session_id) return
+      const read = await safeReadJson<SessionMeta>(join(dir, f))
+      if (!read?.session_id) return
+      // Same reasoning for the list fields: a record holding `languages: {}` crashed every
+      // dashboard that rendered it, here and on the central it was pushed to. See sessionShape.ts.
+      const s = coerceSessionLists(read)
       if (!s.harness) s.harness = 'claude'
       // The store holds whatever an adapter wrote, including shapes it should not have written —
       // Kimi persisted `start_time` as an epoch number, and every consumer that calls a string
