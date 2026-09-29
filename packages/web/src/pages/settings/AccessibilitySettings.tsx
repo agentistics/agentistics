@@ -155,7 +155,7 @@ export default function AccessibilitySettings() {
 
   const card: React.CSSProperties = {
     background: 'var(--bg-surface)', border: '1px solid var(--border)',
-    borderRadius: 12, padding: isMobile ? 14 : 18, marginBottom: 16,
+    borderRadius: 'var(--radius-lg)', padding: isMobile ? 14 : 18, marginBottom: 16,
   }
   const h: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }
   const note: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }
