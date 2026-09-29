@@ -47,6 +47,16 @@
  * call goes to the gate with `./repeat-policy.ts` wrapped around the run's policy: the policy still
  * decides first, a deny stays a deny, and an allow becomes a question to the person — with no person,
  * a refusal the model reads in words. The gate is not skipped and no ask or floor is lifted.
+ *
+ * ## The completion gate (TOOL.3) — only when `opts.completion` is given
+ *
+ * Every call's result and every turn's end are folded through `../completion/gate.ts`. When the model
+ * ends a turn with no tool call, the gate may hold the run: the loop appends ONE user message stating
+ * the facts (open `task.plan` items, or an unverified edit) and gives the model another turn, and
+ * journals `completion.blocked`. When it lets a run end that it had held, or releases one with
+ * something still open, the loop journals `completion.released` and ends with `end-turn` as before.
+ * The gate never adds a tool call, never touches the plan and never asks anyone — a headless run is
+ * handled identically. Without `opts.completion` the loop behaves exactly as it did before TOOL.3.
  */
 
 import { classifyProviderError, sha256Hex, type RetryPolicy } from '@agentistics/core'
@@ -95,6 +105,21 @@ import {
 } from './repeat-guard.ts'
 import { REPEAT_GUARD_POLICY, repeatGuardPolicy } from './repeat-policy.ts'
 import { buildWireTable } from './wire.ts'
+import {
+  DEFAULT_COMPLETION_SETTINGS,
+  completionReleaseSentence,
+  emptyCompletionState,
+  evaluateCompletion,
+  foldBlocked,
+  foldToolResult,
+  foldTurn,
+  type CompletionPlanStep,
+  type CompletionReleaseReason,
+  type CompletionSettings,
+  type CompletionState,
+  type CompletionToolFact,
+} from '../completion/gate.ts'
+import { createCompletionEmitter, type CompletionEmittedType } from '../completion/emit.ts'
 
 // ── Public shapes ───────────────────────────────────────────────────────────────────────────────
 
@@ -153,6 +178,30 @@ export interface ToolLoopResult {
   /** Why the retry loop stopped on the last model turn. */
   lastRetry?: RetryStoppedBecause
   lost: { provider: EmitCounters['lost']; tool: ToolEmitCounters['lost'] }
+  /** Present exactly when the run was given `completion` options. */
+  completion?: ToolLoopCompletion
+}
+
+export interface ToolLoopCompletion {
+  /** Continuations the gate appended. */
+  blocked: number
+  /** Why the gate let the run end; `null` = it never engaged (or the run stopped for another reason). */
+  released: CompletionReleaseReason | null
+  /** The release, in words (EN); absent when `released` is null. */
+  sentence?: string
+  lost: Record<CompletionEmittedType, number>
+}
+
+/**
+ * The completion gate's inputs (TOOL.3). `plan` reads the run's own `task.plan` — normally
+ * `createPlanTool().plan`. The settings default to K=2, N=3, verification OFF; the host resolves
+ * `completion.requireVerificationAfterEdit` from its settings catalogue and passes the answer here.
+ */
+export interface ToolLoopCompletionOptions {
+  plan: () => readonly CompletionPlanStep[]
+  maxContinuations?: number
+  noProgressTurns?: number
+  requireVerificationAfterEdit?: boolean
 }
 
 export interface ToolLoopOptions<R extends ProviderAppendResult = ProviderAppendResult> {
@@ -188,6 +237,8 @@ export interface ToolLoopOptions<R extends ProviderAppendResult = ProviderAppend
   now?: () => Date
   monotonicNow?: () => number
   mintInvocationId?: () => string
+  /** The completion gate (TOOL.3); absent = no gate. */
+  completion?: ToolLoopCompletionOptions
 }
 
 // ── Sentences (the model and the person read these; nothing here is journaled) ──────────────────
@@ -397,20 +448,38 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
   const messages: ProviderMessage[] = [...opts.messages]
   const calls: ToolCallSummary[] = []
   let repeat: RepeatState = emptyRepeatState
+  const gateOpts = opts.completion
+  const gateSettings: CompletionSettings = {
+    maxContinuations: gateOpts?.maxContinuations ?? DEFAULT_COMPLETION_SETTINGS.maxContinuations,
+    noProgressTurns: gateOpts?.noProgressTurns ?? DEFAULT_COMPLETION_SETTINGS.noProgressTurns,
+    requireVerificationAfterEdit: gateOpts?.requireVerificationAfterEdit ?? DEFAULT_COMPLETION_SETTINGS.requireVerificationAfterEdit,
+  }
+  let gate: CompletionState = emptyCompletionState
+  let gateBlocked = 0
+  let gateReleased: { reason: CompletionReleaseReason; sentence: string } | null = null
+  const readPlan = (): readonly CompletionPlanStep[] => {
+    try { return gateOpts?.plan() ?? [] } catch { return [] }
+  }
 
   const providerEmitter = createProviderEmitter({ journal: opts.journal, adapterVersion: opts.client.adapterVersion, now })
   const toolEvents: ToolEmitter = createToolEventEmitter({
     journal: opts.journal, adapterVersion: opts.runtimeVersion, scope, now,
   })
   const lost = () => ({ provider: providerEmitter.counters().lost, tool: toolEvents.counters().lost })
+  const completionEvents = createCompletionEmitter({ journal: opts.journal, adapterVersion: opts.runtimeVersion, scope, now })
 
   let turns = 0
   let toolCalls = 0
   let lastResult: InvocationResult | undefined
   let lastRetry: RetryStoppedBecause | undefined
-  const done = (status: ToolLoopStatus, sentence = stopSentence(status, limits, lastResult)): ToolLoopResult => ({
-    status, sentence, messages, turns, toolCalls, calls, lastResult, lastRetry, lost: lost(),
-  })
+  const done = (status: ToolLoopStatus, sentence = stopSentence(status, limits, lastResult)): ToolLoopResult => {
+    const r: ToolLoopResult = { status, sentence, messages, turns, toolCalls, calls, lastResult, lastRetry, lost: lost() }
+    if (gateOpts) {
+      r.completion = { blocked: gateBlocked, released: gateReleased?.reason ?? null, lost: completionEvents.lost() }
+      if (gateReleased) r.completion.sentence = gateReleased.sentence
+    }
+    return r
+  }
 
   const wire = buildWireTable(opts.tools)
   if (!wire.ok) return done('invalid-catalogue', wire.sentence)
@@ -485,7 +554,32 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
       const plan = planTurn(final, collect.current.calls, collect.current.failures)
       if (plan.calls.length === 0) {
         if (plan.assistant.length > 0) messages.push({ role: 'assistant', content: plan.assistant })
-        return done('end-turn')
+        if (!gateOpts) return done('end-turn')
+        const steps = readPlan()
+        gate = foldTurn(gate, steps)
+        const v = evaluateCompletion({
+          state: gate, plan: steps, settings: gateSettings,
+          turnAvailable: turns < limits.maxTurns && hardStop() === null,
+        })
+        if (v.allow) {
+          if (v.reason !== null) {
+            gateReleased = { reason: v.reason, sentence: completionReleaseSentence(v.reason, v.openItems) }
+            await completionEvents.released(turns, { reason: v.reason, openItems: v.openItems })
+          }
+          return done('end-turn')
+        }
+        // One fact-stating message. The history must alternate roles: after an empty assistant turn the
+        // last message is already the user's, and the fact joins it rather than starting a second one.
+        const fact: ProviderMessagePart = { type: 'text', text: v.message }
+        const last = messages[messages.length - 1]
+        if (last?.role === 'user') {
+          const prior: ProviderMessagePart[] = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : [...last.content]
+          messages[messages.length - 1] = { ...last, content: [...prior, fact] }
+        } else messages.push({ role: 'user', content: [fact] })
+        gate = foldBlocked(gate, v.rule)
+        gateBlocked += 1
+        await completionEvents.blocked(turns, { openItems: v.openItems, attempt: v.attempt, rule: v.rule })
+        continue
       }
       messages.push({ role: 'assistant', content: plan.assistant })
 
@@ -550,11 +644,19 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
         const refusedByGuard = r.status === 'denied' && r.verdict?.policy === REPEAT_GUARD_POLICY
         if (!refusedByGuard) repeat = foldResult(repeat, resultDigest(r.outcome.ok, r.outcome.modelText))
         reply(r.outcome.modelText, !r.outcome.ok)
+        if (gateOpts) {
+          const fact: CompletionToolFact = {
+            toolName: tool.name, kind: tool.kind, ok: r.outcome.ok, resultDigest: resultDigest(r.outcome.ok, r.outcome.modelText),
+          }
+          if (r.outcome.facts?.exitCode !== undefined) fact.exitCode = r.outcome.facts.exitCode
+          gate = foldToolResult(gate, fact)
+        }
         const summary: ToolCallSummary = { toolExecutionId, toolUseId, name, status: r.status }
         if (r.outcome.error) summary.errorClass = r.outcome.error.class
         calls.push(summary)
       }
       messages.push({ role: 'user', content: results })
+      if (gateOpts) gate = foldTurn(gate, readPlan())
 
       if (bound !== null) return done(bound)
     }
