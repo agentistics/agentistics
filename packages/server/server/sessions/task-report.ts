@@ -55,6 +55,10 @@ export interface TaskSessionRow {
    * names no session, so a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /** Null when the conversation is not in the store, or when its harness never recorded one — see
+   *  `RollupSession.meta`. Read straight off `SessionMeta.model` (`data.ts` resolves it from the
+   *  JSONL when not already in session-meta); never a second guess at what the session ran. */
+  model: string | null
   /** Null when the conversation is not in the store — see `RollupSession.meta`. */
   tokens: number | null
   costUSD: number | null
@@ -490,6 +494,7 @@ export function buildTaskDetail(o: {
         ...(r.label ? { label: r.label } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
+        model: meta?.model ?? null,
         tokens: meta ? sessionTokenTotal(meta) : null,
         costUSD: meta ? o.costOf(meta) : null,
         rounds: meta?.user_message_count ?? null,

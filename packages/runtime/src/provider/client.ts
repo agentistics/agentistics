@@ -27,8 +27,10 @@ import type {
 import type { CredentialRef } from './credential.ts'
 import type { CostStatement, UsageCertainty } from './openai-compatible/usage.ts'
 import type { ToolUsePromptUsage } from './google/usage.ts'
+import type { RateLimitReading } from './rate-limit.ts'
 
 export type { CredentialHandle, CredentialRef, CredentialResolution, CredentialResolver } from './credential.ts'
+export type { RateLimitAbsentReason, RateLimitReading, RateLimitResource, RateLimitResourceKind } from './rate-limit.ts'
 
 export interface CallCorrelation {
   /** minted by the caller, `inv_` prefix — the grouping key of an invocation's attempts */
@@ -132,6 +134,10 @@ export interface InvocationCommon {
    * provider id (`messageId` / `requestId`) and the correlation is exact.
    */
   correlationBasis?: 'inferred'
+  /** B9.3 — the response's rate-limit headers, read by `rate-limit.ts`. Absent = no response was
+   *  read (or the client does not attach it); `{ absent: reason }` = a response with no usable
+   *  rate-limit header. Never a zeroed counter. */
+  rateLimit?: RateLimitReading
 }
 
 export type InvocationResult =

@@ -39,6 +39,14 @@
  *
  * A `tool_result`'s content is the gate's `outcome.modelText` — a refusal included, in words. The
  * journal gets only facts plus the content-store `{sha256, bytes}` of that text (`loop/emit.ts`).
+ *
+ * ## The doom-loop guard (H18)
+ *
+ * Every call that reaches the gate is folded through `./repeat-guard.ts`. When the model asks for the
+ * same tool with the same input `REPEAT_LIMIT` times in a row and the result did not change, that
+ * call goes to the gate with `./repeat-policy.ts` wrapped around the run's policy: the policy still
+ * decides first, a deny stays a deny, and an allow becomes a question to the person — with no person,
+ * a refusal the model reads in words. The gate is not skipped and no ask or floor is lifted.
  */
 
 import { classifyProviderError, sha256Hex, type RetryPolicy } from '@agentistics/core'
@@ -74,6 +82,18 @@ import type {
 } from '../tools/contract.ts'
 import { runTool, type GateResult } from '../tools/gate.ts'
 import { createToolEventEmitter, toolScopeKey, type ToolEmitCounters, type ToolEmitter } from './emit.ts'
+import {
+  callIdentity,
+  emptyRepeatState,
+  foldApproved,
+  foldBreak,
+  foldCall,
+  foldResult,
+  resultDigest,
+  verdict as repeatVerdict,
+  type RepeatState,
+} from './repeat-guard.ts'
+import { REPEAT_GUARD_POLICY, repeatGuardPolicy } from './repeat-policy.ts'
 import { buildWireTable } from './wire.ts'
 
 // ── Public shapes ───────────────────────────────────────────────────────────────────────────────
@@ -376,6 +396,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
   const limits = opts.limits
   const messages: ProviderMessage[] = [...opts.messages]
   const calls: ToolCallSummary[] = []
+  let repeat: RepeatState = emptyRepeatState
 
   const providerEmitter = createProviderEmitter({ journal: opts.journal, adapterVersion: opts.client.adapterVersion, now })
   const toolEvents: ToolEmitter = createToolEventEmitter({
@@ -497,6 +518,7 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           await answerWithoutGate(toolExecutionId, tool ? name : UNKNOWN_TOOL_JOURNAL_NAME, tool?.kind ?? 'other', cls, 'failed', text)
           reply(text, true)
           calls.push({ toolExecutionId, toolUseId, name, status: 'malformed', errorClass: cls })
+          repeat = foldBreak()
           continue
         }
 
@@ -505,10 +527,13 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           await answerWithoutGate(toolExecutionId, UNKNOWN_TOOL_JOURNAL_NAME, 'other', 'not-found', 'failed', text)
           reply(text, true)
           calls.push({ toolExecutionId, toolUseId, name, status: 'unknown-tool', errorClass: 'not-found' })
+          repeat = foldBreak()
           continue
         }
 
         toolCalls += 1
+        repeat = foldCall(repeat, callIdentity(tool.name, planned.input))
+        const guard = repeatVerdict(repeat) === 'ask' ? repeatGuardPolicy(opts.policy, repeat.count) : null
         const r = await runTool(tool, planned.input, {
           workspaceRoot: opts.workspaceRoot,
           cwd: opts.cwd,
@@ -518,7 +543,12 @@ export async function runToolLoop<R extends ProviderAppendResult>(opts: ToolLoop
           agentId: scope.agentId,
           now,
           toolExecutionId,
-        }, { policy: opts.policy, events: toolEvents, content: opts.content, asker: opts.asker })
+        }, { policy: guard ?? opts.policy, events: toolEvents, content: opts.content, asker: opts.asker })
+        if (guard?.personAllowed()) repeat = foldApproved(repeat)
+        // The guard's own refusal is not a result of the call: folding it would reset the count and
+        // let the next identical call through silently (repeat-guard.ts).
+        const refusedByGuard = r.status === 'denied' && r.verdict?.policy === REPEAT_GUARD_POLICY
+        if (!refusedByGuard) repeat = foldResult(repeat, resultDigest(r.outcome.ok, r.outcome.modelText))
         reply(r.outcome.modelText, !r.outcome.ok)
         const summary: ToolCallSummary = { toolExecutionId, toolUseId, name, status: r.status }
         if (r.outcome.error) summary.errorClass = r.outcome.error.class

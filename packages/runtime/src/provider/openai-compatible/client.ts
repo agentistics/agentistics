@@ -27,6 +27,7 @@
 import { classifyProviderError, type ClassifierInput, type EditPolicy, type ProviderError } from '@agentistics/core'
 import { createCapturingFetch, writeCapture as defaultWriteCapture } from '../capture.ts'
 import { allowlistOpenAICompatibleHeaders, readOpenAICompatibleExchange } from './raw.ts'
+import { readRateLimit } from '../rate-limit.ts'
 import type { OpenAICompatibleEndpointKind } from './usage.ts'
 import type {
   CaptureRef,
@@ -372,6 +373,7 @@ export async function invokeOpenAICompatibleOnce(
       usageCertainty: read.usageCertainty,
       cost: read.cost,
       usageNotes: read.usageNotes,
+      rateLimit: readRateLimit('openai-compatible', ex.headers, d.now()),
       ...(read.requestId !== undefined ? { requestId: read.requestId } : {}),
       ...(capture !== undefined ? { capture } : {}),
     }

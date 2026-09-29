@@ -56,22 +56,20 @@
  * actually reports one — a task with no direct sessions gets no footer row at all, per §4.4.
  */
 
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Columns3, Plus } from 'lucide-react'
 import {
   cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
 } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import {
-  fmtDateTime, fmtStamp, liveStatusMap, liveStatusOrder, microLabel, pill,
+  button, liveStatusMap, liveStatusOrder, microLabel, pill,
   statusStyle, surface, type BoardStatus,
 } from './board'
-import { DurationCellView } from './SubtaskDurationCell'
 import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
-import { SubtaskSessions } from './SubtaskSessions'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
@@ -84,12 +82,27 @@ import { StagedSessionCompose } from './StagedSessionCompose'
 import { StagedSessionView } from './StagedSessionView'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { useMoney } from './money'
-import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
+import { costCellFor, tokensCellFor } from './subtaskRollup'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
+import { ModelCellView } from './SubtaskModelCell'
+import { PickerMenu } from './PickerMenu'
+import { readBoardPrefs, writeBoardPrefs } from './boardPrefs'
+import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
+import { subtaskColumnCell } from './subtaskColumnCell'
+import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
+import { SubtaskFilterBar } from './SubtaskFilterBar'
 import type {
   StagedSessionWriteResult, StatusWriteResult, Subtask, SubtaskPatch, SubtaskView,
   TaskFile, TaskSessionRow, TaskStatus,
 } from '../../lib/tasks'
+
+/** `SubtaskColumnId` and `SubtaskSortKey` (`@agentistics/core`) name the same seven legacy columns
+ *  by the same string — `model` is the one column with no sort key at all (there is nothing on the
+ *  server to sort a raw session field by), so its header carries no click affordance, the same rule
+ *  `TaskTable.tsx`'s own `cellFor` applies to any column with no `sort` in its `ColumnDef`. */
+function subtaskSortKeyFor(id: SubtaskColumnId): SubtaskSortKey | undefined {
+  return id === 'model' ? undefined : (id as SubtaskSortKey)
+}
 
 function StatusPick({ value, lang, statuses, onPick }: {
   value: TaskStatus
@@ -244,11 +257,21 @@ export function SubtaskTable(p: SubtaskTableProps) {
    * sorted list, so a group and its members stay together), never `p.subtasks` and never a write.
    */
   const [sort, setSort] = useState<SubtaskSortSpec | null>(null)
-  const ordered = orderedSubtasks(p.subtasks, sort, {
+  // Which columns are shown, in the order they were picked (t-63b7d3b2b0 #1) — read once from the
+  // shared board arrangement, same lifetime `TaskTable.tsx`'s own main-grid columns already have.
+  const stored = useMemo(readBoardPrefs, [])
+  const [shownCols, setShownCols] = useState<SubtaskColumnId[]>(stored.subtaskColumns ?? DEFAULT_SUBTASK_COLUMNS)
+  const setColumns = (next: SubtaskColumnId[]) => { setShownCols(next); writeBoardPrefs({ subtaskColumns: next }) }
+  /** The column filter (t-63b7d3b2b0 #2) — ephemeral, like the sort above: it narrows this one look
+   *  at the grid and is never remembered across a remount. */
+  const [filter, setFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
+  const filtered = filterSubtaskRows(p.subtasks, p.sessions, filter)
+  const ordered = orderedSubtasks(filtered, sort, {
     views: p.subtaskRollups,
     sessions: p.sessions,
     statusOrder: liveStatusOrder(p.statuses),
   })
+  const colCount = 2 + shownCols.length
 
   const pickStatus = async (t: Subtask, status: TaskStatus) => {
     const result = await p.onPatch(t.id, { status })
@@ -261,7 +284,9 @@ export function SubtaskTable(p: SubtaskTableProps) {
 
   // The direct-branch footer row — sessions filed straight on the delivery, under no subtask.
   // `subtaskRollupOf` only resolves a SUBTASK's bucket (it takes `{ id, groupId }`, never `null`),
-  // so the `id: null` view is read straight off the list here instead.
+  // so the `id: null` view is read straight off the list here instead. Never affected by the column
+  // FILTER above — it is not a subtask, so a status/harness/model filter has nothing on it to judge
+  // (see `subtaskFilter.ts`'s own header on why a filter never touches this bucket).
   const directView = p.subtaskRollups.find(v => v.id === null)
   const directSessions = p.sessions.filter(s => s.subtaskId === null)
   const directCost = costCellFor(directView?.rollup)
@@ -270,7 +295,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
   return (
     <div style={{ ...surface, overflowX: 'auto' }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px',
+        display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px', flexWrap: 'wrap',
         borderBottom: '1px solid var(--border)',
       }}>
         <span style={microLabel}>{copy.subtasks}</span>
@@ -279,6 +304,20 @@ export function SubtaskTable(p: SubtaskTableProps) {
         <div style={{ flex: 1, maxWidth: 220 }}>
           <TaskProgressBar done={done} total={p.subtasks.length} />
         </div>
+        <SubtaskFilterBar value={filter} onChange={setFilter} sessions={p.sessions} statuses={p.statuses} lang={p.lang} />
+        <PickerMenu
+          title={boardCopy(p.lang).pickers.columnsTitle}
+          lang={p.lang}
+          width={230}
+          orderable
+          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28 }}
+          items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: boardCopy(p.lang).subtaskColumns[c.id] }))}
+          value={shownCols}
+          onChange={next => setColumns(next as SubtaskColumnId[])}
+          note={boardCopy(p.lang).pickers.columnsNote}
+        >
+          <Columns3 size={12} /> {boardCopy(p.lang).pickers.columnsTrigger}
+        </PickerMenu>
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
@@ -287,48 +326,52 @@ export function SubtaskTable(p: SubtaskTableProps) {
             {/* The leading '' is the gear-menu column (`SubtaskActionsMenu`) — no header text, same
                 convention the old trailing actions column used, and no sort: nothing to order by. */}
             <th style={{ ...microLabel, padding: '6px 9px', fontWeight: 600 }} />
-            {([
-              [copy.subtasks, 'title'], ['Status', 'status'],
-              [copy.started, 'started'], [copy.completed, 'completed'], [copy.duration, 'duration'],
-              [copy.sessions, 'sessions'],
-              [copy.cost, 'cost'], [copy.tokens, 'tokens'],
-            ] as Array<[string, SubtaskSortKey]>).map(([h, key]) => (
-              <SortTh
-                key={key}
-                label={h}
-                sortKey={key}
-                current={sort}
-                mobile={isMobile}
-                onSort={k => setSort(cycleSort(sort, k))}
-                title={L.sortByColumn.replace('{column}', h)}
-                align={key === 'cost' || key === 'tokens' || key === 'duration' ? 'right' : 'left'}
-                style={{
-                  ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
-                  textAlign: key === 'cost' || key === 'tokens' || key === 'duration' ? 'right' : 'left',
-                }}
-              />
-            ))}
+            {/* The title column is always shown — the row's own name, never in the "Columns"
+                picker, exactly like `TaskTable.tsx`'s own leading name column. */}
+            <SortTh
+              label={copy.subtasks} sortKey="title" current={sort} mobile={isMobile}
+              onSort={k => setSort(cycleSort(sort, k))}
+              title={L.sortByColumn.replace('{column}', copy.subtasks)}
+              style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap' }}
+            />
+            {shownCols.map(id => {
+              const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+              const sortKey = subtaskSortKeyFor(id)
+              return (
+                <SortTh
+                  key={id}
+                  label={boardCopy(p.lang).subtaskColumns[id]}
+                  sortKey={sortKey}
+                  current={sort}
+                  mobile={isMobile}
+                  onSort={k => setSort(cycleSort(sort, k))}
+                  title={L.sortByColumn.replace('{column}', boardCopy(p.lang).subtaskColumns[id])}
+                  align={def.numeric ? 'right' : 'left'}
+                  style={{
+                    ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
+                    textAlign: def.numeric ? 'right' : 'left',
+                  }}
+                />
+              )
+            })}
           </tr>
         </thead>
         <tbody>
-          {p.subtasks.length === 0 && (
+          {ordered.length === 0 && (
             <tr>
-              <td colSpan={9} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
-                {copy.nothingBrokenOut}
+              <td colSpan={colCount} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
+                {p.subtasks.length === 0 ? copy.nothingBrokenOut : boardCopy(p.lang).subtaskFilter.noMatch}
               </td>
             </tr>
           )}
           {visibleClusterRows(clusterSubtaskRows(ordered), expandedGroups).map(({ subtask: t, depth, clustered }) => {
             // A GROUP MEMBER (§F.1) never carries a session of its own — refused server-side
             // (`subtask_in_group`) — so it has no rollup bucket at all (`subtaskViews` excludes it
-            // outright). `r` is therefore `undefined` for it by construction, which already renders
-            // as the fully empty cost/tokens cells below — the same "nothing filed here yet"
-            // convention every untracked subtask uses, never a fake zero.
+            // outright), which `subtaskColumnCell`'s own cost/tokens cases already read as the
+            // fully empty cell — the same "nothing filed here yet" convention every untracked
+            // subtask uses, never a fake zero.
             const isMember = isGroupMember(t)
             const isGroup = isGroupSubtask(t)
-            const r = subtaskRollupOf(p.subtaskRollups, t)
-            const cost = costCellFor(r)
-            const tok = tokensCellFor(r)
             const view = p.subtaskRollups.find(v => v.id === t.id)
             // Only an ORPHANED member reaches this — a properly clustered one (`clustered === true`)
             // is drawn directly under its group by `clusterSubtaskRows`, and the position plus the
@@ -442,67 +485,32 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   </div>
                 )}
               </td>
-              <td style={{ ...cell, minWidth: 90, whiteSpace: 'nowrap', ...tint }}>
-                <StatusPick
-                  value={t.status} lang={p.lang} statuses={p.statuses}
-                  onPick={s => void pickStatus(t, s)}
-                />
-              </td>
-              {/* `startedAt`/`deliveredAt` are SYSTEM facts, never a date somebody typed — see
-                  `Subtask.startedAt`'s own note. Read-only: no picker, no owner column, nothing to
-                  type. */}
-              <td style={{ ...cell, whiteSpace: 'nowrap', ...tint }}>
-                <span
-                  title={t.startedAt ? fmtStamp(t.startedAt, p.lang) : undefined}
-                  style={{
-                    fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                    color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                  }}
-                >{fmtDateTime(t.startedAt, p.lang, nowMs)}</span>
-              </td>
-              <td style={{ ...cell, whiteSpace: 'nowrap', ...tint }}>
-                <span
-                  title={t.deliveredAt ? fmtStamp(t.deliveredAt, p.lang) : undefined}
-                  style={{
-                    fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                    color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                  }}
-                >{fmtDateTime(t.deliveredAt, p.lang, nowMs)}</span>
-              </td>
-              <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap', ...tint }}>
-                <DurationCellView startedAt={t.startedAt} deliveredAt={t.deliveredAt} lang={p.lang} />
-              </td>
-              <td style={{ ...cell, minWidth: 190, ...tint }}>
-                {/* A MEMBER can never hold a session (`subtask_in_group`, refused server-side) —
-                    so it gets no filing control at all, not a control that always refuses. Its
-                    own chips are moot for the same reason: it has none, and never a UNION of its
-                    group's — that was §B's shared-bucket model, superseded by §F.1. */}
-                {!isMember && (
-                  <SubtaskSessions
-                    subtaskId={t.id}
-                    // A GROUP's own chips are its own direct sessions — never a union of its
-                    // members', who can never carry one. See
-                    // docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §F.3.
-                    subtaskIds={[t.id]}
-                    sessions={p.sessions}
-                    lang={p.lang}
-                    mobile={isMobile}
-                    onLink={setLinking}
-                    onUnfile={sid => void p.onUnfile(sid)}
-                    onOpen={p.onOpenSession}
-                  />
-                )}
-              </td>
-              {/* `r` absent (no bucket at all — always true for a MEMBER) or `sessionsUsed: 0` (a
-                  bucket, but nobody has filed a session here yet) both render as a fully EMPTY
-                  cell — no field at all, not even "N/A" — via `CostCellView`/`TokensCellView`'s
-                  `isUntracked` check. */}
-              <td style={{ ...cell, textAlign: 'right', ...tint }}>
-                <CostCellView r={r} cost={cost} money={money} />
-              </td>
-              <td style={{ ...cell, textAlign: 'right', ...tint }}>
-                <TokensCellView tok={tok} />
-              </td>
+              {shownCols.map(id => {
+                const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+                return (
+                  <td
+                    key={id}
+                    style={{
+                      ...cell, ...tint, whiteSpace: id === 'model' ? undefined : 'nowrap',
+                      minWidth: id === 'sessions' ? 190 : id === 'status' ? 90 : undefined,
+                      textAlign: def.numeric ? 'right' : 'left',
+                    }}
+                  >
+                    {id === 'status'
+                      ? (
+                        <StatusPick
+                          value={t.status} lang={p.lang} statuses={p.statuses}
+                          onPick={s => void pickStatus(t, s)}
+                        />
+                      )
+                      : subtaskColumnCell(id, {
+                        subtask: t, isMember, sessions: p.sessions, subtaskRollups: p.subtaskRollups,
+                        lang: p.lang, nowMs, isMobile, money,
+                        onLink: setLinking, onUnfile: sid => void p.onUnfile(sid), onOpenSession: p.onOpenSession,
+                      })}
+                  </td>
+                )
+              })}
             </tr>
             )
           })}
@@ -519,36 +527,36 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, minWidth: 180, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
                 {copy.directSessions}
               </td>
-              <td style={cell} />
-              <td style={cell} />
-              <td style={cell} />
-              <td style={cell} />
-              <td style={{ ...cell, minWidth: 190 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
-                  {directSessions.map(s => (
-                    <SessionRef
-                      key={s.id}
-                      id={s.id}
-                      title={s.label}
-                      harness={s.harness}
-                      lang={p.lang}
-                      historical={s.historical === true}
-                      onOpen={p.onOpenSession}
-                      onUnfile={sid => void p.onUnfile(sid)}
-                    />
-                  ))}
-                </span>
-              </td>
-              <td style={{ ...cell, textAlign: 'right' }}>
-                <CostCellView r={directView.rollup} cost={directCost} money={money} />
-              </td>
-              <td style={{ ...cell, textAlign: 'right' }}>
-                <TokensCellView tok={directTok} />
-              </td>
+              {shownCols.map(id => {
+                const def = SUBTASK_COLUMNS.find(c => c.id === id)!
+                return (
+                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 190 : undefined }}>
+                    {id === 'sessions' && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
+                        {directSessions.map(s => (
+                          <SessionRef
+                            key={s.id}
+                            id={s.id}
+                            title={s.label}
+                            harness={s.harness}
+                            lang={p.lang}
+                            historical={s.historical === true}
+                            onOpen={p.onOpenSession}
+                            onUnfile={sid => void p.onUnfile(sid)}
+                          />
+                        ))}
+                      </span>
+                    )}
+                    {id === 'model' && <ModelCellView sessions={directSessions} />}
+                    {id === 'cost' && <CostCellView r={directView.rollup} cost={directCost} money={money} />}
+                    {id === 'tokens' && <TokensCellView tok={directTok} />}
+                  </td>
+                )
+              })}
             </tr>
           )}
           <tr>
-            <td colSpan={9} style={{ ...cell }}>
+            <td colSpan={colCount} style={{ ...cell }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%' }}>
                 <Plus size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <input
