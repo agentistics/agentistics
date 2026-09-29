@@ -5,6 +5,15 @@
  * starts a NEW session in the workspace of the current (or `--cwd`) directory; `agentop code
  * --resume <id> [prompt]` repairs and continues one already on disk; `agentop code ls` lists them.
  *
+ * ## Two front doors, one flag check
+ *
+ * With a terminal on BOTH stdin and stdout, `agentop code` (bare, with a prompt, `--model`, `--cwd`
+ * or `--resume`) opens the control center on its `code` tab (`cli-start.ts`'s `runStart`, the host in
+ * `code-host.ts`); `bin/cli.ts` asks `opensCockpit` and does the flag check + argument parse through
+ * THIS module's own `parseCodeArgs`, so the two doors cannot disagree about what a flag means. This
+ * line-mode implementation is what remains for everything the cockpit cannot serve — a pipe, a CI
+ * job, `code ls`, `--help` — exactly as `cli-ui.ts` stays the non-TTY fallback of the control center.
+ *
  * ## Why this module builds its own `content`/`journal`, not only a `RuntimeHost`
  *
  * `--resume` needs `openSession` / `repairInterruptedRun` (`session/resume.ts`), whose deps are
@@ -433,13 +442,13 @@ async function drive(host: RuntimeHost, sessionId: string, initialPrompt: string
 
 // ── Argument parsing ─────────────────────────────────────────────────────────────────────────
 
-interface CodeArgsNew { kind: 'new'; model?: string; cwd?: string; prompt?: string }
-interface CodeArgsResume { kind: 'resume'; sessionId: string; prompt?: string }
-type CodeArgs = CodeArgsNew | CodeArgsResume
+export interface CodeArgsNew { kind: 'new'; model?: string; cwd?: string; prompt?: string }
+export interface CodeArgsResume { kind: 'resume'; sessionId: string; prompt?: string }
+export type CodeArgs = CodeArgsNew | CodeArgsResume
 
-type ParseResult = { ok: true; args: CodeArgs } | { ok: false; message: string }
+export type ParseResult = { ok: true; args: CodeArgs } | { ok: false; message: string }
 
-function parseCodeArgs(args: string[]): ParseResult {
+export function parseCodeArgs(args: string[]): ParseResult {
   let model: string | undefined
   let cwd: string | undefined
   let resume: string | undefined
@@ -611,7 +620,8 @@ Usage: agentop code [--model <id>] [--cwd <dir>] [prompt...]
        agentop code --resume <sessionId> [prompt...]
        agentop code ls [--limit <n>]
 
-The terminal front door onto a native Agentistics session (BETA). Runs a conversation against the
+The terminal front door onto a native Agentistics session (BETA). On a terminal it opens the
+control center on its \`code\` tab; piped, or with \`ls\`/\`--help\`, it runs in line mode. Runs a conversation against the
 Anthropic API using this machine's own stored key (see \`agentop provider key set\`), with every
 tool call gated by the session's policy — a call that is not allowed outright ASKS you, right
 here in the terminal (never auto-approved; no tty/no answer/timeout all deny).
@@ -633,6 +643,22 @@ agentop code ls        List native sessions (id, status, last update, title/mode
 
 const LS_HELP = 'Usage: agentop code ls [--limit <n>]'
 
+/**
+ * Should `agentop code <args>` open the control center's `code` tab instead of the line mode?
+ * Yes only with a real terminal on BOTH ends (an Ink app cannot draw into a pipe or read a pipe) and
+ * never for `ls` or `--help`, which are answers, not sessions.
+ */
+export function opensCockpit(args: string[], tty: { stdin: boolean; stdout: boolean }): boolean {
+  if (!tty.stdin || !tty.stdout) return false
+  const first = args[0]
+  return first !== 'ls' && first !== '--help' && first !== '-h'
+}
+
+/** The refusal `agentop code` prints BEFORE opening anything when the native runtime is off. */
+export function flagOffSentence(): string {
+  return `agentop code: the native runtime is off (BETA) — set ${PROVIDER_FLAG_ENV}=1 to use it.`
+}
+
 export async function runCode(args: string[], deps: Partial<CodeCliDeps> = {}): Promise<number> {
   const d: CodeCliDeps = { ...defaultDeps(), ...deps }
 
@@ -644,7 +670,7 @@ export async function runCode(args: string[], deps: Partial<CodeCliDeps> = {}): 
   // Refused BEFORE any session is created: with the flag off the key store answers "off" to every
   // credential lookup, and a session that exists only to fail its first model call is a lie on disk.
   if (!d.flagOn()) {
-    d.stderr(`agentop code: the native runtime is off (BETA) — set ${PROVIDER_FLAG_ENV}=1 to use it.`)
+    d.stderr(flagOffSentence())
     return 1
   }
 

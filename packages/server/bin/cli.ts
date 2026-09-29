@@ -505,7 +505,36 @@ if (command === 'provider') {
 }
 
 if (command === 'code') {
-  const { runCode } = await import('../server/cli-code.ts')
+  const { runCode, opensCockpit, parseCodeArgs, flagOffSentence } = await import('../server/cli-code.ts')
+  // With a terminal on both ends the tab is the front door; the line mode is the fallback for a pipe,
+  // `ls` and `--help`. The flag is checked HERE, before the alternate screen is entered, because a
+  // refusal printed inside it would be repainted away with the frame.
+  if (opensCockpit(args, { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })) {
+    const { providerFlagOn } = await import('../server/config.ts')
+    if (!providerFlagOn()) {
+      process.stderr.write(`${flagOffSentence()}\n`)
+      process.exit(1)
+    }
+    const parsed = parseCodeArgs(args)
+    if (!parsed.ok) {
+      process.stderr.write(`${parsed.message}\n`)
+      process.exit(2)
+    }
+    const { readPreferencesOrExit } = await import('../server/preferences.ts')
+    await readPreferencesOrExit()
+    const { runStart } = await import('../server/cli-start.ts')
+    const a = parsed.args
+    const result = await runStart(
+      a.kind === 'resume'
+        ? { launch: { resume: a.sessionId, ...(a.prompt ? { prompt: a.prompt } : {}) } }
+        : {
+          launch: { ...(a.prompt ? { prompt: a.prompt } : {}) },
+          ...(a.model ? { model: a.model } : {}),
+          ...(a.cwd ? { cwd: a.cwd } : {}),
+        },
+    )
+    process.exit(result === 'foreground' ? 0 : result)
+  }
   process.exit(await runCode(args))
 }
 
