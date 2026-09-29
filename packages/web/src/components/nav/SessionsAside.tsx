@@ -162,6 +162,14 @@ export interface SessionsAsideProps {
   filtersCount?: number
   onToggleFilters?: () => void
   filtersButtonRef?: (el: HTMLButtonElement | null) => void
+  /**
+   * A session this aside just CREATED — reported instead of navigating to `/sessions/:id`, for a
+   * mount that is not the sessions workspace (the Nay chat's "Sessões" tab opens it in its own
+   * panel). Absent: the workspace behaviour, straight into the new session's route.
+   */
+  onCreated?: (id: string) => void
+  /** The session this mount has open, where that is not the route's — see `onCreated`. */
+  selectedId?: string
 }
 
 /**
@@ -200,13 +208,15 @@ function groupMenuExtras(
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
+  onCreated, selectedId,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
   // 44px is the MOBILE figure. Applying it on desktop turns a compact list into a row of buttons.
   const isMobile = useIsMobile()
   const tap = isMobile ? 44 : undefined
-  const { sessionId } = useParams()
+  const { sessionId: routeSessionId } = useParams()
+  const sessionId = selectedId ?? routeSessionId
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   /**
@@ -1274,7 +1284,8 @@ export function SessionsAside({
             // aside is visible before and after this navigation settles.
             if (id) {
               markSessionPending({ id, ...started })
-              navigate(sessionPath(id), { state: { creating: started ?? {} } })
+              if (onCreated) onCreated(id)
+              else navigate(sessionPath(id), { state: { creating: started ?? {} } })
             }
           }}
         />

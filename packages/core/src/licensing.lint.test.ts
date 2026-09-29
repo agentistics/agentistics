@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 /**
  * The licence map in `LICENSING.md`, kept true by the build.
@@ -19,6 +19,11 @@ import { join, relative } from 'node:path'
  *     is precisely how `@agentistics/mcp` imports `@agentistics/core` with only the MCP SDK in its
  *     `dependencies`. A bundler inlines whatever is imported. The root package (`agentistics`) is
  *     FSL like the platform, and is checked like any other.
+ *  3. **an Apache-2.0 package imports nothing by a relative path that leaves its own directory** —
+ *     `../../core/src/types` reaches FSL code without ever naming `@agentistics/core`, so the check
+ *     above alone would pass it.
+ *  4. **an Apache-2.0 package carries its own `LICENSE` with the Apache text** — the root LICENSE
+ *     is FSL, so a package without one ships under the wrong text.
  */
 
 const ROOT = join(import.meta.dir, '..', '..', '..')
@@ -40,6 +45,35 @@ function readPkg(dir: string): Pkg {
 }
 
 const IMPORT = /(?:from|import)\s*\(?\s*['"](@agentistics\/[a-z0-9-]+)/g
+const RELATIVE = /(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]*)['"]/g
+
+/** PURE. The relative specifiers in `text` (a file in `fileDir`) that resolve outside `pkgDir`. */
+export function escapingImports(text: string, fileDir: string, pkgDir: string): string[] {
+  const root = resolve(pkgDir)
+  const out: string[] = []
+  for (const m of text.matchAll(RELATIVE)) {
+    const spec = m[1]
+    if (!spec) continue
+    const target = resolve(fileDir, spec)
+    if (target !== root && !target.startsWith(root + sep)) out.push(spec)
+  }
+  return out
+}
+
+/** Source files of a package (tests, dist and node_modules excluded). */
+function sourceFiles(dir: string): string[] {
+  const files: string[] = []
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue
+      const p = join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(ts|tsx|js|mjs)$/.test(e.name) && !/\.test\.(ts|tsx)$/.test(e.name)) files.push(p)
+    }
+  }
+  walk(dir)
+  return files
+}
 
 /** Every `@agentistics/<pkg>` a package's own source imports (tests, dist and node_modules excluded). */
 function importedWorkspacePackages(dir: string): string[] {
@@ -85,8 +119,39 @@ describe('licensing map', () => {
         const fsl = [...used].filter((d) => byName.get(d)?.license === 'FSL-1.1-ALv2')
         expect(fsl).toEqual([])
       })
+
+      it(`${pkg.name} (Apache-2.0) imports nothing outside its own directory by a relative path`, () => {
+        const escaping = sourceFiles(pkg.dir).flatMap((f) =>
+          escapingImports(readFileSync(f, 'utf8'), dirname(f), pkg.dir).map((s) => `${relative(pkg.dir, f)}: ${s}`),
+        )
+        expect(escaping).toEqual([])
+      })
+
+      it(`${pkg.name} (Apache-2.0) carries its own Apache-2.0 LICENSE`, () => {
+        const file = join(pkg.dir, 'LICENSE')
+        expect(existsSync(file)).toBe(true)
+        const text = readFileSync(file, 'utf8')
+        expect(text).toContain('Apache License')
+        expect(text).toContain('Version 2.0, January 2004')
+      })
     }
   }
+
+  it('@agentistics/engine-api is Apache-2.0 — the contract a third party codes an engine against', () => {
+    expect(byName.get('@agentistics/engine-api')?.license).toBe('Apache-2.0')
+  })
+
+  it('sees a relative import that leaves the package', () => {
+    const pkgDir = join(ROOT, 'packages', 'engine-api')
+    const fileDir = join(pkgDir, 'src')
+    const text = [
+      "import { a } from './version'",
+      "import type { B } from '../../core/src/types'",
+      "export * from '../src/engine'",
+      "const c = await import('../../server/server/limits')",
+    ].join('\n')
+    expect(escapingImports(text, fileDir, pkgDir)).toEqual(['../../core/src/types', '../../server/server/limits'])
+  })
 
   it('sees the imports an undeclared workspace dependency hides', () => {
     const mcp = byName.get('@agentistics/mcp')

@@ -5,33 +5,17 @@ import os from 'node:os'
 import { buildNaySettings, ensureNayChat } from './chat-tty'
 
 describe('buildNaySettings', () => {
-  it('includes the correct API URL in the MCP env', () => {
-    const settings = buildNaySettings(47291)
-    expect(settings.mcpServers.agentistics.env.AGENTISTICS_API).toBe('http://localhost:47291')
+  it('allows the whole agentistics MCP server, not a hand-kept subset', () => {
+    expect(buildNaySettings().permissions.allow).toContain('mcp__agentistics')
+    expect(buildNaySettings().permissions.allow.filter((p: string) => p.startsWith('mcp__agentistics__'))).toEqual([])
   })
 
-  it('uses bun to run the MCP server', () => {
-    const settings = buildNaySettings(47291)
-    expect(settings.mcpServers.agentistics.command).toBe('bun')
-    expect(settings.mcpServers.agentistics.args).toContain('packages/mcp/agentistics-mcp.ts')
+  it('includes WebFetch permission for localhost', () => {
+    expect(buildNaySettings().permissions.allow).toContain('WebFetch(domain:localhost)')
   })
 
-  it('includes all 18 agentistics MCP tools in permissions.allow', () => {
-    const settings = buildNaySettings(47291)
-    const allowed = settings.permissions.allow
-    const mcpTools = allowed.filter((p: string) => p.startsWith('mcp__agentistics__'))
-    expect(mcpTools).toHaveLength(18)
-  })
-
-  it('includes WebFetch permission for the given port', () => {
-    const settings = buildNaySettings(12345)
-    const webFetch = settings.permissions.allow.find((p: string) => p.startsWith('WebFetch'))
-    expect(webFetch).toBe('WebFetch(domain:localhost)')
-  })
-
-  it('uses a different port correctly', () => {
-    const settings = buildNaySettings(9999)
-    expect(settings.mcpServers.agentistics.env.AGENTISTICS_API).toBe('http://localhost:9999')
+  it('writes no mcpServers block (Claude Code does not read one from a project settings file)', () => {
+    expect(buildNaySettings()).not.toHaveProperty('mcpServers')
   })
 })
 
@@ -59,22 +43,16 @@ describe('ensureNayChat', () => {
     await writeFile(path.join(tmpDir, 'CLAUDE.md'), claudeMdContent)
     await writeFile(
       path.join(dotClaude, 'settings.json'),
-      JSON.stringify(buildNaySettings(47291), null, 2),
+      JSON.stringify(buildNaySettings(), null, 2),
     )
 
     const settingsJson = await readFile(path.join(dotClaude, 'settings.json'), 'utf-8')
     const settings = JSON.parse(settingsJson)
-    expect(settings.mcpServers.agentistics.env.AGENTISTICS_API).toBe('http://localhost:47291')
     expect(settings.permissions.allow).toBeInstanceOf(Array)
   })
 
   it('settings.json contains valid JSON with the correct structure', () => {
-    const settings = buildNaySettings(47291)
-    const json = JSON.stringify(settings, null, 2)
-    const parsed = JSON.parse(json)
-    expect(parsed).toHaveProperty('mcpServers')
+    const parsed = JSON.parse(JSON.stringify(buildNaySettings(), null, 2))
     expect(parsed).toHaveProperty('permissions')
-    expect(parsed.mcpServers.agentistics).toHaveProperty('command')
-    expect(parsed.mcpServers.agentistics).toHaveProperty('cwd')
   })
 })

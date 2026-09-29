@@ -62,7 +62,7 @@ import { BudgetPanel } from './components/BudgetPanel'
 import { SessionDrilldownModal } from './components/SessionDrilldownModal'
 import { TranscriptModal } from './components/TranscriptModal'
 import type { PrefsDraft, AppContext } from './lib/app-context'
-import { TtyChat } from './components/TtyChat'
+import { NayDock } from './components/nay/NayDock'
 import { UpdateModal } from './components/UpdateModal'
 import { InstallModal } from './components/InstallModal'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
@@ -4646,29 +4646,18 @@ export default function AppLayout() {
         />
       )}
 
-      {/* TTY Chat (Nay) — floating button + panel. Hidden on a pure central (aggregator with
-          no local harness): the chat needs a locally-installed harness to be meaningful.
-          Also hidden when the server revoked the localChat capability (an exposed instance
-          answers /api/chat-tty and /api/exec with 403 — see server/capability-guard.ts), so the
-          UI never offers an action that cannot work. */}
-      {!teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false && chatOffered && (
-        <TtyChat
+      {/* The Nay chat — floating button + a panel of REAL sessions (`NayDock`). A Nay conversation
+          is a managed session, so the panel needs BOTH the chat switch and the session power: the
+          `localChat` capability + the user's chat switch (`chatOffered`), and `localShell`, which
+          guards every `/api/fleet` route. Hidden on a pure central, which has no local harness. */}
+      {!teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
+        && teamSession?.capabilities?.localShell !== false && chatOffered && (
+        <NayDock
           lang={lang}
-          chatModel={chatModel}
-          chatSoundEnabled={chatSoundEnabled}
-          chatSoundId={chatSoundId}
-          filters={filters}
-          setFilters={setFilters}
-          onPdfExport={(range) => setPdfDirectExportRange(range)}
           isMobile={isMobile}
-          onModelSet={(model) => {
-            setChatModel(model)
-            fetch('/api/preferences', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chatModel: model }),
-            }).catch(() => {})
-          }}
+          ctx={appCtx}
+          filters={filters}
+          activeOnly={activeOnly}
         />
       )}
 
