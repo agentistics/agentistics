@@ -9,10 +9,13 @@ becomes **open source (Apache-2.0) two years after each release**.
 |---|---|
 | Everything in this repository, unless listed below | [FSL-1.1-ALv2](LICENSE) (Functional Source License, Apache-2.0 future licence) |
 | A package whose own `LICENSE` file says Apache-2.0 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0). Reserved for the integration surface: the hub contract, the SDK and the adapter SDK, once each exists as its own package |
+| `packages/engine-api` (`@agentistics/engine-api`) | [Apache-2.0](packages/engine-api/LICENSE). The engine contract: types and a few pure functions a host and an engine both compile against |
 
 Each package's `package.json` `license` field states its licence. `licensing.lint.test.ts` fails the
 build when a field disagrees with this table. It also fails when an Apache-2.0 package depends on
-an FSL package, because an Apache package that bundles FSL code would not really be Apache.
+an FSL package — by name or by a relative path out of its own directory — and when an Apache-2.0
+package lacks its own Apache `LICENSE`, because an Apache package that bundles FSL code would not
+really be Apache.
 
 ## What you may do (FSL-1.1-ALv2)
 

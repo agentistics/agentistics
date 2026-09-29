@@ -2279,6 +2279,34 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // this one call reads a directory from the body when `resume` refuses to, and `fleet-spawn.ts`
     // for every check made on it. `localShell` is what bounds it: unreachable on a `lan` or `public`
     // profile whoever is authenticated.
+    // A NAY conversation: a managed `claude` session in Nay's own directory, filed under the "Nay"
+    // group (`sessions/nay-web.ts`). It rides `/api/fleet`'s `localShell` guard like every start, and
+    // it is also the chat — so the user's chat switch (`chat-gate.ts`) must be on too.
+    if (url.pathname === '/api/fleet/nay' && req.method === 'POST') {
+      if (!chatAllowed(CAPS.localChat, (await readPreferences()).chatEnabled)) {
+        return new Response(JSON.stringify({ ok: false, message: 'chat_disabled' }), {
+          status: 403,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const { fleetLang } = await import('./sessions/fleet-web')
+        const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+        const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT))
+        return new Response(JSON.stringify(out), {
+          status: out.code === 'memory_budget' ? 409 : 200,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     if (url.pathname === '/api/fleet/new' && req.method === 'POST') {
       try {
         const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')

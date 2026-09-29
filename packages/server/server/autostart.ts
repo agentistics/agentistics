@@ -20,8 +20,15 @@ import { join, resolve } from 'path'
 import { mkdir, writeFile, readFile, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import type { CentralRuntimeId } from './central-runtime'
+import { PORT } from './config'
+import { cliStrings, type CliStrings } from './cli-i18n'
+import { resolveLang } from './cli-lang'
 import {
   availableServiceManagers,
+  awaitReplacement,
+  managerUnreachable,
+  parseUnitShow,
+  pidUnderUnit,
   bootCaveat,
   defaultServiceManager,
   launchdPlist,
@@ -31,6 +38,8 @@ import {
   systemdUnit,
   migrateUnitKillMode,
   migrateUnitPath,
+  type RestartVerdict,
+  type ServingObservation,
   type ServiceManagerFacts,
   type ServiceManagerId,
   type ServiceSpec,
@@ -639,7 +648,83 @@ export async function unitInstalled(mode: AutostartMode): Promise<boolean> {
   }
 }
 
-export async function restartAutostart(mode: AutostartMode): Promise<AutostartResult> {
+/** The seams `restartAutostart` reads the machine through, so a test can stand in a service manager
+ *  and a process table and never run a real `systemctl` against the live server. */
+export interface RestartDeps {
+  run?: (cmd: string[]) => Promise<{ code: number; stdout: string; stderr: string }>
+  /** What is serving `mode` right now. Default: the listener on the port (server) or the unit's own
+   *  MainPID (watch). */
+  observe?: (mode: AutostartMode) => Promise<ServingObservation>
+  /** Parent of a pid, for "is this process under the unit". Default: `/proc/<pid>/stat`. */
+  parentOf?: (pid: number) => Promise<number | null>
+  strings?: CliStrings
+  /** Where the unit files live. Default `~/.config/systemd/user`; a test points it at a temp dir. */
+  unitDir?: string
+  timeoutMs?: number
+  intervalMs?: number
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+export type Exec = NonNullable<RestartDeps['run']>
+
+/** The pid listening on `port`, by `lsof`, falling back to `ss` where lsof is not installed. */
+export async function listenerPid(port: number, exec: Exec): Promise<number | null> {
+  const lsof = await exec(['lsof', '-ti', `tcp:${port}`, '-sTCP:LISTEN'])
+  const fromLsof = Number(lsof.stdout.split(/\s+/).filter(Boolean)[0])
+  if (Number.isInteger(fromLsof) && fromLsof > 0) return fromLsof
+  if (lsof.code !== 127) return null
+  const ss = await exec(['ss', '-H', '-ltnp', `sport = :${port}`])
+  const fromSs = Number(/pid=(\d+)/.exec(ss.stdout)?.[1])
+  return Number.isInteger(fromSs) && fromSs > 0 ? fromSs : null
+}
+
+async function unitFacts(mode: AutostartMode, exec: Exec) {
+  const r = await exec(['systemctl', '--user', 'show', `agentop-${mode}`, '-p', 'MainPID', '-p', 'ActiveState'])
+  return { ...r, ...parseUnitShow(r.stdout) }
+}
+
+/** What is serving `mode`: the server by its port, everything else by the unit's own process. */
+async function observeServing(mode: AutostartMode, exec: Exec): Promise<ServingObservation> {
+  if (mode === 'server') {
+    const pid = await listenerPid(PORT, exec)
+    let answering = false
+    if (pid !== null) {
+      try {
+        answering = (await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(1_500) })).ok
+      } catch { /* not answering this tick */ }
+    }
+    return { pid, answering }
+  }
+  const u = await unitFacts(mode, exec)
+  return { pid: u.mainPid, answering: u.state === 'active' && u.mainPid !== null }
+}
+
+async function procParent(pid: number): Promise<number | null> {
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8')
+    const ppid = Number(/\)\s+\S+\s+(\d+)/.exec(stat)?.[1])
+    return Number.isInteger(ppid) ? ppid : null
+  } catch {
+    return null
+  }
+}
+
+/** The one sentence a verdict earns — never "Restarted" for anything but a replaced process. */
+function verdictMessage(v: RestartVerdict, unit: string, subject: string, t: CliStrings): AutostartResult {
+  if (v.kind === 'replaced') {
+    return {
+      ok: true,
+      message: v.before === null ? t.restartStarted(unit, v.after) : t.restartRestarted(unit, v.before, v.after),
+    }
+  }
+  if (v.kind === 'unchanged') return { ok: false, message: t.restartUnchanged(unit, subject, v.pid) }
+  return { ok: false, message: t.restartSilent(unit, subject) }
+}
+
+export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = {}): Promise<AutostartResult> {
+  const exec: Exec = deps.run ?? run
+  const unitFile = deps.unitDir ? join(deps.unitDir, unitName(mode)) : unitPath(mode)
   if (platform() !== 'linux') return notSupported('restart')
 
   if (mode === 'central') {
@@ -655,7 +740,7 @@ export async function restartAutostart(mode: AutostartMode): Promise<AutostartRe
   let unitExists = true
   let unitText = ''
   try {
-    unitText = await readFile(unitPath(mode), 'utf8')
+    unitText = await readFile(unitFile, 'utf8')
   } catch {
     unitExists = false
   }
@@ -668,6 +753,30 @@ export async function restartAutostart(mode: AutostartMode): Promise<AutostartRe
         `with \`agentop autostart ${mode} enable\`.`,
     }
   }
+
+  // ASK THE MANAGER, AND LOOK AT WHAT IS SERVING, BEFORE TOUCHING ANYTHING. `systemctl restart`
+  // exiting 0 is not a restart: with no reachable user bus, or a server that is running outside the
+  // unit (a foreground `agentop server`), it changes nothing — and once reported "Restarted" while
+  // the same pid went on serving the old code. So the two ways a restart cannot work are refused
+  // here, in a sentence naming the cause, before a unit file is written or a process disturbed.
+  // Nothing agentop did not start is ever killed: the person is told the command instead.
+  const t = deps.strings ?? cliStrings(await resolveLang())
+  const unit = `agentop-${mode}`
+  const facts = await unitFacts(mode, exec)
+  if (facts.code !== 0) {
+    return { ok: false, message: t.restartManagerUnreachable(unit, facts.stderr || `exit ${facts.code}`) }
+  }
+  const observe = deps.observe ?? ((m: AutostartMode) => observeServing(m, exec))
+  // `machine` is a oneshot that runs `docker compose up -d`: no pid of its own to compare.
+  const verifiable = mode === 'server' || mode === 'watch'
+  const before: ServingObservation = verifiable ? await observe(mode) : { pid: null, answering: false }
+  if (mode === 'server' && before.pid !== null) {
+    const owned = await pidUnderUnit(before.pid, facts.mainPid, deps.parentOf ?? procParent)
+    if (!owned) {
+      return { ok: false, message: t.restartNotManaged(`the server on :${PORT}`, before.pid, unit, facts.state) }
+    }
+  }
+  const subject = mode === 'server' ? `the server on :${PORT}` : unit
 
   // MIGRATE BEFORE BOUNCING, and reload before either. A unit written before `KillMode=process`
   // kills its whole cgroup on stop, which is the fleet — so a restart on the old unit is the very
@@ -688,26 +797,36 @@ export async function restartAutostart(mode: AutostartMode): Promise<AutostartRe
   if (pathFixed) { next = pathFixed; done.push('sessions it starts can find the coding assistants on your PATH') }
   if (next !== unitText) {
     try {
-      await writeFile(unitPath(mode), next, 'utf8')
-      const reload = await run(['systemctl', '--user', 'daemon-reload'])
+      await writeFile(unitFile, next, 'utf8')
+      const reload = await exec(['systemctl', '--user', 'daemon-reload'])
       if (reload.code === 0) notes.push(`Updated the unit so ${done.join(', and ')}.`)
       else notes.push(`Updated the unit, but systemctl --user daemon-reload failed: ${reload.stderr || `exit ${reload.code}`}`)
     } catch (err: any) {
-      notes.push(`Could not update ${unitPath(mode)}: ${err?.message ?? err}`)
+      notes.push(`Could not update ${unitFile}: ${err?.message ?? err}`)
     }
   }
 
-  const res = await run(['systemctl', '--user', 'restart', `agentop-${mode}`])
+  const res = await exec(['systemctl', '--user', 'restart', `agentop-${mode}`])
   if (res.code !== 0) {
     return {
       ok: false,
       message: [...notes, `systemctl --user restart agentop-${mode} failed: ${res.stderr || `exit ${res.code}`}`].join('\n'),
     }
   }
-  return {
-    ok: true,
-    message: [...notes, `Restarted agentop-${mode} — it now runs the current code and config.`].join('\n'),
+  if (!verifiable) {
+    return {
+      ok: true,
+      message: [...notes, `Restarted agentop-${mode} — it now runs the current code and config.`].join('\n'),
+    }
   }
+  // The exit code said the OS accepted the command. What was CLAIMED is that the thing serving
+  // changed, so that is what is observed — the pid before against the pid after, with a bounded
+  // wait for the new one to answer.
+  const verdict = await awaitReplacement(before, () => observe(mode), {
+    timeoutMs: deps.timeoutMs, intervalMs: deps.intervalMs, sleep: deps.sleep, now: deps.now,
+  })
+  const outcome = verdictMessage(verdict, unit, subject, t)
+  return { ok: outcome.ok, message: [...notes, outcome.message].join('\n') }
 }
 
 /**
