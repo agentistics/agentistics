@@ -35,6 +35,7 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
 import { ApprovalCard } from './ApprovalCard'
+import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
@@ -456,6 +457,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * `/model` works perfectly.
    */
   const [models, setModels] = useState<{ id: string; label: string }[]>([])
+  /** The list is the server's fallback table, so a typed id is offered too — see `ModelSelect`. */
+  const [modelFreeText, setModelFreeText] = useState(false)
   const modelReason = useMemo(() => modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en'), [row, pt])
   useEffect(() => {
     if (modelReason || !row?.harness) return
@@ -463,11 +466,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     fetch(`/api/fleet/new?lang=${pt ? 'pt' : 'en'}`)
       .then(r => (r.ok ? r.json() : null))
       .then((d: {
-        harnesses?: { id: string; models?: { id: string; label: string }[]; modelSuggestions?: string[] }[]
+        harnesses?: { id: string; models?: { id: string; label: string }[]; modelSuggestions?: string[]; modelFreeText?: boolean }[]
       } | null) => {
         if (!alive || !d?.harnesses) return
         const h = d.harnesses.find(x => x.id === row.harness)
         setModels(h?.models ?? (h?.modelSuggestions ?? []).map(id => ({ id, label: id })))
+        setModelFreeText(h?.modelFreeText === true)
       })
       .catch(() => { /* no list, no picker — the control simply does not appear */ })
     return () => { alive = false }
@@ -3052,7 +3056,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
                         </p>
-                      ) : models.length > 0 && (
+                      ) : (models.length > 0 || modelFreeText) && (
                         <>
                           <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
                           <p style={{
@@ -3078,6 +3082,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                               {m.label}
                             </button>
                           ))}
+                          {modelFreeText && (
+                            <TypedModel lang={pt ? 'pt' : 'en'} onPick={id => { setMoreOpen(false); void switchModel(id) }} />
+                          )}
                           <p style={{ margin: '2px 8px 4px', fontSize: 10, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                             {pt ? 'Envia /model para a sessão.' : 'Sends /model to the session.'}
                           </p>

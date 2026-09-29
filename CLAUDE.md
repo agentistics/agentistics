@@ -779,7 +779,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   ├── lib/
   │   ├── app-context.ts        → AppContext interface (React context type shared by all pages)
   │   ├── componentCatalog.tsx  → catalog of all components available in the custom layout builder
-  │   ├── chatModels.ts         → web-only model list
+  │   ├── chatModel.ts          → PURE: which model the Nay chat runs + its label, read off `/api/chat-harnesses` (the server's ONE model catalog, `server/model-catalog.ts` — each CLI's own list where it publishes one, the verified `HARNESS_MODELS` table + a typed id where it does not). The old hardcoded `chatModels.ts` is gone
   │   ├── chatSounds.ts         → 5 synthesized notification sounds via Web Audio API (Ping, Chime, Soft, Bell, Pop)
   │   ├── notifications.ts      → notification store (useSyncExternalStore) + render-time pt/en i18n (NOTIFICATION_TEXT keyed by code, interpolates meta)
   │   └── harness.ts            → HARNESS_LABELS, HARNESS_COLORS, capable(harness, metric), HARNESS_INFO (data-source/contains/missing/note metadata for HarnessInfoPanel)

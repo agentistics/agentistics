@@ -36,8 +36,6 @@ export interface ChatDriver {
   isAvailable(): boolean
   /** Best-effort check: does the auth/config file exist for this harness? */
   authReady(): boolean
-  models: ChatDriverModel[]
-  defaultModel: string
   /** Static guidance for install / login. */
   setup: ChatDriverSetup
   ensureMcp(port: number): Promise<void>
@@ -61,7 +59,16 @@ export interface HarnessChatStatus {
   authReady: boolean
   /** installed && authReady — driver is usable. */
   ready: boolean
+  /** From `model-catalog.ts` — the CLI's own list where it publishes one, else the verified table. */
   models: ChatDriverModel[]
+  /** `cli`: the harness's own list. `table`: the incomplete fallback — see `modelFreeText`. */
+  modelsSource: 'cli' | 'table'
+  /** The picker must also accept a typed id (the list is the table, which cannot name them all). */
+  modelFreeText: boolean
+  /**
+   * What this machine's CLI uses when no model is passed, read from its own settings file, or `''`
+   * — never an invented one. `''` sends no `--model` at all.
+   */
   defaultModel: string
   setup: ChatDriverSetup
 }

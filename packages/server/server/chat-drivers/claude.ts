@@ -1,4 +1,4 @@
-import { CHAT_MODELS, registerMcpGlobally, streamViaClaude } from '../chat-tty'
+import { registerMcpGlobally, streamViaClaude } from '../chat-tty'
 import type { ChatDriver } from './types'
 import { findCli } from './cli-detect'
 
@@ -24,11 +24,6 @@ export const claudeDriver: ChatDriver = {
     docUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   },
 
-  // Expose all Claude models defined in chat-tty (mutable copy for the interface)
-  models: CHAT_MODELS.map(m => ({ ...m })),
-
-  // Default to the second entry (Sonnet)
-  defaultModel: CHAT_MODELS[1].id,
 
   async ensureMcp(port: number) {
     await registerMcpGlobally(port)
@@ -38,7 +33,7 @@ export const claudeDriver: ChatDriver = {
     await streamViaClaude(
       message,
       history,
-      model as typeof CHAT_MODELS[number]['id'],
+      model,
       cb.onChunk,
       cb.onTool,
       cb.onDone,

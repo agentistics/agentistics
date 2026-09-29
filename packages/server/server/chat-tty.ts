@@ -10,13 +10,6 @@ export const CLAUDE_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'claude-chat'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-export const CHAT_MODELS = [
-  { id: 'claude-haiku-4-5',   label: 'Haiku 4.5',   badge: 'Fast',     desc: 'Fastest responses, great for quick questions',    inputPer1M: 0.80,  outputPer1M: 4.00  },
-  { id: 'claude-sonnet-4-6',  label: 'Sonnet 4.6',  badge: 'Balanced', desc: 'Best balance of speed and intelligence',          inputPer1M: 3.00,  outputPer1M: 15.00 },
-  { id: 'claude-opus-4-7',    label: 'Opus 4.7',    badge: 'Powerful', desc: 'Most capable — ideal for complex analysis',       inputPer1M: 15.00, outputPer1M: 75.00 },
-] as const
-
-export type ChatModelId = typeof CHAT_MODELS[number]['id']
 
 // Written to ~/.agentistics/nay-chat/CLAUDE.md on every server start
 // so git pull + restart always gets the latest instructions.
@@ -317,7 +310,7 @@ export interface StreamViaClaudioOpts {
 export async function streamViaClaude(
   message: string,
   history: ChatMessage[],
-  model: ChatModelId,
+  model: string,
   onChunk: (text: string) => void,
   onTool: (name: string) => void,
   onDone: () => void,
@@ -335,7 +328,8 @@ export async function streamViaClaude(
     args.push('--budget-tokens', String(opts.thinkingBudget))
   }
 
-  args.push('--model', model)
+  // `''` is the CLI's own default — no flag, never an invented model.
+  if (model) args.push('--model', model)
 
   const imageAttachments = opts?.attachments?.filter(a => a.isImage) ?? []
   const textAttachments = opts?.attachments?.filter(a => !a.isImage) ?? []

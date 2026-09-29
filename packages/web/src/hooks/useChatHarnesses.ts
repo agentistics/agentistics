@@ -36,7 +36,13 @@ export interface HarnessChatStatus {
   authReady: boolean
   /** installed && authReady — driver is usable. */
   ready: boolean
+  /** From the server's ONE model catalog — the CLI's own list where it publishes one. */
   models: ChatDriverModel[]
+  /** `cli`: the harness's own list. `table`: the incomplete fallback. Absent on an older server. */
+  modelsSource?: 'cli' | 'table'
+  /** The picker must also accept a typed id (the list is the table, which cannot name them all). */
+  modelFreeText?: boolean
+  /** The machine's configured default, or `''` — the CLI's own, with no `--model` at all. */
   defaultModel: string
   setup: ChatDriverSetup
 }
