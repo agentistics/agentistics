@@ -103,6 +103,9 @@ Commands:
                 set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
                 --stdin, never on the command line ('provider key set|status|remove';
                 'provider try anthropic' makes one real, billed call)
+  code          BETA — the terminal front door onto a native session: runs a conversation
+                against your stored Anthropic key, asking you here for anything not
+                allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
@@ -499,6 +502,11 @@ if (command === 'restore') {
 if (command === 'provider') {
   const { runProvider } = await import('../server/cli-provider.ts')
   process.exit(await runProvider(args))
+}
+
+if (command === 'code') {
+  const { runCode } = await import('../server/cli-code.ts')
+  process.exit(await runCode(args))
 }
 
 if (command === 'member') {

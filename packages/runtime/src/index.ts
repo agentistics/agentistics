@@ -43,5 +43,17 @@ export * from './loop/emit.ts'
 export * from './loop/wire.ts'
 export * from './policy/index.ts'
 export * from './sandbox/index.ts'
+// ── B4.1: session and run lifecycle, recorded ───────────────────────────────────────────────────
+export * from './session/types.ts'
+export * from './session/content-store.ts'
+export * from './session/sqlite-store.ts'
+export * from './session/lifecycle.ts'
+export * from './session/scheduler.ts'
+export * from './session/runtime.ts'
+export * from './session/resume.ts'
+export * from './session/protocol.ts'
+export * from './session/hub.ts'
+export * from './tools/env.ts'
+
 // ── B8.1: the harness catalogue's pure core (the host loader is B8.2) ──────────────────────────
 export * from './catalogue/index.ts'
