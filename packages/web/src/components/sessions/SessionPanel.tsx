@@ -290,13 +290,12 @@ export function SessionPanel({
     bottomOccupant: bottomDesktopPanel, relayed, isMobile, bottomHasPanels: barEntries.length > 0,
   })
   /**
-   * A TAB CLICK SELECTS, IT NEVER TOGGLES — `lib/panelBar.ts`'s own `resolvePanelBarPick`. This bar
-   * only ever lists bottom-placed panels now, so there is exactly one destination for a pick that is
-   * not already the visible active tab: open it there.
+   * A CLICK ON THE OPEN TAB MINIMIZES IT, like the right rail — `lib/panelBar.ts`'s own
+   * `resolvePanelBarPick`. Any other tab opens there; the open one collapsed restores.
    */
   const onPanelBarPick = useCallback((id: PanelBarId) => {
     const action = resolvePanelBarPick({ id, activeBottom: bottomOccupant, bottomOpen: slotLayout.bottomOpen })
-    if (action.kind === 'noop') return
+    if (action.kind === 'minimize') { setBottomOpen(false); return }
     if (action.kind === 'restore') { setBottomOpen(true); return }
     // action.kind === 'open'
     openSlotPanel(id)
