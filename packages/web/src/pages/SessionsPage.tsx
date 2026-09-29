@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
 import { PanelGapDots, PanelJunction, armGap } from '../components/sessions/PanelGap'
-import { activeJunctions, isDragEndEvent, junctionHitRect, PANEL_GAP } from '../lib/panelLayout'
+import { activeJunctions, isDragEndEvent, junctionHitRect, OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from '../lib/panelLayout'
 import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
@@ -1064,7 +1064,7 @@ export default function SessionsPage() {
         // band laid across the top of the conversation.
         ...(isMobile
           ? { border: 'none', borderBottom: '1px solid var(--border-subtle)' }
-          : { border: '1px solid var(--border)', borderRadius: 10, marginBottom: PANEL_GAP, boxSizing: 'border-box' as const }),
+          : { border: PANEL_BORDER, borderRadius: PANEL_RADIUS, marginBottom: PANEL_GAP, boxSizing: 'border-box' as const }),
         background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
         fontFamily: 'inherit', fontSize: 11.5,
       }}
@@ -2098,13 +2098,11 @@ export default function SessionsPage() {
         overflow: 'hidden',
         // A panel on the board like every other: border and 10px corners (its top corners were
         // square). No border while collapsed to width 0, or a 2px sliver would remain.
-        ...(asideIn ? { border: '1px solid var(--border)', borderRadius: 10, boxSizing: 'border-box' as const } : {}),
+        ...(asideIn ? { border: PANEL_BORDER, borderRadius: PANEL_RADIUS, boxSizing: 'border-box' as const } : {}),
         // TOP ALIGNMENT (owner, 2026-09-27): this panel used to start flush against the header, the
-        // one panel on the board with no gap above it at all. `6` is the SAME outer-gap figure the
-        // centre column's own `marginTop` uses (`OUTER_GAP`, declared further down this component —
-        // a bare literal here rather than that binding, since this style is computed above where
-        // `OUTER_GAP` is declared and referencing it here would be a temporal-dead-zone reference).
-        marginTop: 6,
+        // one panel on the board with no gap above it at all. It takes the SAME outer-gap figure the
+        // centre column's own `marginTop` uses (`OUTER_GAP`, `lib/panelLayout.ts`).
+        marginTop: OUTER_GAP,
         transition: asideMotion,
       }
   const artInner: CSSProperties = split
@@ -2904,16 +2902,9 @@ export default function SessionsPage() {
    *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
    *     them be dropped rather than sandwiched.
    */
-  const CENTRAL_PANE = { border: '1px solid var(--border)', radius: 10, gap: 5 } as const
-  /**
-   * THE OUTER FRAME GAP — a panel's own border to the window's edge, or (below) to the header. Kept
-   * as its own named figure rather than a bare `6` scattered across `paddingRight`/`paddingBottom`
-   * and the two panels' `marginTop` below: it is the SAME number as `PANEL_GAP` used to be before the
-   * owner's 6→10 bump for the INNER seams (`lib/panelLayout.ts`'s own `PANEL_GAP`), and it stays 6
-   * because an outer edge has no neighbour to grip against — the request was for more room around the
-   * grip, not a wider margin to the window.
-   */
-  const OUTER_GAP = 6
+  const CENTRAL_PANE = { border: PANEL_BORDER, radius: PANEL_RADIUS, gap: 5 } as const
+  // THE OUTER FRAME GAP is `OUTER_GAP` from `lib/panelLayout.ts` — it moved there once the dashboard
+  // pages joined the same board, so both workspaces read one figure.
   /** The T-junction's own hit-zone square — `junctionHitRect`'s formula (`gap + extra`) applied to
    *  the CURRENT inner gap, so a future `PANEL_GAP` change resizes the junction's target along with
    *  the seam it sits on instead of leaving it sized for the old gap. */

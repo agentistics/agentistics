@@ -48,10 +48,14 @@
   --text-secondary: rgba(255, 255, 255, 0.55);
   --text-tertiary: rgba(255, 255, 255, 0.3);
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* THE BOARD'S RADIUS FAMILY (owner, 2026-09-27). `lg` is a PANEL — the page panel and every
+     card that stands on it — and `md` is a card NESTED inside one; they mirror `PANEL_RADIUS` and
+     `CARD_RADIUS` in `lib/panelLayout.ts`, and `panelLayout.test.ts` fails if the two drift. The
+     scale used to run 8/12/16/20, which put 16px cards on a 10px board. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
 
   --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.3);
   --shadow-elevated: 0 4px 12px rgba(0,0,0,0.5), 0 20px 60px rgba(0,0,0,0.4);
