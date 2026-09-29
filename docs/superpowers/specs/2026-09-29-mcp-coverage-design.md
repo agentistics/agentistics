@@ -322,7 +322,7 @@ public FSL code, so the rules are:
 | `/api/fleet/tree` writes | bypasses the target session's own permission prompts |
 | `PUT/DELETE /api/provider/:id`, team connection add, `/api/team/tokens*`, `/api/team/repos` writes | credentials |
 | `/api/iam/*` writes, `/api/team/{members,config}` writes | identity and escalation; step-up territory |
-| the security switches in preferences, `/api/config*` | an agent must never widen its own gates |
+| the security switches in preferences (including `remoteVoiceApprovals`, the remote caps and the UV tiers), phone pairing and revocation, `/api/config*` | an agent must never widen its own gates or enrol its own approver |
 | `/api/mcp/{install,replace}`, `agentop hooks install`, `autostart` | installs code or writes outside our directories (a CLAUDE.md rule: an explicit act of the user) |
 | restore, `events emit/test` | overwrites history or fabricates facts |
 | lifecycle (`server`, `central up/down`, `restart`) | out of v1 (**D-5**) |
@@ -465,10 +465,112 @@ owns the whole path. The brain never produces the approval.
 6. The shell POSTs `decide` with `channel:'voice'`, the matcher's transcript and its confidence.
    The brain learns the outcome through `agentistics_intent`, like any caller.
 
-**Stated limit.** Nothing verifies the speaker, so anyone in the room can say "confirmo". The web
-card remains the strong channel. Decision **O-3** (still open, for the owner) asks whether voice
-from the phone, through the hub, may decide D intents. Until it is decided, a D intent arriving that
-way is refused `needs_screen`.
+**Stated limit (local call).** Nothing verifies the speaker, so anyone in the room can say
+"confirmo". The web card remains the strong channel.
+
+### 4.5a Phone voice through the hub (D-3: allowed, with its own gates)
+
+The owner decided that voice from the phone, relayed through the hub, may approve class-D actions.
+That channel carries three risks the local call does not:
+
+- **Nobody sees the screen.** The spoken readback is the only account of what will happen.
+- **The hub relays the decision.** It sits between the phone and this machine, and it must not be
+  able to forge or replay an approval.
+- **The phone can be lost, borrowed or unlocked in someone else's hand**, possibly in the middle
+  of a call.
+
+Every gate below answers one of those three. Each is enforced by the MACHINE that executes the
+intent, never by the hub or the phone. This is the same rule as `performMachineAction`: a check
+that runs only on the party whose behaviour cannot be verified is not a check.
+
+1. **A paired device, and a signed decision.**
+   - The phone is enrolled once, **on this machine's screen**: a QR code shown by Settings, scanned
+     by the phone. The phone generates a device keypair, and the machine pins the public key. This
+     is the device-side E2E crypto D-1 keeps PUBLIC, and it follows the envelope pin rules: the
+     first sight is announced, and a key change is refused, never silently re-pinned.
+   - Every remote decision is **signed by that device key** over
+     `{intentId, argsHash, targetSnapshotHash, readbackId, challenge, decision, at}`.
+   - The machine verifies the signature before anything else. A hub that alters, invents or
+     replays a decision produces a signature that does not verify.
+   - Devices are listed in Settings with their last use. Revoking one takes effect on the next
+     decision.
+2. **Its own switch, off until turned on at the screen.**
+   - `preferences.remoteVoiceApprovals`, where absent reads as OFF (the `chat-gate.ts` rule). It
+     can be flipped only from a local surface.
+   - It is on the §3.14 N list, and outside the `PATCH /api/preferences/agent` allowlist, so an
+     agent can never enable its own remote approver.
+   - Pairing a device does not turn the switch on. They are two explicit acts.
+3. **The confirmation repeats the ACTION and the TARGET, plus a challenge.**
+   - The readback ends in a required phrase built by the server from three parts:
+     - the **verb** from a closed table (`matar`/`kill`, `abrir`/`start`, `apagar`/`delete`,
+       `aprovar`/`approve`, and so on);
+     - the **target's short name**, meaning the session title's first distinctive words, or the
+       count for a batch ("cinco sessões");
+     - a **fresh two-digit challenge**.
+
+     Example: "Para confirmar, diga: confirmo matar Pelvie coordenador, quarenta e dois."
+   - The deterministic matcher requires all three to appear in the transcript, in that order, plus
+     an affirmative word. The target is matched against tokens the server supplied, never against
+     free text. A negation word anywhere refuses.
+   - A bare "confirmo" is never enough on this channel. Nor is a phrase naming the wrong target:
+     that is refused `target_mismatch` and counts as a failure (gate 6).
+4. **Bound to the call that heard the readback.**
+   - The readback is delivered to one call session with a `readbackId`.
+   - A decision must name that id and come from the device holding that call.
+   - The utterance must start after the readback finished playing. The phone reports the playback
+     end, signed, and barge-in cancels.
+5. **A short-lived, single-use grant.**
+   - The remote window is **45 s** from the end of the readback (60 s on the local call, 120 s on
+     a card).
+   - The challenge is single-use. The grant is spent on execution and bound to the args hash and
+     the target snapshot.
+   - If the target changed before execution, the intent is refused `stale` and a new readback is
+     needed. This is the §4.2 rule, unchanged.
+6. **Rate limits, and a lockout.**
+   - A device may approve at most **5 D intents per 10 minutes**.
+   - **3 consecutive failed matches** (a wrong target, a wrong challenge, or low confidence) lock
+     remote D approvals for that device until someone unlocks it at a screen.
+   - The lock is announced on every surface.
+7. **Blast-radius caps per intent**, which the owner sets in Settings, on screen only.
+   - The defaults, per intent:
+     - kill: at most 3 sessions;
+     - spawn, batch or fan-out: at most 5;
+     - broadcast: at most 5 targets;
+     - allowances created by phone voice: at most 30 min, with a spawn budget of at most 5.
+   - An intent over a cap is refused on this channel with `over_remote_cap`, in words. The
+     readback suggests splitting the intent or using a screen.
+8. **User verification on the phone for the highest tier.**
+   - The highest tier is: kill of 2 or more sessions, a batch or fan-out, `upgrade`, any
+     disclosure (task share, tag share, widening a sharing rule), and task delete.
+   - For these, the phone additionally asks for **the OS's own user-verification step**: a
+     biometric or the device PIN, as a WebAuthn assertion with user verification required.
+   - Its assertion is part of the signed decision. This is the answer to "an unlocked phone in the
+     wrong hand, mid-call".
+   - The owner can lower this gate to "never" per tier in Settings, on screen only. It can never be
+     lowered by voice.
+9. **Every remote approval is announced where the owner's other screens are.**
+   - An immediate notification (toast, bell and desktop) names the action, the target, the device
+     and the time, with a **Revoke this device** button beside it.
+   - Kill is not undoable, so the announcement is not an undo. It is what makes a misuse visible
+     within seconds, and it stops the next one.
+10. **The audit is richer on this channel (§4.6).**
+    - Each record adds the device id, the readback id, the transcript the matcher saw and its
+      confidence, which gates passed (signature, match, challenge, window, UV), the latency from the
+      end of the readback, and the sha256 of the utterance audio.
+    - **The audio itself is not stored.** A voice recording is personal data, and the hash is
+      enough to prove which utterance was matched if the phone keeps the audio.
+    - A refused or locked-out attempt is audited with the gate that stopped it.
+
+**Stated limits, kept on this channel.**
+
+- The speaker is still not verified by voice.
+- What stands between a thief and an action is:
+  - possession of a paired phone;
+  - a live call;
+  - saying the exact action, target and challenge;
+  - for the highest tier, the phone's own unlock;
+  - the caps, the rate limit and the lockout;
+  - an announcement on every other screen within seconds.
 
 ### 4.6 Audit
 
@@ -619,6 +721,22 @@ item with its mobile version.
   - the lint test that `packages/mcp` imports no engine code;
   - `agentistics_provider_try` (D) as the first engine tool.
 
+- P3.5 **M** — Phone pairing:
+  - the on-screen QR enrollment;
+  - the device keypair, pinned with announce-on-first-sight;
+  - the device list and revoke in Settings;
+  - signed decisions, verified by the machine before any other gate (§4.5a gate 1).
+- P3.6 **M** — The remote-voice gates:
+  - the `remoteVoiceApprovals` switch, local-only and in N;
+  - the action + target + challenge phrase builder and matcher, pure, EN/PT, with `target_mismatch`;
+  - the readback binding and the 45 s window;
+  - the rate limit and the lockout;
+  - the blast-radius caps and their on-screen settings;
+  - the cross-surface announcement with Revoke;
+  - the richer audit fields.
+- P3.7 **S** — Phone user verification (a WebAuthn assertion with UV required) for the highest
+  tier, carried inside the signed decision, plus its per-tier setting on screen.
+
 **P4 — the central (D-6)**
 
 - P4.1 **M** — The agent token: a per-account, read-scoped token minted in Settings and stored
@@ -657,12 +775,17 @@ them. One stays with the owner.
   - In v1 an allowance never covers `kill`, including the kill of sessions that the same allowance
     spawned.
 
-### Open, for the owner
+- **D-3 · Phone voice may approve class-D actions (was O-3). Decided by the owner: implement it
+  completely, with full gates.** The gates are in §4.5a:
+  - a paired device, and a signed decision;
+  - its own on-screen switch, off by default;
+  - a spoken phrase that repeats the action, the target and a challenge;
+  - binding to the call that heard the readback;
+  - a 45 s single-use grant;
+  - a rate limit and a lockout;
+  - blast-radius caps;
+  - OS user verification for the highest tier;
+  - a cross-surface announcement;
+  - a richer audit.
 
-- **O-3 · Can phone voice (through the hub) approve D actions?**
-  - The leader leans NO for v1: a destructive action needs an on-screen confirmation.
-  - The spec's recommendation is compatible with that. Voice from the phone may approve only
-    allowance intents and W. D intents need the local voice path or a card, and under the leader's
-    reading, a card only.
-  - Until the owner decides, P3.2 builds the voice matcher for local calls only, and a D intent
-    arriving from `channel:'voice'` through the hub is refused `needs_screen`.
+  The earlier leaning toward "screen only" is superseded.
