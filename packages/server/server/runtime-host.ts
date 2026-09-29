@@ -24,6 +24,7 @@ import { join } from 'node:path'
 import {
   createAnthropicClient,
   createFileContentStore,
+  createPersistentCheckpointStore,
   createHubAsker,
   createNativeTools,
   createPolicy,
@@ -224,7 +225,14 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
 
   const runtimeVersion = opts.runtimeVersion ?? 'agentistics-runtime@b4'
   const hub = opts.hub ?? createSessionHub()
-  const tools: NativeTools = createNativeTools(opts.env ? { env: opts.env } : {})
+  // H4: every write the file tools make is checkpointed DURABLY — bodies in the content store (0600,
+  // by sha256), refs and paths in the store's own `checkpoints` table, never in the session row — so
+  // `/undo` still works after this process is gone.
+  const checkpointStore = createPersistentCheckpointStore(content, store)
+  const tools: NativeTools = createNativeTools({
+    ...(opts.env ? { env: opts.env } : {}),
+    file: { checkpointStore },
+  })
   const clients = new Map<ProviderId, ProviderClient>()
   const clientFor = opts.clientFor ?? ((provider: ProviderId): ProviderClient => {
     if (provider !== 'anthropic') {
@@ -250,6 +258,7 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
     journal,
     clientFor,
     tools: tools.tools,
+    checkpoints: store,
     policyFactory: () => hostPolicy({
       home: opts.home, dataDir: opts.dataDir,
       ...(opts.protectedPaths ? { protectedPaths: opts.protectedPaths } : {}),

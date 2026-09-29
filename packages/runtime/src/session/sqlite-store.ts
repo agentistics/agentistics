@@ -26,6 +26,7 @@
 
 import { Database } from 'bun:sqlite'
 import type { ContentRef } from '../tools/contract.ts'
+import type { AppendCheckpointInput, CheckpointIndex, CheckpointRow, UndoOutcomeKind } from './checkpoint-store.ts'
 import {
   clampMessagesLimit,
   clampSessionsLimit,
@@ -119,6 +120,24 @@ CREATE TABLE IF NOT EXISTS leases (
   holder_token TEXT NOT NULL,
   expires_at   TEXT NOT NULL
 );
+
+-- H4: the durable edit checkpoint. Refs and paths only — every body is in the content store.
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id        TEXT,
+  run_id            TEXT,
+  tool_execution_id TEXT NOT NULL,
+  path              TEXT NOT NULL,
+  before_sha256     TEXT,
+  before_bytes      INTEGER,
+  after_sha256      TEXT,
+  after_bytes       INTEGER,
+  stored            INTEGER NOT NULL,
+  at                TEXT NOT NULL,
+  undone_at         TEXT,
+  undo_outcome      TEXT
+);
+CREATE INDEX IF NOT EXISTS checkpoints_session_idx ON checkpoints(session_id, undone_at, id);
 `
 
 interface SessionRow {
@@ -229,6 +248,43 @@ function rowToAttachment(r: AttachmentRow): AttachmentRecord {
   return rec
 }
 
+interface CheckpointDbRow {
+  id: number
+  session_id: string | null
+  run_id: string | null
+  tool_execution_id: string
+  path: string
+  before_sha256: string | null
+  before_bytes: number | null
+  after_sha256: string | null
+  after_bytes: number | null
+  stored: number
+  at: string
+  undone_at: string | null
+  undo_outcome: string | null
+}
+
+function refOf(sha: string | null, bytes: number | null): ContentRef | null {
+  return sha === null ? null : { sha256: sha, bytes: bytes ?? 0 }
+}
+
+function rowToCheckpoint(r: CheckpointDbRow): CheckpointRow {
+  const rec: CheckpointRow = {
+    id: r.id,
+    sessionId: r.session_id,
+    runId: r.run_id,
+    toolExecutionId: r.tool_execution_id,
+    path: r.path,
+    before: refOf(r.before_sha256, r.before_bytes),
+    after: refOf(r.after_sha256, r.after_bytes),
+    stored: r.stored === 1,
+    at: r.at,
+  }
+  if (r.undone_at !== null) rec.undoneAt = r.undone_at
+  if (r.undo_outcome !== null) rec.undoOutcome = r.undo_outcome as UndoOutcomeKind
+  return rec
+}
+
 interface ToolCallRow {
   run_id: string
   tool_execution_id: string
@@ -313,7 +369,7 @@ export interface SqliteSessionStoreOptions {
   now?: () => Date
 }
 
-export function openSqliteSessionStore(path: string, opts: SqliteSessionStoreOptions = {}): SessionStore {
+export function openSqliteSessionStore(path: string, opts: SqliteSessionStoreOptions = {}): SessionStore & CheckpointIndex {
   const db = new Database(path, { create: true })
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA busy_timeout = 5000')
@@ -393,6 +449,23 @@ export function openSqliteSessionStore(path: string, opts: SqliteSessionStoreOpt
       run.stop ?? null, run.sentence ?? null, run.turns, run.toolCalls,
     )
     bumpRunCountStmt.run(run.runId, run.startedAt, run.sessionId)
+  })
+
+  const insertCheckpointStmt = db.prepare(
+    `INSERT INTO checkpoints (session_id, run_id, tool_execution_id, path, before_sha256, before_bytes,
+       after_sha256, after_bytes, stored, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+  // The newest run that still has an un-undone row, then that run's un-undone rows. `IS` compares a
+  // NULL run id as equal, so writes made outside any run still group together.
+  const latestUndoableStmt = db.prepare(
+    `SELECT * FROM checkpoints WHERE session_id = ?1 AND undone_at IS NULL AND run_id IS (
+       SELECT run_id FROM checkpoints WHERE session_id = ?1 AND undone_at IS NULL ORDER BY id DESC LIMIT 1
+     ) ORDER BY id ASC`,
+  )
+  const markUndoneStmt = db.prepare('UPDATE checkpoints SET undone_at = ?, undo_outcome = ? WHERE id = ? AND undone_at IS NULL')
+  const allCheckpointsStmt = db.prepare('SELECT * FROM checkpoints ORDER BY id ASC')
+  const markUndoneTx = db.transaction((marks: ReadonlyArray<{ id: number; outcome: UndoOutcomeKind }>, at: string): void => {
+    for (const m of marks) markUndoneStmt.run(at, m.outcome, m.id)
   })
 
   const leaseTx = db.transaction((sessionId: string, holder: LeaseHolder, ttlMs: number, nowMs: number): LeaseAcquireResult => {
@@ -550,6 +623,24 @@ export function openSqliteSessionStore(path: string, opts: SqliteSessionStoreOpt
     async getLease(sessionId: string): Promise<Lease | null> {
       const row = getLeaseStmt.get(sessionId) as LeaseRow | null
       return row ? rowToLease(row) : null
+    },
+
+    async appendCheckpoint(input: AppendCheckpointInput): Promise<void> {
+      insertCheckpointStmt.run(
+        input.sessionId, input.runId, input.toolExecutionId, input.path,
+        input.before?.sha256 ?? null, input.before?.bytes ?? null,
+        input.after?.sha256 ?? null, input.after?.bytes ?? null,
+        input.stored ? 1 : 0, input.at,
+      )
+    },
+    async latestUndoable(sessionId: string): Promise<CheckpointRow[]> {
+      return (latestUndoableStmt.all(sessionId) as CheckpointDbRow[]).map(rowToCheckpoint)
+    },
+    async markUndone(marks, at): Promise<void> {
+      markUndoneTx(marks, at)
+    },
+    async allCheckpoints(): Promise<CheckpointRow[]> {
+      return (allCheckpointsStmt.all() as CheckpointDbRow[]).map(rowToCheckpoint)
     },
 
     close(): void {

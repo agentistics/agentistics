@@ -47,6 +47,8 @@ import { runToolLoop, type ToolLoopLimits, type ToolLoopOptions, type ToolLoopSt
 import { runEndedEvent, runStartedEvent, sessionEndedEvent, sessionStartedEvent, type LifecycleEventContext } from './lifecycle.ts'
 import type { RunScheduler } from './scheduler.ts'
 import type { MessageRecord, RecordToolCallInput, RunRecord, SessionRecord, SessionStore } from './types.ts'
+import type { CheckpointIndex } from './checkpoint-store.ts'
+import { undoLastChange, type UndoOptions, type UndoResult } from './undo.ts'
 
 // ── Context assembly (§4 — the resume item reuses this exact function) ─────────────────────────
 
@@ -158,7 +160,17 @@ export interface CreateSessionRuntimeDeps {
   /** Default 200 (spec §4) — the newest messages fed to the model on a run. */
   contextMessages?: number
   retry?: ToolLoopOptions['retry']
+  /**
+   * The durable edit checkpoint the file tools record into (H4). Absent: `undo` answers that this
+   * runtime keeps no durable checkpoint, in words — never a silent "nothing to undo".
+   */
+  checkpoints?: CheckpointIndex
 }
+
+/** `undo`'s refusals before any file is looked at, beside `undoLastChange`'s own results. */
+export type SessionUndoResult =
+  | UndoResult
+  | { status: 'refused'; reason: 'session-not-found' | 'run-in-progress' | 'no-checkpoint'; sentence: string }
 
 export interface SessionRuntime {
   create(input: CreateSessionInput): Promise<SessionRecord>
@@ -168,6 +180,12 @@ export interface SessionRuntime {
   finish(sessionId: string): Promise<void>
   fail(sessionId: string): Promise<void>
   get(sessionId: string): Promise<SessionRecord | null>
+  /**
+   * H4: revert the agent's last file change set in this session (`./undo.ts`), through the
+   * session's own policy and asker. Refused while a run of the session is in flight — the agent
+   * would be writing the very files being put back.
+   */
+  undo(sessionId: string, opts?: UndoOptions): Promise<SessionUndoResult>
 }
 
 const DEFAULT_MAX_TOKENS = 8192
@@ -192,6 +210,8 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
   const policies = new Map<string, ToolPolicy>()
   /** Bounded by the scheduler's own ceiling: one entry per run in flight, removed in the `finally`. */
   const activeRuns = new Map<string, AbortController>()
+  /** Which session each in-flight run belongs to — the same population as `activeRuns`. */
+  const runSession = new Map<string, string>()
 
   function policyFor(session: SessionRecord): ToolPolicy {
     const existing = policies.get(session.sessionId)
@@ -261,6 +281,7 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
 
     const ctl = new AbortController()
     activeRuns.set(runId, ctl)
+    runSession.set(runId, sessionId)
     if (opts.signal) {
       if (opts.signal.aborted) ctl.abort()
       else opts.signal.addEventListener('abort', () => ctl.abort(), { once: true })
@@ -343,6 +364,7 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
       return { ok: true, runId, status, stop: loopResult.status, sentence: loopResult.sentence, turns: loopResult.turns, toolCalls: loopResult.toolCalls }
     } finally {
       activeRuns.delete(runId)
+      runSession.delete(runId)
       slot.release()
     }
   }
@@ -362,9 +384,34 @@ export function createSessionRuntime(deps: CreateSessionRuntimeDeps): SessionRun
     policies.delete(sessionId)
   }
 
+  async function undo(sessionId: string, opts: UndoOptions = {}): Promise<SessionUndoResult> {
+    const session = await deps.store.getSession(sessionId)
+    if (!session) return { status: 'refused', reason: 'session-not-found', sentence: `No such session: ${sessionId}.` }
+    if (!deps.checkpoints) {
+      return { status: 'refused', reason: 'no-checkpoint', sentence: 'This runtime keeps no durable edit checkpoint, so there is nothing it can undo.' }
+    }
+    if ([...runSession.values()].includes(sessionId)) {
+      return { status: 'refused', reason: 'run-in-progress', sentence: 'A run of this session is still in progress; cancel it or wait for it to end before undoing.' }
+    }
+    const latest = await deps.store.latestRun(sessionId)
+    return undoLastChange(sessionId, {
+      index: deps.checkpoints,
+      content: deps.content,
+      policy: policyFor(session),
+      asker: deps.askerFor?.(sessionId) ?? deps.asker,
+      journal,
+      runtimeVersion: deps.runtimeVersion,
+      workspaceRoot: session.workspaceRoot,
+      cwd: session.cwd,
+      latestRunId: latest?.runId ?? null,
+      now,
+    }, opts)
+  }
+
   return {
     create,
     run,
+    undo,
     cancel,
     finish: sessionId => endSession(sessionId, 'ended'),
     fail: sessionId => endSession(sessionId, 'failed'),

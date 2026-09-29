@@ -345,19 +345,19 @@ export function createFilePatchTool(ledger: ReadLedger, checkpoint: Checkpoint):
       for (const plan of plans) {
         if (plan.kind === 'add') {
           ledger.record(plan.finalPath, await ledgerEntryOf(plan.finalPath))
-          await checkpoint.record({ path: plan.finalPath, before: null, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId }, ctx.now)
+          await checkpoint.record({ path: plan.finalPath, before: null, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId }, ctx.now)
         } else if (plan.kind === 'delete') {
           ledger.forget(plan.originalPath)
-          await checkpoint.record({ path: plan.originalPath, before: plan.beforeContent, after: null, toolExecutionId: ctx.toolExecutionId }, ctx.now)
+          await checkpoint.record({ path: plan.originalPath, before: plan.beforeContent, after: null, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId }, ctx.now)
         } else if (plan.renamed) {
           ledger.forget(plan.originalPath)
           ledger.record(plan.finalPath, await ledgerEntryOf(plan.finalPath))
-          await checkpoint.record({ path: plan.originalPath, before: plan.beforeContent, after: null, toolExecutionId: ctx.toolExecutionId }, ctx.now)
-          await checkpoint.record({ path: plan.finalPath, before: null, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId }, ctx.now)
+          await checkpoint.record({ path: plan.originalPath, before: plan.beforeContent, after: null, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId }, ctx.now)
+          await checkpoint.record({ path: plan.finalPath, before: null, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId }, ctx.now)
         } else {
           ledger.record(plan.finalPath, await ledgerEntryOf(plan.finalPath))
           await checkpoint.record(
-            { path: plan.finalPath, before: plan.beforeContent, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId },
+            { path: plan.finalPath, before: plan.beforeContent, after: plan.afterContent, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId },
             ctx.now
           )
         }

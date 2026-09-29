@@ -36,6 +36,10 @@ export interface CheckpointEntry {
   /** `null` means the editor DELETED this file (restoring means recreating `before`). */
   after: string | null
   toolExecutionId: string
+  /** The session and run the write happened in (the tool context's), so an undo can be scoped to
+   *  "the last change set of THIS session" (H4). Absent for a write made outside any session. */
+  sessionId?: string | undefined
+  runId?: string | undefined
   at: string
 }
 

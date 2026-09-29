@@ -69,7 +69,7 @@ export function createFileWriteTool(ledger: ReadLedger, checkpoint: Checkpoint):
       }
 
       ledger.record(resolved, await ledgerEntryOf(resolved))
-      await checkpoint.record({ path: resolved, before, after: input.content, toolExecutionId: ctx.toolExecutionId }, ctx.now)
+      await checkpoint.record({ path: resolved, before, after: input.content, toolExecutionId: ctx.toolExecutionId, sessionId: ctx.sessionId, runId: ctx.runId }, ctx.now)
 
       const lines = input.content === '' ? 0 : input.content.split('\n').length
       return {
