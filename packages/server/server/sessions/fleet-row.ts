@@ -78,6 +78,14 @@ export type FleetActionId =
    */
   | 'cycleMode'
   /**
+   * RESTORE the conversation to the point before one of the person's own prompts (`text` is that
+   * prompt, `occurrence` which appearance counting from the latest) — the harness's OWN rewind,
+   * driven by `backend.rewindTo`. See `claude-rewind.ts`.
+   */
+  | 'rewind'
+  /** Submit the messages the harness is holding in its own queue NOW — `backend.sendQueuedNow`. */
+  | 'sendNow'
+  /**
    * The two that act on something other than one row, and carry no `id`.
    *
    * `reopenFell` takes back the group of sessions that fell together — a reboot, a laptop closed —
@@ -94,6 +102,8 @@ export interface FleetActionRequest {
   text?: string
   /** The option NUMBER for `approve` on a numbered dialog. Never defaulted — see `answerSession`. */
   choice?: number
+  /** For `rewind`: which appearance of `text` among the person's prompts, 0 = the latest. */
+  occurrence?: number
   /**
    * The rows a FLEET action acts on: which of the fallen to reopen, which sessions to broadcast to.
    *
