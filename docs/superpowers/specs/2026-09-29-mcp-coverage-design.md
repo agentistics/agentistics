@@ -445,28 +445,88 @@ the MCP. It is stored with the intents.
 Voice phrasing: "Coordinate these sessions for half an hour" → Jarvis files an **allowance intent**
 → the person confirms it once → the loop runs.
 
-### 4.5 Voice (Jarvis)
+### 4.5 Voice (Jarvis): the agent asks, the owner answers with a drawn word
 
-The owner's rule is that destructive or spending actions need spoken confirmation. The PUBLIC shell
-owns the whole path. The brain never produces the approval.
+The owner's rule is that destructive or spending actions need spoken confirmation. The owner
+specified the flow on 2026-09-29, and it is the same on every voice channel: the local call and the
+phone (§4.5a adds the phone's own gates).
+
+**The flow.**
 
 1. The shell subscribes to `agent.intent` over the existing notification SSE.
-2. It **speaks the server's readback** (TTS), and then a prompt: "Say 'confirmo' to proceed."
-3. **High-stakes intents add a challenge.** High-stakes means kill of 2 or more sessions, any
-   batch or fan-out, upgrade, or a disclosure. The challenge is a server-issued number, for example
-   "say: confirmo sete". A confirmation said out of reflex, or by a TV in the room, then fails.
-4. It captures the utterance that **starts after the readback ends**. Speech that overlaps the TTS
-   is barge-in, and it **cancels**.
-5. STT runs, then a **deterministic matcher** decides. It is not the LLM.
-   - It accepts only a closed affirmative set in PT and EN, plus the challenge when required.
-   - It refuses on any negation word, a confidence below the threshold, a timeout, or anything
-     ambiguous.
-   - Refusal is the default.
-6. The shell POSTs `decide` with `channel:'voice'`, the matcher's transcript and its confidence.
-   The brain learns the outcome through `agentistics_intent`, like any caller.
+2. **The agent asks, in Jarvis's voice.** It reads back the action and its target, then says
+   "to confirm, say <word>" (PT: "para confirmar, diga <palavra>").
+   - The words spoken are the **server's readback**, which the shell hands to TTS verbatim. The
+     brain cannot rephrase them, so the person hears what will actually happen and not a
+     paraphrase of it.
+   - Example: "Vou matar a sessão Pelvie coordenador, em eagle-worktree. Para confirmar, diga
+     *tangerina*."
+3. **The word is DRAWN BY THE SERVER, at random, per request**, from a curated list
+   (`voiceChallenge.ts`, below).
+   - It is drawn with a cryptographic RNG.
+   - It is never one of the last 20 words drawn on that device or call.
+   - It is stored with the intent and spent with it.
+   - A new word every time means a replayed recording or an overheard answer is useless.
+   - The brain learns the word only as part of the readback text it is handed. The brain never
+     chooses it and never decides whether it was said.
+4. The shell listens for **one utterance that starts after the readback finished playing**, in a
+   **10 s window**. Speech that overlaps the readback is barge-in, and it **cancels**.
+5. STT runs (whisper), then a **deterministic matcher** decides. It is not the LLM.
+   - The transcript is normalized: lower case, accents folded, punctuation and surrounding
+     whitespace stripped.
+   - It is accepted only if it EQUALS the drawn word, or one of that word's **measured spelling
+     variants** from the list (for example `alfa`/`alpha`).
+   - **Anything else means NO:** another word, the word inside a longer phrase, a negation, a
+     confidence below the threshold, silence, or the window expiring.
+   - There is no "close enough". Refusal is the default.
+6. The shell POSTs `decide` with `channel:'voice'`, the transcript, its confidence and the id of
+   the drawn word. The brain learns the outcome through `agentistics_intent`, like any caller.
+   After a NO, the agent may offer to ask again. A new attempt is a new intent with a new word.
 
-**Stated limit (local call).** Nothing verifies the speaker, so anyone in the room can say
-"confirmo". The web card remains the strong channel.
+**Voice is not identity.** A spoken approval is accepted only inside an **authenticated device
+session**:
+
+- the dashboard running on this machine, same-origin, the way the decide route already requires
+  (§4.3);
+- or a **phone paired to the account** (§4.5a gate 1).
+
+A voice decision arriving from anywhere else is refused before the matcher runs. Every approval,
+accepted or refused, is audited with the transcript, the drawn word and the session it came from
+(§4.6).
+
+**The word list: `packages/core/src/voiceChallenge.ts`, pure.**
+
+- **One list per language**, following the call's language: pt-BR and en.
+- **Sources.** The NATO alphabet is the starting candidate for en, since it was designed for
+  exactly this problem. For pt-BR, a curated list of concrete nouns (fruits, animals, objects),
+  because the NATO words are foreign in a pt-BR transcript and whisper spells them inconsistently
+  there.
+- **Admission rules**, checked by the test:
+  - at least 2 syllables and 5 letters;
+  - no homophone, and no near-neighbour of another list word by phonetic key or edit distance ≤ 2;
+  - not a number, not an affirmative or negative (`sim`, `não`, `yes`, `no`, `ok`, `confirmo`,
+    `cancela`), not a command verb the agent itself says;
+  - not a word common in the conversation around a call (coding vocabulary is excluded outright);
+  - not a proper name that is also in the fleet.
+- **A measured list, not an asserted one.** `voiceChallenge.bench.ts` runs whisper, the same model
+  and quantization the shell ships, over recordings of every word, in both languages:
+  - several voices and speeds;
+  - clean audio and phone-codec audio.
+
+  A word stays in the list only if two things hold:
+  - it transcribes to itself or to a recorded variant in **≥ 99 %** of its samples;
+  - it is **never** transcribed as another list word.
+
+  Every variant the bench observes is written into the list with the date and the model version,
+  the `MODEL_PRICING` provenance rule. The bench re-runs whenever the STT model changes. It is a
+  bench and not a unit test, because it needs the model and the audio. The pure admission rules
+  ARE unit-tested.
+- **Size.** At least 40 admitted words per language, so that the no-repeat-in-20 rule still leaves
+  a real draw.
+
+**Stated limit (local call).** Voice is not identity: anyone in the room who hears the word can say
+it. What the drawn word defeats is replay, the reflexive "sim", and a TV or a second conversation.
+The web card remains the strong channel.
 
 ### 4.5a Phone voice through the hub (D-3: allowed, with its own gates)
 
@@ -489,7 +549,7 @@ that runs only on the party whose behaviour cannot be verified is not a check.
      is the device-side E2E crypto D-1 keeps PUBLIC, and it follows the envelope pin rules: the
      first sight is announced, and a key change is refused, never silently re-pinned.
    - Every remote decision is **signed by that device key** over
-     `{intentId, argsHash, targetSnapshotHash, readbackId, challenge, decision, at}`.
+     `{intentId, argsHash, targetSnapshotHash, readbackId, wordId, transcript, decision, at}`.
    - The machine verifies the signature before anything else. A hub that alters, invents or
      replays a decision produces a signature that does not verify.
    - Devices are listed in Settings with their last use. Revoking one takes effect on the next
@@ -500,20 +560,12 @@ that runs only on the party whose behaviour cannot be verified is not a check.
    - It is on the §3.14 N list, and outside the `PATCH /api/preferences/agent` allowlist, so an
      agent can never enable its own remote approver.
    - Pairing a device does not turn the switch on. They are two explicit acts.
-3. **The confirmation repeats the ACTION and the TARGET, plus a challenge.**
-   - The readback ends in a required phrase built by the server from three parts:
-     - the **verb** from a closed table (`matar`/`kill`, `abrir`/`start`, `apagar`/`delete`,
-       `aprovar`/`approve`, and so on);
-     - the **target's short name**, meaning the session title's first distinctive words, or the
-       count for a batch ("cinco sessões");
-     - a **fresh two-digit challenge**.
-
-     Example: "Para confirmar, diga: confirmo matar Pelvie coordenador, quarenta e dois."
-   - The deterministic matcher requires all three to appear in the transcript, in that order, plus
-     an affirmative word. The target is matched against tokens the server supplied, never against
-     free text. A negation word anywhere refuses.
-   - A bare "confirmo" is never enough on this channel. Nor is a phrase naming the wrong target:
-     that is refused `target_mismatch` and counts as a failure (gate 6).
+3. **The drawn-word confirmation of §4.5, unchanged, and nothing weaker.**
+   - The agent reads back the action and the target, then asks for the drawn word. The matcher
+     accepts only that word, or its measured variants, within the 10 s window.
+   - A wrong word is refused `wrong_word` and counts as a failure (gate 6).
+   - The drawn word's id is inside the signed decision (gate 1), so the hub cannot substitute a
+     word from another intent.
 4. **Bound to the call that heard the readback.**
    - The readback is delivered to one call session with a `readbackId`.
    - A decision must name that id and come from the device holding that call.
@@ -522,13 +574,13 @@ that runs only on the party whose behaviour cannot be verified is not a check.
 5. **A short-lived, single-use grant.**
    - The remote window is **45 s** from the end of the readback (60 s on the local call, 120 s on
      a card).
-   - The challenge is single-use. The grant is spent on execution and bound to the args hash and
+   - The drawn word is single-use. The grant is spent on execution and bound to the args hash and
      the target snapshot.
    - If the target changed before execution, the intent is refused `stale` and a new readback is
      needed. This is the §4.2 rule, unchanged.
 6. **Rate limits, and a lockout.**
    - A device may approve at most **5 D intents per 10 minutes**.
-   - **3 consecutive failed matches** (a wrong target, a wrong challenge, or low confidence) lock
+   - **3 consecutive failed matches** (a wrong word, low confidence, or silence) lock
      remote D approvals for that device until someone unlocks it at a screen.
    - The lock is announced on every surface.
 7. **Blast-radius caps per intent**, which the owner sets in Settings, on screen only.
@@ -555,7 +607,7 @@ that runs only on the party whose behaviour cannot be verified is not a check.
      within seconds, and it stops the next one.
 10. **The audit is richer on this channel (§4.6).**
     - Each record adds the device id, the readback id, the transcript the matcher saw and its
-      confidence, which gates passed (signature, match, challenge, window, UV), the latency from the
+      confidence, **the drawn word**, which gates passed (signature, word, window, UV), the latency from the
       end of the readback, and the sha256 of the utterance audio.
     - **The audio itself is not stored.** A voice recording is personal data, and the hash is
       enough to prove which utterance was matched if the phone keeps the audio.
@@ -567,7 +619,7 @@ that runs only on the party whose behaviour cannot be verified is not a check.
 - What stands between a thief and an action is:
   - possession of a paired phone;
   - a live call;
-  - saying the exact action, target and challenge;
+  - hearing and saying a word drawn for that one request;
   - for the highest tier, the phone's own unlock;
   - the caps, the rate limit and the lockout;
   - an announcement on every other screen within seconds.
@@ -590,6 +642,10 @@ Each record carries:
 - `argsHash`;
 - `intentId` and `decidedBy` (channel, and the allowance id);
 - `outcome`: `ok`, a refusal code, or `stale` / `expired`.
+- for a **voice** decision, accepted or refused:
+  - the transcript the matcher saw, and its confidence;
+  - the **drawn word** and its id;
+  - the authenticated session it came from (the local dashboard, or the paired device id).
 
 Prompt text and readback text go through `redactSecrets` and are truncated to 512 characters. The
 existing `audit.ts` rules apply: the pure builder redacts secret-shaped fields.
@@ -711,7 +767,7 @@ item with its mobile version.
 - P3.1 **M** — Standing allowances: the store, the human-only create route, the revocable chip on
   web and cockpit, allowance-aware intent resolution.
 - P3.2 **M** — The Jarvis confirmation path in the public shell: readback TTS, post-readback
-  capture, the deterministic matcher plus challenge, barge-in cancels. Depends on t-3648b62bee's
+  capture, the deterministic drawn-word matcher, barge-in cancels. Depends on t-3648b62bee's
   shell.
 - P3.3 **S** — The public runtime reads: the journal status route plus tool, and the runtime
   metrics tool.
@@ -728,12 +784,17 @@ item with its mobile version.
   - signed decisions, verified by the machine before any other gate (§4.5a gate 1).
 - P3.6 **M** — The remote-voice gates:
   - the `remoteVoiceApprovals` switch, local-only and in N;
-  - the action + target + challenge phrase builder and matcher, pure, EN/PT, with `target_mismatch`;
+  - the drawn-word decision carried inside the signature, with `wrong_word`;
   - the readback binding and the 45 s window;
   - the rate limit and the lockout;
   - the blast-radius caps and their on-screen settings;
   - the cross-surface announcement with Revoke;
   - the richer audit fields.
+- P3.8 **M** — `voiceChallenge.ts`: the pt-BR and en lists, the pure admission rules with their
+  unit tests, the crypto draw with no repeat in the last 20, the normalizing exact matcher, and
+  `voiceChallenge.bench.ts` (whisper over recorded samples in both languages, clean and
+  phone-codec; ≥ 99 % self-recognition and zero cross-confusion; variants written into the list
+  with the date and the model version). It lands before P3.2 and P3.6, which both consume it.
 - P3.7 **S** — Phone user verification (a WebAuthn assertion with UV required) for the highest
   tier, carried inside the signed decision, plus its per-tier setting on screen.
 
@@ -775,11 +836,19 @@ them. One stays with the owner.
   - In v1 an allowance never covers `kill`, including the kill of sessions that the same allowance
     spawned.
 
+- **D-3a · How the voice approval flows (owner detail, 2026-09-29).**
+  - The agent reads back the action and its target, then asks "to confirm, say <word>".
+  - The word is drawn at random per request from a curated list that is unambiguous under STT
+    (§4.5).
+  - Only that exact word, inside a short window, is a yes. Anything else, or silence, is a no.
+  - Voice is not identity: a spoken approval counts only inside an authenticated device session.
+  - Every approval is audited with the transcript and the drawn word.
 - **D-3 · Phone voice may approve class-D actions (was O-3). Decided by the owner: implement it
   completely, with full gates.** The gates are in §4.5a:
   - a paired device, and a signed decision;
   - its own on-screen switch, off by default;
-  - a spoken phrase that repeats the action, the target and a challenge;
+  - the agent reads back the action and target and asks for a word drawn at random per request
+    from a curated, STT-measured list; only that exact word, inside 10 s, is a yes;
   - binding to the call that heard the readback;
   - a 45 s single-use grant;
   - a rate limit and a lockout;
