@@ -4,6 +4,8 @@ import { claudeDriver } from './claude'
 import { codexDriver } from './codex'
 import { geminiDriver } from './gemini'
 import { copilotDriver } from './copilot'
+import { modelCatalog } from '../model-catalog'
+import { readHarnessDefaults } from '../sessions/harness-defaults'
 
 /**
  * Registry of all chat drivers in display order: claude, codex, gemini, copilot.
@@ -15,22 +17,35 @@ export function getChatDriver(harness: HarnessId): ChatDriver | undefined {
 }
 
 /**
+ * The default model a chat with this harness runs when none is asked for: the one this machine's
+ * CLI is configured with, or `''` (the CLI's own default — no `--model` flag at all). Never guessed.
+ */
+export async function chatDefaultModel(harness: HarnessId): Promise<string> {
+  const configured = await readHarnessDefaults(harness).catch(() => ({} as { model?: string }))
+  return configured.model ?? ''
+}
+
+/**
  * Returns status for ALL known drivers (installed or not), with per-field
  * install/auth/ready flags and setup guidance. Used by GET /api/chat-harnesses.
+ * The models come from the ONE catalog every model picker reads (`model-catalog.ts`).
  */
-export function chatHarnessStatus(): HarnessChatStatus[] {
-  return ALL_DRIVERS.map(d => {
+export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
+  return Promise.all(ALL_DRIVERS.map(async d => {
     const installed = d.isAvailable()
     const authReady = d.authReady()
+    const catalog = await modelCatalog(d.id)
     return {
       id: d.id,
       label: d.label,
       installed,
       authReady,
       ready: installed && authReady,
-      models: d.models,
-      defaultModel: d.defaultModel,
+      models: catalog.models.map(m => ({ id: m.id, label: m.label })),
+      modelsSource: catalog.source,
+      modelFreeText: catalog.freeText,
+      defaultModel: await chatDefaultModel(d.id),
       setup: d.setup,
     }
-  })
+  }))
 }

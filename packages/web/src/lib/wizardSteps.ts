@@ -30,6 +30,11 @@ export interface WizardHarness {
   id: string
   label: string
   models: { id: string; label: string }[]
+  /**
+   * The list is the server's incomplete fallback TABLE (the CLI publishes none of its own), so the
+   * picker also takes a typed id — a closed list there would forbid models the CLI accepts.
+   */
+  modelFreeText?: boolean
   supportsModel: boolean
   efforts: string[]
   /** What the CLI itself publishes as its default, where it publishes one. See `unsetAnswer`. */
@@ -68,7 +73,9 @@ export interface StepState {
 export function visibleQuestions(harness: WizardHarness | null): { model: boolean; effort: boolean } {
   if (!harness) return { model: false, effort: false }
   return {
-    model: harness.supportsModel && harness.models.length > 0,
+    // A harness that names no model is still asked when a typed id is accepted — otherwise the
+    // CLI's `--model` would be unreachable from the wizard for every harness with no list.
+    model: harness.supportsModel && (harness.models.length > 0 || harness.modelFreeText === true),
     effort: harness.efforts.length > 0,
   }
 }
@@ -152,6 +159,8 @@ export interface HarnessAnswer {
   /** The same ids, each with the name the harness's own CLI prints. Absent from an older server's
    *  answer, which is why callers fall back to the ids rather than to nothing. */
   models?: { id: string; label: string }[]
+  /** Where `models` came from — see `WizardHarness.modelFreeText`. Absent on an older server. */
+  modelFreeText?: boolean
   supportsModel: boolean
   efforts: string[]
   /** What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it. */
@@ -174,6 +183,7 @@ export function toWizardHarness(h: HarnessAnswer): WizardHarness {
     // The server's labelled list when it sent one; the bare ids otherwise. A missing label is
     // rendered AS THE ID — never as an invented name.
     models: h.models ?? h.modelSuggestions.map(m => ({ id: m, label: m })),
+    ...(h.modelFreeText ? { modelFreeText: true } : {}),
     supportsModel: h.supportsModel,
     efforts: h.efforts,
     ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}),

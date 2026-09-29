@@ -2,9 +2,10 @@
  * ModelSelect — the model picker, pulled out of `NewSessionModal`'s step 1 so a second dialog (the
  * staged-session compose panel, t-918cc82233) does not restate it as a free-text field.
  *
- * A CLOSED picker, never free text: the list is the actual set this harness offers, and a typed id
- * it does not recognise fails at spawn with no explanation on screen. The wizard's job is to offer
- * only what will work.
+ * CLOSED wherever the list is the CLI's own (`modelsSource: 'cli'` — the account's real set): a
+ * typed id there could only be one the CLI does not offer. OPEN (`freeText`) where the list is the
+ * server's fallback table, which cannot name every id the CLI accepts — there a closed picker would
+ * forbid models that work. The typed id is checked for shape here and again on the server.
  *
  * It is built the way `FiltersBar`'s value pickers are built — a trigger, a popover, one checked
  * row per value — rather than a bare `<select>`, which on every platform draws the OS's own menu: a
@@ -22,11 +23,12 @@
  * `open` is the CALLER's state: a dialog that owns the keyboard needs `esc` to close this before it
  * closes the dialog itself.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { modelDisplay } from '../../lib/wizardSteps'
 import { inputStyle } from './formBits'
+import { typedModelId } from '../../lib/chatModel'
 
 export interface ModelSelectProps {
   lang: 'pt' | 'en'
@@ -38,9 +40,11 @@ export interface ModelSelectProps {
   options: { id: string; label: string }[]
   /** The sentence for the unset row — what happens when nothing is picked, in words. */
   unsetLabel: string
+  /** Also accept a typed id — true only where the list is the incomplete fallback table. */
+  freeText?: boolean
 }
 
-export function ModelSelect({ lang, open, onOpenChange, value, onChange, options, unsetLabel }: ModelSelectProps) {
+export function ModelSelect({ lang, open, onOpenChange, value, onChange, options, unsetLabel, freeText }: ModelSelectProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -130,9 +134,48 @@ export function ModelSelect({ lang, open, onOpenChange, value, onChange, options
             const shown = modelDisplay(options, o.id)!
             return row(o.id, o.id === value, shown.label, shown.id, () => onChange(o.id))
           })}
+          {freeText && (
+            <TypedModel lang={lang} onPick={id => { onChange(id); onOpenChange(false) }} />
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A typed model id — the row a picker adds where its list is the fallback table. A form, so `enter`
+ * submits; the button is disabled until the text is a usable id (one token, never flag-shaped).
+ */
+export function TypedModel({ lang, onPick }: { lang: 'pt' | 'en'; onPick: (id: string) => void }) {
+  const pt = lang === 'pt'
+  const isMobile = useIsMobile()
+  const [text, setText] = useState('')
+  const id = typedModelId(text)
+  return (
+    <form
+      onSubmit={e => { e.preventDefault(); if (id) onPick(id) }}
+      style={{ display: 'flex', gap: 6, padding: '6px 4px 2px', borderTop: '1px solid var(--border)', marginTop: 4 }}
+    >
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder={pt ? 'outro id de modelo…' : 'other model id…'}
+        aria-label={pt ? 'Id de modelo' : 'Model id'}
+        style={{ ...inputStyle, flex: 1, minWidth: 0, minHeight: isMobile ? 44 : undefined }}
+      />
+      <button
+        type="submit"
+        disabled={!id}
+        style={{
+          flexShrink: 0, padding: '0 12px', minHeight: isMobile ? 44 : 32, borderRadius: 6,
+          border: '1px solid var(--border)', background: 'transparent', fontFamily: 'inherit', fontSize: 12,
+          color: id ? 'var(--text-primary)' : 'var(--text-tertiary)', cursor: id ? 'pointer' : 'default',
+        }}
+      >
+        {pt ? 'Usar' : 'Use'}
+      </button>
+    </form>
   )
 }
 

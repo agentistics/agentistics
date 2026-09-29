@@ -3,7 +3,6 @@ import type { useDerivedStats } from '../hooks/useData'
 import type { PlanBasisView } from '../hooks/usePlanBasis'
 import type { A11yState } from '../hooks/useAccessibility'
 import type { TagDef } from './tagMatch'
-import type { ChatModelId } from './chatModels'
 import type { CardId } from './cardOrder'
 
 type DerivedStats = NonNullable<ReturnType<typeof useDerivedStats>>
@@ -109,8 +108,8 @@ export interface AppContext {
   // settings section (ChatSettings.tsx), which persists them itself via PUT /api/preferences and
   // calls these setters so the live widget picks up the change without a reload — the same thing
   // `savePreferences` used to do for them when they still lived in the Preferences draft.
-  chatModel: ChatModelId | null
-  setChatModel: (m: ChatModelId) => void
+  chatModel: string | null
+  setChatModel: (m: string) => void
   chatSoundEnabled: boolean
   setChatSoundEnabled: (v: boolean) => void
   chatSoundId: string
