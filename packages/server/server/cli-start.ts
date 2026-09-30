@@ -34,7 +34,7 @@ import { existsSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir, platform } from 'node:os'
 import {
-  DEFAULT_TEAM, HARNESS_ORDER, repoShortName,
+  DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type HarnessId, type TeamConnection,
 } from '@agentistics/core'
 import type {
@@ -3386,9 +3386,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
-      return (await backend.sendQueuedNow(id))
-        ? { ok: true, message: s.sessSentNow }
-        : { ok: false, message: s.sessSendFailed(id) }
+      // The outcome is read off the screen, not assumed from the keystroke — see `sendNow.ts`.
+      const outcome = await backend.sendQueuedNow(id)
+      return { ok: sendNowDelivered(outcome), message: s.sessSendNowOutcome(outcome, id) }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {
