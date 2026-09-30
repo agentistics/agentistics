@@ -1,147 +1,136 @@
 # Nay — AI Chat Assistant
 
-Nay is an AI chat assistant built into the agentistics dashboard. It connects directly to your usage data via MCP tools and can answer questions about your spending, projects, sessions, and layouts without you having to leave the dashboard.
+Nay is the analytics assistant built into the agentistics dashboard. It reads your real usage data
+through the agentistics MCP tools and answers questions about spending, projects, sessions,
+repositories, tags, the task board and custom layouts without you leaving the dashboard.
 
-## How it works
+## How it works — a Nay conversation is a real session
 
-Nay runs as a floating chat panel (bottom-right corner of any page). When you send a message, the dashboard calls Claude Code CLI (`claude --print`) in a sandboxed workspace at `~/.agentistics/nay-chat/`. Claude has access to 13 MCP tools that talk directly to the agentistics API, so every answer is backed by your real data.
+Since #780 a Nay conversation is an **ordinary managed `claude` session**, the same kind the
+Sessions workspace, the cockpit and `agentop session` start. Nothing about it is a separate chat
+engine:
 
 ```
-Your message
-  → /api/chat-tty (POST)
-    → claude --print --output-format stream-json
-      → agentistics MCP tools → /api/data, /api/rates, etc.
-    → streamed JSON events (text chunks + tool calls)
-  → rendered in the chat panel
+"New conversation" in the Nay panel
+  → POST /api/fleet/nay
+    → runFleetSpawn(harness: claude, cwd: ~/.agentistics/nay-chat)   (sessions/nay-web.ts)
+      → an interactive `claude` session in tmux, filed under the "Nay" session group
+  → the panel mounts the workspace's own SessionChat (same composer, same terminal)
+    → claude calls the agentistics MCP tools → /api/data, /api/tasks, /api/session-groups, …
 ```
+
+- **What makes a session "Nay" is its directory.** `isNayCwd` (`@agentistics/core`, `nay.ts`)
+  recognises `~/.agentistics/nay-chat`; there is no extra registry field.
+- **It runs every check a session start makes** (harness on PATH, memory admission, launch
+  settling), because it is `runFleetSpawn` with the directory fixed.
+- **The model** is the one chosen in **Settings → Chat**, or the CLI's own default when none is set.
+- **It is filed under the "Nay" session group**, which is created on first use
+  (`planNayFiling`). A failed filing never turns a started session into a reported failure.
+- **Gates.** `/api/fleet/nay` rides `/api/fleet`'s `localShell` guard (`capability-guard.ts`) and
+  additionally requires the chat switch (`chatAllowed`, Settings → Chat). So Nay is unavailable on a
+  central and on any profile where host power is off.
+
+The old one-shot `claude --print` path (`/api/chat-tty` driving `TtyChat.tsx`) is gone for Nay; the
+component was deleted in #780.
+
+## The panel
+
+The Nay panel (`NayDock`) has two tabs:
+
+- **Nay** — the running Nay sessions, plus "new conversation".
+- **Sessões / Sessions** — the same `SessionsAside` the workspace shows, kept inside the panel.
+
+A session can be **undocked into its own window**, which can be moved, resized and minimized;
+picking a session that already has a window raises and restores that window rather than opening it
+twice. The docked panel is resizable from its top and left edges (persisted per viewer) and is full
+screen on mobile.
+
+Because the composer IS the session composer, Nay gets everything it has — attachments, the metrics
+chip, the microphone, auto mode, approval cards — and nothing a separate copy would have to keep in
+sync.
 
 ## Requirements
 
-- **Claude Code CLI** installed and authenticated (`claude --version`)
-- **agentistics server running** — Nay calls MCP tools that talk to the local API
-- **Claude subscription** — Nay uses your Claude Code session quota (see [usage warning](#subscription-and-quota-usage) below)
+- **Claude Code CLI** installed and authenticated (`claude --version`).
+- **tmux** — Nay is a managed session, so it needs the session backend (Linux, macOS, or WSL on
+  Windows).
+- **`agentop server` running** — the MCP tools talk to the local API.
+- **The chat switch on** (Settings → Chat) on a profile that allows host power.
 
 ## Subscription and quota usage
 
-> **Important:** Every Nay conversation counts against your Claude Code subscription usage.
+> **Important:** every Nay conversation is a normal Claude Code session and counts against your
+> Claude Code usage exactly like one.
 >
-> Nay runs `claude --print` under the hood, which is the same Claude Code process used for coding. Each message sends your conversation history + tool results to the API, and this is billed/counted exactly like a regular Claude Code session.
+> - **Claude Max / Pro subscribers**: usage comes out of your plan's limits.
+> - **API key users**: each turn is billed at standard API rates for the selected model.
 >
-> - **Claude Max / Pro subscribers**: usage comes out of your monthly session quota
-> - **API key users**: each message is billed at standard Claude API rates for the selected model
->
-> Prefer **Haiku 4.5** for quick data queries (cheapest). Use **Sonnet 4.6** for analysis and layout building. **Opus 4.7** for complex multi-step reasoning.
+> A small, fast model is plenty for data lookups; pick a larger one in Settings → Chat for analysis
+> or layout building.
 
-## Model selection
+Nay's own sessions are tracked like any other: they are the project at `~/.agentistics/nay-chat`.
 
-The first time you open Nay, a model picker screen appears. You can change the model at any time by starting a new conversation (clear chat → model picker reappears).
+## Workspace setup
 
-| Model | Speed | Best for | Input / Output |
-|-------|-------|----------|----------------|
-| Haiku 4.5 | Fastest | Quick data lookups | $0.80 / $4.00 per 1M |
-| Sonnet 4.6 | Balanced | Analysis, layout building | $3.00 / $15.00 per 1M |
-| Opus 4.7 | Most capable | Complex reasoning | $15.00 / $75.00 per 1M |
+On every server start, `ensureNayChat()` (`chat-tty.ts`) writes two files to
+`~/.agentistics/nay-chat/` (and `/api/fleet/nay` writes them first if `CLAUDE.md` is missing):
 
-## Nay's identity
+| File | Purpose |
+|------|---------|
+| `CLAUDE.md` | Nay's instructions: identity, tool-call protocol, the tools it has, PDF flow, response format, navigation links |
+| `.claude/settings.json` | Permissions only: `mcp__agentistics` (the **whole** agentistics MCP server) and `WebFetch(domain:localhost)` are allowed without asking; anything else raises the ordinary approval card |
 
-Nay presents herself as **Nay**, the agentistics analytics assistant — not as "Claude" or "an AI by Anthropic". When asked "who are you?", she introduces herself as:
-
-> *Nay — assistente de analytics integrada ao agentistics. Analiso uso do Claude Code: custos, tokens, sessões, projetos e métricas de produtividade.*
-
-This is enforced via the `CLAUDE.md` written to `~/.agentistics/nay-chat/` on every server start.
+There is no `mcpServers` block in that file — Claude Code does not read one from a project
+`settings.json`. The MCP is registered at **user scope** by `registerMcpGlobally`
+(`claude mcp add -s user`), launching the installed binary's own `agentop mcp` (see
+[mcp.md](mcp.md#starting-the-mcp-server)). The registration is idempotent.
 
 ## What Nay can answer
+
+Nay has every agentistics MCP tool (38 at the time of writing — see
+[mcp.md](mcp.md#available-tools)). Typical questions:
 
 | Question | What it calls |
 |----------|--------------|
 | "How much did I spend this month?" | `agentistics_summary`, `agentistics_costs` |
-| "Which project cost the most?" | `agentistics_projects` |
+| "Which project / repository cost the most?" | `agentistics_projects`, `agentistics_repos` |
 | "What were my most expensive sessions?" | `agentistics_sessions` |
+| "Which harness do I use most?" | `agentistics_harnesses` |
+| "How much did tag X cost?" | `agentistics_tags`, `agentistics_tag_detail` |
+| "What is on the board / what can I pick up?" | `agentistics_tasks`, `agentistics_task_next` |
+| "Put these sessions in a folder" | `agentistics_session_groups`, `agentistics_session_group_create` / `_edit` |
 | "Build me a cost overview layout" | `agentistics_component_catalog`, `agentistics_build_layout` |
-| "Show me my cache hit rate" | `agentistics_summary` |
-| "Generate a PDF of my last 30 days" | `agentistics_export_pdf` |
-| "How much have I spent talking to you?" | `agentistics_projects` filtered to `nay-chat` |
+| "How much have I spent talking to you?" | `agentistics_projects`, filtered to `~/.agentistics/nay-chat` |
 
-### "How much have I spent talking to you?"
+What Nay **cannot** do through the MCP today: control the live fleet (read a session's screen,
+prompt, start or stop one), or authenticate to a central. Both are planned in the MCP coverage
+design (`docs/superpowers/specs/2026-09-29-mcp-coverage-design.md`).
 
-When the user asks about the cost of conversations with Nay specifically, Nay calls `agentistics_projects` and filters to the project at path `~/.agentistics/nay-chat`. This is where Nay's own sessions are stored and tracked.
+## PDF export
 
-For general Claude Code usage across all projects, Nay uses `agentistics_summary` or the full project list.
+`agentistics_export_pdf` returns a `[⬇ Download PDF](pdf:URL)` markdown link and Nay's
+instructions tell it to pass that link through unchanged. **Known gap:** since #780 Nay renders
+through the ordinary session chat, which has no handler for the `pdf:` link scheme, so the link is
+shown as text rather than as the download button the old `TtyChat` drew. Use **Export** in the
+dashboard until that is restored.
 
-## PDF report generation
+## Navigation links
 
-Nay can generate a PDF report through a conversational flow:
-
-1. User asks: "Generate a PDF" or "Export a report"
-2. Nay asks for the date range if not specified: "Qual período? 7 dias, 30 dias, 90 dias, ou tudo?"
-3. User answers (e.g., "30 days")
-4. Nay calls `agentistics_export_pdf` with `range: "30d"`
-5. A styled **Download PDF** button appears in the chat
-
-The button uses the `pdf:URL` link protocol, which the Nay chat renders as an orange download button. Clicking it opens the PDF export modal pre-configured with the requested settings.
-
-## Navigation buttons
-
-Nay ends data responses with a navigation button that links to the relevant dashboard page. If the response is about a specific project, the link includes a `?projects=...` filter parameter.
-
-Examples:
-- `→ Ver custos` → `/costs`
-- `→ Ver projetos` → `/?projects=/home/user/my-project`
-- `→ Abrir layout` → `/custom`
-
-These are rendered as purple inline buttons in the chat.
-
-## Terminal commands
-
-You can also run shell commands directly from Nay:
-
-```
-/run ls -la ~/.claude/
-/bash git log --oneline -5
-/sh df -h
-```
-
-Code blocks in Nay responses with bash/shell language tags include a **Run** button to execute the command inline.
-
-## Floating window (detach)
-
-Nay can be detached from the side panel into a free-floating window:
-
-- Click the **⧉** (ExternalLink) icon in the Nay panel header to detach
-- The floating window can be dragged and resized
-- Click **−** (Minus) in the floating header to minimize
-- When minimized, a small **Nay mini FAB** appears above the main corner button — click it to restore the floating window
-- Click the re-attach icon to dock Nay back into the panel
-
-### FAB layout when Nay is detached
-
-| State | Corner button | Mini FAB |
-|-------|--------------|----------|
-| Floating, visible | Shows ⧉ icon (opens panel for Claude) | — |
-| Floating, minimized | Shows ⧉ icon (opens panel for Claude) | Nay logo circle, above corner button |
-
-## Workspace setup
-
-On every server start, `ensureNayChat()` writes two files to `~/.agentistics/nay-chat/`:
-
-| File | Purpose |
-|------|---------|
-| `CLAUDE.md` | Instructions for Nay: identity, tool call protocol, PDF generation flow, "talking to me" context, response format, navigation buttons |
-| `.claude/settings.json` | MCP server registration + permissions (allows all 13 agentistics tools without prompting) |
-
-It also registers the agentistics MCP at user scope via `claude mcp add -s user` so that `claude --print` mode can find the tools, launching the installed binary's own `agentop mcp` (see [mcp.md](mcp.md#starting-the-mcp-server)). This registration is idempotent — it skips when the URL and the launch are already correct, and replaces a stale one.
+Nay ends a data answer with a link to the relevant dashboard page, carrying a `?projects=…` filter
+when the answer was about specific projects — for example `→ Ver custos` → `/costs`,
+`→ Ver repositórios` → `/repositories`, `→ Abrir layout` → `/custom`.
 
 ## Behavior rules (enforced via CLAUDE.md)
 
-1. **Identity** — always presents as Nay, not as Claude or a generic AI
-2. **Never answer from memory** — calls tools for every question, even follow-ups
-3. **Never describe what it's about to do** — calls tools immediately, no "Let me check..."
-4. **Never reference "the Nay agent"** — it has direct tool access, uses it
-5. **Navigation button only when data was fetched** — no button for conversational replies
-6. **"Talking to me" = nay-chat project** — cost queries about Nay specifically filter to `~/.agentistics/nay-chat`
-7. **PDF flow** — asks for date range before calling `agentistics_export_pdf`
+1. **Identity** — presents as Nay, the agentistics analytics assistant, not as a generic assistant.
+2. **Never answer from memory** — calls tools for every data question, follow-ups included.
+3. **Act, don't narrate** — calls tools immediately instead of describing what it is about to do.
+4. **Navigation link only when data was fetched** — no link on a conversational reply.
+5. **"Talking to me" = the nay-chat project** — cost questions about Nay filter to
+   `~/.agentistics/nay-chat`.
+6. **PDF flow** — asks for the date range before calling `agentistics_export_pdf`.
 
 ## See also
 
-- [MCP tools reference](./mcp.md) — full list of tools Nay uses
-- [Architecture](./architecture.md) — how `chat-tty.ts` streams Claude output
+- [MCP tools reference](./mcp.md) — the tools Nay uses
+- [Session manager](./session-manager.md) — the managed sessions Nay conversations are

@@ -63,10 +63,39 @@ export function readEnvConfig(): Record<string, string> {
 }
 
 /**
+ * The first value that would break out of its own line, or null when every value is safe.
+ *
+ * `.env.config` is read line by line at boot (`loadEnvConfig`), so a value carrying `\n` or `\r`
+ * would plant a SECOND key — `47291\nAGENTISTICS_ALLOW_LOCAL_SHELL=1` turns one field into a
+ * security switch the server obeys at its next start. The route is `localShell`-guarded, so this is
+ * defence in depth for the file the server boots from, not the only barrier. Pure.
+ */
+export function unsafeConfigValue(values: Record<string, unknown>): { key: string } | null {
+  for (const field of CONFIG_FIELDS) {
+    const value = values[field.key]
+    if (value === undefined) continue
+    if (typeof value !== 'string' || /[\r\n]/.test(value)) return { key: field.key }
+  }
+  return null
+}
+
+/** Refusal raised by `writeEnvConfig` BEFORE anything is written — the message is the sentence. */
+export class EnvConfigValueError extends Error {
+  constructor(readonly key: string) {
+    super(`The value for ${key} contains a line break (or is not text), so it was not written: each setting must fit on one line of .env.config.`)
+    this.name = 'EnvConfigValueError'
+  }
+}
+
+/**
  * Back up current .env.config to .env.config.bak, then write a new .env.config with the
- * provided values (preserving comment header).
+ * provided values (preserving comment header). Refuses — writing nothing, not even the backup —
+ * when a value would span lines (`unsafeConfigValue`).
  */
 export function writeEnvConfig(values: Record<string, string>): void {
+  const unsafe = unsafeConfigValue(values)
+  if (unsafe) throw new EnvConfigValueError(unsafe.key)
+
   // Back up existing file if it exists
   if (existsSync(ENV_CONFIG_FILE)) {
     copyFileSync(ENV_CONFIG_FILE, ENV_CONFIG_BAK_FILE)

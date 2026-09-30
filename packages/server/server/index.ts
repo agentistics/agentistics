@@ -109,6 +109,8 @@ import {
   readEnvConfigBackup,
   restoreEnvConfig,
   CONFIG_FIELDS,
+  unsafeConfigValue,
+  EnvConfigValueError,
 } from './env-config'
 import {
   sseClients,
@@ -3222,6 +3224,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/config' && req.method === 'PUT') {
       try {
         const body = await req.json() as { values: Record<string, string> }
+        const unsafe = unsafeConfigValue(body.values ?? {})
+        if (unsafe) {
+          return new Response(JSON.stringify({ error: 'invalid_config_value', key: unsafe.key, message: new EnvConfigValueError(unsafe.key).message }), {
+            status: 400,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
         writeEnvConfig(body.values)
         const config = readEnvConfig()
         return new Response(JSON.stringify({ ok: true, config }), {

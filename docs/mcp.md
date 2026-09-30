@@ -1,10 +1,10 @@
 # agentistics MCP Server
 
-The agentistics MCP server exposes your usage analytics as tools that any MCP-compatible client can call — including Claude Code, Nay (the built-in chat), and any third-party agent that supports MCP.
+The agentistics MCP server exposes agentistics as tools that any MCP-compatible client can call — including Claude Code, Nay (the built-in chat), and any third-party agent that supports MCP. It is no longer analytics-only: besides usage metrics it reads and drives the **task board (ALM)**, files sessions into **session groups**, builds **custom layouts**, and reads **tags**, **repositories** and **team status**.
 
 ## What is MCP?
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard that lets AI models call structured tools defined by external servers. The agentistics MCP server translates the `/api/data` response into a set of typed tools so that AI agents can query your usage data programmatically.
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard that lets AI models call structured tools defined by external servers. The agentistics MCP server turns the agentistics HTTP API (`/api/data`, `/api/tasks`, `/api/session-groups`, `/api/preferences`, `/api/tags`, `/api/team/*`) into a set of typed tools.
 
 ## Starting the MCP server
 
@@ -55,20 +55,69 @@ claude mcp list
 
 ## Multi-harness scope
 
-agentistics tracks multiple coding harnesses (Claude Code, Codex CLI, Gemini CLI, Copilot CLI). The MCP server reads the same `/api/data` endpoint, so by default its numbers reflect the **unified (all-harness)** view.
+agentistics tracks multiple coding harnesses (Claude Code, Codex CLI, Gemini CLI, Copilot CLI, Antigravity CLI, Kimi Code). The MCP server reads the same `/api/data` endpoint, so by default its numbers reflect the **unified (all-harness)** view.
 
-- **Per-harness filtering:** `agentistics_summary`, `agentistics_projects`, `agentistics_sessions`, and `agentistics_costs` accept an optional `harness` parameter (`claude` | `codex` | `gemini` | `copilot` | `antigravity`, or `all` — the default). When set, the tool scopes its result to that harness only.
+- **Per-harness filtering:** `agentistics_summary`, `agentistics_projects`, `agentistics_sessions`, and `agentistics_costs` accept an optional `harness` parameter (any harness id — `claude` | `codex` | `gemini` | `copilot` | `antigravity` | `kimi` — or `all`, the default; the enum is `HARNESS_ORDER`, so a new harness appears by itself). When set, the tool scopes its result to that harness only.
 - **Comparison:** `agentistics_harnesses` lists every harness present in the data with its sessions, messages, tokens, estimated cost, and last-active date — the quickest way to answer "which harness do I use most / costs most".
 - **Caveats** match the dashboard: `currentStreak` is Claude-only (returned as `null` when scoping to a single non-Claude harness); harnesses that don't emit token usage (e.g. Gemini's local files) contribute 0 tokens/cost; the unified/`claude` cost breakdown comes from the Claude-complete stats-cache, while a specific non-Claude harness's cost breakdown is aggregated per-model from its sessions.
 - **Per-session cost is priced per model.** Any `estimatedCostUSD` computed from a session (`agentistics_sessions`, `agentistics_projects`, `agentistics_summary`, `agentistics_harnesses`, `agentistics_repos`) charges each model at its own rate via `sessionCostUSD` from `@agentistics/core` — a session that used more than one model (an Antigravity parent with Gemini/Claude subagent children folded into its `model_usage` breakdown) is never priced as if the whole thing ran at the dominant model's rate. For a single-model session this coincides exactly with the flat calculation.
 
 ## Available tools
 
+There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). By area:
+
+| Area | Tools |
+|------|-------|
+| **Task board (ALM)** — 16, *beta* | `agentistics_tasks`, `agentistics_task`, `agentistics_task_create`, `agentistics_task_edit`, `agentistics_task_status`, `agentistics_task_statuses`, `agentistics_task_status_edit`, `agentistics_task_comment`, `agentistics_task_subtask`, `agentistics_task_link`, `agentistics_task_blocked_by`, `agentistics_task_next`, `agentistics_task_claim`, `agentistics_task_activity`, `agentistics_task_session`, `agentistics_task_delete` |
+| **Session groups** — 3 | `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit` |
+| **Metrics** — 6 | `agentistics_summary`, `agentistics_harnesses`, `agentistics_projects`, `agentistics_sessions`, `agentistics_costs`, `agentistics_repos` |
+| **Custom layouts** — 8 | `agentistics_component_catalog`, `agentistics_get_layouts`, `agentistics_build_layout`, `agentistics_add_component`, `agentistics_remove_component`, `agentistics_create_layout`, `agentistics_set_active_layout`, `agentistics_delete_layout` |
+| **PDF export** — 1 | `agentistics_export_pdf` |
+| **Tags** — 2, read-only | `agentistics_tags`, `agentistics_tag_detail` |
+| **Team** — 2, read-only | `agentistics_team_status`, `agentistics_team_members` |
+
+Each tool's own `description` (what `tools/list` returns) is the authoritative contract; the
+sections below document the ones whose shapes are stable.
+
+### What the MCP cannot do — read this before relying on it
+
+- **It has no gate of its own.** Every tool runs on the first call, including the destructive ones
+  (`agentistics_task_delete`, `agentistics_delete_layout`, the `delete` action of
+  `agentistics_session_group_edit`). There is no risk class, no audit and no notion of who called.
+  The only protection is the server's own route guards and your client's tool-approval prompt.
+- **It cannot authenticate to a central.** Every call is a bare `fetch` to `AGENTISTICS_API` with
+  no credential, and a central requires an account session on every `/api/*` outside its public
+  set. Pointed at a central, the tools answer with the auth refusal. `agentistics_team_members`
+  describes central data, but in practice it only works when run against a central that does not
+  demand auth — i.e. it is effectively machine-side today.
+- **It does not control the live fleet.** No tool reads a session's screen, prompts one, starts one
+  or stops one; the web workspace, the cockpit, the VS Code extension and `agentop session` can.
+- **The task-board and session-group tools need a machine.** Their routes (`/api/tasks`,
+  `/api/session-groups`) sit behind the `localShell` capability, so a central refuses them.
+
+These gaps are the subject of the MCP coverage design
+(`docs/superpowers/specs/2026-09-29-mcp-coverage-design.md`).
+
+---
+
+### Task board (ALM) — `agentistics_task*`
+
+Thin calls to `/api/tasks`: the arithmetic (cost, rounds, tokens with provenance) and the rules
+(`blocked` needs a reason, `done` needs a filed session, a claim is a 30-minute LEASE, never a lock)
+live on the server, so the MCP, the CLI and the dashboard cannot disagree about a delivery. Refusals
+come back as the server's own codes (`blocked_needs_reason`, `done_needs_session`, a claim naming its
+holder). The orchestration loop an agent follows is `agentistics_task_next` (what can be picked up,
+plus what is withheld and why) → `agentistics_task_claim` → work → `agentistics_task_session` (file
+the session so the task is measured) → `agentistics_task_status`. Marked **beta**: the shapes may move
+between releases. See CLAUDE.md § "The task board (ALM)".
+
+---
+
 ### `agentistics_summary`
 
 All-time totals aggregated from sessions. Token counts and cost are computed directly from session records (not from the stats-cache snapshot), so they are always accurate even if the cache is stale.
 
-**Parameters:** `harness` *(optional)* — `claude` | `codex` | `gemini` | `copilot` | `antigravity` | `all` (default `all`).
+**Parameters:** `harness` *(optional)* — a harness id or `all` (default `all`).
 
 **Returns:**
 ```json
@@ -152,7 +201,7 @@ Recent sessions with duration, model, and cost.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `limit` | number | 20 | Max sessions to return (1–50) |
-| `harness` | string | `all` | Scope to one harness (`claude` \| `codex` \| `gemini` \| `copilot` \| `antigravity`) |
+| `harness` | string | `all` | Scope to one harness (any harness id), or `all` |
 
 **Returns:** array of sessions sorted by start time descending (each row includes its `harness`)
 ```json
@@ -347,7 +396,11 @@ Permanently deletes a layout. Cannot be undone. Cannot delete the last remaining
 
 ### `agentistics_export_pdf`
 
-Generates a PDF report download link. Returns a `[⬇ Download PDF](pdf:URL)` link that the Nay chat renders as a styled download button. Clicking it opens the PDF export modal pre-configured with the requested date range.
+Generates a PDF report link: a `[⬇ Download PDF](pdf:URL)` markdown link pointing at `/?export=pdf&range=…`.
+
+> **Known gap:** the `pdf:` link scheme was rendered as a download button by the old Nay chat
+> (`TtyChat.tsx`), which #780 removed. Nothing in the current web bundle handles `pdf:` links or the
+> `?export=pdf` parameter, so the link arrives as text. Use **Export** in the dashboard meanwhile.
 
 **Parameters:**
 | Name | Type | Default | Description |
@@ -359,7 +412,29 @@ Generates a PDF report download link. Returns a `[⬇ Download PDF](pdf:URL)` li
 [⬇ Download PDF — last 30d](pdf:http://localhost:47292/?export=pdf&range=30d)
 ```
 
-The Nay chat detects the `pdf:` protocol and renders it as an orange download button. Clicking opens the PDF export modal where you can review and download the report.
+---
+
+### `agentistics_repos`
+
+Repositories grouped by normalized git remote (independent of path or machine), with
+session/message/token/cost totals and last-active date. Sessions with no linked repository are
+grouped under `unlinked`. **Parameters:** `harness` *(optional)*.
+
+---
+
+### `agentistics_tags` / `agentistics_tag_detail`
+
+Read-only. `agentistics_tags` lists every tag visible to the caller with its aggregate sessions,
+cost and tokens; `agentistics_tag_detail` (`tag`: name or id) adds the per-source breakdown,
+distributions, daily series and the tag's date window. Aggregates only — never session rows.
+
+---
+
+### `agentistics_team_status` / `agentistics_team_members`
+
+Read-only. `agentistics_team_status` reports this machine's team mode (solo / central / member) and,
+as a member, its central connections. `agentistics_team_members` lists a central's members with
+presence; see the authentication limit above.
 
 ---
 
@@ -428,9 +503,10 @@ The server lives at `packages/mcp/agentistics-mcp.ts`. It uses the `@modelcontex
 
 Key design decisions:
 - **No direct file access** — all data goes through the agentistics API so the same parsing/aggregation logic applies everywhere
-- **Cost calculation** — the MCP has its own inline `calcCostUSD` that mirrors `src/lib/types.ts` to avoid bundling the frontend module; totals in `agentistics_summary` are aggregated from sessions (not from the stats-cache snapshot) for accuracy
+- **Cost calculation** — `session-tokens.ts` prices through `@agentistics/core` (`sessionCostUSD` per model, `calcCost` for the no-model fallback, the `tokens.ts` helpers for all four counters); there is no pricing copy inside the MCP
+- **The layout catalog is a hand-kept mirror** — `CATALOG` in `agentistics-mcp.ts` copies `packages/web/src/lib/componentCatalog.tsx` and must be updated when a component is added there
 - **Auto-position algorithm** — `agentistics_build_layout` uses first-fit shelf packing on a 12-column grid, then `fillGaps` extends items that have empty space to their right (no right neighbour in the same row range)
-- **PDF links** — `agentistics_export_pdf` returns a `[label](pdf:URL)` markdown link; the Nay chat component detects the `pdf:` protocol and renders it as a download button
+- **PDF links** — `agentistics_export_pdf` returns a `[label](pdf:URL)` markdown link (see the known gap above)
 
 ## MCP Server Verification and Dashboard Integration
 
@@ -443,5 +519,5 @@ The agentistics dashboard provides a dedicated MCP Management interface (in Sett
 
 ## See also
 
-- [Nay chat](./nay.md) — how the built-in AI assistant uses these tools
+- [Nay chat](./nay.md) — the built-in assistant; a Nay conversation is a managed session with every tool allowed
 - [Data sources](./data-sources.md) — what `/api/data` returns and how it's computed
