@@ -60,6 +60,26 @@ export function resizePanel(start: Size, dx: number, dy: number, edges: { left: 
 
 const topZ = (windows: readonly NayWindow[]) => windows.reduce((m, w) => Math.max(m, w.z), 0)
 
+/** The base z-index detached windows stack from (`WINDOW_Z_BASE + win.z`). */
+export const WINDOW_Z_BASE = 410
+
+/** A detached window's z-index. */
+export function windowZIndex(win: Pick<NayWindow, 'z'>): number {
+  return WINDOW_Z_BASE + win.z
+}
+
+/**
+ * The OPEN dock's z-index: always above every detached window.
+ *
+ * It sat at a fixed 400 while windows stack from 410 upward, so a detached window overlapping the
+ * dock took every click on that part of it (and raised itself on each one): the dock's settings
+ * screen, its tabs and its composer could be unreachable wherever a window lay over them. The dock is
+ * the thing the button just opened, so it belongs on top; a window under it is still one drag away.
+ */
+export function dockZIndex(windows: readonly Pick<NayWindow, 'z'>[]): number {
+  return windows.reduce((m, w) => Math.max(m, windowZIndex(w)), WINDOW_Z_BASE) + 1
+}
+
 /**
  * Open a session: RAISE its window if one holds it (restoring a minimized one), otherwise show it
  * in the panel and open the panel.

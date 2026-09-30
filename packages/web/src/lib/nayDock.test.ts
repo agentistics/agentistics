@@ -134,3 +134,22 @@ describe('the dock opens anchored to the button', () => {
     expect(resizeAnchored({ w: 480, h: 600 }, -40, -30, { x: 'left', y: 'up' }, VP)).toEqual({ w: 520, h: 630 })
   })
 })
+
+import { dockZIndex, windowZIndex } from './nayDock'
+
+describe('the open dock stacks above detached windows', () => {
+  test('a window never outranks the dock, however far it was raised', () => {
+    const windows = [{ z: 1 }, { z: 7 }, { z: 3 }]
+    const dock = dockZIndex(windows)
+    for (const w of windows) expect(dock).toBeGreaterThan(windowZIndex(w))
+  })
+  test('with no windows the dock still sits above where the first one would', () => {
+    expect(dockZIndex([])).toBeGreaterThan(windowZIndex({ z: 0 }))
+  })
+  test('raising a window re-ranks the dock above it', () => {
+    const before = dockZIndex([{ z: 2 }])
+    const after = dockZIndex([{ z: 2 }, { z: 3 }])
+    expect(after).toBeGreaterThan(windowZIndex({ z: 3 }))
+    expect(after).toBeGreaterThan(before)
+  })
+})
