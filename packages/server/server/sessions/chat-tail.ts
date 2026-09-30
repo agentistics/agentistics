@@ -29,6 +29,7 @@ import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
 import { classifyUserEntry, type UserEntry } from './chat-envelope'
+import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
 import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
 import type { ChatTurn } from './chat-turn'
@@ -276,6 +277,63 @@ function queuedPromptText(prompt: unknown): string | null {
   return text || null
 }
 
+/**
+ * Bash mode's two entries, joined into ONE turn — see `bash-mode.ts` for the measured shape.
+ *
+ * The walk runs BACKWARDS, so the output (written after its input) is always met first. It is drawn
+ * as the "command output" note it has always been and remembered by its `parentUuid`; when the
+ * input that names it is reached, the note is retired and the input's turn carries the output.
+ * An output whose input fell outside the window therefore keeps its note rather than vanishing.
+ * Shared by both walks in this file — a rule written at each call site is a rule one of them forgets.
+ */
+interface ShellPairing {
+  outputs: Map<string, { output: ShellOutput; turn: ChatTurn }>
+  retired: Set<ChatTurn>
+}
+
+function newShellPairing(): ShellPairing {
+  return { outputs: new Map(), retired: new Set() }
+}
+
+/** Handles one entry if it is bash mode's; `true` when it did (the caller moves on). */
+function shellStep(
+  e: Record<string, unknown>, isNewest: boolean, pairing: ShellPairing,
+  add: (t: ChatTurn) => void, turns: ChatTurn[],
+): boolean {
+  const text = bashEntryText(e)
+  if (text === null) return false
+  const output = parseBashOutput(text)
+  if (output) {
+    add({ role: 'user', text: 'command output', system: 'command output' })
+    if (typeof e.parentUuid === 'string') {
+      pairing.outputs.set(e.parentUuid, { output, turn: turns[turns.length - 1]! })
+    }
+    return true
+  }
+  const command = parseBashInput(text)
+  if (command === null) return false
+  const paired = typeof e.uuid === 'string' ? pairing.outputs.get(e.uuid) : undefined
+  if (paired) pairing.retired.add(paired.turn)
+  add({
+    role: 'user',
+    text: `!${command}`,
+    shell: {
+      command,
+      summary: commandSummary(command),
+      // Only the NEWEST entry can be "still running" — the rule `pending` keeps for the same reason.
+      running: !paired && isNewest,
+      ...(paired ? { output: paired.output } : {}),
+    },
+  })
+  return true
+}
+
+/** Remove the output notes their input absorbed, in place. */
+function dropRetired(turns: ChatTurn[], pairing: ShellPairing): void {
+  if (pairing.retired.size === 0) return
+  for (let k = turns.length - 1; k >= 0; k--) if (pairing.retired.has(turns[k]!)) turns.splice(k, 1)
+}
+
 /** The turn one classified entry becomes. */
 function userTurn(entry: UserEntry): ChatTurn {
   return entry.kind === 'person'
@@ -486,6 +544,8 @@ async function readTurnsFromTail(
    * always seen and recorded here before the marker turn itself is reached.
    */
   const companions = new Map<string, string[]>()
+  /** Bash mode's output entries, waiting for the input that names them. */
+  const shells = newShellPairing()
   // Set once, on the first substantive (non-blank, parseable) line the loop inspects — which is the
   // NEWEST event in the transcript. Only there does "no text yet" mean "busy right now"; the same
   // shape earlier in the file is just an ordinary tool call whose result and follow-up text already
@@ -525,6 +585,8 @@ async function readTurnsFromTail(
     // marker turn it describes below, never drawn as its own "an image was attached" chip.
     if (noteImageCompanion(e, companions)) continue
 
+    if (shellStep(e, isNewest, shells, add, turns)) continue
+
     const userEntry = extractUserEntry(e)
     if (userEntry) { add(markerAwareUserTurn(e, userEntry, companions, lines, i)); continue }
     const queued = extractQueuedEntry(e)
@@ -547,6 +609,7 @@ async function readTurnsFromTail(
     }
   }
 
+  dropRetired(turns, shells)
   turns.reverse()
 
   return { turns, atStart: tail.atStart }
@@ -620,6 +683,8 @@ export async function readChatWindow(
    * always seen and recorded here before the marker turn itself is reached.
    */
   const companions = new Map<string, string[]>()
+  /** Bash mode's output entries, waiting for the input that names them. */
+  const shells = newShellPairing()
   let newest = true
   // THE BRANCH claude IS ON — see `active-branch.ts`. A rewind leaves the abandoned turns in the
   // file; they are skipped here, bounded to the tail this walk can reach.
@@ -658,6 +723,8 @@ export async function readChatWindow(
     // marker turn it describes below, never drawn as its own "an image was attached" chip.
     if (noteImageCompanion(e, companions)) continue
 
+    if (shellStep(e, isNewest, shells, add, turns)) continue
+
     const userEntry = extractUserEntry(e)
     if (userEntry) { add(markerAwareUserTurn(e, userEntry, companions, lines, i)); continue }
     const queued = extractQueuedEntry(e)
@@ -692,6 +759,7 @@ export async function readChatWindow(
     }
   }
 
+  dropRetired(turns, shells)
   turns.reverse()
   // The walk stopped on the cap with content still above it: this is a WINDOW onto a longer
   // conversation, and every surface reading these turns has to be able to say so. A blank tail is

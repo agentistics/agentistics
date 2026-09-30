@@ -72,6 +72,7 @@ import { HARNESS_SKILLS, skillNameFromDir } from './skill-source'
 // Shared with `chat-tail.ts`, which pairs this SAME shape with the `Read` call it describes — one
 // regex, so the classification here and the pairing there can never disagree about what counts.
 import { VIEWED_IMAGE_RE } from './viewed-image'
+import { parseBashInput } from './bash-mode'
 
 
 /** What a `user` entry turns out to be. */
@@ -151,6 +152,13 @@ export function classifyUserText(text: string): UserEntry {
   if (env === undefined) return { kind: 'person', text: trimmed }
 
   if (!env.unwrap) return { kind: 'system', note: env.note }
+
+  // A `!` line reads back as the `!` line the person TYPED — the prefix is part of what they did,
+  // and it is what the composer's echo holds, so dropping it left that echo unreconcilable forever.
+  if (tag === 'bash-input') {
+    const cmd = parseBashInput(trimmed)
+    if (cmd !== null) return { kind: 'person', text: `!${cmd}` }
+  }
 
   const inner = unwrapAll(trimmed)
   // An envelope the person performed but which unwraps to nothing has no text to show and is still
