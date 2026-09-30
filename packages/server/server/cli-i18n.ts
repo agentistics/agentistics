@@ -30,6 +30,8 @@ export type CliLang = 'en' | 'pt'
 const cap = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 
 export interface CliStrings {
+  /** Which language this table is — for the few strings built from data, like a date. */
+  lang: 'en' | 'pt'
   tagline: string
   configSolo: string
   /** The member sentence WITHOUT the endpoint, for surfaces that print the endpoint themselves. */
@@ -522,6 +524,7 @@ export interface CliStrings {
 }
 
 const EN: CliStrings = {
+  lang: 'en',
   tagline: 'AI coding-assistant analytics · agentop',
   configSolo: 'solo — nothing leaves this machine',
   configMemberBare: 'member — sends metrics to a central',
@@ -938,6 +941,7 @@ const EN: CliStrings = {
 }
 
 const PT: CliStrings = {
+  lang: 'pt',
   tagline: 'Analytics de assistentes de código IA · agentop',
   configSolo: 'solo — nada sai desta máquina',
   configMemberBare: 'member — envia métricas para uma central',

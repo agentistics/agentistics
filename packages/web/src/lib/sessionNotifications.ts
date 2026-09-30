@@ -7,25 +7,9 @@ import type { SessionMeta } from '@agentistics/core'
 import { sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
 import { clampVolume } from './soundVolume'
-import { findNaySound, isNaySoundId, type NaySoundId } from './notificationSounds'
-import {
-  alertKey, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
-  type NayAlertKind, type NayAnimation,
-} from './nayNotify'
-import { observeFleet, pushAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
-import { pushNotification, type NotificationType } from './notifications'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
-/** The four original chimes, plus the thirteen synthesized in `notificationSounds.ts`. */
-export type LegacySoundPreset = 'chime' | 'soft' | 'alert' | 'ping'
-export type SoundPreset = LegacySoundPreset | NaySoundId
-const LEGACY_PRESETS: readonly string[] = ['chime', 'soft', 'alert', 'ping']
-export function isSoundPreset(v: unknown): v is SoundPreset {
-  return (typeof v === 'string' && LEGACY_PRESETS.includes(v)) || isNaySoundId(v)
-}
-
-/** The events the settings screen lists: the four states, plus "not opened for a while". */
-export type NotifyEvent = SessionActivity | 'stale'
+export type SoundPreset = 'chime' | 'soft' | 'alert' | 'ping'
 
 export interface NotificationSettings {
   enabled: boolean
@@ -35,8 +19,6 @@ export interface NotificationSettings {
     'waiting': boolean
     'working': boolean
     'exited': boolean
-    /** A session waiting on a person that nobody has opened for `staleAfterMin`. */
-    'stale': boolean
   }
   /**
    * REQUIRED, because it always exists.
@@ -54,25 +36,10 @@ export interface NotificationSettings {
     'waiting': SoundPreset
     'working': SoundPreset
     'exited': SoundPreset
-    'stale': SoundPreset
   }
   soundEnabled: boolean
   soundPreset: SoundPreset
   soundVolume: number // 0.0 to 1.0
-  /**
-   * DO NOT DISTURB: no card, no sound, no shock, no system notification. The bell still records
-   * every event, so nothing that happened is lost — it is only not announced.
-   */
-  doNotDisturb: boolean
-  /** Minutes a waiting session may go unopened before the Nay button says so. `0` = never. */
-  staleAfterMin: number
-  /** How the Nay button delivers a card. Chosen in the chat settings; see `nayNotify.ts`. */
-  nayAnimation: NayAnimation
-  /**
-   * While this tab is in the BACKGROUND the in-app card cannot be seen, so the operating system's
-   * notification is used instead — the only delivery that reaches someone on another window.
-   */
-  systemWhenHidden: boolean
 }
 
 import { createSharedPref } from './sharedPref'
@@ -87,24 +54,16 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     'waiting': true,
     'working': false,
     'exited': true,
-    'stale': true,
   },
-  // One synthesized sound per event, each chosen for what the event asks of the person: a light
-  // pluck for "it answered", a rising question for "it needs you", the quietest one for a reminder.
   eventSounds: {
-    'waiting-approval': 'question',
-    'waiting': 'kalimba',
+    'waiting-approval': 'alert',
+    'waiting': 'chime',
     'working': 'soft',
-    'exited': 'drop',
-    'stale': 'breeze',
+    'exited': 'ping',
   },
   soundEnabled: true,
   soundPreset: 'chime',
   soundVolume: 0.8,
-  doNotDisturb: false,
-  staleAfterMin: DEFAULT_STALE_MIN,
-  nayAnimation: DEFAULT_NAY_ANIMATION,
-  systemWhenHidden: true,
 }
 
 /**
@@ -116,23 +75,11 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
  */
 export function readNotificationSettings(raw: unknown): NotificationSettings {
   const parsed = (raw ?? {}) as Partial<NotificationSettings>
-  const sounds = { ...DEFAULT_NOTIFICATION_SETTINGS.eventSounds, ...(parsed.eventSounds ?? {}) }
-  // A sound id this build does not know (stored by a newer one, or edited by hand) falls back to the
-  // event's default rather than playing nothing while the screen shows a blank picker.
-  for (const k of Object.keys(sounds) as (keyof typeof sounds)[]) {
-    if (!isSoundPreset(sounds[k])) sounds[k] = DEFAULT_NOTIFICATION_SETTINGS.eventSounds[k]
-  }
-  const stale = Number(parsed.staleAfterMin)
   return {
     ...DEFAULT_NOTIFICATION_SETTINGS,
     ...parsed,
     events: { ...DEFAULT_NOTIFICATION_SETTINGS.events, ...(parsed.events ?? {}) },
-    eventSounds: sounds,
-    soundPreset: isSoundPreset(parsed.soundPreset) ? parsed.soundPreset : DEFAULT_NOTIFICATION_SETTINGS.soundPreset,
-    doNotDisturb: parsed.doNotDisturb === true,
-    staleAfterMin: Number.isFinite(stale) && stale >= 0 ? stale : DEFAULT_STALE_MIN,
-    nayAnimation: parseNayAnimation(parsed.nayAnimation),
-    systemWhenHidden: parsed.systemWhenHidden !== false,
+    eventSounds: { ...DEFAULT_NOTIFICATION_SETTINGS.eventSounds, ...(parsed.eventSounds ?? {}) },
   }
 }
 
@@ -214,9 +161,6 @@ export function playNotificationSound(preset: SoundPreset = 'chime', volume: num
     const masterGain = ctx.createGain()
     masterGain.gain.setValueAtTime(clampVolume(volume, 0.8), now)
     masterGain.connect(ctx.destination)
-
-    const synth = findNaySound(preset)
-    if (synth) { synth.play(ctx, masterGain, now + 0.01); return }
 
     if (preset === 'chime') {
       // Warm dual-tone chord: C5 (523.25 Hz) -> E5 (659.25 Hz) -> G5 (783.99 Hz)
@@ -461,7 +405,6 @@ export interface NotifiableSession {
   first_prompt?: string
   project_path?: string
   harness?: string
-  model?: string
 }
 
 export function handleSessionStateTransitions(
@@ -527,108 +470,14 @@ export function handleSessionStateTransitions(
         : `Session "${sessionSubject}"${locationInfo} was closed.`
     }
 
-    if (!title || !body) continue
-    const kind: NayAlertKind | null = nextState === 'waiting' ? 'turn' : nextState === 'waiting-approval' ? 'approval' : null
-    const since = waitingSince(id)
-    const sinceMs = since?.sinceMs ?? Date.now()
-    deliver({
-      event: nextState,
-      title, body, tag: `session-${id}`,
-      bell: { code: BELL_CODE[nextState], id, name: sessionSubject, harness: harnessName, sinceMs },
-      ...(kind ? {
-        alert: {
-          key: alertKey(kind, id, sinceMs), kind, sessionId: id, name: sessionSubject,
-          harness: session?.harness, model: session?.model, sinceMs, sinceKnown: since?.known ?? true,
-        },
-      } : {}),
-      shock: nextState === 'waiting',
-    }, settings)
+    if (title && body) {
+      triggerSessionNotification({
+        title,
+        body,
+        tag: `session-${id}`,
+      })
+    }
   }
-}
-
-// ----------------------------------------------------------------------------
-// Delivery — the Nay button's card, the bell, and the system notification
-// ----------------------------------------------------------------------------
-
-/** Every session event is written to the bell (`notifications.ts`) under one of these codes. */
-export const BELL_CODE: Record<NotifyEvent, string> = {
-  'waiting': 'session.turn_ended',
-  'waiting-approval': 'session.needs_approval',
-  'stale': 'session.stale',
-  'working': 'session.working',
-  'exited': 'session.exited',
-}
-
-const BELL_TYPE: Record<NotifyEvent, NotificationType> = {
-  'waiting': 'info', 'waiting-approval': 'warning', 'stale': 'info', 'working': 'info', 'exited': 'info',
-}
-
-/** Codes the Nay button shows as its own card — the generic toast must not show them a second time. */
-export const NAY_CARD_CODES: ReadonlySet<string> = new Set([BELL_CODE.waiting, BELL_CODE['waiting-approval'], BELL_CODE.stale])
-
-interface Delivery {
-  event: NotifyEvent
-  title: string
-  body: string
-  tag: string
-  bell: { code: string; id: string; name: string; harness: string; sinceMs: number }
-  alert?: NayAlert
-  /** "The session replied" — the button shocks (the button decides whether the page allows it). */
-  shock?: boolean
-}
-
-/**
- * Where one event goes.
- *
- * - The BELL always gets it, so nothing is lost to do-not-disturb or to a closed card. Its `meta`
- *   is the same in every open tab (the minute, not the millisecond), so the server's dedupe keeps
- *   ONE row however many tabs saw the transition.
- * - A VISIBLE tab shows the Nay button's card and plays the event's sound — our own notification,
- *   not the operating system's.
- * - A tab in the BACKGROUND cannot show a card anybody will see, so it falls back to the system
- *   notification (unless that is switched off). Outside a browser — a test — that is the only path.
- * - Do-not-disturb silences all of it except the bell.
- */
-function deliver(d: Delivery, settings: NotificationSettings): void {
-  if (typeof document !== 'undefined') {
-    pushNotification({
-      type: BELL_TYPE[d.event],
-      code: d.bell.code,
-      meta: {
-        sessionId: d.bell.id, name: d.bell.name, harness: d.bell.harness,
-        at: new Date(d.bell.sinceMs).toISOString().slice(0, 16),
-      },
-    })
-  }
-  if (settings.doNotDisturb) return
-  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) {
-    if (d.alert) pushAlert(d.alert)
-    if (d.shock) requestShock()
-    if (settings.soundEnabled) playNotificationSound(settings.eventSounds[d.event], settings.soundVolume)
-    return
-  }
-  if (!settings.systemWhenHidden) return
-  triggerSessionNotification({
-    title: d.title, body: d.body, tag: d.tag,
-    soundPreset: settings.eventSounds[d.event],
-  })
-}
-
-/** A snoozed card coming back: the card and its sound again, never the bell a second time. */
-setSnoozeReleaseHandler(alert => {
-  const settings = getNotificationSettings()
-  if (!settings.enabled || settings.doNotDisturb) return
-  if (!pushAlert(alert)) return
-  const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
-  if (settings.soundEnabled) playNotificationSound(settings.eventSounds[event], settings.soundVolume)
-})
-
-/** The title and body of a "not opened for a while" notification, for the system path. */
-function staleText(name: string, place: string, waited: string, lang: 'pt' | 'en'): { title: string; body: string } {
-  return lang === 'pt'
-    ? { title: `[Sem abrir] ${name}`, body: `A sessão "${name}"${place} espera por você ${waited} e ninguém a abriu.` }
-    : { title: `[Not opened] ${name}`, body: `Session "${name}"${place} has been waiting for you ${waited} and nobody opened it.` }
 }
 
 
@@ -671,42 +520,12 @@ export function fleetActivityStates(
  */
 let unconfirmed: Record<string, SessionActivity> = {}
 
-type FleetNotifyRow = { id: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
-
-/**
- * "Not opened for a while": read this poll into the store's waiting clocks and raise each session
- * that has just crossed the line. It runs on EVERY poll, the first included — the clocks have to
- * start somewhere — and cannot fire on the first one, because every clock starts at that poll.
- */
-function raiseStale(rows: readonly FleetNotifyRow[], lang: 'pt' | 'en'): void {
-  const settings = getNotificationSettings()
-  const due = observeFleet(rows, settings.enabled && settings.events.stale ? settings.staleAfterMin : 0)
-  for (const c of due) {
-    const r = rows.find(x => x.id === c.id)
-    if (!r) continue
-    const name = r.title || (r.cwd?.split('/').filter(Boolean).pop() ?? '') || r.id.slice(0, 8)
-    const harness = r.harness ? ((HARNESS_LABELS as Record<string, string>)[r.harness] || r.harness) : ''
-    const folder = r.cwd?.split('/').filter(Boolean).pop() ?? ''
-    const place = folder ? ` (${harness}${harness ? (lang === 'pt' ? ' em ' : ' in ') : ''}${folder})` : ''
-    const { title, body } = staleText(name, place, formatWaiting(c.sinceMs, Date.now(), c.known, lang), lang)
-    deliver({
-      event: 'stale', title, body, tag: `session-stale-${r.id}`,
-      bell: { code: BELL_CODE.stale, id: r.id, name, harness, sinceMs: c.sinceMs },
-      alert: {
-        key: alertKey('stale', r.id, c.sinceMs), kind: 'stale', sessionId: r.id, name,
-        harness: r.harness, model: r.model, sinceMs: c.sinceMs, sinceKnown: c.known,
-      },
-    }, settings)
-  }
-}
-
 export function notifyFleetTransitions(
   prev: Record<string, SessionActivity> | null,
-  rows: readonly FleetNotifyRow[],
+  rows: readonly { id: string; state: string; title?: string; cwd?: string; harness?: string }[],
   lang: 'pt' | 'en',
 ): Record<string, SessionActivity> {
   const seen = fleetActivityStates(rows)
-  raiseStale(rows, lang)
   // `null` is the first snapshot — see the rule above. It is deliberately distinct from `{}`, which
   // is a machine that genuinely had no sessions a moment ago and now has one.
   if (prev === null) { unconfirmed = seen; return seen }
@@ -772,7 +591,6 @@ export function notifyFleetTransitions(
       ...(r.title ? { title: r.title } : {}),
       ...(r.cwd ? { project_path: r.cwd } : {}),
       ...(r.harness ? { harness: r.harness } : {}),
-      ...(r.model ? { model: r.model } : {}),
     })
   }
   // Only what was CONFIRMED this poll AND is a transition — `prev` is passed as the baseline so the
@@ -786,5 +604,4 @@ export function notifyFleetTransitions(
 /** Test seam: the confirmation memory is module state, and a test must be able to clear it. */
 export function resetNotificationMemory(): void {
   unconfirmed = {}
-  resetNayNotifyStore()
 }

@@ -13,13 +13,10 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   type NotificationSettings,
   type SoundPreset,
-  type NotifyEvent,
+  type SessionActivity,
 } from '../../lib/sessionNotifications'
-import { NAY_SOUNDS } from '../../lib/notificationSounds'
-import { alertKey, formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
-import { pushAlert } from '../../lib/nayNotifyStore'
-import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
-import { Bell, Volume2, VolumeX, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
+import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
+import { Bell, Volume2, VolumeX, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, Clock, Activity, XCircle } from 'lucide-react'
 
 export default function NotificationsSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -71,7 +68,7 @@ export default function NotificationsSettings() {
     update({ events: nextEvents })
   }
 
-  function updateEventSound(eventKey: NotifyEvent, value: SoundPreset) {
+  function updateEventSound(eventKey: SessionActivity, value: SoundPreset) {
     const base = settings.eventSounds || DEFAULT_NOTIFICATION_SETTINGS.eventSounds!
     const nextSounds: NonNullable<NotificationSettings['eventSounds']> = { ...base, [eventKey]: value }
     update({ eventSounds: nextSounds })
@@ -95,14 +92,6 @@ export default function NotificationsSettings() {
   }
 
   function handleTestSoundAndNotification() {
-    // The Nay button's own card, as a DEMO: it carries no real session, so it offers only snooze and
-    // dismiss — a reply or an approval sent from a test would reach nothing, or the wrong thing.
-    const now = Date.now()
-    pushAlert({
-      key: alertKey('turn', 'demo', now), kind: 'turn', sessionId: 'demo', demo: true,
-      name: pt ? 'Sessão de exemplo' : 'Example session', harness: 'claude', model: 'claude-opus-5-5',
-      sinceMs: now - 3 * 60_000, sinceKnown: true,
-    })
     triggerSessionNotification({
       title: pt ? 'Notificação de Teste' : 'Test Notification',
       body: pt
@@ -119,8 +108,6 @@ export default function NotificationsSettings() {
     { key: 'soft', labelPt: 'Suave / Discreto', labelEn: 'Soft / Subtle', descPt: 'Pulso duplo de baixa frequência', descEn: 'Double low-frequency pulse' },
     { key: 'alert', labelPt: 'Alerta / Destaque', labelEn: 'Alert Tone', descPt: 'Tom triplo de atenção em E5', descEn: 'Triple attention tone in E5' },
     { key: 'ping', labelPt: 'Ping de Cristal', labelEn: 'Crystal Ping', descPt: 'Sino agudo de alta clareza', descEn: 'High clarity bell' },
-    // The thirteen synthesized for the Nay button's cards (`notificationSounds.ts`).
-    ...NAY_SOUNDS.map(n => ({ key: n.id as SoundPreset, labelPt: n.label.pt, labelEn: n.label.en, descPt: n.about.pt, descEn: n.about.en })),
   ]
 
   const EVENT_CONFIGS: {
@@ -167,15 +154,6 @@ export default function NotificationsSettings() {
       icon: <XCircle size={15} style={{ color: 'var(--text-tertiary)' }} />,
       descPt: 'Quando o processo de uma sessão ao vivo é finalizado',
       descEn: 'When a live session process exits or terminates',
-    },
-    {
-      key: 'stale',
-      titlePt: 'Sem abrir',
-      titleEn: 'Not opened',
-      color: 'var(--text-secondary)',
-      icon: <Hourglass size={15} style={{ color: 'var(--text-secondary)' }} />,
-      descPt: 'Quando uma sessão espera por você e ninguém a abre pelo tempo escolhido',
-      descEn: 'When a session waits for you and nobody opens it for the chosen time',
     },
   ]
 
@@ -328,24 +306,6 @@ export default function NotificationsSettings() {
         <Toggle on={settings.enabled} onToggle={() => update({ enabled: !settings.enabled })} />
       </PrefRow>
 
-      <PrefRow
-        label={pt ? 'Não perturbe' : 'Do not disturb'}
-        sub={pt
-          ? 'Sem cartão do botão Nay, sem som e sem notificação do sistema. Tudo continua registrado no sino.'
-          : 'No Nay button card, no sound and no system notification. Everything is still recorded in the bell.'}
-      >
-        <Toggle on={settings.doNotDisturb} onToggle={() => update({ doNotDisturb: !settings.doNotDisturb })} />
-      </PrefRow>
-
-      <PrefRow
-        label={pt ? 'Notificação do sistema com a aba em segundo plano' : 'System notification while the tab is in the background'}
-        sub={pt
-          ? 'Com a aba visível, o aviso é o cartão que sai do botão Nay. Com ela escondida, o cartão não seria visto — então usa a notificação do navegador.'
-          : 'With the tab visible, the alert is the card that comes out of the Nay button. With it hidden the card would not be seen, so the browser notification is used.'}
-      >
-        <Toggle on={settings.systemWhenHidden} onToggle={() => update({ systemWhenHidden: !settings.systemWhenHidden })} />
-      </PrefRow>
-
       <Divider />
 
       {/* Event Types & Per-Status Sound Customization */}
@@ -395,14 +355,28 @@ export default function NotificationsSettings() {
                 {/* Per-Status Sound Dropdown */}
                 {settings.soundEnabled && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ minWidth: 150, opacity: enabled ? 1 : 0.6 }}>
-                      <Select
-                        value={currentSound}
-                        onChange={v => updateEventSound(evt.key, v as SoundPreset)}
-                        disabled={!enabled}
-                        options={SOUND_PRESETS.map(p => ({ value: p.key, label: pt ? p.labelPt : p.labelEn }))}
-                      />
-                    </div>
+                    <select
+                      value={currentSound}
+                      onChange={e => updateEventSound(evt.key, e.target.value as SoundPreset)}
+                      disabled={!enabled}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-surface)',
+                        color: enabled ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                        fontSize: 11,
+                        fontFamily: 'inherit',
+                        cursor: enabled ? 'pointer' : 'not-allowed',
+                        opacity: enabled ? 1 : 0.6,
+                      }}
+                    >
+                      {SOUND_PRESETS.map(p => (
+                        <option key={p.key} value={p.key}>
+                          {pt ? p.labelPt : p.labelEn}
+                        </option>
+                      ))}
+                    </select>
 
                     <button
                       onClick={() => playNotificationSound(currentSound, settings.soundVolume)}
@@ -428,19 +402,6 @@ export default function NotificationsSettings() {
                   </div>
                 )}
 
-                {evt.key === 'stale' && (
-                  <div style={{ minWidth: 110, opacity: enabled ? 1 : 0.6 }} title={pt ? 'Depois de quanto tempo sem abrir' : 'After how long unopened'}>
-                    <Select
-                      value={String(settings.staleAfterMin)}
-                      onChange={v => update({ staleAfterMin: Number(v) })}
-                      disabled={!enabled}
-                      options={STALE_OPTIONS_MIN.map(m => ({
-                        value: String(m),
-                        label: m === 0 ? (pt ? 'nunca' : 'never') : formatSpan(m * 60_000),
-                      }))}
-                    />
-                  </div>
-                )}
                 <Toggle
                   on={enabled}
                   onToggle={() => updateEvent(evt.key, !enabled)}

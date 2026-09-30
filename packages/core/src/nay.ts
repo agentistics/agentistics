@@ -135,3 +135,18 @@ export function planNayFiling(groups: SessionUserGroupsValue, pins: readonly str
   const plan = planNayPlacement(groups, pins, [{ key, running: true }])
   return { ok: true, groups: plan.groups, pins: plan.pins, id: plan.activeId, changed: plan.changed }
 }
+
+/**
+ * The title a Nay conversation wears when nobody named it: "Nay · 29/09 21:28" (pt) or
+ * "Nay · 09/29 21:28" (en), on the local clock. The start path labels new conversations with it, and
+ * the fleet uses it as the FALLBACK for any Nay row without a label — so conversations started before
+ * the label existed read "Nay · …" too, instead of the generic "claude em nay-chat". The fallback
+ * writes nothing: it is a reading of the row's own start time.
+ */
+export function nayTitle(when: Date, lang: 'pt' | 'en'): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const day = lang === 'pt'
+    ? `${pad(when.getDate())}/${pad(when.getMonth() + 1)}`
+    : `${pad(when.getMonth() + 1)}/${pad(when.getDate())}`
+  return `Nay · ${day} ${pad(when.getHours())}:${pad(when.getMinutes())}`
+}

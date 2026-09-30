@@ -61,3 +61,40 @@ export function shouldResetDocumentScroll(i: ViewportResetInput): boolean {
   if (i.scrollY <= 0) return false
   return i.scrollHeight <= i.clientHeight + SCROLLABLE_SLACK
 }
+
+/**
+ * The two displacements `shouldResetDocumentScroll` cannot see, because both leave `scrollY` at 0.
+ *
+ * 1. **The VISUAL viewport stays panned** (`visualViewport.offsetTop > 0`) after the keyboard has
+ *    gone. iOS pans it to keep the caret in view, and when the layout viewport never scrolled there
+ *    is no `scrollY` to reset — the guard above answers "nothing to undo" and the page stays lifted.
+ * 2. **An installed app's layout viewport stays SHORT** (`innerHeight` below the tallest this page
+ *    has seen) after the keyboard has gone. Everything pinned to the bottom — the composer, the
+ *    bottom nav — then sits as high as it did over the keyboard until something forces a relayout,
+ *    which is why visiting another route "fixed" it.
+ *
+ * In both cases a `scrollTo(0, 0)` makes iOS recompute the viewport, and on a document that cannot
+ * scroll it moves nothing a reader owns. The same guards as above apply: never while a field has
+ * the caret (that pan is what carries the composer above the keyboard), and only on a document that
+ * genuinely cannot scroll.
+ */
+export interface ViewportNudgeInput {
+  editableFocused: boolean
+  scrollHeight: number
+  clientHeight: number
+  /** `visualViewport.offsetTop`, or 0 where there is no visualViewport. */
+  offsetTop: number
+  innerHeight: number
+  /** The tallest `innerHeight` this page has seen with nothing focused. */
+  tallestInnerHeight: number
+}
+
+/** How far short the layout viewport may be before it counts as left behind by the keyboard. */
+export const SHORT_VIEWPORT_SLACK = 40
+
+export function shouldNudgeViewport(i: ViewportNudgeInput): boolean {
+  if (i.editableFocused) return false
+  if (i.scrollHeight > i.clientHeight + SCROLLABLE_SLACK) return false
+  if (i.offsetTop > 0.5) return true
+  return i.tallestInnerHeight - i.innerHeight >= SHORT_VIEWPORT_SLACK
+}
