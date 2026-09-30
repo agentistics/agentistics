@@ -1,3 +1,0 @@
-bun run stub
-bun tsc --noEmit
-bun test

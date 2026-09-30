@@ -1,2 +1,0 @@
-{"type":"turn.prompt","input":[{"type":"text","text":"<redacted>"}],"origin":{"kind":"user"},"time":1700000000100}
-{"type":"usage.record","model":"anthropic/claude-sonnet-5","usage":{"inputOther":50,"output":10,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1700000000200}

@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "paths": {
-      "@agentistics/core": ["../core/src/index.ts"]
-    }
-  },
-  "include": ["src", "index.html"]
-}

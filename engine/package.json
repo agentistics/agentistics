@@ -1,0 +1,16 @@
+{
+  "name": "@agentistics/engine",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@agentistics/core": "workspace:*",
+    "@agentistics/engine-api": "workspace:*",
+    "@agentistics/runtime": "workspace:*"
+  }
+}
