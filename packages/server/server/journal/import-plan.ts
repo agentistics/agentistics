@@ -33,7 +33,7 @@
  */
 import type { HarnessId } from '@agentistics/core'
 import { HARNESS_ORDER } from '@agentistics/core'
-import type { ReplayCursor, ReplaySource } from '../integrations/types'
+import type { ReplayCursor, ReplaySource } from '@agentistics/engine-api'
 import { canSkip, type SourceStamp } from './shadow'
 import type { RejectionReason } from './types'
 
@@ -237,7 +237,7 @@ export function planStore(
   const plan: StorePlan = { import: [], skipped: {} }
   for (const e of entries) {
     if (discovered === null) { bump(plan.skipped, 'no-replay'); continue }
-    // A replay exists but the import was not told its entity-id derivations (`ENTITY_IDS`): it
+    // A replay exists but the import was not told its entity-id derivations (the integration's `entityIds`): it
     // cannot ask the journal whether the run is already there, so it refuses rather than guess.
     if (runIdOf === null) { bump(plan.skipped, 'no-entity-ids'); continue }
     if (discovered.has(e.sessionId)) { bump(plan.skipped, 'not-orphan'); continue }
@@ -331,7 +331,7 @@ const SKIP_TEXT: Record<ArtifactSkipReason | StoreSkipReason, string> = {
   'not-orphan': 'artifacts still present (replayed from them instead)',
   'already-in-journal': 'its run already holds replayed events',
   'no-replay': 'harness has no replay integration yet',
-  'no-entity-ids': 'harness has a replay, but the import has no entity-id mapping for it (ENTITY_IDS)',
+  'no-entity-ids': 'harness has a replay, but the import has no entity-id mapping for it (the integration declares no entityIds)',
 }
 
 const FAIL_TEXT: Record<string, string> = {

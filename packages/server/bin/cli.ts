@@ -99,10 +99,7 @@ Commands:
                 ('events watch' to subscribe, 'events status' to see who is watching)
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
-  provider      Manage a provider API key for the native runtime (BETA, off by default —
-                set AGENTISTICS_PROVIDER=1). The key is entered at a hidden prompt or via
-                --stdin, never on the command line ('provider key set|status|remove';
-                'provider try anthropic' makes one real, billed call)
+__ENGINE_VERBS__
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
@@ -278,6 +275,16 @@ Examples:
   agentop hooks status
 `.trim()
 
+/**
+ * The help as THIS build prints it: the engine's verbs (`code`, `provider`, `ingest`) are listed by
+ * every build, with the engine's own summary where it offers one and `(official build)` where it
+ * does not — hiding them would make the documentation lie to a community user.
+ */
+async function helpText(): Promise<string> {
+  const { engineHelpSection } = await import('../server/engine/cli.ts')
+  return HELP.replace('__ENGINE_VERBS__', await engineHelpSection())
+}
+
 // ---------------------------------------------------------------------------
 // Version check (runs in parallel with command startup — non-blocking)
 // ---------------------------------------------------------------------------
@@ -386,7 +393,7 @@ async function spawnVersionCacheRefresh(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 if (command === '--help' || command === '-h') {
-  console.log(HELP)
+  console.log(await helpText())
   process.exit(0)
 }
 
@@ -407,7 +414,7 @@ if (command === '--help' || command === '-h') {
 // still prints HELP: a pipe, a CI job or `agentop | less` must keep answering in text.
 if (!command) {
   if (!process.stdin.isTTY) {
-    console.log(HELP)
+    console.log(await helpText())
     process.exit(0)
   }
   // Read the preferences BEFORE the control center opens, and before the alternate screen is
@@ -435,7 +442,7 @@ if (command === 'central') {
   const action = args[0]
   if (!action) {
     console.error('Missing central action. Expected one of: up, init, down, logs, status, restart, pull.\n')
-    console.log(HELP)
+    console.log(await helpText())
     process.exit(1)
   }
   // `up` takes the rebuild flags; every other action forwards its argv untouched (reset-password
@@ -496,9 +503,11 @@ if (command === 'restore') {
   process.exit(code)
 }
 
-if (command === 'provider') {
-  const { runProvider } = await import('../server/cli-provider.ts')
-  process.exit(await runProvider(args))
+// The engine's verbs — recognised by every build, run by the engine when it offers them, and
+// answered in a sentence (exit 2) when it does not (`engine/cli.ts`).
+if (command === 'code' || command === 'provider' || command === 'ingest') {
+  const { runEngineVerb } = await import('../server/engine/cli.ts')
+  process.exit(await runEngineVerb(command, args, await resolveCliLang()))
 }
 
 if (command === 'member') {
@@ -547,7 +556,7 @@ if (command === 'member') {
     process.exit(code)
   }
   console.error(`Invalid member action: ${sub ?? '(none)'}. Expected one of: connect, leave, status, list.\n`)
-  console.log(HELP)
+  console.log(await helpText())
   process.exit(1)
 }
 
@@ -569,6 +578,12 @@ if (command === 'ci-push') {
 if (command === '--version' || command === '-v') {
   const { CURRENT_VERSION, getVersionInfo } = await import('../server/version.ts')
   process.stdout.write(`agentop v${CURRENT_VERSION}\n`)
+  {
+    // Which engine this binary carries — the line a release's smoke test can read.
+    const { loadEngine } = await import('../server/engine/load.ts')
+    const { cliStrings } = await import('../server/cli-i18n.ts')
+    process.stdout.write(`${cliStrings('en').engineVersionLine(await loadEngine({ log: () => {} }))}\n`)
+  }
   // The upgrade's verification probe runs exactly this command on the downloaded binary and
   // must not wait on GitHub (nor recurse into an update check mid-install).
   if (updateChecksDisabled()) process.exit(0)
@@ -690,14 +705,14 @@ if (command === 'autostart') {
 
   if (!modeArg || !isAutostartMode(modeArg)) {
     console.error(`Invalid mode: ${modeArg ?? '(none)'}. Expected one of: server, central, watch, machine.\n`)
-    console.log(HELP)
+    console.log(await helpText())
     process.exit(1)
   }
 
   const action = actionArg ?? 'status'
   if (action !== 'enable' && action !== 'disable' && action !== 'status') {
     console.error(`Invalid action: ${action}. Expected one of: enable, disable, status.\n`)
-    console.log(HELP)
+    console.log(await helpText())
     process.exit(1)
   }
 
@@ -875,6 +890,6 @@ if (command === 'server' || command === 'start' || !command) {
   await runResetPassword(args)
 } else {
   console.error(`Unknown command: ${command}\n`)
-  console.log(HELP)
+  console.log(await helpText())
   process.exit(1)
 }

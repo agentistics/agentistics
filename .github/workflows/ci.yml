@@ -33,6 +33,17 @@ jobs:
       - name: Test
         run: bun test
 
+      # The COMMUNITY build: the same tree with the NULL engine slot (packages/server/scripts/engine-slot.ts).
+      # It must typecheck and its host side must hold — no integrations feeding the journal, the
+      # engine verbs answered in a sentence, the reserved prefixes still guarded. The slot is put back
+      # afterwards so the steps below run against the build they always ran against.
+      - name: Community build (null engine slot)
+        run: |
+          bun run engine:slot:null
+          bun tsc --noEmit
+          bun test packages/server/server/engine packages/server/server/journal packages/server/server/capability-guard.test.ts packages/server/server/cli-journal.test.ts packages/server/server/health-journal.test.ts
+          bun run engine:slot
+
       # The §40 parity matrix (master spec docs/superpowers/specs/2026-09-19-agentistics-runtime-master.md;
       # P3 docs/superpowers/specs/2026-09-19-runtime-p3-projections-parity.md §1.2/§5/§8.1) — one row
       # per metric × harness, generated over the CHECKED-IN FIXTURES ONLY

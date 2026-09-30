@@ -28,59 +28,40 @@ import {
   type CapabilityState,
   type HarnessId,
 } from '@agentistics/core'
+import type * as Api from '@agentistics/engine-api'
 import { claudeReplay } from './claude'
+import * as claudeCore from './claude/replay-core'
 import { CLAUDE_ADAPTER_VERSION } from './claude/replay-core'
 import { codexReplay } from './codex'
+import * as codexCore from './codex/replay-core'
 import { CODEX_ADAPTER_VERSION } from './codex/replay-core'
 import { antigravityReplay } from './antigravity'
 import { geminiReplay } from './gemini'
 import { copilotReplay } from './copilot'
 import { kimiReplay } from './kimi'
+import * as kimiCore from './kimi/replay-core'
 import { KIMI_ADAPTER_VERSION } from './kimi/replay-core'
+import * as copilotCore from './copilot/replay-core'
 import { COPILOT_ADAPTER_VERSION } from './copilot/replay-core'
+import * as geminiCore from './gemini/replay-core'
 import { GEMINI_ADAPTER_VERSION } from './gemini/replay-core'
+import * as antigravityCore from './antigravity/replay-core'
 import { ANTIGRAVITY_ADAPTER_VERSION } from './antigravity/replay-core'
 import { opencodeReplay } from './opencode'
+import * as opencodeCore from './opencode/replay-core'
 import { OPENCODE_ADAPTER_VERSION } from './opencode/replay-core'
 
-/** One thing a replay can be pointed at — a transcript, a database, a session directory. */
-export interface ReplaySource {
-  /** The harness's own id for the conversation. */
-  sessionId: string
-  /** What `sourceRef` on every event read from it resolves to: something a person can re-open. */
-  sourceRef: string
-}
-
 /**
- * Where a replay stopped, opaque to everything but the integration that issued it. `null` is the
- * start. It is a string so it can be stored beside the journal (Claude's is a byte offset plus the
- * anchor `transcript-cursor.ts` checks), and an integration that cannot trust a stored cursor
- * re-reads from the start rather than resuming from it.
+ * The replay contract itself is `@agentistics/engine-api`'s, instantiated with this repository's
+ * canonical event — declared THERE so the public journal can drive a replay without importing this
+ * directory, and re-exported here so nothing that already imports it changes.
  */
-export type ReplayCursor = string | null
-
-export interface ReplayBatch {
-  events: AgentisticsEvent[]
-  /** Pass back to `replay` to read only what is new. */
-  cursor: ReplayCursor
-}
-
-/**
- * Reading a harness's stored record back as canonical events. `discover` and `replay` are the IO
- * halves; the fold that turns entries into events is PURE and lives beside each integration.
- */
-export interface HarnessReplay {
-  /** Every source this integration can currently replay. Total: an unreadable store yields `[]`. */
-  discover(): Promise<ReplaySource[]>
-  /** The events of `source` written since `cursor`. Folding it in N chunks equals folding it whole. */
-  replay(source: ReplaySource, cursor: ReplayCursor): Promise<ReplayBatch>
-}
-
-/** Following a live harness as it writes. Nothing implements it in P1 — the slot is the contract. */
-export interface HarnessLive {
-  /** Starts delivering events; the returned function stops it. */
-  watch(emit: (event: AgentisticsEvent) => void): () => void
-}
+export type ReplaySource = Api.ReplaySource
+export type ReplayCursor = Api.ReplayCursor
+export type ReplayBatch = Api.ReplayBatch<AgentisticsEvent>
+export type HarnessReplay = Api.HarnessReplay<AgentisticsEvent>
+export type HarnessLive = Api.HarnessLive<AgentisticsEvent>
+export type HarnessEntityIds = Api.HarnessEntityIds
 
 interface IntegrationBase {
   id: HarnessId
@@ -89,6 +70,8 @@ interface IntegrationBase {
   /** The A1.4 states for this harness — read, not restated. */
   capabilities: Readonly<Record<CapabilityMetric, CapabilityState>>
   live?: HarnessLive
+  /** The id derivations the journal's store import shares with the replay (`replay-core`). */
+  entityIds?: HarnessEntityIds
 }
 
 export type HarnessIntegration = IntegrationBase &
@@ -116,36 +99,42 @@ export const INTEGRATIONS: Record<HarnessId, HarnessIntegration> = {
     version: CLAUDE_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.claude,
     replay: claudeReplay,
+    entityIds: claudeCore,
   },
   codex: {
     id: 'codex',
     version: CODEX_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.codex,
     replay: codexReplay,
+    entityIds: codexCore,
   },
   gemini: {
     id: 'gemini',
     version: GEMINI_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.gemini,
     replay: geminiReplay,
+    entityIds: geminiCore,
   },
   copilot: {
     id: 'copilot',
     version: COPILOT_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.copilot,
     replay: copilotReplay,
+    entityIds: copilotCore,
   },
   antigravity: {
     id: 'antigravity',
     version: ANTIGRAVITY_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.antigravity,
     replay: antigravityReplay,
+    entityIds: antigravityCore,
   },
   kimi: {
     id: 'kimi',
     version: KIMI_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.kimi,
     replay: kimiReplay,
+    entityIds: kimiCore,
   },
   // No legacy adapter exists for opencode (CLAUDE.md "Adding a harness" step 4, skipped by scope) —
   // it never produces a SessionMeta and therefore never appears on any surface. It still has a full
@@ -155,6 +144,7 @@ export const INTEGRATIONS: Record<HarnessId, HarnessIntegration> = {
     version: OPENCODE_ADAPTER_VERSION,
     capabilities: CAPABILITY_STATES.opencode,
     replay: opencodeReplay,
+    entityIds: opencodeCore,
   },
 }
 

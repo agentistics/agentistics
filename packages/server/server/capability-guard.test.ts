@@ -6,6 +6,7 @@ import { describe, expect, it, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { routeCapability, capabilityDenied, registeredRoutes } from './capability-guard'
 import { capabilitiesFor, resolveProfile, type ExposureEnv } from './exposure'
+import { RESERVED_PREFIXES } from '@agentistics/engine-api'
 
 const publicCaps = capabilitiesFor('public', {
   central: true,
@@ -281,5 +282,34 @@ describe('the dev config routes (/api/config*) — they write the file the serve
       // The solo machine keeps its dev panel.
       expect(capabilityDenied(cap, localCaps)).toBeNull()
     }
+  })
+})
+
+describe("the engine's reserved prefixes", () => {
+  // An engine route may only live under one of these and must declare exactly the capability this
+  // PUBLIC table holds for it (`engine/load.ts` refuses anything else). So the guard exists — and is
+  // tested here — whether or not an engine is loaded; a prefix missing from the table would be a
+  // door the engine could open with no capability at all.
+  it('every reserved prefix resolves to a capability, and so does every path under it', () => {
+    for (const prefix of RESERVED_PREFIXES) {
+      expect(routeCapability(prefix)).not.toBeNull()
+      expect(routeCapability(`${prefix}/anything/deeper`)).toBe(routeCapability(prefix))
+    }
+  })
+
+  it('each one is denied on an exposed profile — no engine route is reachable there', () => {
+    for (const prefix of RESERVED_PREFIXES) {
+      expect(capabilityDenied(routeCapability(prefix)!, publicCaps)?.status).toBe(403)
+    }
+  })
+
+  it('pins the capability each reserved prefix carries', () => {
+    expect(Object.fromEntries(RESERVED_PREFIXES.map(p => [p, routeCapability(p)]))).toEqual({
+      '/api/runtime/sessions': 'localShell',
+      '/api/provider': 'localShell',
+      '/api/ingest': 'localTranscripts',
+      '/v1/logs': 'localTranscripts',
+      '/v1/metrics': 'localTranscripts',
+    })
   })
 })

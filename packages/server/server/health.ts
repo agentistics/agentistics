@@ -47,6 +47,7 @@ const JOURNAL_DISABLED_DESCRIPTIONS: Record<JournalDisabledReason, string> = {
   'wal-unavailable': 'SQLite could not enable WAL mode for the journal on this filesystem.',
   'db-schema-too-new': 'The journal file was written by a newer version of agentop and will not be written to.',
   'migrate-failed': 'The journal file could not be migrated to the current schema.',
+  'no-integrations': 'This build has no integration to feed the journal — every surface keeps working off its existing data.',
 }
 
 /** The actionable next step per `JournalDisabledReason`. */
@@ -57,6 +58,7 @@ const JOURNAL_DISABLED_GUIDES: Record<JournalDisabledReason, string> = {
   'wal-unavailable': 'Move the journal to a local filesystem with AGENTISTICS_JOURNAL_DIR.',
   'db-schema-too-new': 'Upgrade agentop to a version that understands this journal file.',
   'migrate-failed': 'The file may be damaged. Move it aside — the journal will be recreated empty.',
+  'no-integrations': 'Nothing to do: the journal is fed by the official build of agentop, and every metric works without it.',
 }
 
 /** PURE. Pushes at most ONE issue with id 'journal-unwritable'. */
@@ -64,6 +66,19 @@ export function analyzeJournalStatus(status: JournalStatus | null, issues: Healt
   // Off (flag off / nothing has opened a journal yet) or a clean shutdown: no issue. A journal
   // that is off is not a fault, and 'closed' is an orderly exit, not a failure to write.
   if (!status || status.state === 'closed') return
+
+  // A community build: nothing feeds the journal. Said, as INFORMATION — it is the normal state of
+  // that build, and a warning here would read as a fault on every machine that runs it.
+  if (status.state === 'disabled' && status.reason === 'no-integrations') {
+    issues.push({
+      id: 'journal-no-integrations',
+      severity: 'info',
+      title: 'Nothing feeds the event journal in this build',
+      description: JOURNAL_DISABLED_DESCRIPTIONS['no-integrations'],
+      guide: JOURNAL_DISABLED_GUIDES['no-integrations'],
+    })
+    return
+  }
 
   if (status.state === 'disabled') {
     const reason = status.reason
@@ -135,6 +150,7 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
       // can still have an unwritable journal, and bailing out before it would hide exactly that.
       if (enabledIds.size === 1) {
         analyzeJournalStatus(readJournalStatus(), issues)
+        await appendEngineHealth(issues)
         return issues
       }
     } else {
@@ -250,7 +266,33 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
   // breaks the checks above it.
   analyzeJournalStatus(readJournalStatus(), issues)
 
+  // 7. What the engine contributes, when one is loaded.
+  await appendEngineHealth(issues)
+
   return issues
+}
+
+/**
+ * The engine's own checks (a provider key it cannot read, a store it cannot write). Guarded: an
+ * engine whose `health` throws contributes ONE `engine-health-failed` issue and never takes the
+ * check down — the same rule `readJournalStatus` applies to the journal's getter.
+ */
+export async function appendEngineHealth(
+  issues: HealthIssue[],
+  health?: (() => Promise<HealthIssue[]>) | null,
+): Promise<void> {
+  const check = health === undefined ? (await import('./engine/load')).engine()?.health : health ?? undefined
+  if (!check) return
+  try {
+    issues.push(...await check())
+  } catch {
+    issues.push({
+      id: 'engine-health-failed',
+      severity: 'warning',
+      title: "The engine's own health check failed",
+      description: 'The engine loaded, but its health check threw. Every other check above ran normally.',
+    })
+  }
 }
 
 /** Warn when ~/.claude/stats-cache.json is outdated relative to the most recent JSONL session.

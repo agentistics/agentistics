@@ -27,14 +27,7 @@ import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promi
 import { dirname, join } from 'node:path'
 import { CAPABILITY_STATES, normalizeSessionTimes, type AgentisticsEvent, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { CONSOLIDATED_DIR, JOURNAL_IMPORT_STATE_PATH, JOURNAL_PATH } from '../config'
-import { INTEGRATIONS, hasReplay, type HarnessReplay } from '../integrations/types'
-import * as claudeCore from '../integrations/claude/replay-core'
-import * as codexCore from '../integrations/codex/replay-core'
-import * as kimiCore from '../integrations/kimi/replay-core'
-import * as geminiCore from '../integrations/gemini/replay-core'
-import * as copilotCore from '../integrations/copilot/replay-core'
-import * as antigravityCore from '../integrations/antigravity/replay-core'
-import * as opencodeCore from '../integrations/opencode/replay-core'
+import { hasReplay, type HarnessReplay } from '@agentistics/engine-api'
 import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import { openJournalIndex, type JournalIndex } from './import-journal-index'
@@ -45,7 +38,7 @@ import {
   type StoreFailReason,
 } from './import-plan'
 import { storeSessionEvents, type HarnessEntityIds } from './import-store'
-import { claudeStamps, type SourceStamp } from './shadow'
+import { claudeStamps, type JournalRegistry, type SourceStamp } from './shadow'
 import type { Journal } from './types'
 
 export const IMPORT_BATCH_SIZE = 32
@@ -53,21 +46,20 @@ export const IMPORT_CONCURRENCY = 4
 export const IMPORT_FLUSH_EVENTS = 500
 
 /**
- * The entity-id derivations the coarse store events share with each harness's replay. A harness
- * with no integration is `null` — its store entries are skipped (`no-replay`), see import-plan.ts.
- * A `Record<HarnessId, …>`, so adding a harness fails the build here until somebody decides.
+ * The entity-id derivations the coarse store events share with each harness's replay, read off the
+ * registry the run was handed (`HarnessIntegration.entityIds`) — never imported here, so the journal
+ * names no integration. A harness with none has its store entries skipped (`no-replay`, see
+ * import-plan.ts).
  */
-export const ENTITY_IDS: Record<HarnessId, HarnessEntityIds | null> = {
-  claude: claudeCore,
-  codex: codexCore,
-  gemini: geminiCore,
-  copilot: copilotCore,
-  antigravity: antigravityCore,
-  kimi: kimiCore,
-  // No legacy adapter (CLAUDE.md step 4, skipped by scope), but discover().sessionId (opencode's own
-  // session.id) equals the consolidate store's session_id would-be key — the entity ids still let a
-  // gone-from-the-store-but-once-imported opencode conversation's coarse events be derived, per step 19.
-  opencode: opencodeCore,
+/** Why a harness with no entry in the registry replays nothing — a community build's every harness. */
+export const NO_INTEGRATION = 'this build has no integration for this harness — it is in the official build of agentop'
+
+export function entityIdsOf(integrations: JournalRegistry): Partial<Record<HarnessId, HarnessEntityIds | null>> {
+  const out: Partial<Record<HarnessId, HarnessEntityIds | null>> = {}
+  for (const [h, i] of Object.entries(integrations) as [HarnessId, JournalRegistry[HarnessId]][]) {
+    out[h] = i?.entityIds ?? null
+  }
+  return out
 }
 
 /**
@@ -107,9 +99,14 @@ export interface ImportOptions {
   statePath?: string
   /** Default `CONSOLIDATED_DIR`. */
   storeDir?: string
-  /** Default `INTEGRATIONS[h].replay`. `null` = the harness has no replay. */
-  replays?: Partial<Record<HarnessId, HarnessReplay | null>>
-  /** Default `ENTITY_IDS`. */
+  /**
+   * The integrations to replay from — the engine's registry, passed in by the caller. Default: none,
+   * which replays no artifact and imports no orphan, and says so per harness.
+   */
+  integrations?: JournalRegistry
+  /** Overrides `integrations[h].replay`. `null` = the harness has no replay. */
+  replays?: Partial<Record<HarnessId, HarnessReplay<AgentisticsEvent> | null>>
+  /** Overrides `integrations[h].entityIds`. */
   entityIds?: Partial<Record<HarnessId, HarnessEntityIds | null>>
   /** Default `IMPORT_STAMPS`. */
   stamps?: Partial<Record<HarnessId, (() => Promise<Map<string, SourceStamp>>) | null>>
@@ -206,6 +203,8 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
   const concurrency = Math.max(1, opts.concurrency ?? IMPORT_CONCURRENCY)
   const flushEvents = Math.max(1, opts.flushEvents ?? IMPORT_FLUSH_EVENTS)
   const harnesses = selectedHarnesses(opts.harnesses ?? [])
+  const integrations = opts.integrations ?? {}
+  const entityIds = entityIdsOf(integrations)
   const aborted = () => opts.signal?.aborted === true
 
   // The journal: opened for writing unless this is a dry run, which only ever reads one that exists.
@@ -270,10 +269,14 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
     for (const harness of harnesses) {
       const h: HarnessReport = { harness, replayAbsent: null, artifacts: emptyHalf(), store: emptyHalf() }
       report.harnesses.push(h)
-      const integration = INTEGRATIONS[harness]
-      const replay = opts.replays && harness in opts.replays ? opts.replays[harness] ?? null : (hasReplay(integration) ? integration.replay : null)
+      const integration = integrations[harness]
+      const replay = opts.replays && harness in opts.replays
+        ? opts.replays[harness] ?? null
+        : (integration && hasReplay(integration) ? integration.replay : null)
       if (!replay) {
-        h.replayAbsent = hasReplay(integration) ? 'disabled for this run' : integration.replayAbsent
+        h.replayAbsent = !integration
+          ? NO_INTEGRATION
+          : hasReplay(integration) ? 'disabled for this run' : integration.replayAbsent
         discoveredBy.set(harness, null)
         continue
       }
@@ -345,7 +348,7 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
       const entries = storeEntries.filter(e => e.harness === harness)
       h.store.considered = entries.length
       for (const e of entries) if (!e.ok) { bump(h.store.failed, e.reason); example(e.reason, `consolidate:${e.file}`) }
-      const ids = (opts.entityIds && harness in opts.entityIds ? opts.entityIds[harness] : ENTITY_IDS[harness]) ?? null
+      const ids = (opts.entityIds && harness in opts.entityIds ? opts.entityIds[harness] : entityIds[harness]) ?? null
       const plan = planStore(
         entries.filter((e): e is Extract<StoreEntry, { ok: true }> => e.ok),
         discoveredBy.get(harness) ?? null,

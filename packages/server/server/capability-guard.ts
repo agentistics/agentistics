@@ -121,6 +121,19 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // and would be the softer, wrong name. A PREFIX so `/api/config/restore` and any later sub-route
   // are guarded by having been added at all. The GET rides it too: the dev panel is a local tool.
   ['/api/config', 'localShell'],
+  // THE ENGINE'S RESERVED PREFIXES (`@agentistics/engine-api`'s `RESERVED_PREFIXES`). They are held
+  // HERE, in the public table, whether or not an engine is loaded: a guard that shipped with the
+  // engine could not be tested by a build without one. An engine route must declare exactly the
+  // capability this table holds for its prefix or the host refuses it at load (`engine/load.ts`),
+  // so an engine can never weaken the guard on its own door. `capability-guard.test.ts` asserts
+  // every reserved prefix resolves.
+  //  - `/api/runtime/sessions` spawns and drives native sessions: host power, `localShell`.
+  //  - `/api/ingest` and the OTLP pair receive a harness's live record of this machine's
+  //    conversations — transcript data by another road, so the transcript readers' gate.
+  ['/api/runtime/sessions', 'localShell'],
+  ['/api/ingest', 'localTranscripts'],
+  ['/v1/logs', 'localTranscripts'],
+  ['/v1/metrics', 'localTranscripts'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */
