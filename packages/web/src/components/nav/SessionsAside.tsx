@@ -12,7 +12,7 @@
  * decoration.
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -21,7 +21,7 @@ import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/spl
 
 import {
   ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
-  PinOff, Plus, RotateCcw, Search, Send, X,
+  PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -177,7 +177,20 @@ export interface SessionsAsideProps {
   onCreated?: (id: string) => void
   /** The session this mount has open, where that is not the route's — see `onCreated`. */
   selectedId?: string
+  /**
+   * Given, every row carries a SEPARATE "Go to session" button that calls this with the row's id —
+   * for a mount whose row click opens the session somewhere other than the workspace (the Nay
+   * dock's Sessões tab). Absent (the workspace itself), rows carry no such button: there, the row
+   * click already IS going to the session.
+   */
+  onGoToSession?: (id: string) => void
 }
+
+/**
+ * How a row reaches `onGoToSession` without threading it through every band, group and pinned
+ * list between the aside and `SessionRow`. `null` = no button.
+ */
+const GoToSessionContext = createContext<((id: string) => void) | null>(null)
 
 /**
  * What a pin — and a user group (`sessionUserGroups.ts`) — are stored under.
@@ -215,7 +228,7 @@ function groupMenuExtras(
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
-  onCreated, selectedId,
+  onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
@@ -1075,6 +1088,7 @@ export function SessionsAside({
   }
 
   return (
+    <GoToSessionContext.Provider value={onGoToSession ?? null}>
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
           tabs (desktop) and the Sessions/Metrics tabs (mobile). Owner decision 2026-09-27: it sat
@@ -2091,6 +2105,7 @@ export function SessionsAside({
         onCancel={() => setDeletingGroup(null)}
       />
     </div>
+    </GoToSessionContext.Provider>
   )
 }
 
@@ -2279,6 +2294,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   cardColor: AsideCardColor
 }) {
   const wants = sessionNotify(session)
+  const goTo = useContext(GoToSessionContext)
   const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2360,6 +2376,34 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       {/* The pin lives on the row rather than in a menu: it is a one-click decision about the row
           you are looking at. `role="button"` on a span, because a <button> inside a <button> is
           invalid HTML and browsers resolve it by dropping one of them. */}
+      {goTo && (() => {
+        // A SEPARATE control: the row click keeps doing what this mount does with it. Always
+        // visible (unlike the pin): it is the one way out of the dock to the workspace, and a
+        // control that appears only on hover does not exist on a phone.
+        const label = lang === 'en' ? 'Go to session' : 'Ir para a sessão'
+        const hint = lang === 'en' ? 'Open this session in the Sessions workspace' : 'Abrir esta sessão na tela de Sessões'
+        const go = (e: { stopPropagation(): void; preventDefault(): void }) => { e.preventDefault(); e.stopPropagation(); goTo(session.id) }
+        return (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={label}
+            title={hint}
+            onClick={go}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go(e) }}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              // 44px PAINTED on touch (`tap` is only given there): the row has the height, and a
+              // projected `.ag-tap-icon` box would reach into the pin beside it.
+              width: tap ? 44 : 22, height: tap ? 44 : 22, borderRadius: 6, cursor: 'pointer', color: 'var(--text-tertiary)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--anthropic-orange)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
+          >
+            <SquareArrowOutUpRight size={13} />
+          </span>
+        )
+      })()}
       {onPin && (
         <span
           role="button"

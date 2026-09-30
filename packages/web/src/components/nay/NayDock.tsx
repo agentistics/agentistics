@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, Power, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
@@ -40,7 +40,8 @@ import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession, setVisibleSessions, useNayInbox } from '../../lib/nayNotifyStore'
 import { NayInbox } from './NayInbox'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { sessionPath } from '../../lib/sessionRoute'
 import { getSessionGroups } from '../../lib/sessionUserGroups'
 import { getPinnedIds } from '../../lib/pinnedSessions'
 import { loadSharedPrefs } from '../../lib/sharedPref'
@@ -106,6 +107,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
 
   useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
   const { pathname } = useLocation()
+  const navigate = useNavigate()
+  // "Go to session": the workspace route for it, leaving the dock and every window exactly as they are.
+  const goToSession = useCallback((id: string) => navigate(sessionPath(id)), [navigate])
   const inSession = pathname.startsWith('/sessions/')
   // The session on screen, for the notifications: a card about it is never shown, and opening one
   // is what "not opened for a while" is measured from.
@@ -527,6 +531,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                   onOpenRow={row => open(row.id)}
                   onCreated={id => { setArriving(a => ({ ...a, [id]: Date.now() })); open(id) }}
                   {...(panelSession ? { selectedId: panelSession } : {})}
+                  onGoToSession={goToSession}
                 />
               </div>
             )}
@@ -561,6 +566,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           onFocus={() => setDock(d => openSession(d, w.id))}
           onMove={next => setDock(d => placeWindow(d, w.id, next, viewport()))}
           onDock={() => setDock(d => dockSession(d, w.id))}
+          onGoTo={() => goToSession(w.id)}
           onMinimize={() => setDock(d => minimizeWindow(d, w.id))}
           onClose={() => setDock(d => closeWindow(d, w.id))}
         >
@@ -814,13 +820,15 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   )
 }
 
-function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize, onClose, children }: {
+function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, children }: {
   win: NayWindow
   lang: Lang
   title: string
   onFocus: () => void
   onMove: (next: Partial<Pick<NayWindow, 'x' | 'y' | 'w' | 'h'>>) => void
   onDock: () => void
+  /** Open this session in the Sessions workspace; the window stays as it is. */
+  onGoTo: () => void
   onMinimize: () => void
   onClose: () => void
   children: ReactNode
@@ -874,6 +882,8 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Acoplar' : 'Dock'}
           title={pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel'} onClick={onDock} />
+        <LabelButton icon={<SquareArrowOutUpRight size={13} />} label={pt ? 'Ir para a sessão' : 'Go to session'}
+          title={pt ? 'Abrir esta sessão na tela de Sessões' : 'Open this session in the Sessions workspace'} onClick={onGoTo} />
         <IconButton label={pt ? 'Minimizar' : 'Minimize'} onClick={onMinimize} isMobile={false}><Minus size={14} /></IconButton>
         <IconButton label={pt ? 'Fechar a janela' : 'Close the window'} onClick={onClose} isMobile={false}><X size={14} /></IconButton>
       </header>
