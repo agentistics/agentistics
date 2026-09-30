@@ -78,7 +78,7 @@ import { reorderByDrag } from './dragReorder'
 import { clampRailWidth, RAIL_WIDTH_FLOOR_PX } from './railFit'
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
 import { holdIfUnsaved } from './unsavedBuffers'
-import { getFloating, raisePanel, subscribeFloating, type FloatingSet } from './floatingPanels'
+import { getFloating, restoreFloatingPanel, subscribeFloating, type FloatingSet } from './floatingPanels'
 import { getActivePane, paneStorageKey, usePaneId, type PaneId } from './paneScope'
 
 /** The ten panels ArtifactsAside used to render as tabs inside one `contents` container. */
@@ -792,8 +792,9 @@ export function subscribePanelLayout(cb: () => void, pane: PaneId = getActivePan
 export function showPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
   const commit = (n: SlotLayout) => commitTo(n, pane)
   // A panel floating as a window has no docked slot to open into — asking for it (a rail pick, a
-  // chat note's "open the Gallery") brings its window to the front instead.
-  if (getFloating(pane)[panel] !== undefined) { raisePanel(panel, pane); return }
+  // chat note's "open the Gallery") brings its window to the front instead — and a MINIMIZED one
+  // back exactly where it was left.
+  if (getFloating(pane)[panel] !== undefined) { restoreFloatingPanel(panel, pane); return }
   const state = getPanelLayout(pane)
   const next = openPanel(state, panel)
   if (next === state) return

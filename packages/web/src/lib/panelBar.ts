@@ -34,6 +34,9 @@ export interface PanelBarEntry {
   id: PanelBarId
   /** Is this panel the bottom band's own active tab right now? */
   on: boolean
+  /** A FLOATING window the person minimized (`floatingPanels.ts`'s `min`) — its tab lives here until
+   *  it is clicked, which puts the window back exactly where and at the size it was left. */
+  minimized?: boolean
 }
 
 /**
@@ -44,10 +47,18 @@ export interface PanelBarEntry {
  */
 export function panelBarEntries(
   bottomIds: readonly PanelBarId[], activeBottom: PanelBarId | null, gates: PanelBarGates,
+  minimized: readonly PanelBarId[] = [],
 ): PanelBarEntry[] {
-  return bottomIds
+  const docked = bottomIds
     .filter(id => panelBarGateOpen(id, gates))
     .map(id => ({ id, on: activeBottom === id }))
+  // MINIMIZED WINDOWS JOIN THE STRIP AFTER THE DOCKED TABS (owner, 2026-09-29: "minimizar manda de
+  // volta pra barra de baixo"), whatever slot their placement names — a minimized window is still
+  // floating, so it is never ALSO a docked tab, and the gate that hides a panel hides its window too.
+  const windows = minimized
+    .filter(id => panelBarGateOpen(id, gates) && !docked.some(e => e.id === id))
+    .map(id => ({ id, on: false, minimized: true }))
+  return [...docked, ...windows]
 }
 
 function panelBarGateOpen(panel: PanelBarId, gates: PanelBarGates): boolean {
@@ -155,11 +166,17 @@ export function bandBarCompact(width: number): boolean {
  *  - `'minimize'` — it is the active tab AND the band is open. Collapse the band; the panel stays
  *    its occupant, so the next click restores exactly what was there.
  */
-export type PanelBarPickAction = { kind: 'open' } | { kind: 'restore' } | { kind: 'minimize' }
+export type PanelBarPickAction =
+  | { kind: 'open' } | { kind: 'restore' } | { kind: 'minimize' }
+  /** The tab of a MINIMIZED floating window: put the window back where it was. */
+  | { kind: 'restore-window' }
 
 export function resolvePanelBarPick(
-  { id, activeBottom, bottomOpen }: { id: PanelBarId; activeBottom: PanelBarId | null; bottomOpen: boolean },
+  { id, activeBottom, bottomOpen, minimized = false }: {
+    id: PanelBarId; activeBottom: PanelBarId | null; bottomOpen: boolean; minimized?: boolean
+  },
 ): PanelBarPickAction {
+  if (minimized) return { kind: 'restore-window' }
   if (activeBottom !== id) return { kind: 'open' }
   return bottomOpen ? { kind: 'minimize' } : { kind: 'restore' }
 }
