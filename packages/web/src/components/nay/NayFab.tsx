@@ -7,7 +7,10 @@
  *  - the button keeps being a button: a press that travels less than `FAB_CLICK_SLOP` is a click,
  *    and a drag swallows the click that the browser fires after it;
  *  - `prefers-reduced-motion` turns every look into a plain move (no spring, no stretch, no
- *    ripple, no tail) — the position still follows the pointer and still snaps.
+ *    ripple, no tail) — the position still follows the pointer, and the edge magnet still pulls.
+ *  - the button goes where it is DROPPED. An edge pulls it in only when it is released close to
+ *    that edge (`dropFabAt`), and while it is dragged near one, that edge glows — the glow is
+ *    the only warning that a release will snap, so it lights per side, never all four at once.
  *
  * The four looks come from the studies page the owner chose from. Their effects draw on a layer
  * that ignores the pointer, so a ripple or a tail can never catch a click meant for the page.
@@ -15,7 +18,8 @@
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import {
-  clampFabPos, defaultFabPos, FAB_CLICK_SLOP, FAB_SIZE, FAB_SPRING, smoothVelocity, snapFabToEdge, springAtRest,
+  clampFabPos, defaultFabPos, dropFabAt, FAB_CLICK_SLOP, FAB_SIZE, FAB_SPRING, magnetEdges, NO_MAGNET, smoothVelocity, springAtRest,
+  type MagnetEdges,
   stepSpring, stretchFor, type NayFabPrefs, type SpringState, type Vec, type Viewport,
 } from '../../lib/nayFab'
 
@@ -75,7 +79,10 @@ interface Ring { x: number; y: number; r: number; a: number; grow: number }
 
 export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabProps) {
   const style = prefs.style
-  const snap = isMobile || prefs.snap
+  // The magnet is the same on a phone as on a desktop (owner, 2026-09-30): it used to be forced on
+  // there, and it used to snap on every release, which confined the button to the edges.
+  const magnet = prefs.snap
+  const glowRefs = useRef<Record<keyof MagnetEdges, HTMLDivElement | null>>({ left: null, right: null, top: null, bottom: null })
   const anchorRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -229,8 +236,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     const s = sim.current
     const vp = viewport(), inset = bottomInset(isMobile)
     const want = prefs.pos ?? defaultFabPos(vp, isMobile ? Math.max(0, inset - 12) : 0)
-    let t = clampFabPos(want, vp, inset)
-    if (snap && prefs.pos) t = snapFabToEdge(t, vp, inset)
+    const t = clampFabPos(want, vp, inset)
     s.target = t
     if (!s.placed || !animate) {
       s.spring = { pos: t, vel: { x: 0, y: 0 } }
@@ -238,7 +244,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
       s.placed = true
       apply(); draw()
     } else kick()
-  }, [prefs.pos, snap, isMobile, apply, draw, kick])
+  }, [prefs.pos, isMobile, apply, draw, kick])
 
   useEffect(() => { settle(sim.current.placed) }, [settle, routeKey])
   // On a phone the composer grows as someone types and appears a moment after a session opens;
@@ -275,7 +281,9 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
       d.moved = true
       setDragging(true)
     }
-    const next = clampFabPos({ x: d.ox + dx, y: d.oy + dy }, viewport(), bottomInset(isMobile))
+    const vp = viewport(), inset = bottomInset(isMobile)
+    const next = clampFabPos({ x: d.ox + dx, y: d.oy + dy }, vp, inset)
+    showGlow(magnet ? magnetEdges(next, vp, inset) : NO_MAGNET, inset)
     const now = performance.now()
     s.dragVel = smoothVelocity(s.dragVel, next.x - s.spring.pos.x, next.y - s.spring.pos.y, (now - d.t) / 1000)
     d.t = now
@@ -291,9 +299,10 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     if (!d.moved) return   // a press that never travelled is left to be the click it is
     s.swallowClick = true
     setDragging(false)
+    showGlow(NO_MAGNET, 0)
     const vp = viewport(), inset = bottomInset(isMobile)
-    let t = clampFabPos(s.spring.pos, vp, inset)
-    if (snap) t = snapFabToEdge(t, vp, inset)
+    // A cancelled drag (the browser took the pointer) never snaps: nobody chose where it landed.
+    const t = dropFabAt(s.spring.pos, vp, inset, magnet && !cancelled)
     s.target = t
     s.spring = { pos: s.spring.pos, vel: reduced ? { x: 0, y: 0 } : s.dragVel }
     const land = Math.hypot(s.dragVel.x, s.dragVel.y)
@@ -313,10 +322,36 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     e.preventDefault(); e.stopPropagation()
   }
 
+  /** Lights exactly the edges a release would snap to. Written through refs: it runs per move. */
+  function showGlow(m: MagnetEdges, inset: number) {
+    for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+      const el = glowRefs.current[side]
+      if (!el) continue
+      el.style.opacity = m[side] ? '1' : '0'
+      if (side === 'bottom') el.style.bottom = `${inset}px`
+    }
+  }
+
   const effects = !reduced && (style === 'trail' || style === 'shock' || style === 'comet')
+  const glowBase = {
+    position: 'fixed', zIndex: 298, pointerEvents: 'none', opacity: 0,
+    background: 'var(--anthropic-orange)',
+    boxShadow: '0 0 22px 7px color-mix(in srgb, var(--anthropic-orange) 45%, transparent)',
+    transition: reduced ? 'none' : 'opacity 140ms ease-out',
+  } as const
 
   return (
     <>
+      {/* The EDGE MAGNET's glow: mounted only while a drag with the magnet on is in progress, so an
+          idle page carries no fixed layers at all. Each side is its own strip, lit on its own. */}
+      {dragging && magnet && (
+        <div aria-hidden>
+          <div ref={el => { glowRefs.current.left = el }} style={{ ...glowBase, left: 0, top: 0, bottom: 0, width: 3 }} />
+          <div ref={el => { glowRefs.current.right = el }} style={{ ...glowBase, right: 0, top: 0, bottom: 0, width: 3 }} />
+          <div ref={el => { glowRefs.current.top = el }} style={{ ...glowBase, left: 0, right: 0, top: 0, height: 3 }} />
+          <div ref={el => { glowRefs.current.bottom = el }} style={{ ...glowBase, left: 0, right: 0, bottom: 0, height: 3 }} />
+        </div>
+      )}
       {effects && (
         <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 299, pointerEvents: 'none' }}>
           {(style === 'shock' || style === 'comet') && (

@@ -3,7 +3,8 @@
  *
  * It holds the options that belong to THIS widget and nothing else (owner, 2026-09-29):
  *  - the look of the chat button while it is dragged (`NAY_FAB_STYLES`);
- *  - whether it snaps to the nearest edge on release (always, on a phone);
+ *  - the EDGE MAGNET: whether an edge pulls the button in when it is dropped close to it (the
+ *    stored field is still `snap`, so no saved choice is lost). The same on a phone as on a desktop;
  *  - putting the button back where it started;
  *  - the model a NEW Nay conversation starts with and the reply sound — the two chat options
  *    that act on this widget directly.
@@ -115,10 +116,10 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
                 )
               })}
             </div>
-            <Row label={pt ? 'Encostar na borda ao soltar' : 'Snap to the nearest edge'}
-              hint={isMobile ? (pt ? 'Sempre ligado no celular' : 'Always on on a phone') : undefined}>
-              <Switch on={isMobile || prefs.snap} disabled={isMobile} onToggle={() => onPrefs({ ...prefs, snap: !prefs.snap })}
-                label={pt ? 'Encostar na borda' : 'Snap to edge'} />
+            <Row label={pt ? 'Ímã nas bordas' : 'Edge magnet'}
+              hint={pt ? 'Solto perto de uma borda, o botão encosta nela' : 'Dropped near an edge, the button snaps to it'}>
+              <Switch on={prefs.snap} onToggle={() => onPrefs({ ...prefs, snap: !prefs.snap })}
+                label={pt ? 'Ímã nas bordas' : 'Edge magnet'} />
             </Row>
             <button type="button" onClick={() => onPrefs({ ...prefs, pos: null })} disabled={prefs.pos === null}
               style={{

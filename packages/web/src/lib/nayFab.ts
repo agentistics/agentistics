@@ -3,8 +3,9 @@
  *
  * The button can be dragged anywhere (owner, 2026-09-29). Its position is remembered per browser
  * (`localStorage`, never `/api/preferences`: on a central that file is shared by everyone signed
- * in), clamped whenever the window changes size, and snapped to the nearest edge on release when
- * the viewer asks for it (always on a phone, where a button floating mid-screen covers content).
+ * in) and clamped whenever the window changes size. It is pulled flat against an edge only when
+ * it is released CLOSE to one (`dropFabAt`, the edge magnet); anywhere else it stays where it was
+ * dropped.
  *
  * The MOTION is a spring toward the target, and the LOOK is one of the four studies the owner
  * chose from the demo page (all four ship, selectable from the dock's settings popover):
@@ -72,17 +73,48 @@ export function clampFabPos(pos: Vec, vp: Viewport, bottomInset = 0): Vec {
   return { x: Math.min(maxX, Math.max(FAB_EDGE, pos.x)), y: Math.min(maxY, Math.max(FAB_EDGE, pos.y)) }
 }
 
-/** Moves the button flat against whichever edge its centre is nearest, keeping the other axis. */
-export function snapFabToEdge(pos: Vec, vp: Viewport, bottomInset = 0): Vec {
-  const p = clampFabPos(pos, vp, bottomInset)
+/**
+ * THE EDGE MAGNET (owner, 2026-09-30). The button goes wherever it is dropped; an edge pulls it in
+ * only when it is released CLOSE to that edge. "Snap to the nearest edge" used to fire on every
+ * release, wherever the button was dropped, which confined it to the edges and corners.
+ *
+ * `FAB_MAGNET_PX` is the gap between the button's side and the window's side that counts as close.
+ * Each side is judged on its own, so a drop near a corner can engage two edges at once.
+ */
+export const FAB_MAGNET_PX = 56
+
+export interface MagnetEdges { left: boolean; right: boolean; top: boolean; bottom: boolean }
+export const NO_MAGNET: MagnetEdges = { left: false, right: false, top: false, bottom: false }
+
+/** Which edges are close enough to pull the button in, measured from its sides to the window's. */
+export function magnetEdges(pos: Vec, vp: Viewport, bottomInset = 0, threshold = FAB_MAGNET_PX): MagnetEdges {
   const floor = vp.h - bottomInset
-  const cx = p.x + FAB_SIZE / 2, cy = p.y + FAB_SIZE / 2
-  const d = { left: cx, right: vp.w - cx, top: cy, bottom: floor - cy }
-  const nearest = Math.min(d.left, d.right, d.top, d.bottom)
-  if (nearest === d.left) return { ...p, x: FAB_EDGE }
-  if (nearest === d.right) return { ...p, x: vp.w - FAB_SIZE - FAB_EDGE }
-  if (nearest === d.top) return { ...p, y: FAB_EDGE }
-  return { ...p, y: floor - FAB_SIZE - FAB_EDGE }
+  return {
+    left: pos.x <= threshold,
+    right: vp.w - (pos.x + FAB_SIZE) <= threshold,
+    top: pos.y <= threshold,
+    bottom: floor - (pos.y + FAB_SIZE) <= threshold,
+  }
+}
+
+export function anyMagnet(m: MagnetEdges): boolean {
+  return m.left || m.right || m.top || m.bottom
+}
+
+/**
+ * Where a released button comes to rest. It is always kept on screen; with the magnet on, every
+ * edge it was dropped close to pulls it flat against that edge, and it stays exactly where it was
+ * dropped otherwise. With the magnet off it never snaps.
+ */
+export function dropFabAt(pos: Vec, vp: Viewport, bottomInset = 0, magnet = true): Vec {
+  const p = clampFabPos(pos, vp, bottomInset)
+  if (!magnet) return p
+  const m = magnetEdges(p, vp, bottomInset)
+  const floor = vp.h - bottomInset
+  return {
+    x: m.left ? FAB_EDGE : m.right ? vp.w - FAB_SIZE - FAB_EDGE : p.x,
+    y: m.top ? FAB_EDGE : m.bottom ? floor - FAB_SIZE - FAB_EDGE : p.y,
+  }
 }
 
 export interface SpringState { pos: Vec; vel: Vec }

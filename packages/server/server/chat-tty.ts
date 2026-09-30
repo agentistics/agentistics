@@ -5,7 +5,6 @@ import { HOME_DIR } from './config'
 
 
 export const NAY_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'nay-chat')
-export const CLAUDE_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'claude-chat')
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -190,12 +189,6 @@ export function buildNaySettings() {
       ],
     },
   }
-}
-
-// Called at server startup — idempotent, safe to run on every restart.
-// Creates the general-purpose Claude chat working directory.
-export async function ensureClaudeChat(): Promise<void> {
-  await mkdir(CLAUDE_CHAT_DIR, { recursive: true })
 }
 
 export async function ensureNayChat(port: number): Promise<void> {
