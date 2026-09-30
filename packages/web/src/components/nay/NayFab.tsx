@@ -16,6 +16,7 @@
  * that ignores the pointer, so a ripple or a tail can never catch a click meant for the page.
  */
 
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import {
   clampFabPos, defaultFabPos, dropFabAt, FAB_CLICK_SLOP, FAB_SIZE, FAB_SPRING, magnetEdges, NO_MAGNET, smoothVelocity, springAtRest,
@@ -337,7 +338,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
 
   const effects = !reduced && (style === 'trail' || style === 'shock' || style === 'comet')
   const glowBase = {
-    position: 'fixed', zIndex: 298, pointerEvents: 'none', opacity: 0,
+    position: 'absolute', pointerEvents: 'none', opacity: 0,
     background: 'var(--anthropic-orange)',
     boxShadow: '0 0 22px 7px color-mix(in srgb, var(--anthropic-orange) 45%, transparent)',
     transition: reduced ? 'none' : 'opacity 140ms ease-out',
@@ -347,13 +348,18 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     <>
       {/* The EDGE MAGNET's glow: mounted only while a drag with the magnet on is in progress, so an
           idle page carries no fixed layers at all. Each side is its own strip, lit on its own. */}
-      {dragging && magnet && (
-        <div aria-hidden>
+      {/* PORTALED to <body>, as ONE fixed full-viewport layer: rendered in place, the strips were
+          `position: fixed` inside a tree whose ancestor establishes a containing block, so the top
+          edge lit only across the sidebar. From <body> every side spans the whole viewport edge, and
+          the layer sits above every panel. */}
+      {dragging && magnet && typeof document !== 'undefined' && createPortal(
+        <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 9990, pointerEvents: 'none' }}>
           <div ref={el => { glowRefs.current.left = el }} style={{ ...glowBase, left: 0, top: 0, bottom: 0, width: 3 }} />
           <div ref={el => { glowRefs.current.right = el }} style={{ ...glowBase, right: 0, top: 0, bottom: 0, width: 3 }} />
           <div ref={el => { glowRefs.current.top = el }} style={{ ...glowBase, left: 0, right: 0, top: 0, height: 3 }} />
           <div ref={el => { glowRefs.current.bottom = el }} style={{ ...glowBase, left: 0, right: 0, bottom: 0, height: 3 }} />
-        </div>
+        </div>,
+        document.body,
       )}
       {effects && (
         <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 299, pointerEvents: 'none' }}>
