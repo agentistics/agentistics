@@ -43,6 +43,9 @@ export const IDLE_CLOSE: ShellCloseFlow = { phase: 'idle' }
 /** How long the result sentence stays up before the row returns to normal. */
 export const CLOSE_RESULT_MS = 4500
 
+/** The shortest time the progress step stays up, however fast the server answers. */
+export const CLOSE_MIN_PROGRESS_MS = 700
+
 /** Read the server's answer for ONE id. `res` is `null` when the request itself failed. */
 export function closeOutcome(id: string, res: { ok: boolean; body: unknown } | null): ShellCloseOutcome {
   if (!res || !res.ok) return 'failed'
@@ -122,6 +125,9 @@ export async function requestShellClose(sessionId: string, url: string, shellId?
   if (!id) return
   set(sessionId, { flow: { phase: 'closing', id } })
   let res: { ok: boolean; body: unknown } | null = null
+  // Measured: the route answers in well under 150 ms, so the progress step was never on screen
+  // long enough to read. It is held for `CLOSE_MIN_PROGRESS_MS` so the person SEES the close run.
+  const shown = new Promise(r => setTimeout(r, CLOSE_MIN_PROGRESS_MS))
   try {
     const r = await fetch(url, {
       method: 'POST',
@@ -130,6 +136,7 @@ export async function requestShellClose(sessionId: string, url: string, shellId?
     })
     res = { ok: r.ok, body: await r.json().catch(() => null) }
   } catch { res = null }
+  await shown
   const outcome = closeOutcome(id, res)
   const after = shellCloseEntry(sessionId)
   set(sessionId, {
