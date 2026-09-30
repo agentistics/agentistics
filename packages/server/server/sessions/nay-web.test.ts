@@ -7,7 +7,7 @@ function deps(over: Partial<NaySpawnDeps> = {}) {
   const d: NaySpawnDeps = {
     ensureDir: async () => {},
     spawn: (async (_lang, body) => { calls.spawned = body; return { ok: true, message: 'started', id: 'm1' } }) as NaySpawnDeps['spawn'],
-    model: async () => '',
+    launch: async () => ({ ok: true, harness: 'claude' }),
     keyOf: async id => `conv-of-${id}`,
     file: async key => { calls.filed = key },
     now: () => new Date(2026, 8, 29, 14, 5),
@@ -25,10 +25,19 @@ describe('startNaySession', () => {
     expect(calls.filed).toBe('conv-of-m1')
   })
 
-  test('the model chosen in Settings -> Chat is passed on; none means the CLI default', async () => {
-    const { d, calls } = deps({ model: async () => 'claude-opus-5-5' })
-    await startNaySession('en', d)
-    expect(calls.spawned).toMatchObject({ model: 'claude-opus-5-5' })
+  test('it starts with what the launch plan chose, and says so in the reply', async () => {
+    const { d, calls } = deps({ launch: async () => ({ ok: true, harness: 'claude', model: 'claude-opus-5-5', effort: 'high' }) })
+    const out = await startNaySession('en', d)
+    expect(calls.spawned).toMatchObject({ harness: 'claude', model: 'claude-opus-5-5', effort: 'high' })
+    expect(out).toMatchObject({ launch: { harness: 'claude', model: 'claude-opus-5-5', effort: 'high' } })
+  })
+
+  test('a refused launch plan starts nothing and says why', async () => {
+    const { d, calls } = deps({ launch: async () => ({ ok: false, reason: 'unknown_effort', value: 'turbo' }) })
+    const out = await startNaySession('en', d)
+    expect(out.ok).toBe(false)
+    expect(out.message).toContain('effort')
+    expect(calls.spawned).toBeUndefined()
   })
 
   test('a refused start is returned as is and files nothing', async () => {

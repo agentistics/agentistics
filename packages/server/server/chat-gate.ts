@@ -11,12 +11,14 @@
  *    re-enable what `public` denied would be an opt-in that restores host power on an exposed
  *    instance, which `exposure.ts` exists to make impossible.
  *
- *  Absent preference reads as OFF. This is deliberately not the "absent means the old default"
- *  migration `shareMode` uses: there, treating absence as anything else would silently invert live
- *  sharing rules; here, treating absence as ON would keep the shell open on every machine that has
- *  not been touched since the upgrade, which is the very thing being fixed. The cost of the strict
- *  reading is a switch to flip in Settings, and the cost of the lenient one is a shell nobody
- *  asked for. */
+ *  OWNER DECISION, 2026-09-29: an ABSENT preference now reads as ON (`preference !== false`), not
+ *  OFF. Nay became real sessions and its chat button is on every screen; the owner's call is that
+ *  the chat should work from the first run, the same reversal `editor-gate.ts` and `shell-gate.ts`
+ *  carry since 2026-09-14. It used to read absence as OFF so that a machine installed for its
+ *  metrics would not also ship a shell nobody chose — that is now the owner's accepted trade. An
+ *  explicit `false` (a person who turned it off in Settings -> Chat) is respected exactly as before,
+ *  and the SECURITY gate is untouched: `capable` still decides, so a `lan`/`public` profile or a
+ *  central stays OFF whatever the preference says. */
 export function chatAllowed(capable: boolean, preference: boolean | undefined): boolean {
-  return capable && preference === true
+  return capable && preference !== false
 }

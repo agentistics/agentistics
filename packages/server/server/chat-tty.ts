@@ -199,6 +199,11 @@ export async function ensureNayChat(port: number): Promise<void> {
   const dotClaude = path.join(NAY_CHAT_DIR, '.claude')
   await mkdir(dotClaude, { recursive: true })
   await writeFile(path.join(NAY_CHAT_DIR, 'CLAUDE.md'), claudeMd)
+  // A Nay conversation can run on another CLI (Settings -> Chat, the dock's create picker), and each
+  // reads its instructions from its own file: codex, copilot, kimi and agy read AGENTS.md, gemini
+  // reads GEMINI.md. Same text, so Nay is the same Nay whichever CLI hosts it.
+  await writeFile(path.join(NAY_CHAT_DIR, 'AGENTS.md'), claudeMd)
+  await writeFile(path.join(NAY_CHAT_DIR, 'GEMINI.md'), claudeMd)
   await writeFile(
     path.join(dotClaude, 'settings.json'),
     JSON.stringify(buildNaySettings(), null, 2),

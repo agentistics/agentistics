@@ -319,8 +319,8 @@ export async function handleSession(req: Request): Promise<Response> {
   const authed = isAuthed(req)
   const aggregatorOnly = TEAM_CENTRAL && !CENTRAL_USER
   // Unreadable preferences read the same as ABSENT ones do for each of these three switches —
-  // OFF for chat (`chatAllowed`'s own strict rule, unchanged), ON for shell/editor when the profile
-  // is capable (`shellAllowed`/`editorAllowed`'s owner-decided rule, 2026-09-14). A failed read is
+  // ON for all three when the profile is capable (`shellAllowed`/`editorAllowed`'s owner-decided rule,
+  // 2026-09-14, and `chatAllowed`'s, 2026-09-29). A failed read is
   // not a person answering "no" to either question; it is simply not knowing, and each gate's own
   // rule for "not knowing" applies exactly as it would to a preferences file with the key missing.
   const prefs = await readPreferences().catch(() => ({} as {

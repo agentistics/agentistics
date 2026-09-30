@@ -602,8 +602,8 @@ off — reversing the strict rule this section carried before. The bottom bar un
 composer (`panelBar.ts`) offers Claude Code, Shell and Studio as three standing entries of one
 control, and the call is that Shell belongs there from the first run, the same way the session's
 own Claude Code pane always has. `editor-gate.ts` (the Studio) carries the identical reversal for
-the identical reason; `chat-gate.ts` and the `shareMode` migration keep their own strict "absent
-reads OFF" reading, unargued with. An explicit `false` is still respected exactly as before, and
+the identical reason, and `chat-gate.ts` joined them on 2026-09-29 (owner decision); the
+`shareMode` migration keeps its own reading, unargued with. An explicit `false` is still respected exactly as before, and
 the security gate (`capable`) is exactly as strict as it always was — only the reading of an unset
 preference changed.
 

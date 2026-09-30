@@ -18,13 +18,22 @@ import { NAY_CHAT_DIR } from '../chat-tty'
 import { readPreferences, updatePreferences } from '../preferences'
 import { runFleetSpawn, type FleetSpawnResponse } from './fleet-web'
 import { readRegistry } from './registry'
+import { planNayLaunch, type NayLaunch, type NayLaunchRequest, type NayLaunchResult } from './nay-launch'
+
+const LAUNCH_REFUSAL: Record<string, { pt: string; en: string }> = {
+  unknown_harness: { pt: 'Este assistente não pode ser iniciado nesta máquina.', en: 'That assistant cannot be started on this machine.' },
+  unknown_effort: { pt: 'Este assistente não aceita esse esforço de raciocínio.', en: 'That assistant does not accept that reasoning effort.' },
+  no_model_flag: { pt: 'Este assistente não permite escolher o modelo.', en: 'That assistant has no way to choose a model.' },
+  no_harness: { pt: 'Nenhum assistente pode ser iniciado nesta máquina.', en: 'No assistant can be started on this machine.' },
+}
 
 export interface NaySpawnDeps {
   /** Nay's directory must hold its CLAUDE.md before a session starts in it. */
   ensureDir: () => Promise<void>
   spawn: typeof runFleetSpawn
-  /** The model chosen in Settings -> Chat, already validated, or `''` for the CLI's own default. */
-  model: () => Promise<string>
+  /** What the conversation starts with — the picker's request over the Settings -> Chat defaults
+   *  (`planNayLaunch`). A refusal is returned to the caller in words. */
+  launch: (req: NayLaunchRequest) => Promise<NayLaunchResult>
   /** The key the new session is filed under — its conversation id where the registry has one. */
   keyOf: (id: string) => Promise<string>
   file: (key: string) => Promise<void>
@@ -33,19 +42,23 @@ export interface NaySpawnDeps {
 
 const label = (now: Date, lang: CliLang): string => nayTitle(now, lang === 'pt' ? 'pt' : 'en')
 
-export async function startNaySession(lang: CliLang, deps: NaySpawnDeps): Promise<FleetSpawnResponse> {
+export async function startNaySession(
+  lang: CliLang,
+  deps: NaySpawnDeps,
+  req: NayLaunchRequest = {},
+): Promise<FleetSpawnResponse & { launch?: NayLaunch }> {
   await deps.ensureDir()
-  const model = await deps.model().catch(() => '')
-  const out = await deps.spawn(lang, {
-    harness: 'claude', cwd: NAY_CHAT_DIR, label: label(deps.now(), lang), ...(model ? { model } : {}),
-  })
+  const plan = await deps.launch(req)
+  if (!plan.ok) return { ok: false, message: LAUNCH_REFUSAL[plan.reason]![lang === 'pt' ? 'pt' : 'en'] }
+  const { ok: _ok, ...launch } = plan
+  const out = await deps.spawn(lang, { cwd: NAY_CHAT_DIR, label: label(deps.now(), lang), ...launch })
   if (!out.ok || !out.id) return out
   // Filing is a convenience on top of a session that already exists: a failed write must not turn a
   // started session into a reported failure the user would retry into a second one.
   try { await deps.file(await deps.keyOf(out.id)) } catch (err) {
     console.warn('[nay] could not file the session under the Nay group:', err instanceof Error ? err.message : String(err))
   }
-  return out
+  return { ...out, launch }
 }
 
 const groupsOf = (groups: { id: string; name: string; sessionKeys: string[]; parentId?: string }[] | undefined): SessionUserGroupsValue =>
@@ -59,11 +72,12 @@ export function defaultNayDeps(port: number): NaySpawnDeps {
       await ensureNayChat(port)
     },
     spawn: runFleetSpawn,
-    model: async () => {
-      const [{ readPreferences }, { modelCatalog }, { resolveChatModel }] = await Promise.all([
-        import('../preferences'), import('../model-catalog'), import('../model-catalog-parse'),
-      ])
-      return resolveChatModel((await readPreferences()).chatModel, await modelCatalog('claude'), '')
+    launch: async req => {
+      const { readNewOptions } = await import('./fleet-web')
+      const [prefs, options] = await Promise.all([readPreferences(), readNewOptions('en', '')])
+      return planNayLaunch(req, prefs, options.harnesses.map(h => ({
+        id: h.id, supportsModel: h.supportsModel, efforts: h.efforts, models: h.models, modelFreeText: h.modelFreeText === true,
+      })))
     },
     keyOf: async id => (await readRegistry()).find(r => r.id === id)?.conversationId ?? id,
     file: async key => {

@@ -39,6 +39,10 @@ import { useLocation } from 'react-router-dom'
 import { getSessionGroups } from '../../lib/sessionUserGroups'
 import { getPinnedIds } from '../../lib/pinnedSessions'
 import { loadSharedPrefs } from '../../lib/sharedPref'
+import { useNayDefaults, useNayHarnesses } from '../../hooks/useNayDefaults'
+import { launchSummary, normalizeChoice, type NayLaunchChoice } from '../../lib/nayLaunch'
+import { HARNESS_LABELS } from '../../lib/harness'
+import { NayLaunchFields } from './NayLaunchFields'
 import { naySections, NAY_SECTION_ORDER, NAY_SECTION_TEXT, naySectionOf, type NaySectionId } from '../../lib/nayList'
 import { clampFabPos, defaultFabPos, FAB_SIZE, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
 
@@ -157,11 +161,27 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const [confirmEnd, setConfirmEnd] = useState(false)
   useEffect(() => { setConfirmEnd(false) }, [dock.panelSession])
 
+  // What "Nova conversa" starts with: the Settings -> Chat defaults, until somebody changes them in
+  // the picker — then that choice, for this page. One tap when nothing changes.
+  const harnesses = useNayHarnesses(lang, dock.open)
+  const defaults = useNayDefaults()
+  const [choice, setChoice] = useState<NayLaunchChoice | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const launch = harnesses ? normalizeChoice(choice ?? defaults ?? {}, harnesses) : null
+  const harnessLabel = (id: string) => (HARNESS_LABELS as Record<string, string>)[id] ?? harnesses?.find(h => h.id === id)?.label ?? id
+  const summaryOf = (run: { harness: string; model?: string | undefined; effort?: string | undefined }) =>
+    launchSummary(run, harnessLabel(run.harness), harnesses?.find(h => h.id === run.harness), pt)
+
   const startNay = useCallback(async () => {
     setStarting(true)
     setNotice(null)
     try {
-      const res = await fetch(`/api/fleet/nay?lang=${lang}`, { method: 'POST' })
+      // The choice travels only once the harnesses have loaded; before that the server applies the
+      // same Settings defaults itself, so an early tap starts exactly what the picker would show.
+      const res = await fetch(`/api/fleet/nay?lang=${lang}`, {
+        method: 'POST',
+        ...(launch ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(launch) } : {}),
+      })
       const out = await res.json().catch(() => null) as { ok?: boolean; message?: string; id?: string } | null
       if (out?.ok && out.id) {
         setArriving(a => ({ ...a, [out.id!]: Date.now() }))
@@ -178,7 +198,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     } finally {
       setStarting(false)
     }
-  }, [lang, pt, open])
+  }, [lang, pt, open, launch])
 
   const actFleet = useCallback(
     (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number }) => act(req),
@@ -223,6 +243,14 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         padding: isMobile ? '4px 6px 0' : '8px 10px 0',
         ['--ag-composer-ground' as string]: 'var(--bg-surface)',
       } as CSSProperties}>
+        {/* What this conversation runs on, in one line: "Claude Code · Opus 4.8 · high". */}
+        <div title={pt ? 'Assistente · modelo · esforço desta conversa' : 'This conversation\'s assistant · model · effort'} style={{
+          flexShrink: 0, alignSelf: 'flex-start', margin: '0 2px 6px', padding: '2px 8px', borderRadius: 999,
+          border: '1px solid var(--border)', fontSize: 11, color: 'var(--text-secondary)', maxWidth: '100%',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {summaryOf({ harness: s.harness, model: s.model, effort: s.effort })}
+        </div>
         <SessionChat
           key={s.id}
           session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
@@ -355,6 +383,12 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                 lang={lang} isMobile={isMobile} sections={sections} windows={dock.windows}
                 starting={starting} notice={notice} unsupported={unsupported}
                 onStart={() => { void startNay() }} onOpen={open} onEnd={endSession}
+                launchLine={launch ? summaryOf(launch) : null}
+                pickerOpen={pickerOpen} onTogglePicker={() => setPickerOpen(o => !o)}
+                picker={launch && harnesses ? (
+                  <NayLaunchFields layout={isMobile ? 'stack' : 'compact'} pt={pt} harnesses={harnesses}
+                    value={launch} onChange={setChoice} />
+                ) : null}
               />
             )
             : (
@@ -500,7 +534,7 @@ function EndConfirm({ pt, isMobile, onYes, onNo }: { pt: boolean; isMobile: bool
   )
 }
 
-function NayList({ lang, isMobile, sections, windows, starting, notice, unsupported, onStart, onOpen, onEnd }: {
+function NayList({ lang, isMobile, sections, windows, starting, notice, unsupported, onStart, onOpen, onEnd, launchLine, pickerOpen, onTogglePicker, picker }: {
   lang: Lang
   isMobile: boolean
   sections: Record<NaySectionId, ControlSession[]>
@@ -511,6 +545,11 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   onStart: () => void
   onOpen: (id: string) => void
   onEnd: (id: string) => Promise<boolean>
+  /** "Claude Code · Opus 4.8 · high": what the next conversation will start with. */
+  launchLine: string | null
+  pickerOpen: boolean
+  onTogglePicker: () => void
+  picker: ReactNode
 }) {
   const pt = lang === 'pt'
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -531,6 +570,17 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
         {starting ? <Loader2 size={14} style={{ animation: 'ag-working-spin 1s linear infinite' }} /> : <Plus size={14} />}
         {pt ? 'Nova conversa com a Nay' : 'New conversation with Nay'}
       </button>
+      {launchLine && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0 }}>
+          <span style={{ flexShrink: 0 }}>{pt ? 'Com' : 'With'}</span>
+          <span style={{ flex: 1, minWidth: 0, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{launchLine}</span>
+          <button type="button" onClick={onTogglePicker} aria-expanded={pickerOpen} style={{
+            flexShrink: 0, border: 'none', background: 'transparent', padding: isMobile ? '10px 4px' : '2px 4px', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 11.5, color: ORANGE, textDecoration: 'underline', textUnderlineOffset: 3,
+          }}>{pickerOpen ? (pt ? 'Pronto' : 'Done') : (pt ? 'Alterar' : 'Change')}</button>
+        </div>
+      )}
+      {pickerOpen && picker && <div style={{ flexShrink: 0 }}>{picker}</div>}
       {unsupported && (
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>
           {pt ? 'Esta máquina não consegue iniciar sessões.' : 'This machine cannot start sessions.'}
