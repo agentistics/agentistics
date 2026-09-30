@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { initFollow, landImpulse, renderDock, stepFollow, followSettled, NO_FADE, CARD_SIDE_HYSTERESIS } from './nayDockFollow'
+import { initFollow, landImpulse, renderDock, stepFollow, followSettled, NO_FADE, CARD_SIDE_HYSTERESIS, REST_AFTER_FRAMES, nextQuiet, forceRest, shouldWake, restingTransform } from './nayDockFollow'
 import { NAY_FAB_STYLES } from './nayFab'
 
 const VP = { w: 1440, h: 900 }
@@ -136,5 +136,48 @@ describe('the notification card follows without ever fading (NO_FADE)', () => {
     // A real crossing flips it exactly once.
     for (let k = 0; k < 100; k++) stepFollow(st, { x: 100, y: 400, w: B, h: B }, CARD, VP, 'shock', false, 1 / 240, NO_FADE)
     expect(st.sides.right).toBe(false)
+  })
+})
+
+describe('the dock comes to rest wherever the drag ends (REST_AFTER_FRAMES)', () => {
+  // The loop the dock runs, reduced to its decisions: step, count quiet frames, force rest.
+  function settleAt(style: (typeof NAY_FAB_STYLES)[number], end: { x: number; y: number }, jitter: number, reportedSpeed: number, vp = VP) {
+    const st = initFollow({ x: vp.w - B - 24, y: vp.h - B - 24, w: B, h: B }, WANT, vp)
+    let bx = vp.w - B - 24, by = vp.h - B - 24
+    for (let f = 1; f <= 30; f++) { // the drag
+      bx += (end.x - bx) / (31 - f); by += (end.y - by) / (31 - f)
+      for (let k = 0; k < 4; k++) stepFollow(st, { x: bx, y: by, w: B, h: B }, WANT, vp, style, false, 1 / 240)
+    }
+    let quiet = 0, px = bx, py = by
+    for (let f = 1; f <= 300; f++) { // after release: a button that keeps republishing sub-pixel noise
+      const x = end.x + (f % 2 ? jitter : -jitter), y = end.y
+      for (let k = 0; k < 4; k++) stepFollow(st, { x, y, w: B, h: B }, WANT, vp, style, false, 1 / 240)
+      quiet = nextQuiet(quiet, Math.hypot(x - px, y - py), reportedSpeed); px = x; py = y
+      const forced = quiet >= REST_AFTER_FRAMES
+      if (forced) forceRest(st)
+      if (forced || (followSettled(st) && reportedSpeed < 1)) return { frames: f, st, btn: { x, y } }
+    }
+    return { frames: Infinity, st, btn: { x: end.x, y: end.y } }
+  }
+  const spots = (vp: { w: number; h: number }) => ({
+    middle: { x: vp.w / 2 - B / 2, y: vp.h / 2 - B / 2 }, topLeft: { x: 16, y: 16 },
+    bottomCenter: { x: vp.w / 2 - B / 2, y: vp.h - B - 16 }, corner: { x: vp.w - B - 24, y: vp.h - B - 24 },
+  })
+  for (const vp of [VP, { w: 1366, h: 657 }]) for (const style of NAY_FAB_STYLES) for (const [name, at] of Object.entries(spots(vp))) {
+    test(`${vp.w}x${vp.h} ${style} ${name}: at rest within ${REST_AFTER_FRAMES} + a few frames, even with a jittering button`, () => {
+      const r = settleAt(style, at, 0.4, 5, vp)
+      expect(r.frames).toBeLessThanOrEqual(REST_AFTER_FRAMES + 2)
+      // At rest: no deformation, full opacity, and the frame draws no transform at all.
+      const fr = renderDock(r.st, { ...r.btn, w: B, h: B }, vp, style, false, 0)
+      expect(fr.opacity).toBe(1)
+      expect(restingTransform(fr.transform)).toBe('')
+      expect(frameStyle(fr, { left: 0, top: 0 }, false).willChange).toBe('')
+    })
+  }
+  test('a sub-pixel republish does not wake a dock at rest; a real move does', () => {
+    expect(shouldWake(500, 400, { x: 500.4, y: 400.3 }, 3)).toBe(false)
+    expect(shouldWake(500, 400, { x: 520, y: 400 }, 0)).toBe(true)
+    expect(shouldWake(500, 400, { x: 500, y: 400 }, 400)).toBe(true)
+    expect(shouldWake(NaN, NaN, { x: 0, y: 0 }, 0)).toBe(true)
   })
 })
