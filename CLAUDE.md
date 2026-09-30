@@ -783,6 +783,7 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   │   ├── chatSounds.ts         → 5 synthesized notification sounds via Web Audio API (Ping, Chime, Soft, Bell, Pop)
   │   ├── nayDock.ts            → PURE: the Nay chat's geometry (resizable docked panel) and WHERE a session opens — a detached window holding it is raised/restored, otherwise it opens in the panel; one session is never on screen twice
   │   ├── notifications.ts      → notification store (useSyncExternalStore) + render-time pt/en i18n (NOTIFICATION_TEXT keyed by code, interpolates meta)
+  │   ├── nayNotify.ts / nayNotifyStore.ts / nayNotifyAnim.ts / notificationSounds.ts → the session notifications the floating Nay button SPEAKS (`components/nay/NayNotifyCard.tsx`): a card out of the button with reply / go / approve (options read off the screen, never blind) / snooze (15 min, 1 h, typed) / end (stale only, via `NayEndSession`), 4 entrances (`launch` default), 13 synthesized sounds. Every event also lands in the bell; the card replaces the OS notification only while the tab is visible; do-not-disturb silences all but the bell. See docs/nay-notifications.md
   │   └── harness.ts            → HARNESS_LABELS, HARNESS_COLORS, capable(harness, metric), HARNESS_INFO (data-source/contains/missing/note metadata for HarnessInfoPanel)
   ├── hooks/
   │   ├── useData.ts            → fetches /api/data + SSE subscription + useDerivedStats() + computeHarnessSummaries()

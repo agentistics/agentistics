@@ -34,6 +34,8 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { DockSettings } from './DockSettings'
+import { NayNotifyCard } from './NayNotifyCard'
+import { setOpenSession } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation } from 'react-router-dom'
 import { getSessionGroups } from '../../lib/sessionUserGroups'
@@ -101,7 +103,14 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const [arriving, setArriving] = useState<Record<string, number>>({})
 
   useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
-  const inSession = useLocation().pathname.startsWith('/sessions/')
+  const { pathname } = useLocation()
+  const inSession = pathname.startsWith('/sessions/')
+  // The session on screen, for the notifications: a card about it is never shown, and opening one
+  // is what "not opened for a while" is measured from.
+  useEffect(() => {
+    const id = inSession ? decodeURIComponent(pathname.slice('/sessions/'.length).split('/')[0] ?? '') : ''
+    setOpenSession(id || null)
+  }, [pathname, inSession])
   const shownInSession = useNayFabShownInSession()
   const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
   const [fabPrefs, setFabPrefs] = useState<NayFabPrefs>(() => readStored(FAB_KEY, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS))
@@ -421,6 +430,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
 
   return (
     <>
+      {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
+          on screen: on a phone inside a session the button can be hidden, and the card then opens
+          from the corner it would have occupied. */}
+      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} />
       {panel}
 
       {visibleWindows.map(w => (
@@ -462,6 +475,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                   onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
                   onKeyDown={onKeyDown}
                   onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  data-nay-fab
                   aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
                   aria-expanded={dock.open}
                   title={pt ? 'Nay — arraste para mover' : 'Nay — drag to move'}

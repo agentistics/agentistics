@@ -193,6 +193,30 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão iniciada apesar do aviso de memória', message: '{note}' },
     en: { title: 'Session started despite the memory warning', message: '{note}' },
   },
+  // The session notifications (`sessionNotifications.ts`): written to the bell from the browser that
+  // saw the transition, so the history keeps what the Nay button's card showed (and what
+  // do-not-disturb kept quiet). `{name}` is the session's title and `{harness}` the assistant, both
+  // already words; `{at}` is never printed — it only makes each occurrence its own row.
+  'session.turn_ended': {
+    pt: { title: 'Sessão respondeu', message: '{name} ({harness}) terminou o turno e espera por você.' },
+    en: { title: 'Session replied', message: '{name} ({harness}) finished its turn and is waiting for you.' },
+  },
+  'session.needs_approval': {
+    pt: { title: 'Sessão pede aprovação', message: '{name} ({harness}) está parada num diálogo esperando você escolher.' },
+    en: { title: 'Session needs approval', message: '{name} ({harness}) is stopped on a dialog waiting for you to choose.' },
+  },
+  'session.stale': {
+    pt: { title: 'Sessão sem abrir', message: '{name} ({harness}) espera por você há um tempo e ninguém a abriu.' },
+    en: { title: 'Session not opened', message: '{name} ({harness}) has been waiting for you for a while and nobody opened it.' },
+  },
+  'session.working': {
+    pt: { title: 'Sessão trabalhando', message: '{name} ({harness}) voltou a trabalhar.' },
+    en: { title: 'Session working', message: '{name} ({harness}) started working again.' },
+  },
+  'session.exited': {
+    pt: { title: 'Sessão encerrada', message: '{name} ({harness}) foi encerrada.' },
+    en: { title: 'Session closed', message: '{name} ({harness}) was closed.' },
+  },
   // A staged session fired from the task TABLE started, but its filing under the subtask was
   // refused because the subtask is blocked. The session runs either way; this says where it is NOT.
   'tasks.fire_filing_blocked': {
@@ -333,6 +357,11 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
  * rather than to a card that does not exist.
  */
 export function notificationLink(n: Pick<AppNotification, 'code' | 'meta'>): string | null {
+  // A session notification leads to the session itself.
+  if (n.code?.startsWith('session.')) {
+    const sid = String(n.meta?.sessionId ?? '').trim()
+    return sid ? `/sessions/${encodeURIComponent(sid)}` : null
+  }
   const NOTICE_CODES = new Set(['member.rules_proposed', 'member.peer_key_changed', 'member.peer_pinned'])
   if (!n.code || !NOTICE_CODES.has(n.code)) return null
   const id = String(n.meta?.connectionId ?? '').trim()
