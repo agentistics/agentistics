@@ -62,3 +62,24 @@ describe('dock follow', () => {
     expect(st.swap).toBe(0)
   })
 })
+
+import { frameStyle } from './nayDockFollow'
+
+describe('a frame at rest leaves no containing block for fixed popovers', () => {
+  const fr = { left: 120, top: 80, transform: 'scale(1) skewX(0deg) scale(1, 1)' }
+  test('at rest: placed by left/top, no transform, no will-change', () => {
+    // Either one makes the dock the containing block of the Select popovers inside it, and the
+    // dropdown then closed itself as soon as it opened (owner report, v2.80.2, desktop Chrome).
+    const s = frameStyle(fr, { left: 0, top: 0 }, false)
+    expect(s).toEqual({ left: 120, top: 80, transform: '', willChange: '' })
+  })
+  test('in motion: a composited translate from the resting place, on its own layer', () => {
+    const s = frameStyle(fr, { left: 100, top: 100 }, true)
+    expect(s.transform.startsWith('translate3d(20px, -20px, 0)')).toBe(true)
+    expect(s.willChange).toBe('transform')
+    expect(s.left).toBeUndefined()
+  })
+  test('a real deformation at rest is kept', () => {
+    expect(frameStyle({ ...fr, transform: 'rotate(3deg)' }, { left: 0, top: 0 }, false).transform).toBe('rotate(3deg)')
+  })
+})

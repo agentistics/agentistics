@@ -34,7 +34,7 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
-import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { followSettled, frameStyle, initFollow, landImpulse, renderDock, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession } from '../../lib/nayNotifyStore'
@@ -346,12 +346,17 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
    */
   const base = useRef({ left: 0, top: 0 })
   const written = useRef({ w: -1, h: -1, o: -1 })
-  const writeFrame = useCallback((fr: DockFrame | null) => {
+  const writeFrame = useCallback((fr: DockFrame | null, moving: boolean) => {
     const el = panelRef.current
     if (!el || !fr) return
-    const b = base.current, w = written.current
+    const w = written.current
+    // In motion a composited translate; AT REST no transform and no will-change (see `frameStyle`).
+    const fs = frameStyle(fr, base.current, moving)
     el.style.transformOrigin = fr.origin
-    el.style.transform = restingTransform(`translate3d(${fr.left - b.left}px, ${fr.top - b.top}px, 0) ${fr.transform}`)
+    el.style.transform = fs.transform
+    el.style.willChange = fs.willChange
+    if (fs.left !== undefined) el.style.left = `${fs.left}px`
+    if (fs.top !== undefined) el.style.top = `${fs.top}px`
     if (fr.w !== w.w) { el.style.width = `${fr.w}px`; w.w = fr.w }
     if (fr.h !== w.h) { el.style.height = `${fr.h}px`; w.h = fr.h }
     if (fr.opacity !== w.o) { el.style.opacity = String(fr.opacity); w.o = fr.opacity }
@@ -366,7 +371,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     })
   }, [])
   base.current = { left: place.left, top: place.top }
-  useLayoutEffect(() => { if (followOn) { written.current = { w: -1, h: -1, o: -1 }; writeFrame(follow.current.frame) } })
+  useLayoutEffect(() => { if (followOn) { written.current = { w: -1, h: -1, o: -1 }; writeFrame(follow.current.frame, follow.current.raf !== 0) } })
   useEffect(() => {
     const f = follow.current
     if (!followOn) { f.st = null; f.frame = null; return }
@@ -388,8 +393,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       if (b.l && b.l.landed !== f.landed) { f.landed = b.l.landed; landImpulse(st, dockStyle, reduced, b.l.landSpeed) }
       for (let i = 0; i < 4; i++) stepFollow(st, b.rect, size, vp, dockStyle, reduced, dt / 4)
       f.frame = renderDock(st, b.rect, vp, dockStyle, reduced, b.speed)
-      writeFrame(f.frame)
-      f.raf = followSettled(st) && b.speed < 1 ? 0 : requestAnimationFrame(frame)
+      const rest = followSettled(st) && b.speed < 1
+      writeFrame(f.frame, !rest)
+      f.raf = rest ? 0 : requestAnimationFrame(frame)
     }
     const kick = () => { if (!f.raf) { f.last = performance.now(); f.raf = requestAnimationFrame(frame) } }
     kick()
@@ -417,7 +423,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
           }
         : {
-            position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h, willChange: 'transform',
+            position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h,
             zIndex: dockZ, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
             boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}

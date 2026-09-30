@@ -232,6 +232,9 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     const p = frameToPlacement(fr, st, btn), b = cardBase.current, w = written.current
     const dx = fr.left - b.left, dy = fr.top - b.top
     card.style.translate = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? '' : `${dx}px ${dy}px`
+    // Only while it moves: `will-change` left on makes the card the containing block of the folder
+    // Select's fixed popover (see `frameStyle` in nayDockFollow.ts).
+    card.style.willChange = card.style.translate ? 'translate, transform' : ''
     card.style.transformOrigin = `${p.originX}px ${p.originY}px`
     card.style.transform = restingTransform(fr.transform)
     if (fr.w !== w.w) { card.style.width = `${fr.w}px`; w.w = fr.w }
@@ -417,7 +420,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       style={{
         // left / top / transform-origin / max-height are written by the placement and the follow
         // loop, never by React: a re-render mid-drag must not snap the card back for a frame.
-        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)', willChange: 'translate, transform',
+        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)',
         background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
         fontSize: 13, color: 'var(--text-primary)', overflowY: 'auto', overscrollBehavior: 'contain',
