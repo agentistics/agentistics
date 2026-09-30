@@ -25,8 +25,9 @@ import { useNayDefaults, useNayHarnesses, saveNayDefaults } from '../../hooks/us
 import { normalizeChoice } from '../../lib/nayLaunch'
 import { NayLaunchFields } from '../../components/nay/NayLaunchFields'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
-import { getNotificationSettings } from '../../lib/sessionNotifications'
-import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
+import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
+import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
+import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 
 export default function ChatSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -147,6 +148,9 @@ export default function ChatSettings() {
           : 'The server is what decides: with chat off, /api/chat-tty and /api/chat-harnesses answer 403. Hiding the button would not close the door.'}
       </div>
 
+      <Divider />
+      <NayAnimationSetting pt={pt} />
+
       {/* Two gates, not one: the switch above is reachable whenever the PROFILE allows chat, on or
           off — this row is what turns it back on. The sound and model only matter once chat is
           actually serving, so they are gated on the user's own switch, not just the profile. */}
@@ -207,6 +211,37 @@ export default function ChatSettings() {
           )}
         </>
       )}
+    </>
+  )
+}
+
+/**
+ * How the floating Nay button delivers a session notification. The same stored value the dock's
+ * gear popover writes (`NotificationSettings.nayAnimation`), so the two places can never disagree.
+ */
+function NayAnimationSetting({ pt }: { pt: boolean }) {
+  const [value, setValue] = useState<NayAnimation>(() => getNotificationSettings().nayAnimation)
+  useEffect(() => subscribeNotificationSettings(() => setValue(getNotificationSettings().nayAnimation)), [])
+  const lang = pt ? 'pt' : 'en'
+  return (
+    <>
+      <SectionHeader label={pt ? 'Notificações do botão Nay' : 'Nay button notifications'} />
+      <PrefRow
+        label={pt ? 'Como o botão avisa' : 'How the button tells you'}
+        sub={`${NAY_ANIMATION_HINT[value][lang]}. ${pt ? 'Com movimento reduzido no sistema, qualquer escolha vira um fade.' : 'With reduced motion on, every choice becomes a fade.'}`}
+      >
+        <div style={{ minWidth: 180 }}>
+          <Select
+            value={value}
+            onChange={v => {
+              const next = v as NayAnimation
+              setValue(next)
+              saveNotificationSettings({ ...getNotificationSettings(), nayAnimation: next })
+            }}
+            options={NAY_ANIMATIONS.map(a => ({ value: a, label: NAY_ANIMATION_LABEL[a][lang] }))}
+          />
+        </div>
+      </PrefRow>
     </>
   )
 }
