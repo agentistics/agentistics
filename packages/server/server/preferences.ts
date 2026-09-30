@@ -84,10 +84,14 @@ export interface Preferences {
   currency?: 'USD' | 'BRL'
   cardPrecision?: Record<string, boolean>
   chatModel?: string
+  /** The harness a new Nay conversation starts with (Settings -> Chat). Absent means Claude Code.
+   *  `chatModel` and `chatEffort` belong to THIS harness — see `sessions/nay-launch.ts`. */
+  chatHarness?: string
+  /** The reasoning effort a new Nay conversation starts with, one the harness's CLI prints. */
+  chatEffort?: string
   chatSoundEnabled?: boolean
-  /** Whether this machine serves the chat at all. ABSENT READS AS OFF — chat spawns an assistant
-   *  CLI on the host, and until it was made opt-in every machine installed for its metrics also
-   *  shipped a shell nobody had chosen. It can only ever narrow `CAPS.localChat`; see chat-gate.ts. */
+  /** Whether this machine serves the chat at all. ABSENT READS AS ON (owner decision, 2026-09-29);
+   *  an explicit false turns it off. It can only ever narrow `CAPS.localChat`; see chat-gate.ts. */
   chatEnabled?: boolean
   /** Opt-in for the per-session utility SHELL (`/api/shell/*`). Absent reads as OFF, and it can
    *  only ever narrow `CAPS.localShell`; see sessions/shell-gate.ts. Separate from `chatEnabled`

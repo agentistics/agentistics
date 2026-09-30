@@ -377,7 +377,7 @@ description somebody wrote out, every comment, the subtasks, the names of the fi
 card. So it travels under a second, narrower gate than everything else:
 
 - **`Task.shared`, absent reading as NOT shared.** This is deliberately *not* the `shareMode`
-  migration rule (where absence reads as denylist, i.e. share) — it is the `chat-gate.ts` reading.
+  migration rule (where absence reads as denylist, i.e. share) — it is the strict opt-in reading.
   There, treating absence as anything else would silently invert live sharing rules; here, it
   would publish text nobody offered. There is no "share everything" switch, which would be the
   lenient default by another door. A board is opted in one delivery at a time, by its owner, from
@@ -648,10 +648,11 @@ composes this and `index.ts` calls it; `response-policy.test.ts` tests that func
 Reaching into another machine's live sessions is the most powerful thing a central can be asked to
 relay. Four things make it safe enough to offer, and one thing it explicitly does not promise.
 
-**It is off until the machine turns it on.** Absent consent reads as OFF — the rule `chat-gate.ts`
-applies to the dashboard chat, and deliberately not the `shareMode` migration rule that treats
-absence as the old default. (The SHELL and the Studio no longer share that reading: since
-2026-09-14 an absent `shellEnabled`/`editorEnabled` reads as ON, because both are standing entries
+**It is off until the machine turns it on.** Absent consent reads as OFF — the strict opt-in
+reading, and deliberately not the `shareMode` migration rule that treats absence as the old default.
+(The dashboard's own switches no longer share that reading: since 2026-09-14 an absent
+`shellEnabled`/`editorEnabled` reads as ON, and since 2026-09-29 so does `chatEnabled` (owner
+decision, `chat-gate.ts`), because they are standing entries
 of the session's own bottom bar — see `shell-gate.ts`. That reversal is about a switch on the
 machine's OWN dashboard; relaying a machine's sessions to a CENTRAL is a different grant and keeps
 the strict reading.) Treating absence as ON here would hand every already-connected

@@ -2293,7 +2293,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const { fleetLang } = await import('./sessions/fleet-web')
         const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
-        const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT))
+        // The create picker's choice, if any. Shape-checked by `planNayLaunch`; an absent body reads as
+        // "use the Settings -> Chat defaults".
+        const read = await readJsonLimited<Record<string, unknown> | null>(req, 4096).catch(() => null)
+        const body = read && read.ok && read.value && typeof read.value === 'object' ? read.value : null
+        const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT), {
+          harness: body?.harness, model: body?.model, effort: body?.effort,
+        })
         return new Response(JSON.stringify(out), {
           status: out.code === 'memory_budget' ? 409 : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
