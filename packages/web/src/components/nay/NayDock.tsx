@@ -34,7 +34,7 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
-import { followSettled, frameStyle, initFollow, landImpulse, renderDock, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession, setVisibleSessions, useNayInbox } from '../../lib/nayNotifyStore'
@@ -341,7 +341,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
    */
   const panelRef = useRef<HTMLDivElement>(null)
   const echoRefs = useRef<(HTMLDivElement | null)[]>([])
-  const follow = useRef<{ st: DockFollowState | null; raf: number; last: number; landed: number; frame: DockFrame | null }>({ st: null, raf: 0, last: 0, landed: 0, frame: null })
+  const follow = useRef<{ st: DockFollowState | null; raf: number; last: number; landed: number; frame: DockFrame | null; quiet: number; bx: number; by: number; restX: number; restY: number }>({ st: null, raf: 0, last: 0, landed: 0, frame: null, quiet: 0, bx: NaN, by: NaN, restX: NaN, restY: NaN })
   const followOn = dock.open && !isMobile
   /*
    * THE FRAME IS A TRANSFORM, NEVER A LAYOUT WRITE. Moving the dock by `left`/`top` every frame made
@@ -399,15 +399,30 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       const b = btnNow()
       if (b.l && b.l.landed !== f.landed) { f.landed = b.l.landed; landImpulse(st, dockStyle, reduced, b.l.landSpeed) }
       for (let i = 0; i < 4; i++) stepFollow(st, b.rect, size, vp, dockStyle, reduced, dt / 4)
-      f.frame = renderDock(st, b.rect, vp, dockStyle, reduced, b.speed)
-      const rest = followSettled(st) && b.speed < 1
+      // The rest guarantee (see `REST_AFTER_FRAMES`): a quiet button puts the dock at rest even if
+      // the spring never meets its own threshold.
+      f.quiet = nextQuiet(f.quiet, Number.isNaN(f.bx) ? Infinity : Math.hypot(b.rect.x - f.bx, b.rect.y - f.by), b.speed)
+      f.bx = b.rect.x; f.by = b.rect.y
+      const forced = f.quiet >= REST_AFTER_FRAMES
+      if (forced) forceRest(st)
+      f.frame = renderDock(st, b.rect, vp, dockStyle, reduced, forced ? 0 : b.speed)
+      const rest = forced || (followSettled(st) && b.speed < 1)
+      if (rest) { f.quiet = 0; f.restX = b.rect.x; f.restY = b.rect.y }
       writeFrame(f.frame, !rest)
       f.raf = rest ? 0 : requestAnimationFrame(frame)
     }
-    const kick = () => { if (!f.raf) { f.last = performance.now(); f.raf = requestAnimationFrame(frame) } }
+    const kick = () => {
+      if (f.raf) return
+      // A button still where the dock came to rest (a sub-pixel republish) is not a reason to leave
+      // rest: starting the loop would put the transform back on for REST_AFTER_FRAMES, every time.
+      const b = btnNow()
+      if (!shouldWake(f.restX, f.restY, b.rect, b.speed)) return
+      f.last = performance.now(); f.quiet = 0; f.bx = NaN; f.raf = requestAnimationFrame(frame)
+    }
+    f.restX = NaN
     kick()
     const off = subscribeFabLive(kick)
-    const onResize = () => { vp = viewport(); kick() }
+    const onResize = () => { vp = viewport(); f.restX = NaN; kick() }
     window.addEventListener('resize', onResize)
     return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
   }, [followOn, size, dockStyle, fabPrefs.pos, writeFrame])
