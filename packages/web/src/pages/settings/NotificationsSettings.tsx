@@ -15,7 +15,7 @@ import {
   type SoundPreset,
   type NotifyEvent,
 } from '../../lib/sessionNotifications'
-import { NAY_SOUNDS } from '../../lib/notificationSounds'
+import { SOUND_PRESET_OPTIONS } from '../../lib/soundPresetOptions'
 import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
 import { pushDemoAlert } from '../../lib/nayNotifyStore'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
@@ -109,14 +109,7 @@ export default function NotificationsSettings() {
     })
   }
 
-  const SOUND_PRESETS: { key: SoundPreset; labelPt: string; labelEn: string; descPt: string; descEn: string }[] = [
-    { key: 'chime', labelPt: 'Chime Melódico', labelEn: 'Melodic Chime', descPt: 'Acorde suave triplo em C5', descEn: 'Soft triple chord in C5' },
-    { key: 'soft', labelPt: 'Suave / Discreto', labelEn: 'Soft / Subtle', descPt: 'Pulso duplo de baixa frequência', descEn: 'Double low-frequency pulse' },
-    { key: 'alert', labelPt: 'Alerta / Destaque', labelEn: 'Alert Tone', descPt: 'Tom triplo de atenção em E5', descEn: 'Triple attention tone in E5' },
-    { key: 'ping', labelPt: 'Ping de Cristal', labelEn: 'Crystal Ping', descPt: 'Sino agudo de alta clareza', descEn: 'High clarity bell' },
-    // The thirteen synthesized for the Nay button's cards (`notificationSounds.ts`).
-    ...NAY_SOUNDS.map(n => ({ key: n.id as SoundPreset, labelPt: n.label.pt, labelEn: n.label.en, descPt: n.about.pt, descEn: n.about.en })),
-  ]
+  const SOUND_PRESETS = SOUND_PRESET_OPTIONS
 
   const EVENT_CONFIGS: {
     key: keyof NotificationSettings['events']
