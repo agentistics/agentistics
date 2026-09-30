@@ -1,0 +1,64 @@
+import { describe, expect, test } from 'bun:test'
+import { initFollow, landImpulse, renderDock, stepFollow, followSettled } from './nayDockFollow'
+import { NAY_FAB_STYLES } from './nayFab'
+
+const VP = { w: 1440, h: 900 }
+const WANT = { w: 420, h: 560 }
+const B = 56
+
+function run(style: (typeof NAY_FAB_STYLES)[number], reduced: boolean) {
+  const path: [number, number][] = [[0.9, 0.9], [0.05, 0.05], [0.95, 0.1], [0.5, 0.5], [0.08, 0.9], [0.92, 0.5], [0.4, 0.15], [0.9, 0.92]]
+  let bx = VP.w * 0.9, by = VP.h * 0.9
+  const st = initFollow({ x: bx, y: by, w: B, h: B }, WANT, VP)
+  const bad: string[] = []
+  for (const [px, py] of path) {
+    const tx = Math.min(VP.w - B - 16, Math.max(16, VP.w * px)), ty = Math.min(VP.h - B - 16, Math.max(16, VP.h * py))
+    const x0 = bx, y0 = by
+    for (let f = 1; f <= 60; f++) {
+      bx = x0 + (tx - x0) * f / 60; by = y0 + (ty - y0) * f / 60
+      const speed = Math.hypot(tx - x0, ty - y0)   // ~ px per second at 60 frames/s
+      for (let k = 0; k < 4; k++) stepFollow(st, { x: bx, y: by, w: B, h: B }, WANT, VP, style, reduced, 1 / 240)
+      const fr = renderDock(st, { x: bx, y: by, w: B, h: B }, VP, style, reduced, speed)
+      const over = fr.opacity > 0.3 && fr.left < bx + B && bx < fr.left + fr.w && fr.top < by + B && by < fr.top + fr.h
+      const off = fr.left < 0 || fr.top < 0 || fr.left + fr.w > VP.w || fr.top + fr.h > VP.h
+      if (over || off) bad.push(`${style} ${px},${py}#${f}${over ? ' over' : ''}${off ? ' off' : ''}`)
+    }
+    landImpulse(st, style, reduced, 1200)
+    for (let k = 0; k < 480; k++) stepFollow(st, { x: bx, y: by, w: B, h: B }, WANT, VP, style, reduced, 1 / 240)
+  }
+  return { st, bad }
+}
+
+describe('dock follow', () => {
+  for (const style of NAY_FAB_STYLES) {
+    test(`${style}: never covers the button and never leaves the screen, and settles`, () => {
+      const { st, bad } = run(style, false)
+      expect(bad).toEqual([])
+      expect(followSettled(st)).toBe(true)
+    })
+  }
+  test('reduced motion: attached to the target, no effect', () => {
+    const { st, bad } = run('jelly', true)
+    expect(bad).toEqual([])
+    expect(st.x).toBe(st.place.left)
+    expect(st.shear).toBe(0)
+  })
+  test('a side change fades out and back in rather than sliding across the button', () => {
+    const st = initFollow({ x: 1300, y: 800, w: B, h: B }, WANT, VP)
+    const before = st.key
+    let sawFade = false
+    for (let k = 0; k < 400; k++) {
+      stepFollow(st, { x: 100, y: 100, w: B, h: B }, WANT, VP, 'jelly', false, 1 / 240)
+      if (st.swap === 1 && st.o < 0.9) sawFade = true
+    }
+    expect(sawFade).toBe(true)
+    expect(st.key).not.toBe(before)
+  })
+  test('hysteresis: a button wiggling on the midline does not change sides', () => {
+    const st = initFollow({ x: VP.w / 2 + 10 - B / 2, y: 800, w: B, h: B }, WANT, VP)
+    const key = st.key
+    for (let k = 0; k < 200; k++) stepFollow(st, { x: VP.w / 2 + (k % 2 ? -10 : 10) - B / 2, y: 800, w: B, h: B }, WANT, VP, 'shock', false, 1 / 240)
+    expect(st.key).toBe(key)
+    expect(st.swap).toBe(0)
+  })
+})

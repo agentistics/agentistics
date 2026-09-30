@@ -17,6 +17,7 @@
  */
 
 import { createPortal } from 'react-dom'
+import { publishFabLanded, publishFabLive } from '../../lib/nayFabLive'
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import {
   clampFabPos, defaultFabPos, dropFabAt, FAB_CLICK_SLOP, FAB_SIZE, FAB_SPRING, magnetEdges, NO_MAGNET, smoothVelocity, springAtRest,
@@ -124,6 +125,9 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     const s = sim.current
     const a = anchorRef.current
     if (a) a.style.transform = `translate3d(${s.spring.pos.x}px, ${s.spring.pos.y}px, 0)`
+    // The open dock follows the button's LIVE position, not the stored one (`nayFabLive.ts`).
+    const v = s.drag?.moved ? s.dragVel : s.spring.vel
+    publishFabLive(s.spring.pos.x, s.spring.pos.y, Math.hypot(v.x, v.y))
     const b = bodyRef.current
     if (!b) return
     if (reduced) { b.style.transform = ''; return }
@@ -310,6 +314,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
     s.target = t
     s.spring = { pos: s.spring.pos, vel: reduced ? { x: 0, y: 0 } : s.dragVel }
     const land = Math.hypot(s.dragVel.x, s.dragVel.y)
+    if (!cancelled) publishFabLanded(land)
     if (style === 'shock' && !reduced && !cancelled) {
       s.rings.push({ x: t.x + FAB_SIZE / 2, y: t.y + FAB_SIZE / 2, r: 30, a: Math.max(0.25, Math.min(0.9, land / 1600)), grow: 120 + land * 0.12 })
       const nx = s.dragVel.x / (land || 1), ny = s.dragVel.y / (land || 1)

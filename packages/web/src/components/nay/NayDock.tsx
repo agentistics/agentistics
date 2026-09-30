@@ -16,7 +16,7 @@
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, Power, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -33,6 +33,8 @@ import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionCha
 import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
+import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
+import { followSettled, initFollow, landImpulse, renderDock, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession } from '../../lib/nayNotifyStore'
@@ -314,8 +316,68 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const edgeY = place.grow.y === 'up' ? { top: 0 } : { bottom: 0 }
   const cornerCursor = (place.grow.x === 'left') === (place.grow.y === 'up') ? 'nwse-resize' : 'nesw-resize'
 
+  /*
+   * THE DOCK FOLLOWS THE BUTTON (desktop). While the button moves, the open dock follows its LIVE
+   * position with the motion of the button's own drag style — jelly, elastic trail, shock or comet,
+   * the four the owner approved — instead of teleporting to its new place when the drag ends. The
+   * physics is the pure `nayDockFollow.ts`; this loop only feeds it the button and writes the frame
+   * through refs, running only while something moves. React's own `left/top` (from the stored
+   * position) is the resting answer; the last frame is re-applied after every render so a re-render
+   * mid-drag cannot snap the dock back for a frame.
+   */
+  const panelRef = useRef<HTMLDivElement>(null)
+  const echoRefs = useRef<(HTMLDivElement | null)[]>([])
+  const follow = useRef<{ st: DockFollowState | null; raf: number; last: number; landed: number; frame: DockFrame | null }>({ st: null, raf: 0, last: 0, landed: 0, frame: null })
+  const followOn = dock.open && !isMobile
+  const writeFrame = useCallback((fr: DockFrame | null) => {
+    const el = panelRef.current
+    if (!el || !fr) return
+    el.style.left = `${fr.left}px`; el.style.top = `${fr.top}px`
+    el.style.width = `${fr.w}px`; el.style.height = `${fr.h}px`
+    el.style.transformOrigin = fr.origin; el.style.transform = fr.transform
+    el.style.opacity = String(fr.opacity)
+    echoRefs.current.forEach((e, i) => {
+      if (!e) return
+      const ec = fr.echoes[i]
+      e.style.opacity = ec ? String(ec.opacity) : '0'
+      if (ec) { e.style.left = `${ec.left}px`; e.style.top = `${ec.top}px`; e.style.width = `${fr.w}px`; e.style.height = `${fr.h}px` }
+    })
+  }, [])
+  useLayoutEffect(() => { if (followOn) writeFrame(follow.current.frame) })
+  useEffect(() => {
+    const f = follow.current
+    if (!followOn) { f.st = null; f.frame = null; return }
+    const reduced = (() => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } })()
+    const btnNow = () => {
+      const l = getFabLive()
+      const vp = viewport()
+      const p = l ? { x: l.x, y: l.y } : clampFabPos(fabPrefs.pos ?? defaultFabPos(vp), vp)
+      return { rect: { x: p.x, y: p.y, w: FAB_SIZE, h: FAB_SIZE }, speed: l?.speed ?? 0, l }
+    }
+    const b0 = btnNow()
+    if (!f.st) { f.st = initFollow(b0.rect, size, viewport()); f.landed = b0.l?.landed ?? 0 }
+    const frame = (now: number) => {
+      const st = f.st
+      if (!st) { f.raf = 0; return }
+      const dt = Math.min(0.05, (now - f.last) / 1000); f.last = now
+      const b = btnNow()
+      if (b.l && b.l.landed !== f.landed) { f.landed = b.l.landed; landImpulse(st, fabPrefs.style, reduced, b.l.landSpeed) }
+      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, size, viewport(), fabPrefs.style, reduced, dt / 4)
+      f.frame = renderDock(st, b.rect, viewport(), fabPrefs.style, reduced, b.speed)
+      writeFrame(f.frame)
+      f.raf = followSettled(st) && b.speed < 1 ? 0 : requestAnimationFrame(frame)
+    }
+    const kick = () => { if (!f.raf) { f.last = performance.now(); f.raf = requestAnimationFrame(frame) } }
+    kick()
+    const off = subscribeFabLive(kick)
+    window.addEventListener('resize', kick)
+    return () => { off(); window.removeEventListener('resize', kick); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
+  }, [followOn, size, fabPrefs.style, fabPrefs.pos, writeFrame])
+  const echoStyle = followOn && (fabPrefs.style === 'trail' || fabPrefs.style === 'comet')
+
   const panel = dock.open && (
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="Nay"
       style={isMobile
@@ -434,6 +496,13 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} />
+      {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
+      {echoStyle && [0, 1].map(i => (
+        <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
+          position: 'fixed', zIndex: 399, pointerEvents: 'none', opacity: 0,
+          border: '1px solid var(--anthropic-orange)', borderRadius: 10,
+        }} />
+      ))}
       {panel}
 
       {visibleWindows.map(w => (
