@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/runtime",
-  "version": "2.80.3",
+  "version": "2.80.4",
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "main": "./src/index.ts",
