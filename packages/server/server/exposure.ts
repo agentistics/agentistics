@@ -36,7 +36,9 @@ export interface Capabilities {
    *  is not a transcript. The route is NOT registered in capability-guard, because on a central it
    *  also serves members' self-reported snapshots, which stay available when this is off. */
   localProcesses: boolean
-  /** POST /api/mcp-action — mutates the host's ~/.claude.json. */
+  /** `/api/mcp` and everything under it — reads this machine's MCP server configuration and, via
+   *  `/api/mcp/install` and `/api/mcp/remove`, runs `claude mcp` to change it (~/.claude.json).
+   *  RUNNING a configured server (`/api/mcp/check`, `/api/mcp/tools`) is `localShell`, not this. */
   mcpAdmin: boolean
   /** Owner accounts must have TOTP enrolled before they can use the instance. */
   requireMfaForOwner: boolean
