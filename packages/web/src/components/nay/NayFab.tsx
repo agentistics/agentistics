@@ -56,9 +56,12 @@ const viewport = (): Viewport => ({ w: window.innerWidth, h: window.innerHeight 
  */
 function bottomInset(isMobile: boolean): number {
   if (!isMobile) return 0
-  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mobile-nav-h'))
-  let inset = Number.isFinite(v) ? v : 0
   const h = window.innerHeight
+  // The bar is MEASURED, not read off `--mobile-nav-h`: that token is a `calc(…)`, and a custom
+  // property reads back unresolved, so `parseFloat` of it was NaN and the inset silently 0.
+  const nav = document.querySelector('.mobile-bottom-nav')
+  const navTop = nav ? nav.getBoundingClientRect().top : h
+  let inset = navTop < h ? h - navTop + 8 : 0
   document.querySelectorAll('.ag-composer-ground').forEach(el => {
     const r = el.getBoundingClientRect()
     if (r.height > 0 && r.width > 0 && r.top < h && r.bottom > 0) inset = Math.max(inset, h - r.top + 8)
