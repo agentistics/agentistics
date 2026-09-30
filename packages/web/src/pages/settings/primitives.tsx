@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Pencil, Check, AlertTriangle, Info, ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
@@ -726,6 +727,17 @@ export function popoverPosition(rect: DOMRect, maxHeight: number, viewportHeight
 }
 
 /** The style a popover panel gets. `position: fixed` is the load-bearing part — see popoverPosition. */
+/**
+ * Where a Select's open list is drawn: `document.body`, and above every modal. Portalled, because a
+ * `position: fixed` element resolves against its nearest ancestor with a transform, filter or
+ * `will-change` — so a list drawn INSIDE a moving Nay dock was positioned against the dock, the
+ * outside-scroll rule then closed it, and the dock's settings screen could not be used (owner,
+ * v2.80–2.81). In `body` no ancestor can capture it. Just under the magnifier layer
+ * (2147483200), because a portalled list no longer inherits its modal's stacking context and
+ * would otherwise open BEHIND a 2000–10000 overlay.
+ */
+export const PORTALLED_POPOVER_Z = 2147483100
+
 export function popoverStyle(pos: PopoverRect | null): React.CSSProperties {
   return {
     position: 'fixed',
@@ -751,6 +763,9 @@ export function Select({ value, onChange, options, placeholder, disabled, search
   defaultOpenForTest?: boolean
 }) {
   const [open, setOpen] = React.useState(Boolean(defaultOpenForTest))
+  // Portalled only once mounted on a client: a static render (and its test) keeps the list inline.
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => { setMounted(true) }, [])
   const [activeIndex, setActiveIndex] = React.useState(-1)
   const [query, setQuery] = React.useState('')
   const wrapperRef = React.useRef<HTMLDivElement>(null)
@@ -773,8 +788,13 @@ export function Select({ value, onChange, options, placeholder, disabled, search
 
   React.useEffect(() => {
     if (!open) return
+    // "Inside" is the trigger's wrapper OR the list — the list is portalled out of the wrapper.
+    const inside = (t: EventTarget | null) => {
+      const n = t as Node | null
+      return !!n && (!!wrapperRef.current?.contains(n) || !!listRef.current?.contains(n))
+    }
     const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+      if (wrapperRef.current && !inside(e.target)) {
         setOpen(false)
       }
     }
@@ -786,7 +806,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
     // ever land, making any option beyond the visible fold unreachable. Only close for a scroll
     // whose target is outside this component's own DOM subtree.
     const onScroll = (e: Event) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false)
+      if (wrapperRef.current && !inside(e.target)) setOpen(false)
     }
     document.addEventListener('mousedown', handleClickOutside)
     window.addEventListener('scroll', onScroll, true)
@@ -853,6 +873,9 @@ export function Select({ value, onChange, options, placeholder, disabled, search
     }
   }
 
+  const portal = (node: React.ReactNode) =>
+    mounted && typeof document !== 'undefined' ? createPortal(node, document.body) : node
+
   return (
     <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
       <button
@@ -916,12 +939,13 @@ export function Select({ value, onChange, options, placeholder, disabled, search
         </svg>
       </button>
 
-      {open && (
+      {open && portal(
         <div
           ref={listRef}
           role="listbox"
           style={{
             ...popoverStyle(pos),
+            ...(mounted ? { zIndex: PORTALLED_POPOVER_Z } : {}),
             background: 'var(--bg-card)',
             border: '1px solid var(--border)',
             borderRadius: 8,
@@ -1000,7 +1024,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
               </div>
             )
           })}
-        </div>
+        </div>,
       )}
     </div>
   )

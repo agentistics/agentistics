@@ -91,6 +91,38 @@ export function followSettled(st: DockFollowState): boolean {
 }
 
 /**
+ * THE REST GUARANTEE. `followSettled` is a threshold on the SPRING, and a spring can fail to meet
+ * it forever: a button that republishes a sub-pixel position, a clamp that nudges the target back
+ * and forth, or a reported speed that never quite reaches zero all keep a follower "moving" — and a
+ * moving follower keeps its `translate3d` + `will-change`, which is exactly what made the dock the
+ * containing block of the settings screen's popovers away from the corner (owner, v2.81.1). So
+ * the loop also counts frames in which the BUTTON has not moved (by its position, not by the speed
+ * it reports), and after `REST_AFTER_FRAMES` of them the follower is put at rest outright.
+ */
+export const REST_AFTER_FRAMES = 30
+/** A button that moved less than this in a frame, and reports less than this speed, is quiet. */
+export const QUIET_MOVE_PX = 1
+export const QUIET_SPEED = 20
+
+/** The next quiet-frame count, given how far the button moved this frame and its reported speed. */
+export function nextQuiet(quiet: number, moved: number, speed: number): number {
+  return moved < QUIET_MOVE_PX && speed < QUIET_SPEED ? quiet + 1 : 0
+}
+
+/** Should a follower at rest (its button last seen at `restX,restY`) start moving again? */
+export function shouldWake(restX: number, restY: number, btn: { x: number; y: number }, speed: number): boolean {
+  if (Number.isNaN(restX)) return true
+  return Math.hypot(btn.x - restX, btn.y - restY) >= QUIET_MOVE_PX || speed >= QUIET_SPEED
+}
+
+/** Put a follower at rest on its current target: no velocity, no deformation, full opacity. */
+export function forceRest(st: DockFollowState): void {
+  Object.assign(st, { x: st.place.left, y: st.place.top, vx: 0, vy: 0, w: st.place.w, h: st.place.h,
+    swap: 0, o: 1, sc: 1, scv: 0, shear: 0, shearV: 0, sq: 0, sqV: 0, rot: 0, rotV: 0 })
+  for (const e of st.echoes) { e.x = st.x; e.y = st.y; e.vx = e.vy = 0 }
+}
+
+/**
  * Advance one step. `btn` is the button's LIVE rect (its spring position, not where it was
  * released), so the dock follows the whole motion, overshoot included.
  */

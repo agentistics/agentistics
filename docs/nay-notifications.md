@@ -49,6 +49,15 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
 
 ## Following the button, and leaving by itself
 
+- **The dock ALWAYS reaches rest, wherever the button stopped** (`REST_AFTER_FRAMES`). A spring can
+  miss its own settle threshold forever — a sub-pixel republish, a clamp nudging the target, a
+  reported speed that never hits zero — and a dock that never rests keeps `translate3d` +
+  `will-change`, which made it the containing block of its settings screen's popovers away from
+  the corner (v2.81.1). The loop counts frames in which the BUTTON did not move (by position) and
+  forces rest after 30; a republish that does not move the button does not wake it (`shouldWake`).
+- **A `Select`'s open list is portalled to `document.body`** (`pages/settings/primitives.tsx`), at
+  `PORTALLED_POPOVER_Z`, so no transformed ancestor can ever capture it again.
+
 - The card **follows the button** while it is dragged, with the dock's own physics
   (`nayDockFollow.ts` fed by `nayFabLive.ts`): same side rules, never over the button, clamped on
   screen, reduced motion rides along without lag. Frames are composited only (`translate` from a
