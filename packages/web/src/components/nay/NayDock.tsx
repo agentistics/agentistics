@@ -27,7 +27,7 @@ import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
-  placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, type DockState, type NayWindow, type Size,
+  placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, windowZIndex, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
@@ -400,6 +400,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   }, [followOn, size, dockStyle, fabPrefs.pos, writeFrame])
   const echoStyle = followOn && (dockStyle === 'trail' || dockStyle === 'comet')
 
+  // Above every detached window, or one overlapping the dock takes its clicks (see `dockZIndex`).
+  const dockZ = dockZIndex(dock.windows.filter(w => !w.minimized))
   const panel = dock.open && (
     <div
       ref={panelRef}
@@ -416,7 +418,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           }
         : {
             position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h, willChange: 'transform',
-            zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+            zIndex: dockZ, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
             boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
     >
@@ -527,7 +529,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
         <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
-          position: 'fixed', left: 0, top: 0, zIndex: 399, pointerEvents: 'none', opacity: 0, willChange: 'transform, opacity',
+          position: 'fixed', left: 0, top: 0, zIndex: dockZ - 1, pointerEvents: 'none', opacity: 0, willChange: 'transform, opacity',
           border: '1px solid var(--anthropic-orange)', borderRadius: 10,
         }} />
       ))}
@@ -821,7 +823,7 @@ function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onMinimize,
     <div
       onPointerDownCapture={onFocus}
       style={{
-        position: 'fixed', left: win.x, top: win.y, width: win.w, height: win.h, zIndex: 410 + win.z,
+        position: 'fixed', left: win.x, top: win.y, width: win.w, height: win.h, zIndex: windowZIndex(win),
         // THE SAME DISCREET FRAME the terminal's floating windows wear (`FloatingPanelLayer`) — a
         // hairline border, a 10px radius and their shadow. It was a loud orange outline, which read
         // as an alert rather than as a window (owner, 2026-09-29). Their drag bar is NOT borrowed:
