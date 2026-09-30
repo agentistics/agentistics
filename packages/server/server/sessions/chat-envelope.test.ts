@@ -35,7 +35,7 @@ describe('classifyUserText', () => {
     expect(classifyUserText('<command-name>/commit</command-name>'))
       .toEqual({ kind: 'person', text: '/commit' })
     expect(classifyUserText('<bash-input>ls -la</bash-input>'))
-      .toEqual({ kind: 'person', text: 'ls -la' })
+      .toEqual({ kind: 'person', text: '!ls -la' })
   })
 
   it('unwraps a slash command spread across several envelope tags', () => {
@@ -136,7 +136,7 @@ describe('classifyUserEntry — isMeta', () => {
 
   it('still unwraps the envelopes that ARE the person acting', () => {
     expect(classifyUserEntry({ text: '<bash-input>ls -la</bash-input>' }))
-      .toEqual({ kind: 'person', text: 'ls -la' })
+      .toEqual({ kind: 'person', text: '!ls -la' })
   })
 
   it('does not hide an ordinary message that merely starts with a bracket', () => {
