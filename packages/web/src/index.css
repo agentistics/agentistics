@@ -262,7 +262,12 @@ html.ag-viewport-locked > body {
    above the bar. */
 :root {
   --mobile-nav-inset: env(safe-area-inset-bottom, 0px);
-  --mobile-nav-h: calc(56px + var(--mobile-nav-inset));
+  /* The bar is a floating PILL (MobilePillBar.tsx): 64px tall, lifted 8px off the floor and the
+     home indicator. --mobile-nav-h stays the FULL occupied height, so everything already reading
+     it (the sheet, page bottom padding, the Nay button) clears the pill without knowing its shape. */
+  --mobile-nav-pill: 64px;
+  --mobile-nav-gap: 8px;
+  --mobile-nav-h: calc(var(--mobile-nav-pill) + var(--mobile-nav-gap) * 2 + var(--mobile-nav-inset));
   /* The STATUS-BAR inset, and the twin of the one above.
      Installed as a PWA the page owns the whole screen, so the topmost bar of every layout was
      drawn UNDERNEATH the clock, the signal bars and the battery — ~47px on an iPhone 14 Pro. The
@@ -277,8 +282,8 @@ html.ag-viewport-locked > body {
 }
 
 .mobile-bottom-nav {
-  height: var(--mobile-nav-h);
-  padding-bottom: var(--mobile-nav-inset);
+  height: var(--mobile-nav-pill);
+  bottom: calc(var(--mobile-nav-gap) + var(--mobile-nav-inset));
 }
 
 /* Prevent tap highlight flicker on mobile */

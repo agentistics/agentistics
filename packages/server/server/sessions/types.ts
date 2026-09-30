@@ -6,7 +6,7 @@
  * planner emits an argv, the backend hosts an argv, and that is the only thing they share.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import type { HarnessId, SendNowOutcome } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
 
 /**
@@ -484,10 +484,12 @@ export interface SessionBackend {
   rewindTo?(id: string, text: string, occurrence: number): Promise<RewindOutcome>
   /**
    * Submit the messages the harness is holding in its OWN queue now, instead of when the running
-   * turn ends — claude's `ctrl+x ctrl+s`. Every queued message goes, in order: that is the harness's
-   * rule and the one the product wants ("send now" on the second also sends the first).
+   * turn ends — claude's `ctrl+x ctrl+s`, then Esc if that did not drain the queue in time. Every
+   * queued message goes, in order: that is the harness's rule and the one the product wants ("send
+   * now" on the second also sends the first). The outcome says what really happened, read off the
+   * screen — see `@agentistics/core`'s `sendNow.ts`.
    */
-  sendQueuedNow?(id: string): Promise<boolean>
+  sendQueuedNow?(id: string): Promise<SendNowOutcome>
   /**
    * Press ONE named key — the backend's own vocabulary (`Enter`, `Escape`).
    *

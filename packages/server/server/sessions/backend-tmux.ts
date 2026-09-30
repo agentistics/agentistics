@@ -20,7 +20,10 @@ import { probeDependency } from './dependency-probe'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
 import { writeToPane } from './pane-writer'
-import { sanitizePasteText } from '@agentistics/core'
+import {
+  SEND_NOW_FIRM_MS, SEND_NOW_GENTLE_MS, SEND_NOW_POLL_MS, hasQueuedMessages, sanitizePasteText,
+  type SendNowOutcome,
+} from '@agentistics/core'
 import type {
   BackendInitialPrompt, BackendSession, BackendSpawn, SessionBackend, TerminalCapture,
 } from './types'
@@ -213,6 +216,41 @@ async function rewindDriver(id: string, text: string, occurrence: number): Promi
   }
   await tmux(sendKeysNamedArgs(id, 'Escape'))
   return 'not-found'
+}
+
+/**
+ * SEND NOW, and CHECK that it went — see `@agentistics/core`'s `sendNow.ts` for the measurement.
+ *
+ * It used to press `C-x C-s` and answer "sent". Claude's send-now is a REQUEST to a scheduler that
+ * waits whenever the turn has no safe point, so the answer was true of the keystroke and false of
+ * the message. Now: the keyboard is given to the input box first (a key pressed into the agents list
+ * lands nowhere), claude's own send-now is tried and the SCREEN is watched for the queue to drain,
+ * and only if it does not drain in `SEND_NOW_GENTLE_MS` is the turn interrupted with Esc — which,
+ * with a queue pending, claude answers by submitting the queue as the next turn.
+ */
+async function sendNowDriver(id: string): Promise<SendNowOutcome> {
+  if (!(await focusInput(id))) return 'no-focus'
+  if (!hasQueuedMessages(await captureFrame(id))) return 'nothing'
+  if ((await tmux(sendKeysNamedArgs(id, 'C-x'))).code !== 0) return 'failed'
+  await sleep(SUBMIT_POLL_MS)
+  if ((await tmux(sendKeysNamedArgs(id, 'C-s'))).code !== 0) return 'failed'
+  if (await queueDrains(id, SEND_NOW_GENTLE_MS)) return 'sent'
+  // The gentle step's scheduler may be holding the keyboard's focus somewhere else by now; Esc from
+  // the agents list only returns the focus, so it is brought back before the Esc that interrupts.
+  if (!(await focusInput(id))) return 'no-focus'
+  if (!hasQueuedMessages(await captureFrame(id))) return 'sent'
+  if ((await tmux(sendKeysNamedArgs(id, 'Escape'))).code !== 0) return 'failed'
+  return (await queueDrains(id, SEND_NOW_FIRM_MS)) ? 'interrupted' : 'stuck'
+}
+
+/** Has the queue left the screen within the budget? Returns as soon as it has. */
+async function queueDrains(id: string, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs
+  for (;;) {
+    await sleep(SEND_NOW_POLL_MS)
+    if (!hasQueuedMessages(await captureFrame(id))) return true
+    if (Date.now() >= deadline) return false
+  }
 }
 
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
@@ -484,14 +522,8 @@ export const tmuxBackend: SessionBackend = {
     return writeToPane(id, () => rewindDriver(id, text, occurrence))
   },
 
-  async sendQueuedNow(id: string) {
-    return writeToPane(id, async () => {
-      // claude's own "ctrl+x ctrl+s to send now" — measured: it cut the running reply and sent BOTH
-      // queued messages as one turn, in order.
-      if ((await tmux(sendKeysNamedArgs(id, 'C-x'))).code !== 0) return false
-      await sleep(SUBMIT_POLL_MS)
-      return (await tmux(sendKeysNamedArgs(id, 'C-s'))).code === 0
-    })
+  async sendQueuedNow(id: string): Promise<SendNowOutcome> {
+    return writeToPane(id, () => sendNowDriver(id))
   },
 
   async sendKey(id: string, key: string) {
