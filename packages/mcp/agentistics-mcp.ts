@@ -16,6 +16,7 @@ import {
   harnessParam,
   HARNESS_IDS,
 } from "./session-tokens.js";
+import { describeManifest, filterToolsByManifest, parseManifest, withheldReason, type AgentManifest } from "./manifest.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
@@ -99,6 +100,18 @@ async function putPrefs(patch: Record<string, unknown>) {
   });
   if (!res.ok) throw new Error(`PUT /api/preferences → HTTP ${res.status}`);
   return res.json();
+}
+
+/**
+ * What this machine lets the agent use (`GET /api/agent/manifest`, spec P1.3), or null when the
+ * server has no manifest (older) or cannot be reached — and null withholds nothing (manifest.ts).
+ */
+async function loadManifest(): Promise<AgentManifest | null> {
+  try {
+    return parseManifest(await apiGet("/api/agent/manifest"));
+  } catch {
+    return null;
+  }
 }
 
 function nextId(items: Array<{ i: string }>): string {
@@ -683,12 +696,34 @@ const TOOLS: Tool[] = [
       "List members of this team, central only: display name, online/presence status, latency, and last-seen timestamp. For usage/cost per member use agentistics_summary or agentistics_sessions against this central's own /api/data. Returns an explanatory message when this machine is not running as a central (solo/member mode).",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
+  {
+    name: "agentistics_capabilities",
+    description:
+      "What this agent may use on this machine, and why anything is withheld: whether it is a central, the exposure profile, which host capabilities and switches are on, and every tool this machine withholds with its reason. Call it when a tool you expected is missing, or before planning work that needs host tools. Read-only.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
 ];
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+// Only the tools that can work here are listed (spec P1.3): the manifest decides, and a tool it
+// withholds is explained by agentistics_capabilities instead of failing on first use.
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: filterToolsByManifest(TOOLS, await loadManifest()),
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
+
+  // A client may call a tool it listed before the machine changed (or never listed at all): refuse
+  // it here in words rather than letting the server answer with a bare 403 or 404.
+  if (name !== "agentistics_capabilities") {
+    const reason = withheldReason(await loadManifest(), name);
+    if (reason) {
+      return {
+        content: [{ type: "text", text: `Error: ${name} is not available on this machine — ${reason}. Call agentistics_capabilities for the full picture.` }],
+        isError: true,
+      };
+    }
+  }
 
   try {
     switch (name) {
@@ -1416,6 +1451,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           lastSeenAt: m.lastSeenAt ?? null,
         }));
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+      }
+
+      case "agentistics_capabilities": {
+        const manifest = parseManifest(await apiGet("/api/agent/manifest").catch(() => null));
+        return { content: [{ type: "text", text: describeManifest(manifest) }] };
       }
 
       default:

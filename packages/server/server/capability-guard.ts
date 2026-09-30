@@ -123,6 +123,23 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/config', 'localShell'],
 ]
 
+/**
+ * Routes REVIEWED and found to use no host power, registered so the review is on record rather
+ * than implied by absence. Each must answer on every profile, a central included, so none may carry
+ * a capability — `routeCapability` returns null for them and `capability-guard.test.ts` pins both
+ * halves. A route belongs here only if it reads nothing a profile could switch off.
+ *
+ *  - `/api/agent/manifest` (MCP spec P1.3): reports what this machine's agent may use. It reads
+ *    `CAPS`, the profile and the preference gates, and touches nothing on the host; it must answer on
+ *    a central, where every host capability is off, or the agent cannot be told why.
+ */
+const HOST_FREE: ReadonlySet<string> = new Set<string>(['/api/agent/manifest'])
+
+/** The reviewed host-free routes, read-only. */
+export function hostFreeRoutes(): readonly string[] {
+  return Object.freeze([...HOST_FREE])
+}
+
 /** One registration, as `registeredRoutes()` reports it. */
 export interface RegisteredRoute {
   readonly path: string

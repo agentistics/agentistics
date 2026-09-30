@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
+import { buildAgentManifest } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute } from './upgrade-web'
@@ -3348,6 +3349,31 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const headers = new Headers(res.headers)
       for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
       return new Response(res.body, { status: res.status, headers })
+    }
+
+    // GET /api/agent/manifest — what this machine's agent may use (MCP spec P1.3). Read-only, and
+    // registered as host-free in capability-guard.ts so it answers on a central too; authenticated
+    // there by the gate above like every other /api route. The rows are the pure
+    // `buildAgentManifest` over the P1.1 policy table — no rule is decided here.
+    if (url.pathname === '/api/agent/manifest' && req.method === 'GET') {
+      const prefs = await readPreferences()
+      const manifest = buildAgentManifest({
+        profile: PROFILE,
+        central: TEAM_CENTRAL,
+        capabilities: {
+          localShell: CAPS.localShell,
+          localChat: CAPS.localChat,
+          localTranscripts: CAPS.localTranscripts,
+          localProcesses: CAPS.localProcesses,
+          mcpAdmin: CAPS.mcpAdmin,
+        },
+        gates: {
+          chat: chatAllowed(CAPS.localChat, prefs.chatEnabled),
+          shell: shellAllowedNow(CAPS.localShell, prefs.shellEnabled, getShellOverride()),
+          editor: editorAllowed(CAPS.localShell, prefs.editorEnabled),
+        },
+      })
+      return new Response(JSON.stringify(manifest), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
     }
 
     if (url.pathname === '/api/iam/login/mfa' && req.method === 'POST') {

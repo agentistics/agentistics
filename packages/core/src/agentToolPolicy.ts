@@ -50,7 +50,7 @@ export interface AgentToolPolicy {
   allowance: 'prompt' | 'spawn' | null
 }
 
-/** Every tool the MCP exposes today — 38 on `origin/dev` (the spec's §1 said 44; P0.3 re-counted). */
+/** Every tool the MCP exposes — 38 on `origin/dev` at P1.1 (the spec's §1 said 44; P0.3 re-counted), plus P1.3's `agentistics_capabilities`. */
 export const AGENT_TOOL_NAMES = [
   // ALM (16)
   'agentistics_tasks',
@@ -97,6 +97,7 @@ export const AGENT_TOOL_NAMES = [
   // Team (2)
   'agentistics_team_status',
   'agentistics_team_members',
+  'agentistics_capabilities',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -174,6 +175,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Team
   agentistics_team_status: { ...PREFS, risk: 'R', routes: ['GET /api/preferences'], reason: 'reads mode and connection endpoints; returns no token' },
   agentistics_team_members: { ...DATA, central: 'only', risk: 'R', routes: ['GET /api/team/members'], reason: 'reads the member list; central only' },
+  agentistics_capabilities: { ...DATA, risk: 'R', routes: ['GET /api/agent/manifest'], reason: 'reads what this machine lets the agent use, and why the rest is withheld' },
 }
 
 /**

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { routeCapability, capabilityDenied, registeredRoutes } from './capability-guard'
+import { routeCapability, capabilityDenied, registeredRoutes, hostFreeRoutes } from './capability-guard'
 import { capabilitiesFor, resolveProfile, type ExposureEnv } from './exposure'
 
 const publicCaps = capabilitiesFor('public', {
@@ -186,6 +186,17 @@ test('/api/live-sessions is deliberately NOT blanket-guarded, and the reason is 
   expect(src.match(/import\('\.\/live-sessions'\)/g)?.length).toBe(1)
   const helper = src.slice(src.indexOf('async function readLocalLiveSnapshot'))
   expect(helper.indexOf('CAPS.localProcesses')).toBeLessThan(helper.indexOf("import('./live-sessions')"))
+})
+
+test('the agent manifest is REGISTERED as host-free, and so answers on a central', () => {
+  // MCP spec P1.3: an agent on a central must be told what is withheld there, and every host
+  // capability is off on a central — so the route may carry no capability. It is registered in the
+  // host-free table rather than left unregistered, so the review that made it safe is on record.
+  expect(hostFreeRoutes()).toContain('/api/agent/manifest')
+  for (const path of hostFreeRoutes()) expect(routeCapability(path), path).toBeNull()
+  // …and it is not public: the auth gate covers it like any other /api route.
+  const routes = readFileSync(new URL('./index-routes.ts', import.meta.url), 'utf-8')
+  expect(routes).not.toContain("'/api/agent/manifest'")
 })
 
 test('THE UTILITY SHELL rides localShell, by prefix', () => {
