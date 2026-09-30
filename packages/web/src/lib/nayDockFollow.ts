@@ -17,6 +17,11 @@
  *    `renderDock` keeps a berth that grows with the style's shear, tilt or squash, and a clamp that
  *    would still put it on the button fades it instead.
  *  - Reduced motion: attached to the button, no lag, no effect.
+ *  - `NO_FADE` (the notification card): its opacity NEVER moves. The owner saw the card dip and
+ *    come back while dragging the button along an edge — the side-change fade and the "fade
+ *    rather than cover the button" rule, each firing near the edges — and wants it simply to
+ *    follow. A side change is a retarget the spring slides to, and it is decided with a wider
+ *    hysteresis (`CARD_SIDE_HYSTERESIS`), so it happens once per crossing, never per frame.
  *
  * The state is a plain record the caller keeps and `stepFollow` advances in place — the loop runs
  * per frame and allocating a new record every frame is garbage for nothing. No DOM here.
@@ -36,6 +41,13 @@ export const DOCK_FOLLOW: Record<NayFabStyle, { k: number; c: number }> = {
 /** How long the fade toward the old corner takes, and the fade in on the new side. */
 export const SWAP_OUT_S = 0.11
 export const SWAP_IN_S = 0.16
+
+/** How a follower treats its own opacity. The dock keeps the fades; the card has none. */
+export interface FollowOpts { fade: boolean; hysteresis?: number }
+export const WITH_FADE: FollowOpts = { fade: true }
+/** Wider than the dock's: a card hopping sides near the midline is the flicker this removes. */
+export const CARD_SIDE_HYSTERESIS = 40
+export const NO_FADE: FollowOpts = { fade: false, hysteresis: CARD_SIDE_HYSTERESIS }
 
 export interface Echo { x: number; y: number; vx: number; vy: number }
 
@@ -82,8 +94,8 @@ export function followSettled(st: DockFollowState): boolean {
  * Advance one step. `btn` is the button's LIVE rect (its spring position, not where it was
  * released), so the dock follows the whole motion, overshoot included.
  */
-export function stepFollow(st: DockFollowState, btn: AnchorRect, want: Size, vp: Viewport, style: NayFabStyle, reduced: boolean, dt: number): void {
-  const sides = dockSides(btn, vp, st.sides)
+export function stepFollow(st: DockFollowState, btn: AnchorRect, want: Size, vp: Viewport, style: NayFabStyle, reduced: boolean, dt: number, opts: FollowOpts = WITH_FADE): void {
+  const sides = dockSides(btn, vp, st.sides, opts.hysteresis)
   const next = placeDock(btn, want, vp, sides)
   const key = placementKey(next, btn)
 
@@ -94,7 +106,9 @@ export function stepFollow(st: DockFollowState, btn: AnchorRect, want: Size, vp:
     return
   }
 
-  if (key !== st.key && st.swap === 0) st.swap = 1
+  // No fade: the new side is simply the new target and the spring carries the card there.
+  if (!opts.fade) { st.swap = 0; st.o = 1 }
+  else if (key !== st.key && st.swap === 0) st.swap = 1
   if (st.swap === 1) {
     st.o -= dt / SWAP_OUT_S
     st.sc -= dt * 0.6
@@ -165,7 +179,7 @@ export interface DockFrame {
  * Where to draw the dock this frame, with its style's deformation and the berth that deformation
  * needs. `buttonSpeed` widens the berth while the button itself is stretched.
  */
-export function renderDock(st: DockFollowState, btn: AnchorRect, vp: Viewport, style: NayFabStyle, reduced: boolean, buttonSpeed: number): DockFrame {
+export function renderDock(st: DockFollowState, btn: AnchorRect, vp: Viewport, style: NayFabStyle, reduced: boolean, buttonSpeed: number, opts: FollowOpts = WITH_FADE): DockFrame {
   const vertical = st.key[0] === 'v'
   let extra = '', reach = 0
   if (!reduced) {
@@ -185,7 +199,7 @@ export function renderDock(st: DockFollowState, btn: AnchorRect, vp: Viewport, s
   const edge = reduced ? 6 : 6 + reach
   const g = guard({ x: st.x, y: st.y, w: st.w, h: st.h }, st.place.grow, vertical, btn, vp, pad, edge)
   const over = g.x < btn.x + btn.w + pad && btn.x - pad < g.x + st.w && g.y < btn.y + btn.h + pad && btn.y - pad < g.y + st.h
-  const opacity = over && !reduced ? Math.min(st.o, 0.15) : st.o
+  const opacity = !opts.fade ? 1 : over && !reduced ? Math.min(st.o, 0.15) : st.o
   const origin = vertical
     ? `${st.place.grow.x === 'left' ? 'right' : 'left'} ${st.place.grow.y === 'up' ? 'bottom' : 'top'}`
     : `${st.place.grow.x === 'left' ? 'right' : 'left'} ${st.place.grow.y === 'up' ? 'bottom' : 'top'}`

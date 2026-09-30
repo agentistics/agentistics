@@ -37,7 +37,7 @@ import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import {
   cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
-import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import type { AnchorRect, Size } from '../../lib/nayDock'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
@@ -257,8 +257,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       const vp = viewport()
       if (!f.st) { f.st = initFollow(b.rect, want, vp); f.landed = b.landed }
       f.want = want
-      stepFollow(f.st, b.rect, want, vp, fabStyle, true, 0)
-      f.frame = renderDock(f.st, b.rect, vp, fabStyle, reduced, 0)
+      stepFollow(f.st, b.rect, want, vp, fabStyle, true, 0, NO_FADE)
+      f.frame = renderDock(f.st, b.rect, vp, fabStyle, reduced, 0, NO_FADE)
       written.current = { w: -1, h: -1, o: -1 }
       setBase(f.frame.left, f.frame.top)
       writeFrame(f.frame, f.st, b.rect)
@@ -309,8 +309,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       if (!st || !b || !f.want) { f.raf = 0; return }
       const dt = Math.min(0.05, (now - f.last) / 1000); f.last = now
       if (b.landed !== f.landed) { f.landed = b.landed; landImpulse(st, fabStyle, reduced, b.landSpeed) }
-      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, f.want, vp, fabStyle, reduced, dt / 4)
-      f.frame = renderDock(st, b.rect, vp, fabStyle, reduced, b.speed)
+      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, f.want, vp, fabStyle, reduced, dt / 4, NO_FADE)
+      f.frame = renderDock(st, b.rect, vp, fabStyle, reduced, b.speed, NO_FADE)
       writeFrame(f.frame, st, b.rect)
       if (followSettled(st) && b.speed < 1) {
         // At rest the card is RE-ANCHORED where it stopped and carries no translate or transform:
