@@ -35,7 +35,7 @@ import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
-import { DockSettings } from './DockSettings'
+import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
@@ -117,6 +117,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   // The button's place and its three motion choices live in a shared store: Settings → Chat edits
   // them too, and two copies of one setting disagree the moment either changes.
   const fabPrefs = useNayFabPrefs()
+  /** The chat window's settings screen replaces the conversation while it is open (owner, 2026-09-30). */
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  // Opening a session (a notification's Reply, a row) or closing the window leaves the settings screen.
+  useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
   const setFabPrefs = setNayFabPrefs
   const dockStyle = dockStyleOf(fabPrefs)
   useEffect(() => { writeStored(TAB_KEY, tab) }, [tab])
@@ -456,17 +461,20 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             {tabButton('sessions', pt ? 'Sessões' : 'Sessions')}
           </div>
         </>)}
-        <DockSettings
-          pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
-          onLeave={() => setDock(d => ({ ...d, open: false }))}
-        />
+        <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
         <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
           <X size={15} />
         </IconButton>
       </header>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {panelSession
+        {settingsOpen ? (
+          <DockSettingsScreen
+            pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
+            onLeave={() => setDock(d => ({ ...d, open: false }))}
+            onBack={closeSettings}
+          />
+        ) : panelSession
           ? renderSession(panelSession, next => setDock(d => ({ ...d, panelSession: next })))
           : tab === 'nay'
             ? (

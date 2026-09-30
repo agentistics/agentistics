@@ -157,6 +157,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const [notice, setNotice] = useState<string | null>(null)
   const [leaving, setLeaving] = useState(false)
   const [, tick] = useState(0)
+  /** The pointer is over the card or it holds the keyboard: somebody is using it, so it stays. */
+  const [engaged, setEngaged] = useState(false)
   const tailRef = useRef<HTMLSpanElement>(null)
   /** Where React-free placement put the card; the follow loop only ever moves it by `translate` from here. */
   const cardBase = useRef({ left: 0, top: 0 })
@@ -185,6 +187,16 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     const t = window.setInterval(() => tick(n => n + 1), 30_000)
     return () => window.clearInterval(t)
   }, [alert])
+
+  // IT LEAVES BY ITSELF after the chosen time (5 s by default), unless somebody is using it.
+  useEffect(() => {
+    const sec = settings.autoDismissSec
+    if (!alert || drawer || engaged || !(sec > 0)) return
+    const key = alert.key
+    const t = window.setTimeout(() => void close(() => dismissAlert(key)), sec * 1000)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alert?.key, drawer, engaged, settings.autoDismissSec])
 
   // A new card resets its own controls.
   useEffect(() => { setDrawer(null); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false) }, [alert?.key])
@@ -398,6 +410,10 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       role="dialog"
       aria-label={pt ? `Notificação: ${alert.name}` : `Notification: ${alert.name}`}
       aria-live="polite"
+      onPointerEnter={() => setEngaged(true)}
+      onPointerLeave={() => setEngaged(false)}
+      onFocus={() => setEngaged(true)}
+      onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setEngaged(false) }}
       style={{
         // left / top / transform-origin / max-height are written by the placement and the follow
         // loop, never by React: a re-render mid-drag must not snap the card back for a frame.

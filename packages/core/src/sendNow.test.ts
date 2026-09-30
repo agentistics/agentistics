@@ -42,6 +42,28 @@ describe('hasQueuedMessages', () => {
   test('sees the hint above the spinner even with text typed in the box', () => {
     expect(hasQueuedMessages(QUEUED_ABOVE_SPINNER)).toBe(true)
   })
+  test('sees the queue on a NAMED session, whose top rule carries its name (owner report, 2026-09-30)', () => {
+    // The screen that answered "nothing queued" over two queued messages: `/rename` draws the
+    // session's name into the top rule, and a tip plus the usage line sit between the hint and it.
+    const labeled = '─'.repeat(60) + ' Líder — Runtime/Harness (sessão 3) ─'
+    const frame = [
+      '> /home/mithrandir/.agentistics/attachments/27c457e0-image.png',
+      '  posso encerrar aquela sessao e continuar com vc?',
+      '  alem disso:',
+      '  ctrl+x ctrl+s to send now',
+      '· Prestidigitating… (1m 24s · ↓ 3.5k tokens · thinking)',
+      '  └ Tip: Run /ultrareview for a cloud-based multi-agent review that finds and verifies bugs in your branch — 3 free',
+      '    reviews left',
+      "          You've used 93% of your session limit · resets 3pm (America/Sao_Paulo) · /upgrade to keep using Claude Code",
+      labeled,
+      '❯ Press up to edit queued messages',
+      RULE,
+      '  ⏵⏵ auto mode on · esc to interrupt',
+    ]
+    expect(hasQueuedMessages(frame)).toBe(true)
+    // …and once drained, the same named rule still reads as an input box with nothing queued.
+    expect(hasQueuedMessages([labeled, '❯ ', RULE, '  footer'])).toBe(false)
+  })
   test('a drained queue reads as nothing queued', () => {
     expect(hasQueuedMessages(DRAINED)).toBe(false)
   })

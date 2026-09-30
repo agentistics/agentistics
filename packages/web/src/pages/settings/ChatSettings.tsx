@@ -26,7 +26,7 @@ import { normalizeChoice } from '../../lib/nayLaunch'
 import { NayLaunchFields } from '../../components/nay/NayLaunchFields'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
-import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
+import { AUTO_DISMISS_OPTIONS_SEC, NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { pushDemoAlert } from '../../lib/nayNotifyStore'
 import { NayMotionSettings } from '../../components/nay/NayMotionSettings'
@@ -223,7 +223,11 @@ export default function ChatSettings() {
  */
 function NayAnimationSetting({ pt }: { pt: boolean }) {
   const [value, setValue] = useState<NayAnimation>(() => getNotificationSettings().nayAnimation)
-  useEffect(() => subscribeNotificationSettings(() => setValue(getNotificationSettings().nayAnimation)), [])
+  const [autoDismiss, setAutoDismiss] = useState(() => getNotificationSettings().autoDismissSec)
+  useEffect(() => subscribeNotificationSettings(() => {
+    setValue(getNotificationSettings().nayAnimation)
+    setAutoDismiss(getNotificationSettings().autoDismissSec)
+  }), [])
   const lang = pt ? 'pt' : 'en'
   return (
     <>
@@ -253,6 +257,18 @@ function NayAnimationSetting({ pt }: { pt: boolean }) {
           }}>
           {pt ? 'Testar' : 'Test'}
         </button>
+        </div>
+      </PrefRow>
+
+      <PrefRow
+        label={pt ? 'A notificação some sozinha após' : 'The notification goes away after'}
+        sub={pt ? 'Fica enquanto você usa o cartão, e sempre fica registrada no sino.' : 'It stays while you use the card, and is always kept in the bell.'}
+      >
+        <div style={{ minWidth: 140 }}>
+          <Select value={String(autoDismiss)} onChange={v => {
+            setAutoDismiss(Number(v))
+            saveNotificationSettings({ ...getNotificationSettings(), autoDismissSec: Number(v) })
+          }} options={AUTO_DISMISS_OPTIONS_SEC.map(n => ({ value: String(n), label: n === 0 ? (pt ? 'Nunca' : 'Never') : `${n} s` }))} />
         </div>
       </PrefRow>
 

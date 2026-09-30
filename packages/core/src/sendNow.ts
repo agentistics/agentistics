@@ -49,8 +49,14 @@ export const SEND_NOW_POLL_MS = 150
  */
 export type SendNowOutcome = 'sent' | 'interrupted' | 'nothing' | 'stuck' | 'no-focus' | 'failed'
 
-/** claude's own horizontal rule — the input box sits between the last two. */
-const RULE = /^\s*─{3,}.*─{3,}\s*$/
+/**
+ * claude's own horizontal rule — the input box sits between the last two. It STARTS with a run of
+ * `─` and may carry a LABEL after it: a session renamed with `/rename` draws its name into the top
+ * rule (`──── Líder — Runtime/Harness (sessão 3) ─`), measured on the owner's screen 2026-09-30.
+ * Requiring a run of `─` at the END too missed that rule, so no queue was ever found on a named
+ * session and "send now" answered "nothing queued" over a queued message.
+ */
+const RULE = /^\s*─{3,}/
 /** The hint claude draws under the queued messages (`ctrl+enter` on terminals that send it). */
 const SEND_NOW_HINT = /^\s*(?:ctrl\+x ctrl\+s|ctrl\+enter) to send now\s*$/
 /** The empty input box's placeholder while something is queued. */
