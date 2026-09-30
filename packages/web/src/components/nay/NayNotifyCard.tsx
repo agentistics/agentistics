@@ -5,9 +5,9 @@
  * button — "ei, olha essa sessão" — and carries what a person needs to decide without leaving the
  * page: the session's name, its assistant and model, how long it has been waiting and when its last
  * message came. Its actions:
- *  - REPLY inline, through the fleet's own `prompt` verb (refused in words by the server while a
- *    dialog is open, like everywhere else);
- *  - GO to the session;
+ *  - REPLY — opens the session in the Nay dock's floating window, the full `SessionChat` composer
+ *    (attachments, mic, auto mode, history, send-now), never a second, smaller text field;
+ *  - GO to the session — its full page;
  *  - APPROVE — only on an approval card, and never blindly: it lists the options the server READ OFF
  *    the session's screen (`dialogOptions`) and sends the one tapped, by number. When the options
  *    cannot be read, it says so and sends nothing (`approveBlind`/`chooseBlind`/`dialogBlind`);
@@ -18,6 +18,12 @@
  *
  * One card at a time, the newest; a count says how many more are waiting behind it. The rules are
  * `nayNotify.ts`, the memory `nayNotifyStore.ts`, the motion `nayNotifyAnim.ts`.
+ *
+ * THE CARD FOLLOWS THE BUTTON the way the open dock does (owner, 2026-09-30): the same pure physics
+ * (`nayDockFollow.ts`) fed the same live position (`nayFabLive.ts`), so it takes the button's drag
+ * style, changes sides with the same hysteresis, never covers the button, stays on screen, and
+ * rides along without lag under reduced motion. With no button on screen it stands still where
+ * `cardPlacement` put it.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
@@ -29,14 +35,18 @@ import type { FleetState } from '../../lib/fleet'
 import { versionedAsset } from '../../lib/brand'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import {
-  cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type NayAlert,
+  cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
+import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import type { AnchorRect, Size } from '../../lib/nayDock'
+import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
+import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
 import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/nayNotifyStore'
 import { playEnter, playExit, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
 import { NayEndSession } from './NayEndSession'
 
-type Drawer = null | 'reply' | 'approve' | 'snooze' | 'snooze-custom' | 'end'
+type Drawer = null | 'approve' | 'snooze' | 'snooze-custom' | 'end'
 
 export interface NayNotifyCardProps {
   lang: 'pt' | 'en'
@@ -44,6 +54,43 @@ export interface NayNotifyCardProps {
   rows: readonly ControlSession[]
   finishedTasks: readonly string[]
   act: FleetState['act']
+  /** The button's drag style — the card follows it with the matching motion, like the dock. */
+  fabStyle: NayFabStyle
+  /** Open this session in the Nay dock's floating window (what "Responder" does). */
+  onReply: (sessionId: string) => void
+}
+
+interface ButtonNow { rect: AnchorRect; speed: number; landed: number; landSpeed: number }
+
+/** Where the button is RIGHT NOW: its live, per-frame position while it moves; null when not on screen. */
+function buttonNow(): ButtonNow | null {
+  const r = fabEl()?.getBoundingClientRect()
+  if (!r || r.width === 0) return null
+  const l = getFabLive()
+  return l
+    ? { rect: { x: l.x, y: l.y, w: FAB_SIZE, h: FAB_SIZE }, speed: l.speed, landed: l.landed, landSpeed: l.landSpeed }
+    : { rect: { x: r.left, y: r.top, w: r.width, h: r.height }, speed: 0, landed: 0, landSpeed: 0 }
+}
+
+/** The button's live position alone, for the frame loop: no DOM read, so no layout forced per frame. */
+function liveButton(): ButtonNow | null {
+  const l = getFabLive()
+  return l ? { rect: { x: l.x, y: l.y, w: FAB_SIZE, h: FAB_SIZE }, speed: l.speed, landed: l.landed, landSpeed: l.landSpeed } : null
+}
+
+const viewport = () => ({ w: window.innerWidth, h: window.innerHeight })
+
+/** The follow engine's frame, read as the placement the entrances and the tail are drawn from. */
+function frameToPlacement(fr: DockFrame, st: DockFollowState, btn: AnchorRect): CardPlacement & { tail: boolean } {
+  const originX = btn.x + btn.w / 2 - fr.left
+  const originY = btn.y + btn.h / 2 - fr.top
+  const vertical = st.key[0] === 'v'
+  return {
+    left: fr.left, top: fr.top, originX, originY,
+    tailSide: st.place.grow.y === 'up' ? 'bottom' : 'top',
+    tailX: Math.max(18, Math.min(fr.w - 34, originX - 8)),
+    tail: vertical,
+  }
 }
 
 /** The live notification settings — a fresh object per read, so held in state and re-read on change. */
@@ -93,7 +140,7 @@ function lastSaid(row: ControlSession | undefined, kind: NayAlert['kind']): stri
   return turn ? turn.text.trim().slice(0, 240) : null
 }
 
-export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayNotifyCardProps) {
+export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply }: NayNotifyCardProps) {
   const pt = lang === 'pt'
   const alerts = useNayAlerts()
   const alert = alerts.length > 0 ? alerts[alerts.length - 1]! : null
@@ -104,14 +151,19 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
   const cardRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef<(() => void) | null>(null)
   const [drawer, setDrawer] = useState<Drawer>(null)
-  const [text, setText] = useState('')
   const [snoozeText, setSnoozeText] = useState('')
   const [snoozeErr, setSnoozeErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [leaving, setLeaving] = useState(false)
   const [, tick] = useState(0)
-  const [pos, setPos] = useState<{ left: number; top: number; origin: string; tailSide: 'top' | 'bottom'; tailX: number } | null>(null)
+  const tailRef = useRef<HTMLSpanElement>(null)
+  /** Where React-free placement put the card; the follow loop only ever moves it by `translate` from here. */
+  const cardBase = useRef({ left: 0, top: 0 })
+  const written = useRef({ w: -1, h: -1, o: -1 })
+  const follow = useRef<{ st: DockFollowState | null; want: Size | null; raf: number; last: number; landed: number; frame: DockFrame | null }>(
+    { st: null, want: null, raf: 0, last: 0, landed: 0, frame: null })
+  const kickRef = useRef<() => void>(() => {})
 
   const row = alert ? rows.find(r => r.id === alert.sessionId) : undefined
   const reduced = prefersReducedMotion()
@@ -135,44 +187,130 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
   }, [alert])
 
   // A new card resets its own controls.
-  useEffect(() => { setDrawer(null); setText(''); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false) }, [alert?.key])
+  useEffect(() => { setDrawer(null); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false) }, [alert?.key])
 
-  const place = () => {
+  /** The balloon's tail, drawn by ref: it moves every frame and must not re-render React for it. */
+  const writeTail = (t: { side: 'top' | 'bottom'; x: number } | null) => {
+    const el = tailRef.current
+    if (!el) return
+    if (!t) { el.style.display = 'none'; return }
+    el.style.display = 'block'
+    el.style.left = `${Math.round(t.x)}px`
+    if (t.side === 'bottom') { el.style.top = ''; el.style.bottom = '-9px'; el.style.borderTop = 'none'; el.style.borderLeft = 'none'; el.style.borderBottom = ''; el.style.borderRight = '' }
+    else { el.style.bottom = ''; el.style.top = '-9px'; el.style.borderBottom = 'none'; el.style.borderRight = 'none'; el.style.borderTop = ''; el.style.borderLeft = '' }
+  }
+
+  /** Anchor the card at a resting place: the one layout write, made when a card opens or is re-placed. */
+  const setBase = (left: number, top: number) => {
+    const card = cardRef.current
+    if (!card) return
+    cardBase.current = { left, top }
+    card.style.left = `${left}px`; card.style.top = `${top}px`
+    card.style.translate = ''
+  }
+
+  /**
+   * Put the card where the follow engine says. A COMPOSITED write only: `translate` from the
+   * resting place (the entrances animate `transform`, which `translate` composes with instead of
+   * fighting), width / max-height / opacity only when they change, and no layout read at all.
+   */
+  const writeFrame = (fr: DockFrame, st: DockFollowState, btn: AnchorRect) => {
+    const card = cardRef.current
+    if (!card) return
+    const p = frameToPlacement(fr, st, btn), b = cardBase.current, w = written.current
+    const dx = fr.left - b.left, dy = fr.top - b.top
+    card.style.translate = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? '' : `${dx}px ${dy}px`
+    card.style.transformOrigin = `${p.originX}px ${p.originY}px`
+    card.style.transform = restingTransform(fr.transform)
+    if (fr.w !== w.w) { card.style.width = `${fr.w}px`; w.w = fr.w }
+    if (fr.h !== w.h) { card.style.maxHeight = `${fr.h}px`; w.h = fr.h }
+    if (fr.opacity !== w.o) { card.style.opacity = String(fr.opacity); w.o = fr.opacity }
+    writeTail(p.tail ? { side: p.tailSide, x: p.tailX } : null)
+  }
+
+  /** Place the card now: on the follow engine when the button is on screen, statically otherwise. */
+  const placeNow = (): CardPlacement | null => {
     const card = cardRef.current
     if (!card) return null
-    const fab = fabEl()
-    const r = fab?.getBoundingClientRect()
+    const f = follow.current
+    const want: Size = { w: card.offsetWidth, h: card.scrollHeight }
+    const b = buttonNow()
+    const reduced = prefersReducedMotion()
+    if (b) {
+      const vp = viewport()
+      if (!f.st) { f.st = initFollow(b.rect, want, vp); f.landed = b.landed }
+      f.want = want
+      stepFollow(f.st, b.rect, want, vp, fabStyle, true, 0)
+      f.frame = renderDock(f.st, b.rect, vp, fabStyle, reduced, 0)
+      written.current = { w: -1, h: -1, o: -1 }
+      setBase(f.frame.left, f.frame.top)
+      writeFrame(f.frame, f.st, b.rect)
+      return frameToPlacement(f.frame, f.st, b.rect)
+    }
+    f.st = null
     const p = cardPlacement({
-      fab: r && r.width > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null,
-      vpW: window.innerWidth, vpH: window.innerHeight,
+      fab: null, vpW: window.innerWidth, vpH: window.innerHeight,
       cardW: card.offsetWidth, cardH: card.offsetHeight, bottomInset: bottomInset(isMobile),
     })
-    setPos({ left: p.left, top: p.top, origin: `${p.originX}px ${p.originY}px`, tailSide: p.tailSide, tailX: p.tailX })
+    setBase(p.left, p.top)
+    card.style.transformOrigin = `${p.originX}px ${p.originY}px`
+    writeTail({ side: p.tailSide, x: p.tailX })
     return p
   }
 
   // Placed and animated once per card, before paint.
   useLayoutEffect(() => {
     if (!alert) return
-    const p = place()
+    follow.current.st = null
+    const p = placeNow()
     if (!p || !cardRef.current) return
     cancelRef.current?.()
-    const card = cardRef.current
-    // The final position has to be on the element before the entrance measures it.
-    card.style.left = `${p.left}px`; card.style.top = `${p.top}px`
-    cancelRef.current = playEnter(settings.nayAnimation, card, fabEl(), p, prefersReducedMotion())
+    cancelRef.current = playEnter(settings.nayAnimation, cardRef.current, fabEl(), p, prefersReducedMotion())
     return () => { cancelRef.current?.(); cancelRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alert?.key])
 
-  // A drawer opening changes the card's height; keep it clear of the button and the screen edges.
-  useLayoutEffect(() => { if (alert) place() }, [drawer, notice, busy]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A drawer opening changes the card's height: the follow target grows with it.
+  useLayoutEffect(() => {
+    if (!alert) return
+    const card = cardRef.current, f = follow.current
+    if (card && f.st) { f.want = { w: card.offsetWidth, h: card.scrollHeight }; kickRef.current() } else placeNow()
+  }, [drawer, notice, busy]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // THE FOLLOW LOOP — the dock's own, run only while something moves.
   useEffect(() => {
     if (!alert) return
-    const on = () => place()
-    window.addEventListener('resize', on)
-    return () => window.removeEventListener('resize', on)
-  }, [alert]) // eslint-disable-line react-hooks/exhaustive-deps
+    const f = follow.current
+    const reduced = prefersReducedMotion()
+    // Measured once, and again on a resize — the loop itself reads no layout.
+    let vp = viewport()
+    const frame = (now: number) => {
+      const st = f.st, b = liveButton()
+      if (!st || !b || !f.want) { f.raf = 0; return }
+      const dt = Math.min(0.05, (now - f.last) / 1000); f.last = now
+      if (b.landed !== f.landed) { f.landed = b.landed; landImpulse(st, fabStyle, reduced, b.landSpeed) }
+      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, f.want, vp, fabStyle, reduced, dt / 4)
+      f.frame = renderDock(st, b.rect, vp, fabStyle, reduced, b.speed)
+      writeFrame(f.frame, st, b.rect)
+      if (followSettled(st) && b.speed < 1) {
+        // At rest the card is RE-ANCHORED where it stopped and carries no translate or transform:
+        // either would make it the containing block of the folder `Select`'s fixed popover.
+        setBase(f.frame.left, f.frame.top)
+        writeFrame(f.frame, st, b.rect)
+        f.raf = 0
+      } else f.raf = requestAnimationFrame(frame)
+    }
+    const kick = () => {
+      if (!f.st) { placeNow(); return }
+      if (!f.raf) { f.last = performance.now(); f.raf = requestAnimationFrame(frame) }
+    }
+    kickRef.current = kick
+    const off = subscribeFabLive(kick)
+    const onResize = () => { vp = viewport(); kick() }
+    window.addEventListener('resize', onResize)
+    return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alert?.key, fabStyle])
 
   if (!alert) return null
 
@@ -205,16 +343,6 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
   }
 
   const finish = (message: string) => void close(() => { dismissAlert(alert.key); if (message) setNotice(null) })
-
-  const sendReply = async () => {
-    const t = text.trim()
-    if (!t) return
-    setBusy(true)
-    const out = await act({ id: alert.sessionId, action: 'prompt', text: t })
-    setBusy(false)
-    if (out.ok) finish('')
-    else setNotice(out.message)
-  }
 
   const pick = async (n: number) => {
     setBusy(true)
@@ -258,11 +386,11 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
     )
   }
 
-  const tailStyle: CSSProperties | undefined = pos && settings.nayAnimation === 'balloon' && !reduced ? {
-    position: 'absolute', left: pos.tailX, width: 16, height: 16, background: 'var(--bg-card, var(--bg-surface))',
+  const showTail = settings.nayAnimation === 'balloon' && !reduced
+  const tailStyle: CSSProperties = {
+    position: 'absolute', display: 'none', width: 16, height: 16, background: 'var(--bg-card, var(--bg-surface))',
     transform: 'rotate(45deg)', border: '1px solid var(--border)',
-    ...(pos.tailSide === 'bottom' ? { bottom: -9, borderTop: 'none', borderLeft: 'none' } : { top: -9, borderBottom: 'none', borderRight: 'none' }),
-  } : undefined
+  }
 
   return (
     <div
@@ -271,14 +399,15 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
       aria-label={pt ? `Notificação: ${alert.name}` : `Notification: ${alert.name}`}
       aria-live="polite"
       style={{
-        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)',
-        left: pos?.left ?? -9999, top: pos?.top ?? -9999, transformOrigin: pos?.origin ?? 'center',
+        // left / top / transform-origin / max-height are written by the placement and the follow
+        // loop, never by React: a re-render mid-drag must not snap the card back for a frame.
+        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)', willChange: 'translate, transform',
         background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
-        fontSize: 13, color: 'var(--text-primary)', maxHeight: 'calc(100dvh - 24px)', overflowY: 'auto', overscrollBehavior: 'contain',
+        fontSize: 13, color: 'var(--text-primary)', overflowY: 'auto', overscrollBehavior: 'contain',
       }}
     >
-      {tailStyle && <span aria-hidden style={tailStyle} />}
+      {showTail && <span aria-hidden ref={tailRef} style={tailStyle} />}
       <div style={{ position: 'relative', display: 'grid', gap: 10, padding: 12 }}>
         <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6 }} />
@@ -326,7 +455,11 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
           <span data-rise style={hint}>{pt ? 'Exemplo das configurações: não há sessão por trás, então só adiar e dispensar funcionam.' : 'A settings example: there is no session behind it, so only snooze and dismiss work.'}</span>
         )}
         <div data-rise style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {!alert.demo && <button type="button" style={btn} onClick={() => setDrawer(d => (d === 'reply' ? null : 'reply'))}>{pt ? 'Responder' : 'Reply'}</button>}
+          {!alert.demo && (
+            <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
+              {pt ? 'Responder' : 'Reply'}
+            </button>
+          )}
           {!alert.demo && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
@@ -349,19 +482,6 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayN
 
         {drawer && (
           <div style={{ display: 'grid', gap: 7, borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
-            {drawer === 'reply' && (
-              <form style={{ display: 'grid', gap: 7 }} onSubmit={e => { e.preventDefault(); void sendReply() }}>
-                <textarea autoFocus value={text} onChange={e => setText(e.target.value)} rows={3}
-                  aria-label={pt ? `Mensagem para ${alert.name}` : `Message to ${alert.name}`}
-                  placeholder={pt ? `Mensagem para ${alert.name}` : `Message to ${alert.name}`}
-                  onKeyDown={e => { if (!isMobile && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendReply() } }}
-                  style={{ ...field, resize: 'vertical', minHeight: 58 }} />
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="submit" style={{ ...primary, opacity: busy || !text.trim() ? 0.6 : 1 }} disabled={busy || !text.trim()}>{pt ? 'Enviar' : 'Send'}</button>
-                  <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setDrawer(null)}>{pt ? 'Cancelar' : 'Cancel'}</button>
-                </div>
-              </form>
-            )}
             {drawer === 'approve' && approveBody()}
             {drawer === 'snooze' && (
               <>

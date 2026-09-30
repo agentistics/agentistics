@@ -27,6 +27,7 @@ import { getNotificationSettings, saveNotificationSettings, subscribeNotificatio
 import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
 import { Select } from '../../pages/settings/primitives'
+import { NayMotionSettings } from './NayMotionSettings'
 
 type ChatCtx = Pick<AppContext, 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
 
@@ -112,7 +113,7 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
             position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 288, maxWidth: 'calc(100vw - 24px)',
             zIndex: 20, background: 'var(--bg-elevated, var(--bg-surface))', border: '1px solid var(--border)',
             borderRadius: 10, boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)',
-            padding: 12, display: 'flex', flexDirection: 'column', gap: 12, animation: 'ag-fade-in 120ms ease-out',
+            padding: 12, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'min(620px, calc(100dvh - 96px))', overflowY: 'auto', overscrollBehavior: 'contain', animation: 'ag-fade-in 120ms ease-out',
           }}
         >
           <Section title={pt ? 'Botão do chat' : 'Chat button'}>
@@ -135,6 +136,9 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
                 )
               })}
             </div>
+            {/* The window and the notification card each follow the button with their OWN motion,
+                inheriting this one until somebody picks another (owner, 2026-09-30). */}
+            <NayMotionSettings pt={pt} />
             <Row label={pt ? 'Ímã nas bordas' : 'Edge magnet'}
               hint={pt ? 'Solto perto de uma borda, o botão encosta nela' : 'Dropped near an edge, the button snaps to it'}>
               <Switch on={prefs.snap} onToggle={() => onPrefs({ ...prefs, snap: !prefs.snap })}
