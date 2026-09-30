@@ -13,7 +13,7 @@
  * `CliStrings`, so this module owns no copy of any sentence.
  */
 
-import { contextFraction, fmt, fmtCost } from '@agentistics/core'
+import { contextFraction, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
 import type { CliStrings } from '../cli-i18n'
 import { approvalFor, canPick, isFreeTextOption } from './approval-spec'
@@ -95,7 +95,11 @@ export function toControlSession(
     // its record is missing.
     fallback: v.status === 'unregistered'
       ? s.sessUnregistered(v.id.slice(0, 12))
-      : s.sessUntitled(harness || '?', project),
+      // A Nay conversation nobody named reads "Nay · 29/09 21:28" like the ones Nay labels itself,
+      // never "claude em nay-chat": the directory is Nay's own and says nothing to a person.
+      : isNayCwd(v.cwd) && v.createdMs !== undefined
+        ? nayTitle(new Date(v.createdMs), s.lang)
+        : s.sessUntitled(harness || '?', project),
   })
   // Why there is no conversation link, on a row we HOST and only while it has none — two DIFFERENT
   // facts, and conflating them is how a disabled Reopen button ended up with nothing beside it

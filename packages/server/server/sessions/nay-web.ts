@@ -10,7 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { planNayFiling, planNayPlacement, nayPlacementRows as corePlacementRows, type NayPlacementRow, type SessionUserGroupsValue } from '@agentistics/core'
+import { nayTitle, planNayFiling, planNayPlacement, nayPlacementRows as corePlacementRows, type NayPlacementRow, type SessionUserGroupsValue } from '@agentistics/core'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { CliLang } from '../cli-lang'
@@ -31,13 +31,7 @@ export interface NaySpawnDeps {
   now: () => Date
 }
 
-function label(now: Date, lang: CliLang): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const day = lang === 'pt'
-    ? `${pad(now.getDate())}/${pad(now.getMonth() + 1)}`
-    : `${pad(now.getMonth() + 1)}/${pad(now.getDate())}`
-  return `Nay · ${day} ${pad(now.getHours())}:${pad(now.getMinutes())}`
-}
+const label = (now: Date, lang: CliLang): string => nayTitle(now, lang === 'pt' ? 'pt' : 'en')
 
 export async function startNaySession(lang: CliLang, deps: NaySpawnDeps): Promise<FleetSpawnResponse> {
   await deps.ensureDir()

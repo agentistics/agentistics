@@ -13,6 +13,7 @@
  */
 
 import type { TakeoverRefusal } from './sessions/takeover'
+import type { SendNowOutcome } from '@agentistics/core'
 import type { RateLimitAbsentReason, RateLimitResourceKind } from '@agentistics/runtime'
 
 /*
@@ -29,6 +30,8 @@ export type CliLang = 'en' | 'pt'
 const cap = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 
 export interface CliStrings {
+  /** Which language this table is — for the few strings built from data, like a date. */
+  lang: 'en' | 'pt'
   tagline: string
   configSolo: string
   /** The member sentence WITHOUT the endpoint, for surfaces that print the endpoint themselves. */
@@ -294,6 +297,8 @@ export interface CliStrings {
   sessRewindFailed: (reason: 'no-menu' | 'not-found' | 'unexpected' | 'failed') => string
   sessRewindUnsupported: (harness: string) => string
   sessSentNow: string
+  /** What "send now" really did — one sentence per `SendNowOutcome`. */
+  sessSendNowOutcome: (outcome: SendNowOutcome, id: string) => string
   sessSendNowUnsupported: (harness: string) => string
   /** A session whose pane died at birth, in the harness's own words or its exit status. */
   sessDiedAtSpawn: (reason: string) => string
@@ -519,6 +524,7 @@ export interface CliStrings {
 }
 
 const EN: CliStrings = {
+  lang: 'en',
   tagline: 'AI coding-assistant analytics · agentop',
   configSolo: 'solo — nothing leaves this machine',
   configMemberBare: 'member — sends metrics to a central',
@@ -742,6 +748,14 @@ const EN: CliStrings = {
         : 'Could not reach the session to rewind it — nothing was changed.',
   sessRewindUnsupported: harness => `Restoring the conversation is only available for Claude Code sessions (this one is ${harness}).`,
   sessSentNow: 'Queued messages sent now.',
+  sessSendNowOutcome: (outcome, id) => ({
+    sent: 'Delivered now — the session took the queued message without stopping its turn.',
+    interrupted: 'Delivered — the session would not yield, so its current turn was interrupted to hand the message over.',
+    nothing: 'Nothing was waiting in the session’s queue — the message had already been taken in.',
+    stuck: 'Not delivered — the session kept the message queued even after being interrupted. Open the terminal to see why.',
+    'no-focus': 'Not delivered — the session’s input box could not be reached, so nothing was pressed.',
+    failed: `${id} did not take the keystroke — it may have just ended.`,
+  } satisfies Record<SendNowOutcome, string>)[outcome],
   sessSendNowUnsupported: harness => `"Send now" is only available for Claude Code sessions (this one is ${harness}).`,
   sessDiedAtSpawn: (reason: string) => `the session exited as soon as it started: ${reason}`,
   sessDiedAtSpawnStatus: (status: number | undefined) =>
@@ -927,6 +941,7 @@ const EN: CliStrings = {
 }
 
 const PT: CliStrings = {
+  lang: 'pt',
   tagline: 'Analytics de assistentes de código IA · agentop',
   configSolo: 'solo — nada sai desta máquina',
   configMemberBare: 'member — envia métricas para uma central',
@@ -1136,6 +1151,14 @@ const PT: CliStrings = {
         : 'Não deu para alcançar a sessão para voltar — nada foi alterado.',
   sessRewindUnsupported: harness => `Restaurar a conversa só está disponível para sessões do Claude Code (esta é ${harness}).`,
   sessSentNow: 'Mensagens da fila enviadas agora.',
+  sessSendNowOutcome: (outcome, id) => ({
+    sent: 'Entregue agora — a sessão recebeu a mensagem da fila sem parar o turno.',
+    interrupted: 'Entregue — a sessão não liberou a vez, então o turno atual foi interrompido para entregar a mensagem.',
+    nothing: 'Não havia nada na fila da sessão — a mensagem já tinha sido recebida.',
+    stuck: 'Não entregue — a sessão manteve a mensagem na fila mesmo depois de interrompida. Abra o terminal para ver o motivo.',
+    'no-focus': 'Não entregue — não foi possível alcançar a caixa de texto da sessão, então nada foi pressionado.',
+    failed: `${id} não aceitou a tecla — pode ter acabado de encerrar.`,
+  } satisfies Record<SendNowOutcome, string>)[outcome],
   sessSendNowUnsupported: harness => `"Enviar agora" só está disponível para sessões do Claude Code (esta é ${harness}).`,
   sessDiedAtSpawn: (reason: string) => `a sessão terminou assim que começou: ${reason}`,
   sessDiedAtSpawnStatus: (status: number | undefined) =>
