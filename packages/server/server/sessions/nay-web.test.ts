@@ -42,3 +42,19 @@ describe('startNaySession', () => {
     expect((await startNaySession('en', d)).ok).toBe(true)
   })
 })
+
+describe('nayPlacementRows', () => {
+  test('one entry per conversation, running when any of its rows runs; store-only and external rows skipped', async () => {
+    const { nayPlacementRows } = await import('./nay-web')
+    const nay = '/home/u/.agentistics/nay-chat'
+    const rows = [
+      { id: 'a1', conversationId: 'c1', cwd: nay, state: 'exited' as const },
+      { id: 'a2', conversationId: 'c1', cwd: nay, state: 'waiting' as const },
+      { id: 'b', conversationId: 'c2', cwd: nay, state: 'lost' as const },
+      { id: 'closed:x', cwd: nay, state: 'closed' as const },
+      { id: 'p', cwd: nay, state: 'unknown' as const },
+      { id: 'w', conversationId: 'c3', cwd: '/home/u/work', state: 'waiting' as const },
+    ]
+    expect(nayPlacementRows(rows)).toEqual([{ key: 'c1', running: true }, { key: 'c2', running: false }])
+  })
+})

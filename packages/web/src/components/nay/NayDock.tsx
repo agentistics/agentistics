@@ -17,8 +17,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, X } from 'lucide-react'
-import { isNayCwd, type Filters, type SessionMeta } from '@agentistics/core'
+import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, Power, X } from 'lucide-react'
+import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { AppContext } from '../../lib/app-context'
@@ -34,8 +34,14 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { DockSettings } from './DockSettings'
+import { NayNotifyCard } from './NayNotifyCard'
+import { setOpenSession } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation } from 'react-router-dom'
+import { getSessionGroups } from '../../lib/sessionUserGroups'
+import { getPinnedIds } from '../../lib/pinnedSessions'
+import { loadSharedPrefs } from '../../lib/sharedPref'
+import { naySections, NAY_SECTION_ORDER, NAY_SECTION_TEXT, naySectionOf, type NaySectionId } from '../../lib/nayList'
 import { clampFabPos, defaultFabPos, FAB_SIZE, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
 
 type Lang = 'pt' | 'en'
@@ -93,7 +99,14 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const [arriving, setArriving] = useState<Record<string, number>>({})
 
   useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
-  const inSession = useLocation().pathname.startsWith('/sessions/')
+  const { pathname } = useLocation()
+  const inSession = pathname.startsWith('/sessions/')
+  // The session on screen, for the notifications: a card about it is never shown, and opening one
+  // is what "not opened for a while" is measured from.
+  useEffect(() => {
+    const id = inSession ? decodeURIComponent(pathname.slice('/sessions/'.length).split('/')[0] ?? '') : ''
+    setOpenSession(id || null)
+  }, [pathname, inSession])
   const shownInSession = useNayFabShownInSession()
   const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
   const [fabPrefs, setFabPrefs] = useState<NayFabPrefs>(() => readStored(FAB_KEY, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS))
@@ -117,12 +130,41 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     setDock(d => pruneDock(d, id => !!findSession(id) || (arriving[id] !== undefined && now - arriving[id]! < ARRIVAL_BUDGET_MS)))
   }, [loading, findSession, arriving])
 
-  const naySessions = useMemo(
-    () => fleet.rows.filter(r => isNayCwd(r.cwd) && sessionRunning(r)),
-    [fleet.rows],
-  )
+  const sections = useMemo(() => naySections(fleet.rows), [fleet.rows])
+
+  /*
+   * THE SERVER FILES NAY CONVERSATIONS; THIS TAB ONLY RE-READS WHAT IT WROTE.
+   *
+   * On every fleet read the server moves each Nay conversation into "Nay › Ativas" or
+   * "Nay › Inativas" (`reconcileNayFolders`). The browser's copy of the groups is only re-read when
+   * the tab regains focus, so a conversation started or ended here went on showing in the wrong
+   * place — and the next drag in the aside wrote that stale copy back over the server's filing. So
+   * when the local copy disagrees with where the fleet says a Nay conversation belongs, re-read it,
+   * at most once every few seconds. Never a write: the folder ids are minted on the server, and a
+   * browser creating its own would leave two "Nay" trees.
+   */
+  const lastSync = useRef(0)
+  useEffect(() => {
+    const rows = nayPlacementRows(fleet.rows, sessionRunning)
+    if (rows.length === 0) return
+    if (!planNayPlacement(getSessionGroups(), getPinnedIds(), rows).changed) return
+    const now = Date.now()
+    if (now - lastSync.current < 4000) return
+    lastSync.current = now
+    void loadSharedPrefs()
+  }, [fleet.rows])
+
+  /** End a Nay conversation: kill its session; the server then files it under "Nay › Inativas". */
+  const endSession = useCallback(async (id: string): Promise<boolean> => {
+    const out = await act({ id, action: 'kill' })
+    if (!out.ok) { setNotice(out.message); return false }
+    setNotice(null)
+    return true
+  }, [act])
 
   const open = useCallback((id: string) => setDock(d => openSession(d, id)), [])
+  const [confirmEnd, setConfirmEnd] = useState(false)
+  useEffect(() => { setConfirmEnd(false) }, [dock.panelSession])
 
   const startNay = useCallback(async () => {
     setStarting(true)
@@ -132,6 +174,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       const out = await res.json().catch(() => null) as { ok?: boolean; message?: string; id?: string } | null
       if (out?.ok && out.id) {
         setArriving(a => ({ ...a, [out.id!]: Date.now() }))
+        // The server has just filed it under "Nay › Ativas"; pick that up now rather than on focus.
+        void loadSharedPrefs()
         open(out.id)
       } else {
         setNotice(out?.message === 'chat_disabled'
@@ -211,7 +255,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   }
 
   const panelSession = dock.panelSession
-  const panelTitle = panelSession ? (findSession(panelSession)?.title ?? 'Nay') : 'Nay'
+  const panelRow = panelSession ? findSession(panelSession) : undefined
+  const panelTitle = panelRow?.title ?? 'Nay'
 
   const tabButton = (id: Tab, label: string) => (
     <button
@@ -271,7 +316,18 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {panelTitle}
           </span>
-          {!isMobile && (
+          {panelRow && isNayCwd(panelRow.cwd) && sessionRunning(panelRow) && (
+            confirmEnd ? (
+              <EndConfirm pt={pt} isMobile={isMobile}
+                onYes={() => { void endSession(panelRow.id).then(ok => { if (ok) setDock(d => ({ ...d, panelSession: null })) }); setConfirmEnd(false) }}
+                onNo={() => setConfirmEnd(false)} />
+            ) : (
+              <LabelButton icon={<Power size={14} />} label={isMobile ? (pt ? 'Encerrar' : 'End') : (pt ? 'Encerrar conversa' : 'End conversation')} danger
+                title={pt ? 'Encerrar esta conversa e arquivá-la em Nay › Inativas' : 'End this conversation and file it under Nay › Inativas'}
+                onClick={() => setConfirmEnd(true)} />
+            )
+          )}
+          {!isMobile && !confirmEnd && (
             <LabelButton icon={<PictureInPicture2 size={14} />} label={pt ? 'Desacoplar' : 'Undock'}
               title={pt ? 'Abrir esta sessão numa janela própria' : 'Open this session in its own window'}
               onClick={() => setDock(d => detachSession(d, panelSession, viewport()))} />
@@ -298,13 +354,14 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           : tab === 'nay'
             ? (
               <NayList
-                lang={lang} isMobile={isMobile} sessions={naySessions} windows={dock.windows}
+                lang={lang} isMobile={isMobile} sections={sections} windows={dock.windows}
                 starting={starting} notice={notice} unsupported={unsupported}
-                onStart={() => { void startNay() }} onOpen={open}
+                onStart={() => { void startNay() }} onOpen={open} onEnd={endSession}
               />
             )
             : (
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              // Inner gutter, so the aside's cards and search do not run into the panel's edges.
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }}>
                 <SessionsAside
                   lang={lang}
                   rows={fleet.rows}
@@ -332,6 +389,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
 
   return (
     <>
+      {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
+          on screen: on a phone inside a session the button can be hidden, and the card then opens
+          from the corner it would have occupied. */}
+      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} />
       {panel}
 
       {visibleWindows.map(w => (
@@ -373,6 +434,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                   onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
                   onKeyDown={onKeyDown}
                   onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  data-nay-fab
                   aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
                   aria-expanded={dock.open}
                   title={pt ? 'Nay — arraste para mover' : 'Nay — drag to move'}
@@ -408,38 +470,66 @@ function IconButton({ label, onClick, isMobile, children }: { label: string; onC
   )
 }
 
-/** A control whose action must be unmistakable: an icon AND a word, orange-outlined. */
-function LabelButton({ icon, label, title, onClick }: { icon: ReactNode; label: string; title: string; onClick: () => void }) {
+/** A control whose action must be unmistakable: an icon AND a word, orange-outlined (red to end). */
+function LabelButton({ icon, label, title, onClick, danger }: { icon: ReactNode; label: string; title: string; onClick: () => void; danger?: boolean }) {
+  const tone = danger ? 'var(--accent-red, #ef4444)' : ORANGE
   return (
     <button onClick={onClick} title={title} style={{
       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '4px 9px', borderRadius: 7,
-      border: `1px solid ${ORANGE}`, background: ORANGE_DIM, color: ORANGE, cursor: 'pointer',
-      fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+      border: `1px solid ${tone}`, background: danger ? 'rgba(239, 68, 68, 0.1)' : ORANGE_DIM, color: tone, cursor: 'pointer',
+      fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap',
     }}>
       {icon}{label}
     </button>
   )
 }
 
-function NayList({ lang, isMobile, sessions, windows, starting, notice, unsupported, onStart, onOpen }: {
+/**
+ * The inline "end it?" question. Ending a conversation stops its session, so it ASKS — inline, in
+ * the place the button was, never through `window.confirm` (which blocks the page and reads as a
+ * browser error).
+ */
+function EndConfirm({ pt, isMobile, onYes, onNo }: { pt: boolean; isMobile: boolean; onYes: () => void; onNo: () => void }) {
+  const btn = (label: string, onClick: () => void, danger: boolean) => (
+    <button type="button" onClick={onClick} style={{
+      minHeight: isMobile ? 36 : 26, padding: '2px 9px', borderRadius: 6, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+      border: `1px solid ${danger ? 'var(--accent-red, #ef4444)' : 'var(--border)'}`,
+      background: danger ? 'var(--accent-red, #ef4444)' : 'transparent', color: danger ? '#fff' : 'var(--text-secondary)',
+    }}>{label}</button>
+  )
+  return (
+    <span role="group" aria-label={pt ? 'Encerrar esta conversa?' : 'End this conversation?'}
+      style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+      <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{pt ? 'Encerrar?' : 'End it?'}</span>
+      {btn(pt ? 'Encerrar' : 'End', onYes, true)}
+      {btn(pt ? 'Não' : 'No', onNo, false)}
+    </span>
+  )
+}
+
+function NayList({ lang, isMobile, sections, windows, starting, notice, unsupported, onStart, onOpen, onEnd }: {
   lang: Lang
   isMobile: boolean
-  sessions: ControlSession[]
+  sections: Record<NaySectionId, ControlSession[]>
   windows: readonly NayWindow[]
   starting: boolean
   notice: string | null
   unsupported: boolean
   onStart: () => void
   onOpen: (id: string) => void
+  onEnd: (id: string) => Promise<boolean>
 }) {
   const pt = lang === 'pt'
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [ending, setEnding] = useState<string | null>(null)
+  const empty = NAY_SECTION_ORDER.every(id => sections[id].length === 0)
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <button
         onClick={onStart}
         disabled={starting || unsupported}
         style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: isMobile ? 44 : 36,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: isMobile ? 44 : 36, flexShrink: 0,
           borderRadius: 9, border: `1px solid ${ORANGE}`, background: ORANGE_DIM, color: ORANGE,
           fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: starting || unsupported ? 'default' : 'pointer',
           opacity: unsupported ? 0.5 : 1,
@@ -455,32 +545,80 @@ function NayList({ lang, isMobile, sessions, windows, starting, notice, unsuppor
       )}
       {notice && <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--accent-orange, var(--text-secondary))' }}>{notice}</p>}
 
-      {sessions.length === 0 ? (
+      {empty && (
         <p style={{ margin: '8px 2px 0', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
           {pt
-            ? 'Nenhuma conversa da Nay aberta. Elas também aparecem na lista de sessões, no grupo "Nay".'
-            : 'No Nay conversation is open. They also appear in the sessions list, under the "Nay" group.'}
+            ? 'Nenhuma conversa da Nay ainda. Elas também aparecem na lista de sessões, na pasta "Nay".'
+            : 'No Nay conversation yet. They also appear in the sessions list, in the "Nay" folder.'}
         </p>
-      ) : sessions.map(s => {
-        const inWindow = windows.some(w => w.id === s.id)
+      )}
+      {NAY_SECTION_ORDER.map(section => {
+        const rows = sections[section]
+        if (rows.length === 0) return null
+        const text = NAY_SECTION_TEXT[section]
         return (
-          <button
-            key={s.id}
-            onClick={() => onOpen(s.id)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, minHeight: isMobile ? 44 : 38, padding: '6px 10px',
-              borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-elevated)', cursor: 'pointer',
-              fontFamily: 'inherit', textAlign: 'left',
-            }}
-          >
-            <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.state === 'working' ? ORANGE : 'var(--text-tertiary)' }} />
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
-            {inWindow && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: ORANGE, flexShrink: 0 }}>
-                <PictureInPicture2 size={11} />{pt ? 'em janela' : 'in a window'}
-              </span>
-            )}
-          </button>
+          <section key={section} aria-label={text.heading[pt ? 'pt' : 'en']} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+            <h3 style={{ margin: '2px 2px 0', display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
+              {text.heading[pt ? 'pt' : 'en']}
+              <span style={{ fontWeight: 500 }}>{rows.length}</span>
+            </h3>
+            {rows.map(s => {
+              const inWindow = windows.some(w => w.id === s.id)
+              const running = naySectionOf(s.state) !== 'ended'
+              const isEnding = ending === s.id
+              return (
+                // The row and its End control are SIBLINGS: a button nested in a button is one
+                // control to a screen reader and two to a pointer.
+                <div key={s.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, minHeight: isMobile ? 48 : 40, padding: '0 8px 0 0',
+                    borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                    opacity: section === 'ended' ? 0.75 : 1,
+                  }}
+                >
+                  <button type="button" onClick={() => onOpen(s.id)} style={{
+                    flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 10px',
+                    border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderRadius: 9,
+                  }}>
+                  <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: text.color }} />
+                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: text.color }}>
+                      {text.state[pt ? 'pt' : 'en']}
+                      {inWindow && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: ORANGE }}>
+                          · <PictureInPicture2 size={10} />{pt ? 'em janela' : 'in a window'}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  </button>
+                  {running && (confirming === s.id ? (
+                    <EndConfirm pt={pt} isMobile={isMobile}
+                      onYes={() => {
+                        setConfirming(null); setEnding(s.id)
+                        void onEnd(s.id).finally(() => setEnding(e => (e === s.id ? null : e)))
+                      }}
+                      onNo={() => setConfirming(null)} />
+                  ) : (
+                    <button type="button" disabled={isEnding}
+                      onClick={() => setConfirming(s.id)}
+                      aria-label={pt ? `Encerrar ${s.title}` : `End ${s.title}`}
+                      title={pt ? 'Encerrar esta conversa' : 'End this conversation'}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexShrink: 0,
+                        minWidth: isMobile ? 44 : 0, minHeight: isMobile ? 36 : 26, padding: '2px 8px', borderRadius: 6,
+                        border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)',
+                        fontFamily: 'inherit', fontSize: 11.5, cursor: isEnding ? 'default' : 'pointer',
+                      }}>
+                      {isEnding ? <Loader2 size={12} style={{ animation: 'ag-working-spin 1s linear infinite' }} /> : <Power size={12} />}
+                      {!isMobile && (pt ? 'Encerrar' : 'End')}
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+          </section>
         )
       })}
     </div>

@@ -21,8 +21,10 @@ import { ArrowUpRight, RotateCcw, Settings2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
-import { getNotificationSettings } from '../../lib/sessionNotifications'
+import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
+import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
+import { Select } from '../../pages/settings/primitives'
 
 type ChatCtx = Pick<AppContext, 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
 
@@ -53,7 +55,12 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   useEffect(() => {
     if (!open) return
     const onDown = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) } }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // An open Select inside closes itself first; only a second Escape closes this popover.
+      if (rootRef.current?.querySelector('[role="listbox"]')) return
+      e.stopPropagation(); setOpen(false)
+    }
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey, true) }
@@ -65,6 +72,17 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   }
 
   const currentModel = chat.chatModel ?? models[0]?.id ?? ''
+
+  // The session notifications' own two switches that belong to this button: how it speaks a card,
+  // and do-not-disturb. Stored in the notification settings, so Settings -> Chat and Settings ->
+  // Notifications read the very same values.
+  const [notify, setNotify] = useState(getNotificationSettings)
+  useEffect(() => subscribeNotificationSettings(() => setNotify(getNotificationSettings())), [])
+  const saveNotify = (patch: Partial<typeof notify>) => {
+    const next = { ...getNotificationSettings(), ...patch }
+    setNotify(next)
+    saveNotificationSettings(next)
+  }
 
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'flex' }}>
@@ -132,18 +150,35 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
             </button>
           </Section>
 
+          <Section title={pt ? 'Notificações das sessões' : 'Session notifications'}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{pt ? 'Como o botão avisa' : 'How the button tells you'}</div>
+              <Select
+                value={notify.nayAnimation}
+                onChange={v => saveNotify({ nayAnimation: v as NayAnimation })}
+                options={NAY_ANIMATIONS.map(a => ({ value: a, label: NAY_ANIMATION_LABEL[a][pt ? 'pt' : 'en'] }))}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{NAY_ANIMATION_HINT[notify.nayAnimation][pt ? 'pt' : 'en']}</div>
+            </div>
+            <Row label={pt ? 'Não perturbe' : 'Do not disturb'}
+              hint={pt ? 'Sem cartão nem som; tudo fica no sino' : 'No card or sound; everything stays in the bell'}>
+              <Switch on={notify.doNotDisturb} label={pt ? 'Não perturbe' : 'Do not disturb'}
+                onToggle={() => saveNotify({ doNotDisturb: !notify.doNotDisturb })} />
+            </Row>
+          </Section>
+
           <Section title={pt ? 'Conversas da Nay' : 'Nay conversations'}>
             <Row label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
-              <select
-                aria-label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}
-                value={currentModel}
-                disabled={models.length === 0}
-                onChange={e => { chat.setChatModel(e.target.value); putPreference({ chatModel: e.target.value }) }}
-                style={selectStyle}
-              >
-                {models.length === 0 && <option value="">{pt ? 'Carregando…' : 'Loading…'}</option>}
-                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
+              <div style={{ width: 156, flexShrink: 0 }} aria-label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
+                <Select
+                  value={currentModel}
+                  disabled={models.length === 0}
+                  placeholder={pt ? 'Carregando…' : 'Loading…'}
+                  searchPlaceholder={pt ? 'Buscar modelo…' : 'Search models…'}
+                  options={models.map(m => ({ value: m.id, label: m.label }))}
+                  onChange={v => { chat.setChatModel(v); putPreference({ chatModel: v }) }}
+                />
+              </div>
             </Row>
             <Row label={pt ? 'Som ao responder' : 'Sound on reply'}>
               <Switch on={chat.chatSoundEnabled} label={pt ? 'Som ao responder' : 'Sound on reply'} onToggle={() => {
@@ -154,14 +189,13 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
               }} />
             </Row>
             {chat.chatSoundEnabled && (
-              <select
-                aria-label={pt ? 'Qual som' : 'Which sound'}
-                value={chat.chatSoundId}
-                onChange={e => { chat.setChatSoundId(e.target.value); putPreference({ chatSoundId: e.target.value }); preview(e.target.value) }}
-                style={{ ...selectStyle, width: '100%' }}
-              >
-                {CHAT_SOUNDS.map(s => <option key={s.id} value={s.id}>{s.label[pt ? 'pt' : 'en']}</option>)}
-              </select>
+              <div aria-label={pt ? 'Qual som' : 'Which sound'}>
+                <Select
+                  value={chat.chatSoundId}
+                  options={CHAT_SOUNDS.map(s => ({ value: s.id, label: s.label[pt ? 'pt' : 'en'] }))}
+                  onChange={v => { chat.setChatSoundId(v); putPreference({ chatSoundId: v }); preview(v) }}
+                />
+              </div>
             )}
           </Section>
 
@@ -178,11 +212,6 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
     </div>
   )
 }
-
-const selectStyle = {
-  fontFamily: 'inherit', fontSize: 12, padding: '4px 6px', borderRadius: 6, maxWidth: 150,
-  border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)',
-} as const
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
