@@ -26,7 +26,7 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -90,6 +90,17 @@ export interface ChatTurn {
    * a turn this was not resolved for.
    */
   imagePaths?: string[]
+  /**
+   * A `!` command the person ran in Claude Code's bash mode, with what it printed — see the
+   * server's `bash-mode.ts`. `text` is then the `!line` as typed. Drawn as an EXECUTED command with
+   * its output folded under a chip, never as prose: markdown would eat a `*` or a `#` in it.
+   */
+  shell?: {
+    command: string
+    summary: string
+    running: boolean
+    output?: { stdout: string; stderr: string; truncated?: boolean }
+  }
 }
 
 export interface ChatBubbleProps {
@@ -787,7 +798,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
                 the accent — the same colour the panel's "use this skill" button wears, so the
                 thing you pressed and the thing that appears are visibly the same act. The rule is
                 `slashLine.ts` and it is anchored: a `/home/...` path is not a command. */}
-            {(() => {
+            {turn.shell ? <ShellRunBlock run={turn.shell} pt={pt} /> : (() => {
               const { command, rest } = splitSlashLine(text)
               if (command === '') {
                 return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
@@ -925,4 +936,77 @@ function menuItemStyle(isMobile: boolean): React.CSSProperties {
     background: 'transparent', color: 'var(--text-primary)',
     fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
   }
+}
+
+/**
+ * A `!` command, EXECUTED: the line as typed, then a chip — `commandSummary`'s one line, plus how
+ * much it printed — that unfolds the output. Folded by default: a build's log is the reason the
+ * terminal exists, and a conversation that unrolls it for every `!ls` stops being a conversation.
+ * The output scrolls inside its own box, never the page (a 390px screen and a 200-column log).
+ */
+function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: boolean }) {
+  const [open, setOpen] = useState(false)
+  const out = run.output
+  const lines = out ? [out.stdout, out.stderr].filter(t => t !== '').join('\n').split('\n').length : 0
+  const hasOut = out !== undefined && (out.stdout !== '' || out.stderr !== '')
+  const mono = 'var(--font-mono, ui-monospace, monospace)'
+  const status = run.running
+    ? (pt ? 'executando…' : 'running…')
+    : out === undefined
+      ? (pt ? 'executado' : 'ran')
+      : !hasOut
+        ? (pt ? 'sem saída' : 'no output')
+        : pt ? `${lines} ${lines === 1 ? 'linha' : 'linhas'}` : `${lines} ${lines === 1 ? 'line' : 'lines'}`
+  const pre: React.CSSProperties = {
+    margin: 0, padding: '8px 10px', borderRadius: 8,
+    background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+    fontFamily: mono, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)',
+    whiteSpace: 'pre', overflow: 'auto', maxHeight: 320, maxWidth: '100%',
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div style={{ fontFamily: mono, fontWeight: 600, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+        <span style={{ color: 'var(--anthropic-orange)' }}>!</span>{run.command}
+      </div>
+      <button
+        type="button"
+        className="ag-tap"
+        onClick={() => { if (hasOut) setOpen(o => !o) }}
+        aria-expanded={hasOut ? open : undefined}
+        disabled={!hasOut}
+        title={hasOut ? (pt ? 'Mostrar/ocultar a saída' : 'Show/hide the output') : undefined}
+        style={{
+          alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
+          padding: '3px 9px', borderRadius: 999, cursor: hasOut ? 'pointer' : 'default',
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+          color: run.running ? 'var(--anthropic-orange)' : 'var(--text-secondary)', fontSize: 11,
+        }}
+      >
+        {run.running
+          ? <Loader size={11} className="ag-working-spin" style={{ flexShrink: 0 }} />
+          : <Check size={11} style={{ flexShrink: 0 }} />}
+        <span style={{ fontFamily: mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+          {run.summary}
+        </span>
+        <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>· {status}</span>
+        {hasOut && <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />}
+      </button>
+      {open && out && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+          {out.truncated && (
+            <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+              {pt ? 'Saída longa — mostrando o final.' : 'Long output — showing the end.'}
+            </span>
+          )}
+          {out.stdout !== '' && <pre style={pre}>{out.stdout}</pre>}
+          {out.stderr !== '' && (
+            <>
+              <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>stderr</span>
+              <pre style={pre}>{out.stderr}</pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }

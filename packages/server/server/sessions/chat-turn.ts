@@ -11,6 +11,8 @@
  * the field, not enforced by which module owns it.
  */
 
+import type { ShellRun } from './bash-mode'
+
 export interface ChatTurn {
   /**
    * When the transcript recorded this turn, ISO.
@@ -141,4 +143,10 @@ export interface ChatTurn {
    * all rather than an incomplete list, the same all-or-nothing rule the browser's own rule keeps.
    */
   imagePaths?: string[]
+  /**
+   * A `!` command the PERSON ran in Claude Code's bash mode, paired with what it printed — see
+   * `bash-mode.ts`. `text` is then the `!line` exactly as typed, which is also what the composer's
+   * echo holds, so the "delivered — not read yet" bubble reconciles against it. Claude only.
+   */
+  shell?: ShellRun
 }
