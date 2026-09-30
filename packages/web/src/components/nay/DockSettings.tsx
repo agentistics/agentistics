@@ -21,7 +21,9 @@ import { ArrowUpRight, RotateCcw, Settings2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
-import { getNotificationSettings } from '../../lib/sessionNotifications'
+import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
+import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
+import { Select } from '../../pages/settings/primitives'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
 import { Select } from '../../pages/settings/primitives'
 
@@ -71,6 +73,17 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   }
 
   const currentModel = chat.chatModel ?? models[0]?.id ?? ''
+
+  // The session notifications' own two switches that belong to this button: how it speaks a card,
+  // and do-not-disturb. Stored in the notification settings, so Settings -> Chat and Settings ->
+  // Notifications read the very same values.
+  const [notify, setNotify] = useState(getNotificationSettings)
+  useEffect(() => subscribeNotificationSettings(() => setNotify(getNotificationSettings())), [])
+  const saveNotify = (patch: Partial<typeof notify>) => {
+    const next = { ...getNotificationSettings(), ...patch }
+    setNotify(next)
+    saveNotificationSettings(next)
+  }
 
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'flex' }}>
@@ -136,6 +149,23 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
               }}>
               <RotateCcw size={12} />{pt ? 'Voltar o botão ao lugar' : 'Reset the button position'}
             </button>
+          </Section>
+
+          <Section title={pt ? 'Notificações das sessões' : 'Session notifications'}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{pt ? 'Como o botão avisa' : 'How the button tells you'}</div>
+              <Select
+                value={notify.nayAnimation}
+                onChange={v => saveNotify({ nayAnimation: v as NayAnimation })}
+                options={NAY_ANIMATIONS.map(a => ({ value: a, label: NAY_ANIMATION_LABEL[a][pt ? 'pt' : 'en'] }))}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{NAY_ANIMATION_HINT[notify.nayAnimation][pt ? 'pt' : 'en']}</div>
+            </div>
+            <Row label={pt ? 'Não perturbe' : 'Do not disturb'}
+              hint={pt ? 'Sem cartão nem som; tudo fica no sino' : 'No card or sound; everything stays in the bell'}>
+              <Switch on={notify.doNotDisturb} label={pt ? 'Não perturbe' : 'Do not disturb'}
+                onToggle={() => saveNotify({ doNotDisturb: !notify.doNotDisturb })} />
+            </Row>
           </Section>
 
           <Section title={pt ? 'Conversas da Nay' : 'Nay conversations'}>

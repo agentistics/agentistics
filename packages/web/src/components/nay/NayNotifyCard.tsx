@@ -1,0 +1,415 @@
+/**
+ * NayNotifyCard.tsx — the session notification the floating Nay button SPEAKS.
+ *
+ * Our own notification in place of the operating system's (owner, 2026-09-29): it comes out of the
+ * button — "ei, olha essa sessão" — and carries what a person needs to decide without leaving the
+ * page: the session's name, its assistant and model, how long it has been waiting and when its last
+ * message came. Its actions:
+ *  - REPLY inline, through the fleet's own `prompt` verb (refused in words by the server while a
+ *    dialog is open, like everywhere else);
+ *  - GO to the session;
+ *  - APPROVE — only on an approval card, and never blindly: it lists the options the server READ OFF
+ *    the session's screen (`dialogOptions`) and sends the one tapped, by number. When the options
+ *    cannot be read, it says so and sends nothing (`approveBlind`/`chooseBlind`/`dialogBlind`);
+ *  - SNOOZE — 15 min, 1 h, or a time typed by hand (`parseSnooze`); the card comes back when it runs
+ *    out, if what it said is still true;
+ *  - END — only on a "not opened for a while" card, through `NayEndSession`;
+ *  - DISMISS.
+ *
+ * One card at a time, the newest; a count says how many more are waiting behind it. The rules are
+ * `nayNotify.ts`, the memory `nayNotifyStore.ts`, the motion `nayNotifyAnim.ts`.
+ */
+
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { X } from 'lucide-react'
+import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+import type { HarnessId } from '@agentistics/core'
+import type { FleetState } from '../../lib/fleet'
+import { versionedAsset } from '../../lib/brand'
+import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import {
+  cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type NayAlert,
+} from '../../lib/nayNotify'
+import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/nayNotifyStore'
+import { playEnter, playExit, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
+import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
+import { NayEndSession } from './NayEndSession'
+
+type Drawer = null | 'reply' | 'approve' | 'snooze' | 'snooze-custom' | 'end'
+
+export interface NayNotifyCardProps {
+  lang: 'pt' | 'en'
+  isMobile: boolean
+  rows: readonly ControlSession[]
+  finishedTasks: readonly string[]
+  act: FleetState['act']
+}
+
+/** The live notification settings — a fresh object per read, so held in state and re-read on change. */
+function useSettings(): NotificationSettings {
+  const [s, set] = useState(getNotificationSettings)
+  useEffect(() => subscribeNotificationSettings(() => set(getNotificationSettings())), [])
+  useEffect(() => {
+    const on = () => set(getNotificationSettings())
+    window.addEventListener('agentistics:notification-settings-changed', on)
+    return () => window.removeEventListener('agentistics:notification-settings-changed', on)
+  }, [])
+  return s
+}
+
+function fabEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-nay-fab]')
+}
+
+function bottomInset(isMobile: boolean): number {
+  if (!isMobile) return 0
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mobile-nav-h'))
+  return Number.isFinite(v) ? v : 0
+}
+
+const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
+  turn: { pt: 'Ei, a sessão respondeu.', en: 'Hey, the session replied.' },
+  approval: { pt: 'Ei, olha essa sessão: ela pediu permissão.', en: 'Hey, look at this session: it is asking for permission.' },
+  stale: { pt: 'Ei, essa sessão está parada faz tempo.', en: 'Hey, this session has been waiting a while.' },
+}
+
+const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
+  turn: { pt: 'precisa de você', en: 'needs you', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
+  approval: { pt: 'pede aprovação', en: 'needs approval', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
+  stale: { pt: 'sem abrir', en: 'not opened', fg: 'var(--text-secondary)', bg: 'var(--border)' },
+}
+
+function hhmm(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** The last thing the session said, for a two-line preview. Absent = nothing is drawn. */
+function lastSaid(row: ControlSession | undefined, kind: NayAlert['kind']): string | null {
+  if (!row) return null
+  if (kind === 'approval' && row.approvalLines?.length) return row.approvalLines.filter(l => l.trim()).slice(0, 3).join(' ')
+  const turn = [...(row.chatTurns ?? [])].reverse().find(t => t.role === 'assistant' && !t.pending && t.text.trim())
+  return turn ? turn.text.trim().slice(0, 240) : null
+}
+
+export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act }: NayNotifyCardProps) {
+  const pt = lang === 'pt'
+  const alerts = useNayAlerts()
+  const alert = alerts.length > 0 ? alerts[alerts.length - 1]! : null
+  const settings = useSettings()
+  const shock = useNayShock()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const cardRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<(() => void) | null>(null)
+  const [drawer, setDrawer] = useState<Drawer>(null)
+  const [text, setText] = useState('')
+  const [snoozeText, setSnoozeText] = useState('')
+  const [snoozeErr, setSnoozeErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [leaving, setLeaving] = useState(false)
+  const [, tick] = useState(0)
+  const [pos, setPos] = useState<{ left: number; top: number; origin: string; tailSide: 'top' | 'bottom'; tailX: number } | null>(null)
+
+  const row = alert ? rows.find(r => r.id === alert.sessionId) : undefined
+  const reduced = prefersReducedMotion()
+
+  // "A session replied": the button shocks — but NOT on the Sessions page, where the reply is
+  // already on screen and a jumping button beside it is noise.
+  const lastShock = useRef(shock)
+  useEffect(() => {
+    if (shock === lastShock.current) return
+    lastShock.current = shock
+    if (pathname.startsWith('/sessions')) return
+    const el = fabEl()
+    if (el) playShock(el, prefersReducedMotion())
+  }, [shock, pathname])
+
+  // The wait is live: re-rendered every 30 s while a card is up.
+  useEffect(() => {
+    if (!alert) return
+    const t = window.setInterval(() => tick(n => n + 1), 30_000)
+    return () => window.clearInterval(t)
+  }, [alert])
+
+  // A new card resets its own controls.
+  useEffect(() => { setDrawer(null); setText(''); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false) }, [alert?.key])
+
+  const place = () => {
+    const card = cardRef.current
+    if (!card) return null
+    const fab = fabEl()
+    const r = fab?.getBoundingClientRect()
+    const p = cardPlacement({
+      fab: r && r.width > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null,
+      vpW: window.innerWidth, vpH: window.innerHeight,
+      cardW: card.offsetWidth, cardH: card.offsetHeight, bottomInset: bottomInset(isMobile),
+    })
+    setPos({ left: p.left, top: p.top, origin: `${p.originX}px ${p.originY}px`, tailSide: p.tailSide, tailX: p.tailX })
+    return p
+  }
+
+  // Placed and animated once per card, before paint.
+  useLayoutEffect(() => {
+    if (!alert) return
+    const p = place()
+    if (!p || !cardRef.current) return
+    cancelRef.current?.()
+    const card = cardRef.current
+    // The final position has to be on the element before the entrance measures it.
+    card.style.left = `${p.left}px`; card.style.top = `${p.top}px`
+    cancelRef.current = playEnter(settings.nayAnimation, card, fabEl(), p, prefersReducedMotion())
+    return () => { cancelRef.current?.(); cancelRef.current = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alert?.key])
+
+  // A drawer opening changes the card's height; keep it clear of the button and the screen edges.
+  useLayoutEffect(() => { if (alert) place() }, [drawer, notice, busy]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!alert) return
+    const on = () => place()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [alert]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!alert) return null
+
+  const close = async (after: () => void) => {
+    if (leaving) return
+    setLeaving(true)
+    if (cardRef.current) await playExit(cardRef.current, fabEl(), reduced)
+    after()
+  }
+
+  const say = SAY[alert.kind][lang]
+  const chip = STATE_CHIP[alert.kind]
+  const harnessLabel = alert.harness ? (HARNESS_LABELS[alert.harness as HarnessId] ?? alert.harness) : null
+  const harnessColor = alert.harness ? (HARNESS_COLORS[alert.harness as HarnessId] ?? 'var(--text-tertiary)') : null
+  const preview = lastSaid(row, alert.kind)
+  const width = cardWidth(typeof window === 'undefined' ? 390 : window.innerWidth, isMobile)
+  const tap = isMobile ? 44 : 32
+
+  const btn: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: tap,
+    padding: isMobile ? '8px 12px' : '5px 10px', borderRadius: 8, border: '1px solid var(--border)',
+    background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12.5,
+    fontWeight: 500, cursor: 'pointer',
+  }
+  const primary: CSSProperties = { ...btn, background: 'var(--anthropic-orange)', borderColor: 'var(--anthropic-orange)', color: '#fff' }
+  const hint: CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }
+  const field: CSSProperties = {
+    fontFamily: 'inherit', fontSize: isMobile ? 16 : 13, padding: '7px 9px', borderRadius: 8, minWidth: 0,
+    border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)',
+  }
+
+  const finish = (message: string) => void close(() => { dismissAlert(alert.key); if (message) setNotice(null) })
+
+  const sendReply = async () => {
+    const t = text.trim()
+    if (!t) return
+    setBusy(true)
+    const out = await act({ id: alert.sessionId, action: 'prompt', text: t })
+    setBusy(false)
+    if (out.ok) finish('')
+    else setNotice(out.message)
+  }
+
+  const pick = async (n: number) => {
+    setBusy(true)
+    const out = await act({ id: alert.sessionId, action: 'approve', choice: n })
+    setBusy(false)
+    if (out.ok) finish('')
+    else setNotice(out.message)
+  }
+
+  const doSnooze = (ms: number) => void close(() => snoozeAlert(alert.key, ms))
+
+  const approveBody = () => {
+    const blind = row?.approveBlind ?? row?.chooseBlind ?? row?.dialogBlind
+    const options = row?.dialogOptions ?? []
+    if (!row || row.state !== 'waiting-approval') {
+      return <span style={hint}>{pt ? 'A sessão não está mais esperando uma aprovação.' : 'The session is no longer waiting for an approval.'}</span>
+    }
+    if (blind || options.length === 0) {
+      return (
+        <>
+          <span style={hint}>{blind ?? (pt ? 'Não consegui ler as opções desta tela, então nada será enviado daqui. Abra a sessão para responder.' : 'The options on this screen could not be read, so nothing is sent from here. Open the session to answer.')}</span>
+          <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
+            {pt ? 'Ir para a sessão' : 'Go to the session'}
+          </button>
+        </>
+      )
+    }
+    return (
+      <>
+        <span style={hint}>{pt ? 'Opções lidas da tela da sessão. Nada é enviado até você tocar em uma.' : 'Options read off the session\'s screen. Nothing is sent until you tap one.'}</span>
+        {options.map(o => (
+          <button key={o.number} type="button" disabled={busy || o.freeText}
+            title={o.freeText ? (pt ? 'Esta opção pede texto: abra a sessão para escrever' : 'This option takes text: open the session to type it') : undefined}
+            onClick={() => void pick(o.number)}
+            style={{ ...btn, justifyContent: 'flex-start', textAlign: 'left', width: '100%', opacity: o.freeText ? 0.55 : 1 }}>
+            <span style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)', color: 'var(--anthropic-orange-light)', minWidth: 16 }}>{o.number}.</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{o.label}</span>
+          </button>
+        ))}
+      </>
+    )
+  }
+
+  const tailStyle: CSSProperties | undefined = pos && settings.nayAnimation === 'balloon' && !reduced ? {
+    position: 'absolute', left: pos.tailX, width: 16, height: 16, background: 'var(--bg-card, var(--bg-surface))',
+    transform: 'rotate(45deg)', border: '1px solid var(--border)',
+    ...(pos.tailSide === 'bottom' ? { bottom: -9, borderTop: 'none', borderLeft: 'none' } : { top: -9, borderBottom: 'none', borderRight: 'none' }),
+  } : undefined
+
+  return (
+    <div
+      ref={cardRef}
+      role="dialog"
+      aria-label={pt ? `Notificação: ${alert.name}` : `Notification: ${alert.name}`}
+      aria-live="polite"
+      style={{
+        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)',
+        left: pos?.left ?? -9999, top: pos?.top ?? -9999, transformOrigin: pos?.origin ?? 'center',
+        background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
+        boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
+        fontSize: 13, color: 'var(--text-primary)', maxHeight: 'calc(100dvh - 24px)', overflowY: 'auto', overscrollBehavior: 'contain',
+      }}
+    >
+      {tailStyle && <span aria-hidden style={tailStyle} />}
+      <div style={{ position: 'relative', display: 'grid', gap: 10, padding: 12 }}>
+        <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6 }} />
+          <span style={{ fontWeight: 650, fontSize: 12.5 }}>Nay</span>
+          {alerts.length > 1 && (
+            <span title={pt ? 'Mais notificações esperando' : 'More notifications waiting'} style={{
+              fontSize: 10.5, fontWeight: 600, padding: '2px 6px', borderRadius: 9,
+              background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)',
+            }}>+{alerts.length - 1}</span>
+          )}
+          <button type="button" aria-label={pt ? 'Dispensar' : 'Dismiss'} onClick={() => void close(() => dismissAlert(alert.key))}
+            style={{ marginLeft: 'auto', width: tap, height: tap, border: 'none', borderRadius: 7, background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        <div data-rise data-say style={{ fontSize: 13.5, fontWeight: 500 }}>{say}</div>
+
+        <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
+          <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.name}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {harnessLabel && (
+              <span style={chipStyle}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: harnessColor ?? undefined }} />{harnessLabel}
+              </span>
+            )}
+            {alert.model && <span style={chipStyle}>{alert.model}</span>}
+            <span style={{ ...chipStyle, border: 'none', background: chip.bg, color: chip.fg }}>{chip[lang]}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 10px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+            <span>{pt ? 'Esperando' : 'Waiting'}</span>
+            <b style={numStyle}>{formatWaiting(alert.sinceMs, Date.now(), alert.sinceKnown, lang)}</b>
+            <span>{pt ? 'Última mensagem' : 'Last message'}</span>
+            <b style={numStyle}>{alert.sinceKnown ? hhmm(alert.sinceMs) : (pt ? 'antes de abrir a página' : 'before this page opened')}</b>
+          </div>
+          {preview && (
+            <div style={{
+              fontSize: 12.5, color: 'var(--text-secondary)', borderLeft: '2px solid var(--anthropic-orange-dim)', paddingLeft: 8,
+              display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
+            }}>{preview}</div>
+          )}
+        </div>
+
+        {alert.demo && (
+          <span data-rise style={hint}>{pt ? 'Exemplo das configurações: não há sessão por trás, então só adiar e dispensar funcionam.' : 'A settings example: there is no session behind it, so only snooze and dismiss work.'}</span>
+        )}
+        <div data-rise style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {!alert.demo && <button type="button" style={btn} onClick={() => setDrawer(d => (d === 'reply' ? null : 'reply'))}>{pt ? 'Responder' : 'Reply'}</button>}
+          {!alert.demo && (
+            <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
+              {pt ? 'Ir para a sessão' : 'Go to session'}
+            </button>
+          )}
+          {alert.kind === 'approval' && !alert.demo && (
+            <button type="button" style={primary} onClick={() => setDrawer(d => (d === 'approve' ? null : 'approve'))}>{pt ? 'Aprovar…' : 'Approve…'}</button>
+          )}
+          <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setDrawer(d => (d === 'snooze' || d === 'snooze-custom' ? null : 'snooze'))}>
+            {pt ? 'Adiar' : 'Snooze'}
+          </button>
+          {alert.kind === 'stale' && row && (
+            <button type="button" style={{ ...btn, background: 'transparent', color: 'var(--accent-red)' }} onClick={() => setDrawer(d => (d === 'end' ? null : 'end'))}>
+              {pt ? 'Encerrar' : 'End'}
+            </button>
+          )}
+        </div>
+
+        {notice && <span role="alert" style={{ ...hint, color: 'var(--accent-red)' }}>{notice}</span>}
+
+        {drawer && (
+          <div style={{ display: 'grid', gap: 7, borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
+            {drawer === 'reply' && (
+              <form style={{ display: 'grid', gap: 7 }} onSubmit={e => { e.preventDefault(); void sendReply() }}>
+                <textarea autoFocus value={text} onChange={e => setText(e.target.value)} rows={3}
+                  aria-label={pt ? `Mensagem para ${alert.name}` : `Message to ${alert.name}`}
+                  placeholder={pt ? `Mensagem para ${alert.name}` : `Message to ${alert.name}`}
+                  onKeyDown={e => { if (!isMobile && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendReply() } }}
+                  style={{ ...field, resize: 'vertical', minHeight: 58 }} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="submit" style={{ ...primary, opacity: busy || !text.trim() ? 0.6 : 1 }} disabled={busy || !text.trim()}>{pt ? 'Enviar' : 'Send'}</button>
+                  <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setDrawer(null)}>{pt ? 'Cancelar' : 'Cancel'}</button>
+                </div>
+              </form>
+            )}
+            {drawer === 'approve' && approveBody()}
+            {drawer === 'snooze' && (
+              <>
+                <span style={hint}>{pt ? 'Lembrar de novo em' : 'Remind me again in'}</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {SNOOZE_PRESETS.map(p => (
+                    <button key={p.ms} type="button" style={btn} onClick={() => doSnooze(p.ms)}>{p.label[lang]}</button>
+                  ))}
+                  <button type="button" style={btn} onClick={() => setDrawer('snooze-custom')}>{pt ? 'Inserir tempo' : 'Enter a time'}</button>
+                </div>
+              </>
+            )}
+            {drawer === 'snooze-custom' && (
+              <form style={{ display: 'grid', gap: 6 }} onSubmit={e => {
+                e.preventDefault()
+                const r = parseSnooze(snoozeText)
+                if (!r.ok) { setSnoozeErr(snoozeError(r.reason, lang)); return }
+                doSnooze(r.ms)
+              }}>
+                <label htmlFor="nay-snooze" style={hint}>{pt ? 'Minutos ou horas: 30m, 2h, 1h30' : 'Minutes or hours: 30m, 2h, 1h30'}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input id="nay-snooze" autoFocus value={snoozeText} placeholder="30m" inputMode="text"
+                    aria-invalid={snoozeErr ? true : undefined}
+                    onChange={e => { setSnoozeText(e.target.value); setSnoozeErr(null) }} style={{ ...field, flex: 1 }} />
+                  <button type="submit" style={primary}>{pt ? 'Adiar' : 'Snooze'}</button>
+                </div>
+                {snoozeErr
+                  ? <span role="alert" style={{ ...hint, color: 'var(--accent-red)' }}>{snoozeErr}</span>
+                  : (() => { const r = parseSnooze(snoozeText); return r.ok ? <span style={hint}>{pt ? `Volta em ${formatSpan(r.ms)}.` : `Back in ${formatSpan(r.ms)}.`}</span> : null })()}
+              </form>
+            )}
+            {drawer === 'end' && row && (
+              <NayEndSession
+                row={row} rows={rows} finishedTasks={finishedTasks} lang={lang} isMobile={isMobile} act={act}
+                onBack={() => setDrawer(null)}
+                onDone={(message, ended) => { if (ended) finish(message); else setNotice(message) }}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const chipStyle: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, lineHeight: 1, padding: '4px 7px', borderRadius: 6,
+  border: '1px solid var(--border)', color: 'var(--text-secondary)', whiteSpace: 'nowrap',
+  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+}
+const numStyle: CSSProperties = { fontWeight: 500, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }
