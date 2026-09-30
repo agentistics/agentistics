@@ -27,7 +27,7 @@ import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
-  placeWindow, pruneDock, resizePanel, PANEL_DEFAULT, PANEL_MARGIN, type DockState, type NayWindow, type Size,
+  placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
@@ -36,7 +36,7 @@ import { NayFab } from './NayFab'
 import { DockSettings } from './DockSettings'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation } from 'react-router-dom'
-import { parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
+import { clampFabPos, defaultFabPos, FAB_SIZE, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -201,10 +201,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   // ------------------------------------------------------------------------------------------
   // The docked panel's resize handles (desktop only).
   // ------------------------------------------------------------------------------------------
-  const resizeFrom = (edges: { left: boolean; top: boolean }) => (e: ReactPointerEvent) => {
+  const resizeFrom = (handle: { x?: 'left' | 'right'; y?: 'up' | 'down' }) => (e: ReactPointerEvent) => {
     e.preventDefault()
     const start = { x: e.clientX, y: e.clientY, size }
-    const move = (ev: PointerEvent) => setSize(resizePanel(start.size, ev.clientX - start.x, ev.clientY - start.y, edges, viewport()))
+    const move = (ev: PointerEvent) => setSize(resizeAnchored(start.size, ev.clientX - start.x, ev.clientY - start.y, handle, viewport()))
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -231,6 +231,16 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
     </button>
   )
 
+  // THE PANEL OPENS BESIDE THE BUTTON, wherever it was dragged (desktop). The button's place is the
+  // same stored position `NayFab` draws from, clamped the same way, so the two cannot disagree about
+  // where the button is. A phone keeps its full-screen sheet.
+  const vpNow = viewport()
+  const fabAt = clampFabPos(fabPrefs.pos ?? defaultFabPos(vpNow), vpNow)
+  const place = anchorDock({ x: fabAt.x, y: fabAt.y, w: FAB_SIZE, h: FAB_SIZE }, size, vpNow)
+  const edgeX = place.grow.x === 'left' ? { left: 0 } : { right: 0 }
+  const edgeY = place.grow.y === 'up' ? { top: 0 } : { bottom: 0 }
+  const cornerCursor = (place.grow.x === 'left') === (place.grow.y === 'up') ? 'nwse-resize' : 'nesw-resize'
+
   const panel = dock.open && (
     <div
       role="dialog"
@@ -238,19 +248,19 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column' }
         : {
-            position: 'fixed', right: PANEL_MARGIN.right, bottom: PANEL_MARGIN.bottom, width: size.w, height: size.h,
+            position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h,
             zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
             boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
     >
       {!isMobile && (<>
-        {/* Resize handles: the panel grows up and to the left from its bottom-right anchor. */}
-        <div onPointerDown={resizeFrom({ left: false, top: true })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
-          style={{ position: 'absolute', top: 0, left: 10, right: 0, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
-        <div onPointerDown={resizeFrom({ left: true, top: false })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
-          style={{ position: 'absolute', top: 10, left: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2 }} />
-        <div onPointerDown={resizeFrom({ left: true, top: true })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
-          style={{ position: 'absolute', top: 0, left: 0, width: 12, height: 12, cursor: 'nwse-resize', zIndex: 3 }} />
+        {/* Resize handles, on the edges facing AWAY from the button: the panel grows away from it. */}
+        <div onPointerDown={resizeFrom({ y: place.grow.y })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
+          style={{ position: 'absolute', ...edgeY, left: 10, right: 10, height: 6, cursor: 'ns-resize', zIndex: 2 }} />
+        <div onPointerDown={resizeFrom({ x: place.grow.x })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
+          style={{ position: 'absolute', ...edgeX, top: 10, bottom: 10, width: 6, cursor: 'ew-resize', zIndex: 2 }} />
+        <div onPointerDown={resizeFrom({ x: place.grow.x, y: place.grow.y })} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'}
+          style={{ position: 'absolute', ...edgeX, ...edgeY, width: 12, height: 12, cursor: cornerCursor, zIndex: 3 }} />
       </>)}
 
       <header style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
