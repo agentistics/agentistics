@@ -1,0 +1,4 @@
+{"type":"session.start","data":{"sessionId":"redacted-session-2","startTime":"2026-01-01T11:00:00.000Z","context":{"cwd":"/tmp/example-project"}},"id":"<redacted>","timestamp":"2026-01-01T11:00:00.000Z"}
+{"type":"user.message","data":{"content":"<redacted>"},"id":"<redacted>","timestamp":"2026-01-01T11:00:01.000Z"}
+{"type":"assistant.turn_start","data":{},"id":"<redacted>","timestamp":"2026-01-01T11:00:02.000Z"}
+{"type":"tool.execution_start","data":{"toolCallId":"tool-9","toolName":"view","arguments":{"path":"<redacted>"}},"id":"<redacted>","timestamp":"2026-01-01T11:00:03.000Z"}

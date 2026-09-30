@@ -1,0 +1,80 @@
+{
+  "sessions": [
+    {
+      "id": "ses_fixture0000000000000001",
+      "directory": "<redacted-project-a>",
+      "version": "1.17.7",
+      "time_created": 1700000000000
+    },
+    {
+      "id": "ses_fixture0000000000000002",
+      "directory": "",
+      "version": "1.17.9",
+      "time_created": 1700100000000
+    }
+  ],
+  "messages": {
+    "ses_fixture0000000000000001": [
+      { "id": "msg_a1", "time_created": 1700000002000, "role": "user" },
+      {
+        "id": "msg_a2", "time_created": 1700000005000, "role": "assistant",
+        "modelID": "fixture-model-a", "finish": "stop",
+        "time": { "created": 1700000005000, "completed": 1700000008000 },
+        "tokens": { "input": 100, "output": 20, "reasoning": 5, "cache": { "read": 10, "write": 0 } },
+        "cost": 0.002
+      },
+      { "id": "msg_a3", "time_created": 1700000020000, "role": "user" },
+      {
+        "id": "msg_a4", "time_created": 1700000022000, "role": "assistant",
+        "modelID": "fixture-model-a", "error": { "name": "MessageAbortedError" },
+        "time": { "created": 1700000022000, "completed": 1700000030000 },
+        "tokens": { "input": 150, "output": 0, "reasoning": 0, "cache": { "read": 50, "write": 5 } }
+      },
+      { "id": "msg_a5", "time_created": 1700000040000, "role": "user" },
+      {
+        "id": "msg_a6", "time_created": 1700000042000, "role": "assistant",
+        "modelID": "fixture-model-b", "finish": "tool-calls",
+        "time": { "created": 1700000042000, "completed": 1700000050000 },
+        "tokens": { "input": 80, "output": 15, "reasoning": 0, "cache": { "read": 0, "write": 0 } },
+        "cost": 0.001
+      },
+      {
+        "id": "msg_a7", "time_created": 1700000052000, "role": "assistant",
+        "modelID": "fixture-model-b", "finish": "stop",
+        "time": { "created": 1700000052000, "completed": 1700000060000 },
+        "tokens": { "input": 90, "output": 5, "reasoning": 0, "cache": { "read": 0, "write": 0 } },
+        "cost": 0.0009
+      }
+    ],
+    "ses_fixture0000000000000002": [
+      { "id": "msg_b1", "time_created": 1700100001000, "role": "user" },
+      {
+        "id": "msg_b2", "time_created": 1700100003000, "role": "assistant",
+        "modelID": "fixture-model-c", "finish": "stop",
+        "time": { "created": 1700100003000, "completed": 1700100004000 },
+        "tokens": { "input": 9653, "output": 9, "reasoning": 45, "cache": { "read": 0, "write": 0 } },
+        "cost": 0
+      }
+    ]
+  },
+  "parts": {
+    "ses_fixture0000000000000001": [
+      {
+        "id": "prt_a1", "message_id": "msg_a2", "time_created": 1700000006000, "time_updated": 1700000007000,
+        "tool": "bash", "status": "completed",
+        "command": "<redacted-command>", "time": { "start": 1700000006000, "end": 1700000007000 }
+      },
+      {
+        "id": "prt_a2", "message_id": "msg_a6", "time_created": 1700000044000, "time_updated": 1700000046000,
+        "tool": "write", "status": "completed",
+        "filePath": "<redacted-path>/file.txt", "time": { "start": 1700000044000, "end": 1700000046000 }
+      },
+      {
+        "id": "prt_a3", "message_id": "msg_a6", "time_created": 1700000047000, "time_updated": 1700000048000,
+        "tool": "read", "status": "error",
+        "filePath": "<redacted-path>/missing.txt"
+      }
+    ],
+    "ses_fixture0000000000000002": []
+  }
+}

@@ -1,0 +1,66 @@
+{
+ "aaaaaaaa-0000-4000-8000-000000000001": [
+  {
+   "idx": 0,
+   "sys": 1072,
+   "input": 1800,
+   "output": 129,
+   "thinking": 86,
+   "completion": 43,
+   "cached": 0,
+   "ctx": 2000,
+   "window": 128000,
+   "model": "gemini-3.6-flash",
+   "ts": [
+    1786701605,
+    500000000
+   ]
+  },
+  {
+   "idx": 1,
+   "sys": 1072,
+   "input": 200,
+   "output": 62,
+   "thinking": 17,
+   "completion": 45,
+   "cached": 1700,
+   "ctx": 4100,
+   "window": 128000,
+   "model": "gemini-3.6-flash",
+   "ts": [
+    1786701610,
+    0
+   ]
+  },
+  {
+   "idx": 2,
+   "sys": 1072,
+   "input": 90,
+   "output": 30,
+   "thinking": 0,
+   "completion": 30,
+   "cached": 4000,
+   "ctx": 4300,
+   "window": 128000,
+   "model": "gemini-3.6-flash"
+  }
+ ],
+ "cccccccc-0000-4000-8000-000000000002": [
+  {
+   "idx": 0,
+   "sys": 1072,
+   "input": 500,
+   "output": 40,
+   "thinking": 10,
+   "completion": 30,
+   "cached": 0,
+   "ctx": 600,
+   "window": 128000,
+   "model": "gemini-3.6-flash",
+   "ts": [
+    1786701613,
+    0
+   ]
+  }
+ ]
+}

@@ -1,0 +1,185 @@
+[
+ {
+  "id": "4b7d9208c4c73effd1c32128c0c113e2",
+  "type": "session.started",
+  "at": "2026-08-13T00:50:12.736Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000004:1",
+  "confidence": "exact",
+  "data": {
+   "origin": "adapter",
+   "projectPath": "/redacted/project"
+  }
+ },
+ {
+  "id": "e99484e13c133f3568649c284d1f7055",
+  "type": "run.started",
+  "at": "2026-08-13T00:50:12.736Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000004:1",
+  "confidence": "exact",
+  "data": {
+   "harness": "codex",
+   "harnessVersion": "0.113.0",
+   "conversationId": "00000000-0000-4000-8000-000000000004",
+   "conversationLink": "observed",
+   "cwd": "/redacted/project"
+  }
+ },
+ {
+  "id": "0ea197075c62596d03c09daa82a74a61",
+  "type": "agent.started",
+  "at": "2026-08-13T00:50:12.736Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:1",
+  "confidence": "exact",
+  "data": {
+   "kind": "main"
+  }
+ },
+ {
+  "id": "2057939266eca553b767d36fc819d44c",
+  "type": "turn.started",
+  "at": "2026-08-13T00:51:33.698Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:8",
+  "confidence": "exact",
+  "data": {
+   "by": "user"
+  }
+ },
+ {
+  "id": "ac40eddd79c80b488e9b16a9ab669c91",
+  "type": "tool.requested",
+  "at": "2026-08-13T00:51:36.733Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:13",
+  "confidence": "exact",
+  "data": {
+   "toolExecutionId": "tex_e10cabcd19e3eaee5107621c",
+   "name": "exec_command",
+   "canonicalName": "Bash",
+   "kind": "shell",
+   "summary": "git commit -am <redacted>"
+  }
+ },
+ {
+  "id": "e6fd33a05ec6fa5485b2cc6b265e11d1",
+  "type": "model.completed",
+  "at": "2026-08-13T00:51:37.773Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:19",
+  "confidence": "exact",
+  "data": {
+   "provider": "openai",
+   "model": "gpt-5.4-mini",
+   "usage": {
+    "input": 7528,
+    "output": 86,
+    "cacheRead": 11520
+   },
+   "status": "completed",
+   "contextTokens": 9580,
+   "contextWindow": 258400
+  }
+ },
+ {
+  "id": "d604de854cb9690039fcff2f104060b4",
+  "type": "turn.ended",
+  "at": "2026-08-13T00:51:55.632Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:23",
+  "confidence": "exact",
+  "data": {
+   "close": "last-line"
+  }
+ },
+ {
+  "id": "a08fe54081e9f80ff9ff2ea6885153ee",
+  "type": "turn.started",
+  "at": "2026-08-13T00:51:55.632Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:24",
+  "confidence": "exact",
+  "data": {
+   "by": "user"
+  }
+ },
+ {
+  "id": "fd7770dc4dc3393d05b7211829085f33",
+  "type": "tool.requested",
+  "at": "2026-08-13T00:51:58.264Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:29",
+  "confidence": "exact",
+  "data": {
+   "toolExecutionId": "tex_7f9f568e281d4f7f5ccab9b7",
+   "name": "exec_command",
+   "canonicalName": "Bash",
+   "kind": "shell",
+   "summary": "git commit -am <redacted>"
+  }
+ },
+ {
+  "id": "be4260704beac3167a4cfa09815ba959",
+  "type": "model.completed",
+  "at": "2026-08-13T00:51:58.275Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:30",
+  "confidence": "exact",
+  "data": {
+   "provider": "openai",
+   "model": "gpt-5.4-mini",
+   "usage": {
+    "input": 516,
+    "output": 135,
+    "cacheRead": 9088
+   },
+   "status": "completed",
+   "contextTokens": 9604,
+   "contextWindow": 258400
+  }
+ },
+ {
+  "id": "2a687fd4a3604d851c6c3a7cb5fb8269",
+  "type": "turn.ended",
+  "at": "2026-08-13T00:52:30.979Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:33",
+  "confidence": "exact",
+  "data": {
+   "close": "last-line"
+  }
+ },
+ {
+  "id": "a3f9c5d7f6e824f2738df0d498fd66cd",
+  "type": "agent.ended",
+  "at": "2026-08-13T00:52:30.979Z",
+  "agent": "agt_bd4babe0c96be8132235d5b3",
+  "ref": "codex:00000000-0000-4000-8000-000000000004:33",
+  "confidence": "exact",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "id": "880e8d3ef4e186d46ae4be124a1b3a01",
+  "type": "run.ended",
+  "at": "2026-08-13T00:52:30.979Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000004:33",
+  "confidence": "exact",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "id": "850bde6ef57f2a196c5d3cfcceca654f",
+  "type": "session.ended",
+  "at": "2026-08-13T00:52:30.979Z",
+  "agent": null,
+  "ref": "codex:00000000-0000-4000-8000-000000000004:33",
+  "confidence": "exact",
+  "data": {}
+ }
+]

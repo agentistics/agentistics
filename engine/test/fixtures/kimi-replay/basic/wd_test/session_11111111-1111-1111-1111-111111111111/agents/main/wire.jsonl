@@ -1,0 +1,11 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1700000000000}
+{"type":"turn.prompt","input":[{"type":"text","text":"<redacted>"}],"origin":{"kind":"user"},"time":1700000000100}
+{"type":"context.append_loop_event","event":{"type":"step.begin","uuid":"u1","turnId":"0","step":1},"time":1700000000200}
+{"type":"usage.record","model":"anthropic/claude-sonnet-5","usage":{"inputOther":100,"output":20,"inputCacheRead":5,"inputCacheCreation":3},"usageScope":"turn","time":1700000000300}
+{"type":"context.append_loop_event","event":{"type":"content.part","uuid":"u2","turnId":"0","step":1,"stepUuid":"u1","part":{"type":"text","text":"<redacted>"}},"time":1700000000400}
+{"type":"context.append_loop_event","event":{"type":"step.end","uuid":"u1","turnId":"0","step":1,"finishReason":"end_turn","usage":{"inputOther":100,"output":20,"inputCacheRead":5,"inputCacheCreation":3},"messageId":"chatcmpl-1"},"time":1700000000400}
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"c1","turnId":"1","step":2,"stepUuid":"u3","toolCallId":"call_1","name":"Write","args":{"path":"<redacted>","content":"<redacted>"}},"time":1700000000500}
+{"type":"context.append_loop_event","event":{"type":"tool.result","parentUuid":"c1","toolCallId":"call_1","result":{"output":"<redacted>"}},"time":1700000000600}
+{"type":"turn.ended","turnId":0,"reason":"completed","durationMs":600,"time":1700000000600}
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"c2","turnId":"1","step":3,"stepUuid":"u4","toolCallId":"call_2","name":"Bash","args":{"command":"<redacted>"}},"time":1700000000700}
+{"type":"context.append_loop_event","event":{"type":"tool.result","parentUuid":"c2","toolCallId":"call_2","result":{"output":"<redacted>","isError":true}},"time":1700000000800}
