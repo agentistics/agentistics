@@ -13,7 +13,7 @@ import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
   dismissStoredNotification, clearStoredNotifications, localViewer, type NotificationInput,
 } from './notifications-store'
-import { streamViaClaude, execCommand, ensureNayChat, ensureClaudeChat, CLAUDE_CHAT_DIR, type ChatMessage, type ChatAttachment } from './chat-tty'
+import { streamViaClaude, execCommand, ensureNayChat, type ChatMessage, type ChatAttachment } from './chat-tty'
 import { getChatDriver, chatHarnessStatus, chatDefaultModel } from './chat-drivers/index'
 import { modelCatalog } from './model-catalog'
 import { resolveChatModel } from './model-catalog-parse'
@@ -339,7 +339,6 @@ try { startVersionRecheck() } catch (err) { console.warn('[version] recheck fail
 // server itself had crashed. The message is what a reader can act on; the stack belongs to a bug
 // report, not to every boot.
 ensureNayChat(PORT).catch(err => console.warn('[nay-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
-ensureClaudeChat().catch(err => console.warn('[claude-chat] failed to initialize:', err instanceof Error ? err.message : String(err)))
 // THE MCP COMES UP WITH THE SERVER, for every assistant installed here — not only Claude (which
 // `ensureNayChat` registers) and not only once somebody opens a chat with that driver, which is when
 // codex/gemini/copilot used to be registered. Each registration launches THIS binary's own
@@ -3100,59 +3099,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    if (url.pathname === '/api/claude-chat' && req.method === 'POST') {
-      try {
-        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: string; sessionId?: string | null; thinkingBudget?: number; projectPath?: string; attachments?: ChatAttachment[] }
-        const { message, history = [], model: requestedModel, sessionId = null, thinkingBudget, projectPath, attachments } = body
-        // Same rule as /api/chat-tty: never hand an unvalidated value to the CLI's argv.
-        const model = resolveChatModel(requestedModel, await modelCatalog('claude'), await chatDefaultModel('claude'))
-        const enc = new TextEncoder()
-        const stream = new ReadableStream<Uint8Array>({
-          start(ctrl) {
-            streamViaClaude(
-              message,
-              history,
-              model,
-              (text) => {
-                ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ text })}\n\n`))
-              },
-              (tool) => {
-                ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ tool })}\n\n`))
-              },
-              () => {
-                ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ done: true })}\n\n`))
-                ctrl.close()
-              },
-              (err) => {
-                ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ error: err })}\n\n`))
-                ctrl.close()
-              },
-              (id) => {
-                ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ sessionId: id })}\n\n`))
-              },
-              sessionId,
-              { cwd: projectPath ?? CLAUDE_CHAT_DIR, thinkingBudget, attachments, signal: req.signal },
-            )
-          },
-        })
-        return new Response(stream, {
-          status: 200,
-          headers: {
-            ...CORS_HEADERS,
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-          },
-        })
-      } catch (err) {
-        const safe = safeError(err, { verbose: PROFILE === 'local' })
-        console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-    }
+    // POST /api/claude-chat — REMOVED. An older, Claude-only duplicate of /api/chat-tty that no
+    // client called once Nay became real sessions, and it spawned `claude` on the host with no
+    // capability-guard entry and no chat switch. It now falls through to the 404 like any unknown
+    // path; `claude-chat-removed.test.ts` pins that.
 
     if (url.pathname === '/api/exec' && req.method === 'POST') {
       try {
