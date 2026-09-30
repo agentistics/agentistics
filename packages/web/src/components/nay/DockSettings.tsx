@@ -23,7 +23,6 @@ import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
 import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
-import { Select } from '../../pages/settings/primitives'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
 import { Select } from '../../pages/settings/primitives'
 
