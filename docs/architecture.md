@@ -235,7 +235,7 @@ The members panel (`TeamMembers.tsx`, central Settings → Team) can **mint**, *
 ### The delivery board on a central — opted in one delivery at a time
 
 The board (`/tasks`) is per machine. A delivery reaches a central only when its owner opts it in —
-`Task.shared`, **absent reading as NOT shared**, the `chat-gate.ts` reading and deliberately not the
+`Task.shared`, **absent reading as NOT shared**, the strict opt-in reading and deliberately not the
 `shareMode` one — from the delivery's own screen or `agentop task share <ref>`. It is the one thing
 a member pushes that is free text by design, which is why it has a gate of its own on top of the
 connection's rules rather than riding inside them.

@@ -6,7 +6,7 @@
  *  - the EDGE MAGNET: whether an edge pulls the button in when it is dropped close to it (the
  *    stored field is still `snap`, so no saved choice is lost). The same on a phone as on a desktop;
  *  - putting the button back where it started;
- *  - the model a NEW Nay conversation starts with and the reply sound — the two chat options
+ *  - what a NEW Nay conversation starts with (assistant, model, effort) and the reply sound — the chat options
  *    that act on this widget directly.
  * Everything else about the chat stays in Settings -> Chat, which this links to rather than
  * copying: two places to change one setting is two places for them to disagree.
@@ -19,7 +19,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowUpRight, RotateCcw, Settings2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { useChatHarnesses } from '../../hooks/useChatHarnesses'
+import { useNayDefaults, useNayHarnesses, saveNayDefaults } from '../../hooks/useNayDefaults'
+import { normalizeChoice } from '../../lib/nayLaunch'
+import { NayLaunchFields } from './NayLaunchFields'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings } from '../../lib/sessionNotifications'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
@@ -47,8 +49,8 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const { harnesses } = useChatHarnesses()
-  const models = harnesses.find(h => h.id === 'claude')?.models ?? []
+  const harnesses = useNayHarnesses(pt ? 'pt' : 'en', open)
+  const defaults = useNayDefaults()
   const audioRef = useRef<AudioContext | null>(null)
 
   useEffect(() => {
@@ -70,7 +72,6 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
     findChatSound(id).play(audioRef.current, getNotificationSettings().soundVolume)
   }
 
-  const currentModel = chat.chatModel ?? models[0]?.id ?? ''
 
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'flex' }}>
@@ -139,18 +140,13 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
           </Section>
 
           <Section title={pt ? 'Conversas da Nay' : 'Nay conversations'}>
-            <Row label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
-              <div style={{ width: 156, flexShrink: 0 }} aria-label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
-                <Select
-                  value={currentModel}
-                  disabled={models.length === 0}
-                  placeholder={pt ? 'Carregando…' : 'Loading…'}
-                  searchPlaceholder={pt ? 'Buscar modelo…' : 'Search models…'}
-                  options={models.map(m => ({ value: m.id, label: m.label }))}
-                  onChange={v => { chat.setChatModel(v); putPreference({ chatModel: v }) }}
-                />
-              </div>
-            </Row>
+            <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{pt ? 'Novas conversas começam com' : 'New conversations start with'}</div>
+            {harnesses && defaults ? (
+              <NayLaunchFields layout="stack" pt={pt} harnesses={harnesses}
+                value={normalizeChoice(defaults, harnesses)} onChange={saveNayDefaults} />
+            ) : (
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando…' : 'Loading…'}</div>
+            )}
             <Row label={pt ? 'Som ao responder' : 'Sound on reply'}>
               <Switch on={chat.chatSoundEnabled} label={pt ? 'Som ao responder' : 'Sound on reply'} onToggle={() => {
                 const next = !chat.chatSoundEnabled

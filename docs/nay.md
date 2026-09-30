@@ -23,11 +23,22 @@ engine:
   recognises `~/.agentistics/nay-chat`; there is no extra registry field.
 - **It runs every check a session start makes** (harness on PATH, memory admission, launch
   settling), because it is `runFleetSpawn` with the directory fixed.
-- **The model** is the one chosen in **Settings → Chat**, or the CLI's own default when none is set.
-- **It is filed under the "Nay" session group**, which is created on first use
-  (`planNayFiling`). A failed filing never turns a started session into a reported failure.
+- **What it starts with** — the assistant, model and reasoning effort — comes from the dock's
+  create picker, which is pre-filled with the defaults in **Settings → Chat** (`chatHarness` /
+  `chatModel` / `chatEffort`). `sessions/nay-launch.ts` decides: an explicit choice the machine
+  cannot run is refused in words, a saved default that no longer applies is dropped to the CLI's own
+  default, a saved model or effort never rides onto a different harness, and only the flags each CLI
+  prints are offered (`spawn-spec.ts`). Nay's instructions are written as `CLAUDE.md`, `AGENTS.md`
+  and `GEMINI.md`, so every CLI that can host it reads them. The conversation's header shows what it
+  runs on ("Claude Code · Opus 4.8 · high").
+- **It is filed under "Nay › Ativas" while it runs and "Nay › Inativas" once it ends.** The server
+  creates the folders on first use and re-files on every fleet read (`reconcileNayFolders`,
+  `planNayPlacement`), so ending a conversation — from the chat's "Encerrar", the row menu, the
+  cockpit or a reboot — moves it on its own. A failed filing never turns a started session into a
+  reported failure.
 - **Gates.** `/api/fleet/nay` rides `/api/fleet`'s `localShell` guard (`capability-guard.ts`) and
-  additionally requires the chat switch (`chatAllowed`, Settings → Chat). So Nay is unavailable on a
+  additionally requires the chat switch (`chatAllowed`, Settings → Chat; ON unless turned off,
+  owner decision 2026-09-29). So Nay is unavailable on a
   central and on any profile where host power is off.
 
 The old one-shot `claude --print` path (`/api/chat-tty` driving `TtyChat.tsx`) is gone for Nay; the

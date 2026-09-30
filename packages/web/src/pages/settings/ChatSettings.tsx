@@ -1,10 +1,10 @@
 /**
  * Chat settings — the switch that decides whether this machine serves the chat at all, plus (once
- * it is on) the notification sound and the model it drives.
+ * it is on) the notification sound and what new Nay conversations start with.
  *
- * It is off until someone turns it on. Chat spawns an assistant CLI on this host, which is the most
- * powerful thing the server does; before it was opt-in, a machine installed for its metrics also
- * shipped a shell nobody had chosen.
+ * It is ON unless someone turns it off (owner decision, 2026-09-29 — see `chat-gate.ts`). Chat
+ * spawns an assistant CLI on this host, which is the most powerful thing the server does, so the
+ * switch stays here and an explicit "off" is always respected.
  *
  * The switch can only NARROW what the exposure profile already permits (`chat-gate.ts`). When the
  * profile has revoked `localChat` the row says so and stays disabled — offering a toggle that the
@@ -19,9 +19,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Bot, Volume2, VolumeX, Zap } from 'lucide-react'
+import { Volume2, VolumeX } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { useChatHarnesses } from '../../hooks/useChatHarnesses'
+import { useNayDefaults, useNayHarnesses, saveNayDefaults } from '../../hooks/useNayDefaults'
+import { normalizeChoice } from '../../lib/nayLaunch'
+import { NayLaunchFields } from '../../components/nay/NayLaunchFields'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings } from '../../lib/sessionNotifications'
 import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
@@ -34,9 +36,8 @@ export default function ChatSettings() {
   const [capable, setCapable] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const [chatModel, setChatModel] = useState<string | null>(null)
-  const { harnesses } = useChatHarnesses()
-  const claudeModels = harnesses.find(h => h.id === 'claude')?.models ?? []
+  const harnesses = useNayHarnesses(pt ? 'pt' : 'en')
+  const nayDefaults = useNayDefaults()
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState(DEFAULT_CHAT_SOUND_ID)
 
@@ -65,8 +66,8 @@ export default function ChatSettings() {
           .then(r => (r.ok ? r.json() : {}) as Promise<{ capabilities?: { localChat?: boolean } }>)
           .catch(() => ({}) as { capabilities?: { localChat?: boolean } }),
       ])
-      setEnabled(prefs.chatEnabled === true)
-      setChatModel(prefs.chatModel ?? null)
+      // Absent reads as ON (owner decision 2026-09-29, `chat-gate.ts`); only an explicit false is off.
+      setEnabled(prefs.chatEnabled !== false)
       setChatSoundEnabled(prefs.chatSoundEnabled ?? true)
       setChatSoundId(prefs.chatSoundId ?? DEFAULT_CHAT_SOUND_ID)
       // Undefined on an older server, which had no capability model — treat as permitted, the same
@@ -116,15 +117,6 @@ export default function ChatSettings() {
     }).catch(() => {})
   }, [previewSound, ctx])
 
-  const selectModel = useCallback((id: string) => {
-    setChatModel(id)
-    ctx.setChatModel(id)
-    void fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatModel: id }),
-    }).catch(() => {})
-  }, [ctx])
 
   return (
     <>
@@ -134,8 +126,8 @@ export default function ChatSettings() {
         label={pt ? 'Habilitar o chat' : 'Enable chat'}
         sub={capable
           ? (pt
-            ? 'Desligado por padrão. Ligar permite que o painel execute a CLI de um assistente nesta máquina.'
-            : 'Off by default. Turning it on lets the dashboard run an assistant CLI on this machine.')
+            ? 'Ligado por padrão. Permite que o painel execute a CLI de um assistente nesta máquina; desligue para fechar essa porta.'
+            : 'On by default. It lets the dashboard run an assistant CLI on this machine; turn it off to close that door.')
           : (pt
             ? 'Indisponível: o perfil de exposição desta instância não permite executar nada no host.'
             : 'Unavailable: this instance’s exposure profile does not allow running anything on the host.')}
@@ -161,7 +153,7 @@ export default function ChatSettings() {
       {enabled === true && (
         <>
           <Divider />
-          <SectionHeader label={pt ? 'Som e modelo' : 'Sound and model'} />
+          <SectionHeader label={pt ? 'Som' : 'Sound'} />
 
           <PrefRow
             label={pt ? 'Som de notificação' : 'Notification sound'}
@@ -198,43 +190,21 @@ export default function ChatSettings() {
               })}
             </div>
           )}
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500, marginBottom: 8 }}>
-            {pt ? 'Modelo do chat' : 'Chat model'}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {claudeModels.length === 0 && (
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                {enabled
-                  ? (pt ? 'Carregando os modelos que o Claude Code oferece nesta máquina…' : 'Loading the models Claude Code offers on this machine…')
-                  : (pt ? 'Ative o chat para escolher o modelo.' : 'Turn the chat on to choose its model.')}
-              </div>
-            )}
-            {claudeModels.map(m => {
-              const active = (chatModel ?? claudeModels[0]?.id) === m.id
-              return (
-                <button key={m.id} onClick={() => selectModel(m.id)} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 7,
-                  border: active ? '1.5px solid var(--anthropic-orange)' : '1px solid var(--border)',
-                  background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-                  cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s', fontFamily: 'inherit',
-                }}>
-                  <Bot size={14} color={active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)'} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--anthropic-orange)' : 'var(--text-primary)' }}>{m.label}</div>
-                    {m.label !== m.id && (
-                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1, fontFamily: 'var(--font-mono, monospace)' }}>{m.id}</div>
-                    )}
-                  </div>
-                  {active && <Zap size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />}
-                </button>
-              )
-            })}
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>
+          <Divider />
+          <SectionHeader label={pt ? 'Novas conversas da Nay' : 'New Nay conversations'} />
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 10 }}>
             {pt
-              ? 'A lista é a que o próprio Claude Code oferece à sua conta, lida nesta máquina.'
-              : 'This is the list Claude Code itself offers your account, read on this machine.'}
+              ? 'O assistente, o modelo e o esforço de raciocínio com que toda conversa nova da Nay começa. O botão "Nova conversa" do chat já vem com estes valores, e dá para trocar ali mesmo. Só aparecem as opções que a CLI de cada assistente aceita.'
+              : 'The assistant, model and reasoning effort every new Nay conversation starts with. The chat\'s "New conversation" picker comes filled with these, and can change them right there. Only the options each assistant\'s CLI accepts are offered.'}
           </div>
+          {!harnesses || !nayDefaults ? (
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando os assistentes desta máquina…' : 'Loading the assistants on this machine…'}</div>
+          ) : harnesses.length === 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Nenhum assistente pode ser iniciado nesta máquina.' : 'No assistant can be started on this machine.'}</div>
+          ) : (
+            <NayLaunchFields layout="rows" pt={pt} harnesses={harnesses}
+              value={normalizeChoice(nayDefaults, harnesses)} onChange={saveNayDefaults} />
+          )}
         </>
       )}
     </>

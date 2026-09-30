@@ -120,7 +120,7 @@ preferences and `intervalMs` is the ONE place that clamps it, so a hand-edited f
 five-minute backup past a validation living elsewhere).
 
 **Absent reads as OFF.** A machine must never start writing gigabytes because it was upgraded — the
-same rule `chat-gate.ts` applies to the local shell.
+same strict opt-in rule the remote-sessions consent uses.
 
 **`custom` anchors to `--at HOUR` just like `daily`/`weekly` do — a fixed grid, not a rolling
 interval off the last run.** `every 8h from 09h` is 09/17/01, every day, forever: reconnecting late
