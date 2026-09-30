@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
 import { SCROLLABLE_SLACK, shouldResetDocumentScroll } from './viewportReset'
 
 /** A workspace that cannot scroll, displaced by the caret scroll, with nothing focused. */
@@ -32,4 +32,23 @@ test('nothing to undo is not a reason to write', () => {
   // Writing anyway would fight a rubber-band mid-gesture.
   expect(shouldResetDocumentScroll({ ...stuck, scrollY: 0 })).toBe(false)
   expect(shouldResetDocumentScroll({ ...stuck, scrollY: -20 })).toBe(false)
+})
+
+import { shouldNudgeViewport } from './viewportReset'
+describe('shouldNudgeViewport', () => {
+  const base = { editableFocused: false, scrollHeight: 844, clientHeight: 844, offsetTop: 0, innerHeight: 844, tallestInnerHeight: 844 }
+  test('a visual viewport left panned with scrollY already 0 is nudged back', () => {
+    expect(shouldNudgeViewport({ ...base, offsetTop: 180 })).toBe(true)
+  })
+  test('a layout viewport left short after the keyboard is nudged back', () => {
+    expect(shouldNudgeViewport({ ...base, innerHeight: 520 })).toBe(true)
+    expect(shouldNudgeViewport({ ...base, innerHeight: 830 })).toBe(false)
+  })
+  test('never while a field has the caret, and never on a page that really scrolls', () => {
+    expect(shouldNudgeViewport({ ...base, offsetTop: 180, editableFocused: true })).toBe(false)
+    expect(shouldNudgeViewport({ ...base, offsetTop: 180, scrollHeight: 2400 })).toBe(false)
+  })
+  test('nothing displaced, nothing to do', () => {
+    expect(shouldNudgeViewport(base)).toBe(false)
+  })
 })

@@ -42,7 +42,7 @@ import { FiltersBar } from './components/FiltersBar'
 import { NotificationToasts } from './components/NotificationToasts'
 import { BetaTag } from './components/BetaTag'
 import { KeyboardProbe, keyboardProbeOn } from './components/KeyboardProbe'
-import { shouldResetDocumentScroll } from './lib/viewportReset'
+import { shouldNudgeViewport, shouldResetDocumentScroll } from './lib/viewportReset'
 import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
@@ -1952,15 +1952,29 @@ export default function AppLayout() {
      * the three guards; this only asks, on whichever signals do arrive, and again a moment later
      * because iOS keeps adjusting through a dismissal.
      */
+    let tallestInner = window.innerHeight
     const settle = () => {
       const el = document.documentElement
-      if (!shouldResetDocumentScroll({
+      const focused = editable(document.activeElement)
+      if (!focused && window.innerHeight > tallestInner) tallestInner = window.innerHeight
+      if (shouldResetDocumentScroll({
         scrollY: window.scrollY,
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
-        editableFocused: editable(document.activeElement),
-      })) return
-      window.scrollTo(0, 0)
+        editableFocused: focused,
+      })) { window.scrollTo(0, 0); return }
+      // The two displacements that leave `scrollY` at 0 — a visual viewport still panned, or an
+      // installed app's layout viewport still short — which the reset above never sees. A
+      // `scrollTo(0, 0)` on a document that cannot scroll moves nothing the reader owns and makes
+      // iOS recompute the viewport. See `shouldNudgeViewport`.
+      if (shouldNudgeViewport({
+        editableFocused: focused,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        offsetTop: vv ? vv.offsetTop : 0,
+        innerHeight: window.innerHeight,
+        tallestInnerHeight: tallestInner,
+      })) window.scrollTo(0, 0)
     }
     const settleSoon = () => { for (const ms of [0, 160, 420, 900]) window.setTimeout(settle, ms) }
 
@@ -4400,8 +4414,10 @@ export default function AppLayout() {
         // browser tab — see `--safe-top`.
         ...(isMobile ? { paddingTop: 'var(--safe-top)' } : {}),
         zIndex: 100,
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
+        // NO backdrop blur. The background is opaque, so the blur could never show through it; on
+        // iOS it is still composited, and with this bar running up behind the status bar it read as
+        // a blurred band across the top of every page. A blur belongs where something shows through
+        // (the composer's ground), not under a solid colour.
         boxShadow: scrolled ? '0 4px 24px rgba(0,0,0,0.25)' : 'none',
         borderBottom: '1px solid var(--border)',
         transition: 'box-shadow 0.25s ease',

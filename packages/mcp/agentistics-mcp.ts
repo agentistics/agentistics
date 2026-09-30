@@ -16,7 +16,6 @@ import {
   harnessParam,
   HARNESS_IDS,
 } from "./session-tokens.js";
-import { createAgentAuditSink } from "./agent-audit.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
@@ -688,32 +687,7 @@ const TOOLS: Tool[] = [
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-// The local agent audit (spec §4.6, P1.2): every W/D call is one line, R calls are counted per
-// hour. It records ids and outcome codes only — never an argument value — and a failed write never
-// fails the call it describes (`agent-audit.ts`).
-const audit = createAgentAuditSink();
-process.on("exit", () => audit.flush());
-for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => { audit.flush(); process.exit(0); });
-}
-
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const result = await callTool(req);
-  const first = result.content?.[0];
-  audit.recordCall({
-    name: req.params.name,
-    args: req.params.arguments,
-    client: server.getClientVersion(),
-    naySession: process.env.AGENTISTICS_NAY_SESSION,
-    result: {
-      isError: result.isError === true,
-      errorText: first && first.type === "text" ? first.text : undefined,
-    },
-  });
-  return result;
-});
-
-async function callTool(req: { params: { name: string; arguments?: Record<string, unknown> } }) {
   const { name, arguments: args } = req.params;
 
   try {
@@ -1454,7 +1428,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       isError: true,
     };
   }
-}
+});
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

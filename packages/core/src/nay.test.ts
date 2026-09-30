@@ -99,3 +99,12 @@ describe('planNayFiling', () => {
     expect(named(second.groups, 'conv-2')).toBe('Nay/Ativas')
   })
 })
+
+import { nayTitle } from './nay'
+describe('nayTitle', () => {
+  test('day and month in the reader\'s order, local clock', () => {
+    const d = new Date(2026, 8, 29, 7, 5)
+    expect(nayTitle(d, 'pt')).toBe('Nay · 29/09 07:05')
+    expect(nayTitle(d, 'en')).toBe('Nay · 09/29 07:05')
+  })
+})
