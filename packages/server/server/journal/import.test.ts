@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 import { createClaudeReplay } from '../integrations/claude'
 import { createCodexReplay } from '../integrations/codex'
-import type { HarnessReplay } from '../integrations/types'
+import { INTEGRATIONS, type HarnessReplay } from '../integrations/types'
 import { openJournal } from './journal'
 import { runImport, type ImportOptions } from './import'
 import type { ImportReport } from './import-plan'
@@ -56,6 +56,9 @@ function opts(w: { store: string; journalPath: string }, extra: Partial<ImportOp
     harnesses: ['claude', 'codex'],
     journalPath: w.journalPath,
     storeDir: w.store,
+    // The registry is the ENGINE's and is handed in; the journal imports none. The replays below
+    // override it with fixture-rooted ones, and it supplies the store half's entity ids.
+    integrations: INTEGRATIONS,
     replays: {
       claude: createClaudeReplay({ projectsDir: CLAUDE_PROJECTS, settledMs: 0 }),
       codex: createCodexReplay({ sessionsDir: CODEX_SESSIONS, settledMs: 0 }),

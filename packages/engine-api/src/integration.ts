@@ -34,6 +34,16 @@ export interface HarnessReplay<E extends EngineEvent = EngineEvent> {
   replay(source: ReplaySource, cursor: ReplayCursor): Promise<ReplayBatch<E>>
 }
 
+/**
+ * The entity-id derivations a harness's replay uses, so a conversation whose own files are gone can
+ * still be imported from the consolidate store under the SAME ids its replay would have minted.
+ */
+export interface HarnessEntityIds {
+  sessionIdOf(conversationId: string): string
+  runIdOf(conversationId: string): string
+  mainAgentIdOf(conversationId: string): string
+}
+
 /** Following a live harness as it writes. */
 export interface HarnessLive<E extends EngineEvent = EngineEvent> {
   /** Starts delivering events; the returned function stops it. */
@@ -46,6 +56,8 @@ interface IntegrationBase<E extends EngineEvent> {
   version: string
   capabilities: Readonly<Record<string, EngineCapabilityState>>
   live?: HarnessLive<E>
+  /** Absent = the store import skips this harness's orphaned conversations, and says so. */
+  entityIds?: HarnessEntityIds
 }
 
 export type HarnessIntegration<E extends EngineEvent = EngineEvent> = IntegrationBase<E> &

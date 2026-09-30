@@ -28,6 +28,8 @@ import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
+import { RESERVED_PREFIXES } from '@agentistics/engine-api'
+import { engine, engineStatus, loadEngine } from './engine/load'
 import { hostGate, currentHostAllowlist, startHostAllowlistRefresh, badRequestTarget } from './host-allow'
 
 /**
@@ -331,6 +333,11 @@ if (TEAM_CENTRAL) {
 import('./team-uploader').then(m => m.startUploader()).catch(err => console.error('[team-uploader] failed to start:', err))
 startAgentClient()
 maybeSpawnWatcher()
+// The engine is judged at boot so a refused or failed one is logged when the server starts, not on
+// the first request that happens to reach a reserved prefix. `loadEngine` never throws.
+void loadEngine().then(st => {
+  if (st.present) console.log(`[engine] ${st.manifest.name} ${st.manifest.version} (api ${st.manifest.apiVersion})`)
+})
 // Periodic best-effort re-check so a long-running daemon surfaces new releases
 // without a page reload (broadcasts an SSE notification when an update appears).
 try { startVersionRecheck() } catch (err) { console.warn('[version] recheck failed to start:', String(err)) }
@@ -1666,26 +1673,39 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    // THE NATIVE RUNTIME'S PROVIDERS (UI.1) — `/api/provider`, `/api/provider/:id`, and its `/test`
-    // and `/models` sub-resources, all matched inside `provider-web.ts` (sub-resources explicitly,
-    // so an id can never be read as `test`). `capability-guard.ts` has already required
-    // `localShell`; the handler refuses a central on its own too. A PUT body carries a key, so an
-    // unexpected failure is rendered NON-verbose regardless of profile — the `/api/backup/github/
-    // setup` rule.
-    if (url.pathname === '/api/provider' || url.pathname.startsWith('/api/provider/')) {
-      try {
-        const { handleProviderRequest } = await import('./provider-web')
-        const out = await handleProviderRequest(req, url.pathname, clientIp, { dev: !SERVE_STATIC })
-        if (out !== null) return json(out.body, out.status)
-      } catch (err) {
-        const safe = safeError(err, { verbose: false })
-        console.error(safe.logLine)
-        return json({
-          code: safe.body.error,
-          sentence: `an unexpected error occurred — see the server log (ref ${safe.body.ref}).`,
-          ref: safe.body.ref,
-        }, 500)
+    // THE ENGINE'S ROUTES (`engine/load.ts`, `@agentistics/engine-api`). Every one lives under a
+    // RESERVED prefix and was checked at load against this repository's own guard table, and it runs
+    // here — AFTER the capability guard, the auth gate and the Host allowlist, BEFORE the SPA
+    // fallback — exactly where the in-tree routes it replaced ran. The provider routes are its first
+    // tenant: a PUT there carries a key, so the engine renders its own failures non-verbose. With no
+    // engine (a community build, or one switched off or refused at load) a reserved prefix answers
+    // 404 `engine-absent` rather than falling through to the SPA's index.html.
+    {
+      const reserved = RESERVED_PREFIXES.find(p => url.pathname === p || url.pathname.startsWith(p + '/'))
+      if (reserved) {
+        await loadEngine()
+        const live = engine()
+        if (live) {
+          for (const route of live.routes) {
+            if (url.pathname !== route.prefix && !url.pathname.startsWith(route.prefix + '/')) continue
+            const res = await route.handle(req, url, { clientIp })
+            if (res === null) continue
+            const headers = new Headers(res.headers)
+            for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
+            return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+          }
+          return json({ error: 'not_found' }, 404)
+        }
+        return json({ error: 'engine-absent', engine: engineStatus() }, 404)
       }
+    }
+
+    // WHICH BUILD THIS IS — `GET /api/engine` (authenticated; not in AUTH_PUBLIC). The web and the
+    // VS Code extension read it once per load to decide whether an engine feature exists here, and
+    // to SAY which build it is when it does not.
+    if (url.pathname === '/api/engine' && req.method === 'GET') {
+      await loadEngine()
+      return json(engineStatus())
     }
 
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see

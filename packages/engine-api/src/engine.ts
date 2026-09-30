@@ -25,6 +25,12 @@ export interface EngineManifest {
   }
 }
 
+/** What the host knows about a request that the `Request` itself does not carry. */
+export interface EngineRequestContext {
+  /** The peer address the host's own rate limits and audit use. */
+  clientIp: string
+}
+
 /** The host serves every engine route AFTER its capability guard, auth gate and Host allowlist. */
 export interface EngineRoute {
   /** Must be one of `RESERVED_PREFIXES`; the host refuses anything else at load. */
@@ -32,7 +38,7 @@ export interface EngineRoute {
   /** The capability the host's own guard table holds for `prefix` — never a new one. */
   capability: CapabilityName
   /** `null` = not mine; the host answers 404. */
-  handle(req: Request, url: URL): Promise<Response | null>
+  handle(req: Request, url: URL, ctx?: EngineRequestContext): Promise<Response | null>
 }
 
 /** The only prefixes an engine route may live under. There is no field for a public route. */

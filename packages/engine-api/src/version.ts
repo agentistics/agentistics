@@ -5,7 +5,12 @@
  * optional member or a new reserved prefix is a minor bump.
  */
 
-export const ENGINE_API_VERSION = '1.0.0'
+/**
+ * 1.1.0 — an integration may declare its `entityIds` (the derivations the journal's store import
+ * shares with its replay), and a route's `handle` receives the request's `EngineRequestContext`.
+ * Both optional, so an engine built against 1.0 still loads.
+ */
+export const ENGINE_API_VERSION = '1.1.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
