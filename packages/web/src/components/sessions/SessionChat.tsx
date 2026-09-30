@@ -68,6 +68,8 @@ import {
 } from '../../lib/atMenu'
 import { addReply, composeReply, markExcerpt, orderReplies, quoteAll, replyAuthor, replyPreview, type ReplyTarget } from '../../lib/replyQuote'
 import { pendingEchoes } from '@agentistics/core'
+import { SendNowControl, type SendNowRun } from './SendNowControl'
+
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
 } from '../../lib/composerStore'
@@ -105,6 +107,9 @@ import { SessionPickModal } from './SessionPickModal'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
+
+/** How long a successful "send now" keeps its sentence on screen. */
+const SEND_NOW_RESULT_MS = 6000
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -1531,16 +1536,25 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * SEND NOW — submit everything claude is holding in ITS OWN queue. It is for the WHOLE queue (a
    * queued message 1 goes out with message 2), and the button says so when there is more than one.
    */
-  const [sendingNow, setSendingNow] = useState(false)
+  const [sendNowRun, setSendNowRun] = useState<SendNowRun | null>(null)
   const showSendNow = sendNowShown({
     harness: session.harness, working, queuedCount: queued.length, dialogOpen: blocked,
-  })
+  }) && sendNowRun?.kind !== 'running'
   const sendNow = useCallback(async () => {
-    setSendingNow(true)
+    setSendNowRun({ kind: 'running', startedAt: Date.now() })
     const out = await act({ id: session.id, action: 'sendNow' })
-    setSendingNow(false)
-    if (out.ok) { setNotice(null); nudgeChat.current() } else setNotice(out.message)
+    // The server's sentence is read off the pane — "delivered", "interrupted to deliver", or why not.
+    setSendNowRun({ kind: 'done', ok: out.ok, message: out.message })
+    if (out.ok) nudgeChat.current()
   }, [act, session.id])
+  // A success says its sentence and goes; a failure stays until it is dismissed or retried.
+  useEffect(() => {
+    if (sendNowRun?.kind !== 'done' || !sendNowRun.ok) return
+    const t = setTimeout(() => setSendNowRun(null), SEND_NOW_RESULT_MS)
+    return () => clearTimeout(t)
+  }, [sendNowRun])
+  // Another session's result must not be shown over this one.
+  useEffect(() => { setSendNowRun(null) }, [session.id])
   /** Selection mode's "Reply (N)" exists only where the composer can send. */
   const canReplySelection = canPrompt
   // Publishes the selection to the header — see `chatSelection.ts`. Declared here, after
@@ -2005,30 +2019,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           {/* SEND NOW, under the LAST queued bubble: the queue is one group and this acts on the
               whole of it. Only while claude is working with something held (`sendNowShown`) — idle,
               nothing is held, and elsewhere the keystroke does not exist. */}
-          {showSendNow && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => void sendNow()}
-                disabled={sendingNow}
-                // A pill keeps its natural height; `.ag-tap` projects the 44px touch target around
-                // it on a phone instead of painting it (see index.css).
-                className="ag-tap"
-                title={sendNowHint(queued.length, pt)}
-                aria-label={sendNowHint(queued.length, pt)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  minHeight: 28, padding: '0 12px',
-                  borderRadius: 999, border: '1px solid var(--anthropic-orange)',
-                  background: 'transparent', color: 'var(--anthropic-orange)',
-                  fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
-                  cursor: sendingNow ? 'default' : 'pointer', opacity: sendingNow ? 0.6 : 1,
-                }}
-              >
-                <Send size={12} style={{ flexShrink: 0 }} />
-                {sendingNow ? (pt ? 'Enviando…' : 'Sending…') : sendNowLabel(queued.length, pt)}
-              </button>
-            </div>
-          )}
+          <SendNowControl
+            offered={showSendNow}
+            count={queued.length}
+            run={sendNowRun}
+            pt={pt}
+            onSend={() => void sendNow()}
+            onDismiss={() => setSendNowRun(null)}
+          />
 
           {/* `live` (the screen read off the terminal frame) is deliberately NOT rendered here any
               more — it used to show as a full-size bubble, and a CLI's own screen carries its own
