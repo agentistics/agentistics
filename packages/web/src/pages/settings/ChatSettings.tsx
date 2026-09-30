@@ -26,8 +26,10 @@ import { normalizeChoice } from '../../lib/nayLaunch'
 import { NayLaunchFields } from '../../components/nay/NayLaunchFields'
 import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
-import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
+import { AUTO_DISMISS_OPTIONS_SEC, NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
+import { pushDemoAlert } from '../../lib/nayNotifyStore'
+import { NayMotionSettings } from '../../components/nay/NayMotionSettings'
 
 export default function ChatSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -221,7 +223,11 @@ export default function ChatSettings() {
  */
 function NayAnimationSetting({ pt }: { pt: boolean }) {
   const [value, setValue] = useState<NayAnimation>(() => getNotificationSettings().nayAnimation)
-  useEffect(() => subscribeNotificationSettings(() => setValue(getNotificationSettings().nayAnimation)), [])
+  const [autoDismiss, setAutoDismiss] = useState(() => getNotificationSettings().autoDismissSec)
+  useEffect(() => subscribeNotificationSettings(() => {
+    setValue(getNotificationSettings().nayAnimation)
+    setAutoDismiss(getNotificationSettings().autoDismissSec)
+  }), [])
   const lang = pt ? 'pt' : 'en'
   return (
     <>
@@ -230,6 +236,7 @@ function NayAnimationSetting({ pt }: { pt: boolean }) {
         label={pt ? 'Como o botão avisa' : 'How the button tells you'}
         sub={`${NAY_ANIMATION_HINT[value][lang]}. ${pt ? 'Com movimento reduzido no sistema, qualquer escolha vira um fade.' : 'With reduced motion on, every choice becomes a fade.'}`}
       >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 180 }}>
           <Select
             value={value}
@@ -241,7 +248,37 @@ function NayAnimationSetting({ pt }: { pt: boolean }) {
             options={NAY_ANIMATIONS.map(a => ({ value: a, label: NAY_ANIMATION_LABEL[a][lang] }))}
           />
         </div>
+        {/* The very demo card Settings → Notificações pops, so a style is previewed where it is picked. */}
+        <button type="button" onClick={() => pushDemoAlert(lang)}
+          style={{
+            padding: '7px 12px', minHeight: 34, borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12.5,
+            fontWeight: 600, cursor: 'pointer',
+          }}>
+          {pt ? 'Testar' : 'Test'}
+        </button>
+        </div>
       </PrefRow>
+
+      <PrefRow
+        label={pt ? 'A notificação some sozinha após' : 'The notification goes away after'}
+        sub={pt ? 'Fica enquanto você usa o cartão, e sempre fica registrada no sino.' : 'It stays while you use the card, and is always kept in the bell.'}
+      >
+        <div style={{ minWidth: 140 }}>
+          <Select value={String(autoDismiss)} onChange={v => {
+            setAutoDismiss(Number(v))
+            saveNotificationSettings({ ...getNotificationSettings(), autoDismissSec: Number(v) })
+          }} options={AUTO_DISMISS_OPTIONS_SEC.map(n => ({ value: String(n), label: n === 0 ? (pt ? 'Nunca' : 'Never') : `${n} s` }))} />
+        </div>
+      </PrefRow>
+
+      <SectionHeader label={pt ? 'Movimento do botão Nay' : 'Nay button motion'} />
+      {/* Three independent choices, the same component the dock's gear shows (owner, 2026-09-30). */}
+      <NayMotionSettings pt={pt} includeButton row={(label, hint, control) => (
+        <PrefRow key={label} label={label} sub={hint}>
+          <div style={{ minWidth: 200 }}>{control}</div>
+        </PrefRow>
+      )} />
     </>
   )
 }

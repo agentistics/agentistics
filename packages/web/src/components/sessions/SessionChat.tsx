@@ -1120,6 +1120,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * one. `at` may still be undefined for a purely local entry that has not been through a poll yet,
    * and the bubble then shows no age rather than inventing one.
    */
+  /**
+   * Texts a successful "send now" reported as handed over — `nothing` included, which means the
+   * session had ALREADY taken them. They leave the screen at once instead of waiting for the next
+   * transcript read or for the server to drop its copy.
+   */
+  const deliveredRef = useRef(new Set<string>())
+  const [deliveredTick, setDeliveredTick] = useState(0)
+  useEffect(() => { deliveredRef.current = new Set(); setDeliveredTick(n => n + 1) }, [session.id])
   const queued = useMemo(() => {
     const out: { text: string; at?: number }[] = []
     const server = new Map((payload?.pending ?? []).map(p => [p.text, p.at]))
@@ -1135,8 +1143,19 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       seen.add(p.text)
       out.push({ text: p.text, at: p.at })
     }
-    return out
-  }, [echo, payload?.pending])
+    // IN THE ORDER THEY WERE SENT (owner report, 2026-09-30: the second message was drawn first).
+    // A stable sort on the hand-over time; one with no time yet is the newest and goes last.
+    const when = (q: { text: string; at?: number }) => q.at ?? echoSeen.current.get(q.text) ?? Number.MAX_SAFE_INTEGER
+    out.sort((a, b) => when(a) - when(b))
+    // RECONCILED AGAINST THE TRANSCRIPT, both halves. Only the local echo used to be retired when
+    // its text showed up as a user turn; the SERVER's copy was drawn until the server dropped it,
+    // so a message the session had already taken in stayed "delivered — not read yet" and kept
+    // "Send now (N)" on offer. The same containment rule decides for both (`pendingEchoes`).
+    const userTurns = turns.filter(t => t.role === 'user').map(t => t.text)
+    const still = new Set(pendingEchoes(out.map(q => q.text), userTurns))
+    return out.filter(q => still.has(q.text) && !deliveredRef.current.has(q.text))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [echo, payload?.pending, turns, deliveredTick])
 
   /** A clock, so an ageing echo ages on screen instead of freezing at its first render. */
   const [now, setNow] = useState(() => Date.now())
@@ -1537,6 +1556,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * queued message 1 goes out with message 2), and the button says so when there is more than one.
    */
   const [sendNowRun, setSendNowRun] = useState<SendNowRun | null>(null)
+  const queuedRef = useRef(queued)
+  queuedRef.current = queued
   const showSendNow = sendNowShown({
     harness: session.harness, working, queuedCount: queued.length, dialogOpen: blocked,
   }) && sendNowRun?.kind !== 'running'
@@ -1545,8 +1566,15 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     const out = await act({ id: session.id, action: 'sendNow' })
     // The server's sentence is read off the pane — "delivered", "interrupted to deliver", or why not.
     setSendNowRun({ kind: 'done', ok: out.ok, message: out.message })
-    if (out.ok) nudgeChat.current()
-  }, [act, session.id])
+    if (out.ok) {
+      // Delivered — or, when the server answered that nothing was queued, delivered before the
+      // press. Either way nothing is pending any more: clear the bubbles and the count now.
+      for (const q of queuedRef.current) deliveredRef.current.add(q.text)
+      editEcho(() => [])
+      setDeliveredTick(n => n + 1)
+      nudgeChat.current()
+    }
+  }, [act, session.id, editEcho])
   // A success says its sentence and goes; a failure stays until it is dismissed or retried.
   useEffect(() => {
     if (sendNowRun?.kind !== 'done' || !sendNowRun.ok) return

@@ -214,3 +214,22 @@ function guard(r: { x: number; y: number; w: number; h: number }, grow: DockPlac
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
+
+/**
+ * A transform that changes nothing, written as nothing. `renderDock` always writes one (`scale(1)`
+ * at rest, plus the style's skew or rotation), and ANY transform on an element makes it the
+ * containing block of its `position: fixed` descendants — which is exactly what the `Select`
+ * popovers inside the dock and the notification card are. So a frame at rest clears it, and a
+ * popover opened after a drag lands where it belongs instead of offset by the dock's corner.
+ */
+export function restingTransform(t: string): string {
+  const fns = [...t.matchAll(/(\w+)\(([^)]*)\)/g)]
+  const identity = fns.every(([, fn, args]) => {
+    const nums = args!.split(',').map(a => parseFloat(a))
+    if (fn === 'scale') return nums.every(n => Math.abs(n - 1) < 1e-3)
+    if (fn === 'skewX' || fn === 'skewY' || fn === 'rotate') return nums.every(n => Math.abs(n) < 1e-3)
+    if (fn === 'translate3d' || fn === 'translate') return nums.every(n => Math.abs(n) < 0.5)
+    return false
+  })
+  return identity ? '' : t
+}

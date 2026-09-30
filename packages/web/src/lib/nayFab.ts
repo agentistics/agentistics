@@ -39,7 +39,21 @@ export interface NayFabPrefs {
   snap: boolean
   /** Top-left corner in CSS pixels, or null for the default bottom-right place. */
   pos: Vec | null
+  /**
+   * How the open DOCK follows the button, and how a NOTIFICATION CARD does — each its own choice,
+   * combinable with the button's (owner, 2026-09-30). ABSENT means "inherit the button's style",
+   * which is what every browser had before the choice existed, so nothing changes until somebody
+   * picks one. Read them through `dockStyleOf` / `cardStyleOf`, never directly.
+   */
+  dockStyle?: NayFabStyle
+  cardStyle?: NayFabStyle
 }
+
+/** The style the open dock follows the button with: its own choice, else the button's. */
+export function dockStyleOf(p: NayFabPrefs): NayFabStyle { return p.dockStyle ?? p.style }
+
+/** The style a notification card follows the button with: its own choice, else the button's. */
+export function cardStyleOf(p: NayFabPrefs): NayFabStyle { return p.cardStyle ?? p.style }
 
 export const DEFAULT_NAY_FAB_PREFS: NayFabPrefs = { style: DEFAULT_NAY_FAB_STYLE, snap: true, pos: null }
 
@@ -58,6 +72,8 @@ export function parseNayFabPrefs(raw: unknown): NayFabPrefs {
     style: isNayFabStyle(o.style) ? o.style : DEFAULT_NAY_FAB_STYLE,
     snap: typeof o.snap === 'boolean' ? o.snap : DEFAULT_NAY_FAB_PREFS.snap,
     pos,
+    ...(isNayFabStyle(o.dockStyle) ? { dockStyle: o.dockStyle } : {}),
+    ...(isNayFabStyle(o.cardStyle) ? { cardStyle: o.cardStyle } : {}),
   }
 }
 

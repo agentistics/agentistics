@@ -9,7 +9,7 @@ import { HARNESS_LABELS } from './harness'
 import { clampVolume } from './soundVolume'
 import { findNaySound, isNaySoundId, type NaySoundId } from './notificationSounds'
 import {
-  alertKey, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
+  alertKey, DEFAULT_AUTO_DISMISS_SEC, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
   type NayAlertKind, type NayAnimation,
 } from './nayNotify'
 import { observeFleet, pushAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
@@ -66,6 +66,8 @@ export interface NotificationSettings {
   doNotDisturb: boolean
   /** Minutes a waiting session may go unopened before the Nay button says so. `0` = never. */
   staleAfterMin: number
+  /** Seconds before a card leaves by itself; `0` never. See `AUTO_DISMISS_OPTIONS_SEC`. */
+  autoDismissSec: number
   /** How the Nay button delivers a card. Chosen in the chat settings; see `nayNotify.ts`. */
   nayAnimation: NayAnimation
   /**
@@ -105,6 +107,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   staleAfterMin: DEFAULT_STALE_MIN,
   nayAnimation: DEFAULT_NAY_ANIMATION,
   systemWhenHidden: true,
+  autoDismissSec: DEFAULT_AUTO_DISMISS_SEC,
 }
 
 /**
@@ -123,6 +126,7 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
     if (!isSoundPreset(sounds[k])) sounds[k] = DEFAULT_NOTIFICATION_SETTINGS.eventSounds[k]
   }
   const stale = Number(parsed.staleAfterMin)
+  const autoDismiss = Number(parsed.autoDismissSec)
   return {
     ...DEFAULT_NOTIFICATION_SETTINGS,
     ...parsed,
@@ -133,6 +137,7 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
     staleAfterMin: Number.isFinite(stale) && stale >= 0 ? stale : DEFAULT_STALE_MIN,
     nayAnimation: parseNayAnimation(parsed.nayAnimation),
     systemWhenHidden: parsed.systemWhenHidden !== false,
+    autoDismissSec: Number.isFinite(autoDismiss) && autoDismiss >= 0 ? autoDismiss : DEFAULT_AUTO_DISMISS_SEC,
   }
 }
 

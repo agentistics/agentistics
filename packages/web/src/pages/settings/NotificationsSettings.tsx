@@ -16,8 +16,8 @@ import {
   type NotifyEvent,
 } from '../../lib/sessionNotifications'
 import { NAY_SOUNDS } from '../../lib/notificationSounds'
-import { alertKey, formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
-import { pushAlert } from '../../lib/nayNotifyStore'
+import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
+import { pushDemoAlert } from '../../lib/nayNotifyStore'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { Bell, Volume2, VolumeX, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
 
@@ -97,12 +97,7 @@ export default function NotificationsSettings() {
   function handleTestSoundAndNotification() {
     // The Nay button's own card, as a DEMO: it carries no real session, so it offers only snooze and
     // dismiss — a reply or an approval sent from a test would reach nothing, or the wrong thing.
-    const now = Date.now()
-    pushAlert({
-      key: alertKey('turn', 'demo', now), kind: 'turn', sessionId: 'demo', demo: true,
-      name: pt ? 'Sessão de exemplo' : 'Example session', harness: 'claude', model: 'claude-opus-5-5',
-      sinceMs: now - 3 * 60_000, sinceKnown: true,
-    })
+    pushDemoAlert(pt ? 'pt' : 'en')
     triggerSessionNotification({
       title: pt ? 'Notificação de Teste' : 'Test Notification',
       body: pt

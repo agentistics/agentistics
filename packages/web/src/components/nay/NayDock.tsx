@@ -34,8 +34,8 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
-import { followSettled, initFollow, landImpulse, renderDock, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
-import { DockSettings } from './DockSettings'
+import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
 import { setOpenSession } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
@@ -48,7 +48,8 @@ import { launchSummary, normalizeChoice, type NayLaunchChoice } from '../../lib/
 import { HARNESS_LABELS } from '../../lib/harness'
 import { NayLaunchFields } from './NayLaunchFields'
 import { naySections, NAY_SECTION_ORDER, NAY_SECTION_TEXT, naySectionOf, type NaySectionId } from '../../lib/nayList'
-import { clampFabPos, defaultFabPos, FAB_SIZE, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS, type NayFabPrefs } from '../../lib/nayFab'
+import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '../../lib/nayFab'
+import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -58,8 +59,6 @@ const ORANGE_DIM = 'var(--anthropic-orange-dim)'
 const SIZE_KEY = 'agentistics-nay-dock-size'
 const WINDOWS_KEY = 'agentistics-nay-dock-windows'
 const TAB_KEY = 'agentistics-nay-dock-tab'
-/** The chat button's place and look — per browser, never the shared preferences file. */
-const FAB_KEY = 'agentistics-nay-fab'
 /** How long a just-started session may be missing from the fleet before we stop saying it is coming. */
 const ARRIVAL_BUDGET_MS = 20_000
 
@@ -115,8 +114,16 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   }, [pathname, inSession])
   const shownInSession = useNayFabShownInSession()
   const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
-  const [fabPrefs, setFabPrefs] = useState<NayFabPrefs>(() => readStored(FAB_KEY, parseNayFabPrefs, DEFAULT_NAY_FAB_PREFS))
-  useEffect(() => { writeStored(FAB_KEY, fabPrefs) }, [fabPrefs])
+  // The button's place and its three motion choices live in a shared store: Settings → Chat edits
+  // them too, and two copies of one setting disagree the moment either changes.
+  const fabPrefs = useNayFabPrefs()
+  /** The chat window's settings screen replaces the conversation while it is open (owner, 2026-09-30). */
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  // Opening a session (a notification's Reply, a row) or closing the window leaves the settings screen.
+  useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
+  const setFabPrefs = setNayFabPrefs
+  const dockStyle = dockStyleOf(fabPrefs)
   useEffect(() => { writeStored(TAB_KEY, tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
@@ -329,51 +336,69 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const echoRefs = useRef<(HTMLDivElement | null)[]>([])
   const follow = useRef<{ st: DockFollowState | null; raf: number; last: number; landed: number; frame: DockFrame | null }>({ st: null, raf: 0, last: 0, landed: 0, frame: null })
   const followOn = dock.open && !isMobile
+  /*
+   * THE FRAME IS A TRANSFORM, NEVER A LAYOUT WRITE. Moving the dock by `left`/`top` every frame made
+   * the browser re-lay-out the whole panel (a full SessionChat) sixty times a second, which is the
+   * stutter the owner saw after #821. React keeps the RESTING place in `left`/`top`; the loop only
+   * writes a `translate3d` offset from it (composited, no layout), and touches width, height and
+   * opacity only when they actually change. `base` is React's current resting place, refreshed on
+   * every render, so the offset is always measured from what the element really has.
+   */
+  const base = useRef({ left: 0, top: 0 })
+  const written = useRef({ w: -1, h: -1, o: -1 })
   const writeFrame = useCallback((fr: DockFrame | null) => {
     const el = panelRef.current
     if (!el || !fr) return
-    el.style.left = `${fr.left}px`; el.style.top = `${fr.top}px`
-    el.style.width = `${fr.w}px`; el.style.height = `${fr.h}px`
-    el.style.transformOrigin = fr.origin; el.style.transform = fr.transform
-    el.style.opacity = String(fr.opacity)
+    const b = base.current, w = written.current
+    el.style.transformOrigin = fr.origin
+    el.style.transform = restingTransform(`translate3d(${fr.left - b.left}px, ${fr.top - b.top}px, 0) ${fr.transform}`)
+    if (fr.w !== w.w) { el.style.width = `${fr.w}px`; w.w = fr.w }
+    if (fr.h !== w.h) { el.style.height = `${fr.h}px`; w.h = fr.h }
+    if (fr.opacity !== w.o) { el.style.opacity = String(fr.opacity); w.o = fr.opacity }
     echoRefs.current.forEach((e, i) => {
       if (!e) return
       const ec = fr.echoes[i]
       e.style.opacity = ec ? String(ec.opacity) : '0'
-      if (ec) { e.style.left = `${ec.left}px`; e.style.top = `${ec.top}px`; e.style.width = `${fr.w}px`; e.style.height = `${fr.h}px` }
+      if (ec) {
+        e.style.transform = `translate3d(${ec.left}px, ${ec.top}px, 0)`
+        if (e.style.width !== `${fr.w}px`) { e.style.width = `${fr.w}px`; e.style.height = `${fr.h}px` }
+      }
     })
   }, [])
-  useLayoutEffect(() => { if (followOn) writeFrame(follow.current.frame) })
+  base.current = { left: place.left, top: place.top }
+  useLayoutEffect(() => { if (followOn) { written.current = { w: -1, h: -1, o: -1 }; writeFrame(follow.current.frame) } })
   useEffect(() => {
     const f = follow.current
     if (!followOn) { f.st = null; f.frame = null; return }
     const reduced = (() => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } })()
+    // Measured ONCE, and again only on a resize: nothing inside the frame loop reads the layout.
+    let vp = viewport()
     const btnNow = () => {
       const l = getFabLive()
-      const vp = viewport()
       const p = l ? { x: l.x, y: l.y } : clampFabPos(fabPrefs.pos ?? defaultFabPos(vp), vp)
       return { rect: { x: p.x, y: p.y, w: FAB_SIZE, h: FAB_SIZE }, speed: l?.speed ?? 0, l }
     }
     const b0 = btnNow()
-    if (!f.st) { f.st = initFollow(b0.rect, size, viewport()); f.landed = b0.l?.landed ?? 0 }
+    if (!f.st) { f.st = initFollow(b0.rect, size, vp); f.landed = b0.l?.landed ?? 0 }
     const frame = (now: number) => {
       const st = f.st
       if (!st) { f.raf = 0; return }
       const dt = Math.min(0.05, (now - f.last) / 1000); f.last = now
       const b = btnNow()
-      if (b.l && b.l.landed !== f.landed) { f.landed = b.l.landed; landImpulse(st, fabPrefs.style, reduced, b.l.landSpeed) }
-      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, size, viewport(), fabPrefs.style, reduced, dt / 4)
-      f.frame = renderDock(st, b.rect, viewport(), fabPrefs.style, reduced, b.speed)
+      if (b.l && b.l.landed !== f.landed) { f.landed = b.l.landed; landImpulse(st, dockStyle, reduced, b.l.landSpeed) }
+      for (let i = 0; i < 4; i++) stepFollow(st, b.rect, size, vp, dockStyle, reduced, dt / 4)
+      f.frame = renderDock(st, b.rect, vp, dockStyle, reduced, b.speed)
       writeFrame(f.frame)
       f.raf = followSettled(st) && b.speed < 1 ? 0 : requestAnimationFrame(frame)
     }
     const kick = () => { if (!f.raf) { f.last = performance.now(); f.raf = requestAnimationFrame(frame) } }
     kick()
     const off = subscribeFabLive(kick)
-    window.addEventListener('resize', kick)
-    return () => { off(); window.removeEventListener('resize', kick); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
-  }, [followOn, size, fabPrefs.style, fabPrefs.pos, writeFrame])
-  const echoStyle = followOn && (fabPrefs.style === 'trail' || fabPrefs.style === 'comet')
+    const onResize = () => { vp = viewport(); kick() }
+    window.addEventListener('resize', onResize)
+    return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
+  }, [followOn, size, dockStyle, fabPrefs.pos, writeFrame])
+  const echoStyle = followOn && (dockStyle === 'trail' || dockStyle === 'comet')
 
   const panel = dock.open && (
     <div
@@ -390,7 +415,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
           }
         : {
-            position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h,
+            position: 'fixed', left: place.left, top: place.top, width: place.w, height: place.h, willChange: 'transform',
             zIndex: 400, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
             boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
@@ -436,17 +461,20 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
             {tabButton('sessions', pt ? 'Sessões' : 'Sessions')}
           </div>
         </>)}
-        <DockSettings
-          pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
-          onLeave={() => setDock(d => ({ ...d, open: false }))}
-        />
+        <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
         <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
           <X size={15} />
         </IconButton>
       </header>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {panelSession
+        {settingsOpen ? (
+          <DockSettingsScreen
+            pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
+            onLeave={() => setDock(d => ({ ...d, open: false }))}
+            onBack={closeSettings}
+          />
+        ) : panelSession
           ? renderSession(panelSession, next => setDock(d => ({ ...d, panelSession: next })))
           : tab === 'nay'
             ? (
@@ -495,11 +523,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
-      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} />
+      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} />
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
         <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
-          position: 'fixed', zIndex: 399, pointerEvents: 'none', opacity: 0,
+          position: 'fixed', left: 0, top: 0, zIndex: 399, pointerEvents: 'none', opacity: 0, willChange: 'transform, opacity',
           border: '1px solid var(--anthropic-orange)', borderRadius: 10,
         }} />
       ))}
