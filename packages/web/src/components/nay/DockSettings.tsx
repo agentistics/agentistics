@@ -23,6 +23,7 @@ import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings } from '../../lib/sessionNotifications'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
+import { Select } from '../../pages/settings/primitives'
 
 type ChatCtx = Pick<AppContext, 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
 
@@ -53,7 +54,12 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   useEffect(() => {
     if (!open) return
     const onDown = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) } }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // An open Select inside closes itself first; only a second Escape closes this popover.
+      if (rootRef.current?.querySelector('[role="listbox"]')) return
+      e.stopPropagation(); setOpen(false)
+    }
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey, true) }
@@ -134,16 +140,16 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
 
           <Section title={pt ? 'Conversas da Nay' : 'Nay conversations'}>
             <Row label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
-              <select
-                aria-label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}
-                value={currentModel}
-                disabled={models.length === 0}
-                onChange={e => { chat.setChatModel(e.target.value); putPreference({ chatModel: e.target.value }) }}
-                style={selectStyle}
-              >
-                {models.length === 0 && <option value="">{pt ? 'Carregando…' : 'Loading…'}</option>}
-                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
+              <div style={{ width: 156, flexShrink: 0 }} aria-label={pt ? 'Modelo das novas conversas' : 'Model for new conversations'}>
+                <Select
+                  value={currentModel}
+                  disabled={models.length === 0}
+                  placeholder={pt ? 'Carregando…' : 'Loading…'}
+                  searchPlaceholder={pt ? 'Buscar modelo…' : 'Search models…'}
+                  options={models.map(m => ({ value: m.id, label: m.label }))}
+                  onChange={v => { chat.setChatModel(v); putPreference({ chatModel: v }) }}
+                />
+              </div>
             </Row>
             <Row label={pt ? 'Som ao responder' : 'Sound on reply'}>
               <Switch on={chat.chatSoundEnabled} label={pt ? 'Som ao responder' : 'Sound on reply'} onToggle={() => {
@@ -154,14 +160,13 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
               }} />
             </Row>
             {chat.chatSoundEnabled && (
-              <select
-                aria-label={pt ? 'Qual som' : 'Which sound'}
-                value={chat.chatSoundId}
-                onChange={e => { chat.setChatSoundId(e.target.value); putPreference({ chatSoundId: e.target.value }); preview(e.target.value) }}
-                style={{ ...selectStyle, width: '100%' }}
-              >
-                {CHAT_SOUNDS.map(s => <option key={s.id} value={s.id}>{s.label[pt ? 'pt' : 'en']}</option>)}
-              </select>
+              <div aria-label={pt ? 'Qual som' : 'Which sound'}>
+                <Select
+                  value={chat.chatSoundId}
+                  options={CHAT_SOUNDS.map(s => ({ value: s.id, label: s.label[pt ? 'pt' : 'en'] }))}
+                  onChange={v => { chat.setChatSoundId(v); putPreference({ chatSoundId: v }); preview(v) }}
+                />
+              </div>
             )}
           </Section>
 
@@ -178,11 +183,6 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
     </div>
   )
 }
-
-const selectStyle = {
-  fontFamily: 'inherit', fontSize: 12, padding: '4px 6px', borderRadius: 6, maxWidth: 150,
-  border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)',
-} as const
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
