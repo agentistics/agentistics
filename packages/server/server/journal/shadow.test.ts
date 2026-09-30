@@ -14,6 +14,7 @@ import type { HarnessReplay } from '../integrations/types'
 import type { JournalStatus } from './types'
 import { openJournal } from './journal'
 import { canSkip, claudeStamps, createShadow, SETTLE_MARGIN_MS, type ShadowStatusFile } from './shadow'
+import { buildHasEngine } from '../engine/load'
 
 let root = ''
 let seq = 0
@@ -411,7 +412,15 @@ describe('the real flag and the real data.ts call', () => {
     )
     expect(r.code).toBe(0)
     const file = JSON.parse(readFileSync(join(data, 'journal.db.status.json'), 'utf8')) as ShadowStatusFile
-    expect(file.sinceBoot.counters.written).toBeGreaterThan(0)
-    expect(file.runs).toBe(1)
+    if (buildHasEngine()) {
+      expect(file.sinceBoot.counters.written).toBeGreaterThan(0)
+      expect(file.runs).toBe(1)
+      expect(file.off).toBeUndefined()
+    } else {
+      // The community build: the journal is on and fed by nothing. It says so, and opens nothing.
+      expect(file.off).toBe('no-integrations')
+      expect(file.runs).toBe(0)
+      expect(existsSync(join(data, 'journal.db'))).toBe(false)
+    }
   }, 60_000)
 })

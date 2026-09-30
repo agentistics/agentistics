@@ -1953,6 +1953,34 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
 - **Consent gate**: `ArchiveConsentModal.tsx` blocks first load (links the official doc) — primary Yes(consolidate)/No(off) + an "Advanced" expander revealing full-copy. `App.tsx` early-returns the modal when `archiveChoice === null`; `chooseArchive(mode)` PUTs `archiveMode`. Env `AGENTISTICS_ARCHIVE=0` hard-disables everything; `AGENTISTICS_ARCHIVE_DIR` overrides the archive path.
 - **No false metrics**: dedup by `session_id` (live always wins) + the `supplementStatsCache` guard (`day <= lastComputedDate` skip) mean revived old sessions show in lists/agent-metrics but never inflate aggregate totals. Boot + the PUT `/api/preferences` handler warm a build (persists the store) and `full` also runs `fullSync()`.
 
+## The engine slot — the host reaches the engine through ONE door
+
+`@agentistics/engine-api` is the contract; `packages/server/server/engine-slot.generated.ts`
+(gitignored, written by `scripts/engine-slot.ts`) says which engine this build carries, and
+`engine/load.ts` is the only module that reads it (`engine()` / `engineIntegrations()` /
+`engineStatus()`). `bun run stub` writes the slot when it is missing and `build:assets` rewrites it;
+`bun run engine:slot:null` writes the NULL slot, which is the community build. Rules:
+
+- **The journal imports no integration.** `shadowIngest`, `runImport` and `agentop journal import`
+  are HANDED the engine's registry (`HarnessIntegration.entityIds` feeds the store half). An empty
+  registry is `off` / `no-integrations`: the journal is on and empty, health says so as INFO
+  (`journal-no-integrations`), and `agentop journal status` prints the same sentence. It must never
+  read as a fault — it is the normal state of a community build.
+- **`code` / `provider` / `ingest` are recognised by every build** (`engine/cli.ts`). An engine that
+  offers the verb runs it; otherwise the verb answers in a sentence and exits 2 — a verb this build
+  lacks is not an unknown command. `--help` lists all three, marking the absent ones
+  `(official build)`, and `--version` prints an `engine …` line.
+- **Engine routes live only under `RESERVED_PREFIXES`**, which stay in the PUBLIC
+  `capability-guard.ts` table whether or not an engine is loaded; `loadEngine` refuses a route whose
+  capability differs from that table's. They run after the guard, the auth gate and the Host
+  allowlist; with no engine a reserved prefix answers 404 `engine-absent`. `GET /api/engine`
+  (authenticated) returns `EngineStatus`.
+- **A failed or mismatched engine never takes the product down** — it is logged and the host runs as
+  a community build. `AGENTISTICS_ENGINE=0` switches a present engine off.
+- `engine/in-tree.ts` is TRANSITIONAL: the integrations and the provider verb still live in this tree
+  and are packaged behind the contract there, so nothing else in the host imports them. When that
+  code moves out, the file goes and the generator falls back to the null slot on its own.
+
 ## Security rules
 
 A central can be published on the internet. The model is documented in **`docs/security.md`**

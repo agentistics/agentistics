@@ -22,8 +22,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:api": "bun run --cwd packages/server server/index.ts",
-    "cli": "bun packages/server/bin/cli.ts",
+    "dev:api": "bun packages/server/scripts/engine-slot.ts --if-missing && bun run --cwd packages/server server/index.ts",
+    "cli": "bun packages/server/scripts/engine-slot.ts --if-missing && bun packages/server/bin/cli.ts",
     "dev:ui": "bun run --cwd packages/web dev",
     "dev": "bun run concurrently \"bun run dev:api\" \"bun run dev:ui\"",
     "dev:central": "AGENTISTICS_TEAM_CENTRAL=1 bun --watch --env-file=central.env packages/server/server/index.ts",
@@ -32,7 +32,9 @@
     "build": "bun run --cwd packages/web build",
     "bin": "bun build:binary && mkdir -p ~/.local/bin && cp -f ./release/agentop ~/.local/bin/.agentop.new && mv -f ~/.local/bin/.agentop.new ~/.local/bin/agentop",
     "restart:all": "bun run bin && agentop restart all --rebuild",
-    "build:assets": "bun run packages/server/scripts/embed-dist.ts",
+    "build:assets": "bun run packages/server/scripts/embed-dist.ts && bun run engine:slot",
+    "engine:slot": "bun run packages/server/scripts/engine-slot.ts",
+    "engine:slot:null": "bun run packages/server/scripts/engine-slot.ts --null",
     "build:vscode": "bun run --cwd packages/vscode build",
     "package:vscode": "bun run --cwd packages/vscode package",
     "build:binary": "bun run build && bun run build:assets && bun build --compile packages/server/bin/cli.ts --outfile ./release/agentop",

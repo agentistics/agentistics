@@ -15,6 +15,10 @@
 import type { TakeoverRefusal } from './sessions/takeover'
 import type { SendNowOutcome } from '@agentistics/core'
 import type { RateLimitAbsentReason, RateLimitResourceKind } from '@agentistics/runtime'
+import type { EngineAbsentReason, EngineCommand, EngineStatus } from '@agentistics/engine-api'
+
+/** A verb an engine may answer. Recognised by every build, so a missing one is SAID, not unknown. */
+export type EngineVerb = EngineCommand['verb']
 
 /*
  *
@@ -25,6 +29,33 @@ import type { RateLimitAbsentReason, RateLimitResourceKind } from '@agentistics/
  */
 
 export type CliLang = 'en' | 'pt'
+
+/** Where the official build is downloaded. */
+export const OFFICIAL_BUILD_URL = 'https://github.com/agentistics/agentistics/releases'
+
+/** What each engine verb DOES, completing "`agentop <verb>` …". */
+const ENGINE_VERB_WHAT: Record<CliLang, Record<EngineVerb, string>> = {
+  en: {
+    code: 'runs the native harness',
+    provider: "manages the native harness's provider keys",
+    ingest: 'feeds live events from your harnesses into the journal',
+  },
+  pt: {
+    code: 'roda o harness nativo',
+    provider: 'gerencia as chaves de provedor do harness nativo',
+    ingest: 'alimenta o journal com eventos ao vivo dos seus harnesses',
+  },
+}
+
+/** The engine verbs every build recognises, in the order the help lists them. */
+export const ENGINE_VERBS: readonly EngineVerb[] = ['code', 'provider', 'ingest']
+
+/** English one-liners for `agentop --help`, used when this build's engine does not provide a verb. */
+export const ENGINE_VERB_HELP: Record<EngineVerb, string> = {
+  code: 'Run the native harness',
+  provider: 'Manage a provider API key for the native harness',
+  ingest: 'Feed live events from your harnesses into the journal',
+}
 
 /** A subject that opens a sentence (`the server on :47291` → `The server on :47291`). */
 const cap = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
@@ -521,6 +552,14 @@ export interface CliStrings {
   rateLimitRetryAfter: (seconds: string) => string
   rateLimitDropped: (n: number) => string
   rateLimitAbsent: (reason: RateLimitAbsentReason, dropped: number) => string
+
+  // The engine (`engine/load.ts`). A verb this build lacks is a different sentence from a verb that
+  // does not exist, and each reason an engine is absent is its own sentence.
+  engineVerbAbsent: (verb: EngineVerb, reason: EngineAbsentReason) => string
+  /** The engine is loaded and simply offers no such command. */
+  engineVerbNotProvided: (verb: EngineVerb) => string
+  /** The `agentop --version` line. */
+  engineVersionLine: (status: EngineStatus) => string
 }
 
 const EN: CliStrings = {
@@ -938,6 +977,25 @@ const EN: CliStrings = {
       case 'unparseable': return `not read — ${dropped} rate-limit header${dropped === 1 ? ' was' : 's were'} present and none could be parsed`
     }
   },
+  engineVerbAbsent: (verb, reason) => {
+    const what = ENGINE_VERB_WHAT.en[verb]
+    switch (reason) {
+      case 'community-build': return `\`agentop ${verb}\` ${what}, which is in the official build of agentop and not in this one. Download it from ${OFFICIAL_BUILD_URL}, or keep using the harnesses you already have — every metric works without it.`
+      case 'disabled': return `\`agentop ${verb}\` ${what}. This binary carries the engine, but AGENTISTICS_ENGINE=0 switched it off — unset it to use this command.`
+      case 'api-mismatch': return `\`agentop ${verb}\` ${what}, but this binary's engine was built for a different contract version and was not loaded — a release defect; upgrading agentop fixes it. Everything else keeps working.`
+      case 'load-failed': return `\`agentop ${verb}\` ${what}, but this binary's engine failed to load (the reason is in the log). Everything else keeps working.`
+    }
+  },
+  engineVerbNotProvided: verb => `\`agentop ${verb}\` ${ENGINE_VERB_WHAT.en[verb]}, and the engine in this build does not provide it yet.`,
+  engineVersionLine: st => {
+    if (st.present) return `engine ${st.manifest.version} (api ${st.manifest.apiVersion})`
+    switch (st.reason) {
+      case 'community-build': return 'engine: none — community build'
+      case 'disabled': return 'engine: off — AGENTISTICS_ENGINE=0'
+      case 'api-mismatch': return 'engine: not loaded — contract version mismatch'
+      case 'load-failed': return 'engine: not loaded — it failed to load (see the log)'
+    }
+  },
 }
 
 const PT: CliStrings = {
@@ -1339,6 +1397,25 @@ const PT: CliStrings = {
       case 'unknown-format': return 'não lido — não há formato documentado de cabeçalho de limite de taxa para este provedor'
       case 'no-headers': return 'não informado — a resposta não trouxe cabeçalho de limite de taxa'
       case 'unparseable': return `não lido — ${dropped} ${dropped === 1 ? 'cabeçalho de limite de taxa presente, ilegível' : 'cabeçalhos de limite de taxa presentes, nenhum legível'}`
+    }
+  },
+  engineVerbAbsent: (verb, reason) => {
+    const what = ENGINE_VERB_WHAT.pt[verb]
+    switch (reason) {
+      case 'community-build': return `\`agentop ${verb}\` ${what}, que está no build oficial do agentop e não neste. Baixe em ${OFFICIAL_BUILD_URL}, ou continue usando os harnesses que você já tem — todas as métricas funcionam sem ele.`
+      case 'disabled': return `\`agentop ${verb}\` ${what}. Este binário traz o engine, mas AGENTISTICS_ENGINE=0 o desligou — remova essa variável para usar este comando.`
+      case 'api-mismatch': return `\`agentop ${verb}\` ${what}, mas o engine deste binário foi construído para outra versão do contrato e não foi carregado — um defeito de release; atualizar o agentop resolve. Todo o resto continua funcionando.`
+      case 'load-failed': return `\`agentop ${verb}\` ${what}, mas o engine deste binário falhou ao carregar (o motivo está no log). Todo o resto continua funcionando.`
+    }
+  },
+  engineVerbNotProvided: verb => `\`agentop ${verb}\` ${ENGINE_VERB_WHAT.pt[verb]}, e o engine deste build ainda não oferece esse comando.`,
+  engineVersionLine: st => {
+    if (st.present) return `engine ${st.manifest.version} (api ${st.manifest.apiVersion})`
+    switch (st.reason) {
+      case 'community-build': return 'engine: nenhum — build da comunidade'
+      case 'disabled': return 'engine: desligado — AGENTISTICS_ENGINE=0'
+      case 'api-mismatch': return 'engine: não carregado — versão de contrato incompatível'
+      case 'load-failed': return 'engine: não carregado — falhou ao carregar (veja o log)'
     }
   },
 }

@@ -91,6 +91,8 @@ export type JournalDisabledReason =
   | 'db-schema-too-new'
   /** Opening succeeded but the schema could not be created or migrated. */
   | 'migrate-failed'
+  /** This build carries no integration to feed the journal from (a community build). Not a fault. */
+  | 'no-integrations'
 
 export interface JournalCounters {
   /** Rows written since this process opened the journal. */

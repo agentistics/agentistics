@@ -28,3 +28,8 @@ if (!existsSync(out)) {
   )
   process.stdout.write(`created type stub: packages/server/server/embedded-dist.generated.ts\n`)
 }
+
+// The engine slot (scripts/engine-slot.ts) is gitignored for the same reason. Written only when it is
+// missing: a slot somebody generated on purpose (`--null`, an engine checkout) is left alone.
+const slot = Bun.spawnSync(['bun', join(SERVER_PKG, 'scripts', 'engine-slot.ts'), '--if-missing'], { stdout: 'inherit', stderr: 'inherit' })
+if (slot.exitCode !== 0) process.exit(slot.exitCode ?? 1)

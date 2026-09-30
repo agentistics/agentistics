@@ -79,6 +79,11 @@ export interface JournalReport {
   sinceBoot: JournalSinceBoot | null
   /** `null` = no differential has been run. */
   differential: JournalDifferentialSummary | null
+  /**
+   * `true` when nothing feeds the journal: the writing process said so in its status file, or this
+   * build carries no engine (or has it switched off). The normal state of a community build.
+   */
+  noIntegrations: boolean
 }
 
 export interface JournalCliDeps {
@@ -96,6 +101,8 @@ export interface JournalCliDeps {
   statusPath?: string
   /** Default `process.kill(pid, 0)`. Injected so a test can decide who is alive. */
   alive?: (pid: number) => boolean
+  /** Default: whether this build's engine slot holds an engine (`engine/load.ts`). */
+  buildHasEngine?: () => boolean
 }
 
 function pidAlive(pid: number): boolean {
@@ -118,6 +125,17 @@ export function readSinceBoot(path: string, alive: (pid: number) => boolean): Jo
     const out: JournalSinceBoot = { counters: raw.sinceBoot.counters }
     if (raw.sinceBoot.rejectedByReason) out.rejectedByReason = raw.sinceBoot.rejectedByReason
     return out
+  } catch {
+    return null
+  }
+}
+
+/** The writing process's `off` reason, when it is alive and reported one. */
+export function readWriterOff(path: string, alive: (pid: number) => boolean): string | null {
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { v?: unknown; pid?: unknown; off?: unknown }
+    if (raw.v !== 1 || typeof raw.pid !== 'number' || !alive(raw.pid)) return null
+    return typeof raw.off === 'string' ? raw.off : null
   } catch {
     return null
   }
@@ -155,6 +173,7 @@ export async function collectJournalReport(deps: JournalCliDeps = {}): Promise<J
     flag: env.AGENTISTICS_JOURNAL ?? null,
     sinceBoot: null,
     differential: null,
+    noIntegrations: false,
   }
   if (fsType !== undefined) report.fsType = fsType
 
@@ -167,7 +186,14 @@ export async function collectJournalReport(deps: JournalCliDeps = {}): Promise<J
     present = false
   }
   report.present = present
-  report.sinceBoot = readSinceBoot(deps.statusPath ?? `${path}.status.json`, deps.alive ?? pidAlive)
+  const statusPath = deps.statusPath ?? `${path}.status.json`
+  report.sinceBoot = readSinceBoot(statusPath, deps.alive ?? pidAlive)
+  report.noIntegrations = readWriterOff(statusPath, deps.alive ?? pidAlive) === 'no-integrations'
+    || !(await (async () => {
+      if (deps.buildHasEngine) return deps.buildHasEngine()
+      const { buildHasEngine, engineDisabled } = await import('./engine/load')
+      return buildHasEngine() && !engineDisabled(env)
+    })())
   if (!present) return report
 
   // The file exists: open it to read status + stats (no event is ever appended), and always close
@@ -190,6 +216,10 @@ export async function collectJournalReport(deps: JournalCliDeps = {}): Promise<J
   return report
 }
 
+/** The one sentence for a journal nothing feeds. Information, never a fault. */
+export const NO_INTEGRATIONS_TEXT =
+  'this build has no integration to feed the journal — every surface keeps working off its existing data.'
+
 const DISABLED_REASON_TEXT: Record<JournalDisabledReason, string> = {
   'network-filesystem': 'its directory is on a network filesystem, where WAL is not safe — the journal refuses to open there.',
   'no-sqlite': 'bun:sqlite could not be loaded (this is not a Bun runtime).',
@@ -197,6 +227,7 @@ const DISABLED_REASON_TEXT: Record<JournalDisabledReason, string> = {
   'wal-unavailable': 'SQLite answered with a journal mode other than WAL on this filesystem.',
   'db-schema-too-new': 'the file was written by a newer agentop; this build will not write into it.',
   'migrate-failed': 'the file opened, but its schema could not be created or migrated.',
+  'no-integrations': NO_INTEGRATIONS_TEXT,
 }
 
 function pathKindText(kind: ReportedPathKind, fsType?: string): string {
@@ -228,6 +259,7 @@ export function renderJournalStatus(r: JournalReport): string {
   lines.push(`Journal: ${r.path}`)
   lines.push(`  Path: ${pathKindText(r.pathKind, r.fsType)}`)
   lines.push(`  AGENTISTICS_JOURNAL (this shell): ${r.flag ?? '(unset)'}`)
+  if (r.noIntegrations) lines.push(`  Feeder: none — ${NO_INTEGRATIONS_TEXT}`)
   lines.push('')
 
   if (!r.present) {
@@ -336,7 +368,10 @@ export async function runJournal(argv: string[], deps?: JournalCliDeps): Promise
  * report on stdout. Exit 0 when it ran (failures are REPORTED, by reason), 130 when interrupted,
  * 1 on a usage error or a journal that cannot be opened.
  */
-export async function runJournalImport(argv: string[], deps: { run?: typeof import('./journal/import').runImport } = {}): Promise<number> {
+export async function runJournalImport(
+  argv: string[],
+  deps: { run?: typeof import('./journal/import').runImport; integrations?: import('./journal/shadow').JournalRegistry } = {},
+): Promise<number> {
   const { parseImportArgs, renderImportReport } = await import('./journal/import-plan')
   const parsed = parseImportArgs(argv)
   if (!parsed.ok) {
@@ -345,6 +380,13 @@ export async function runJournalImport(argv: string[], deps: { run?: typeof impo
   }
   const args = parsed.args
   const run = deps.run ?? (await import('./journal/import')).runImport
+  // The integrations are the ENGINE's; the journal imports none. A community build replays nothing
+  // and the report says so per harness.
+  const integrations = deps.integrations ?? await (async () => {
+    const { loadEngine, engineIntegrations } = await import('./engine/load')
+    await loadEngine()
+    return engineIntegrations()
+  })()
   const controller = new AbortController()
   let signals = 0
   const onSigint = () => {
@@ -358,6 +400,7 @@ export async function runJournalImport(argv: string[], deps: { run?: typeof impo
   try {
     const result = await run({
       harnesses: args.harnesses,
+      integrations,
       ...(args.from !== undefined ? { from: args.from } : {}),
       dryRun: args.dryRun,
       ...(args.batchSize !== undefined ? { batchSize: args.batchSize } : {}),

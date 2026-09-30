@@ -49,10 +49,9 @@ import { readFileSync, statSync } from 'node:fs'
 import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
-import { JOURNAL_ENABLED, JOURNAL_STATUS_PATH, PROJECTS_DIR } from '../config'
+import { JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_STATUS_PATH, PROJECTS_DIR } from '../config'
 import { setJournalStatusSource } from '../health'
-import { INTEGRATIONS } from '../integrations/types'
-import type { HarnessReplay, ReplayCursor } from '../integrations/types'
+import type { HarnessReplay, IntegrationRegistry, ReplayCursor } from '@agentistics/engine-api'
 import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import type { Journal, JournalCounters, RejectionReason } from './types'
@@ -84,6 +83,8 @@ export interface ShadowStatusFile {
   /** The last completed run — what the ingest cost, so the ≤10 % budget can be read off a live machine. */
   lastRun: ShadowRun | null
   sinceBoot: ShadowSinceBoot
+  /** Present when the writer ran with nothing to feed the journal from — read by `agentop journal status`. */
+  off?: ShadowOffReason
 }
 
 export interface ShadowRun {
@@ -109,15 +110,29 @@ export interface ShadowRun {
   phases?: { scanMs: number; replayMs: number; appendMs: number }
 }
 
-export type ShadowResult = ({ status: 'ran' } & ShadowRun) | { status: 'off' | 'busy' | 'failed' }
+/** A journal fed with nothing is not a journal that failed: the registry this build carries is empty. */
+export type ShadowOffReason = 'no-integrations'
+
+export type ShadowResult =
+  | ({ status: 'ran' } & ShadowRun)
+  | { status: 'off'; reason?: ShadowOffReason }
+  | { status: 'busy' | 'failed' }
+
+/** The registry the journal is fed from — the engine's, passed in; the journal imports none. */
+export type JournalRegistry = IntegrationRegistry<AgentisticsEvent>
 
 export interface ShadowDeps {
   /** Default `JOURNAL_ENABLED`. */
   enabled?: boolean
   /** Default `openJournal()`. Injected so a test can hand over a failing or in-memory-path journal. */
   open?: () => Promise<Journal>
-  /** Default `INTEGRATIONS.claude.replay`. */
-  replay?: HarnessReplay
+  /**
+   * The integrations to feed from — a registry, or a getter read on every run (the engine may load
+   * after the shadow is created). Default: none. `replay` below, when given, wins over it.
+   */
+  integrations?: JournalRegistry | (() => JournalRegistry)
+  /** Overrides the registry's `claude` replay. */
+  replay?: HarnessReplay<AgentisticsEvent>
   /** Default `JOURNAL_STATUS_PATH`; `null` writes no file. */
   statusPath?: string | null
   /** Change detection. Default: `claudeStamps()` over the real projects dir — or none at all when a
@@ -232,6 +247,9 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
   const enabled = deps.enabled ?? JOURNAL_ENABLED
   const open = deps.open ?? (() => openJournal())
   const statusPath = deps.statusPath === undefined ? JOURNAL_STATUS_PATH : deps.statusPath
+  const registry = (): JournalRegistry =>
+    typeof deps.integrations === 'function' ? deps.integrations() : deps.integrations ?? {}
+  const replayOf = (): HarnessReplay<AgentisticsEvent> | undefined => deps.replay ?? registry().claude?.replay
   const readStamps = deps.stamps === undefined ? (deps.replay ? null : () => claudeStamps()) : deps.stamps
   const register = deps.registerStatus ?? setJournalStatusSource
   const now = deps.now ?? Date.now
@@ -246,6 +264,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
   let runs = 0
   let skippedBusy = 0
   let lastRun: ShadowRun | null = null
+  let off: ShadowOffReason | undefined
   const rejectedByReason: Partial<Record<RejectionReason, number>> = {}
   const cursors = new Map<string, ReplayCursor>()
   let committed: Map<string, CommittedStamp> | null = null // loaded once the journal is open
@@ -280,6 +299,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     const file: ShadowStatusFile = {
       v: 1, pid: process.pid, bootedAt, updatedAt: new Date(now()).toISOString(),
       runs, skippedBusy, lastRun, sinceBoot: sinceBoot(),
+      ...(off ? { off } : {}),
     }
     try {
       await mkdir(dirname(statusPath), { recursive: true })
@@ -305,9 +325,24 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
 
   async function run(sessions: readonly ShadowSession[]): Promise<ShadowResult> {
     const started = now()
+    const replay = replayOf()
+    // No integration to feed from: the normal state of a community build. Nothing is opened and
+    // nothing is replayed; the status file says so, so `agentop journal status` can too.
+    if (!replay) {
+      off = 'no-integrations'
+      // Health says it too, as information: this is the normal state of a community build, never a
+      // fault. A journal opened by an earlier run keeps its own registration.
+      if (!journal) {
+        register(() => ({
+          state: 'disabled', reason: 'no-integrations', path: JOURNAL_PATH, pathKind: 'unknown',
+          counters: { written: 0, duplicates: 0, rejected: 0, dropped: 0, failedAppends: 0, failedReads: 0 },
+        }))
+      }
+      await writeStatus()
+      return { status: 'off', reason: 'no-integrations' }
+    }
+    off = undefined
     const j = await getJournal()
-    const replay = deps.replay ?? INTEGRATIONS.claude.replay
-    if (!replay) return { status: 'failed' }
 
     const identity = fileIdentity(j.status().path)
     const stampsPath = deps.stampsPath === undefined ? `${j.status().path}.stamps.json` : deps.stampsPath
@@ -410,10 +445,18 @@ let shared: Shadow | null = null
 /**
  * The one call `data.ts` makes. **Not awaited by the caller**: it returns a promise that always
  * resolves (never rejects), so the build's latency never includes the shadow. With the flag off the
- * default shadow is not even created.
+ * default shadow is not even created. The integrations are PASSED IN (the engine's registry — the
+ * journal imports none); the latest registry given is the one every later run reads, and an empty
+ * one answers `off` / `no-integrations`.
  */
-export function shadowIngest(sessions: readonly ShadowSession[]): Promise<ShadowResult> {
+let latestRegistry: JournalRegistry = {}
+
+export function shadowIngest(
+  sessions: readonly ShadowSession[],
+  opts: { integrations?: JournalRegistry } = {},
+): Promise<ShadowResult> {
   if (!JOURNAL_ENABLED) return Promise.resolve({ status: 'off' })
-  shared ??= createShadow()
+  if (opts.integrations) latestRegistry = opts.integrations
+  shared ??= createShadow({ integrations: () => latestRegistry })
   return shared.ingest(sessions).catch(() => ({ status: 'failed' as const }))
 }

@@ -2,10 +2,11 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, HarnessId, WorkflowRun } from '@agentistics/core'
 import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
-import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED } from './config'
+import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
 import { shadowIngest } from './journal/shadow'
+import { engineIntegrations, loadEngine } from './engine/load'
 import { planProjectFacts, applyProjectFacts, type ResolvedFacts } from './project-facts'
 import { mergeLocalAndIngestedSessions, sessionKey } from './session-merge'
 import { writeWorkflowRuns, loadWorkflowRuns } from './workflow-store'
@@ -1161,9 +1162,15 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
 
     // The shadow journal (P1 §5): a flagged, additional consumer of the transcripts just read. It is NOT
     // awaited — `shadowIngest` never rejects, and a build's latency must never include it — and with
-    // `AGENTISTICS_JOURNAL` off it returns before doing anything at all.
+    // `AGENTISTICS_JOURNAL` off it returns before doing anything at all. Its integrations are the
+    // ENGINE's (`engine/load.ts`): the journal imports none, and a build without an engine feeds it
+    // nothing and says so. The engine is loaded only when the journal is on — off, nothing is touched.
     try {
-      void shadowIngest(dedupedSessions)
+      if (JOURNAL_ENABLED) {
+        void loadEngine()
+          .then(() => shadowIngest(dedupedSessions, { integrations: engineIntegrations() }))
+          .catch(err => console.warn('[journal] shadow ingest could not start:', String(err)))
+      }
     } catch (err) {
       console.warn('[journal] shadow ingest could not start:', String(err))
     }
