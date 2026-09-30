@@ -51,8 +51,13 @@ export interface Size { w: number; h: number }
  *  Below this a terminal or a list stops being usable, which is the only thing the floor is for. */
 export const MIN_FLOAT_SIZE: Size = { w: 280, h: 180 }
 
-/** A floating panel's stored state: where it is, and its place in the stacking order. */
-export interface FloatingWindow extends Rect { z: number }
+/** A floating panel's stored state: where it is, and its place in the stacking order.
+ *
+ *  `min` — MINIMIZED (owner, 2026-09-29): the window is sent back into the bottom band's tab strip
+ *  and drawn nowhere, but its rect and its place in the stack are KEPT, so clicking its tab puts it
+ *  back exactly where and at the size it was left. It is still floating (out of every docked slot):
+ *  minimizing is not docking. Absent reads as not minimized. */
+export interface FloatingWindow extends Rect { z: number; min?: boolean }
 
 export type FloatingSet = Partial<Record<PanelId, FloatingWindow>>
 
@@ -140,13 +145,14 @@ export function defaultRect(area: Size, index: number, min: Size = MIN_FLOAT_SIZ
 
 /** A stored window, re-read for the area as it is NOW. Pure: the stored value is not touched. */
 export function restoreRect(win: FloatingWindow, area: Size, min: Size = MIN_FLOAT_SIZE): FloatingWindow {
-  return { ...clampRect(win, area, min), z: win.z }
+  return { ...clampRect(win, area, min), z: win.z, ...(win.min ? { min: true } : {}) }
 }
 
-/** The panels floating, back-most first — the order to draw them in. */
+/** The panels floating AND ON SCREEN, back-most first — the order to draw them in. A minimized
+ *  window is not drawn: its tab in the bottom band is the only thing left of it. */
 export function stackOrder(set: FloatingSet): PanelId[] {
   return (Object.keys(set) as PanelId[])
-    .filter(id => set[id] !== undefined)
+    .filter(id => set[id] !== undefined && !set[id]!.min)
     .sort((a, b) => set[a]!.z - set[b]!.z)
 }
 
@@ -155,6 +161,27 @@ export function floatIn(set: FloatingSet, id: PanelId, area: Size): FloatingSet 
   if (set[id]) return bringToFront(set, id)
   const index = Object.keys(set).length
   return { ...set, [id]: { ...defaultRect(area, index), z: topZ(set) + 1 } }
+}
+
+/** The floating panels that are MINIMIZED — each one a tab in the bottom band. */
+export function minimizedPanels(set: FloatingSet): PanelId[] {
+  return (Object.keys(set) as PanelId[]).filter(id => set[id]?.min === true)
+}
+
+/** Minimize `id` — kept whole (rect, z) and flagged. No-op when it does not float or already is. */
+export function minimizeIn(set: FloatingSet, id: PanelId): FloatingSet {
+  const win = set[id]
+  if (!win || win.min) return set
+  return { ...set, [id]: { ...win, min: true } }
+}
+
+/** Bring a minimized `id` back where it was, on top. A window already on screen is only raised. */
+export function restoreIn(set: FloatingSet, id: PanelId): FloatingSet {
+  const win = set[id]
+  if (!win) return set
+  if (!win.min) return bringToFront(set, id)
+  const { min: _min, ...rest } = win
+  return { ...set, [id]: { ...rest, z: topZ(set) + 1 } }
 }
 
 /** Dock `id` back (no-op when it does not float). */
@@ -186,7 +213,7 @@ function readWindow(v: unknown): FloatingWindow | null {
   if (!nums.every(n => typeof n === 'number' && Number.isFinite(n))) return null
   const [x, y, w, h, z] = nums as number[]
   if (w! <= 0 || h! <= 0) return null
-  return { x: x!, y: y!, w: w!, h: h!, z: z! }
+  return { x: x!, y: y!, w: w!, h: h!, z: z!, ...(r.min === true ? { min: true } : {}) }
 }
 
 /** Parse whatever is in storage. Anything unreadable is dropped entry by entry — one corrupt
@@ -299,6 +326,14 @@ export function floatPanel(id: PanelId, pane: PaneId = getActivePane()): void {
 export function dockPanel(id: PanelId, pane: PaneId = getActivePane()): void {
   commit(dockOut(getFloating(pane), id), pane)
 }
+/** Minimize `id` into the bottom band, keeping where and how big it was. */
+export function minimizeFloatingPanel(id: PanelId, pane: PaneId = getActivePane()): void {
+  commit(minimizeIn(getFloating(pane), id), pane)
+}
+/** Put a minimized `id` back exactly where it was (or raise it when it is already on screen). */
+export function restoreFloatingPanel(id: PanelId, pane: PaneId = getActivePane()): void {
+  commit(restoreIn(getFloating(pane), id), pane)
+}
 /** Raise `id` above every other window of the pane's current session. */
 export function raisePanel(id: PanelId, pane: PaneId = getActivePane()): void {
   commit(bringToFront(getFloating(pane), id), pane)
@@ -309,7 +344,7 @@ export function placePanel(id: PanelId, rect: Rect, pane: PaneId = getActivePane
   const win = set[id]
   if (!win) return
   if (win.x === rect.x && win.y === rect.y && win.w === rect.w && win.h === rect.h) return
-  commit({ ...set, [id]: { ...rect, z: win.z } }, pane)
+  commit({ ...set, [id]: { ...rect, z: win.z, ...(win.min ? { min: true } : {}) } }, pane)
 }
 /** Is `id` floating in the pane's current session? */
 export function isFloating(id: PanelId, pane: PaneId = getActivePane()): boolean { return getFloating(pane)[id] !== undefined }

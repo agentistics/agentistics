@@ -39,7 +39,8 @@ import {
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
 import {
-  dockPanel, floatPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession, useFloatingPanels,
+  dockPanel, floatPanel, minimizeFloatingPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession,
+  useFloatingPanels,
 } from '../lib/floatingPanels'
 import { FloatingPanelLayer } from '../components/sessions/FloatingPanelLayer'
 import { sessionIdentityKey } from '../lib/sessionIdentity'
@@ -74,7 +75,10 @@ import { RelayedAsideNote } from '../components/sessions/RelayedAsideNote'
 import { relayedTabAvailable } from '../lib/relayedAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
-import { PanelFixedControls, PanelTileDropdown } from '../components/sessions/bandControls'
+import { PanelFixedControls, PanelPinButton, PanelTileDropdown } from '../components/sessions/bandControls'
+import { ShellCloseStatus } from '../components/sessions/ShellCloseStatus'
+import { panelClosable, requestShellClose, useShellClose } from '../lib/shellClose'
+import { shellApiUrl } from '../lib/shellBand'
 import { fullscreenModeFor, panelMinimizeAction } from '../lib/panelMenu'
 import {
   artifactsPanelMax, ASIDE_ANIM_MS, ASIDE_EASE, currentAction, edgeHint, PANEL_MIN_WIDTH, panelWidth,
@@ -930,11 +934,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *  carrier into, so floating it is a MOVE (buffers survive), never a remount. */
   const [floatStudioEl, setFloatStudioEl] = useState<HTMLDivElement | null>(null)
   const studioFloating = floating.studio !== undefined
+  /** Floating AND on screen — a MINIMIZED Studio window parks its carrier like a collapsed band. */
+  const studioWindowShown = studioFloating && floating.studio?.min !== true
   /** `null` PARKS the Studio — mounted, hidden, taking no space — which is also what a COLLAPSED
    *  bottom band, or a MINIMIZED right slot (`slotLayout.rightOpen`, the right slot's own analogue
    *  of `bottomOpen` — see `panelSlots.ts`'s own doc comment), holding it means: collapsing or
    *  minimizing must not be a way to lose a buffer. */
-  const studioTarget: HTMLElement | null = studioFloating ? floatStudioEl
+  const studioTarget: HTMLElement | null = studioFloating ? (studioWindowShown ? floatStudioEl : null)
     : rightIsStudio && slotLayout.rightOpen
     ? rightSlotEl
     : bottomIsStudio && slotLayout.bottomOpen ? bottomStudioEl : null
@@ -1730,27 +1736,49 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * rule `resolveForGates` applies to the docked slots.
    */
   const dockBack = (id: PanelId) => { dockPanel(id); openSlotPanel(id) }
-  const dockControls = (id: PanelId, name: string): ReactNode => (
-    <PanelFixedControls
-      lang={pt ? 'pt' : 'en'}
-      panelName={name}
-      pinned={{ active: true, onToggle: () => dockBack(id) }}
-      gearLabel={pt ? `Opções — ${name}` : `${name} options`}
-      gearEntries={[]}
-    />
-  )
+  /** THE FLOATING WINDOW'S OWN CONTROLS (owner, 2026-09-29): minimize (the window goes back into
+   *  the bottom band's tab strip, keeping where and how big it was) and — only where the item is
+   *  really closable (`panelClosable`: the Shell) and there is a shell to end — the X beside it. The
+   *  gear that used to hold "close" is gone; the pin (dock back) leads the header, see `floatingBar`. */
+  const shellCloseEntry = useShellClose(selected?.id)
+  const dockControls = (id: PanelId, name: string): ReactNode => {
+    const closable = panelClosable(id) && selected !== undefined && selected !== null
+      && shellCloseEntry.live !== null
+    return (
+      <PanelFixedControls
+        lang={pt ? 'pt' : 'en'}
+        panelName={name}
+        onMinimize={() => minimizeFloatingPanel(id)}
+        minimizeLabel={pt ? `Minimizar ${name} para a barra inferior` : `Minimize ${name} to the bottom bar`}
+        {...(closable ? {
+          close: {
+            onClose: () => { void requestShellClose(selected!.id, shellApiUrl('/api/shell/close', pt ? 'pt' : 'en')) },
+            busy: shellCloseEntry.flow.phase === 'closing',
+          },
+        } : {})}
+        gearLabel={pt ? `Opções — ${name}` : `${name} options`}
+        gearEntries={[]}
+      />
+    )
+  }
   const floatingTitle = (id: PanelId): string => (id === 'cli' || id === 'shell') && selected
     ? targetLabel(id, selected.harness, pt ? 'pt' : 'en')
     : panelTitle(id, pt)
   const floatingBar = (id: PanelId): ReactNode => (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, padding: '6px 8px 0 12px', flexShrink: 0,
+      display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, padding: '6px 8px 0 8px', flexShrink: 0,
     }}>
+      <PanelPinButton
+        lang={pt ? 'pt' : 'en'}
+        panelName={floatingTitle(id)}
+        pinned={{ active: true, onToggle: () => dockBack(id) }}
+      />
       <span style={{
         fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--text-primary)',
         minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>{floatingTitle(id)}</span>
       <span style={{ flex: 1 }} />
+      {id === 'shell' && <ShellCloseStatus sessionId={selected?.id} lang={pt ? 'pt' : 'en'} />}
       {dockControls(id, floatingTitle(id))}
     </div>
   )
@@ -3326,10 +3354,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         onMove: () => moveSlotPanel('studio', studioPlacement === 'bottom' ? 'rail' : 'bottom'),
         // THE ALWAYS-VISIBLE MINIMIZE ICON — right-slot only; at the bottom `StudioBand`'s own
         // collapse chevron already is this control (`panelMenu.ts`'s own `panelMinimizeAction`).
-        onMinimizeRight: rightIsStudio && !studioFloating ? () => setRightOpen(false) : undefined,
+        // A FLOATING Studio minimizes into the bottom band's strip (owner, 2026-09-29), keeping its
+        // window's place and size for the click that restores it.
+        onMinimizeRight: studioFloating ? () => minimizeFloatingPanel('studio')
+          : rightIsStudio ? () => setRightOpen(false) : undefined,
         // PIN = FLOAT (`lib/floatingPanels.ts`) — pressed on the docked Studio it floats it, pressed
         // on the floating window it docks it back. Nothing floats on a phone.
-        pinned: isMobile ? undefined
+        // AT THE BOTTOM the pin leads the band's own tab row (`StudioBand`), so the toolbar has none.
+        pinned: isMobile || (!rightIsStudio && !studioFloating) ? undefined
           : studioFloating
             ? { active: true, onToggle: () => dockBack('studio') }
             : { active: false, onToggle: () => floatPanel('studio') },

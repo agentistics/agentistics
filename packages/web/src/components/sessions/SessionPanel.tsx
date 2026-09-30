@@ -51,9 +51,9 @@ import {
   BAND_MIN_PX, bandPanelFull, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
   writeBandPrefs,
 } from '../../lib/shellBand'
-import { floatPanel } from '../../lib/floatingPanels'
+import { floatPanel, minimizedPanels, restoreFloatingPanel, useFloatingPanels } from '../../lib/floatingPanels'
 import {
-  BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, useBandDrag, useBandDropTarget,
+  BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, PanelPinButton, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
 } from './bandControls'
 import { PanelGapDots } from './PanelGap'
@@ -281,7 +281,12 @@ export function SessionPanel({
   // here too, or the bar would light no tab at all over a pane `ShellBand` draws anyway (its own
   // `target` is clamped the same way independently). See `gatedBottomOccupant`'s own doc comment.
   const bottomOccupant = gatedBottomOccupant(slotLayout.bottom, panelBarGates.shellEnabled)
-  const barEntries = panelBarEntries(bottomIds, bottomOccupant, panelBarGates)
+  // MINIMIZED FLOATING WINDOWS get a tab here too — clicking it puts the window back where it was.
+  // A phone floats nothing, so it has none.
+  const floatingSet = useFloatingPanels()
+  const barEntries = panelBarEntries(
+    bottomIds, bottomOccupant, panelBarGates, isMobile ? [] : minimizedPanels(floatingSet),
+  )
 
   /** WHICH BAND RENDERS AT THE FOOT OF THE PANEL — `lib/panelBar.ts`'s own `bottomBandFor`. Kept
    *  here as one small pure call rather than as a JSX ternary so the decision can be planted and
@@ -297,12 +302,16 @@ export function SessionPanel({
    * `resolvePanelBarPick`. Any other tab opens there; the open one collapsed restores.
    */
   const onPanelBarPick = useCallback((id: PanelBarId) => {
-    const action = resolvePanelBarPick({ id, activeBottom: bottomOccupant, bottomOpen: slotLayout.bottomOpen })
+    const action = resolvePanelBarPick({
+      id, activeBottom: bottomOccupant, bottomOpen: slotLayout.bottomOpen,
+      minimized: barEntries.some(e => e.id === id && e.minimized === true),
+    })
+    if (action.kind === 'restore-window') { restoreFloatingPanel(id); return }
     if (action.kind === 'minimize') { setBottomOpen(false); return }
     if (action.kind === 'restore') { setBottomOpen(true); return }
     // action.kind === 'open'
     openSlotPanel(id)
-  }, [bottomOccupant, slotLayout.bottomOpen, openSlotPanel, setBottomOpen])
+  }, [bottomOccupant, slotLayout.bottomOpen, openSlotPanel, setBottomOpen, barEntries])
 
   /**
    * THE CENTRE COLUMN'S OWN HEIGHT, MEASURED (design item 7) — what "full" means for the bottom
@@ -839,6 +848,10 @@ function StudioBand({
             simply reads `on` here, since this bar IS the Studio. `harness` (owner, 2026-09-19) is
             what makes its `cli` tab read "Claude Code" here too, instead of the generic fallback —
             see this component's own `harness` prop doc comment. */}
+        {/* PIN = FLOAT, LEADING THE ROW (owner, 2026-09-29: "antes da primeira aba") — it used to sit
+            in the Studio's own toolbar below; `SessionsPage` leaves it out of that toolbar while the
+            Studio is docked at the bottom, so there is exactly one. */}
+        <PanelPinButton lang={lang} panelName="Studio" pinned={{ active: false, onToggle: () => floatPanel('studio') }} />
         <PanelBar
           entries={barEntries} lang={lang} studioSeen={studioSeen} onPick={onBarPick} compact={compact}
           {...(harness ? { harness } : {})}
@@ -1044,6 +1057,8 @@ function SimpleDockedBand({
           display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', minHeight: 32,
         }}
       >
+        {/* PIN = FLOAT, LEADING THE ROW (owner, 2026-09-29) — this band is desktop-only. */}
+        <PanelPinButton lang={lang} panelName={panelName} pinned={{ active: false, onToggle: () => floatPanel(panel) }} />
         <PanelBar
           entries={barEntries} lang={lang} studioSeen={studioSeen} onPick={onBarPick} compact={compact}
           {...(harness ? { harness } : {})}
@@ -1059,8 +1074,6 @@ function SimpleDockedBand({
           onMinimize={onToggleOpen}
           minimizeLabel={open ? (pt ? `Recolher ${panelName}` : `Collapse ${panelName}`)
             : (pt ? `Expandir ${panelName}` : `Expand ${panelName}`)}
-          // PIN = FLOAT (`lib/floatingPanels.ts`) — this band is desktop-only, so always offered.
-          pinned={{ active: false, onToggle: () => floatPanel(panel) }}
           gearLabel={pt ? `Opções — ${panelName}` : `${panelName} options`}
           gearEntries={gearEntries}
         />

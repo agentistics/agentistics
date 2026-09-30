@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ArrowDown, ArrowRight, ChevronUp, EyeOff, Maximize2, Minimize2, Minus, MoreHorizontal, Pin, Settings, X,
+  ArrowDown, ArrowRight, ChevronUp, EyeOff, Maximize2, Minimize2, Minus, MoreHorizontal, PictureInPicture2, Pin,
+  Settings, X,
 } from 'lucide-react'
 import type { PanelBarEntry, PanelBarId } from '../../lib/panelBar'
 import { hasDragPayload, readDragPayload, setDragPayload } from '../../lib/dragReorder'
@@ -535,11 +536,15 @@ export function PanelBar({
       } : {})}
       dropHighlight={dragOver === 'bar'}
     >
-      {entries.map(({ id, on }) => {
+      {entries.map(({ id, on, minimized }) => {
         const label = labelFor(id)
         // An unlit tab in compact mode still carries the FULL text as its accessible name (a screen
         // reader gets no less than before), only painted off-screen rather than beside the icon.
         const hideLabel = compact && !on
+        // A MINIMIZED WINDOW's tab says so — in words (the tooltip and accessible name) and with a
+        // small window glyph beside the label, never colour alone. It takes no drag and no move menu:
+        // it is floating, and its only verb here is "bring it back".
+        const restoreLabel = pt ? `Restaurar a janela — ${label}` : `Restore the window — ${label}`
         return (
           <BandSegmentTab
             key={id}
@@ -549,15 +554,21 @@ export function PanelBar({
             // pick the tab AND collapse the band underneath it.
             onClick={e => { e.stopPropagation(); onPick(id) }}
             icon={iconFor(id)}
-            label={hideLabel ? <span style={VISUALLY_HIDDEN}>{label}</span> : <span>{label}</span>}
-            title={label}
-            {...(onMove || onHide ? {
+            label={minimized
+              ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={hideLabel ? VISUALLY_HIDDEN : undefined}>{label}</span>
+                  <PictureInPicture2 size={11} aria-hidden="true" style={{ opacity: 0.75 }} />
+                  <span style={VISUALLY_HIDDEN}>{pt ? ' — janela minimizada' : ' — minimized window'}</span>
+                </span>
+              : hideLabel ? <span style={VISUALLY_HIDDEN}>{label}</span> : <span>{label}</span>}
+            title={minimized ? restoreLabel : label}
+            {...(!minimized && (onMove || onHide) ? {
               onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => {
                 e.preventDefault()
                 setMenu({ id, at: { x: e.currentTarget.getBoundingClientRect().left, y: e.currentTarget.getBoundingClientRect().bottom + 4 } })
               },
             } : {})}
-            {...(dropHere ? {
+            {...(dropHere && !minimized ? {
               draggable: true,
               onDragStart: (e: React.DragEvent<HTMLButtonElement>) => setDragPayload(e, id),
               onDragEnd: () => setDragOver(null),
@@ -845,9 +856,43 @@ export function BandOverflowMenu({ label, entries, isMobile = false, icon }: {
  * THE GEAR HOLDS WHATEVER IS LEFT — move, close, panel-specific settings — and is ABSENT, never a
  * disabled trigger, when `gearEntries` is empty (`BandOverflowMenu`'s own rule).
  */
+/**
+ * THE PIN (float / dock back), as its own button — so a bar can put it where the owner asked
+ * (2026-09-29: "o botão de pin vai para a esquerda, no começo da linha das abas, antes da primeira
+ * aba") rather than only inside `PanelFixedControls`' right-hand cluster. One component, so the
+ * pressed state (filled glyph + `aria-pressed`, never colour alone) and the two sentences can never
+ * differ between the bottom band's leading pin and a right-slot header's.
+ */
+export function PanelPinButton({ lang, panelName, pinned }: {
+  lang: 'pt' | 'en'
+  panelName: string
+  pinned: { active: boolean; onToggle: () => void }
+}) {
+  const pt = lang === 'pt'
+  const label = pinned.active
+    ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
+    : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)
+  return (
+    <button
+      className="ag-tap-icon"
+      type="button"
+      aria-pressed={pinned.active}
+      onClick={e => { e.stopPropagation(); pinned.onToggle() }}
+      title={label}
+      aria-label={label}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        width: BAND_CONTROL_H, height: BAND_CONTROL_H, padding: 0,
+        borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer',
+        color: pinned.active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+      }}
+    ><Pin size={14} {...(pinned.active ? { fill: 'currentColor' } : {})} /></button>
+  )
+}
+
 export function PanelFixedControls({
   lang, panelName, fullscreen, collapsed = false, onMinimize, minimizeLabel, pinned, gearLabel,
-  gearEntries, isMobile = false,
+  gearEntries, isMobile = false, close,
 }: {
   lang: 'pt' | 'en'
   /** The panel's own display name — folded into every button's accessible name/tooltip so two
@@ -868,6 +913,10 @@ export function PanelFixedControls({
   gearLabel: string
   gearEntries: readonly BandOverflowEntry[]
   isMobile?: boolean
+  /** THE X (owner, 2026-09-29) — present ONLY where the item is really closable
+   *  (`lib/shellClose.ts`'s `panelClosable`: today the Shell alone), drawn immediately LEFT of
+   *  minimize so minimize keeps its rightmost pixel. `busy` disables it while a close is in flight. */
+  close?: { onClose: () => void; busy?: boolean }
 }) {
   const pt = lang === 'pt'
   // The 44px mobile touch target is PROJECTED by `.ag-tap-icon` (`index.css`'s invisible-hitbox
@@ -882,21 +931,7 @@ export function PanelFixedControls({
   return (
     <>
       <BandOverflowMenu label={gearLabel} icon={<Settings size={14} />} entries={gearEntries} isMobile={isMobile} />
-      {pinned && (
-        <button
-          className="ag-tap-icon"
-          type="button"
-          aria-pressed={pinned.active}
-          onClick={e => { e.stopPropagation(); pinned.onToggle() }}
-          title={pinned.active
-            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
-            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
-          aria-label={pinned.active
-            ? (pt ? `Encaixar ${panelName} de volta` : `Dock ${panelName} back`)
-            : (pt ? `Soltar ${panelName} como janela` : `Float ${panelName} as a window`)}
-          style={{ ...iconBtn, color: pinned.active ? 'var(--anthropic-orange)' : 'var(--text-secondary)' }}
-        ><Pin size={14} {...(pinned.active ? { fill: 'currentColor' } : {})} /></button>
-      )}
+      {pinned && <PanelPinButton lang={lang} panelName={panelName} pinned={pinned} />}
       {fullscreen && (
         <button
           className="ag-tap-icon"
@@ -910,6 +945,21 @@ export function PanelFixedControls({
             : (pt ? `${panelName} em tela cheia` : `${panelName} full screen`)}
           style={{ ...iconBtn, color: 'var(--text-secondary)' }}
         >{fullscreen.active ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
+      )}
+      {close && (
+        <button
+          className="ag-tap-icon"
+          type="button"
+          disabled={close.busy === true}
+          aria-busy={close.busy === true}
+          onClick={e => { e.stopPropagation(); close.onClose() }}
+          title={pt ? `Encerrar ${panelName}` : `End ${panelName}`}
+          aria-label={pt ? `Encerrar ${panelName}` : `End ${panelName}`}
+          style={{
+            ...iconBtn, color: 'var(--text-secondary)',
+            ...(close.busy ? { opacity: 0.5, cursor: 'progress' } : {}),
+          }}
+        ><X size={14} /></button>
       )}
       {onMinimize && (
         <button

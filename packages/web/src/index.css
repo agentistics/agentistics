@@ -1028,3 +1028,10 @@ button:focus-within .ag-row-pin,
 @keyframes ag-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .ag-menu-row:hover, .ag-menu-row:focus-visible { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
 @media (prefers-reduced-motion: reduce) { [role="menu"][aria-label] { animation: none !important; } }
+
+/* The Shell X's indeterminate progress bar (`ShellCloseStatus.tsx`). */
+@keyframes ag-close-progress { 0% { left: -40%; } 100% { left: 100%; } }
+.ag-close-progress { animation: ag-close-progress 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ag-close-progress { animation: none; left: 0; width: 100% !important; opacity: 0.6; }
+}
