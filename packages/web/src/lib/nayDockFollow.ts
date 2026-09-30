@@ -222,6 +222,28 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
  * popovers inside the dock and the notification card are. So a frame at rest clears it, and a
  * popover opened after a drag lands where it belongs instead of offset by the dock's corner.
  */
+/**
+ * THE STYLE ONE FRAME WRITES, in motion and at rest — the rule that keeps popovers working.
+ *
+ * In MOTION the element is moved by a composited `translate3d` from its React-owned resting place,
+ * with `will-change: transform` so the browser keeps it on its own layer. At REST it carries NO
+ * transform and NO `will-change` at all, and is placed by `left`/`top` instead: either property
+ * (even `will-change: transform` alone) makes the element the containing block of its
+ * `position: fixed` descendants. The `Select` popovers inside the dock are exactly that, so with
+ * `will-change` left on permanently (#825) every dropdown opened relative to the dock, its
+ * `scrollIntoView` scrolled the settings screen, and the `Select` closed itself on that scroll —
+ * "the dropdown flashes and closes", desktop only (the phone's dock is a sheet with no transform),
+ * and less often with the page zoomed out (the option was already in view, so nothing scrolled).
+ */
+export interface FrameStyle { left?: number; top?: number; transform: string; willChange: string }
+
+export function frameStyle(fr: Pick<DockFrame, 'left' | 'top' | 'transform'>, base: { left: number; top: number }, moving: boolean): FrameStyle {
+  if (moving) {
+    return { transform: `translate3d(${fr.left - base.left}px, ${fr.top - base.top}px, 0) ${fr.transform}`, willChange: 'transform' }
+  }
+  return { left: fr.left, top: fr.top, transform: restingTransform(fr.transform), willChange: '' }
+}
+
 export function restingTransform(t: string): string {
   const fns = [...t.matchAll(/(\w+)\(([^)]*)\)/g)]
   const identity = fns.every(([, fn, args]) => {
