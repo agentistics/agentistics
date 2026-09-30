@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  clampFabPos, DEFAULT_NAY_FAB_PREFS, defaultFabPos, FAB_EDGE, FAB_SIZE, NAY_FAB_STYLES, parseNayFabPrefs,
-  smoothVelocity, snapFabToEdge, springAtRest, stepSpring, stretchFor, type SpringState,
+  anyMagnet, clampFabPos, DEFAULT_NAY_FAB_PREFS, dropFabAt, FAB_MAGNET_PX, magnetEdges, defaultFabPos, FAB_EDGE, FAB_SIZE, NAY_FAB_STYLES, parseNayFabPrefs,
+  smoothVelocity, springAtRest, stepSpring, stretchFor, type SpringState,
 } from './nayFab'
 
 const VP = { w: 1440, h: 900 }
@@ -32,11 +32,6 @@ describe('position', () => {
   })
   test('clamping keeps the whole button on screen after a resize', () => {
     expect(clampFabPos({ x: 5000, y: -40 }, VP)).toEqual({ x: VP.w - FAB_SIZE - FAB_EDGE, y: FAB_EDGE })
-  })
-  test('snaps to the nearest edge and keeps the other axis', () => {
-    expect(snapFabToEdge({ x: 30, y: 400 }, VP)).toEqual({ x: FAB_EDGE, y: 400 })
-    expect(snapFabToEdge({ x: 700, y: 820 }, VP)).toEqual({ x: 700, y: VP.h - FAB_SIZE - FAB_EDGE })
-    expect(snapFabToEdge({ x: 1380, y: 400 }, VP)).toEqual({ x: VP.w - FAB_SIZE - FAB_EDGE, y: 400 })
   })
 })
 
@@ -70,5 +65,37 @@ describe('visibility inside a session', () => {
   test('desktop and the rest of the app always show it', () => {
     expect(nayFabVisible({ isMobile: false, inSession: true, shownInSession: false })).toBe(true)
     expect(nayFabVisible({ isMobile: true, inSession: false, shownInSession: false })).toBe(true)
+  })
+})
+
+describe('the edge magnet', () => {
+  test('a drop away from every edge stays exactly where it was dropped', () => {
+    expect(dropFabAt({ x: 600, y: 400 }, VP)).toEqual({ x: 600, y: 400 })
+    expect(anyMagnet(magnetEdges({ x: 600, y: 400 }, VP))).toBe(false)
+  })
+  test('a drop close to one edge snaps to that edge only', () => {
+    const near = FAB_MAGNET_PX - 10
+    expect(magnetEdges({ x: near, y: 400 }, VP)).toEqual({ left: true, right: false, top: false, bottom: false })
+    expect(dropFabAt({ x: near, y: 400 }, VP)).toEqual({ x: FAB_EDGE, y: 400 })
+    expect(dropFabAt({ x: 600, y: near }, VP)).toEqual({ x: 600, y: FAB_EDGE })
+  })
+  test('near a corner both edges light and both pull', () => {
+    const m = magnetEdges({ x: VP.w - FAB_SIZE - 20, y: VP.h - FAB_SIZE - 20 }, VP)
+    expect(m).toEqual({ left: false, right: true, top: false, bottom: true })
+    expect(dropFabAt({ x: VP.w - FAB_SIZE - 20, y: VP.h - FAB_SIZE - 20 }, VP))
+      .toEqual({ x: VP.w - FAB_SIZE - FAB_EDGE, y: VP.h - FAB_SIZE - FAB_EDGE })
+  })
+  test('just outside the zone does not snap', () => {
+    const far = FAB_MAGNET_PX + 1
+    expect(dropFabAt({ x: far, y: 400 }, VP)).toEqual({ x: far, y: 400 })
+  })
+  test('with the magnet off nothing snaps, but the button stays on screen', () => {
+    expect(dropFabAt({ x: 20, y: 400 }, VP, 0, false)).toEqual({ x: 20, y: 400 })
+    expect(dropFabAt({ x: -50, y: 400 }, VP, 0, false)).toEqual({ x: FAB_EDGE, y: 400 })
+  })
+  test('the bottom edge is measured from the floor above a bottom inset (a phone composer)', () => {
+    const inset = 200, floor = VP.h - inset
+    expect(magnetEdges({ x: 600, y: floor - FAB_SIZE - 30 }, VP, inset).bottom).toBe(true)
+    expect(dropFabAt({ x: 600, y: floor - FAB_SIZE - 30 }, VP, inset)).toEqual({ x: 600, y: floor - FAB_SIZE - FAB_EDGE })
   })
 })
