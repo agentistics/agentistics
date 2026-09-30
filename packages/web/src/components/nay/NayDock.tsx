@@ -37,7 +37,7 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, initFollow, landImpulse, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
-import { setOpenSession } from '../../lib/nayNotifyStore'
+import { setOpenSession, setVisibleSessions } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation } from 'react-router-dom'
 import { getSessionGroups } from '../../lib/sessionUserGroups'
@@ -402,6 +402,13 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
 
   // Above every detached window, or one overlapping the dock takes its clicks (see `dockZIndex`).
   const dockZ = dockZIndex(dock.windows.filter(w => !w.minimized))
+  // What the person can see: every detached window that is not minimized, plus the session the open
+  // dock shows. No card is raised about those (see `setVisibleSessions`).
+  const visibleKey = [
+    ...(isMobile ? [] : dock.windows.filter(w => !w.minimized).map(w => w.id)),
+    ...(dock.open && panelSession ? [panelSession] : []),
+  ].join('\n')
+  useEffect(() => { setVisibleSessions(visibleKey ? visibleKey.split('\n') : []) }, [visibleKey])
   const panel = dock.open && (
     <div
       ref={panelRef}
@@ -525,7 +532,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
-      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} />
+      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1} />
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
         <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{

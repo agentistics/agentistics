@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { alertKey, type NayAlert } from './nayNotify'
 import {
-  dismissAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, snoozeAlert,
+  dismissAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
   waitingSince,
 } from './nayNotifyStore'
 
@@ -105,5 +105,25 @@ describe('a snooze', () => {
     releaseDue(60_000)
     await Promise.resolve()
     expect(readNayAlerts()).toHaveLength(0)
+  })
+})
+
+describe('a session the person can see is not announced', () => {
+  it('no card for a session shown in a visible detached window, and an open card leaves', () => {
+    pushAlert(alert('a'))
+    setVisibleSessions(['a'])
+    expect(readNayAlerts()).toHaveLength(0)
+    expect(pushAlert(alert('a', 'turn', 2))).toBe(false)
+  })
+  it('announced again once the window is minimized or closed', () => {
+    setVisibleSessions(['a'])
+    setVisibleSessions([])
+    expect(pushAlert(alert('a', 'turn', 3))).toBe(true)
+  })
+  it('a visible session never goes stale', () => {
+    setVisibleSessions(['a'])
+    observeFleet([{ id: 'a', state: 'working' }], 1, 0)
+    observeFleet([{ id: 'a', state: 'waiting' }], 1, 10)
+    expect(observeFleet([{ id: 'a', state: 'waiting' }], 1, 10 + 5 * 60_000)).toEqual([])
   })
 })

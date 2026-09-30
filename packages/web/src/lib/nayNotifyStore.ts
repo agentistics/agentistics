@@ -69,6 +69,26 @@ export function setOpenSession(id: string | null): void {
   if (next.length !== state.queue.length) { state = { ...state, queue: next }; emit() }
 }
 
+/**
+ * Sessions the person can SEE right now besides the open page: a detached Nay window that is not
+ * minimized, and the session the open dock is showing. A card about one is never raised — the owner
+ * is looking at it (2026-09-30) — and it is raised again as usual once that window is minimized or
+ * closed. Being on screen counts as having looked at it, for "not opened for a while".
+ */
+let visibleSessions = new Set<string>()
+
+export function setVisibleSessions(ids: readonly string[]): void {
+  visibleSessions = new Set(ids)
+  for (const id of visibleSessions) markOpened(id)
+  const next = state.queue.filter(a => !visibleSessions.has(a.sessionId))
+  if (next.length !== state.queue.length) { state = { ...state, queue: next }; emit() }
+}
+
+/** Is this session on screen (its page open, or a visible window showing it)? */
+function onScreen(id: string): boolean {
+  return id === openSession || visibleSessions.has(id)
+}
+
 function markOpened(id: string, now = Date.now()): void {
   const map = readJson<Record<string, number>>(OPENED_KEY, {})
   map[id] = now
@@ -102,7 +122,7 @@ export function pushDemoAlert(lang: 'pt' | 'en', now = Date.now()): void {
 
 /** Queue a card. Refused (false) when it is already up, when its session is open, or while snoozed. */
 export function pushAlert(a: NayAlert, now = Date.now()): boolean {
-  if (a.sessionId === openSession) return false
+  if (onScreen(a.sessionId)) return false
   if (state.queue.some(x => x.key === a.key)) return false
   if (snoozedSession(a.sessionId, now)) return false
   // One card per session: a newer occurrence replaces the older one rather than stacking beside it.
@@ -174,7 +194,7 @@ export function observeFleet(rows: readonly { id: string; state: string }[], thr
   const out: StaleCandidate[] = []
   for (const [id, s] of since) {
     const mark = `${id}:${s.sinceMs}`
-    if (staleRaised.has(mark) || id === openSession || snoozedSession(id, now)) continue
+    if (staleRaised.has(mark) || onScreen(id) || snoozedSession(id, now)) continue
     if (!staleDue({ state: s.state, sinceMs: s.sinceMs, lastOpenedMs: lastOpened(id), nowMs: now, thresholdMin })) continue
     staleRaised.add(mark)
     out.push({ id, sinceMs: s.sinceMs, known: s.known })
@@ -247,5 +267,6 @@ export function resetNayNotifyStore(): void {
   since.clear(); latest.clear(); staleRaised.clear()
   snoozes = []
   openSession = null
+  visibleSessions = new Set()
   if (timer !== null) { clearInterval(timer); timer = null }
 }

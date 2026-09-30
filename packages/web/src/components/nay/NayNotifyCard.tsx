@@ -58,6 +58,8 @@ export interface NayNotifyCardProps {
   fabStyle: NayFabStyle
   /** Open this session in the Nay dock's floating window (what "Responder" does). */
   onReply: (sessionId: string) => void
+  /** Above the dock and every detached window: a card behind a window is a card nobody sees. */
+  zIndex: number
 }
 
 interface ButtonNow { rect: AnchorRect; speed: number; landed: number; landSpeed: number }
@@ -140,7 +142,7 @@ function lastSaid(row: ControlSession | undefined, kind: NayAlert['kind']): stri
   return turn ? turn.text.trim().slice(0, 240) : null
 }
 
-export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply }: NayNotifyCardProps) {
+export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply, zIndex }: NayNotifyCardProps) {
   const pt = lang === 'pt'
   const alerts = useNayAlerts()
   const alert = alerts.length > 0 ? alerts[alerts.length - 1]! : null
@@ -269,6 +271,9 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     writeTail({ side: p.tailSide, x: p.tailX })
     return p
   }
+
+  // Stacked above the dock and every detached window (the owner found it hidden behind one).
+  useLayoutEffect(() => { if (cardRef.current) cardRef.current.style.zIndex = String(zIndex) })
 
   // Placed and animated once per card, before paint.
   useLayoutEffect(() => {
