@@ -324,8 +324,12 @@ describe('StudioHost is mounted once, through mountStudioHostPanel (I4)', () => 
     // anything and the test passes for the wrong reason (see the failure this exact drift caused
     // when `target: studioTarget,`, then `onMention: onStudioMention,`, then
     // `onToggleFullscreen: …`, then `onMinimizeRight: …`, were each in turn assumed to be last —
-    // PIN = FLOAT, 2026-09-27, is the current one).
-    const LAST_FIELD = "pinned: isMobile ? undefined\n          : studioFloating\n            ? { active: true, onToggle: () => dockBack('studio') }\n            : { active: false, onToggle: () => floatPanel('studio') },"
+    // PIN = FLOAT, 2026-09-27, is the current one — its condition gained the bottom-band case on
+    // 2026-09-30, when the pin moved to lead the band's own tab row).
+    const LAST_FIELD = "pinned: isMobile || (!rightIsStudio && !studioFloating) ? undefined\n          : studioFloating\n            ? { active: true, onToggle: () => dockBack('studio') }\n            : { active: false, onToggle: () => floatPanel('studio') },"
+    // The anchor must really be the literal's tail, or the plant below replaces nothing and the
+    // assertion that follows it is only checking the unmodified file.
+    expect(SRC.includes(LAST_FIELD + CALL_CLOSE)).toBe(true)
     const last = SRC.replace(
       LAST_FIELD + CALL_CLOSE,
       `${LAST_FIELD}\n        key: rightIsStudio ? 'right' : 'bottom',` + CALL_CLOSE,
