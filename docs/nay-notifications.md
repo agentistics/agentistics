@@ -54,6 +54,11 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
   screen, reduced motion rides along without lag. Frames are composited only (`translate` from a
   resting place, no layout read in the loop); at rest the card is re-anchored and carries no
   transform, so the folder `Select`'s fixed popover inside it lands where it should.
+- **The card never fades while it follows** (`NO_FADE`). The dock fades out and back in on a side
+  change and fades rather than cover the button; on the card both fired near the screen edges and
+  read as flicker. The card's opacity is fixed at 1: a side change is a retarget the spring slides
+  to, decided with a wider hysteresis (`CARD_SIDE_HYSTERESIS`, 40px) so it happens once per
+  crossing, never per frame. Pinned by a drag along each edge in every style.
 - It **goes away by itself** after `autoDismissSec` (5 s by default; 3/5/10/30 s or never), unless
   the pointer is over it, it has the keyboard, or a drawer is open. It stays in the bell.
 - **Three motion choices, each on its own** (`NayFabPrefs.style` / `dockStyle` / `cardStyle`): the
