@@ -17,7 +17,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { alertStillTrue, staleDue, type NayAlert } from './nayNotify'
+import { alertKey, alertStillTrue, staleDue, type NayAlert } from './nayNotify'
 
 interface State {
   queue: NayAlert[]
@@ -85,6 +85,19 @@ function lastOpened(id: string): number | undefined {
 
 function snoozedSession(sessionId: string, now: number): boolean {
   return snoozes.some(s => s.alert.sessionId === sessionId && s.until > now)
+}
+
+/**
+ * The settings DEMO card: names no session, so it offers only snooze and dismiss. ONE builder for
+ * every "Testar" button (Settings → Notificações and Settings → Chat), so the two previews are the
+ * same card.
+ */
+export function pushDemoAlert(lang: 'pt' | 'en', now = Date.now()): void {
+  pushAlert({
+    key: alertKey('turn', 'demo', now), kind: 'turn', sessionId: 'demo', demo: true,
+    name: lang === 'pt' ? 'Sessão de exemplo' : 'Example session', harness: 'claude', model: 'claude-opus-5-5',
+    sinceMs: now - 3 * 60_000, sinceKnown: true,
+  }, now)
 }
 
 /** Queue a card. Refused (false) when it is already up, when its session is open, or while snoozed. */

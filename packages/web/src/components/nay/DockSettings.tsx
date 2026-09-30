@@ -17,16 +17,17 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, RotateCcw, Settings2 } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, RotateCcw, Settings2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useNayDefaults, useNayHarnesses, saveNayDefaults } from '../../hooks/useNayDefaults'
 import { normalizeChoice } from '../../lib/nayLaunch'
 import { NayLaunchFields } from './NayLaunchFields'
 import { CHAT_SOUNDS, findChatSound } from '../../lib/chatSounds'
 import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
-import { NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
+import { AUTO_DISMISS_OPTIONS_SEC, NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, type NayFabPrefs } from '../../lib/nayFab'
 import { Select } from '../../pages/settings/primitives'
+import { NayMotionSettings } from './NayMotionSettings'
 
 type ChatCtx = Pick<AppContext, 'chatModel' | 'setChatModel' | 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
 
@@ -46,37 +47,67 @@ function putPreference(body: Record<string, unknown>): void {
   }).catch(() => {})
 }
 
-export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: DockSettingsProps) {
-  const [open, setOpen] = useState(false)
+export interface DockSettingsButtonProps {
+  pt: boolean
+  isMobile: boolean
+  open: boolean
+  onToggle: () => void
+}
+
+/**
+ * The gear in the dock's header. It used to open a dropdown the owner found hard to use (2026-09-30);
+ * it now opens the chat window's own SETTINGS SCREEN (`DockSettingsScreen`), which replaces the
+ * conversation until its back button is pressed.
+ */
+export function DockSettings({ pt, isMobile, open, onToggle }: DockSettingsButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}
+      aria-pressed={open}
+      title={pt ? 'Ajustes do chat' : 'Chat settings'}
+      className={isMobile ? 'ag-tap-icon' : undefined}
+      style={{
+        width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none',
+        borderRadius: 7, cursor: 'pointer', color: open ? 'var(--text-primary)' : 'var(--text-secondary)',
+        background: open ? 'var(--bg-hover, rgba(127,127,127,0.1))' : 'transparent',
+      }}
+    >
+      <Settings2 size={15} />
+    </button>
+  )
+}
+
+/**
+ * The chat window's settings SCREEN: three sections (the chat button, session notifications, Nay
+ * conversations), scrolling inside the window, with a back button. `Escape` goes back too, unless a
+ * `Select` inside is open — that one closes itself first.
+ */
+export function DockSettingsScreen({ pt, isMobile, prefs, onPrefs, chat, onLeave, onBack }: DockSettingsProps & { onBack: () => void }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const harnesses = useNayHarnesses(pt ? 'pt' : 'en', open)
+  const harnesses = useNayHarnesses(pt ? 'pt' : 'en', true)
   const defaults = useNayDefaults()
   const audioRef = useRef<AudioContext | null>(null)
 
   useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false) }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      // An open Select inside closes itself first; only a second Escape closes this popover.
       if (rootRef.current?.querySelector('[role="listbox"]')) return
-      e.stopPropagation(); setOpen(false)
+      e.stopPropagation(); onBack()
     }
-    window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('keydown', onKey, true)
-    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey, true) }
-  }, [open])
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onBack])
 
   const preview = (id: string) => {
     if (!audioRef.current) { try { audioRef.current = new AudioContext() } catch { return } }
     findChatSound(id).play(audioRef.current, getNotificationSettings().soundVolume)
   }
 
-
-  // The session notifications' own two switches that belong to this button: how it speaks a card,
-  // and do-not-disturb. Stored in the notification settings, so Settings -> Chat and Settings ->
-  // Notifications read the very same values.
+  // The session notifications' own switches that belong to this button. Stored in the notification
+  // settings (`/api/preferences`), so Settings -> Chat and Settings -> Notifications read the same values.
   const [notify, setNotify] = useState(getNotificationSettings)
   useEffect(() => subscribeNotificationSettings(() => setNotify(getNotificationSettings())), [])
   const saveNotify = (patch: Partial<typeof notify>) => {
@@ -86,35 +117,19 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
   }
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', display: 'flex' }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title={pt ? 'Ajustes do chat' : 'Chat settings'}
-        className={isMobile ? 'ag-tap-icon' : undefined}
-        style={{
-          width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none',
-          borderRadius: 7, cursor: 'pointer', color: open ? 'var(--text-primary)' : 'var(--text-secondary)',
-          background: open ? 'var(--bg-hover, rgba(127,127,127,0.1))' : 'transparent',
-        }}
-      >
-        <Settings2 size={15} />
-      </button>
-
-      {open && (
-        <div
-          role="dialog"
-          aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}
+    <div ref={rootRef} role="region" aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <button type="button" onClick={onBack} aria-label={pt ? 'Voltar à conversa' : 'Back to the conversation'}
           style={{
-            position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 288, maxWidth: 'calc(100vw - 24px)',
-            zIndex: 20, background: 'var(--bg-elevated, var(--bg-surface))', border: '1px solid var(--border)',
-            borderRadius: 10, boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)',
-            padding: 12, display: 'flex', flexDirection: 'column', gap: 12, animation: 'ag-fade-in 120ms ease-out',
-          }}
-        >
+            display: 'flex', alignItems: 'center', gap: 4, minHeight: isMobile ? 44 : 30, padding: '0 8px', borderRadius: 7,
+            border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+          }}>
+          <ArrowLeft size={15} />{pt ? 'Voltar' : 'Back'}
+        </button>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{pt ? 'Ajustes do chat' : 'Chat settings'}</span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: isMobile ? 16 : 14, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <Section title={pt ? 'Botão do chat' : 'Chat button'}>
             <div role="radiogroup" aria-label={pt ? 'Animação ao arrastar' : 'Drag animation'}
               style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -135,6 +150,9 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
                 )
               })}
             </div>
+            {/* The window and the notification card each follow the button with their OWN motion,
+                inheriting this one until somebody picks another (owner, 2026-09-30). */}
+            <NayMotionSettings pt={pt} />
             <Row label={pt ? 'Ímã nas bordas' : 'Edge magnet'}
               hint={pt ? 'Solto perto de uma borda, o botão encosta nela' : 'Dropped near an edge, the button snaps to it'}>
               <Switch on={prefs.snap} onToggle={() => onPrefs({ ...prefs, snap: !prefs.snap })}
@@ -166,6 +184,13 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
               <Switch on={notify.doNotDisturb} label={pt ? 'Não perturbe' : 'Do not disturb'}
                 onToggle={() => saveNotify({ doNotDisturb: !notify.doNotDisturb })} />
             </Row>
+            <Row label={pt ? 'Some sozinho após' : 'Goes away after'}
+              hint={pt ? 'Fica enquanto você usa o cartão; sempre fica no sino' : 'Stays while you use the card; always kept in the bell'}>
+              <div style={{ minWidth: 110 }}>
+                <Select value={String(notify.autoDismissSec)} onChange={v => saveNotify({ autoDismissSec: Number(v) })}
+                  options={AUTO_DISMISS_OPTIONS_SEC.map(n => ({ value: String(n), label: n === 0 ? (pt ? 'Nunca' : 'Never') : `${n} s` }))} />
+              </div>
+            </Row>
           </Section>
 
           <Section title={pt ? 'Conversas da Nay' : 'Nay conversations'}>
@@ -195,7 +220,7 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
             )}
           </Section>
 
-          <button type="button" onClick={() => { setOpen(false); onLeave(); navigate('/settings/chat') }}
+          <button type="button" onClick={() => { onBack(); onLeave(); navigate('/settings/chat') }}
             style={{
               display: 'flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start', border: 'none', padding: 0,
               background: 'transparent', color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer',
@@ -203,8 +228,7 @@ export function DockSettings({ pt, isMobile, prefs, onPrefs, chat, onLeave }: Do
             }}>
             {pt ? 'Todos os ajustes do chat' : 'All chat settings'}<ArrowUpRight size={12} />
           </button>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

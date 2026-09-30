@@ -138,6 +138,10 @@ export interface Preferences {
    *  records that one BROWSER was shown the permission dialog, and that permission is per device;
    *  sharing it would suppress the prompt on a device that has never been asked. */
   notificationSettings?: Record<string, unknown>
+  /** The Nay button's three motion choices (button drag, dock follow, notification card) — see
+   *  `web/src/lib/nayFabPrefsStore.ts`. Shared like the notification settings; the button's PLACE
+   *  stays per browser. Written only by the web. */
+  nayMotion?: { style?: string; dockStyle?: string; cardStyle?: string }
   /** How a person reads their own lists. About the work, not about the screen. */
   tagsLayout?: 'grid' | 'list'
   galleryView?: 'grid' | 'list'

@@ -27,7 +27,8 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
 
 ## Actions
 
-- **Responder** — the fleet's own `prompt` verb. The server refuses it in words while a dialog is open.
+- **Responder** — opens the session in the Nay dock's floating window (the full `SessionChat`
+  composer: attachments, mic, auto mode, history, send-now). There is no inline text field.
 - **Ir para a sessão** — navigates to `/sessions/<id>`.
 - **Aprovar…** — approval cards only. It lists the options the server read off the session's screen
   (`dialogOptions`) and sends the one tapped, by number. When the options cannot be read it says so
@@ -46,6 +47,19 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
   BEFORE the kill, which runs only if they worked.
 - **×** — dismiss.
 
+## Following the button, and leaving by itself
+
+- The card **follows the button** while it is dragged, with the dock's own physics
+  (`nayDockFollow.ts` fed by `nayFabLive.ts`): same side rules, never over the button, clamped on
+  screen, reduced motion rides along without lag. Frames are composited only (`translate` from a
+  resting place, no layout read in the loop); at rest the card is re-anchored and carries no
+  transform, so the folder `Select`'s fixed popover inside it lands where it should.
+- It **goes away by itself** after `autoDismissSec` (5 s by default; 3/5/10/30 s or never), unless
+  the pointer is over it, it has the keyboard, or a drawer is open. It stays in the bell.
+- **Three motion choices, each on its own** (`NayFabPrefs.style` / `dockStyle` / `cardStyle`): the
+  button's drag, the dock's follow, the card's follow. Absent = inherit the button's. Stored in
+  `/api/preferences` (`nayMotion`); the button's place stays per browser.
+
 ## Delivery rules (`sessionNotifications.ts` → `deliver`)
 
 - Every event is written to the **bell** (`lib/notifications.ts`, codes `session.turn_ended`,
@@ -60,8 +74,10 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
 
 ## Settings
 
-- **Animation** (`launch` default, `balloon`, `unfurl`, `voice`): the dock's gear popover and
-  Settings → Chat, both with the Agentistics `Select`, one stored value
+- **The chat window's settings screen** (the gear in the dock's header): replaces the conversation
+  with a back button; sections chat button / session notifications / Nay conversations.
+- **Animation** (`launch` default, `balloon`, `unfurl`, `voice`): the chat window's settings screen and
+  Settings → Chat (with a **Testar** button that pops the demo card), both with the Agentistics `Select`, one stored value
   (`NotificationSettings.nayAnimation`).
 - **Sounds**: Settings → Notificações, one per event, from the four original chimes plus the 13
   synthesized in `lib/notificationSounds.ts` (Web Audio, no audio files, no licence).

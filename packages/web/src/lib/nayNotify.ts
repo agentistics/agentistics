@@ -130,6 +130,15 @@ export function formatWaiting(sinceMs: number, nowMs: number, known: boolean, la
   return known ? `${span} ago` : `at least ${span}`
 }
 
+/**
+ * How long a card stays up before it goes back into the button by itself, in seconds (owner,
+ * 2026-09-30: 5 s by default). `0` is "never". The card never leaves while somebody is using it —
+ * the pointer is over it, it has the keyboard, or a drawer (approve, snooze, end) is open — and it
+ * stays in the bell either way.
+ */
+export const AUTO_DISMISS_OPTIONS_SEC: readonly number[] = [3, 5, 10, 30, 0]
+export const DEFAULT_AUTO_DISMISS_SEC = 5
+
 /** The stale thresholds the settings offer, in minutes. `0` is "never". */
 export const STALE_OPTIONS_MIN: readonly number[] = [15, 30, 60, 120, 240, 0]
 export const DEFAULT_STALE_MIN = 60
