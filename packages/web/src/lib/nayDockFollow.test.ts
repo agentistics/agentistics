@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { initFollow, landImpulse, renderDock, stepFollow, followSettled } from './nayDockFollow'
+import { initFollow, landImpulse, renderDock, stepFollow, followSettled, NO_FADE, CARD_SIDE_HYSTERESIS } from './nayDockFollow'
 import { NAY_FAB_STYLES } from './nayFab'
 
 const VP = { w: 1440, h: 900 }
@@ -81,5 +81,60 @@ describe('a frame at rest leaves no containing block for fixed popovers', () => 
   })
   test('a real deformation at rest is kept', () => {
     expect(frameStyle({ ...fr, transform: 'rotate(3deg)' }, { left: 0, top: 0 }, false).transform).toBe('rotate(3deg)')
+  })
+})
+
+describe('the notification card follows without ever fading (NO_FADE)', () => {
+  const CARD = { w: 340, h: 230 }
+  const M = 8
+  // Along each edge, then round the corners, the way the owner dragged it.
+  const edges: Record<string, [[number, number], [number, number]]> = {
+    top: [[M, M], [VP.w - B - M, M]],
+    right: [[VP.w - B - M, M], [VP.w - B - M, VP.h - B - M]],
+    bottom: [[VP.w - B - M, VP.h - B - M], [M, VP.h - B - M]],
+    left: [[M, VP.h - B - M], [M, M]],
+  }
+  for (const style of NAY_FAB_STYLES) {
+    for (const [edge, [[x0, y0], [x1, y1]]] of Object.entries(edges)) {
+      test(`${style}: opacity stays 1 on every frame of a drag along the ${edge} edge`, () => {
+        const st = initFollow({ x: x0, y: y0, w: B, h: B }, CARD, VP)
+        const dips: string[] = []
+        for (let f = 0; f <= 180; f++) {
+          const bx = x0 + (x1 - x0) * f / 180, by = y0 + (y1 - y0) * f / 180
+          const btn = { x: bx, y: by, w: B, h: B }
+          for (let k = 0; k < 4; k++) stepFollow(st, btn, CARD, VP, style, false, 1 / 240, NO_FADE)
+          const fr = renderDock(st, btn, VP, style, false, 1800, NO_FADE)
+          if (fr.opacity !== 1) dips.push(`#${f} ${fr.opacity}`)
+        }
+        expect(dips).toEqual([])
+      })
+    }
+  }
+  test('a side change is a retarget, not a fade: opacity 1 throughout', () => {
+    const st = initFollow({ x: 1300, y: 800, w: B, h: B }, CARD, VP)
+    const before = st.key
+    let min = 1
+    for (let k = 0; k < 400; k++) {
+      stepFollow(st, { x: 100, y: 100, w: B, h: B }, CARD, VP, 'jelly', false, 1 / 240, NO_FADE)
+      min = Math.min(min, renderDock(st, { x: 100, y: 100, w: B, h: B }, VP, 'jelly', false, 0, NO_FADE).opacity)
+    }
+    expect(min).toBe(1)
+    expect(st.key).not.toBe(before)
+  })
+  test('side choice is decided once per crossing: a wiggle within the wider band never flips it', () => {
+    const cx = VP.w / 2 - B / 2
+    const st = initFollow({ x: cx + CARD_SIDE_HYSTERESIS - 5, y: 400, w: B, h: B }, CARD, VP)
+    const sides0 = { ...st.sides }
+    let flips = 0, last = st.sides.right
+    for (let k = 0; k < 600; k++) {
+      const x = cx + (k % 2 ? 1 : -1) * (CARD_SIDE_HYSTERESIS - 5)
+      stepFollow(st, { x, y: 400, w: B, h: B }, CARD, VP, 'shock', false, 1 / 240, NO_FADE)
+      if (st.sides.right !== last) { flips++; last = st.sides.right }
+    }
+    expect(flips).toBe(0)
+    expect(st.sides).toEqual(sides0)
+    // A real crossing flips it exactly once.
+    for (let k = 0; k < 100; k++) stepFollow(st, { x: 100, y: 400, w: B, h: B }, CARD, VP, 'shock', false, 1 / 240, NO_FADE)
+    expect(st.sides.right).toBe(false)
   })
 })
