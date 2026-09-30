@@ -12,7 +12,7 @@ import {
   alertKey, DEFAULT_AUTO_DISMISS_SEC, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
   type NayAlertKind, type NayAnimation,
 } from './nayNotify'
-import { observeFleet, pushAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
+import { inboxAdd, observeFleet, pushAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
 import { pushNotification, type NotificationType } from './notifications'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -605,6 +605,9 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
       },
     })
   }
+  // The inbox keeps it until the session stops waiting — do-not-disturb included: it silences the
+  // announcement, never the record.
+  if (d.alert && typeof document !== 'undefined') inboxAdd(d.alert)
   if (settings.doNotDisturb) return
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible) {

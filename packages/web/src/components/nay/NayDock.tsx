@@ -37,7 +37,8 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, frameStyle, initFollow, landImpulse, renderDock, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
-import { setOpenSession, setVisibleSessions } from '../../lib/nayNotifyStore'
+import { setOpenSession, setVisibleSessions, useNayInbox } from '../../lib/nayNotifyStore'
+import { NayInbox } from './NayInbox'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation } from 'react-router-dom'
 import { getSessionGroups } from '../../lib/sessionUserGroups'
@@ -117,6 +118,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   // The button's place and its three motion choices live in a shared store: Settings → Chat edits
   // them too, and two copies of one setting disagree the moment either changes.
   const fabPrefs = useNayFabPrefs()
+  /** Sessions still waiting on the person — the Nay button's badge and the top of the Nay tab. */
+  const inbox = useNayInbox()
   /** The chat window's settings screen replaces the conversation while it is open (owner, 2026-09-30). */
   const [settingsOpen, setSettingsOpen] = useState(false)
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
@@ -492,7 +495,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         ) : panelSession
           ? renderSession(panelSession, next => setDock(d => ({ ...d, panelSession: next })))
           : tab === 'nay'
-            ? (
+            ? (<>
+              <NayInbox entries={inbox} lang={lang} isMobile={isMobile} onOpen={open} />
               <NayList
                 lang={lang} isMobile={isMobile} sections={sections} windows={dock.windows}
                 starting={starting} notice={notice} unsupported={unsupported}
@@ -504,7 +508,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                     value={launch} onChange={setChoice} />
                 ) : null}
               />
-            )
+            </>)
             : (
               // Inner gutter, so the aside's cards and search do not run into the panel's edges.
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }}>
@@ -586,9 +590,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                   onPointerCancel={fab.onPointerCancel}
                   onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
                   onKeyDown={onKeyDown}
-                  onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  onClick={() => {
+                    // Opening with something waiting lands on the Nay tab, where the list is.
+                    if (!dock.open && inbox.length > 0) setTab('nay')
+                    setDock(d => ({ ...d, open: !d.open }))
+                  }}
                   data-nay-fab
-                  aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
+                  aria-label={inbox.length > 0
+                    ? (pt ? `Abrir o chat da Nay — ${inbox.length} sessão(ões) esperando por você` : `Open the Nay chat — ${inbox.length} session(s) waiting for you`)
+                    : (pt ? 'Abrir o chat da Nay' : 'Open the Nay chat')}
                   aria-expanded={dock.open}
                   title={pt ? 'Nay — arraste para mover' : 'Nay — drag to move'}
                   style={{
@@ -596,8 +606,18 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                     background: dock.open ? ORANGE : 'var(--bg-surface)', cursor: fab.dragging ? 'grabbing' : 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                     touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', padding: 0, willChange: 'transform',
+                    position: 'relative',
                   }}
                 >
+                  {inbox.length > 0 && (
+                    // The inbox's count: the sessions still waiting on the person (top-left; the
+                    // minimized-windows badge owns the top-right).
+                    <span aria-hidden style={{
+                      position: 'absolute', top: -6, left: -6, minWidth: 20, height: 20, padding: '0 5px', borderRadius: 999,
+                      background: ORANGE, color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: '20px', textAlign: 'center',
+                      fontVariantNumeric: 'tabular-nums', boxShadow: '0 2px 6px rgba(0,0,0,0.25)', pointerEvents: 'none',
+                    }}>{inbox.length > 99 ? '99+' : inbox.length}</span>
+                  )}
                   {dock.open
                     ? <X size={20} color="var(--bg-surface)" />
                     : <img src={versionedAsset('/minimalistLogo.png')} alt="" draggable={false} style={{ width: 30, height: 30, borderRadius: 8, pointerEvents: 'none' }} />}
