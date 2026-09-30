@@ -200,6 +200,10 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It
+    // rides the fleet read because that is the one moment every state change is seen, and it never
+    // holds the reply: a filing is a convenience, the fleet is what this route is for.
+    void import('./nay-web').then(m => m.reconcileNayFolders(fleet.sessions)).catch(() => {})
     const tasks = host.sessionTasks ? await host.sessionTasks().catch(() => []) : []
     const finishedTasks = fleet.finishedTasks ?? []
     // A failed store read costs freshness, never the fleet: the fleet is what this route is for.

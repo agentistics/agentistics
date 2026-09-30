@@ -939,8 +939,10 @@ export function Select({ value, onChange, options, placeholder, disabled, search
               onKeyDown={handleKeyDown}
               placeholder={searchPlaceholder ?? 'Search…'}
               style={{
-                position: 'sticky', top: 0, zIndex: 1, width: '100%', boxSizing: 'border-box',
-                margin: '0 0 4px', padding: isMobile ? '10px 9px' : '7px 9px', background: 'var(--bg-elevated)',
+                // `top: -4` cancels the list's own 4px padding: at `top: 0` the scrolled rows showed
+                // through a 4px strip above the field.
+                position: 'sticky', top: -4, zIndex: 1, width: '100%', boxSizing: 'border-box',
+                margin: '0 0 4px', boxShadow: '0 -4px 0 var(--bg-card)', padding: isMobile ? '10px 9px' : '7px 9px', background: 'var(--bg-elevated)',
                 border: '1px solid var(--border)', borderRadius: 6,
                 // 16px minimum on mobile: below it, iOS Safari auto-zooms the viewport on focus.
                 fontSize: isMobile ? 16 : 13,
