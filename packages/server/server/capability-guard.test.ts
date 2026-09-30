@@ -5,7 +5,7 @@
 import { describe, expect, it, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { routeCapability, capabilityDenied, registeredRoutes } from './capability-guard'
-import { capabilitiesFor } from './exposure'
+import { capabilitiesFor, resolveProfile, type ExposureEnv } from './exposure'
 
 const publicCaps = capabilitiesFor('public', {
   central: true,
@@ -254,3 +254,32 @@ describe('registeredRoutes — the table, exported for walking', () => {
 })
 
 type RegisteredRouteMutable = { path: string; match: 'exact' | 'prefix'; capability: string }
+
+describe('the dev config routes (/api/config*) — they write the file the server boots from', () => {
+  // `PUT /api/config` rewrites `.env.config` and `POST /api/config/restore` copies its backup over
+  // it; `loadEnvConfig` feeds that file into process.env at the next start. Unguarded, a central
+  // refused `/api/fleet` while leaving writable the file that can re-open it.
+  const centralEnv: ExposureEnv = { central: true, exposure: undefined, allowLocalShell: false, tls: false }
+  const centralCaps = capabilitiesFor(resolveProfile(centralEnv), centralEnv)
+
+  it('maps both writes, and any sub-path added later, to localShell', () => {
+    expect(routeCapability('/api/config')).toBe('localShell')
+    expect(routeCapability('/api/config/restore')).toBe('localShell')
+    expect(routeCapability('/api/config/anything-added-later')).toBe('localShell')
+    // …without swallowing a neighbour that merely starts with the same letters.
+    expect(routeCapability('/api/configuration')).toBeNull()
+  })
+
+  it('is refused wherever localShell is off: a default central, and public even with the opt-in', () => {
+    // A central with no AGENTISTICS_EXPOSURE resolves to `lan`, where host power is off unless
+    // the operator opted in — so both routes answer 403 there.
+    expect(resolveProfile(centralEnv)).toBe('lan')
+    for (const path of ['/api/config', '/api/config/restore']) {
+      const cap = routeCapability(path)!
+      expect(capabilityDenied(cap, centralCaps)?.status).toBe(403)
+      expect(capabilityDenied(cap, publicCaps)?.status).toBe(403)
+      // The solo machine keeps its dev panel.
+      expect(capabilityDenied(cap, localCaps)).toBeNull()
+    }
+  })
+})

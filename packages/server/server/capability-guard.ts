@@ -99,9 +99,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // Reading and WRITING this machine's MCP server configuration. `/api/mcp/servers` reports what is
   // configured and what is running; `/api/mcp/install` and `/api/mcp/remove` run `claude mcp` to
   // change it. A PREFIX for the same reason `/api/fleet` is one: the next route here is guarded by
-  // having been added at all, never by having remembered a second table. It cannot collide with the
-  // older `/api/mcp-list` / `/api/mcp-action`, which are exact entries above — a prefix matches
-  // `<prefix>` and `<prefix>/…` only.
+  // having been added at all, never by having remembered a second table.
   // It replaced `/api/mcp-list` + `/api/mcp-action`, which had no client and read two files that
   // hold no MCP servers at all (`~/.claude/settings.json` and `<project>/.claude/settings.json`) —
   // a second lister giving a different, wrong answer is the drift this codebase is built against.
@@ -114,6 +112,15 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // `/api/runtime/metrics` rather than all of `/api/runtime`, whose other routes (§28) spawn and
   // drive sessions and need their own, stronger decision.
   ['/api/runtime/metrics', 'localTranscripts'],
+  // The dev config file (`env-config.ts`): `PUT /api/config` rewrites `.env.config` beside the
+  // server and `POST /api/config/restore` copies its backup over it. `loadEnvConfig` feeds that
+  // file into `process.env` at the next start, so this is a write to the file that decides how the
+  // host's own server boots — and a value is written verbatim, newline included, so it is not
+  // limited to the two keys the form shows. That is host power over this product's own security
+  // posture, the class of route `localShell` exists for; `mcpAdmin` is scoped to MCP configuration
+  // and would be the softer, wrong name. A PREFIX so `/api/config/restore` and any later sub-route
+  // are guarded by having been added at all. The GET rides it too: the dev panel is a local tool.
+  ['/api/config', 'localShell'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */
