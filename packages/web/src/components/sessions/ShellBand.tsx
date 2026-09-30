@@ -42,7 +42,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import {
   ChevronLeft, Loader2,
-  RotateCcw, TerminalSquare, Trash2,
+  RotateCcw, TerminalSquare, Trash2, X,
 } from 'lucide-react'
 import { useDocumentVisible } from '../../hooks/useDocumentVisible'
 import { useElementWidth } from '../../hooks/useElementWidth'
@@ -78,9 +78,11 @@ import { bandSegmentEntries } from '../../lib/bandSegment'
 import { bandBarCompact, type PanelBarEntry, type PanelBarId } from '../../lib/panelBar'
 import { panelMenuEntries } from '../../lib/panelMenu'
 import {
-  BAND_CONTROL_H, BandResizeHandle, BandSegment, BandSegmentTab, PanelBar, PanelFixedControls,
+  BAND_CONTROL_H, BandResizeHandle, BandSegment, BandSegmentTab, PanelBar, PanelFixedControls, PanelPinButton,
   panelMenuIconFor, useBandDrag, useBandDropTarget, type BandOverflowEntry,
 } from './bandControls'
+import { closeEndsShell, publishLiveShell, requestShellClose, useShellClose } from '../../lib/shellClose'
+import { ShellCloseStatus } from './ShellCloseStatus'
 
 const SessionTerminal = lazy(() => import('../SessionTerminal'))
 import type { TerminalNotice } from '../SessionTerminal'
@@ -713,17 +715,32 @@ export function ShellBand({
     write.send(keyBytes(entry.key))
   }, [write, clipboardReadable, sendPasteText, t])
 
+  /**
+   * THE X — ends this session's shell through `lib/shellClose.ts`, which says each step in words
+   * (`ShellCloseStatus`) and reports whether it really ended. The band drops the shell only once the
+   * server says it is gone (the effect below), never optimistically: a close that failed must leave
+   * the shell on screen, still running, beside a sentence saying so.
+   */
+  const closeEntry = useShellClose(sessionId)
+  const closing = closeEntry.flow.phase === 'closing'
   const close = useCallback(async () => {
     if (!shell) return
-    const id = shell.id
+    await requestShellClose(sessionId, shellApiUrl('/api/shell/close', lang), shell.id)
+  }, [shell, sessionId, lang])
+  // Publish the shell this band holds, so a FLOATING window's header (drawn outside this component)
+  // can offer the same X for it.
+  useEffect(() => { publishLiveShell(sessionId, shell?.id ?? null) }, [sessionId, shell?.id])
+  // The close landed (from this band's X or a floating header's): drop the shell it named. The docked
+  // band also collapses, as the old gear row did — the result sentence stays readable in the bar.
+  const endedSeen = useRef(closeEntry.ended)
+  useEffect(() => {
+    if (closeEntry.ended === endedSeen.current) return
+    endedSeen.current = closeEntry.ended
+    const f = closeEntry.flow
+    if (f.phase !== 'done' || !closeEndsShell(f.outcome) || f.id !== shell?.id) return
     dispatch({ type: 'ended' })
-    setBand({ open: false })
-    await fetch(shellApiUrl('/api/shell/close', lang), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id] }),
-    }).catch(() => {})
-  }, [shell, setBand, lang])
+    if (!dedicated) setBand({ open: false })
+  }, [closeEntry, shell?.id, dedicated, setBand])
 
   /**
    * THE DISABLED-SHELL EMPTY STATE'S TWO BUTTONS.
@@ -845,6 +862,8 @@ export function ShellBand({
    * reading in `SessionPanel.tsx`'s `onPanelBarPick`.
    */
   const handleBarPick = useCallback((id: PanelBarId) => {
+    // A MINIMIZED WINDOW's tab restores that window and touches nothing in this band.
+    if (barEntries?.find(e => e.id === id)?.minimized) { onBarPick?.(id); return }
     if ((id === 'cli' || id === 'shell') && !barEntries?.find(e => e.id === id)?.on) {
       chooseTarget(id)
       if (!bandOpen) setBand({ open: true })
@@ -908,10 +927,12 @@ export function ShellBand({
       id: moveEntry.id, label: moveEntry.label, icon: panelMenuIconFor(moveEntry.iconId),
       onSelect: () => onBarMove!(target),
     }] : []),
-    ...(prefs.open && shell && target === 'shell' ? [{
-      id: 'end', label: t.close, icon: <Trash2 size={14} />, onSelect: () => { void close() },
-    }] : []),
+    // "END THIS SHELL" LEFT THIS GEAR (owner, 2026-09-29) — it is the X beside minimize now,
+    // drawn only while there is a shell to end (`closeControl`, below).
   ]
+  const closeControl = shell && target === 'shell'
+    ? { onClose: () => { void close() }, busy: closing }
+    : undefined
   /**
    * THE FIXED FULL-SCREEN BUTTON — "navigate to the dedicated screen" (`onOpenFullscreen`), a
    * different question from the Studio's in-place overlay (`fullscreenModeFor(target) ===
@@ -1167,7 +1188,25 @@ export function ShellBand({
       }}>
         {showShellDisabled ? shellDisabledPane : (
           <>
-            {streamId ? screen : <div style={{ flex: 1 }} />}
+            {streamId ? screen : target === 'shell' && band.phase === 'closed' ? (
+              // ENDED HERE (the X, or `exit`): say so and offer a new one — a blank box after a close
+              // reads as a pane that failed to load.
+              <div style={{
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: 10, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', padding: 16,
+              }}>
+                <span>{lang === 'pt' ? 'Este shell foi encerrado.' : 'This shell has ended.'}</span>
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: 'retry' })}
+                  style={{
+                    minHeight: isMobile ? 44 : 28, padding: '0 12px', borderRadius: 6, cursor: 'pointer',
+                    border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-primary)',
+                    fontFamily: 'inherit', fontSize: 12,
+                  }}
+                >{lang === 'pt' ? 'Abrir um novo shell' : 'Open a new shell'}</button>
+              </div>
+            ) : <div style={{ flex: 1 }} />}
             {notice}
             {ceilingList}
           </>
@@ -1197,6 +1236,7 @@ export function ShellBand({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{where}</span>}
           {!where && <span style={{ flex: 1 }} />}
+          <ShellCloseStatus sessionId={sessionId} lang={lang} />
           {targetSwitch}
         </div>
       )
@@ -1231,18 +1271,24 @@ export function ShellBand({
               fontSize: 10.5, color: 'var(--text-tertiary)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{where}</div>}
+            <ShellCloseStatus sessionId={sessionId} lang={lang} />
           </div>
           {shell && target === 'shell' && (
             <button
+              type="button"
               onClick={() => { void close() }}
+              disabled={closing}
+              aria-busy={closing}
               aria-label={t.close}
+              title={t.close}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 44, height: 44, flexShrink: 0,
-                border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
+                border: 'none', background: 'transparent', color: 'var(--text-tertiary)',
+                cursor: closing ? 'progress' : 'pointer', ...(closing ? { opacity: 0.5 } : {}),
               }}
             >
-              <Trash2 size={18} />
+              <X size={18} />
             </button>
           )}
         </div>
@@ -1326,9 +1372,20 @@ export function ShellBand({
           display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', minHeight: 32,
         }}
       >
+        {/* PIN = FLOAT (`lib/floatingPanels.ts`), LEADING THE ROW (owner, 2026-09-29: "antes da
+            primeira aba") — the pane on screen (Claude Code or Shell) becomes a window; desktop
+            only, since nothing floats on a phone. */}
+        {!isMobile && placement === 'docked' && !targetFloats && (
+          <PanelPinButton
+            lang={lang}
+            panelName={targetLabel(target, harness, lang)}
+            pinned={{ active: false, onToggle: () => floatPanel(target) }}
+          />
+        )}
         {panelBar}
         {busy && <Loader2 size={13} className="ag-spin" style={{ color: 'var(--text-tertiary)' }} />}
         <span style={{ flex: 1 }} />
+        <ShellCloseStatus sessionId={sessionId} lang={lang} />
         <PanelFixedControls
           lang={lang}
           panelName={targetLabel(target, harness, lang)}
@@ -1336,11 +1393,7 @@ export function ShellBand({
           collapsed={!prefs.open}
           onMinimize={() => setBand({ open: !prefs.open })}
           minimizeLabel={prefs.open ? t.collapse : t.expand}
-          // PIN = FLOAT (`lib/floatingPanels.ts`) — the pane on screen (Claude Code or Shell) becomes
-          // a window; desktop only, since nothing floats on a phone.
-          {...(!isMobile && placement === 'docked' && !targetFloats
-            ? { pinned: { active: false, onToggle: () => floatPanel(target) } }
-            : {})}
+          {...(closeControl ? { close: closeControl } : {})}
           gearLabel={lang === 'pt' ? 'Mais ações' : 'More actions'}
           gearEntries={gearEntries}
         />
