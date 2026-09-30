@@ -1,7 +1,8 @@
 /**
  * nayDock.ts — PURE: the Nay chat's geometry and WHERE a session opens.
  *
- * The chat is a docked panel (bottom-right, resizable by its top and left edges) plus any number of
+ * The chat is a docked panel (opened beside the chat button wherever it was dragged, `anchorDock`,
+ * and resizable by the edges facing away from it) plus any number of
  * DETACHED windows, each holding one session. The rule the owner asked for: picking a session opens
  * it where it already is. If a window holds it, that window is raised and restored; otherwise it
  * opens inside the panel. One session is never on screen twice, because two composers typing into
@@ -147,17 +148,109 @@ export function minimizedBadge(count: number): string | null {
 
 export interface MenuPlacement { vertical: 'above' | 'below'; horizontal: 'left' | 'right' }
 
-/** Room the list needs above the button before it flips below. */
+/** Room the list needs on its preferred side before it flips to the other one. */
 export const MENU_MIN_ABOVE = 240
 
 /**
- * Which way the minimized list opens from the chat button. Above it and growing leftward is the
- * default (the button lives bottom-right); it flips below when the button is near the top edge,
- * and grows rightward when the button is near the left edge. Once the button can be dragged
- * anywhere, both flips are what keep the list on screen.
+ * Which way the minimized list opens from the chat button — the SAME rule as the dock
+ * (`anchorDock`), so the two never open in opposite directions from one button: toward the
+ * vertical half of the screen with more room (up from a button in the lower half, down from one in
+ * the upper half), falling back to the other side when the preferred one cannot hold the list, and
+ * growing leftward from a button in the right half, rightward from one in the left half — unless
+ * that would leave the screen.
  */
 export function menuPlacement(anchor: { top: number; bottom: number; left: number; right: number }, vp: Viewport, menuWidth: number): MenuPlacement {
-  const vertical = anchor.top >= MENU_MIN_ABOVE || anchor.top >= vp.h - anchor.bottom ? 'above' : 'below'
-  const horizontal = anchor.right - menuWidth >= 8 ? 'right' : 'left'
+  const roomAbove = anchor.top
+  const roomBelow = vp.h - anchor.bottom
+  const lowerHalf = (anchor.top + anchor.bottom) / 2 > vp.h / 2
+  let vertical: MenuPlacement['vertical'] = lowerHalf ? 'above' : 'below'
+  const preferredRoom = vertical === 'above' ? roomAbove : roomBelow
+  const otherRoom = vertical === 'above' ? roomBelow : roomAbove
+  if (preferredRoom < MENU_MIN_ABOVE && otherRoom > preferredRoom) vertical = vertical === 'above' ? 'below' : 'above'
+  const rightHalf = (anchor.left + anchor.right) / 2 > vp.w / 2
+  let horizontal: MenuPlacement['horizontal'] = rightHalf ? 'right' : 'left'
+  if (horizontal === 'right' && anchor.right - menuWidth < 8) horizontal = 'left'
+  if (horizontal === 'left' && anchor.left + menuWidth > vp.w - 8) horizontal = 'right'
   return { vertical, horizontal }
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE DOCK FOLLOWS THE BUTTON (owner, 2026-09-30). The chat button can be dragged anywhere, and the
+// docked panel used to open at its fixed bottom-right place regardless — so a button moved to the
+// top-left opened a panel on the far side of the screen from the hand that clicked it.
+
+export interface AnchorRect { x: number; y: number; w: number; h: number }
+
+export interface DockPlacement {
+  left: number
+  top: number
+  w: number
+  h: number
+  /** Which way the panel grows when resized: the edges facing AWAY from the button carry the handles. */
+  grow: { x: 'left' | 'right'; y: 'up' | 'down' }
+}
+
+/** Space between the button and the panel it opens. */
+export const DOCK_GAP = 10
+/** Nothing is placed closer than this to the window's edge. */
+export const DOCK_MARGIN = 16
+
+/**
+ * Where the docked panel opens for a button at `btn`. Pure: every input is a number.
+ *
+ *  - It opens ABOVE a button in the lower half of the screen and BELOW one in the upper half, and
+ *    takes the other side only when the preferred one cannot hold `PANEL_MIN.h`.
+ *  - It is aligned to the button's outer edge: its right edge on the button's right edge for a
+ *    button in the right half (growing leftward), its left edge on the button's left edge otherwise.
+ *  - When neither side above nor below can hold the minimum height, it opens BESIDE the button.
+ *  - It is always clamped inside the window, and it never covers the button: above/below and beside
+ *    are separated from it by `DOCK_GAP` on the axis they share.
+ *  - `want` is the person's stored size; it is only ever SHRUNK to fit here, never saved shrunk.
+ */
+export function anchorDock(btn: AnchorRect, want: Size, vp: Viewport, margin = DOCK_MARGIN, gap = DOCK_GAP): DockPlacement {
+  const btnRight = btn.x + btn.w, btnBottom = btn.y + btn.h
+  const rightHalf = btn.x + btn.w / 2 > vp.w / 2
+  const lowerHalf = btn.y + btn.h / 2 > vp.h / 2
+  const fitW = Math.max(0, Math.min(want.w, vp.w - 2 * margin))
+  const roomAbove = btn.y - gap - margin
+  const roomBelow = vp.h - btnBottom - gap - margin
+  const minH = Math.min(PANEL_MIN.h, want.h)
+
+  const vertical: 'up' | 'down' | null =
+    (lowerHalf ? roomAbove : roomBelow) >= minH ? (lowerHalf ? 'up' : 'down')
+      : (lowerHalf ? roomBelow : roomAbove) >= minH ? (lowerHalf ? 'down' : 'up')
+        : null
+
+  if (vertical) {
+    const h = Math.min(want.h, vertical === 'up' ? roomAbove : roomBelow)
+    const top = vertical === 'up' ? btn.y - gap - h : btnBottom + gap
+    const rawLeft = rightHalf ? btnRight - fitW : btn.x
+    const left = Math.min(Math.max(margin, rawLeft), Math.max(margin, vp.w - margin - fitW))
+    return { left, top, w: fitW, h, grow: { x: rightHalf ? 'left' : 'right', y: vertical } }
+  }
+
+  // BESIDE the button: toward the horizontal half with more room.
+  const roomLeft = btn.x - gap - margin
+  const roomRight = vp.w - btnRight - gap - margin
+  const minW = Math.min(PANEL_MIN.w, want.w)
+  const preferredRoom = rightHalf ? roomLeft : roomRight
+  const toLeft = preferredRoom >= minW ? rightHalf : roomLeft > roomRight
+  const w = Math.max(0, Math.min(want.w, toLeft ? roomLeft : roomRight))
+  const h = Math.max(0, Math.min(want.h, vp.h - 2 * margin))
+  const left = toLeft ? btn.x - gap - w : btnRight + gap
+  const rawTop = lowerHalf ? btnBottom - h : btn.y
+  const top = Math.min(Math.max(margin, rawTop), Math.max(margin, vp.h - margin - h))
+  return { left, top, w, h, grow: { x: toLeft ? 'left' : 'right', y: lowerHalf ? 'up' : 'down' } }
+}
+
+/**
+ * A drag on one of the anchored panel's resize handles. The handles sit on the edges facing away
+ * from the button, so pulling a `left`-growing edge left (negative dx) widens it and pulling an
+ * `up`-growing edge up (negative dy) heightens it — and the mirror for `right`/`down`.
+ */
+export function resizeAnchored(start: Size, dx: number, dy: number, handle: { x?: 'left' | 'right'; y?: 'up' | 'down' }, vp: Viewport): Size {
+  return clampPanelSize({
+    w: handle.x === 'left' ? start.w - dx : handle.x === 'right' ? start.w + dx : start.w,
+    h: handle.y === 'up' ? start.h - dy : handle.y === 'down' ? start.h + dy : start.h,
+  }, vp)
 }

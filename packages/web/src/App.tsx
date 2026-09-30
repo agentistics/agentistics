@@ -70,6 +70,7 @@ import { resolveArchiveChoice } from './lib/archive'
 import { TeamLogin } from './components/TeamLogin'
 import { Login } from './components/Login'
 import { ModeSwitch } from './components/nav/ModeSwitch'
+import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
@@ -802,31 +803,13 @@ function MobileBottomNav({
   const allTiles = [...navTiles, ...actionTiles]
 
   const navAction = navTiles.some(t => t.active)
-
-  const itemStyle = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    textDecoration: 'none',
-    color: active ? orange : 'var(--text-tertiary)',
-    fontSize: 10,
-    fontWeight: active ? 700 : 500,
-    transition: 'color 0.15s',
-    padding: '6px 2px',
-    overflow: 'hidden',
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  })
-
-  const labelStyle: React.CSSProperties = {
-    width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  }
+  // A repo's own page is `/repo/:id`, not a child of `/repositories` — the slot has to know it,
+  // or the section stops marking itself the moment you open a repository.
+  const primaryActive = primary.findIndex(tab => tab.to === '/'
+    ? location.pathname === '/'
+    : tab.to === '/repositories'
+      ? location.pathname.startsWith('/repositories') || location.pathname.startsWith('/repo')
+      : location.pathname.startsWith(tab.to))
 
   const accountActionStyle: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
@@ -848,11 +831,15 @@ function MobileBottomNav({
         }}
       />
       <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 'var(--mobile-nav-h)', zIndex: 320,
+        // Down to the FLOOR, with the pill floating over its foot: stopped at the pill's top it left a
+        // strip of page showing around the see-through bar.
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 320,
         background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
         borderRadius: '16px 16px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.35)',
-        padding: '8px 12px 16px',
-        transform: moreOpen ? 'translateY(0)' : 'translateY(110%)',
+        padding: '8px 12px calc(16px + var(--mobile-nav-h))',
+        // The bar under it is a see-through floating pill now, so the closed sheet must travel past the
+        // floor entirely — a fraction short of its own height left an edge showing through the pill.
+        transform: moreOpen ? 'translateY(0)' : 'translateY(calc(100% + 24px))',
         transition: 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
       }}>
         <div style={{
@@ -961,55 +948,24 @@ function MobileBottomNav({
         )}
       </div>
 
-      <nav
-        className="mobile-bottom-nav"
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 330,
-          background: 'var(--bg-surface)',
-          borderTop: '1px solid var(--border)',
-          display: 'flex',
-          alignItems: 'stretch',
-          // Height comes from .mobile-bottom-nav (56px + the home-indicator inset). An inline
-          // `height: 56` would win over the class and re-break the installed PWA.
-        }}
-      >
-        {primary.map(tab => {
-          const active = tab.to === '/'
-            ? location.pathname === '/'
-            // A repo's own page is `/repo/:id`, not a child of `/repositories` — the tile it was
-            // promoted from already knew that, and the bar has to know it too or the section it is
-            // in stops marking itself the moment you open a repository.
-            : tab.to === '/repositories'
-              ? location.pathname.startsWith('/repositories') || location.pathname.startsWith('/repo')
-              : location.pathname.startsWith(tab.to)
-          const Icon = tab.icon
-          return (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              end={tab.to === '/'}
-              onClick={() => closeSheet()}
-              style={itemStyle(active)}
-            >
-              <Icon size={18} />
-              <span style={labelStyle}>{pt ? tab.labelPt : tab.labelEn}</span>
-            </NavLink>
-          )
-        })}
-        <button
-          onClick={() => { if (moreOpen) closeSheet(); else setMoreOpen(true) }}
-          style={itemStyle(navAction || moreOpen)}
-        >
-          <div style={{ position: 'relative' }}>
-            <MoreHorizontal size={18} />
-          </div>
-          <span style={labelStyle}>{pt ? 'Mais' : 'More'}</span>
-        </button>
-      </nav>
+      <MobilePillBar
+        ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
+        items={[
+          ...primary.map(tab => ({
+            key: tab.to,
+            label: pt ? tab.labelPt : tab.labelEn,
+            icon: tab.icon,
+            onActivate: () => { closeSheet(); navigate(tab.to) },
+          })),
+          {
+            key: 'more',
+            label: pt ? 'Mais' : 'More',
+            icon: MoreHorizontal,
+            onActivate: () => { if (moreOpen) closeSheet(); else setMoreOpen(true) },
+          },
+        ]}
+        activeIndex={moreOpen || navAction ? primary.length : primaryActive}
+      />
 
       {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
       {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}

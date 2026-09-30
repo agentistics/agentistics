@@ -76,3 +76,61 @@ describe('minimized list', () => {
       .toEqual({ vertical: 'below', horizontal: 'left' })
   })
 })
+
+import { anchorDock, DOCK_GAP, DOCK_MARGIN, resizeAnchored } from './nayDock'
+
+describe('the dock opens anchored to the button', () => {
+  const VP = { w: 1440, h: 900 }
+  const WANT = { w: 480, h: 720 }
+  const overlaps = (p: { left: number; top: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+    p.left < b.x + b.w && p.left + p.w > b.x && p.top < b.y + b.h && p.top + p.h > b.y
+  const onScreen = (p: { left: number; top: number; w: number; h: number }) =>
+    p.left >= DOCK_MARGIN && p.top >= DOCK_MARGIN && p.left + p.w <= VP.w - DOCK_MARGIN && p.top + p.h <= VP.h - DOCK_MARGIN
+
+  test('from the default bottom-right button it opens up and to the left, as before', () => {
+    const btn = { x: VP.w - 56 - 24, y: VP.h - 56 - 24, w: 56, h: 56 }
+    const p = anchorDock(btn, WANT, VP)
+    expect(p.grow).toEqual({ x: 'left', y: 'up' })
+    expect(p.left + p.w).toBe(btn.x + btn.w)
+    expect(p.top + p.h).toBe(btn.y - DOCK_GAP)
+    expect(overlaps(p, btn)).toBe(false)
+    expect(onScreen(p)).toBe(true)
+  })
+  test('from a top-left button it opens down and to the right', () => {
+    const btn = { x: 16, y: 16, w: 56, h: 56 }
+    const p = anchorDock(btn, WANT, VP)
+    expect(p.grow).toEqual({ x: 'right', y: 'down' })
+    expect(p.left).toBe(16)
+    expect(p.top).toBe(16 + 56 + DOCK_GAP)
+    expect(overlaps(p, btn)).toBe(false)
+    expect(onScreen(p)).toBe(true)
+  })
+  test('the height is shrunk to the room there is, never the stored size', () => {
+    const btn = { x: 16, y: 16, w: 56, h: 56 }
+    const p = anchorDock(btn, { w: 480, h: 2000 }, VP)
+    expect(p.h).toBe(VP.h - (16 + 56) - DOCK_GAP - DOCK_MARGIN)
+    expect(onScreen(p)).toBe(true)
+  })
+  test('a button in the middle of a short window opens the panel beside it', () => {
+    const vp = { w: 1440, h: 700 }
+    const btn = { x: 700, y: 322, w: 56, h: 56 }
+    const p = anchorDock(btn, WANT, vp)
+    expect(overlaps(p, btn)).toBe(false)
+    expect(p.left + p.w <= btn.x - DOCK_GAP || p.left >= btn.x + btn.w + DOCK_GAP).toBe(true)
+    expect(p.top >= DOCK_MARGIN && p.top + p.h <= vp.h - DOCK_MARGIN).toBe(true)
+  })
+  test('never covers the button and stays on screen wherever the button is', () => {
+    for (const x of [16, 300, 700, 1100, VP.w - 72]) {
+      for (const y of [16, 200, 420, 650, VP.h - 72]) {
+        const btn = { x, y, w: 56, h: 56 }
+        const p = anchorDock(btn, WANT, VP)
+        expect(overlaps(p, btn)).toBe(false)
+        expect(onScreen(p)).toBe(true)
+      }
+    }
+  })
+  test('resizing grows away from the button', () => {
+    expect(resizeAnchored({ w: 480, h: 600 }, 40, 30, { x: 'right', y: 'down' }, VP)).toEqual({ w: 520, h: 630 })
+    expect(resizeAnchored({ w: 480, h: 600 }, -40, -30, { x: 'left', y: 'up' }, VP)).toEqual({ w: 520, h: 630 })
+  })
+})
