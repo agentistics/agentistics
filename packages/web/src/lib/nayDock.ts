@@ -208,9 +208,34 @@ export const DOCK_MARGIN = 16
  *  - `want` is the person's stored size; it is only ever SHRUNK to fit here, never saved shrunk.
  */
 export function anchorDock(btn: AnchorRect, want: Size, vp: Viewport, margin = DOCK_MARGIN, gap = DOCK_GAP): DockPlacement {
+  return placeDock(btn, want, vp, dockSides(btn, vp), margin, gap)
+}
+
+/** Which halves of the screen the button is in — the input every placement decision starts from. */
+export interface DockSides { right: boolean; lower: boolean }
+
+/** How far past a midline the button must travel before the dock changes sides. */
+export const DOCK_SIDE_HYSTERESIS = 16
+
+/**
+ * The halves the button is in, with HYSTERESIS against the previous answer: while the dock follows a
+ * dragged button, a button resting ON a midline would otherwise flip the dock between sides on
+ * every pixel of jitter. Without `prev` it is the plain midpoint test.
+ */
+export function dockSides(btn: AnchorRect, vp: Viewport, prev?: DockSides, hyst = DOCK_SIDE_HYSTERESIS): DockSides {
+  const cx = btn.x + btn.w / 2, cy = btn.y + btn.h / 2
+  if (!prev) return { right: cx > vp.w / 2, lower: cy > vp.h / 2 }
+  return {
+    right: prev.right ? cx > vp.w / 2 - hyst : cx > vp.w / 2 + hyst,
+    lower: prev.lower ? cy > vp.h / 2 - hyst : cy > vp.h / 2 + hyst,
+  }
+}
+
+/** `anchorDock` with the halves already decided — see `dockSides`. */
+export function placeDock(btn: AnchorRect, want: Size, vp: Viewport, sides: DockSides, margin = DOCK_MARGIN, gap = DOCK_GAP): DockPlacement {
   const btnRight = btn.x + btn.w, btnBottom = btn.y + btn.h
-  const rightHalf = btn.x + btn.w / 2 > vp.w / 2
-  const lowerHalf = btn.y + btn.h / 2 > vp.h / 2
+  const rightHalf = sides.right
+  const lowerHalf = sides.lower
   const fitW = Math.max(0, Math.min(want.w, vp.w - 2 * margin))
   const roomAbove = btn.y - gap - margin
   const roomBelow = vp.h - btnBottom - gap - margin
