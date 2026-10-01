@@ -38,7 +38,10 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
-import { agyLogFromFds, conversationFromAgyLog } from './agy-conversation'
+import {
+  SPAWN_LOG_AFTER_MS, SPAWN_LOG_BEFORE_MS, agyLogFromFds, agyLogStartMs, conversationFromAgyLog,
+  conversationFromSpawnWindow,
+} from './agy-conversation'
 
 /** One harness session record, reduced to the fields anything here may rely on. */
 export interface HarnessSessionFile {
@@ -291,10 +294,35 @@ export interface HarnessProcessLog {
   logFromFds(targets: readonly string[]): string | null
   /** The conversation that log says the process created, or `null`. */
   conversationFrom(text: string): string | null
+  /**
+   * The POST-MORTEM read: the same fact, recovered from the log a process LEFT BEHIND, for a row
+   * whose process ended before anything read it. See `conversationFromSpawnWindow`.
+   */
+  readonly afterTheFact: {
+    /** When a log file of this harness was opened, from its name; `null` for any other file. */
+    logStartMs(path: string): number | null
+    /** How far around the spawn a log may have been opened for it to be that spawn's. */
+    windowMs: { before: number; after: number }
+    conversationFromSpawn(o: {
+      logs: readonly { path: string; text: string }[]
+      spawnedMs: number
+      cwd: string
+      rivalSpawnsMs?: readonly number[]
+      taken?: ReadonlySet<string>
+    }): string | null
+  }
 }
 
 export const HARNESS_PROCESS_LOGS: Record<HarnessId, HarnessProcessLog | null> = {
-  antigravity: { logFromFds: agyLogFromFds, conversationFrom: conversationFromAgyLog },
+  antigravity: {
+    logFromFds: agyLogFromFds,
+    conversationFrom: conversationFromAgyLog,
+    afterTheFact: {
+      logStartMs: agyLogStartMs,
+      windowMs: { before: SPAWN_LOG_BEFORE_MS, after: SPAWN_LOG_AFTER_MS },
+      conversationFromSpawn: conversationFromSpawnWindow,
+    },
+  },
   // Nobody has read a per-process log for the other five, and one that has not been read is one
   // that must not be guessed at. claude is `null` HERE and non-null above: it already has two exact
   // links and needs no third.

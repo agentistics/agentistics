@@ -783,3 +783,97 @@ describe('poll: the same-second log collision', () => {
     expect(calls).toEqual([['m1', 'agy-conv', 'assigned']])
   })
 })
+
+describe('the post-mortem conversation link', () => {
+  const dead = (over: Record<string, unknown> = {}) => managed('m1', {
+    harness: 'antigravity', cwd: '/home/padawan/ads-next',
+    createdAt: new Date(NOW - 180_000).toISOString(),
+    endedAt: new Date(NOW - 60_000).toISOString(),
+    ...over,
+  })
+  const run = async (o: {
+    rows: ReturnType<typeof managed>[]
+    read: (a: { cwd: string; spawnedMs: number; rivalSpawnsMs?: readonly number[]; taken?: ReadonlySet<string> }) => Promise<string | null>
+    record?: (id: string, cid: string, link: string) => Promise<unknown>
+    polls?: number
+  }) => {
+    const calls: Array<[string, string, string]> = []
+    const asked: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [], frames: {} }),
+      readRegistry: async () => o.rows,
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadConversations: async () => [] as never,
+      recordConversation: o.record ?? (async (id, cid, link) => { calls.push([id, cid, link]) }),
+      readSpawnWindowConversation: async a => { asked.push(a.cwd); return o.read(a) },
+    })
+    for (let i = 0; i < (o.polls ?? 1); i++) await p.poll()
+    return { calls, asked }
+  }
+
+  it('links a row whose process ended before anything read its log, as an exact (assigned) link', async () => {
+    const { calls } = await run({ rows: [dead()], read: async () => 'conv-from-log' })
+    expect(calls).toEqual([['m1', 'conv-from-log', 'assigned']])
+  })
+
+  it('hands the reader the row\'s spawn time, folder and the conversations already taken', async () => {
+    let seen: { cwd: string; spawnedMs: number; taken?: ReadonlySet<string> } | undefined
+    await run({
+      rows: [dead(), managed('m2', { harness: 'antigravity', cwd: '/x', conversationId: 'held' })],
+      read: async a => { seen = a; return null },
+    })
+    expect(seen?.cwd).toBe('/home/padawan/ads-next')
+    expect(seen?.spawnedMs).toBe(NOW - 180_000)
+    expect(seen?.taken?.has('held')).toBe(true)
+  })
+
+  it('tells the reader about every OTHER antigravity row spawned in the same folder', async () => {
+    let rivals: readonly number[] | undefined
+    await run({
+      rows: [
+        dead(),
+        managed('m2', { harness: 'antigravity', cwd: '/home/padawan/ads-next', createdAt: new Date(NOW - 179_500).toISOString() }),
+        managed('m3', { harness: 'antigravity', cwd: '/elsewhere', createdAt: new Date(NOW - 179_800).toISOString() }),
+      ],
+      read: async a => { if (a.spawnedMs === NOW - 180_000) rivals = a.rivalSpawnsMs; return null },
+    })
+    expect(rivals).toEqual([NOW - 179_500])
+  })
+
+  it('writes nothing when the log names no conversation', async () => {
+    const { calls } = await run({ rows: [dead()], read: async () => null })
+    expect(calls).toEqual([])
+  })
+
+  it('never touches a row that already has a link, or a harness with no process log', async () => {
+    const { calls, asked } = await run({
+      rows: [dead({ conversationId: 'already' }), managed('m9', { harness: 'claude' })],
+      read: async () => 'conv-from-log',
+    })
+    expect(calls).toEqual([])
+    expect(asked).toEqual([])
+  })
+
+  it('reads a dead row ONCE — its log is final — and does not repeat the directory scan every poll', async () => {
+    const { asked } = await run({ rows: [dead()], read: async () => null, polls: 3 })
+    expect(asked).toHaveLength(1)
+  })
+
+  it('retries when the registry WRITE failed, not when the read found nothing', async () => {
+    let writes = 0
+    const { asked } = await run({
+      rows: [dead()],
+      read: async () => 'conv-from-log',
+      record: async () => { writes++; throw new Error('registry write lock timed out') },
+      polls: 2,
+    })
+    expect(asked).toHaveLength(2)
+    expect(writes).toBe(2)
+  })
+
+  it('a throwing reader costs the link, never the poll', async () => {
+    const { calls } = await run({ rows: [dead()], read: async () => { throw new Error('EACCES') } })
+    expect(calls).toEqual([])
+  })
+})
