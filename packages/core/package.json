@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/core",
-  "version": "2.90.1",
+  "version": "2.90.2",
   "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
