@@ -47,6 +47,7 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
+import type { MarkerOpts } from './dialog-choice'
 import { FOOTER_LINES } from './attention'
 
 export interface ApprovalSpec {
@@ -110,7 +111,7 @@ export interface ApprovalSpec {
    * line per option (`❯ No, exit` / `  Yes, I trust this folder`, captured from a live session the
    * same day), which is the only shape this reader models.
    */
-  markerSelect?: { probed: string }
+  markerSelect?: { probed: string; glyph?: string; footer?: RegExp }
   /**
    * How the SCREEN says a free-text field is open and taking keys.
    *
@@ -170,7 +171,13 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
     probed: 'agy 1.1.12, 2026-08-13',
     choice: { kind: 'digit', probed: 'agy 1.1.25, 2026-09-09 (AskUserQuestion / ask_question)' },
     move: { down: 'Down', up: 'Up', probed: 'agy 1.1.25, 2026-09-09 (option picker)' },
-    markerSelect: { probed: 'agy 1.1.25, 2026-09-09' },
+    // agy's select draws `>` and not `❯`, and `>` is also its chat prompt, so the footer is the
+    // fence. Captured from agy 1.2.14's directory-trust prompt on 2026-10-01.
+    markerSelect: {
+      probed: 'agy 1.2.14, 2026-10-01 (directory-trust prompt)',
+      glyph: '>',
+      footer: /↑\/↓ Navigate · enter Confirm/i,
+    },
     fieldOpen: {
       pattern: /ctrl\+g to edit/i,
       probed: 'agy 1.1.25, 2026-09-09',
@@ -239,6 +246,13 @@ export function canPick(
 /** Whether the NUMBERLESS shape reader may run on this harness's frames — see `markerSelect`. */
 export function readsMarkerSelect(harness: HarnessId | undefined): boolean {
   return !!approvalFor(harness)?.markerSelect
+}
+
+/** The options `readDialog` is given for this harness: whether to read a numberless select, and how. */
+export function markerReadOptions(harness: HarnessId | undefined): MarkerOpts {
+  const m = approvalFor(harness)?.markerSelect
+  if (!m) return { marker: false }
+  return { marker: true, ...(m.glyph ? { glyph: m.glyph } : {}), ...(m.footer ? { footer: m.footer } : {}) }
 }
 
 /** The spec for a harness, or `undefined` when its dialog was never read. */
