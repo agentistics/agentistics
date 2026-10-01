@@ -13,6 +13,8 @@ export interface UserPrefsDoc {
   /** The accountId. */
   _id: string
   accessibility?: AccessibilityPrefs
+  /** A person's own interface arrangement, by key — see user-ui-prefs.ts for the closed list. */
+  ui?: Record<string, Record<string, unknown>>
   /** BSON Date — see mongo-dates.ts. */
   updatedAt: Date
 }
@@ -33,6 +35,18 @@ export async function writeUserAccessibility(accountId: string, prefs: Accessibi
     { $set: { accessibility: prefs, updatedAt: new Date() } },
     { upsert: true },
   )
+}
+
+export async function readUserUi(accountId: string): Promise<unknown> {
+  const doc = await (await collection()).findOne({ _id: accountId })
+  return doc?.ui ?? null
+}
+
+/** Each named key is replaced whole (`$set` on `ui.<key>`); keys not named are left as they are. */
+export async function writeUserUi(accountId: string, patch: Record<string, Record<string, unknown>>): Promise<void> {
+  const set: Record<string, unknown> = { updatedAt: new Date() }
+  for (const [k, v] of Object.entries(patch)) set[`ui.${k}`] = v
+  await (await collection()).updateOne({ _id: accountId }, { $set: set }, { upsert: true })
 }
 
 /** Called when an account is deleted — its preferences have no owner left. */

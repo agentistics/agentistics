@@ -14,7 +14,7 @@
  * shows both and no total, and an open task shows no duration — "still running" is not "took N h".
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import {
@@ -35,10 +35,9 @@ import { BoardView } from '../components/tasks/TaskBoard'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
-  readBoardPrefs, writeBoardPrefs, type BoardView as ViewId, type LaneKey,
+  useBoardPref,
 } from '../components/tasks/boardPrefs'
 import { BoardArrange } from '../components/tasks/BoardArrange'
-import type { ColumnSorts } from '../components/tasks/columnSort'
 import { DeliveryDetail } from '../components/tasks/DeliveryDetail'
 import { useMoney } from '../components/tasks/money'
 import { RailSection } from '../components/tasks/RailSection'
@@ -149,32 +148,25 @@ function TaskList() {
   // which is the question the product exists for.
   // Restored, not re-decided: opening a task navigates away and unmounts this list, so a view that
   // resets itself on every back-press is a view nobody can stay in.
-  const stored = useMemo(readBoardPrefs, [])
-  const [view, setViewState] = useState<ViewId>(stored.view)
-  const setView = (v: ViewId) => { setViewState(v); writeBoardPrefs({ view: v }) }
+  // Read LIVE from the per-person store (`boardPrefs.ts`), not seeded once: on a device that opens
+  // the board before the server answers, the arrangement lands as soon as it does.
+  const [view, setView] = useBoardPref('view')
   // The kanban's arrangement, persisted with everything else the board remembers. The SORT is
   // shared with the table on purpose: a board that ranks its cards one way in the grid and another
   // in the columns is two boards, and the reader has to hold both.
-  const [sort, setSortState] = useState<SortSpec>(stored.sort)
-  const setSort = (v: SortSpec) => { setSortState(v); writeBoardPrefs({ sort: v }) }
+  const [sort, setSort] = useBoardPref('sort')
   // A column's OWN order (set by clicking its title), by status id — persisted beside the board's
-  // own, in `localStorage` for the same reason: it is one viewer's arrangement.
-  const [columnSort, setColumnSortState] = useState<ColumnSorts>(stored.columnSort)
-  const setColumnSort = (v: ColumnSorts) => { setColumnSortState(v); writeBoardPrefs({ columnSort: v }) }
-  const [lanes, setLanesState] = useState<LaneKey>(stored.lanes)
-  const setLanes = (v: LaneKey) => { setLanesState(v); writeBoardPrefs({ lanes: v }) }
-  const [wip, setWipState] = useState<Record<string, number>>(stored.wip)
+  // own, in the same per-person store for the same reason: it is one viewer's arrangement.
+  const [columnSort, setColumnSort] = useBoardPref('columnSort')
+  const [lanes, setLanes] = useBoardPref('lanes')
+  const [wip, setWip] = useBoardPref('wip')
   // The visible columns, shared with the table's group chooser — `boardPrefs.groups`. Falls back to
   // the LIVE list's own order (every status the board currently has, custom ones included) rather
   // than the fixed legacy seven, so a board nobody has customized shows what is really there.
-  const [boardColumns, setBoardColumnsState] = useState<BoardStatus[]>(
-    stored.groups ?? liveStatusOrder(statuses),
-  )
-  const setBoardColumns = (v: BoardStatus[]) => { setBoardColumnsState(v); writeBoardPrefs({ groups: v }) }
-  // The live list resolves asynchronously — see `TaskTable.tsx`'s identical effect for the reason.
-  useEffect(() => {
-    if (stored.groups === null) setBoardColumnsState(liveStatusOrder(statuses))
-  }, [statuses])
+  // The live list resolves asynchronously, so the fallback is derived on every render rather than
+  // frozen at whatever the first render saw.
+  const [storedGroups, setBoardColumns] = useBoardPref('groups')
+  const boardColumns = useMemo(() => storedGroups ?? liveStatusOrder(statuses), [storedGroups, statuses])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
    *
@@ -183,7 +175,6 @@ function TaskList() {
    * rather than four times with four chances to forget one.
    */
   const [blocking, setBlocking] = useState<string[] | null>(null)
-  const setWip = (v: Record<string, number>) => { setWipState(v); writeBoardPrefs({ wip: v }) }
   // The board's own fleet read — for the kanban's "who is running this" join. The orchestration
   // reads (the ready queue, the activity log) went with the Agents view; nothing else on this page
   // needs them.

@@ -151,6 +151,10 @@ export interface Preferences {
   /** Magnifier lenses and their settings, for a MACHINE. On a central the same object lives per
    *  account in the `userPrefs` collection instead — see a11y-prefs.ts, which owns that choice. */
   accessibility?: AccessibilityPrefs
+  /** A person's own interface arrangement (the task board's view, columns, groups…), for a
+   *  MACHINE. On a central the same keys live per account in `userPrefs.ui` — see
+   *  user-ui-prefs.ts, which owns the closed list of keys, and `/api/user-prefs`. */
+  ui?: Record<string, Record<string, unknown>>
   /** How this machine is actually billed — a timeline of periods per harness, plus the display
    *  basis. Drives the "plan" cost basis; see `billing.ts` in @agentistics/core.
    *

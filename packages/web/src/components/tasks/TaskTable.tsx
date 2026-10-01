@@ -35,10 +35,10 @@ import {
 import { useMoney, type Money } from './money'
 import {
   DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
-  type SortKey, type SortSpec, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
+  type SortKey, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
   type TaskStatusDef,
 } from '@agentistics/core'
-import { readBoardPrefs, writeBoardPrefs } from './boardPrefs'
+import { useBoardPref } from './boardPrefs'
 import { SortTh } from './SortHeader'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
@@ -629,23 +629,20 @@ type TableStagedTarget = StagedTarget & { taskId: string }
 export function TaskTable(p: TaskTableProps) {
   const isMobile = useIsMobile()
   const money = useMoney()
-  const stored = useMemo(readBoardPrefs, [])
-
-  const [shown, setShown] = useState<ColumnId[]>(stored.columns ?? DEFAULT_COLUMNS)
+  // The arrangement is read LIVE from the per-person store (`boardPrefs.ts`) — never seeded once, or
+  // a value the server answers after mount would wait for the next remount to appear.
+  const [storedColumns, setColumns] = useBoardPref('columns')
+  const shown = storedColumns ?? DEFAULT_COLUMNS
   // Which SUBTASK columns every expanded delivery's inline grid shows, in the order they were
   // picked (t-63b7d3b2b0 #1) — ONE arrangement for the whole table, shared through the same
   // `boardPrefs.subtaskColumns` slot `SubtaskTable.tsx`'s own standalone grid reads/writes, so
   // opening a delivery here and opening it from its own page never disagree about the columns.
-  const [shownSubtaskCols, setShownSubtaskCols] = useState<SubtaskColumnId[]>(
-    stored.subtaskColumns ?? DEFAULT_SUBTASK_COLUMNS,
-  )
-  const setSubtaskColumns = (next: SubtaskColumnId[]) => {
-    setShownSubtaskCols(next); writeBoardPrefs({ subtaskColumns: next })
-  }
+  const [storedSubtaskCols, setSubtaskColumns] = useBoardPref('subtaskColumns')
+  const shownSubtaskCols: SubtaskColumnId[] = storedSubtaskCols ?? DEFAULT_SUBTASK_COLUMNS
   /** The subtask column filter (t-63b7d3b2b0 #2) — ONE filter for the whole table, applied to every
    *  expanded delivery's own subtasks; ephemeral, like the per-delivery sort override below. */
   const [subtaskFilter, setSubtaskFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
-  const [sort, setSortState] = useState<SortSpec>(stored.sort ?? DEFAULT_SORT)
+  const [sort, setSort] = useBoardPref('sort')
   // One clock for every lease cell on the screen, ticking a minute at a time. A card that says
   // "3m left" forever is worse than one that says nothing, and a timer per cell would be N timers.
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -653,17 +650,13 @@ export function TaskTable(p: TaskTableProps) {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
     return () => clearInterval(t)
   }, [])
-  const [groupsShown, setGroupsShown] = useState<BoardStatus[]>(
-    stored.groups ?? liveStatusOrder(p.statuses),
-  )
   // The live list resolves ASYNCHRONOUSLY (`useTaskStatuses`) — a status a person just created
   // must still get its own group the first time it renders, so a default (never customized: no
-  // `stored.groups`) tracks the list rather than freezing at whatever `useState`'s initializer saw
-  // on the render before the fetch resolved.
-  useEffect(() => {
-    if (stored.groups === null) setGroupsShown(liveStatusOrder(p.statuses))
-  }, [p.statuses])
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(stored.collapsed))
+  // stored `groups`) is DERIVED from the list on every render rather than frozen.
+  const [storedGroups, setGroups] = useBoardPref('groups')
+  const groupsShown = useMemo(() => storedGroups ?? liveStatusOrder(p.statuses), [storedGroups, p.statuses])
+  const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
+  const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
   const [menu, setMenu] = useState<'columns' | 'groups' | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // SELECT MODE (selection.ts): the checkboxes are behind it, it starts off, and leaving it clears
@@ -741,14 +734,10 @@ export function TaskTable(p: TaskTableProps) {
     rows: sortRows(p.rows.filter(r => (r.task.status as BoardStatus) === status), sort),
   })), [p.rows, sort, p.statuses])
 
-  const setColumns = (next: ColumnId[]) => { setShown(next); writeBoardPrefs({ columns: next }) }
-  const setSort = (next: SortSpec) => { setSortState(next); writeBoardPrefs({ sort: next }) }
-  const setGroups = (next: BoardStatus[]) => { setGroupsShown(next); writeBoardPrefs({ groups: next }) }
   const foldGroup = (status: BoardStatus) => {
     const next = new Set(collapsed)
     next.has(status) ? next.delete(status) : next.add(status)
-    setCollapsed(next)
-    writeBoardPrefs({ collapsed: [...next] as BoardStatus[] })
+    setStoredCollapsed([...next] as BoardStatus[])
   }
 
   const toggleIn = (set: Set<string>, id: string, apply: (s: Set<string>) => void) => {
