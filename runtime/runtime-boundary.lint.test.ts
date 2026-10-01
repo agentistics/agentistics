@@ -61,7 +61,7 @@ export function importSpecifiers(src: string): string[] {
   ]
   for (const re of patterns) {
     let m: RegExpExecArray | null
-    while ((m = re.exec(src))) specs.push(m[2])
+    while ((m = re.exec(src))) specs.push(m[2]!)
   }
   return specs
 }

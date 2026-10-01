@@ -47,7 +47,9 @@ function deps(over: Partial<ProviderWebDeps> = {}): Partial<ProviderWebDeps> {
     flagOn: () => true,
     dir,
     fetch: fakeFetch,
-    audit: (a) => { audits.push(a) },
+    // The engine audits through the CONTRACT shape (`EngineAuditEvent`, `action: string`); the host
+    // narrows it to its own `AuditAction` union when it writes. The test feeds the public builder.
+    audit: (a) => { audits.push(a as AuditInput) },
     now: () => Date.now(),
     ...over,
   }

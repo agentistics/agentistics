@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext", "DOM"],
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
@@ -18,7 +21,31 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
-    "types": ["bun"]
+    "types": [
+      "bun"
+    ],
+    "paths": {
+      "@agentistics/core": [
+        "./node_modules/@agentistics/core/src/index.ts"
+      ],
+      "@agentistics/core/*": [
+        "./node_modules/@agentistics/core/src/*"
+      ],
+      "@agentistics/engine-api": [
+        "./node_modules/@agentistics/engine-api/src/index.ts"
+      ],
+      "@agentistics/runtime": [
+        "./runtime/src/index.ts"
+      ]
+    }
   },
-  "include": ["index.ts", "engine/src", "engine/scripts", "runtime/src", "runtime/test", "runtime/*.ts", "scripts"]
+  "include": [
+    "index.ts",
+    "engine/src",
+    "engine/scripts",
+    "runtime/src",
+    "runtime/test",
+    "runtime/*.ts",
+    "scripts"
+  ]
 }
