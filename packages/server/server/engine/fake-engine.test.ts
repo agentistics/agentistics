@@ -22,10 +22,27 @@ import { readJsonLimited } from '../limits'
 import { safeError } from '../errors'
 import { routeCapability } from '../capability-guard'
 import { FAKE_EVENTS, createEngine, makeFakeEngine, type FakeEngine } from './fixtures/fake-engine'
+import { buildReuseSurface } from './reuse-surface'
+import { hostServices as realHostServices } from './load'
+import { OPENCODE_DB_PATH } from '../config'
+import { commandSummary } from '../sessions/shell-writes'
+import { REUSE_SURFACE_MEMBERS, missingReuseMembers } from '@agentistics/engine-api'
 
-function hostServices(opts: { central?: boolean; audit?: EngineAuditEvent[] } = {}): EngineHostServices {
+/** The host's REAL reuse surface — what `hostServices()` hands an engine. */
+const READERS = await buildReuseSurface()
+
+function hostServices(opts: {
+  central?: boolean
+  audit?: EngineAuditEvent[]
+  readers?: EngineHostServices['readers']
+  origins?: string[]
+  dev?: boolean
+} = {}): EngineHostServices {
   return {
-    paths: { dataDir: '/tmp/x', defaultDataDir: '/tmp/x', contentDir: '/tmp/x/content', home: '/tmp', harnessRoots: {} },
+    paths: {
+      dataDir: '/tmp/x', defaultDataDir: '/tmp/x', contentDir: '/tmp/x/content', home: '/tmp', harnessRoots: {},
+      opencodeDbPath: '/tmp/elsewhere/opencode.db',
+    },
     journal: { sink: async () => null, status: () => ({ state: 'disabled', reason: 'no-integrations' }) },
     protectedPaths: [],
     caps: CAPS,
@@ -41,7 +58,8 @@ function hostServices(opts: { central?: boolean; audit?: EngineAuditEvent[] } = 
       fileNative: async () => ({ ok: false, reason: 'not in this build' }),
       unfileNative: async () => {},
     },
-    readers: {},
+    readers: opts.readers ?? READERS,
+    originPolicy: () => ({ allowedOrigins: opts.origins ?? [], dev: opts.dev ?? false }),
     now: () => new Date('2026-09-29T12:00:00.000Z'),
   }
 }
@@ -185,5 +203,45 @@ describe('the fake engine against the host seam', () => {
     expect((await engine!.health!()).map(i => i.severity)).toEqual(['info'])
     await engine!.dispose()
     expect(engine!.disposed()).toBe(true)
+  })
+
+  it('1.2: reads the reuse surface, the origin policy and the opencode file the host handed over', async () => {
+    const { engine } = await load(makeFakeEngine(), hostServices({ origins: ['https://ok.example'] }))
+    const ask = (origin: string) => dispatch(engine!, new Request(
+      'http://localhost/api/provider/reuse?cmd=cd%20/x%20%26%26%20bun%20test&tool=shell',
+      { headers: { origin } },
+    ))
+    const ok = await (await ask('https://ok.example'))!.json()
+    expect(ok.summary).toBe(commandSummary('cd /x && bun test'))
+    expect(ok.tool).toBe(READERS.canonicalTool('codex', 'shell'))
+    expect(ok.originAllowed).toBe(true)
+    expect(ok.dev).toBe(false)
+    expect(ok.opencodeDbPath).toBe('/tmp/elsewhere/opencode.db')
+    expect((await (await ask('https://evil.example'))!.json()).originAllowed).toBe(false)
+  })
+
+  it('1.2: an incomplete reuse surface is named member by member, never half-used', async () => {
+    const { planTranscriptRead: _, ...partial } = READERS
+    const { engine } = await load(makeFakeEngine(), hostServices({ readers: partial as EngineHostServices['readers'] }))
+    const res = await dispatch(engine!, new Request('http://localhost/api/provider/reuse'))
+    expect(res?.status).toBe(503)
+    expect(await res!.json()).toEqual({ missing: ['planTranscriptRead'] })
+  })
+})
+
+describe('the real host services (1.2)', () => {
+  it('hand over every reuse member, the host\'s own functions', async () => {
+    const h = await realHostServices()
+    expect(missingReuseMembers(h.readers)).toEqual([])
+    expect(Object.keys(READERS).sort()).toEqual([...REUSE_SURFACE_MEMBERS].sort())
+    expect(h.readers.commandSummary).toBe(commandSummary)
+  })
+
+  it('name the opencode database file the host resolved, and its origin policy', async () => {
+    const h = await realHostServices()
+    expect(h.paths.opencodeDbPath).toBe(OPENCODE_DB_PATH)
+    const p = h.originPolicy()
+    expect(Array.isArray(p.allowedOrigins)).toBe(true)
+    expect(p.dev).toBe(process.env.SERVE_STATIC !== '1')
   })
 })

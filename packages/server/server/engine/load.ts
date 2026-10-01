@@ -180,6 +180,9 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     lang = prefs.lang === 'pt' ? 'pt' : 'en'
   } catch { /* an unreadable preferences file leaves the defaults */ }
 
+  const { buildReuseSurface } = await import('./reuse-surface')
+  const readers = await buildReuseSurface()
+
   let journal: import('../journal/types').Journal | null = null
   return {
     paths: {
@@ -196,6 +199,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
         kimi: config.KIMI_DIR,
         opencode: config.OPENCODE_DIR,
       },
+      opencodeDbPath: config.OPENCODE_DB_PATH,
     },
     journal: {
       async sink() {
@@ -220,7 +224,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     isCentral: () => config.TEAM_CENTRAL || centralPref,
     flag: name => (name === 'provider' ? config.providerFlagOn() : process.env.AGENTISTICS_INGEST === '1'),
     audit: e => {
-      void import('../audit').then(m => m.writeAudit(e as import('../audit').AuditInput)).catch(() => {})
+      void import('../audit').then(m => m.writeAudit(e)).catch(() => {})
     },
     readJsonLimited,
     safeError,
@@ -241,7 +245,10 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
       fileNative: async () => ({ ok: false, reason: 'this build has no native sessions to file' }),
       unfileNative: async () => {},
     },
-    readers: {},
+    readers,
+    // `SERVE_STATIC` is `sse.ts`'s own reading of the same variable; importing `sse` here would load
+    // the embedded dashboard for every engine load.
+    originPolicy: () => ({ allowedOrigins: [...config.ALLOWED_ORIGINS], dev: process.env.SERVE_STATIC !== '1' }),
     now: () => new Date(),
   }
 }
