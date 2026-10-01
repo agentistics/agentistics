@@ -138,6 +138,12 @@ export async function linkProcessConversation(o: {
   }
 }
 
+/** Rows the after-the-fact read may try per poll: each one lists a log directory. */
+const AFTER_THE_FACT_PER_POLL = 5
+/** A live row is left to the ordinary read this long before the after-the-fact one steps in. */
+const AFTER_THE_FACT_LIVE_AFTER_MS = 30_000
+const AFTER_THE_FACT_RETRY_MS = 60_000
+
 export function createSessionsPoller(o: {
   backend: SessionBackend
   readRegistry: () => Promise<ManagedSession[]>
@@ -198,6 +204,18 @@ export function createSessionsPoller(o: {
    */
   resolveProcessLog?: (harness: HarnessId, pid: number) => Promise<string | null>
   /**
+   * The conversation a row's process created, recovered from the log it LEFT BEHIND — for the row
+   * whose process ended (or whose live read never landed) before anything linked it. See
+   * `readSpawnWindowConversation`. Optional like every other read here.
+   */
+  readSpawnWindowConversation?: (o: {
+    harness: HarnessId
+    cwd: string
+    spawnedMs: number
+    rivalSpawnsMs?: readonly number[]
+    taken?: ReadonlySet<string>
+  }) => Promise<string | null>
+  /**
    * Persist the name a managed row was given INSIDE the harness (`/rename`), so the title survives
    * the process.
    *
@@ -236,6 +254,9 @@ export function createSessionsPoller(o: {
   // it, while a return to work is believed at once — so the "waiting on you" count stops lying.
   let confirmMemory: ConfirmMemory = EMPTY_CONFIRM_MEMORY
   const prevProcStats = new Map<number, ProcStatSample>()
+  // When the after-the-fact read last ran for a row. A DEAD row's answer cannot change (its log is
+  // final), so it runs once; a LIVE row the live read has not linked gets another go every minute.
+  const afterTheFactTried = new Map<string, number>()
   let last: SessionSnapshot | null = null
   /**
    * When the heartbeat last wrote. `-Infinity` so the FIRST poll always stamps.
@@ -510,6 +531,49 @@ export function createSessionsPoller(o: {
         }
       }
       markFleetPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)
+
+      // THE POST-MORTEM LINK. The block above can only name a conversation while the process is
+      // ALIVE (it reads `/proc/<pid>/fd`), so a session that ended before that read landed kept
+      // `conversationId: null` forever — no chat, and "cannot be reopened" — although the log it
+      // left behind says which conversation it made. See `conversationFromSpawnWindow`.
+      const afterStart = performance.now()
+      let afterWrites = 0
+      if (o.recordConversation && o.readSpawnWindowConversation) {
+        let budget = AFTER_THE_FACT_PER_POLL
+        const taken = new Set(registry.map(m => m.conversationId).filter((v): v is string => Boolean(v)))
+        for (const m of registry) {
+          if (budget <= 0) break
+          if (m.conversationId || !HARNESS_PROCESS_LOGS[m.harness]) continue
+          const spawnedMs = Date.parse(m.createdAt)
+          if (!Number.isFinite(spawnedMs)) continue
+          const alive = panePids?.get(m.id) !== undefined
+          // A live row gets the ordinary read (and its collision guard) first.
+          if (alive && nowMs - spawnedMs < AFTER_THE_FACT_LIVE_AFTER_MS) continue
+          const last = afterTheFactTried.get(m.id)
+          if (last !== undefined && (!alive || nowMs - last < AFTER_THE_FACT_RETRY_MS)) continue
+          afterTheFactTried.set(m.id, nowMs)
+          budget--
+          const found = await o.readSpawnWindowConversation({
+            harness: m.harness,
+            cwd: m.cwd,
+            spawnedMs,
+            rivalSpawnsMs: registry
+              .filter(r => r.id !== m.id && r.harness === m.harness && r.cwd === m.cwd)
+              .map(r => Date.parse(r.createdAt))
+              .filter(Number.isFinite),
+            taken,
+          }).catch(() => null)
+          if (!found) continue
+          try {
+            await o.recordConversation(m.id, found, 'assigned')
+            taken.add(found)
+            afterWrites++
+          } catch {
+            afterTheFactTried.delete(m.id) // the write failed, not the read: try again next poll
+          }
+        }
+      }
+      markFleetPhase(`poll: afterTheFactConversation x${afterWrites}`, afterStart)
 
       // The conversation link for the harnesses no `assignId` can be given (codex, kimi,
       // antigravity, gemini): claimed ONCE, at first sighting, and refused on any ambiguity. Written

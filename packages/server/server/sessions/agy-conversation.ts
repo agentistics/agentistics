@@ -140,3 +140,110 @@ export function agyLogCollisions(
   }
   return collided
 }
+
+/**
+ * ## The post-mortem read — a link that does not need the process to be alive
+ *
+ * Everything above reads `/proc/<pid>/fd`, so it can only name a conversation while the process is
+ * ALIVE. A session that ends before that read lands keeps `conversationId: null` for good — and a
+ * row with no conversation has no chat and cannot be reopened (`conversationBlind`). Measured on
+ * the owner's own machine, 2026-10-01 (agy 1.2.14): 'ADS-NEXT VPC' was spawned at 15:31:59.963,
+ * lived three minutes, and ended unlinked although its log, `cli-20261001_153200.log`, said
+ * `Created conversation 02eefe27-…` three seconds after it opened.
+ *
+ * The log OUTLIVES the process, and it states two facts an unrelated log cannot share with this
+ * row: when it was opened (the file name, to the second) and which directory agy was opened on
+ * (`workspaceDirs=[…]`, written once at start-up). A log opened at the spawn and in the row's own
+ * folder is this row's — and when that is not provably ONE log, nothing is claimed.
+ */
+
+/** A log older than the spawn by more than this cannot be the spawn's: the name is floored to the second. */
+export const SPAWN_LOG_BEFORE_MS = 2_000
+/**
+ * Measured 1-1.5s from spawn to the first line, and a slow machine or a contended disk is the case
+ * this exists for — so the window is generous, and ambiguity is what stays strict.
+ */
+export const SPAWN_LOG_AFTER_MS = 20_000
+
+const AGY_LOG_NAME_RE = /(?:^|\/)cli-(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.log$/
+
+/**
+ * When agy opened this log, on THIS machine's clock (the name is local time), or `null`.
+ *
+ * An impossible date is refused rather than rolled over: `new Date(2026, 12, 45)` is a real date
+ * next year, and a log that does not say a time it could have been opened at is not evidence.
+ */
+export function agyLogStartMs(path: string): number | null {
+  const m = AGY_LOG_NAME_RE.exec(path)
+  if (!m) return null
+  const [y, mo, d, h, mi, s] = m.slice(1).map(Number) as [number, number, number, number, number, number]
+  const t = new Date(y, mo - 1, d, h, mi, s)
+  const same = t.getFullYear() === y && t.getMonth() === mo - 1 && t.getDate() === d
+    && t.getHours() === h && t.getMinutes() === mi && t.getSeconds() === s
+  return same ? t.getTime() : null
+}
+
+/** The directories agy says it was opened on, from its own start-up line; `[]` when it never says. */
+export function agyLogWorkspaces(text: string): string[] {
+  const m = /workspaceDirs=\[([^\]\n]*)\]/.exec(text)
+  if (!m || !m[1]) return []
+  // Go prints a slice space-separated, so a directory holding a space cannot be split safely: it is
+  // kept whole as one entry AND as its pieces, and the caller only ever tests membership.
+  const whole = m[1].trim()
+  return whole ? [...new Set([whole, ...whole.split(' ').filter(Boolean)])] : []
+}
+
+export interface SpawnWindowLog {
+  path: string
+  text: string
+}
+
+/**
+ * The conversation a row's process created, read from the log it left behind — or `null`.
+ *
+ * PURE and conservative in the same way `agyLogFromFds` / `agyLogCollisions` are: every rule below
+ * is a REFUSAL, because the failure to avoid is not "no link" (the row keeps behaving exactly as it
+ * does today) but a wrong one, which puts another session's conversation on screen under this
+ * session's name and cannot be seen to be wrong.
+ *
+ *  - the log must have been opened in `[spawnedMs - BEFORE, spawnedMs + AFTER]`;
+ *  - agy must have been opened on `cwd`;
+ *  - it must have created a conversation (the last wins, as in the live read);
+ *  - exactly ONE log may qualify;
+ *  - a log belongs to the NEAREST spawn at or before it: a rival row spawned later in the same
+ *    folder whose spawn also precedes the log takes it, so a batch of sessions each finds its own;
+ *  - a rival spawned within the same second (`SAME_SECOND_MS`) refuses outright — agy names its log
+ *    by the second, so two such processes can share ONE file whose content is not reliably kept for
+ *    either (see `agyLogCollisions`);
+ *  - a conversation another row already holds is never handed out twice.
+ */
+const SAME_SECOND_MS = 1_500
+
+export function conversationFromSpawnWindow(o: {
+  logs: readonly SpawnWindowLog[]
+  spawnedMs: number
+  cwd: string
+  /** Spawn times of every OTHER antigravity row in this folder. */
+  rivalSpawnsMs?: readonly number[]
+  /** Conversations some other row already holds. */
+  taken?: ReadonlySet<string>
+}): string | null {
+  const rivals = o.rivalSpawnsMs ?? []
+  if (rivals.some(r => Math.abs(r - o.spawnedMs) <= SAME_SECOND_MS)) return null
+
+  const mine: { conv: string }[] = []
+  for (const log of o.logs) {
+    const start = agyLogStartMs(log.path)
+    if (start === null) continue
+    if (start < o.spawnedMs - SPAWN_LOG_BEFORE_MS || start > o.spawnedMs + SPAWN_LOG_AFTER_MS) continue
+    if (!agyLogWorkspaces(log.text).includes(o.cwd)) continue
+    // A closer owner: another row spawned after this one and no later than this log was opened.
+    if (rivals.some(r => r > o.spawnedMs && r <= start + SPAWN_LOG_BEFORE_MS)) continue
+    const conv = conversationFromAgyLog(log.text)
+    if (!conv) continue
+    mine.push({ conv })
+  }
+  if (mine.length !== 1) return null
+  const conv = mine[0]!.conv
+  return o.taken?.has(conv) ? null : conv
+}

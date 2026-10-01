@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { agyLogCollisions, agyLogFromFds, conversationFromAgyLog } from './agy-conversation'
+import {
+  agyLogCollisions, agyLogFromFds, agyLogStartMs, agyLogWorkspaces, conversationFromAgyLog,
+  conversationFromSpawnWindow,
+} from './agy-conversation'
 
 /**
  * The fixtures are REAL lines, captured on 2026-09-08 from agy 1.1.27 on this machine — the log of
@@ -149,5 +152,111 @@ describe('agyLogCollisions', () => {
 
   it('answers empty for no pids at all', () => {
     expect(agyLogCollisions(new Map()).size).toBe(0)
+  })
+})
+
+/**
+ * THE POST-MORTEM READ. The fixtures are the shape of the owner's own machine on 2026-10-01 (agy
+ * 1.2.14): the session 'ADS-NEXT VPC' was spawned at 15:31:59.963 local, lived three minutes, and
+ * ended with no conversation recorded — although its log, `cli-20261001_153200.log`, said
+ * `Created conversation …` three seconds after it opened. The link had been attempted only while
+ * the process was alive.
+ */
+const at = (h: number, m: number, sec: number, ms = 0) => new Date(2026, 9, 1, h, m, sec, ms).getTime()
+
+const logOf = (stamp: string, cwd: string, conv?: string) => ({
+  path: `/home/padawan/.gemini/antigravity-cli/log/cli-${stamp}.log`,
+  text: [
+    `I1001 ${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}.396968       7 manager.go:108] Creating trajectory store manager with proto store and SQLite store`,
+    `I1001 ${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}.428716       1 server.go:323] Creating CLI server backend: product=antigravity workspaceDirs=[${cwd}] appDataDir=/home/padawan/.gemini/antigravity-cli cascadeManager=true codeAssist=true`,
+    ...(conv ? [`I1001 ${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}.541591     250 server.go:1248] Created conversation ${conv}`] : []),
+  ].join('\n'),
+})
+
+const CONV_A = '02eefe27-dee3-44e4-87bc-b23ae2aa933f'
+const CONV_B = 'b7554d22-679c-4241-b9eb-79493fd4f521'
+
+describe('agyLogStartMs', () => {
+  it('reads the local start time off the log name', () => {
+    expect(agyLogStartMs('/x/antigravity-cli/log/cli-20261001_153200.log')).toBe(at(15, 32, 0))
+  })
+
+  it('refuses a crash log, whose uuid is a crash id and not a time', () => {
+    expect(agyLogStartMs('/x/antigravity-cli/crashes/crash_157041_0a37ae18-ba7a-4e37-91fc-b96311b6bc9e.log')).toBeNull()
+  })
+
+  it('refuses an impossible date rather than rolling it over', () => {
+    expect(agyLogStartMs('/x/log/cli-20261345_256199.log')).toBeNull()
+  })
+})
+
+describe('agyLogWorkspaces', () => {
+  it('reads the directories agy was opened on', () => {
+    expect(agyLogWorkspaces(logOf('20261001_153200', '/home/padawan/ads-next').text)).toEqual(['/home/padawan/ads-next'])
+  })
+
+  it('answers [] for a log that never says', () => {
+    expect(agyLogWorkspaces('nothing here')).toEqual([])
+  })
+})
+
+describe('conversationFromSpawnWindow', () => {
+  const base = { cwd: '/home/padawan/ads-next', spawnedMs: at(15, 31, 59, 963) }
+
+  it('finds the conversation of the one log opened at the spawn, in the row\'s own folder', () => {
+    const logs = [logOf('20261001_153200', '/home/padawan/ads-next', CONV_A)]
+    expect(conversationFromSpawnWindow({ ...base, logs })).toBe(CONV_A)
+  })
+
+  it('refuses a log opened in another folder', () => {
+    const logs = [logOf('20261001_153200', '/home/padawan/ads-propostas', CONV_A)]
+    expect(conversationFromSpawnWindow({ ...base, logs })).toBeNull()
+  })
+
+  it('refuses a log opened long before or long after the spawn', () => {
+    expect(conversationFromSpawnWindow({ ...base, logs: [logOf('20261001_153000', '/home/padawan/ads-next', CONV_A)] })).toBeNull()
+    expect(conversationFromSpawnWindow({ ...base, logs: [logOf('20261001_153300', '/home/padawan/ads-next', CONV_A)] })).toBeNull()
+  })
+
+  it('refuses a matching log that never created a conversation', () => {
+    expect(conversationFromSpawnWindow({ ...base, logs: [logOf('20261001_153200', '/home/padawan/ads-next')] })).toBeNull()
+  })
+
+  it('refuses when two logs qualify — nothing here can say which one is this row\'s', () => {
+    const logs = [
+      logOf('20261001_153200', '/home/padawan/ads-next', CONV_A),
+      logOf('20261001_153201', '/home/padawan/ads-next', CONV_B),
+    ]
+    expect(conversationFromSpawnWindow({ ...base, logs })).toBeNull()
+  })
+
+  it('takes the last conversation the process created, like the live read', () => {
+    const l = logOf('20261001_153200', '/home/padawan/ads-next', CONV_A)
+    l.text += `\nI1001 15:32:40.000000     250 server.go:1248] Created conversation ${CONV_B}`
+    expect(conversationFromSpawnWindow({ ...base, logs: [l] })).toBe(CONV_B)
+  })
+
+  it('refuses a conversation another row already holds', () => {
+    const logs = [logOf('20261001_153200', '/home/padawan/ads-next', CONV_A)]
+    expect(conversationFromSpawnWindow({ ...base, logs, taken: new Set([CONV_A]) })).toBeNull()
+  })
+
+  it('refuses two rows spawned in the same second in one folder — they may share one log', () => {
+    const logs = [logOf('20261001_153200', '/home/padawan/ads-next', CONV_A)]
+    expect(conversationFromSpawnWindow({ ...base, logs, rivalSpawnsMs: [at(15, 32, 0, 400)] })).toBeNull()
+  })
+
+  it('lets two rows in one folder each find their OWN log when they were spawned apart', () => {
+    const logs = [
+      logOf('20261001_153200', '/home/padawan/ads-next', CONV_A),
+      logOf('20261001_153210', '/home/padawan/ads-next', CONV_B),
+    ]
+    const later = at(15, 32, 9, 900)
+    expect(conversationFromSpawnWindow({ ...base, logs, rivalSpawnsMs: [later] })).toBe(CONV_A)
+    expect(conversationFromSpawnWindow({ cwd: base.cwd, spawnedMs: later, logs, rivalSpawnsMs: [base.spawnedMs] })).toBe(CONV_B)
+  })
+
+  it('answers null with no logs at all', () => {
+    expect(conversationFromSpawnWindow({ ...base, logs: [] })).toBeNull()
   })
 })
