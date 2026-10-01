@@ -39,7 +39,7 @@
  */
 import type { AnyAgentisticsEvent } from '@agentistics/core'
 import { MAX_PAGE, type Journal } from '../journal/types'
-import { CURRENT_ADAPTER_VERSIONS } from './adapter-versions'
+import { currentAdapterVersions } from './adapter-versions'
 import { STORED_PROJECTIONS, planProjection, type ProjectionPlan, type StoredProjection } from './catalog'
 import { canonicalJson, decodeState, encodeState } from './state-codec'
 import { openProjectionStore, projectionsEnabled, type OpenStoreOptions, type ProjectionStore } from './store'
@@ -65,7 +65,7 @@ export interface CatchUpOptions {
   env?: Record<string, string | undefined>
   /** Default every materialised projection. */
   projections?: readonly StoredProjection[]
-  /** The adapter versions running now. Default `CURRENT_ADAPTER_VERSIONS`; `null` skips that comparison. */
+  /** The adapter versions running now. Default `currentAdapterVersions()`; `null` skips that comparison. */
   adapterVersions?: Record<string, string> | null
   /** Default `MAX_PAGE`. */
   pageSize?: number
@@ -132,7 +132,7 @@ export async function catchUpProjections(opts: CatchUpOptions): Promise<CatchUpR
   const journalStatus = opts.journal.status()
   if (journalStatus.state !== 'open') return done({ state: 'disabled', reason: `journal ${journalStatus.reason ?? journalStatus.state}`, ...base })
 
-  const adapters = opts.adapterVersions === undefined ? CURRENT_ADAPTER_VERSIONS : opts.adapterVersions
+  const adapters = opts.adapterVersions === undefined ? currentAdapterVersions() : opts.adapterVersions
   const pageSize = Math.max(1, Math.min(opts.pageSize ?? MAX_PAGE, MAX_PAGE))
   const failedReadsAtStart = journalStatus.counters.failedReads
   const readFailed = () => opts.journal.status().counters.failedReads > failedReadsAtStart

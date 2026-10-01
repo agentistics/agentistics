@@ -65,23 +65,8 @@ jobs:
           bun test packages/server/server/engine packages/server/server/journal packages/server/server/capability-guard.test.ts packages/server/server/cli-journal.test.ts packages/server/server/health-journal.test.ts
           bun run engine:slot
 
-      # The §40 parity matrix (master spec docs/superpowers/specs/2026-09-19-agentistics-runtime-master.md;
-      # P3 docs/superpowers/specs/2026-09-19-runtime-p3-projections-parity.md §1.2/§5/§8.1) — one row
-      # per metric × harness, generated over the CHECKED-IN FIXTURES ONLY
-      # (packages/server/scripts/parity-matrix.ts never reads a real machine's ~/.claude or
-      # ~/.agentistics). Exits non-zero on any `regression` row, which fails this step and therefore
-      # the job; the artifact upload below still runs (`if: always()`) so a failing run's matrix is
-      # inspectable rather than only a red X.
-      - name: Parity matrix
-        run: bun packages/server/scripts/parity-matrix.ts --out parity-matrix-out
-
-      - name: Upload parity matrix
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: parity-matrix
-          path: parity-matrix-out
-          if-no-files-found: error
+      # The §40 parity matrix moved to the ENGINE repo's CI with the integrations it measures
+      # (engine-interface spec §11 step 4).
 
       # The extension ships as two BUNDLES, and neither is produced by `tsc` or exercised by a
       # test: `dist/extension.cjs` for the extension host and `dist/webview.js` for the panel. A

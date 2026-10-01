@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@agentistics/core": "workspace:*",
-    "@agentistics/runtime": "workspace:*",
     "@agentistics/tui": "workspace:*",
     "jose": "^6.2.3",
     "mongodb": "^6.12.0"

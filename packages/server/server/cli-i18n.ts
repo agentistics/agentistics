@@ -14,7 +14,10 @@
 
 import type { TakeoverRefusal } from './sessions/takeover'
 import type { SendNowOutcome } from '@agentistics/core'
-import type { RateLimitAbsentReason, RateLimitResourceKind } from '@agentistics/runtime'
+// Mirrors of the engine's rate-limit vocabulary (its `provider/rate-limit.ts`) — the engine is no
+// longer in this tree, and these strings are what the host renders its readings with.
+type RateLimitResourceKind = 'requests' | 'tokens' | 'input-tokens' | 'output-tokens' | 'project-tokens'
+type RateLimitAbsentReason = 'not-documented' | 'unknown-format' | 'no-headers' | 'unparseable'
 import type { EngineAbsentReason, EngineCommand, EngineStatus } from '@agentistics/engine-api'
 
 /** A verb an engine may answer. Recognised by every build, so a missing one is SAID, not unknown. */
