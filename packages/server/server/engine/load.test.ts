@@ -227,13 +227,12 @@ describe('the journal, fed through the engine', () => {
 })
 
 describe('the slot generator', () => {
-  const base = { nullRequested: false, engineDir: undefined, packageExists: false, inTreeExists: false }
+  const base = { nullRequested: false, engineDir: undefined, packageExists: false }
 
-  it('chooses in order: --null, an engine dir, the package, the in-tree engine, else null', () => {
-    expect(chooseSlot({ ...base, nullRequested: true, engineDir: '/e', packageExists: true, inTreeExists: true })).toEqual({ kind: 'null' })
+  it('chooses in order: --null, an engine dir, the package, else null', () => {
+    expect(chooseSlot({ ...base, nullRequested: true, engineDir: '/e', packageExists: true })).toEqual({ kind: 'null' })
     expect(chooseSlot({ ...base, engineDir: '/e', packageExists: true })).toEqual({ kind: 'dir', dir: '/e' })
-    expect(chooseSlot({ ...base, packageExists: true, inTreeExists: true })).toEqual({ kind: 'package' })
-    expect(chooseSlot({ ...base, inTreeExists: true })).toEqual({ kind: 'in-tree' })
+    expect(chooseSlot({ ...base, packageExists: true })).toEqual({ kind: 'package' })
     expect(chooseSlot(base)).toEqual({ kind: 'null' })
     expect(chooseSlot({ ...base, engineDir: '  ' })).toEqual({ kind: 'null' })
   })
@@ -243,7 +242,6 @@ describe('the slot generator', () => {
     expect(nul).toContain('createEngine: CreateEngine<AgentisticsEvent> | null = null')
     expect(nul).not.toMatch(/from '(\.\/engine|@agentistics\/engine')/)
     expect(renderSlot({ kind: 'package' }, '/r')).toContain("from '@agentistics/engine'")
-    expect(renderSlot({ kind: 'in-tree' }, '/r')).toContain("from './engine/in-tree'")
     expect(renderSlot({ kind: 'dir', dir: '/r/engine/src/index.ts' }, '/r/packages/server/server'))
       .toContain("from '../../../engine/src/index.ts'")
   })

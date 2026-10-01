@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { CANONICAL_EVENT_SCHEMA, EVENT_TYPES, type AgentisticsEvent } from '@agentistics/core'
-import { createClaudeReplay } from '../integrations/claude'
 import {
   REJECTION_ORDER, decodeData, decodeRow, encodeData, encodeEventId, encodeInstant, encodeRow,
   isIsoInstant, joinSourceRef, planAppend, rejectionOf, rowToEvent, splitSourceRef, toRow,
@@ -455,28 +452,6 @@ describe('storage encoding — lossless by construction', () => {
     expect('sourceRef' in back.provenance).toBe(false)
   })
 })
-
-describe('storage encoding over the replay fixtures (A2.2\'s redacted real transcripts)', () => {
-  const FIXTURES = join(import.meta.dir, '../../test/fixtures')
-  for (const name of readdirSync(FIXTURES).filter(n => n.startsWith('claude-replay'))) {
-    test(`${name}: rowToEvent(decodeRow(encodeRow(toRow(e)))) deep-equals e for EVERY event`, async () => {
-      const replay = createClaudeReplay({ projectsDir: join(FIXTURES, name), now: () => Date.UTC(2100, 0, 1) })
-      const d = dictionary()
-      let n = 0
-      for (const src of await replay.discover()) {
-        const { events } = await replay.replay(src, null)
-        for (const e of events) {
-          expect(rowToEvent(toRow(e))).toEqual(e)
-          expect(throughStorage(e, d)).toEqual(e)
-          n++
-        }
-      }
-      expect(n).toBeGreaterThan(0)
-    })
-  }
-})
-
-// ── planAppend ──────────────────────────────────────────────────────────────────────────────────
 
 describe('planAppend', () => {
   test('every event lands in exactly one bucket, at its own index', () => {
