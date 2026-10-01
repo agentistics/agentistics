@@ -91,3 +91,6 @@ central.env.*
 
 # VS Code extension package
 *.vsix
+
+# The private engine, checked out by release.yml for the official build (engine.pin)
+/.engine/
