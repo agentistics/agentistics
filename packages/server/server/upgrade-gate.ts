@@ -20,7 +20,7 @@
  * "download a release again" trigger anybody can hold down.
  */
 
-export type UpgradeRefusal = 'no-capability' | 'central' | 'up-to-date' | 'busy' | 'not-a-binary'
+export type UpgradeRefusal = 'no-capability' | 'central' | 'container' | 'up-to-date' | 'busy' | 'not-a-binary'
 
 export type UpgradeDecision =
   | { ok: true; version: string }
@@ -36,6 +36,13 @@ export const UPGRADE_REFUSALS: Record<UpgradeRefusal, { pt: string; en: string }
   central: {
     pt: 'Um central se atualiza reconstruindo a imagem, não trocando um binário — rode o comando abaixo no host dele.',
     en: 'A central upgrades by rebuilding its image rather than swapping a binary — run the command below on its host.',
+  },
+  // A machine run from the published image (docker/machine.yml) runs the compiled `agentop`, so the
+  // binary check below would PASS and the upgrade would swap the binary inside the container: gone
+  // on the next recreate, and a container quietly running a version its image does not say.
+  container: {
+    pt: 'Este agentistics roda num contêiner, que se atualiza baixando ou reconstruindo a imagem — não trocando o binário lá dentro.',
+    en: 'This agentistics runs in a container, which upgrades by pulling or rebuilding its image — not by swapping the binary inside it.',
   },
   'up-to-date': {
     pt: 'Esta máquina já está na versão mais recente; não há nada para atualizar.',
@@ -58,12 +65,15 @@ export function upgradeFromUiDecision(o: {
   /** `CAPS.localShell` — the same gate the shell and the fleet ride. */
   capable: boolean
   central: boolean
+  /** `IN_CONTAINER` — the image's runtime stage sets it. */
+  container?: boolean
   hasUpdate: boolean
   /** The version `getVersionInfo` named. Blank or absent means nobody could say. */
   latest: string | null | undefined
 }): UpgradeDecision {
   if (!o.capable) return { ok: false, reason: 'no-capability' }
   if (o.central) return { ok: false, reason: 'central' }
+  if (o.container) return { ok: false, reason: 'container' }
   // A version nobody could name is not an update: running the CLI blind would re-download whatever
   // GitHub calls latest at that instant, which is not what the person read on screen.
   if (!o.hasUpdate || !o.latest) return { ok: false, reason: 'up-to-date' }

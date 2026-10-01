@@ -870,11 +870,17 @@ if (command === 'server' || command === 'start' || !command) {
   }
 
   process.env.SERVE_STATIC = '1'
-  // Server, daemon and version check run in parallel
+  // Server, daemon and version check run in parallel — the daemon and the banner only where they
+  // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
+  const { serverDaemonPlan } = await import('../server/daemon-plan.ts')
+  const plan = serverDaemonPlan({
+    central: process.env.AGENTISTICS_TEAM_CENTRAL === '1',
+    container: process.env.AGENTISTICS_CONTAINER === '1',
+  })
   await Promise.all([
     import('../server/index.ts'),
-    import('../server/otel-watcher.ts'),
-    checkVersionAndWarn(),
+    plan.watcher ? import('../server/otel-watcher.ts') : null,
+    plan.updateBanner ? checkVersionAndWarn() : null,
   ])
 } else if (command === 'watch') {
   checkVersionAndWarn() // fire-and-forget

@@ -24,6 +24,18 @@ describe('who may press "update now"', () => {
       .toEqual({ ok: false, reason: 'central' })
   })
 
+  // The published image runs the compiled `agentop`, so the not-a-binary refusal no longer catches
+  // it: without this a machine container would swap the binary inside itself, lost on recreate.
+  test('a container may not upgrade itself — it is replaced by its image', () => {
+    expect(upgradeFromUiDecision({ ...base, container: true }))
+      .toEqual({ ok: false, reason: 'container' })
+    expect(upgradeFromUiDecision({ ...base, container: false }))
+      .toEqual({ ok: true, version: '2.30.0' })
+    // A central container keeps the central's sentence: it names the command to run on its host.
+    expect(upgradeFromUiDecision({ ...base, central: true, container: true }))
+      .toEqual({ ok: false, reason: 'central' })
+  })
+
   // Without this the button is a free "download a release again" trigger, repeatable at will.
   test('a machine already on the latest version has nothing to run', () => {
     expect(upgradeFromUiDecision({ ...base, hasUpdate: false }))
@@ -46,11 +58,11 @@ describe('who may press "update now"', () => {
   // por um motivo que não existe.
   test('every refusal has a sentence in both languages, and none is reused for another reason', () => {
     const seen = new Set<string>()
-    for (const reason of ['no-capability', 'central', 'up-to-date', 'busy', 'not-a-binary'] as const) {
+    for (const reason of ['no-capability', 'central', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
       expect(seen.has(UPGRADE_REFUSALS[reason].pt), reason).toBe(false)
       seen.add(UPGRADE_REFUSALS[reason].pt)
     }
-    for (const reason of ['no-capability', 'central', 'up-to-date', 'busy', 'not-a-binary'] as const) {
+    for (const reason of ['no-capability', 'central', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
       expect(UPGRADE_REFUSALS[reason].pt.length, reason).toBeGreaterThan(10)
       expect(UPGRADE_REFUSALS[reason].en.length, reason).toBeGreaterThan(10)
     }
