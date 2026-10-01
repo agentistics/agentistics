@@ -21,10 +21,13 @@ import { chooseSlot, renderSlot } from '../../scripts/engine-slot'
 import { engine, engineDisabled, engineIntegrations, engineStatus, loadEngine, refusalLine, resetEngineForTests } from './load'
 import { ENGINE_ABSENT_EXIT, engineHelpLines, isEngineVerb, resolveEngineVerb } from './cli'
 import { makeFakeEngine, type FakeEngineOptions } from './fixtures/fake-engine'
+import { buildReuseSurface } from './reuse-surface'
+
+const READERS = await buildReuseSurface()
 
 function host(): EngineHostServices<AgentisticsEvent> {
   return {
-    paths: { dataDir: '/tmp/x', defaultDataDir: '/tmp/x', contentDir: '/tmp/x/c', home: '/tmp', harnessRoots: {} },
+    paths: { dataDir: '/tmp/x', defaultDataDir: '/tmp/x', contentDir: '/tmp/x/c', home: '/tmp', harnessRoots: {}, opencodeDbPath: '/tmp/x/opencode.db' },
     journal: { sink: async () => null, status: () => ({ state: 'disabled', reason: 'flag-off' }) },
     protectedPaths: [],
     caps: CAPS,
@@ -37,7 +40,8 @@ function host(): EngineHostServices<AgentisticsEvent> {
     notify: () => {},
     lang: () => 'en',
     tasks: { fileNative: async () => ({ ok: false, reason: 'test' }), unfileNative: async () => {} },
-    readers: {},
+    readers: READERS,
+    originPolicy: () => ({ allowedOrigins: [], dev: false }),
     now: () => new Date('2026-09-30T12:00:00.000Z'),
   }
 }

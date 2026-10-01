@@ -6,6 +6,9 @@ import {
   checkEngine,
   hasReplay,
   isReservedPrefix,
+  missingReuseMembers,
+  REUSE_SURFACE_MEMBERS,
+  type ReuseSurface,
   type CapabilityName,
   type EngineManifest,
   type HarnessIntegration,
@@ -99,5 +102,30 @@ describe('hasReplay', () => {
   it('is false for a declared absence', () => {
     const i: HarnessIntegration = { ...base, replayAbsent: 'no stored record' }
     expect(hasReplay(i)).toBe(false)
+  })
+})
+
+// Every `ReuseSurface` key is in the member list, and the list names nothing else (`satisfies`).
+type MissingFromList = Exclude<keyof ReuseSurface, (typeof REUSE_SURFACE_MEMBERS)[number]>
+const listIsExhaustive: [MissingFromList] extends [never] ? true : false = true
+
+describe('the reuse surface (1.2)', () => {
+  it('names exactly the 48 members an engine reuses, once each', () => {
+    expect(listIsExhaustive).toBe(true)
+    expect(REUSE_SURFACE_MEMBERS.length).toBe(48)
+    expect(new Set(REUSE_SURFACE_MEMBERS).size).toBe(48)
+  })
+  it('an empty surface (a 1.1 host) lacks every member', () => {
+    expect(missingReuseMembers({})).toEqual([...REUSE_SURFACE_MEMBERS])
+  })
+  it('a surface missing one member names exactly that one', () => {
+    const offered = Object.fromEntries(REUSE_SURFACE_MEMBERS.map(k => [k, () => {}]))
+    delete offered.planTranscriptRead
+    expect(missingReuseMembers(offered)).toEqual(['planTranscriptRead'])
+  })
+  it('a falsy constant still counts as offered — only an absent member is missing', () => {
+    const offered: Record<string, unknown> = Object.fromEntries(REUSE_SURFACE_MEMBERS.map(k => [k, () => {}]))
+    offered.MAX_STATES = 0
+    expect(missingReuseMembers(offered)).toEqual([])
   })
 })

@@ -16,6 +16,7 @@ import {
   type EngineEvent,
   type EngineHostServices,
   type ReplaySource,
+  missingReuseMembers,
 } from '@agentistics/engine-api'
 
 export const FAKE_ENGINE_VERSION = '0.0.0-fake'
@@ -74,6 +75,22 @@ export function makeFakeEngine(opts: FakeEngineOptions = {}): (host: EngineHostS
           prefix: '/api/provider',
           capability: 'localShell',
           async handle(req, url) {
+            if (url.pathname === '/api/provider/reuse') {
+              // 1.2: answers ONLY from what the host handed over — its reuse surface, its origin
+              // policy and its paths — exactly the members a real engine reads instead of importing
+              // the public tree or the environment.
+              const missing = missingReuseMembers(host.readers)
+              if (missing.length > 0) return Response.json({ missing }, { status: 503 })
+              const policy = host.originPolicy()
+              const origin = req.headers.get('origin')
+              return Response.json({
+                summary: host.readers.commandSummary(url.searchParams.get('cmd') ?? ''),
+                tool: host.readers.canonicalTool('codex', url.searchParams.get('tool') ?? ''),
+                originAllowed: host.readers.originAllowed(origin, policy.allowedOrigins, policy.dev),
+                dev: policy.dev,
+                opencodeDbPath: host.paths.opencodeDbPath,
+              })
+            }
             if (url.pathname !== '/api/provider/echo') return null
             const body = await host.readJsonLimited<{ say?: unknown }>(req, 1024)
             if (!body.ok) return Response.json({ error: body.error }, { status: 400 })
