@@ -181,3 +181,34 @@ describe('the dock comes to rest wherever the drag ends (REST_AFTER_FRAMES)', ()
     expect(shouldWake(NaN, NaN, { x: 0, y: 0 }, 0)).toBe(true)
   })
 })
+
+describe('every card-follow style visibly moves the card (owner: "only Gelatina animates")', () => {
+  const CARD = { w: 340, h: 230 }
+  /** Drag the button across the screen and collect what each frame would draw on the card. */
+  function drag(style: (typeof NAY_FAB_STYLES)[number]) {
+    let bx = 1300, by = 800
+    const st = initFollow({ x: bx, y: by, w: B, h: B }, CARD, VP)
+    const frames = []
+    for (let f = 1; f <= 60; f++) {
+      bx -= 12; by -= 6
+      const btn = { x: bx, y: by, w: B, h: B }
+      for (let k = 0; k < 4; k++) stepFollow(st, btn, CARD, VP, style, false, 1 / 240, NO_FADE)
+      frames.push(renderDock(st, btn, VP, style, false, 900, NO_FADE))
+    }
+    const lefts = new Set(frames.map(fr => Math.round(fr.left)))
+    const deformed = frames.some(fr => restingTransform(fr.transform) !== '')
+    const echoed = frames.some(fr => fr.echoes.some(e => e.opacity > 0.05))
+    // The landing, which is where `shock` speaks.
+    landImpulse(st, style, false, 1500)
+    stepFollow(st, { x: bx, y: by, w: B, h: B }, CARD, VP, style, false, 1 / 240, NO_FADE)
+    const landed = restingTransform(renderDock(st, { x: bx, y: by, w: B, h: B }, VP, style, false, 0, NO_FADE).transform) !== ''
+    return { moved: lefts.size > 30, deformed, echoed, landed, opacities: frames.map(fr => fr.opacity) }
+  }
+  test('jelly: follows and shears', () => { const r = drag('jelly'); expect(r.moved).toBe(true); expect(r.deformed).toBe(true) })
+  test('trail: follows and leaves outline echoes', () => { const r = drag('trail'); expect(r.moved).toBe(true); expect(r.echoed).toBe(true) })
+  test('comet: follows, leans and leaves echoes', () => { const r = drag('comet'); expect(r.moved).toBe(true); expect(r.deformed).toBe(true); expect(r.echoed).toBe(true) })
+  test('shock: follows and squashes on landing', () => { const r = drag('shock'); expect(r.moved).toBe(true); expect(r.landed).toBe(true) })
+  test('no style fades the card', () => {
+    for (const s of NAY_FAB_STYLES) expect(drag(s).opacities.every(o => o === 1)).toBe(true)
+  })
+})
