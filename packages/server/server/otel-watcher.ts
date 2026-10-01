@@ -42,7 +42,8 @@ import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
 import { calcCost, sessionCostUSD } from '@agentistics/core'
 import type { ModelUsage, HarnessId, SessionMeta } from '@agentistics/core'
 import type { OtelSnapshot } from '@agentistics/core'
-import { HOME_DIR, CLAUDE_DIR, PROJECTS_DIR, SESSION_META_DIR, STATS_CACHE_FILE, CONSOLIDATED_DIR } from './config'
+import { HOME_DIR, CLAUDE_DIR, PROJECTS_DIR, SESSION_META_DIR, STATS_CACHE_FILE, CONSOLIDATED_DIR, TEAM_CENTRAL, IN_CONTAINER } from './config'
+import { serverDaemonPlan } from './daemon-plan'
 import { createLimiter, safeReadJson, safeReadDir, safeStat } from './utils'
 import { getEnabledAdapters } from './adapters/types'
 
@@ -634,20 +635,35 @@ async function main() {
     // Said out loud, because "metrics export disabled" alone reads as "the numbers are not sent"
     // rather than "the numbers are not computed", and someone reading the log should be able to
     // tell that this process is now cheap.
-    console.log('[otel] Snapshot loop not started — nothing would read it. The event producer still runs.')
+    console.log('[otel] Snapshot loop not started — nothing would read it.')
   }
 
   // The session-event producer rides along here rather than being its own service: it has to be
   // long-lived to tell a working session from a finished one (see events/producer.ts), and a
   // separate process the user must remember to start is a process that will be dead at the moment
   // it matters. Never fatal to this daemon — see events/daemon.ts.
-  const { startEventProducer } = await import('./events/daemon')
-  const events = await startEventProducer()
+  //
+  // NOT on a central and NOT in a container — daemon-plan.ts says why. Said in the log either way,
+  // so an `agentop events status` reporting no producer has a line to point at.
+  const plan = serverDaemonPlan({ central: TEAM_CENTRAL, container: IN_CONTAINER })
+  const where = TEAM_CENTRAL ? 'a central' : 'a container'
+  let events: { stop(): Promise<void> } | null = null
+  if (plan.eventProducer) {
+    const { startEventProducer } = await import('./events/daemon')
+    events = await startEventProducer()
+  } else {
+    console.log(`[events] not started — ${where} has no host sessions to watch`)
+  }
 
   // The scheduled backup rides along for the same reason the event producer does — see
   // backup/daemon.ts. Never fatal to this daemon.
-  const { startScheduledBackup } = await import('./backup/daemon')
-  const backups = startScheduledBackup()
+  let backups: { stop(): void } | null = null
+  if (plan.scheduledBackup) {
+    const { startScheduledBackup } = await import('./backup/daemon')
+    backups = startScheduledBackup()
+  } else {
+    console.log(`[backup] scheduled backup not started in ${where}`)
+  }
 
   console.log('[watcher] Running — use `bun run dev` in a separate terminal for the dashboard UI')
 

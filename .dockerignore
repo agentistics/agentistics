@@ -23,3 +23,7 @@ coverage/
 # Agent scratch — see the note in .gitignore. Excluded here so writing a review
 # package never busts the build cache.
 .superpowers
+
+# The private engine checkout (release.yml / engine.pin). It reaches the official build ONLY as a
+# bind-mounted named context (`--build-context engine=.engine`), never through `COPY . .`.
+.engine
