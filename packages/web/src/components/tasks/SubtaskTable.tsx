@@ -56,7 +56,7 @@
  * actually reports one — a task with no direct sessions gets no footer row at all, per §4.4.
  */
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronRight, Columns3, Plus } from 'lucide-react'
 import {
   cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
@@ -84,7 +84,7 @@ import { costCellFor, tokensCellFor } from './subtaskRollup'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { ModelCellView } from './SubtaskModelCell'
 import { PickerMenu } from './PickerMenu'
-import { readBoardPrefs, writeBoardPrefs } from './boardPrefs'
+import { useBoardPref } from './boardPrefs'
 import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { subtaskColumnCell } from './subtaskColumnCell'
 import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
@@ -254,11 +254,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
    * sorted list, so a group and its members stay together), never `p.subtasks` and never a write.
    */
   const [sort, setSort] = useState<SubtaskSortSpec | null>(null)
-  // Which columns are shown, in the order they were picked (t-63b7d3b2b0 #1) — read once from the
-  // shared board arrangement, same lifetime `TaskTable.tsx`'s own main-grid columns already have.
-  const stored = useMemo(readBoardPrefs, [])
-  const [shownCols, setShownCols] = useState<SubtaskColumnId[]>(stored.subtaskColumns ?? DEFAULT_SUBTASK_COLUMNS)
-  const setColumns = (next: SubtaskColumnId[]) => { setShownCols(next); writeBoardPrefs({ subtaskColumns: next }) }
+  // Which columns are shown, in the order they were picked (t-63b7d3b2b0 #1) — read LIVE from the
+  // per-person board arrangement (server-side, `boardPrefs.ts`), the same slot `TaskTable.tsx`'s
+  // inline subtask grid writes, so both surfaces always draw the same columns.
+  const [storedCols, setColumns] = useBoardPref('subtaskColumns')
+  const shownCols: SubtaskColumnId[] = storedCols ?? DEFAULT_SUBTASK_COLUMNS
   /** The column filter (t-63b7d3b2b0 #2) — ephemeral, like the sort above: it narrows this one look
    *  at the grid and is never remembered across a remount. */
   const [filter, setFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)

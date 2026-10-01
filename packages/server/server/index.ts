@@ -127,6 +127,7 @@ import {
 import { fullSync } from './archive'
 import { getArchiveMode } from './preferences'
 import { handleAccessibility } from './a11y-routes'
+import { handleUserUiPrefs } from './user-ui-prefs-routes'
 import { registerAgent, unregisterAgent, onAgentMessage, onAgentPong, setPresenceChangeHook } from './team-agent'
 import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
@@ -985,6 +986,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/accessibility') {
       return await handleAccessibility(req, CORS_HEADERS)
+    }
+
+    if (url.pathname === '/api/user-prefs') {
+      return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
     if (url.pathname === '/api/billing/plan-prices' && req.method === 'GET') {

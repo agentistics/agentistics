@@ -1,71 +1,61 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { readBoardPrefs, writeBoardPrefs } from './boardPrefs'
+import { describe, expect, it } from 'bun:test'
+import { DEFAULT_PREFS, parseBoardPrefs, readBoardPrefs, writeBoardPrefs } from './boardPrefs'
 
-// The board's arrangement is `localStorage`, and the accessor can THROW (a private window). A tiny
-// in-memory stand-in is enough: what is under test is what the reader keeps and what it drops.
-const store = new Map<string, string>()
-const g = globalThis as unknown as { localStorage?: unknown }
-let saved: unknown
+// What a stored document is READ AS is the pure `parseBoardPrefs`; where it is stored (server,
+// per person, with the browser copy as first paint) is `sharedPref.ts`, tested there.
 
-beforeEach(() => {
-  store.clear()
-  saved = g.localStorage
-  g.localStorage = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => { store.set(k, v) },
-  }
-})
-afterEach(() => { g.localStorage = saved })
-
-describe('boardPrefs.columnSort', () => {
-  it('defaults to no per-column order', () => {
-    expect(readBoardPrefs().columnSort).toEqual({})
+describe('parseBoardPrefs', () => {
+  it('junk yields the defaults instead of throwing', () => {
+    expect(parseBoardPrefs(undefined)).toEqual(DEFAULT_PREFS)
+    expect(parseBoardPrefs(null)).toEqual(DEFAULT_PREFS)
+    expect(parseBoardPrefs('table')).toEqual(DEFAULT_PREFS)
+    expect(parseBoardPrefs(['table'])).toEqual(DEFAULT_PREFS)
   })
 
-  it('round-trips a column order beside the board order', () => {
-    writeBoardPrefs({ columnSort: { todo: { key: 'cost', dir: 'desc' } } })
-    const p = readBoardPrefs()
-    expect(p.columnSort).toEqual({ todo: { key: 'cost', dir: 'desc' } })
-    expect(p.sort).toEqual({ key: 'manual', dir: 'asc' })
-  })
-
-  it('drops entries that are not a sort, and tolerates a stored non-object', () => {
-    store.set('agentistics-task-board-v1', JSON.stringify({
+  it('drops columnSort entries that are not a sort, and tolerates a non-object', () => {
+    expect(parseBoardPrefs({
       columnSort: { ok: { key: 'title', dir: 'asc' }, junk: 'x', empty: null, nokey: { dir: 'asc' } },
-    }))
-    expect(readBoardPrefs().columnSort).toEqual({ ok: { key: 'title', dir: 'asc' } })
-    store.set('agentistics-task-board-v1', JSON.stringify({ columnSort: ['a'] }))
-    expect(readBoardPrefs().columnSort).toEqual({})
-    store.set('agentistics-task-board-v1', JSON.stringify({ columnSort: 'no' }))
-    expect(readBoardPrefs().columnSort).toEqual({})
+    }).columnSort).toEqual({ ok: { key: 'title', dir: 'asc' } })
+    expect(parseBoardPrefs({ columnSort: ['a'] }).columnSort).toEqual({})
+    expect(parseBoardPrefs({ columnSort: 'no' }).columnSort).toEqual({})
   })
 
-  it('an unreadable store falls back to the defaults instead of throwing', () => {
-    g.localStorage = { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } }
-    expect(readBoardPrefs().columnSort).toEqual({})
-    expect(() => writeBoardPrefs({ columnSort: {} })).not.toThrow()
+  it('subtaskColumns: null unless an array; an empty array is a real choice', () => {
+    expect(parseBoardPrefs({}).subtaskColumns).toBeNull()
+    expect(parseBoardPrefs({ subtaskColumns: 'model' }).subtaskColumns).toBeNull()
+    expect(parseBoardPrefs({ subtaskColumns: [] }).subtaskColumns).toEqual([])
+    expect(parseBoardPrefs({ subtaskColumns: ['model', 'status'] }).subtaskColumns).toEqual(['model', 'status'])
+  })
+
+  it('keeps the delivery table\'s columns apart from the subtask grid\'s', () => {
+    const p = parseBoardPrefs({ columns: ['status', 'cost'], subtaskColumns: ['model'] })
+    expect(p.columns).toEqual(['status', 'cost'])
+    expect(p.subtaskColumns).toEqual(['model'])
+  })
+
+  it('drops a WIP limit that is not a positive number and a rail entry that is not a boolean', () => {
+    const p = parseBoardPrefs({ wip: { todo: 3, doing: 0, x: 'y' }, rail: { a: true, b: 'open' } })
+    expect(p.wip).toEqual({ todo: 3 })
+    expect(p.rail).toEqual({ a: true })
+  })
+
+  it('an unknown view or lane falls back', () => {
+    const p = parseBoardPrefs({ view: 'gantt', lanes: 'team' })
+    expect(p.view).toBe('overview')
+    expect(p.lanes).toBe('none')
   })
 })
 
-describe('boardPrefs.subtaskColumns', () => {
-  it('defaults to null (every column, in the fixed order)', () => {
-    expect(readBoardPrefs().subtaskColumns).toBeNull()
-  })
-
-  it('round-trips a picked/reordered set, separately from the delivery table\'s own columns', () => {
+describe('readBoardPrefs / writeBoardPrefs', () => {
+  it('a write is a PATCH: one field changes, the rest of the arrangement stays', () => {
     writeBoardPrefs({ columns: ['status', 'cost'], subtaskColumns: ['model', 'status'] })
+    writeBoardPrefs({ subtaskColumns: ['status'] })
     const p = readBoardPrefs()
-    expect(p.subtaskColumns).toEqual(['model', 'status'])
+    expect(p.subtaskColumns).toEqual(['status'])
     expect(p.columns).toEqual(['status', 'cost'])
   })
 
-  it('keeps an empty stored list as a real choice', () => {
-    writeBoardPrefs({ subtaskColumns: [] })
-    expect(readBoardPrefs().subtaskColumns).toEqual([])
-  })
-
-  it('falls back to null for anything that is not an array', () => {
-    store.set('agentistics-task-board-v1', JSON.stringify({ subtaskColumns: 'model' }))
-    expect(readBoardPrefs().subtaskColumns).toBeNull()
+  it('does not throw without a usable localStorage', () => {
+    expect(() => writeBoardPrefs({ columnSort: {} })).not.toThrow()
   })
 })
