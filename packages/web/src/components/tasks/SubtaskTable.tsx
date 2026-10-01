@@ -289,6 +289,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const directCost = costCellFor(directView?.rollup)
   const directTok = tokensCellFor(directView?.rollup)
 
+  // Desktop only: the header row stays put while the grid's own box scrolls (see the box below).
+  const stickyHead: React.CSSProperties = isMobile
+    ? {}
+    : { position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg-card)' }
+
   return (
     <div style={{ ...surface, overflowX: 'auto' }}>
       <div style={{
@@ -323,19 +328,29 @@ export function SubtaskTable(p: SubtaskTableProps) {
         </PickerMenu>
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+      {/* The grid's OWN scroll box. Its last column (Tokens) was cut off at 1440: a flat 760px table
+          minimum plus a 180px title and a 190px sessions cell overran the task page's 742px column,
+          and the horizontal scrollbar that could reach it sat under every row — on a 47-row task,
+          two screens below the cut. Now (1) no fixed table minimum and tighter cell minimums, so a
+          six-column arrangement fits outright, and (2) on desktop the box is bounded in height, so
+          an arrangement wider than the column (the default eight are ~890px) keeps its scrollbar
+          on screen, with the header row sticky so the columns stay named while it scrolls. A phone
+          swipes sideways and has no scrollbar to lose, so it keeps the page's own vertical scroll —
+          a nested one there traps the thumb. */}
+      <div style={isMobile ? { overflowX: 'auto' } : { maxHeight: '70vh', overflow: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             {/* The leading '' is the gear-menu column (`SubtaskActionsMenu`) — no header text, same
                 convention the old trailing actions column used, and no sort: nothing to order by. */}
-            <th style={{ ...microLabel, padding: '6px 9px', fontWeight: 600 }} />
+            <th style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, ...stickyHead }} />
             {/* The title column is always shown — the row's own name, never in the "Columns"
                 picker, exactly like `TaskTable.tsx`'s own leading name column. */}
             <SortTh
               label={copy.subtasks} sortKey="title" current={sort} mobile={isMobile}
               onSort={k => setSort(cycleSort(sort, k))}
               title={L.sortByColumn.replace('{column}', copy.subtasks)}
-              style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap', ...stickyHead }}
             />
             {shownCols.map(id => {
               const def = SUBTASK_COLUMNS.find(c => c.id === id)!
@@ -352,7 +367,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   align={def.numeric ? 'right' : 'left'}
                   style={{
                     ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
-                    textAlign: def.numeric ? 'right' : 'left',
+                    textAlign: def.numeric ? 'right' : 'left', ...stickyHead,
                   }}
                 />
               )
@@ -415,7 +430,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
               </td>
               {/* A MEMBER is indented one level under its group's header — the visual nesting that
                   replaces the old "parte do grupo" caption for every properly clustered row. */}
-              <td style={{ ...cell, minWidth: 180, ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
+              <td style={{ ...cell, minWidth: 150, ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {/* The accordion toggle — collapsed by default (product feedback, 2026-09-21),
                       the same chevron interaction `TaskTable`'s own task-row expansion already
@@ -495,7 +510,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     key={id}
                     style={{
                       ...cell, ...tint, whiteSpace: id === 'model' ? undefined : 'nowrap',
-                      minWidth: id === 'sessions' ? 190 : id === 'status' ? 90 : undefined,
+                      minWidth: id === 'sessions' ? 160 : id === 'status' ? 90 : undefined,
                       textAlign: def.numeric ? 'right' : 'left',
                     }}
                   >
@@ -527,13 +542,13 @@ export function SubtaskTable(p: SubtaskTableProps) {
             <tr>
               {/* No gear here — this bucket is not a subtask, it has nothing a menu could act on. */}
               <td style={cell} />
-              <td style={{ ...cell, minWidth: 180, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
+              <td style={{ ...cell, minWidth: 150, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
                 {copy.directSessions}
               </td>
               {shownCols.map(id => {
                 const def = SUBTASK_COLUMNS.find(c => c.id === id)!
                 return (
-                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 190 : undefined }}>
+                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 160 : undefined }}>
                     {id === 'sessions' && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
                         {directSessions.map(s => (
@@ -575,6 +590,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
           </tr>
         </tbody>
       </table>
+      </div>
 
       {linking && (
         <SessionPicker
