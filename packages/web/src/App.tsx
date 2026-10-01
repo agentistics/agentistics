@@ -63,6 +63,7 @@ import { SessionDrilldownModal } from './components/SessionDrilldownModal'
 import { TranscriptModal } from './components/TranscriptModal'
 import type { PrefsDraft, AppContext } from './lib/app-context'
 import { NayDock } from './components/nay/NayDock'
+import { dockActiveOnly } from './lib/nayDock'
 import { UpdateModal } from './components/UpdateModal'
 import { InstallModal } from './components/InstallModal'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
@@ -4843,7 +4844,7 @@ export default function AppLayout() {
           isMobile={isMobile}
           ctx={appCtx}
           filters={filters}
-          activeOnly={activeOnly}
+          activeOnly={dockActiveOnly(inSessionsWorkspace, activeOnly)}
         />
       )}
 
