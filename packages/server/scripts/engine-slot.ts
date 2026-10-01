@@ -12,9 +12,6 @@
  *   --null (or AGENTISTICS_ENGINE_SLOT=null) → `createEngine = null`: the COMMUNITY build.
  *   AGENTISTICS_ENGINE_DIR                     → that checkout's engine entry.
  *   packages/engine/ beside the others         → `@agentistics/engine`.
- *   server/engine/in-tree.ts present           → the engine code that still lives in this tree
- *                                                (the migration's transitional state; the file goes
- *                                                when the code moves, and this branch goes with it).
  *   nothing                                    → the null slot.
  *
  * `--if-missing` leaves an existing slot alone — what `bun run stub` uses, so a fresh checkout
@@ -31,19 +28,16 @@ export type SlotSource =
   | { kind: 'null' }
   | { kind: 'dir'; dir: string }
   | { kind: 'package' }
-  | { kind: 'in-tree' }
 
 /** PURE. Which engine this build gets. */
 export function chooseSlot(o: {
   nullRequested: boolean
   engineDir: string | undefined
   packageExists: boolean
-  inTreeExists: boolean
 }): SlotSource {
   if (o.nullRequested) return { kind: 'null' }
   if (o.engineDir && o.engineDir.trim() !== '') return { kind: 'dir', dir: o.engineDir }
   if (o.packageExists) return { kind: 'package' }
-  if (o.inTreeExists) return { kind: 'in-tree' }
   return { kind: 'null' }
 }
 
@@ -81,13 +75,6 @@ export function renderSlot(src: SlotSource, slotDir: string): string {
         "export const engineSlot = 'package' as const",
       )
       break
-    case 'in-tree':
-      lines.push(
-        "import { createEngine as create } from './engine/in-tree'",
-        'export const createEngine: CreateEngine<AgentisticsEvent> | null = create',
-        "export const engineSlot = 'in-tree' as const",
-      )
-      break
   }
   return lines.join('\n') + '\n'
 }
@@ -99,7 +86,6 @@ if (import.meta.main) {
     nullRequested: argv.includes('--null') || process.env.AGENTISTICS_ENGINE_SLOT === 'null',
     engineDir: process.env.AGENTISTICS_ENGINE_DIR,
     packageExists: existsSync(join(ROOT, 'packages', 'engine', 'package.json')),
-    inTreeExists: existsSync(join(SERVER_PKG, 'server', 'engine', 'in-tree.ts')),
   })
   writeFileSync(SLOT_PATH, renderSlot(src, join(SERVER_PKG, 'server')))
   process.stdout.write(`engine slot: ${src.kind}${src.kind === 'dir' ? ` (${src.dir})` : ''} → packages/server/server/engine-slot.generated.ts\n`)

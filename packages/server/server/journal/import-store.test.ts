@@ -1,12 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 import { CAPABILITY_STATES, type CapabilityState, type SessionMeta } from '@agentistics/core'
-import * as claudeCore from '../integrations/claude/replay-core'
+import type { HarnessEntityIds } from '@agentistics/engine-api'
 import { sessionMetaProjection } from '../projections/session-meta'
 import { rejectionOf } from './journal-plan'
 import {
   coarseConfidence, IMPORT_STORE_ADAPTER_VERSION, IMPORT_STORE_SOURCE_ID, normaliseInstant, storedCounter,
   storeSessionEvents, type StoreEventContext,
 } from './import-store'
+
+// A harness's entity-id derivations (the engine's integrations own the real ones); these only need
+// to be deterministic and distinct per kind.
+const claudeCore: HarnessEntityIds = {
+  sessionIdOf: c => `ses_test_${c}`,
+  runIdOf: c => `run_test_${c}`,
+  mainAgentIdOf: c => `agt_test_${c}`,
+}
 
 const SUPPORTED: CapabilityState = { state: 'supported', exactness: 'exact' }
 const PARTIAL: CapabilityState = { state: 'partial', exactness: 'exact', limit: 'x' }

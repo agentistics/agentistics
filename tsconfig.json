@@ -29,13 +29,11 @@
     // Workspace package resolution
     "paths": {
       "@agentistics/core": ["./packages/core/src/index.ts"],
-      "@agentistics/runtime": ["./packages/runtime/src/index.ts"],
       "@agentistics/engine-api": ["./packages/engine-api/src/index.ts"]
     }
   },
   "include": [
     "packages/core/src",
-    "packages/runtime/src",
     "packages/engine-api/src",
     "packages/server/server",
     "packages/server/bin",

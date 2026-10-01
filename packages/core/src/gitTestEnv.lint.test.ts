@@ -248,8 +248,6 @@ describe('gitTestEnv.lint — a test may only spawn `git` with the scrubbed envi
     expect(TEST_FILES.length).toBeGreaterThan(100)
     const rels = TEST_FILES.map(f => relative(ROOT, f))
     expect(rels).toContain(join('packages', 'server', 'server', 'backup', 'repo-probe.test.ts'))
-    expect(rels).toContain(join('packages', 'runtime', 'test', 'git-test-env.ts'))
-    expect(rels).toContain(join('packages', 'runtime', 'src', 'tools', 'git', 'test-repo.ts'))
     expect(rels).not.toContain(relative(ROOT, SELF))
   })
 
