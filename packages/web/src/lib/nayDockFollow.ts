@@ -290,6 +290,15 @@ export function frameStyle(fr: Pick<DockFrame, 'left' | 'top' | 'transform'>, ba
   return { left: fr.left, top: fr.top, transform: restingTransform(fr.transform), willChange: '' }
 }
 
+/**
+ * PURE: the opacity each outline echo may be drawn at. Echoes exist ONLY while the follower is
+ * visible AND moving: at rest, while it leaves, or once it is gone they are 0 — an echo left at its
+ * last opacity stayed on screen as an empty outline after the card had hidden (owner, v2.85.2).
+ */
+export function echoOpacities(fr: Pick<DockFrame, 'echoes'> | null, moving: boolean, visible: boolean): number[] {
+  return [0, 1].map(i => (fr && moving && visible ? fr.echoes[i]?.opacity ?? 0 : 0))
+}
+
 export function restingTransform(t: string): string {
   const fns = [...t.matchAll(/(\w+)\(([^)]*)\)/g)]
   const identity = fns.every(([, fn, args]) => {

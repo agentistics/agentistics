@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { initFollow, landImpulse, renderDock, stepFollow, followSettled, NO_FADE, CARD_SIDE_HYSTERESIS, REST_AFTER_FRAMES, nextQuiet, forceRest, shouldWake, restingTransform } from './nayDockFollow'
+import { initFollow, landImpulse, renderDock, stepFollow, followSettled, NO_FADE, CARD_SIDE_HYSTERESIS, REST_AFTER_FRAMES, nextQuiet, forceRest, shouldWake, restingTransform, echoOpacities } from './nayDockFollow'
 import { NAY_FAB_STYLES } from './nayFab'
 
 const VP = { w: 1440, h: 900 }
@@ -210,5 +210,23 @@ describe('every card-follow style visibly moves the card (owner: "only Gelatina 
   test('shock: follows and squashes on landing', () => { const r = drag('shock'); expect(r.moved).toBe(true); expect(r.landed).toBe(true) })
   test('no style fades the card', () => {
     for (const s of NAY_FAB_STYLES) expect(drag(s).opacities.every(o => o === 1)).toBe(true)
+  })
+})
+
+describe('echoes exist only while the card is visible AND moving (empty outline left after hide, v2.85.2)', () => {
+  const fr = { echoes: [{ left: 1, top: 1, opacity: 0.4 }, { left: 2, top: 2, opacity: 0.2 }] }
+  test('moving and visible: drawn at their own opacity', () => { expect(echoOpacities(fr, true, true)).toEqual([0.4, 0.2]) })
+  test('at rest: none', () => { expect(echoOpacities(fr, false, true)).toEqual([0, 0]) })
+  test('leaving or hidden: none, even mid-motion', () => { expect(echoOpacities(fr, true, false)).toEqual([0, 0]) })
+  test('no frame: none', () => { expect(echoOpacities(null, true, true)).toEqual([0, 0]) })
+  test('after a trail drag comes to rest, the last frame leaves no echo', () => {
+    const CARD = { w: 340, h: 230 }
+    let bx = 1300
+    const st = initFollow({ x: bx, y: 700, w: B, h: B }, CARD, VP)
+    for (let f = 0; f < 40; f++) { bx -= 15; for (let k = 0; k < 4; k++) stepFollow(st, { x: bx, y: 700, w: B, h: B }, CARD, VP, 'trail', false, 1 / 240, NO_FADE) }
+    let last = renderDock(st, { x: bx, y: 700, w: B, h: B }, VP, 'trail', false, 0, NO_FADE)
+    for (let k = 0; k < 4000 && !followSettled(st); k++) { stepFollow(st, { x: bx, y: 700, w: B, h: B }, CARD, VP, 'trail', false, 1 / 240, NO_FADE); last = renderDock(st, { x: bx, y: 700, w: B, h: B }, VP, 'trail', false, 0, NO_FADE) }
+    expect(followSettled(st)).toBe(true)
+    expect(echoOpacities(last, false, true)).toEqual([0, 0])
   })
 })
