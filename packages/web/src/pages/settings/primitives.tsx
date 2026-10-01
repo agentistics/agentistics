@@ -386,11 +386,16 @@ export function PrefRow({ label, sub, children }: { label: string; sub?: string;
   )
 }
 
-export function Toggle({ on, onToggle, disabled }: { on: boolean; onToggle: () => void; disabled?: boolean }) {
+export function Toggle({ on, onToggle, disabled, label }: {
+  on: boolean; onToggle: () => void; disabled?: boolean
+  /** Names the switch for assistive tech; given, the button is announced as a switch with its state. */
+  label?: string
+}) {
   return (
     <button
       onClick={() => { if (!disabled) onToggle() }}
       disabled={disabled}
+      {...(label ? { role: 'switch', 'aria-checked': on, 'aria-label': label } : {})}
       aria-disabled={disabled || undefined}
       // `.ag-switch` opts this control OUT of the `.ag-settings button { min-height: 44px }`
       // mobile rule (index.css). That rule exists for real buttons that were 22-33px tall on

@@ -54,7 +54,11 @@ export interface GroupMember {
   harness?: string
 }
 
-export interface GroupView { id: string; name: string; sessions: GroupMember[]; parentId?: string }
+export interface GroupView {
+  id: string; name: string; sessions: GroupMember[]; parentId?: string
+  /** The person hid this folder from the sessions list (it still holds its sessions). */
+  hidden?: true
+}
 
 export type GroupsReply =
   | { ok: true; groups: GroupView[] }
@@ -68,6 +72,7 @@ function viewOf(g: SessionUserGroup, rows: readonly FleetRowForGroups[]): GroupV
     id: g.id,
     name: g.name,
     ...(g.parentId ? { parentId: g.parentId } : {}),
+    ...(g.hidden ? { hidden: true as const } : {}),
     sessions: g.sessionKeys.map(key => {
       const r = byKey.get(key)
       return r

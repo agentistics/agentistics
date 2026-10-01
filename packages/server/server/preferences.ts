@@ -127,7 +127,7 @@ export interface Preferences {
    * other key) and the MCP tools through `/api/session-groups`, which goes via `updatePreferences`.
    */
   sessionGroups?: {
-    groups: { id: string; name: string; sessionKeys: string[]; parentId?: string }[]
+    groups: { id: string; name: string; sessionKeys: string[]; parentId?: string; hidden?: boolean }[]
   }
   /** Idle-session suggestions — see `web/src/lib/idleSessionsPrefs.ts`. Written only by the web. */
   idleSessions?: { enabled?: boolean; thresholdMin?: number; pressureThresholdMin?: number; kept?: Record<string, number> }

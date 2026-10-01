@@ -78,6 +78,14 @@ export function collapseKey(band: AsideBandId, groupBy: AsideGroupBy, key: strin
   return `${band}:${groupBy}:${key}`
 }
 
+/**
+ * The key a whole BAND (Ativas / Inativas) is folded under, in the same `collapsed` list as its
+ * sub-groups. It cannot collide with `collapseKey` — that one always has three `:`-separated parts.
+ */
+export function bandCollapseKey(band: AsideBandId): string {
+  return `band:${band}`
+}
+
 const isGroupBy = (v: unknown): v is AsideGroupBy =>
   typeof v === 'string' && (ASIDE_GROUP_BY_VALUES as readonly string[]).includes(v)
 
@@ -123,4 +131,28 @@ export function writeAsideGroupPrefs(patch: Partial<AsideGroupPrefs>): void {
   try {
     localStorage.setItem(KEY, JSON.stringify({ ...readAsideGroupPrefs(), ...patch }))
   } catch { /* storage unavailable — the arrangement lasts this visit and no longer */ }
+}
+
+/**
+ * PURE: how many of the list's arrangement options differ from the default — the count the arrange
+ * button wears, so a list that is quietly grouped, sorted or missing folders says so on the button
+ * that changes it. One per OPTION, never per value: a manual group order is one change however many
+ * groups it moved, and hidden folders are one change however many are hidden.
+ */
+export function arrangeChangedCount(o: {
+  groupBy: AsideGroupBy
+  sort: SessionOrder
+  cardColor: AsideCardColor
+  /** The manual group order for the CURRENT dimension (empty = automatic). */
+  order: readonly string[]
+  hiddenFolders: number
+}): number {
+  const d = DEFAULT_ASIDE_GROUP_PREFS
+  return [
+    o.groupBy !== d.groupBy,
+    o.sort.by !== d.sort.by || o.sort.dir !== d.sort.dir,
+    o.order.length > 0,
+    o.cardColor !== d.cardColor,
+    o.hiddenFolders > 0,
+  ].filter(Boolean).length
 }
