@@ -1035,3 +1035,20 @@ button:focus-within .ag-row-pin,
 @media (prefers-reduced-motion: reduce) {
   .ag-close-progress { animation: none; left: 0; width: 100% !important; opacity: 0.6; }
 }
+
+/* `ROW_FLASH` (lib/noteFocus.ts) — "it is here", three beats and gone. Global so a surface that
+   does not mount the aside (the Nay dock's chat, a quote card jumping to its passage) still has it.
+   ArtifactsAside declares the same frames inline; the two are identical. */
+@keyframes ag-row-flash {
+  0%, 100% { background: transparent; box-shadow: 0 0 0 0 transparent }
+  15%, 55% {
+    background: color-mix(in srgb, var(--anthropic-orange) 20%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--anthropic-orange) 55%, transparent)
+  }
+}
+
+/* A quote card's passage, marked word for word when its card is clicked (SessionChat `jumpToQuote`).
+   `--ag-quote-hl` is stepped down to 0 so the mark fades rather than vanishing. */
+::highlight(ag-quote) {
+  background-color: color-mix(in srgb, var(--anthropic-orange) var(--ag-quote-hl, 32%), transparent);
+}

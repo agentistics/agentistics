@@ -38,6 +38,11 @@ export interface ReplyTarget {
    * Absent for a target stored before replies became a list.
    */
   key?: string
+  /**
+   * Which card in the draft this quote is (`quoteCards.ts`). The draft carries the id in a marker
+   * line, so the quote can sit BETWEEN the person's answers instead of above all of them.
+   */
+  id?: string
 }
 
 /** How many lines of the quoted message travel with the reply. See decision 1. */
@@ -157,10 +162,12 @@ export function parseReply(raw: string | null): ReplyTarget | null {
     // shape is a document this code did not write, and reading it as truthy would uncap the quote.
     const excerpt = (v as Record<string, unknown>).excerpt === true
     const key = (v as Record<string, unknown>).key
+    const id = (v as Record<string, unknown>).id
     return {
       role, text,
       ...(excerpt ? { excerpt: true } : {}),
       ...(typeof key === 'string' && key !== '' ? { key } : {}),
+      ...(typeof id === 'string' && /^\d+$/.test(id) ? { id } : {}),
     }
   } catch { return null }
 }
