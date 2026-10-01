@@ -16,7 +16,7 @@
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -26,7 +26,7 @@ import { useFleet, useFleetIndex, type FleetActionId } from '../../lib/fleet'
 import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
-import { readAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
+import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { TabStrip } from '../sessions/formBits'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -58,6 +58,7 @@ import { NayLaunchFields } from './NayLaunchFields'
 import { naySections, NAY_SECTION_ORDER, NAY_SECTION_TEXT, naySectionOf, type NaySectionId } from '../../lib/nayList'
 import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '../../lib/nayFab'
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
+import { createPersonalDoc, createSharedPref } from '../../lib/sharedPref'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
@@ -70,6 +71,16 @@ const WINDOWS_KEY = 'agentistics-nay-dock-windows'
 const TAB_KEY = 'agentistics-nay-dock-tab'
 /** How long a just-started session may be missing from the fleet before we stop saying it is coming. */
 const ARRIVAL_BUDGET_MS = 20_000
+
+/**
+ * The open windows and the active tab are CHOICES and live server-side (`/api/user-prefs`), so the
+ * dock reads the same on every device; the panel SIZE depends on the screen and stays per browser.
+ */
+const windowsStore = createPersonalDoc(WINDOWS_KEY, 'nayDockWindows')
+const tabStore = createSharedPref<Tab>({
+  key: TAB_KEY, prefKey: 'nayDockTab', fallback: 'nay', adoptLocalWhenAbsent: true,
+  parse: v => (v === 'sessions' || v === 'nay' ? v : null),
+})
 
 /** Every storage touch is guarded: a private window makes the accessor itself throw. */
 function readStored<T>(key: string, parse: (v: unknown) => T, fallback: T): T {
@@ -100,9 +111,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const rowIndex = useFleetIndex(fleet.sessions)
 
   const [dock, setDock] = useState<DockState>(() => ({
-    open: false, panelSession: null, ...readStored(WINDOWS_KEY, parseDockState, { windows: [] }),
+    open: false, panelSession: null, ...parseDockState(windowsStore.get()),
   }))
-  const [tab, setTab] = useState<Tab>(() => readStored<Tab>(TAB_KEY, v => (v === 'sessions' ? 'sessions' : 'nay'), 'nay'))
+  const [tab, setTab] = useState<Tab>(() => tabStore.get())
+  // Follow the server's copy when it lands after mount, or arrives from another device.
+  useEffect(() => windowsStore.subscribe(() => {
+    const { windows } = parseDockState(windowsStore.get())
+    setDock(d => (JSON.stringify(d.windows) === JSON.stringify(windows) ? d : { ...d, windows }))
+  }), [])
+  useEffect(() => tabStore.subscribe(() => setTab(tabStore.get())), [])
   const [size, setSize] = useState<Size>(() => clampPanelSize(readStored(SIZE_KEY, v => {
     const o = v as Partial<Size>
     return typeof o?.w === 'number' && typeof o?.h === 'number' ? { w: o.w, h: o.h } : PANEL_DEFAULT
@@ -112,7 +129,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   /** Sessions just started here, and when — so the panel says "starting" rather than "not found". */
   const [arriving, setArriving] = useState<Record<string, number>>({})
 
-  useEffect(() => { writeStored(WINDOWS_KEY, { windows: dock.windows }) }, [dock.windows])
+  useEffect(() => { windowsStore.set({ windows: dock.windows }) }, [dock.windows])
   const { pathname } = useLocation()
   const navigate = useNavigate()
   // "Go to session": the workspace route for it, leaving the dock and every window exactly as they are.
@@ -137,7 +154,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
   const setFabPrefs = setNayFabPrefs
   const dockStyle = dockStyleOf(fabPrefs)
-  useEffect(() => { writeStored(TAB_KEY, tab) }, [tab])
+  useEffect(() => { tabStore.set(tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
     const onResize = () => setSize(s => clampPanelSize(s, viewport()))
@@ -736,7 +753,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   }
   const empty = NAY_SECTION_ORDER.every(id => sections[id].length === 0)
   // The person's own card-colour choice from the Sessions aside, so a Nay row reads like that list's.
-  const cardColor = useMemo(() => readAsideGroupPrefs().cardColor, [])
+  const cardColor = useSyncExternalStore(subscribeAsideGroupPrefs, () => readAsideGroupPrefs().cardColor)
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <button

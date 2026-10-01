@@ -2,8 +2,8 @@
  * nayFab.ts — PURE: where the Nay chat button sits, how it moves, and how it looks while moving.
  *
  * The button can be dragged anywhere (owner, 2026-09-29). Its position is remembered per browser
- * (`localStorage`, never `/api/preferences`: on a central that file is shared by everyone signed
- * in) and clamped whenever the window changes size. It is pulled flat against an edge only when
+ * (`localStorage`: a position depends on the SCREEN, and a phone and a desktop must not fight over
+ * one value — see `user-ui-prefs.ts` on the server) and clamped whenever the window changes size. It is pulled flat against an edge only when
  * it is released CLOSE to one (`dropFabAt`, the edge magnet); anywhere else it stays where it was
  * dropped.
  *

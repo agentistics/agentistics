@@ -2963,6 +2963,37 @@ harness must not break.
 
 ## Important rules
 
+- **A person's CHOICES live in `/api/user-prefs`, never `/api/preferences`, and the SCREEN stays in
+  the browser.** `/api/preferences` is the MACHINE's file, and on a central it is shared by everyone
+  signed in, so for months one person's pins, session groups, notification settings, theme and
+  board arrangement were the whole team's. Every `sharedPref.ts` store now defaults to
+  `PERSONAL_PREFS`, App's choices (theme, lang, currency, card order/precision, budget, chat
+  defaults) go through `putPersonal`, and App reads them ONLY from `/api/user-prefs` (the copies in
+  the machine file are stripped from what it applies). Rules:
+  - **`USER_UI_PREF_REGISTRY` (`user-ui-prefs.ts`) is the one closed list, and it says per key
+    where the value lives ON A MACHINE.** A key that was already a top-level field of
+    `preferences.json` (theme, lang, `chatHarness`/`chatModel`/`chatEffort` — read by the Nay
+    launcher — `pinnedSessions`, `sessionGroups` — written by the MCP — …) stays `top`, so no data
+    moves and no server reader breaks; a new key goes under `ui.<key>`. On a central EVERY key lives
+    in the account's `userPrefs.ui.<key>`. `user-ui-prefs.test.ts` holds the mapping to the
+    `Preferences` interface's own fields: a key is `top` exactly when that interface declares it.
+  - **Values are any JSON value with a byte cap per key**; an unknown key or an oversized value is
+    REFUSED (400), never dropped. Machine gates (`chatEnabled`, `shellEnabled`, `archiveMode`,
+    `team`, …) are not personal and can never ride this door.
+  - **A central session with no account reads `{}` with `X-Prefs-Writable: false`**; the web then
+    adopts in memory, stays UNARMED and leaves the browser copy alone for a later migration.
+  - **A store moved off `localStorage` keeps its old key AND its old format** (`encode`/`decode` for a
+    `'1'`/`'0'` flag or a bare string, `seed` for a copy that lived under other keys) as the first
+    paint, and is written up ONCE PER KEY PER BROWSER (`adoptLocalWhenAbsent`, `migrateLocalOnce`,
+    `MIGRATED_PREFIX`) — without that bound a shared browser on a central copies the first person's
+    arrangement into every next account. Components FOLLOW the store (`subscribe`), never seed once.
+  - **The line**: a CHOICE moves (pins, groupings, which panel is docked where, which tab, which
+    terminal the band shows, a dismissal); what depends on the SCREEN stays per device — pane widths
+    and sizes, the rail width (split out of `panelSlots` on purpose), the shell band's height/open
+    state/geometry, split ratios, terminal zoom, a collapsed sidebar, the Nay button's position —
+    because a phone and a desktop must not fight over one value. Caches and first-paint mirrors stay
+    local. `web/src/lib/userPrefs.registry.test.ts` fails when a store names a key the registry does
+    not list, or when web code PUTs a choice to `/api/preferences`.
 - **Anything agentop writes OUTSIDE its own directories is an explicit act of the user, and is
   exactly reversible.** `~/.bashrc` and `~/.zshrc` (`autostart.ts`), `~/.claude/settings.json` and
   `~/.claude/skills/` (`cli-hooks.ts`): each is written only behind a command the user typed, never

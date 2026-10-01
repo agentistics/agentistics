@@ -5,8 +5,13 @@
  * the aside and the fleet is fetched by the poller, and two copies of "which machine" is how a list
  * ends up describing one machine while a header counts another.
  *
- * Remembered per browser, so reopening the app lands where you left it.
+ * Remembered per PERSON on the server (`/api/user-prefs`, `centralMachine` — per ACCOUNT, the only
+ * store this ever reaches, since it exists only on a central), so reopening the app on any device
+ * lands where you left it. The browser copy under the old key (a bare id, kept in that format) is
+ * the first paint and the one-time migration source.
  */
+
+import { createSharedPref } from './sharedPref'
 
 const KEY = 'agentistics-central-machine'
 
@@ -14,10 +19,22 @@ let picked: string | null = null
 let loaded = false
 const listeners = new Set<() => void>()
 
+const store = createSharedPref<string | null>({
+  key: KEY, prefKey: 'centralMachine', fallback: null, adoptLocalWhenAbsent: true,
+  parse: raw => (typeof raw === 'string' && raw ? raw : null),
+  decode: raw => raw, encode: v => v ?? '',
+})
+store.subscribe(() => {
+  const next = store.get()
+  if (next === picked) return
+  picked = next
+  for (const fn of listeners) fn()
+})
+
 function load(): void {
   if (loaded) return
   loaded = true
-  try { picked = localStorage.getItem(KEY) } catch { picked = null }
+  picked = store.get()
 }
 
 export function getCentralMachine(): string | null {
@@ -29,10 +46,7 @@ export function setCentralMachine(id: string | null): void {
   load()
   if (picked === id) return
   picked = id
-  try {
-    if (id) localStorage.setItem(KEY, id)
-    else localStorage.removeItem(KEY)
-  } catch { /* private mode — the memory is a convenience, the selection still works */ }
+  store.set(id)
   for (const fn of listeners) fn()
 }
 

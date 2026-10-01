@@ -16,16 +16,20 @@
  *    else. `shell-web.ts`'s own refusals (`no-tmux`, `no-cwd`, `cwd-missing`, `at-cap`) already
  *    arrive as sentences and are shown verbatim; nothing here re-words them.
  *
- * The band's open/closed state and its height are a per-viewer convenience, so they live in
- * `localStorage` — the CLAUDE.md rule for exactly this kind of state — and every read and write is
- * guarded: a private window, cleared site data or a browser blocking storage makes the accessor
- * itself throw.
+ * The band's open/closed state, its height, which panels fill it and the terminal geometry depend
+ * on the SCREEN, so they stay per browser in `localStorage` — a phone and a desktop must not fight
+ * over one value, and an open band on one device must never open (and start capturing) a shell on
+ * another. WHICH terminal the band shows (`target`) is a CHOICE and lives on the server
+ * (`/api/user-prefs`, `shellBand`, per pane; per ACCOUNT on a central) so it reads the same from
+ * every device. Every storage read and write is guarded: a private window, cleared site data or a
+ * browser blocking storage makes the accessor itself throw.
  */
 
 // `PanelId`/`PANEL_IDS` only — `panelSlots.ts` imports nothing from this module, so this stays a
 // one-way dependency rather than a circular one.
 import { PANEL_IDS, type PanelId } from './panelSlots'
 import { paneStorageKey, type PaneId } from './paneScope'
+import { createSharedPref, type SharedPrefStore } from './sharedPref'
 
 /** The smallest band worth drawing: a prompt, a command and a few lines of its output. */
 export const BAND_MIN_PX = 140
@@ -309,8 +313,39 @@ export interface PaneGeometry { cols: number; rows: number }
 /** ABSENT READS AS CLOSED. Nobody acquires an open shell band by having reloaded the page. */
 export const DEFAULT_BAND_PREFS: BandPrefs = { open: false, height: 240 }
 
-/** Per PANE of a split view (`paneScope.ts`); the main pane keeps the historical key. */
+/** The CHOICE half — `target` per pane. Created on first use (see `panelSlots.ts`'s import order). */
+type SharedBand = Partial<Record<PaneId, { target?: string }>>
+let shared: SharedPrefStore<SharedBand | null> | null = null
+export function sharedBand(): SharedPrefStore<SharedBand | null> {
+  if (shared) return shared
+  shared = createSharedPref<SharedBand | null>({
+    key: 'agentistics-shell-band-ui', prefKey: 'shellBand', fallback: null, adoptLocalWhenAbsent: true,
+    parse: raw => (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as SharedBand : null),
+    // The one-time migration source: the target each pane's browser copy remembered.
+    seed: () => {
+      const out: SharedBand = {}
+      for (const pane of ['main', 'split'] as const) {
+        const t = readLocalBandPrefs(undefined, pane).target
+        if (t !== undefined) out[pane] = { target: t }
+      }
+      return Object.keys(out).length > 0 ? out : null
+    },
+  })
+  return shared
+}
+
+/**
+ * Per PANE of a split view (`paneScope.ts`); the main pane keeps the historical key. Without an
+ * injected `storage` (i.e. the real app) the `target` comes from the server's copy when it has one.
+ */
 export function readBandPrefs(storage?: Storage, pane: PaneId = 'main'): BandPrefs {
+  const local = readLocalBandPrefs(storage, pane)
+  if (storage) return local
+  const target = sharedBand().get()?.[pane]?.target
+  return typeof target === 'string' ? { ...local, target } : local
+}
+
+function readLocalBandPrefs(storage?: Storage, pane: PaneId = 'main'): BandPrefs {
   try {
     const raw = (storage ?? globalThis.localStorage)?.getItem(paneStorageKey(STORAGE_KEY, pane))
     if (!raw) return DEFAULT_BAND_PREFS
@@ -446,4 +481,8 @@ export function writeBandPrefs(prefs: BandPrefs, storage?: Storage, pane: PaneId
   try {
     (storage ?? globalThis.localStorage)?.setItem(paneStorageKey(STORAGE_KEY, pane), JSON.stringify(prefs))
   } catch { /* a browser blocking site data costs the convenience, never the band */ }
+  if (storage || prefs.target === undefined) return
+  const all = sharedBand()
+  if (all.get()?.[pane]?.target === prefs.target) return
+  all.set({ ...(all.get() ?? {}), [pane]: { target: prefs.target } })
 }

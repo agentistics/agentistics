@@ -30,7 +30,7 @@ import {
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
 import {
-  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs, arrangeChangedCount,
+  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs, subscribeAsideGroupPrefs, arrangeChangedCount,
   type AsideBandId, type AsideCardColor, type AsideGroupBy,
 } from '../../lib/sessionsAsidePrefs'
 import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -59,7 +59,7 @@ import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, resolvePinnedRows,
   subscribePinnedSessions, togglePinnedSession,
 } from '../../lib/pinnedSessions'
-import { fellGroupDismissed, readDismissedFell, writeDismissedFell } from '../../lib/fellDismissal'
+import { fellGroupDismissed, readDismissedFell, writeDismissedFell, subscribeDismissedFell } from '../../lib/fellDismissal'
 import { endDispatch, tryBeginDispatch } from '../../lib/dispatchGuard'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import {
@@ -257,9 +257,9 @@ export function SessionsAside({
   const [creating, setCreating] = useState(false)
   /**
    * The aside's own arrangement — which dimension it sub-groups by, the manual order per
-   * dimension, which groups are folded, and how a card shows its status. Read once on mount, like
-   * `TaskList` seeds `readBoardPrefs()` — see `sessionsAsidePrefs.ts` for why this is
-   * `localStorage` and not `/api/preferences`.
+   * dimension, which groups are folded, and how a card shows its status. Seeded on mount and
+   * RE-SEEDED when the server's copy lands (see the effect after `hiddenGroups`) — it is a choice
+   * that lives server-side, see `sessionsAsidePrefs.ts`.
    */
   const storedGroupPrefs = useMemo(readAsideGroupPrefs, [])
   const [groupBy, setGroupByState] = useState<AsideGroupBy>(storedGroupPrefs.groupBy)
@@ -319,6 +319,7 @@ export function SessionsAside({
   /** The exact set of fallen ids the "reopen what fell" banner was last dismissed for — see
    *  `fellDismissal.ts`. Read once on mount; a dismiss updates it (and persists it) directly. */
   const [dismissedFell, setDismissedFell] = useState<string[] | null>(readDismissedFell)
+  useEffect(() => subscribeDismissedFell(() => setDismissedFell(readDismissedFell())), [])
 
   /*
    * THE TWO GROUP VERBS, derived from the rows the server already shaped.
@@ -446,6 +447,20 @@ export function SessionsAside({
   const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   // Groups whose name is hidden on THIS screen — see `lib/groupNameMask.ts`.
   const [hiddenGroups, setHiddenGroups] = useState<ReadonlySet<string>>(new Set(storedGroupPrefs.hiddenUserGroups))
+  // The arrangement is server-side and the load lands after mount (or a change arrives from
+  // another device on refocus): follow it, or this screen keeps the first paint until a reload.
+  useEffect(() => subscribeAsideGroupPrefs(() => {
+    const p = readAsideGroupPrefs()
+    setGroupByState(p.groupBy)
+    setSortOrderState(p.sort)
+    setGroupOrderState(p.order)
+    setFoldedGroupsState(new Set(p.collapsed))
+    setCardColorState(p.cardColor)
+    setFoldedUserGroupsState(new Set(p.collapsedUserGroups))
+    setFoldedPinnedState(p.foldedPinned)
+    setFoldedGroupsSectionState(p.foldedGroupsSection)
+    setHiddenGroups(new Set(p.hiddenUserGroups))
+  }), [])
   const toggleGroupNameHidden = (id: string) => {
     const next = toggleHidden(hiddenGroups, id)
     setHiddenGroups(next)

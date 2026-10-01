@@ -84,7 +84,8 @@ import { SessionsAside } from './components/nav/SessionsAside'
 import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
-import { loadSharedPrefs } from './lib/sharedPref'
+import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
+import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
@@ -1445,6 +1446,23 @@ type StorageLike = { getItem(key: string): string | null; setItem(key: string, v
 export const STUDIO_SEEN_KEY = 'agentistics.studio.seen'
 
 /**
+ * The App-wide CHOICES read off `/api/user-prefs` rather than `/api/preferences` — each is a
+ * personal key in `USER_UI_PREF_REGISTRY` (server). On a central the copy in the shared machine
+ * file is somebody else's and is never read.
+ */
+export const APP_CHOICE_KEYS = [
+  'lang', 'theme', 'currency', 'cardOrder', 'cardPrecision', 'monthlyBudgetUSD',
+  'chatModel', 'chatSoundEnabled', 'chatSoundId',
+] as const
+
+/** PURE: only `keys` of `doc`, dropping absent ones. */
+export function pickKeys(doc: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of keys) if (doc[k] !== undefined) out[k] = doc[k]
+  return out
+}
+
+/**
  * Whether the dot has already fired. Tolerates a storage whose `getItem` throws (a private window,
  * a wiped store) by answering "not seen yet" — the safer of the two wrong answers, since it shows a
  * dot rather than hiding a real one.
@@ -1621,11 +1639,9 @@ export default function AppLayout() {
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t)
     try { localStorage.setItem('agentistics-theme', t) } catch { /* private mode */ }
-    fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: t }),
-    }).catch(() => { /* the local copy still holds for this browser */ })
+    // A person's choice — `/api/user-prefs`, per ACCOUNT on a central. The local copy above still
+    // holds for this browser if the write cannot happen.
+    putPersonal({ theme: t })
   }, [])
   /**
    * Set the currency AND remember it — the same defect `setTheme` above had. It only set state, so
@@ -1635,11 +1651,7 @@ export default function AppLayout() {
    */
   const setCurrency = useCallback((c: 'USD' | 'BRL') => {
     setCurrencyState(c)
-    fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currency: c }),
-    }).catch(() => { /* this tab still holds it */ })
+    putPersonal({ currency: c })
   }, [])
 
   // How this machine is actually billed. Local only — it never travels to a central.
@@ -1719,6 +1731,9 @@ export default function AppLayout() {
       if (v === null) localStorage.removeItem('agentistics-monthly-budget-usd')
       else localStorage.setItem('agentistics-monthly-budget-usd', String(v))
     } catch { /* ignore quota/disabled storage */ }
+    // A CHOICE, so it lives on the server (per account on a central); the browser copy above is
+    // the first paint only.
+    putPersonal({ monthlyBudgetUSD: v })
   }, [])
 
   // The card id set and its migration are PURE and tested (`lib/cardOrder.ts`) — the order is
@@ -2081,11 +2096,12 @@ export default function AppLayout() {
    */
   const { layout: slotLayout } = usePanelSlots()
   const studioOn = isPanelShown(slotLayout, 'studio')
-  const [studioSeen, setStudioSeen] = useState(() => readStudioSeen(localStorage))
+  const [studioSeen, setStudioSeen] = useState(() => studioSeenStore.get())
+  useEffect(() => studioSeenStore.subscribe(() => setStudioSeen(studioSeenStore.get())), [])
   useEffect(() => {
     if (!studioOn || studioSeen) return
     setStudioSeen(true)
-    writeStudioSeen(localStorage)
+    studioSeenStore.set(true)
   }, [studioOn, studioSeen])
 
   /**
@@ -2113,14 +2129,8 @@ export default function AppLayout() {
    * is nothing lost by starting closed. Persisted PER BROWSER, not per session, because it is a
    * standing preference about how this workspace looks, the same reasoning `fleetOpen` documents.
    */
-  const SESSIONS_FILTERS_OPEN_KEY = 'agentistics-sessions-filters-open'
-  const [sessionsFiltersOpen, setSessionsFiltersOpen] = useState<boolean>(() => {
-    try {
-      const stored = localStorage.getItem(SESSIONS_FILTERS_OPEN_KEY)
-      if (stored !== null) return stored === '1'
-    } catch { /* private mode */ }
-    return false
-  })
+  const [sessionsFiltersOpen, setSessionsFiltersOpen] = useState<boolean>(() => sessionsFiltersOpenStore.get())
+  useEffect(() => sessionsFiltersOpenStore.subscribe(() => setSessionsFiltersOpen(sessionsFiltersOpenStore.get())), [])
   const [sessionsFiltersClip, setSessionsFiltersClip] = useState(false)
   /** The panel's own clipped wrapper (carries `inert` while collapsed) and its trigger — both
    *  needed to answer "is focus inside the thing about to become unreachable" on collapse. */
@@ -2162,7 +2172,7 @@ export default function AppLayout() {
     }
     setSessionsFiltersOpen(next)
     setSessionsFiltersClip(true)
-    try { localStorage.setItem(SESSIONS_FILTERS_OPEN_KEY, next ? '1' : '0') } catch { /* ignore */ }
+    sessionsFiltersOpenStore.set(next)
   }
   /**
    * CLOSE-ONLY (owner, 2026-09-27: "clicking OUTSIDE does not close it") — the toggle above is right
@@ -2185,7 +2195,7 @@ export default function AppLayout() {
         sessionsFiltersTriggerRef.current?.focus()
       }
       setSessionsFiltersClip(true)
-      try { localStorage.setItem(SESSIONS_FILTERS_OPEN_KEY, '0') } catch { /* ignore */ }
+      sessionsFiltersOpenStore.set(false)
       return false
     })
   }, [])
@@ -2538,11 +2548,7 @@ export default function AppLayout() {
       const next = { ...prev, [id]: v }
       if (precisionSaveTimer.current) clearTimeout(precisionSaveTimer.current)
       precisionSaveTimer.current = setTimeout(() => {
-        fetch('/api/preferences', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cardPrecision: next }),
-        }).catch(() => {})
+        putPersonal({ cardPrecision: next })
       }, 400)
       return next
     })
@@ -2556,17 +2562,13 @@ export default function AppLayout() {
     setCurrencyState(draft.currency)
     setCardOrder(draft.cardOrder as CardId[])
     setCardPrecisionState(draft.cardPrecision)
-    fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lang: draft.lang,
-        theme: draft.theme,
-        currency: draft.currency,
-        cardOrder: draft.cardOrder,
-        cardPrecision: draft.cardPrecision,
-      }),
-    }).catch(() => {})
+    putPersonal({
+      lang: draft.lang,
+      theme: draft.theme,
+      currency: draft.currency,
+      cardOrder: draft.cardOrder,
+      cardPrecision: draft.cardPrecision,
+    })
   }, [setCardOrder])
   const [scrolled, setScrolled] = useState(false)
   const [highlightUpdates, setHighlightUpdates] = useState(true)
@@ -2583,7 +2585,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; cardOrder?: string[]; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
@@ -2599,6 +2601,14 @@ export default function AppLayout() {
       }
       if (prefs.currency) setCurrencyState(prefs.currency)
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
+      if ('monthlyBudgetUSD' in prefs) {
+        const v = typeof prefs.monthlyBudgetUSD === 'number' && Number.isFinite(prefs.monthlyBudgetUSD) ? prefs.monthlyBudgetUSD : null
+        setMonthlyBudgetUSD(v)
+        try {
+          if (v === null) localStorage.removeItem('agentistics-monthly-budget-usd')
+          else localStorage.setItem('agentistics-monthly-budget-usd', String(v))
+        } catch { /* private mode */ }
+      }
       if (prefs.chatModel) setChatModel(prefs.chatModel)
       if (prefs.chatSoundEnabled !== undefined) setChatSoundEnabled(prefs.chatSoundEnabled)
       // Absent reads as OFF, so this is `=== true` rather than the `!== undefined` guard above —
@@ -2615,10 +2625,36 @@ export default function AppLayout() {
     }
     const load = async (attempt = 0) => {
       try {
-        const r = await fetch('/api/preferences')
+        // TWO documents. `/api/preferences` still answers for the machine's own settings (archive
+        // mode, team, billing, the gates); every CHOICE comes from `/api/user-prefs`, which is per
+        // ACCOUNT on a central. The choice keys are stripped from the first one, so on a central
+        // nobody reads the theme, language or card order somebody else saved in the shared file.
+        const [r, personal] = await Promise.all([fetch('/api/preferences'), loadPersonalPrefs()])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const prefs = await r.json()
-        if (!cancelled) apply(prefs)
+        if (personal === null) throw new Error('user-prefs unavailable')
+        const prefs = await r.json() as Record<string, unknown>
+        if (cancelled) return
+        const merged: Record<string, unknown> = { ...prefs }
+        for (const k of APP_CHOICE_KEYS) delete merged[k]
+        Object.assign(merged, pickKeys(personal, APP_CHOICE_KEYS))
+        // The one-time migration of the browser copies these choices used to live in alone.
+        let localTheme: string | null = null
+        let localBudget: string | null = null
+        let localOrder: string | null = null
+        try {
+          localTheme = localStorage.getItem('agentistics-theme')
+          localBudget = localStorage.getItem('agentistics-monthly-budget-usd')
+          localOrder = localStorage.getItem('claude-stats-card-order')
+        } catch { /* private mode */ }
+        const theme = localTheme === 'light' || localTheme === 'dark' ? localTheme : null
+        if (migrateLocalOnce('theme', personal.theme !== undefined, theme)) merged.theme = theme
+        const budget = localBudget === null ? null : parseFloat(localBudget)
+        const budgetOk = budget !== null && !isNaN(budget) ? budget : null
+        if (migrateLocalOnce('monthlyBudgetUSD', personal.monthlyBudgetUSD !== undefined, budgetOk)) merged.monthlyBudgetUSD = budgetOk
+        let order: unknown = null
+        try { order = localOrder ? JSON.parse(localOrder) : null } catch { order = null }
+        if (migrateLocalOnce('cardOrder', personal.cardOrder !== undefined, Array.isArray(order) ? order : null)) merged.cardOrder = order
+        apply(merged as Parameters<typeof apply>[0])
       } catch {
         if (cancelled) return
         // Keep archiveChoice/installDismissedPref at their loading values and retry with
@@ -3047,14 +3083,16 @@ export default function AppLayout() {
   // header that already carries the filters, and its own summary row keeps the three headline
   // figures visible while it is shut — so closing it costs nothing and gives back the viewport.
   // Desktop has the room and keeps what it had.
-  const [fleetOpen, setFleetOpen] = useState<boolean>(() => {
-    try {
-      const stored = localStorage.getItem('agentistics-fleet-open')
-      if (stored !== null) return stored !== '0'
-    } catch { /* private mode */ }
-    return !isMobile
-  })
-  const toggleFleet = () => setFleetOpen(v => { const n = !v; try { localStorage.setItem('agentistics-fleet-open', n ? '1' : '0') } catch { /* ignore */ } return n })
+  const [fleetOpen, setFleetOpen] = useState<boolean>(() => fleetOpenStore.get() ?? !isMobile)
+  useEffect(() => fleetOpenStore.subscribe(() => {
+    const v = fleetOpenStore.get()
+    if (v !== null) setFleetOpen(v)
+  }), [])
+  const toggleFleet = () => {
+    const n = !fleetOpen
+    setFleetOpen(n)
+    fleetOpenStore.set(n)
+  }
 
   // Members list = users WITH machines only
   const machineUsers = useMemo(() => new Set(machinesList.map(m => m.user)), [machinesList])
@@ -3458,11 +3496,7 @@ export default function AppLayout() {
         onChoose={chooseArchive}
         onLangChange={(l) => {
           setLang(l)
-          fetch('/api/preferences', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lang: l }),
-          }).catch(() => {})
+          putPersonal({ lang: l })
         }}
       />
     )

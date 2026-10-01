@@ -10,7 +10,7 @@
  * GEOMETRY IS NEVER DECIDED HERE — every rect goes through `restoreRect` (drawing), `moveRect`
  * (dragging) and `resizeRect` (resizing), which clamp to the area this layer MEASURES of itself.
  * A drag is kept locally while the pointer is down and written to the store once, on release, so a
- * drag costs one `localStorage` write rather than one per pointer event.
+ * drag costs one store write (and one server PUT) rather than one per pointer event.
  *
  * DRAGGED BY ITS HEADER. Every window carries a slim GRIP BAR on top (its panel's name and a grip),
  * which is always draggable — some panels fill their own header with controls edge to edge (the
