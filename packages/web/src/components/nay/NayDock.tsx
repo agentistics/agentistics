@@ -507,7 +507,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {settingsOpen ? (
           <DockSettingsScreen
-            pt={pt} isMobile={isMobile} prefs={fabPrefs} onPrefs={setFabPrefs} chat={ctx}
+            pt={pt} isMobile={isMobile} chat={ctx}
             onLeave={() => setDock(d => ({ ...d, open: false }))}
             onBack={closeSettings}
           />

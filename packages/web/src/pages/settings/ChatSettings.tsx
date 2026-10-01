@@ -16,20 +16,16 @@
  * whole section the moment chat is off would make that switch unreachable — a one-way door with no
  * way back. `chatEnabled` gates these ROWS; `capabilities.localChat` (in `settingsSections.ts`)
  * gates the SECTION.
+ *
+ * Everything below the switch is `NaySettingsPanel` — the SAME component the chat window's own
+ * settings screen draws, so the two can never offer different groups, words or values.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Volume2, VolumeX } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { useNayDefaults, useNayHarnesses, saveNayDefaults } from '../../hooks/useNayDefaults'
-import { normalizeChoice } from '../../lib/nayLaunch'
-import { NayLaunchFields } from '../../components/nay/NayLaunchFields'
-import { CHAT_SOUNDS, DEFAULT_CHAT_SOUND_ID, findChatSound } from '../../lib/chatSounds'
-import { getNotificationSettings, saveNotificationSettings, subscribeNotificationSettings } from '../../lib/sessionNotifications'
-import { AUTO_DISMISS_OPTIONS_SEC, NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
-import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
-import { pushDemoAlert } from '../../lib/nayNotifyStore'
-import { NayMotionSettings } from '../../components/nay/NayMotionSettings'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { SectionHeader, Divider, PrefRow, Toggle } from './primitives'
+import { NaySettingsPanel } from '../../components/nay/NaySettingsPanel'
 
 export default function ChatSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -39,20 +35,7 @@ export default function ChatSettings() {
   const [capable, setCapable] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const harnesses = useNayHarnesses(pt ? 'pt' : 'en')
-  const nayDefaults = useNayDefaults()
-  const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
-  const [chatSoundId, setChatSoundId] = useState(DEFAULT_CHAT_SOUND_ID)
-
-  const previewCtxRef = useRef<AudioContext | null>(null)
-  const previewSound = useCallback((id: string) => {
-    if (!previewCtxRef.current) {
-      try { previewCtxRef.current = new AudioContext() } catch { return }
-    }
-    // Preview at the SAME volume a real reply would use, read fresh — so picking a sound here shows
-    // exactly what the Notifications screen's volume slider will make it sound like, immediately.
-    findChatSound(id).play(previewCtxRef.current, getNotificationSettings().soundVolume)
-  }, [])
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     void (async () => {
@@ -71,8 +54,6 @@ export default function ChatSettings() {
       ])
       // Absent reads as ON (owner decision 2026-09-29, `chat-gate.ts`); only an explicit false is off.
       setEnabled(prefs.chatEnabled !== false)
-      setChatSoundEnabled(prefs.chatSoundEnabled ?? true)
-      setChatSoundId(prefs.chatSoundId ?? DEFAULT_CHAT_SOUND_ID)
       // Undefined on an older server, which had no capability model — treat as permitted, the same
       // reading the rest of the app uses.
       setCapable(session.capabilities?.localChat !== false)
@@ -96,30 +77,6 @@ export default function ChatSettings() {
       setSaving(false)
     }
   }, [enabled, capable])
-
-  const toggleSound = useCallback(() => {
-    const next = !chatSoundEnabled
-    setChatSoundEnabled(next)
-    ctx.setChatSoundEnabled(next)  // keeps the live chat widget (TtyChat) in sync, no reload needed
-    if (next) previewSound(chatSoundId)
-    void fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatSoundEnabled: next }),
-    }).catch(() => {})
-  }, [chatSoundEnabled, chatSoundId, previewSound, ctx])
-
-  const selectSound = useCallback((id: string) => {
-    setChatSoundId(id)
-    ctx.setChatSoundId(id)
-    previewSound(id)
-    void fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatSoundId: id }),
-    }).catch(() => {})
-  }, [previewSound, ctx])
-
 
   return (
     <>
@@ -151,134 +108,8 @@ export default function ChatSettings() {
       </div>
 
       <Divider />
-      <NayAnimationSetting pt={pt} />
-
-      {/* Two gates, not one: the switch above is reachable whenever the PROFILE allows chat, on or
-          off — this row is what turns it back on. The sound and model only matter once chat is
-          actually serving, so they are gated on the user's own switch, not just the profile. */}
-      {enabled === true && (
-        <>
-          <Divider />
-          <SectionHeader label={pt ? 'Som' : 'Sound'} />
-
-          <PrefRow
-            label={pt ? 'Som de notificação' : 'Notification sound'}
-            sub={pt
-              ? 'Toca quando uma resposta chega com o chat minimizado. Volume e chave geral em Configurações → Notificações → Efeitos Sonoros; esta chave só pode silenciar, nunca reativar aquela.'
-              : 'Plays when a reply arrives while chat is minimized. Volume and the master switch live in Settings → Notifications → Sound Effects; this switch can only silence it further, never override that one.'}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {chatSoundEnabled ? <Volume2 size={14} color="var(--anthropic-orange)" /> : <VolumeX size={14} color="var(--text-tertiary)" />}
-              <Toggle on={chatSoundEnabled} onToggle={toggleSound} />
-            </div>
-          </PrefRow>
-
-          {/* Sound picker — only visible when sound is enabled */}
-          {chatSoundEnabled && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-              {CHAT_SOUNDS.map(s => {
-                const active = chatSoundId === s.id
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => selectSound(s.id)}
-                    style={{
-                      padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: active ? 700 : 500,
-                      border: active ? '1.5px solid var(--anthropic-orange)' : '1px solid var(--border)',
-                      background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-                      color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-                      cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
-                    }}
-                  >
-                    {s.label[pt ? 'pt' : 'en']}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          <Divider />
-          <SectionHeader label={pt ? 'Novas conversas da Nay' : 'New Nay conversations'} />
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 10 }}>
-            {pt
-              ? 'O assistente, o modelo e o esforço de raciocínio com que toda conversa nova da Nay começa. O botão "Nova conversa" do chat já vem com estes valores, e dá para trocar ali mesmo. Só aparecem as opções que a CLI de cada assistente aceita.'
-              : 'The assistant, model and reasoning effort every new Nay conversation starts with. The chat\'s "New conversation" picker comes filled with these, and can change them right there. Only the options each assistant\'s CLI accepts are offered.'}
-          </div>
-          {!harnesses || !nayDefaults ? (
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando os assistentes desta máquina…' : 'Loading the assistants on this machine…'}</div>
-          ) : harnesses.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Nenhum assistente pode ser iniciado nesta máquina.' : 'No assistant can be started on this machine.'}</div>
-          ) : (
-            <NayLaunchFields layout="rows" pt={pt} harnesses={harnesses}
-              value={normalizeChoice(nayDefaults, harnesses)} onChange={saveNayDefaults} />
-          )}
-        </>
-      )}
-    </>
-  )
-}
-
-/**
- * How the floating Nay button delivers a session notification. The same stored value the dock's
- * gear popover writes (`NotificationSettings.nayAnimation`), so the two places can never disagree.
- */
-function NayAnimationSetting({ pt }: { pt: boolean }) {
-  const [value, setValue] = useState<NayAnimation>(() => getNotificationSettings().nayAnimation)
-  const [autoDismiss, setAutoDismiss] = useState(() => getNotificationSettings().autoDismissSec)
-  useEffect(() => subscribeNotificationSettings(() => {
-    setValue(getNotificationSettings().nayAnimation)
-    setAutoDismiss(getNotificationSettings().autoDismissSec)
-  }), [])
-  const lang = pt ? 'pt' : 'en'
-  return (
-    <>
-      <SectionHeader label={pt ? 'Notificações do botão Nay' : 'Nay button notifications'} />
-      <PrefRow
-        label={pt ? 'Como o botão avisa' : 'How the button tells you'}
-        sub={`${NAY_ANIMATION_HINT[value][lang]}. ${pt ? 'Com movimento reduzido no sistema, qualquer escolha vira um fade.' : 'With reduced motion on, every choice becomes a fade.'}`}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 180 }}>
-          <Select
-            value={value}
-            onChange={v => {
-              const next = v as NayAnimation
-              setValue(next)
-              saveNotificationSettings({ ...getNotificationSettings(), nayAnimation: next })
-            }}
-            options={NAY_ANIMATIONS.map(a => ({ value: a, label: NAY_ANIMATION_LABEL[a][lang] }))}
-          />
-        </div>
-        {/* The very demo card Settings → Notificações pops, so a style is previewed where it is picked. */}
-        <button type="button" onClick={() => pushDemoAlert(lang)}
-          style={{
-            padding: '7px 12px', minHeight: 34, borderRadius: 8, border: '1px solid var(--border)',
-            background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12.5,
-            fontWeight: 600, cursor: 'pointer',
-          }}>
-          {pt ? 'Testar' : 'Test'}
-        </button>
-        </div>
-      </PrefRow>
-
-      <PrefRow
-        label={pt ? 'A notificação some sozinha após' : 'The notification goes away after'}
-        sub={pt ? 'Fica enquanto você usa o cartão, e sempre fica registrada no sino.' : 'It stays while you use the card, and is always kept in the bell.'}
-      >
-        <div style={{ minWidth: 140 }}>
-          <Select value={String(autoDismiss)} onChange={v => {
-            setAutoDismiss(Number(v))
-            saveNotificationSettings({ ...getNotificationSettings(), autoDismissSec: Number(v) })
-          }} options={AUTO_DISMISS_OPTIONS_SEC.map(n => ({ value: String(n), label: n === 0 ? (pt ? 'Nunca' : 'Never') : `${n} s` }))} />
-        </div>
-      </PrefRow>
-
-      <SectionHeader label={pt ? 'Movimento do botão Nay' : 'Nay button motion'} />
-      {/* Three independent choices, the same component the dock's gear shows (owner, 2026-09-30). */}
-      <NayMotionSettings pt={pt} includeButton row={(label, hint, control) => (
-        <PrefRow key={label} label={label} sub={hint}>
-          <div style={{ minWidth: 200 }}>{control}</div>
-        </PrefRow>
-      )} />
+      <NaySettingsPanel pt={pt} isMobile={isMobile} layout={isMobile ? 'stack' : 'rows'} chat={ctx}
+        conversations={enabled === true} />
     </>
   )
 }
