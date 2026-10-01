@@ -59,10 +59,14 @@ const STYLE_HINT: Record<NayFabStyle, { pt: string; en: string }> = {
   comet: { pt: 'Inclina no movimento e deixa uma cauda.', en: 'Leans into its motion and leaves a tail.' },
 }
 
-/** The three notifications that come out of the button, each with its own sound. */
-const CARD_EVENTS: { key: 'waiting' | 'waiting-approval' | 'stale'; pt: string; en: string; hintPt: string; hintEn: string }[] = [
-  { key: 'waiting', pt: 'Precisa de você', en: 'Needs you', hintPt: 'Uma sessão terminou a vez e espera sua resposta.', hintEn: 'A session finished its turn and waits for your answer.' },
-  { key: 'waiting-approval', pt: 'Pede aprovação', en: 'Needs approval', hintPt: 'Uma sessão pede permissão para seguir.', hintEn: 'A session asks for permission to go on.' },
+/**
+ * The notifications that come out of the button, each with its own sound. A NAY conversation rings
+ * the Nay sound whatever happened in it (`resolveSound`), so the other rows are about OTHER sessions.
+ */
+const CARD_EVENTS: { key: 'nay' | 'waiting' | 'waiting-approval' | 'stale'; pt: string; en: string; hintPt: string; hintEn: string }[] = [
+  { key: 'nay', pt: 'Nay', en: 'Nay', hintPt: 'Uma conversa da Nay respondeu, pede aprovação ou espera você.', hintEn: 'A Nay conversation replied, asks for approval or waits for you.' },
+  { key: 'waiting', pt: 'Precisa de você', en: 'Needs you', hintPt: 'Outra sessão terminou a vez e espera sua resposta.', hintEn: 'Another session finished its turn and waits for your answer.' },
+  { key: 'waiting-approval', pt: 'Pede aprovação', en: 'Needs approval', hintPt: 'Outra sessão pede permissão para seguir.', hintEn: 'Another session asks for permission to go on.' },
   { key: 'stale', pt: 'Sem abrir', en: 'Not opened', hintPt: 'Lembrete de uma sessão que espera há tempo e ninguém abriu.', hintEn: 'A reminder about a session that has waited a while unopened.' },
 ]
 
@@ -183,7 +187,7 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
         )}
         {notify.soundEnabled && CARD_EVENTS.map(ev => choice(
           ev[lang],
-          `${pt ? ev.hintPt : ev.hintEn} ${soundAbout(notify.eventSounds[ev.key])}.`,
+          `${pt ? ev.hintPt : ev.hintEn} ${pt ? 'Som' : 'Sound'}: ${soundAbout(notify.eventSounds[ev.key]).replace(/^./, c => c.toLowerCase())}.`,
           <SoundPicker value={notify.eventSounds[ev.key]} options={soundOptions} tap={tap}
             playLabel={pt ? `Ouvir o som de "${ev.pt}"` : `Play the "${ev.en}" sound`}
             onPlay={() => playNotificationSound(notify.eventSounds[ev.key], notify.soundVolume)}

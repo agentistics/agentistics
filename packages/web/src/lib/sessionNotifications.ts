@@ -4,7 +4,7 @@
 
 import { versionedAsset } from './brand'
 import type { SessionMeta } from '@agentistics/core'
-import { sessionLabel } from '@agentistics/core'
+import { isNayCwd, sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
 import { clampVolume } from './soundVolume'
 import { findNaySound, isNaySoundId, type NaySoundId } from './notificationSounds'
@@ -55,6 +55,11 @@ export interface NotificationSettings {
     'working': SoundPreset
     'exited': SoundPreset
     'stale': SoundPreset
+    /**
+     * Anything from a NAY CONVERSATION, whatever the event (owner, 2026-09-30): the Nay is a voice
+     * of its own, so "needs you" and "needs approval" mean OTHER sessions. See `resolveSound`.
+     */
+    'nay': SoundPreset
   }
   soundEnabled: boolean
   soundPreset: SoundPreset
@@ -93,12 +98,14 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   },
   // One synthesized sound per event, each chosen for what the event asks of the person: a light
   // pluck for "it answered", a rising question for "it needs you", the quietest one for a reminder.
+  // Shipped defaults (owner, 2026-09-30); a stored choice is kept, only an ABSENT one reads these.
   eventSounds: {
     'waiting-approval': 'question',
-    'waiting': 'kalimba',
+    'waiting': 'triad',
     'working': 'soft',
     'exited': 'drop',
     'stale': 'breeze',
+    'nay': 'nay',
   },
   soundEnabled: true,
   soundPreset: 'chime',
@@ -534,16 +541,18 @@ export function handleSessionStateTransitions(
 
     if (!title || !body) continue
     const kind: NayAlertKind | null = nextState === 'waiting' ? 'turn' : nextState === 'waiting-approval' ? 'approval' : null
+    const nay = isNayCwd(session?.project_path)
     const since = waitingSince(id)
     const sinceMs = since?.sinceMs ?? Date.now()
     deliver({
-      event: nextState,
+      event: nextState, nay,
       title, body, tag: `session-${id}`,
       bell: { code: BELL_CODE[nextState], id, name: sessionSubject, harness: harnessName, sinceMs },
       ...(kind ? {
         alert: {
           key: alertKey(kind, id, sinceMs), kind, sessionId: id, name: sessionSubject,
           harness: session?.harness, model: session?.model, sinceMs, sinceKnown: since?.known ?? true,
+          ...(nay ? { nay: true } : {}),
         },
       } : {}),
       shock: nextState === 'waiting',
@@ -571,8 +580,18 @@ const BELL_TYPE: Record<NotifyEvent, NotificationType> = {
 /** Codes the Nay button shows as its own card — the generic toast must not show them a second time. */
 export const NAY_CARD_CODES: ReadonlySet<string> = new Set([BELL_CODE.waiting, BELL_CODE['waiting-approval'], BELL_CODE.stale])
 
+/**
+ * PURE: which sound one notification rings. A notification from a NAY CONVERSATION always rings
+ * the Nay sound, whatever the event; every other session rings its event's own sound.
+ */
+export function resolveSound(event: NotifyEvent, nay: boolean, settings: Pick<NotificationSettings, 'eventSounds'>): SoundPreset {
+  return nay ? settings.eventSounds.nay : settings.eventSounds[event]
+}
+
 interface Delivery {
   event: NotifyEvent
+  /** The session is a Nay conversation (`isNayCwd`): it rings the Nay sound. */
+  nay?: boolean
   title: string
   body: string
   tag: string
@@ -613,13 +632,13 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
   if (visible) {
     if (d.alert) pushAlert(d.alert)
     if (d.shock) requestShock()
-    if (settings.soundEnabled) playNotificationSound(settings.eventSounds[d.event], settings.soundVolume)
+    if (settings.soundEnabled) playNotificationSound(resolveSound(d.event, d.nay === true, settings), settings.soundVolume)
     return
   }
   if (!settings.systemWhenHidden) return
   triggerSessionNotification({
     title: d.title, body: d.body, tag: d.tag,
-    soundPreset: settings.eventSounds[d.event],
+    soundPreset: resolveSound(d.event, d.nay === true, settings),
   })
 }
 
@@ -629,7 +648,7 @@ setSnoozeReleaseHandler(alert => {
   if (!settings.enabled || settings.doNotDisturb) return
   if (!pushAlert(alert)) return
   const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
-  if (settings.soundEnabled) playNotificationSound(settings.eventSounds[event], settings.soundVolume)
+  if (settings.soundEnabled) playNotificationSound(resolveSound(event, alert.nay === true, settings), settings.soundVolume)
 })
 
 /** The title and body of a "not opened for a while" notification, for the system path. */
@@ -697,12 +716,14 @@ function raiseStale(rows: readonly FleetNotifyRow[], lang: 'pt' | 'en'): void {
     const folder = r.cwd?.split('/').filter(Boolean).pop() ?? ''
     const place = folder ? ` (${harness}${harness ? (lang === 'pt' ? ' em ' : ' in ') : ''}${folder})` : ''
     const { title, body } = staleText(name, place, formatWaiting(c.sinceMs, Date.now(), c.known, lang), lang)
+    const nay = isNayCwd(r.cwd)
     deliver({
-      event: 'stale', title, body, tag: `session-stale-${r.id}`,
+      event: 'stale', nay, title, body, tag: `session-stale-${r.id}`,
       bell: { code: BELL_CODE.stale, id: r.id, name, harness, sinceMs: c.sinceMs },
       alert: {
         key: alertKey('stale', r.id, c.sinceMs), kind: 'stale', sessionId: r.id, name,
         harness: r.harness, model: r.model, sinceMs: c.sinceMs, sinceKnown: c.known,
+        ...(nay ? { nay: true } : {}),
       },
     }, settings)
   }

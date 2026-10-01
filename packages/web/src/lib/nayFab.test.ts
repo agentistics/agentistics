@@ -7,13 +7,13 @@ import {
 const VP = { w: 1440, h: 900 }
 
 describe('prefs', () => {
-  test('an empty or broken store reads as the defaults, jelly first', () => {
+  test('an empty or broken store reads as the defaults, the elastic trail first (shipped default, 2026-09-30)', () => {
     expect(parseNayFabPrefs(null)).toEqual(DEFAULT_NAY_FAB_PREFS)
     expect(parseNayFabPrefs('x')).toEqual(DEFAULT_NAY_FAB_PREFS)
-    expect(DEFAULT_NAY_FAB_PREFS.style).toBe('jelly')
+    expect(DEFAULT_NAY_FAB_PREFS.style).toBe('trail')
   })
   test('a style nothing can draw falls back instead of sticking', () => {
-    expect(parseNayFabPrefs({ style: 'rocket', snap: false }).style).toBe('jelly')
+    expect(parseNayFabPrefs({ style: 'rocket', snap: false }).style).toBe('trail')
     expect(parseNayFabPrefs({ style: 'comet', snap: false })).toEqual({ style: 'comet', snap: false, pos: null })
   })
   test('keeps a readable position and drops a broken one', () => {
