@@ -299,3 +299,17 @@ export function resizeAnchored(start: Size, dx: number, dy: number, handle: { x?
     h: handle.y === 'up' ? start.h - dy : handle.y === 'down' ? start.h + dy : start.h,
   }, vp)
 }
+
+/**
+ * The "active only" switch the dock's Sessões tab is drawn under.
+ *
+ * The tab mounts the very `SessionsAside` the Sessions workspace mounts, and that component's folder
+ * rules (the `active/total` count, the dimmed folder holding nothing active) all key off this one
+ * switch. App keeps the switch ON only while the workspace is the page, so the dock — open over any
+ * other page — drew the same folders as bare counts in full colour: one component, two answers.
+ * Outside the workspace the dock therefore takes the workspace's own DEFAULT (on); inside it, it
+ * follows whatever the person set there, so the two lists on one screen can never disagree.
+ */
+export function dockActiveOnly(inSessionsWorkspace: boolean, activeOnly: boolean): boolean {
+  return inSessionsWorkspace ? activeOnly : true
+}

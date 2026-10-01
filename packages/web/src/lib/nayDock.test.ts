@@ -153,3 +153,22 @@ describe('the open dock stacks above detached windows', () => {
     expect(after).toBeGreaterThan(before)
   })
 })
+
+import { dockActiveOnly } from './nayDock'
+import { folderCountLabel, listNarrowed } from './sessionUserGroups'
+import { folderFold } from './folderFold'
+
+describe("the dock's Sessões tab draws folders under the workspace's rules", () => {
+  test('outside the workspace it takes the workspace default (active only)', () => {
+    expect(dockActiveOnly(false, false)).toBe(true)
+  })
+  test('inside the workspace it follows the switch the person set there', () => {
+    expect(dockActiveOnly(true, false)).toBe(false)
+    expect(dockActiveOnly(true, true)).toBe(true)
+  })
+  test('so a folder reads active/total and is dimmed when nothing in it is active', () => {
+    const narrowing = listNarrowed({ activeOnly: dockActiveOnly(false, false), query: '', valueFiltered: 10, total: 10 })
+    expect(folderCountLabel(0, 87, narrowing)).toBe('0/87')
+    expect(folderFold({ storedFolded: false, openedDimmed: false, narrowing, searching: false, shownCount: 0 }).dimmed).toBe(true)
+  })
+})

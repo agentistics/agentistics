@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { ArrowDownToLine, ArrowLeft, Loader2, Minus, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
@@ -25,6 +25,13 @@ import type { AppContext } from '../../lib/app-context'
 import { useFleet, useFleetIndex, type FleetActionId } from '../../lib/fleet'
 import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
+import { sessionCardStyle } from '../../lib/sessionCardStyle'
+import { readAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
+import { SessionFacts } from '../sessions/SessionFacts'
+import { TabStrip } from '../sessions/formBits'
+import { SessionRowMenu } from '../sessions/SessionRowMenu'
+import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
+import { NAY_COPY_ID, NAY_GO_TO, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
   placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, windowZIndex, type DockState, type NayWindow, type Size,
@@ -55,6 +62,7 @@ import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 
 type Lang = 'pt' | 'en'
 type Tab = 'nay' | 'sessions'
+const DOCK_TABS: readonly Tab[] = ['nay', 'sessions']
 
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
@@ -302,23 +310,6 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
   const panelRow = panelSession ? findSession(panelSession) : undefined
   const panelTitle = panelRow?.title ?? 'Nay'
 
-  const tabButton = (id: Tab, label: string) => (
-    <button
-      key={id}
-      role="tab"
-      aria-selected={tab === id}
-      onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
-      style={{
-        padding: isMobile ? '0 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined,
-        border: 'none', borderBottom: `2px solid ${tab === id && !panelSession ? ORANGE : 'transparent'}`,
-        background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5,
-        fontWeight: tab === id && !panelSession ? 700 : 500,
-        color: tab === id && !panelSession ? ORANGE : 'var(--text-secondary)',
-      }}
-    >
-      {label}
-    </button>
-  )
 
   // THE PANEL OPENS BESIDE THE BUTTON, wherever it was dragged (desktop). The button's place is the
   // same stored position `NayFab` draws from, clamped the same way, so the two cannot disagree about
@@ -493,9 +484,17 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           )}
         </>) : (<>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6, marginLeft: 4 }} />
-          <div role="tablist" style={{ display: 'flex', flex: 1 }}>
-            {tabButton('nay', 'Nay')}
-            {tabButton('sessions', pt ? 'Sessões' : 'Sessions')}
+          {/* The site's shared tab strip (`TabStrip`), not a dock-only underline copy. */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TabStrip<Tab>
+              tabs={DOCK_TABS}
+              value={tab}
+              onPick={id => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
+              label={id => (id === 'nay' ? 'Nay' : (pt ? 'Sessões' : 'Sessions'))}
+              flush
+              ariaLabel={pt ? 'Painel da Nay' : 'Nay panel'}
+              {...(isMobile ? { tap: 44 } : {})}
+            />
           </div>
         </>)}
         <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
@@ -520,6 +519,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
                 lang={lang} isMobile={isMobile} sections={sections} windows={dock.windows}
                 starting={starting} notice={notice} unsupported={unsupported}
                 onStart={() => { void startNay() }} onOpen={open} onEnd={endSession}
+                onAct={act} onGoTo={goToSession} onNotice={setNotice} rowsById={rowIndex}
                 launchLine={launch ? summaryOf(launch) : null}
                 pickerOpen={pickerOpen} onTogglePicker={() => setPickerOpen(o => !o)}
                 picker={launch && harnesses ? (
@@ -701,7 +701,7 @@ function EndConfirm({ pt, isMobile, onYes, onNo }: { pt: boolean; isMobile: bool
   )
 }
 
-function NayList({ lang, isMobile, sections, windows, starting, notice, unsupported, onStart, onOpen, onEnd, launchLine, pickerOpen, onTogglePicker, picker }: {
+function NayList({ lang, isMobile, sections, windows, starting, notice, unsupported, onStart, onOpen, onEnd, onAct, onGoTo, onNotice, rowsById, launchLine, pickerOpen, onTogglePicker, picker }: {
   lang: Lang
   isMobile: boolean
   sections: Record<NaySectionId, ControlSession[]>
@@ -712,6 +712,13 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   onStart: () => void
   onOpen: (id: string) => void
   onEnd: (id: string) => Promise<boolean>
+  /** The fleet's own verbs (`rename`, `resume`) — the same `act` the Sessions workspace calls. */
+  onAct: (req: { id: string; action: FleetActionId; text?: string }) => Promise<{ ok: boolean; message: string; id?: string }>
+  /** Open the session in the Sessions workspace. */
+  onGoTo: (id: string) => void
+  onNotice: (message: string | null) => void
+  /** The fleet rows by id, for each row's server-resolved verbs. */
+  rowsById: ReadonlyMap<string, { verbs: RowVerb[] }>
   /** "Claude Code · Opus 4.8 · high": what the next conversation will start with. */
   launchLine: string | null
   pickerOpen: boolean
@@ -721,7 +728,33 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   const pt = lang === 'pt'
   const [confirming, setConfirming] = useState<string | null>(null)
   const [ending, setEnding] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
+  const all = NAY_SECTION_ORDER.flatMap(id => sections[id])
+  const menuRow = menu ? all.find(r => r.id === menu.id) : undefined
+  const pickMenu = (action: string) => {
+    if (!menuRow) return
+    const id = menuRow.id
+    if (action === 'kill') { setConfirming(id); return }
+    if (action === 'rename') { setRenaming({ id, title: menuRow.title }); return }
+    if (action === NAY_GO_TO) { onGoTo(id); return }
+    if (action === NAY_COPY_ID) {
+      const conv = menuRow.conversationId
+      if (conv) void navigator.clipboard?.writeText(conv).then(
+        () => onNotice(pt ? 'Id da conversa copiado.' : 'Conversation id copied.'),
+        () => onNotice(pt ? 'Não foi possível copiar.' : 'Could not copy.'),
+      )
+      return
+    }
+    void onAct({ id, action: action as FleetActionId }).then(out => {
+      onNotice(out.ok && action !== 'resume' ? null : out.message)
+      // A reopen mints a new id; open THAT one, or the row it came from vanishes on the next poll.
+      if (out.ok && action === 'resume' && out.id) onOpen(out.id)
+    })
+  }
   const empty = NAY_SECTION_ORDER.every(id => sections[id].length === 0)
+  // The person's own card-colour choice from the Sessions aside, so a Nay row reads like that list's.
+  const cardColor = useMemo(() => readAsideGroupPrefs().cardColor, [])
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <button
@@ -774,63 +807,91 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
             </h3>
             {rows.map(s => {
               const inWindow = windows.some(w => w.id === s.id)
-              const running = naySectionOf(s.state) !== 'ended'
               const isEnding = ending === s.id
+              const card = sessionCardStyle(s.state, cardColor, false)
               return (
                 // The row and its End control are SIBLINGS: a button nested in a button is one
                 // control to a screen reader and two to a pointer.
                 <div key={s.id}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, minHeight: isMobile ? 48 : 40, padding: '0 8px 0 0',
-                    borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
-                    opacity: section === 'ended' ? 0.75 : 1,
+                    borderRadius: 9, background: card.background, boxShadow: card.edge,
                   }}
                 >
-                  <button type="button" onClick={() => onOpen(s.id)} style={{
-                    flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 10px',
-                    border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderRadius: 9,
-                  }}>
-                  <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: text.color }} />
-                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: text.color }}>
-                      {text.state[pt ? 'pt' : 'en']}
-                      {inWindow && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: ORANGE }}>
-                          · <PictureInPicture2 size={10} />{pt ? 'em janela' : 'in a window'}
-                        </span>
-                      )}
-                    </span>
-                  </span>
+                  {/* The Sessions workspace's own row vocabulary (`SessionFacts` + `sessionCardStyle`),
+                      not a third style: title, then state · harness · model · effort. The title
+                      already carries the time the conversation started. */}
+                  <button type="button" onClick={() => onOpen(s.id)}
+                    title={s.model ? `${s.title}\n${s.model}` : s.title}
+                    style={{
+                      flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 7px 14px',
+                      border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderRadius: 9,
+                      color: 'var(--text-secondary)',
+                    }}>
+                    <SessionFacts session={s} lang={pt ? 'pt' : 'en'} withEffort withDelivery={false}
+                      {...(card.stateTextColor ? { metaColor: card.stateTextColor } : {})} />
+                    {inWindow && (
+                      <span title={pt ? 'Aberta numa janela' : 'Open in a window'}
+                        style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, fontSize: 10.5, color: ORANGE }}>
+                        <PictureInPicture2 size={11} />{!isMobile && (pt ? 'em janela' : 'in a window')}
+                      </span>
+                    )}
                   </button>
-                  {running && (confirming === s.id ? (
+                  {confirming === s.id ? (
                     <EndConfirm pt={pt} isMobile={isMobile}
                       onYes={() => {
                         setConfirming(null); setEnding(s.id)
                         void onEnd(s.id).finally(() => setEnding(e => (e === s.id ? null : e)))
                       }}
                       onNo={() => setConfirming(null)} />
+                  ) : isEnding ? (
+                    <Loader2 size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)', animation: 'ag-working-spin 1s linear infinite' }} />
                   ) : (
-                    <button type="button" disabled={isEnding}
-                      onClick={() => setConfirming(s.id)}
-                      aria-label={pt ? `Encerrar ${s.title}` : `End ${s.title}`}
-                      title={pt ? 'Encerrar esta conversa' : 'End this conversation'}
+                    <button type="button"
+                      onClick={e => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        setMenu({ id: s.id, x: r.right - 210, y: r.bottom + 4 })
+                      }}
+                      aria-label={pt ? `Opções de ${s.title}` : `Options for ${s.title}`}
+                      aria-haspopup="menu"
+                      title={pt ? 'Opções' : 'Options'}
+                      // A 26px icon that projects its 44px touch box (`.ag-tap-icon`) instead of painting it.
+                      className="ag-tap-icon"
                       style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexShrink: 0,
-                        minWidth: isMobile ? 44 : 0, minHeight: isMobile ? 36 : 26, padding: '2px 8px', borderRadius: 6,
-                        border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)',
-                        fontFamily: 'inherit', fontSize: 11.5, cursor: isEnding ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                        width: 26, height: 26, borderRadius: 6,
+                        border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
                       }}>
-                      {isEnding ? <Loader2 size={12} style={{ animation: 'ag-working-spin 1s linear infinite' }} /> : <Power size={12} />}
-                      {!isMobile && (pt ? 'Encerrar' : 'End')}
+                      <MoreVertical size={14} />
                     </button>
-                  ))}
+                  )}
                 </div>
               )
             })}
           </section>
         )
       })}
+      {menu && menuRow && (
+        <SessionRowMenu
+          x={Math.max(4, menu.x)} y={menu.y}
+          entries={nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
+            running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
+          })}
+          onPick={pickMenu}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {renaming && (
+        <RenameSessionDialog
+          lang={pt ? 'pt' : 'en'}
+          title={renaming.title}
+          onCancel={() => setRenaming(null)}
+          onSubmit={text => onAct({ id: renaming.id, action: 'rename', text }).then(out => {
+            onNotice(out.ok ? null : out.message)
+            setRenaming(null)
+          })}
+        />
+      )}
     </div>
   )
 }

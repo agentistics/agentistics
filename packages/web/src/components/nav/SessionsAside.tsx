@@ -49,6 +49,7 @@ import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendi
 import { buildPickRows } from '../../lib/sessionPick'
 import { rowMenuEntries, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
+import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { attachSession, detachSession } from '../../lib/tasks'
@@ -533,7 +534,6 @@ export function SessionsAside({
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   /** The task picker, anchored where the menu was — see `pickMenuAction`. */
   const [linking, setLinking] = useState<{ id: string; x: number; y: number } | null>(null)
-  const [renameDraft, setRenameDraft] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   /**
    * AUTO-SCROLL WHILE DRAGGING. Native HTML5 drag-and-drop does not scroll a container on its own —
@@ -578,7 +578,6 @@ export function SessionsAside({
     if (action === 'rename') {
       const target = rows.find(r => r.id === id)
       setRenaming({ id, title: target?.title ?? '' })
-      setRenameDraft(target?.title ?? '')
       return
     }
     if (action === 'move-to-group') {
@@ -1874,74 +1873,16 @@ export function SessionsAside({
       {/* A tiny rename prompt, seeded with the row's current title — the same shape the panel's own
           rename flow uses (`SessionActions`'s `asking` form), reachable here for a row that may not
           be the one currently open. */}
-      {renaming && (
-        <div
-          role="dialog"
-          aria-label={pt ? 'Renomear sessão' : 'Rename session'}
-          style={{ position: 'fixed', inset: 0, zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <div
-            onClick={() => setRenaming(null)}
-            style={{ position: 'absolute', inset: 0, background: 'var(--ag-scrim, rgba(0,0,0,0.4))' }}
-          />
-          <form
-            onSubmit={e => {
-              e.preventDefault()
-              if (!act) return
-              const id = renaming.id
-              void act({ id, action: 'rename', text: renameDraft.trim() }).then(out => {
-                setNotice(out.message)
-                setRenaming(null)
-              })
-            }}
-            style={{
-              position: 'relative', zIndex: 1, minWidth: 260, maxWidth: 340,
-              background: 'var(--bg-surface)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
-              boxShadow: 'var(--ag-shadow-menu)',
-            }}
-          >
-            <label style={{
-              fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '0.05em', color: 'var(--text-tertiary)',
-            }}>
-              {pt ? 'Novo nome' : 'New name'}
-            </label>
-            <input
-              autoFocus
-              value={renameDraft}
-              onChange={e => setRenameDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setRenaming(null) }}
-              style={{
-                width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
-                border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-                color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 13, outline: 'none',
-              }}
-            />
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-              <button
-                type="button" onClick={() => setRenaming(null)}
-                style={{
-                  padding: '6px 11px', borderRadius: 8, cursor: 'pointer',
-                  border: '1px solid var(--border-subtle)', background: 'transparent',
-                  color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12,
-                }}
-              >
-                {pt ? 'Cancelar' : 'Cancel'}
-              </button>
-              <button
-                type="submit"
-                style={{
-                  padding: '6px 12px', borderRadius: 8, cursor: 'pointer', border: 'none',
-                  background: 'var(--anthropic-orange)', color: '#fff',
-                  fontFamily: 'inherit', fontSize: 12, fontWeight: 650,
-                }}
-              >
-                {pt ? 'Salvar' : 'Save'}
-              </button>
-            </div>
-          </form>
-        </div>
+      {renaming && act && (
+        <RenameSessionDialog
+          lang={lang}
+          title={renaming.title}
+          onCancel={() => setRenaming(null)}
+          onSubmit={text => act({ id: renaming.id, action: 'rename', text }).then(out => {
+            setNotice(out.message)
+            setRenaming(null)
+          })}
+        />
       )}
 
       {/* Create a group — from the "+ Novo grupo" control, or from a row menu's "Novo grupo…", in

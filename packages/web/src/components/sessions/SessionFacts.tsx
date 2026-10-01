@@ -44,9 +44,22 @@ export interface SessionFactsProps {
    * rail's tooltip still gets: this is a Sessions-aside preference, not a fact about the row itself.
    */
   metaColor?: string
+  /**
+   * Also say the reasoning EFFORT the session was started with, after the model. Opt-in: the Nay
+   * dock's list, where every row is the same assistant in the same folder, needs it to tell two
+   * conversations apart. Absent effort draws nothing — no flag was passed, the harness default is
+   * in force, and naming a level there would invent one.
+   */
+  withEffort?: boolean
+  /**
+   * Draw the DELIVERY cell (default). Off only where the surface already files every row in one
+   * place — the Nay dock, whose conversations live in the Nay folder — so a "no delivery" on every
+   * row would be a line of noise.
+   */
+  withDelivery?: boolean
 }
 
-export function SessionFacts({ session, selected = false, onFile, lang = 'en', metaColor }: SessionFactsProps) {
+export function SessionFacts({ session, selected = false, onFile, lang = 'en', metaColor, withEffort = false, withDelivery = true }: SessionFactsProps) {
   const wants = sessionNotify(session)
   return (
     <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -90,6 +103,13 @@ export function SessionFacts({ session, selected = false, onFile, lang = 'en', m
             </span>
           </>
         )}
+        {withEffort && session.effort && (
+          <>
+            <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
+            <span style={{ flexShrink: 0 }}>{session.effort}</span>
+          </>
+        )}
+        {withDelivery && (<>
         {/*
           * The DELIVERY, and it is drawn whether or not there is one.
           *
@@ -131,6 +151,7 @@ export function SessionFacts({ session, selected = false, onFile, lang = 'en', m
             {session.task ?? (lang === 'pt' ? 'sem entrega' : 'no delivery')}
           </span>
         </span>
+        </>)}
       </span>
     </span>
   )

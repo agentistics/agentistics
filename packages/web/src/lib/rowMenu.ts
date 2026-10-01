@@ -44,3 +44,38 @@ export function rowMenuEntries(
   const fleet = [find('rename'), stop, find('resume')].filter((v): v is RowVerb => v !== undefined)
   return [...fleet, ...extra]
 }
+
+/** The client-side entries of the Nay dock's row menu. */
+export const NAY_GO_TO = '__nay_go_to__'
+export const NAY_COPY_ID = '__nay_copy_id__'
+
+/**
+ * The Nay dock's "⋮" on one conversation row: Rename; End, or Reopen once it has ended; Go to the
+ * session in the Sessions workspace; Copy the conversation id. No delete — a Nay conversation is
+ * never removed from the list from here.
+ *
+ * Like `rowMenuEntries`, the session verbs are the row's OWN server verbs (`rename`, `kill`,
+ * `resume`), passed through with their label, `enabled` and `reason` untouched — so End and Rename
+ * are the fleet's very verbs (`rename.ts` renames inside the harness too). The one difference from
+ * the aside's menu is deliberate: a Nay row mid-turn still offers END (`kill`), never `interrupt`,
+ * because what this list asks about is the conversation, not its current turn. A verb the server
+ * did not send is left out rather than invented.
+ */
+export function nayRowMenuEntries(
+  verbs: readonly RowVerb[],
+  o: { running: boolean; conversationId: string | undefined; pt: boolean },
+): MenuEntry[] {
+  const find = (a: string) => verbs.find(v => v.action === a)
+  const session = [find('rename'), o.running ? find('kill') : find('resume')]
+    .filter((v): v is RowVerb => v !== undefined)
+  return [
+    ...session,
+    { action: NAY_GO_TO, label: o.pt ? 'Ir para a sessão' : 'Go to session', enabled: true },
+    o.conversationId
+      ? { action: NAY_COPY_ID, label: o.pt ? 'Copiar id da conversa' : 'Copy conversation id', enabled: true }
+      : {
+        action: NAY_COPY_ID, label: o.pt ? 'Copiar id da conversa' : 'Copy conversation id', enabled: false,
+        reason: o.pt ? 'Esta sessão ainda não tem uma conversa vinculada.' : 'This session has no linked conversation yet.',
+      },
+  ]
+}
