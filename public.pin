@@ -1,5 +1,5 @@
 {
   "repository": "agentistics/agentistics",
-  "ref": "a1419a858eae17b875bf5a7f0367e05922975780",
-  "note": "The public commit this engine is built and tested against: feat/engine-api-1.2 (engine-api 1.2, PRs #847/#848, on top of origin/main v2.84.0). Moves to the merged main commit once the leader merges #848. Bump it in the same change that adapts the engine to a newer public tree."
+  "ref": "8e013e713c8c956dc8d19a02d0766d15f53a1a31",
+  "note": "The public commit this engine is built and tested against: merge of #874 (chore/es4-remove-engine-code — ES.4, removing the frozen engine code from the public tree), on top of origin/main. Bump it in the same change that adapts the engine to a newer public tree."
 }
