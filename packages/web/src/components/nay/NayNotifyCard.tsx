@@ -162,6 +162,14 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   /** The pointer is over the card or it holds the keyboard: somebody is using it, so it stays. */
   const [engaged, setEngaged] = useState(false)
   const tailRef = useRef<HTMLSpanElement>(null)
+  /**
+   * The outline ECHOES `trail` and `comet` leave behind the card while it follows (the dock draws
+   * the same ones). They were computed by the follow engine all along and never drawn here, so on
+   * the card those two styles looked like plain following — "only Gelatina animates" (owner,
+   * 2026-09-30). Positioned by the loop, never by React.
+   */
+  const echoRefs = useRef<(HTMLDivElement | null)[]>([])
+  const cardSize = useRef({ w: 0, h: 0 })
   /** Where React-free placement put the card; the follow loop only ever moves it by `translate` from here. */
   const cardBase = useRef({ left: 0, top: 0 })
   const written = useRef({ w: -1, h: -1, o: -1 })
@@ -243,6 +251,16 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     if (fr.h !== w.h) { card.style.maxHeight = `${fr.h}px`; w.h = fr.h }
     if (fr.opacity !== w.o) { card.style.opacity = String(fr.opacity); w.o = fr.opacity }
     writeTail(p.tail ? { side: p.tailSide, x: p.tailX } : null)
+    const sz = cardSize.current
+    echoRefs.current.forEach((e, i) => {
+      if (!e) return
+      const ec = fr.echoes[i]
+      e.style.opacity = ec ? String(ec.opacity) : '0'
+      if (ec) {
+        e.style.transform = `translate3d(${ec.left}px, ${ec.top}px, 0)`
+        e.style.width = `${sz.w}px`; e.style.height = `${sz.h}px`
+      }
+    })
   }
 
   /** Place the card now: on the follow engine when the button is on screen, statically otherwise. */
@@ -251,6 +269,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     if (!card) return null
     const f = follow.current
     const want: Size = { w: card.offsetWidth, h: card.scrollHeight }
+    cardSize.current = { w: card.offsetWidth, h: card.offsetHeight }
     const b = buttonNow()
     const reduced = prefersReducedMotion()
     if (b) {
@@ -412,7 +431,13 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     transform: 'rotate(45deg)', border: '1px solid var(--border)',
   }
 
-  return (
+  return (<>
+    {[0, 1].map(i => (
+      <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
+        position: 'fixed', left: 0, top: 0, zIndex: zIndex - 1, pointerEvents: 'none', opacity: 0,
+        borderRadius: 14, border: '1.5px solid var(--anthropic-orange)', willChange: 'transform, opacity',
+      }} />
+    ))}
     <div
       ref={cardRef}
       role="dialog"
@@ -548,7 +573,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         )}
       </div>
     </div>
-  )
+  </>)
 }
 
 const chipStyle: CSSProperties = {

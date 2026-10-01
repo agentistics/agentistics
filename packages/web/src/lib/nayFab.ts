@@ -21,7 +21,8 @@
 
 export const NAY_FAB_STYLES = ['jelly', 'trail', 'shock', 'comet'] as const
 export type NayFabStyle = typeof NAY_FAB_STYLES[number]
-export const DEFAULT_NAY_FAB_STYLE: NayFabStyle = 'jelly'
+// Shipped default (owner, 2026-09-30): the elastic trail. A stored choice is kept; only an ABSENT one reads this.
+export const DEFAULT_NAY_FAB_STYLE: NayFabStyle = 'trail'
 
 export const FAB_SIZE = 56
 /** Distance kept from every edge of the window. */

@@ -33,6 +33,8 @@ export interface NayAlert {
   sinceKnown: boolean
   /** A test card from the settings screen: no real session behind it, so it acts on nothing. */
   demo?: boolean
+  /** It comes from a Nay conversation, which always rings the Nay sound (see `resolveSound`). */
+  nay?: boolean
 }
 
 export function alertKey(kind: NayAlertKind, sessionId: string, sinceMs: number): string {
