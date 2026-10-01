@@ -198,13 +198,34 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     return () => window.clearInterval(t)
   }, [alert])
 
-  // IT LEAVES BY ITSELF after the chosen time (5 s by default), unless somebody is using it.
+  /*
+   * IT LEAVES BY ITSELF after the chosen time (5 s by default), and a REGRESSIVE BAR along its foot
+   * shows the time left — no number (owner, 2026-09-30). Using the card (pointer on it, focus in it,
+   * a drawer open) PAUSES both, and leaving it RESUMES from where they stopped: the time already
+   * spent is kept per card, so a card somebody hovered for a moment is not given its full time again.
+   * The bar is moved by the compositor (`transform`), never by React.
+   */
+  const progressRef = useRef<HTMLDivElement>(null)
+  const remaining = useRef<{ key: string; ms: number }>({ key: '', ms: 0 })
   useEffect(() => {
     const sec = settings.autoDismissSec
-    if (!alert || drawer || engaged || !(sec > 0)) return
+    if (!alert || !(sec > 0)) return
     const key = alert.key
-    const t = window.setTimeout(() => void close(() => dismissAlert(key)), sec * 1000)
-    return () => window.clearTimeout(t)
+    const total = sec * 1000
+    if (remaining.current.key !== key) remaining.current = { key, ms: total }
+    const from = Math.min(remaining.current.ms, total)
+    const bar = progressRef.current
+    if (bar) bar.style.transform = `scaleX(${from / total})`
+    if (drawer || engaged) return
+    const started = performance.now()
+    const anim = bar?.animate?.([{ transform: `scaleX(${from / total})` }, { transform: 'scaleX(0)' }], { duration: from, easing: 'linear', fill: 'forwards' })
+    const t = window.setTimeout(() => void close(() => dismissAlert(key)), from)
+    return () => {
+      window.clearTimeout(t)
+      if (remaining.current.key === key) remaining.current.ms = Math.max(0, from - (performance.now() - started))
+      anim?.cancel()
+      if (bar) bar.style.transform = `scaleX(${remaining.current.ms / total})`
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alert?.key, drawer, engaged, settings.autoDismissSec])
 
@@ -457,6 +478,12 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       }}
     >
       {showTail && <span aria-hidden ref={tailRef} style={tailStyle} />}
+      {settings.autoDismissSec > 0 && (
+        // The time left before the card leaves by itself; inset so it follows the card's rounded foot.
+        <div aria-hidden style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, overflow: 'hidden', borderRadius: 2, pointerEvents: 'none' }}>
+          <div ref={progressRef} style={{ height: '100%', background: 'var(--anthropic-orange)', opacity: 0.85, transformOrigin: 'left center', transform: 'scaleX(1)' }} />
+        </div>
+      )}
       <div style={{ position: 'relative', display: 'grid', gap: 10, padding: 12 }}>
         <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6 }} />

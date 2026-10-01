@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { idleSessionNoun } from './idleExecution'
+import { notificationMuted } from './notificationCategories'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -388,10 +389,22 @@ const API = '/api/notifications'
 // External store — a single immutable array reference that changes on every mutation,
 // so useSyncExternalStore re-renders subscribers without extra bookkeeping.
 let items: AppNotification[] = []
+/** What the bell and the toasts SHOW: `items` minus the categories turned off in Settings. */
+let visible: AppNotification[] = []
+let muted: ReadonlySet<string> = new Set()
 const listeners = new Set<() => void>()
 
 function emit() {
+  visible = muted.size === 0 ? items : items.filter(n => !notificationMuted(n.code, muted))
   for (const l of listeners) l()
+}
+
+/** The categories turned off (`NotificationSettings.mutedCategories`); set by `sessionNotifications.ts`. */
+export function setMutedCategories(ids: readonly string[]): void {
+  const next = new Set(ids)
+  if (next.size === muted.size && [...next].every(x => muted.has(x))) return
+  muted = next
+  emit()
 }
 
 /** Replace the cache with the server's list. Every endpoint answers with the full list, so one
@@ -480,7 +493,7 @@ export function readNotifications(): AppNotification[] {
   return items
 }
 
-/** Reactive list of notifications (newest first). */
+/** Reactive list of the notifications to SHOW (newest first) — muted categories left out. */
 export function useNotifications(): AppNotification[] {
-  return useSyncExternalStore(subscribe, () => items, () => items)
+  return useSyncExternalStore(subscribe, () => visible, () => visible)
 }

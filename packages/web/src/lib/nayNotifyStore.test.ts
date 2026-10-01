@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { alertKey, type NayAlert } from './nayNotify'
 import {
-  dismissAlert, inboxAdd, inboxRemove, observeFleet, pushAlert, readNayInbox, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
+  bellEntriesToDrop, dismissAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
   waitingSince,
 } from './nayNotifyStore'
 
@@ -128,32 +128,19 @@ describe('a session the person can see is not announced', () => {
   })
 })
 
-describe('the inbox keeps what still waits on the person', () => {
-  beforeEach(() => { for (const a of readNayInbox()) inboxRemove(a.sessionId) })
-  it('one entry per session: a newer alert replaces the older', () => {
-    inboxAdd(alert('a', 'turn', 1))
-    inboxAdd(alert('a', 'approval', 2))
-    inboxAdd(alert('b'))
-    expect(readNayInbox().map(a => `${a.sessionId}:${a.kind}`)).toEqual(['a:approval', 'b:turn'])
+describe('a hidden card lives in the bell until the session no longer needs the person', () => {
+  const bell = [
+    { id: '1', code: 'session.turn_ended', meta: { sessionId: 'a' } },
+    { id: '2', code: 'session.needs_approval', meta: { sessionId: 'b' } },
+    { id: '3', code: 'session.stale', meta: { sessionId: 'c' } },
+    { id: '4', code: 'update.available', meta: {} },
+    { id: '5', code: 'session.exited', meta: { sessionId: 'a' } },
+  ]
+  it('drops the entries whose session stopped waiting, and only those', () => {
+    const still = (kind: string, sid: string) => sid === 'b' && kind === 'approval'
+    expect(bellEntriesToDrop(bell, still)).toEqual(['1', '3'])
   })
-  it('an entry leaves by itself once the session stops waiting', () => {
-    observeFleet([{ id: 'a', state: 'waiting' }, { id: 'b', state: 'waiting' }], 0, 0)
-    inboxAdd(alert('a')); inboxAdd(alert('b'))
-    observeFleet([{ id: 'a', state: 'working' }, { id: 'b', state: 'waiting' }], 0, 10)
-    expect(readNayInbox().map(a => a.sessionId)).toEqual(['b'])
-    observeFleet([], 0, 20)
-    expect(readNayInbox()).toEqual([])
-  })
-  it('an approval entry leaves once the dialog is answered, even if the session still waits', () => {
-    observeFleet([{ id: 'a', state: 'waiting-approval' }], 0, 0)
-    inboxAdd(alert('a', 'approval'))
-    observeFleet([{ id: 'a', state: 'waiting' }], 0, 10)
-    expect(readNayInbox()).toEqual([])
-  })
-  it('a demo card, or the session whose page is open, never enters', () => {
-    inboxAdd({ ...alert('demo'), demo: true })
-    setOpenSession('c')
-    inboxAdd(alert('c'))
-    expect(readNayInbox()).toEqual([])
+  it('leaves everything that is not a card notification alone', () => {
+    expect(bellEntriesToDrop(bell, () => false)).toEqual(['1', '2', '3'])
   })
 })
