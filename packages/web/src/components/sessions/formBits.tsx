@@ -54,16 +54,23 @@ export function Muted({ text }: { text: string }) {
  * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
  * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
-export function TabStrip<T extends string>({ tabs, value, onPick, label, count }: {
+export function TabStrip<T extends string>({ tabs, value, onPick, label, count, tap, flush, ariaLabel }: {
   tabs: readonly T[]
-  value: T
+  /** The selected tab, or null when none is (a surface showing something the tabs do not name). */
+  value: T | null
   onPick: (t: T) => void
   label: (t: T) => string
-  count: (t: T) => number
+  /** A count beside each label. Absent = the tabs carry no count, and no `0` is drawn in its place. */
+  count?: (t: T) => number
+  /** Minimum tab height on touch — 44 on mobile; absent keeps the desktop 30px. */
+  tap?: number
+  /** Drop the strip's own bottom margin, for a strip that sits inside a header row. */
+  flush?: boolean
+  ariaLabel?: string
 }) {
   return (
-    <div role="tablist" style={{
-      display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9, minWidth: 0,
+    <div role="tablist" aria-label={ariaLabel} style={{
+      display: 'flex', gap: 3, marginBottom: flush ? 0 : 8, padding: 3, borderRadius: 9, minWidth: 0,
       background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
     }}>
       {tabs.map(id => {
@@ -76,7 +83,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, count }
             onClick={() => onPick(id)}
             style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: 5, minHeight: 30, minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
+              gap: 5, minHeight: tap ?? 30, minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
               background: on ? 'var(--bg-surface)' : 'transparent',
               color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,
@@ -85,7 +92,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, count }
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {label(id)}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{count(id)}</span>
+            {count && <span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{count(id)}</span>}
           </button>
         )
       })}
