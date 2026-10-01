@@ -1,0 +1,5 @@
+{
+  "repository": "agentistics/agentistics",
+  "ref": "c25739c782b9f43aabb1157495683288ed7acc91",
+  "note": "The public commit this engine is built and tested against (origin/main, v2.83.0: the engine slot #840 + engine-api 1.1). Bump it in the same change that adapts the engine to a newer public tree."
+}

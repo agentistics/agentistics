@@ -1,0 +1,77 @@
+# Engine CI (spec §9). The public repository is checked out at the ref this engine targets
+# (`public.pin`) — it is public, so no secret is needed — and the engine is linked against it.
+# Runs: tsc, every test (runtime, integrations, provider, conformance kit, reuse-surface lint), the
+# parity matrix, and finally the PUBLIC server's own suite with its slot pointed at this checkout,
+# which is the proof that the host loads this engine and stays green.
+name: engine-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the engine
+        uses: actions/checkout@v4
+        with:
+          path: agentistics-engine
+
+      - name: Read the public pin
+        id: pin
+        run: |
+          echo "repo=$(jq -r .repository agentistics-engine/public.pin)" >> "$GITHUB_OUTPUT"
+          echo "ref=$(jq -r .ref agentistics-engine/public.pin)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the public repository at the pinned ref
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.ref }}
+          path: agentistics
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install the public tree
+        working-directory: agentistics
+        run: |
+          bun install --frozen-lockfile
+          bun run packages/server/scripts/ensure-type-stub.ts
+
+      - name: Install + link the engine
+        working-directory: agentistics-engine
+        env:
+          AGENTISTICS_PUBLIC_DIR: ../agentistics
+        run: bun install
+
+      - name: Typecheck
+        working-directory: agentistics-engine
+        run: bun run typecheck
+
+      - name: Tests (runtime, integrations, provider, conformance, lints)
+        working-directory: agentistics-engine
+        run: bun run test
+
+      - name: Parity matrix
+        working-directory: agentistics-engine
+        run: bun run parity -- --out ../parity-matrix-out
+
+      - name: The public server, with its slot pointed at this engine
+        working-directory: agentistics
+        env:
+          AGENTISTICS_ENGINE_DIR: ../agentistics-engine
+        run: |
+          bun packages/server/scripts/engine-slot.ts
+          grep -q "engineSlot = 'dir'" packages/server/server/engine-slot.generated.ts
+          bun packages/server/bin/cli.ts --version | grep -E '^engine [0-9]'
+          cd packages/server && bun test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-matrix
+          path: parity-matrix-out
