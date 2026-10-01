@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
-  DEFAULT_NOTIFICATION_SETTINGS, handleSessionStateTransitions, notificationSupport, notifyFleetTransitions, supportFrom,
+  DEFAULT_NOTIFICATION_SETTINGS, handleSessionStateTransitions, notifyFleetTransitions, observeDeliveries,
   resetNotificationMemory, type SessionActivity,
 } from './sessionNotifications'
 
 /**
- * These tests exist because this module reaches the user through the OS: a browser notification and
- * a sound. A wrong number on a chart is read by someone who chose to look at the chart; a wrong
+ * These tests exist because this module interrupts the user: a card, a sound and the bell (in-app
+ * only since 2026-09-30 — what is observed here is each DELIVERY as decided, via `observeDeliveries`). A wrong number on a chart is read by someone who chose to look at the chart; a wrong
  * notification interrupts whatever they were doing instead. So the two failures pinned here are the
  * two that were live in production — one that fired alerts nobody asked for, and one that put a
  * Portuguese word inside an English sentence.
@@ -15,7 +15,7 @@ import {
 
 const STORAGE_KEY = 'agentistics.notifications'
 
-/** A minimal localStorage + Notification, so the module runs outside a browser. */
+/** A minimal localStorage, so the module runs outside a browser; deliveries are observed directly. */
 function installBrowser(): { notifications: Array<{ title: string; body: string }> } {
   const store = new Map<string, string>()
   const notifications: Array<{ title: string; body: string }> = []
@@ -26,13 +26,7 @@ function installBrowser(): { notifications: Array<{ title: string; body: string 
     removeItem: (k: string) => { store.delete(k) },
   }
   g.window = g
-  class FakeNotification {
-    static permission = 'granted'
-    constructor(title: string, opts?: { body?: string }) {
-      notifications.push({ title, body: opts?.body ?? '' })
-    }
-  }
-  g.Notification = FakeNotification
+  observeDeliveries(d => { notifications.push({ title: d.title, body: d.body }) })
   // Sound is a no-op here: `playNotificationSound` swallows a missing AudioContext by design.
   store.set(STORAGE_KEY, JSON.stringify({
     ...DEFAULT_NOTIFICATION_SETTINGS,
@@ -55,7 +49,7 @@ let captured: Array<{ title: string; body: string }>
 beforeEach(() => { captured = installBrowser().notifications; resetNotificationMemory() })
 afterEach(() => {
   const g = globalThis as Record<string, unknown>
-  delete g.Notification
+  observeDeliveries(null)
   delete g.localStorage
 })
 
@@ -234,68 +228,3 @@ describe('a row nobody watched arrive is not an event that happened', () => {
   })
 })
 
-describe('notificationSupport', () => {
-  const g = globalThis as unknown as { window?: unknown; navigator?: unknown }
-  const realWindow = g.window
-  const realNavigator = g.navigator
-
-  afterEach(() => {
-    if (realWindow === undefined) delete g.window; else g.window = realWindow
-    if (realNavigator === undefined) delete g.navigator; else g.navigator = realNavigator
-  })
-
-  it('a browser that HAS the API is simply ok', () => {
-    g.window = { Notification: {} }
-    expect(notificationSupport()).toBe('ok')
-  })
-
-  it('THE REPORTED CASE: an iPhone tab needs the app installed, and says so', () => {
-    // Safari on iPhone exposes `Notification` only to a Home-Screen web app. Reported as "não tá
-    // pedindo permissão" — the button was there and could never do anything.
-    g.window = {}
-    g.navigator = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari', platform: 'iPhone', maxTouchPoints: 5 }
-    expect(notificationSupport()).toBe('needs-install')
-  })
-
-  it('an iPad reporting itself as a Mac is still an iPad', () => {
-    g.window = {}
-    g.navigator = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X) Safari', platform: 'MacIntel', maxTouchPoints: 5 }
-    expect(notificationSupport()).toBe('needs-install')
-  })
-
-  it('anything else without the API is unsupported — a different fact, kept separate', () => {
-    // `denied` is a decision the user can reverse from that screen; this is not, and folding them
-    // together is what leaves a reader pressing a button that cannot work.
-    g.window = {}
-    g.navigator = { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Firefox', platform: 'Linux x86_64', maxTouchPoints: 0 }
-    expect(notificationSupport()).toBe('unsupported')
-  })
-})
-
-describe('supportFrom — the four reasons, in the order they must be cleared', () => {
-  const env = (over: Partial<Parameters<typeof supportFrom>[0]>) =>
-    supportFrom({ hasNotification: true, secure: true, standalone: false, ios: false, ...over })
-
-  it('THE REPORTED CASE: an insecure origin outranks everything else', () => {
-    // Reached over Tailscale as `http://100.x.y.z:47292`. Notifications, service workers and
-    // installability all need a secure context, so no amount of asking can ever grant one — and
-    // telling somebody to install the app first sends them to do the second step first.
-    expect(env({ secure: false })).toBe('insecure')
-    expect(env({ secure: false, hasNotification: false, ios: true, standalone: true })).toBe('insecure')
-  })
-
-  it('an iOS app added from CHROME is standalone-shaped and still cannot notify', () => {
-    // Every iOS browser is WebKit underneath, but only a Safari-added web app runs standalone, and
-    // only a standalone one is given the API.
-    expect(env({ hasNotification: false, ios: true, standalone: true })).toBe('needs-safari')
-  })
-
-  it('an iOS tab is told to install it', () => {
-    expect(env({ hasNotification: false, ios: true, standalone: false })).toBe('needs-install')
-  })
-
-  it('anything else with no API is unsupported, and a working one is ok', () => {
-    expect(env({ hasNotification: false })).toBe('unsupported')
-    expect(env({})).toBe('ok')
-  })
-})

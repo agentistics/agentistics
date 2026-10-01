@@ -17,8 +17,8 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { alertKey, alertStillTrue, staleDue, type NayAlert } from './nayNotify'
-import { createSharedPref } from './sharedPref'
+import { alertKey, alertStillTrue, staleDue, type NayAlert, type NayAlertKind } from './nayNotify'
+import { dismissNotification, readNotifications, type AppNotification } from './notifications'
 
 interface State {
   queue: NayAlert[]
@@ -121,51 +121,35 @@ export function pushDemoAlert(lang: 'pt' | 'en', now = Date.now()): void {
   }, now)
 }
 
-// --- the inbox: what still waits on the person ----------------------------------------------------
+// --- the bell: what still waits on the person ----------------------------------------------------
 
 /**
- * THE INBOX (owner, 2026-09-30). The card leaves after a few seconds; the notification does not. It
- * stays in a list reached from the Nay button (a badge counts it) until the SESSION no longer needs
- * the person — it was answered, or it went back to work — and then it leaves by itself. One entry per
- * session (a newer one replaces the older), so nothing accumulates. Stored in `/api/preferences`
- * (`nayInbox`), so every device shows the same list; a demo card never enters it.
+ * WHERE A HIDDEN CARD GOES (owner, 2026-09-30): to the header BELL, not to a list inside the chat.
+ * Every card's event is already written to the bell when it is delivered; what the bell must ALSO
+ * do is drop it once the session no longer needs the person — answered, back at work, or gone — so
+ * the history shows what is still waiting rather than everything that ever waited. That used to be
+ * the in-chat inbox's job; the inbox and its badge on the button are gone.
  */
-const inbox = createSharedPref<{ entries: NayAlert[] }>({
-  key: 'agentistics-nay-inbox',
-  prefKey: 'nayInbox',
-  fallback: { entries: [] },
-  parse: raw => {
-    const e = (raw as { entries?: unknown } | null)?.entries
-    if (!Array.isArray(e)) return null
-    return { entries: e.filter((a): a is NayAlert => !!a && typeof a === 'object' && typeof (a as NayAlert).sessionId === 'string' && typeof (a as NayAlert).key === 'string') }
-  },
-})
-
-export function readNayInbox(): NayAlert[] { return inbox.get().entries }
-
-/** Record an alert in the inbox — never a demo, never a session already on screen. */
-export function inboxAdd(a: NayAlert): void {
-  if (a.demo || onScreen(a.sessionId)) return
-  const cur = inbox.get().entries
-  if (cur.some(x => x.key === a.key)) return
-  inbox.set({ entries: [...cur.filter(x => x.sessionId !== a.sessionId), a] })
+const BELL_KIND: Readonly<Record<string, NayAlertKind>> = {
+  'session.turn_ended': 'turn', 'session.needs_approval': 'approval', 'session.stale': 'stale',
 }
 
-export function inboxRemove(sessionId: string): void {
-  const cur = inbox.get().entries
-  const next = cur.filter(x => x.sessionId !== sessionId)
-  if (next.length !== cur.length) inbox.set({ entries: next })
+/** PURE: the bell entries about a session that no longer needs the person. */
+export function bellEntriesToDrop(
+  items: readonly Pick<AppNotification, 'id' | 'code' | 'meta'>[],
+  stillTrue: (kind: NayAlertKind, sessionId: string) => boolean,
+): string[] {
+  const out: string[] = []
+  for (const n of items) {
+    const kind = n.code ? BELL_KIND[n.code] : undefined
+    const id = typeof n.meta?.sessionId === 'string' ? n.meta.sessionId : undefined
+    if (kind && id && !stillTrue(kind, id)) out.push(n.id)
+  }
+  return out
 }
 
-/** Drop every entry the fleet says is no longer true (answered, working again, or gone). */
-function reconcileInbox(): void {
-  const cur = inbox.get().entries
-  const next = cur.filter(a => alertStillTrue(a.kind, latest.get(a.sessionId)))
-  if (next.length !== cur.length) inbox.set({ entries: next })
-}
-
-export function useNayInbox(): NayAlert[] {
-  return useSyncExternalStore(inbox.subscribe, () => inbox.get().entries, () => inbox.serverSnapshot().entries)
+function pruneBell(): void {
+  for (const id of bellEntriesToDrop(readNotifications(), (k, sid) => alertStillTrue(k, latest.get(sid)))) dismissNotification(id)
 }
 
 /** Queue a card. Refused (false) when it is already up, when its session is open, or while snoozed. */
@@ -236,7 +220,7 @@ export function observeFleet(rows: readonly { id: string; state: string }[], thr
   for (const id of [...since.keys()]) if (!seen.has(id)) { since.delete(id); latest.delete(id) }
 
   // A settings DEMO names no session, so the fleet can never confirm it — it stays until dismissed.
-  reconcileInbox()
+  pruneBell()
   const queue = state.queue.filter(a => a.demo || alertStillTrue(a.kind, latest.get(a.sessionId)))
   if (queue.length !== state.queue.length) { state = { ...state, queue }; emit() }
 

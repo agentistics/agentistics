@@ -37,7 +37,7 @@ import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import {
   cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
-import { followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { echoOpacities, followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import type { AnchorRect, Size } from '../../lib/nayDock'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
@@ -169,6 +169,9 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
    * 2026-09-30). Positioned by the loop, never by React.
    */
   const echoRefs = useRef<(HTMLDivElement | null)[]>([])
+  const leavingRef = useRef(false)
+  /** Every echo off: the loop stopped, the card is leaving, or a new card replaced it. */
+  const hideEchoes = () => { for (const e of echoRefs.current) if (e) e.style.opacity = '0' }
   const cardSize = useRef({ w: 0, h: 0 })
   /** Where React-free placement put the card; the follow loop only ever moves it by `translate` from here. */
   const cardBase = useRef({ left: 0, top: 0 })
@@ -198,18 +201,39 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     return () => window.clearInterval(t)
   }, [alert])
 
-  // IT LEAVES BY ITSELF after the chosen time (5 s by default), unless somebody is using it.
+  /*
+   * IT LEAVES BY ITSELF after the chosen time (5 s by default), and a REGRESSIVE BAR along its foot
+   * shows the time left — no number (owner, 2026-09-30). Using the card (pointer on it, focus in it,
+   * a drawer open) PAUSES both, and leaving it RESUMES from where they stopped: the time already
+   * spent is kept per card, so a card somebody hovered for a moment is not given its full time again.
+   * The bar is moved by the compositor (`transform`), never by React.
+   */
+  const progressRef = useRef<HTMLDivElement>(null)
+  const remaining = useRef<{ key: string; ms: number }>({ key: '', ms: 0 })
   useEffect(() => {
     const sec = settings.autoDismissSec
-    if (!alert || drawer || engaged || !(sec > 0)) return
+    if (!alert || !(sec > 0)) return
     const key = alert.key
-    const t = window.setTimeout(() => void close(() => dismissAlert(key)), sec * 1000)
-    return () => window.clearTimeout(t)
+    const total = sec * 1000
+    if (remaining.current.key !== key) remaining.current = { key, ms: total }
+    const from = Math.min(remaining.current.ms, total)
+    const bar = progressRef.current
+    if (bar) bar.style.transform = `scaleX(${from / total})`
+    if (drawer || engaged) return
+    const started = performance.now()
+    const anim = bar?.animate?.([{ transform: `scaleX(${from / total})` }, { transform: 'scaleX(0)' }], { duration: from, easing: 'linear', fill: 'forwards' })
+    const t = window.setTimeout(() => void close(() => dismissAlert(key)), from)
+    return () => {
+      window.clearTimeout(t)
+      if (remaining.current.key === key) remaining.current.ms = Math.max(0, from - (performance.now() - started))
+      anim?.cancel()
+      if (bar) bar.style.transform = `scaleX(${remaining.current.ms / total})`
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alert?.key, drawer, engaged, settings.autoDismissSec])
 
   // A new card resets its own controls.
-  useEffect(() => { setDrawer(null); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false) }, [alert?.key])
+  useEffect(() => { setDrawer(null); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false); leavingRef.current = false; hideEchoes() }, [alert?.key])
 
   /** The balloon's tail, drawn by ref: it moves every frame and must not re-render React for it. */
   const writeTail = (t: { side: 'top' | 'bottom'; x: number } | null) => {
@@ -252,11 +276,12 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     if (fr.opacity !== w.o) { card.style.opacity = String(fr.opacity); w.o = fr.opacity }
     writeTail(p.tail ? { side: p.tailSide, x: p.tailX } : null)
     const sz = cardSize.current
+    const ops = echoOpacities(fr, card.style.translate !== '', !leavingRef.current)
     echoRefs.current.forEach((e, i) => {
       if (!e) return
       const ec = fr.echoes[i]
-      e.style.opacity = ec ? String(ec.opacity) : '0'
-      if (ec) {
+      e.style.opacity = String(ops[i] ?? 0)
+      if (ec && ops[i]) {
         e.style.transform = `translate3d(${ec.left}px, ${ec.top}px, 0)`
         e.style.width = `${sz.w}px`; e.style.height = `${sz.h}px`
       }
@@ -347,7 +372,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     const off = subscribeFabLive(kick)
     const onResize = () => { vp = viewport(); kick() }
     window.addEventListener('resize', onResize)
-    return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0 }
+    return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0; hideEchoes() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alert?.key, fabStyle])
 
@@ -356,6 +381,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const close = async (after: () => void) => {
     if (leaving) return
     setLeaving(true)
+    leavingRef.current = true
+    hideEchoes()
     if (cardRef.current) await playExit(cardRef.current, fabEl(), reduced)
     after()
   }
@@ -432,7 +459,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   }
 
   return (<>
-    {[0, 1].map(i => (
+    {(fabStyle === 'trail' || fabStyle === 'comet') && !leaving && [0, 1].map(i => (
       <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
         position: 'fixed', left: 0, top: 0, zIndex: zIndex - 1, pointerEvents: 'none', opacity: 0,
         borderRadius: 14, border: '1.5px solid var(--anthropic-orange)', willChange: 'transform, opacity',
@@ -457,6 +484,12 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       }}
     >
       {showTail && <span aria-hidden ref={tailRef} style={tailStyle} />}
+      {settings.autoDismissSec > 0 && (
+        // The time left before the card leaves by itself; inset so it follows the card's rounded foot.
+        <div aria-hidden style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, overflow: 'hidden', borderRadius: 2, pointerEvents: 'none' }}>
+          <div ref={progressRef} style={{ height: '100%', background: 'var(--anthropic-orange)', opacity: 0.85, transformOrigin: 'left center', transform: 'scaleX(1)' }} />
+        </div>
+      )}
       <div style={{ position: 'relative', display: 'grid', gap: 10, padding: 12 }}>
         <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6 }} />
