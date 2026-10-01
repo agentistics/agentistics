@@ -24,6 +24,7 @@
 import { readFile, readdir, readlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
+import { ANTIGRAVITY_DIR } from '../config'
 import { HARNESS_PROCESS_LOGS } from './harness-session-file'
 
 /** Every path this process currently holds open. `[]` for anything that cannot be read. */
@@ -91,4 +92,72 @@ export async function readProcessConversation(
   } catch {
     return null
   }
+}
+
+/**
+ * Where each harness leaves the per-process logs `HARNESS_PROCESS_LOGS` reads. A `Record<HarnessId,
+ * …>` so a harness added later has to say, rather than being absent by omission.
+ */
+const PROCESS_LOG_DIRS: Record<HarnessId, string | null> = {
+  antigravity: join(ANTIGRAVITY_DIR, 'log'),
+  claude: null,
+  codex: null,
+  gemini: null,
+  copilot: null,
+  kimi: null,
+  opencode: null,
+}
+
+/**
+ * The conversation a row's process created, recovered from the log it LEFT BEHIND — for the row
+ * whose process ended before the live read (`readProcessConversation`) ever landed.
+ *
+ * Only the logs opened inside the spawn's window are READ: a log directory holds one file per
+ * process the harness ever ran (64 conversations, hundreds of logs, on a real machine), and the
+ * window is decided from the file NAME before any content is touched. The rules — which log, in
+ * which folder, and every refusal — are `conversationFromSpawnWindow`'s; this only lists and reads.
+ *
+ * Failure is ABSENCE, always, like everything in this module: an unreadable directory or file is
+ * `null`, and the row keeps behaving exactly as it does today.
+ */
+export async function readSpawnWindowConversation(
+  o: {
+    harness: HarnessId
+    cwd: string
+    spawnedMs: number
+    rivalSpawnsMs?: readonly number[]
+    taken?: ReadonlySet<string>
+  },
+  logsDir?: string,
+): Promise<string | null> {
+  const source = HARNESS_PROCESS_LOGS[o.harness]
+  const dir = logsDir ?? PROCESS_LOG_DIRS[o.harness]
+  if (!source || !dir) return null
+  const { logStartMs, windowMs, conversationFromSpawn } = source.afterTheFact
+
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return null
+  }
+  const logs: { path: string; text: string }[] = []
+  for (const name of names) {
+    const path = join(dir, name)
+    const start = logStartMs(path)
+    if (start === null) continue
+    if (start < o.spawnedMs - windowMs.before || start > o.spawnedMs + windowMs.after) continue
+    try {
+      logs.push({ path, text: await readFile(path, 'utf-8') })
+    } catch {
+      // One unreadable log is one fewer candidate. If it was the row's, the answer is `null`.
+    }
+  }
+  return conversationFromSpawn({
+    logs,
+    spawnedMs: o.spawnedMs,
+    cwd: o.cwd,
+    ...(o.rivalSpawnsMs ? { rivalSpawnsMs: o.rivalSpawnsMs } : {}),
+    ...(o.taken ? { taken: o.taken } : {}),
+  })
 }

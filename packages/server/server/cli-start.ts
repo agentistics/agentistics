@@ -155,7 +155,7 @@ import {
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
-import { readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
+import { readProcessConversation, readSpawnWindowConversation, resolveProcessLog } from './sessions/process-conversation'
 import { agyLogCollisions } from './sessions/agy-conversation'
 import { idleServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
@@ -1543,6 +1543,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // `recordConversation` at all, so their procLink write block never runs and they have nothing
     // to guard.
     resolveProcessLog,
+    // The same link recovered from the log a FINISHED process left behind — see
+    // `readSpawnWindowConversation`. Wired on this poller only, for the reason `recordConversation` is.
+    readSpawnWindowConversation,
     // The `/rename` name, persisted so the title survives the process — same once-per-change
     // discipline. See `ManagedSession.harnessName` and `pickTitle`.
     recordHarnessName: (id, name, since) =>
