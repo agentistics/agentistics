@@ -8,6 +8,15 @@ Issue/PR/Project-board/Discussion workflow rules are harness-agnostic and live i
 the repo root — read it before opening an Issue, starting implementation work, or submitting a PR.
 This file stays Claude-Code-specific implementation memory and does not duplicate those rules.
 
+## Frozen engine paths — fix them in agentistics/agentistics-engine
+
+Since 2026-10-01 the ENGINE repo is the source of truth for the runtime, the integrations, the
+provider clients, the differentials and the parity matrix; the public copies are frozen until ES.4
+deletes them. The exact list is `.github/frozen-engine-paths.txt` (the ONE place it lives), and the
+`frozen-paths` job in `ci.yml` (`packages/server/scripts/frozen-paths-check.ts`) fails any PR that
+touches one. The only exception is the ES.4 deletion PR: title tagged `[ES.4]` and ONLY deletions
+under those paths. `packages/engine-api` and the engine slot/host (`server/engine/**`) are not frozen.
+
 ## Language convention
 
 **Everything in this project is in English**: code, comments, commit messages, PR titles and descriptions, documentation, and this file.
