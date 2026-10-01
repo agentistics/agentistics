@@ -132,3 +132,27 @@ export function writeAsideGroupPrefs(patch: Partial<AsideGroupPrefs>): void {
     localStorage.setItem(KEY, JSON.stringify({ ...readAsideGroupPrefs(), ...patch }))
   } catch { /* storage unavailable — the arrangement lasts this visit and no longer */ }
 }
+
+/**
+ * PURE: how many of the list's arrangement options differ from the default — the count the arrange
+ * button wears, so a list that is quietly grouped, sorted or missing folders says so on the button
+ * that changes it. One per OPTION, never per value: a manual group order is one change however many
+ * groups it moved, and hidden folders are one change however many are hidden.
+ */
+export function arrangeChangedCount(o: {
+  groupBy: AsideGroupBy
+  sort: SessionOrder
+  cardColor: AsideCardColor
+  /** The manual group order for the CURRENT dimension (empty = automatic). */
+  order: readonly string[]
+  hiddenFolders: number
+}): number {
+  const d = DEFAULT_ASIDE_GROUP_PREFS
+  return [
+    o.groupBy !== d.groupBy,
+    o.sort.by !== d.sort.by || o.sort.dir !== d.sort.dir,
+    o.order.length > 0,
+    o.cardColor !== d.cardColor,
+    o.hiddenFolders > 0,
+  ].filter(Boolean).length
+}

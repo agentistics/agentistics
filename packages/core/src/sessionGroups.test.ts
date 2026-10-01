@@ -198,3 +198,39 @@ describe('planDeleteGroup — a deleted parent promotes its children, never dele
     expect(planDeleteGroup(g, 'a')).toEqual({ groups: [] })
   })
 })
+
+import { groupConcealed, hiddenGroups, planSetGroupHidden, planDeleteGroup as planDeleteGroupH, planRenameGroup as planRenameGroupH } from './sessionGroups'
+
+describe('hiding a folder', () => {
+  const base = {
+    groups: [
+      { id: 'nay', name: 'Nay', sessionKeys: [] },
+      { id: 'nay-a', name: 'Ativas', sessionKeys: ['k1'], parentId: 'nay' },
+      { id: 'x', name: 'X', sessionKeys: ['k2'] },
+    ],
+  }
+  test('hides any folder, the Nay folder included, and keeps its sessions', () => {
+    const next = planSetGroupHidden(base, 'nay', true)
+    expect(next.groups[0]!.hidden).toBe(true)
+    expect(next.groups[1]!.sessionKeys).toEqual(['k1'])
+    expect(hiddenGroups(next).map(g => g.id)).toEqual(['nay'])
+  })
+  test('a child is concealed with its hidden parent; a sibling is not', () => {
+    const next = planSetGroupHidden(base, 'nay', true)
+    expect(groupConcealed(next, 'nay-a')).toBe(true)
+    expect(groupConcealed(next, 'x')).toBe(false)
+  })
+  test('showing removes the key, so a shown folder reads like one never hidden', () => {
+    const shown = planSetGroupHidden(planSetGroupHidden(base, 'x', true), 'x', false)
+    expect('hidden' in shown.groups[2]!).toBe(false)
+  })
+  test('no-ops return the same value (no write)', () => {
+    expect(planSetGroupHidden(base, 'x', false)).toBe(base)
+    expect(planSetGroupHidden(base, 'missing', true)).toBe(base)
+  })
+  test('the flag survives other edits to the folder', () => {
+    const hidden = planSetGroupHidden(base, 'x', true)
+    expect(planRenameGroupH(hidden, 'x', 'Y').groups[2]!.hidden).toBe(true)
+    expect(planDeleteGroupH(hidden, 'nay').groups.find(g => g.id === 'x')!.hidden).toBe(true)
+  })
+})

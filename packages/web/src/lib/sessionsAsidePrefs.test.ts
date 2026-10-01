@@ -161,3 +161,20 @@ describe('bandCollapseKey', () => {
     }
   })
 })
+
+import { arrangeChangedCount, DEFAULT_ASIDE_GROUP_PREFS as D } from './sessionsAsidePrefs'
+
+describe('arrangeChangedCount', () => {
+  const base = { groupBy: D.groupBy, sort: D.sort, cardColor: D.cardColor, order: [] as string[], hiddenFolders: 0 }
+  test('the default arrangement has nothing changed (no badge)', () => {
+    expect(arrangeChangedCount(base)).toBe(0)
+  })
+  test('one per option, never per value', () => {
+    expect(arrangeChangedCount({ ...base, groupBy: 'status' })).toBe(1)
+    expect(arrangeChangedCount({ ...base, sort: { by: D.sort.by, dir: D.sort.dir === 'asc' ? 'desc' : 'asc' } })).toBe(1)
+    expect(arrangeChangedCount({ ...base, order: ['a', 'b', 'c'] })).toBe(1)
+    expect(arrangeChangedCount({ ...base, cardColor: 'stripe' })).toBe(1)
+    expect(arrangeChangedCount({ ...base, hiddenFolders: 4 })).toBe(1)
+    expect(arrangeChangedCount({ groupBy: 'task', sort: { by: 'name', dir: 'asc' }, cardColor: 'neutral', order: ['x'], hiddenFolders: 2 })).toBe(5)
+  })
+})

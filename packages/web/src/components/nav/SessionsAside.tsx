@@ -30,7 +30,7 @@ import {
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
 import {
-  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs,
+  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs, arrangeChangedCount,
   type AsideBandId, type AsideCardColor, type AsideGroupBy,
 } from '../../lib/sessionsAsidePrefs'
 import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -67,7 +67,7 @@ import {
   canNestGroup, createSessionGroup, deleteSessionGroup, getSessionGroups, moveSessionToGroup,
   nestSessionGroup, removeSessionFromGroup, renameSessionGroup, reorderSessionGroups,
   reorderSessionInGroup, resolveGroupRows, sessionGroupsServerSnapshot, stepSessionGroup, folderSessionCount, folderCountLabel, listNarrowed,
-  subscribeSessionGroups,
+  subscribeSessionGroups, setSessionGroupHidden, groupConcealed, hiddenGroups as hiddenFoldersOf,
 } from '../../lib/sessionUserGroups'
 import {
   hasDragPayload, hasGroupDragPayload, hasGroupNestDragPayload, readDragPayload, readGroupDragPayload,
@@ -799,7 +799,7 @@ export function SessionsAside({
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
-    const children = depth === 0 ? source.filter(g => g.group.parentId === group.id) : []
+    const children = depth === 0 ? source.filter(g => g.group.parentId === group.id && !g.group.hidden) : []
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
@@ -1249,6 +1249,16 @@ export function SessionsAside({
           onCardColor={setCardColor}
           onCollapseAll={collapseAll}
           onExpandAll={expandAll}
+          hiddenFolders={hiddenFoldersOf(groupsValue).map(g => {
+            const parent = g.parentId ? groupsValue.groups.find(x => x.id === g.parentId) : undefined
+            const name = displayName(g.name, hiddenGroups.has(g.id))
+            return { id: g.id, name: parent ? `${displayName(parent.name, hiddenGroups.has(parent.id))} › ${name}` : name }
+          })}
+          onShowFolder={id => setSessionGroupHidden(id, false)}
+          changed={arrangeChangedCount({
+            groupBy, sort: sortOrder, cardColor,
+            order: groupOrder[groupBy] ?? [], hiddenFolders: hiddenFoldersOf(groupsValue).length,
+          })}
         />
       </div>
 
@@ -1558,7 +1568,9 @@ export function SessionsAside({
             </button>
           </div>
 
-          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId).map(entry => renderGroupBand(entry, 0))}
+          {/* A HIDDEN folder (and everything inside it) is not drawn; it is listed, with a way back,
+              in the arrange panel's "Pastas ocultas". */}
+          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId && !groupConcealed(groupsValue, g.group.id)).map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (
@@ -1719,6 +1731,10 @@ export function SessionsAside({
               // is the dead control this product refuses everywhere.
               ? [{ action: 'dismiss-attn', label: pt ? 'Marcar como visto (silenciar aviso)' : 'Mark as seen (silence alert)', enabled: true }]
               : []),
+            // Takes the whole folder off the list (its sessions stay in it); it comes back from the
+            // arrange panel's "Pastas ocultas". Distinct from "Ocultar nome", which keeps the folder
+            // and masks only its name.
+            { action: 'hide-folder', label: pt ? 'Ocultar pasta' : 'Hide folder', enabled: true },
             { action: 'delete', label: pt ? 'Excluir grupo…' : 'Delete group…', enabled: true },
           ]}
           onPick={action => {
@@ -1728,6 +1744,7 @@ export function SessionsAside({
               setRenamingGroup({ id: groupMenu.id })
             }
             if (action === 'toggle-hide-name') toggleGroupNameHidden(groupMenu.id)
+            if (action === 'hide-folder') setSessionGroupHidden(groupMenu.id, true)
             if (action === 'move-up') stepSessionGroup(groupMenu.id, -1)
             if (action === 'move-down') stepSessionGroup(groupMenu.id, 1)
             if (action === 'unnest') nestSessionGroup(groupMenu.id, null)
