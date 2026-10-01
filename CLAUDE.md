@@ -2685,10 +2685,17 @@ by the compiler.
   subtasks draws NO bar rather than an empty one — "nobody broke this up" is not "nothing is done".
 - **A WIP limit WARNS, it never blocks.** A board that refuses a drop teaches people to route around
   it instead of looking at it.
-- **The board's arrangement is `localStorage`, not `/api/preferences`** (`boardPrefs.ts`): on a
-  central that file is shared by everyone signed in, and one person's folded groups would fold them
-  for the whole team. Every read and write is guarded — a private window makes the accessor itself
-  throw.
+- **The board's arrangement is PER PERSON on the server — `/api/user-prefs`, never
+  `/api/preferences`** (`boardPrefs.ts` over `sharedPref.ts`'s `PERSONAL_PREFS`): on a central
+  `preferences.json` is shared by everyone signed in, so one person's hidden columns would hide them
+  for the whole team. `user-ui-prefs-routes.ts` reuses `resolveA11yStore` — a machine writes its own
+  preferences file (`ui.<key>`), a central the account's `userPrefs.ui.<key>`, and a central
+  session with no account reads `{}` and is refused on write. The keys are a CLOSED list
+  (`USER_UI_PREF_KEYS`; an unknown key is refused, not dropped) and the values are opaque to the
+  server — the web store's own `parse` sanitises them. The old `localStorage` key is kept as the
+  first paint and written up ONCE when the server has nothing yet (`adoptLocalWhenAbsent`).
+  Components read it LIVE (`useBoardPref`), never seeded once, or a value the server answers after
+  mount waits for a remount.
 - **A comment's pasted image becomes a real task FILE plus a REFERENCE** (`commentBody.ts`,
   `![name](file:<id>)`, by id — two screenshots pasted in the same second share a minted name). A
   reference whose file was deleted renders as its NAME in plain text: never a broken image, never

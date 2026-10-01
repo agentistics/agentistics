@@ -7,18 +7,23 @@
  * itself: the arrangement is the user's, and a surface that forgets it teaches people not to arrange
  * anything.
  *
- * It lives in `localStorage` and NOT in `/api/preferences`, deliberately: this is a per-viewer,
- * per-browser convenience, and on a central `preferences.json` is shared by everyone signed in —
- * one person's folded groups would fold them for the whole team.
+ * It lives on the SERVER, per PERSON (`PERSONAL_PREFS` = `/api/user-prefs`): a machine keeps it in
+ * its own preferences file, a central keeps it in the signed-in account's `userPrefs` document —
+ * never in the central's `preferences.json`, which is shared by everyone signed in, so one
+ * person's hidden columns would hide them for the whole team (t-f4e5ecffe7). It used to be
+ * `localStorage` alone, so the same board arranged on the desktop opened unarranged on the phone.
+ * The browser copy (the old key, kept compatible) is now only the first paint, and the first armed
+ * load writes it up when the server has nothing yet — see `sharedPref.ts`.
  *
- * Every read and write is guarded. A private window, cleared site data, or a browser set to block
- * storage makes the accessor itself THROW, and a board that will not render because it could not
- * remember which columns were shown is worse than one that opens on the defaults.
+ * Every read is total. A private window, cleared site data, or a stored document from another
+ * build must never stop the board rendering: what cannot be read falls back to the defaults.
  */
 
 import type { BoardStatus, ColumnId } from './board'
 import type { SubtaskColumnId } from './subtaskColumnDefs'
 import { DEFAULT_SORT, type SortSpec } from '@agentistics/core'
+import { useSyncExternalStore } from 'react'
+import { createSharedPref, PERSONAL_PREFS } from '../../lib/sharedPref'
 
 const KEY = 'agentistics-task-board-v1'
 
@@ -119,38 +124,65 @@ const isView = (v: unknown): v is BoardView =>
 const statuses = (v: unknown): BoardStatus[] | null =>
   Array.isArray(v) ? v.filter((x): x is BoardStatus => typeof x === 'string') : null
 
+/**
+ * PURE: a stored document → a board arrangement. Total — anything unrecognised falls back field by
+ * field, so a document written by another build or edited by hand never blanks the board.
+ */
+export function parseBoardPrefs(raw: unknown): BoardPrefs {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return DEFAULT_PREFS
+  const p = raw as Record<string, unknown>
+  return {
+    view: isView(p.view) ? p.view : DEFAULT_PREFS.view,
+    sort: readSort(p.sort),
+    columnSort: readColumnSort(p.columnSort),
+    lanes: isLane(p.lanes) ? p.lanes : 'none',
+    // A WIP limit is a number per column; anything else in the stored object is dropped rather
+    // than rendered as a limit nobody set.
+    wip: p.wip && typeof p.wip === 'object'
+      ? Object.fromEntries(Object.entries(p.wip as Record<string, unknown>)
+        .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
+      : {},
+    // A stored column id no longer in the table is dropped rather than rendering a blank cell;
+    // an EMPTY stored list is a real choice ("show me only the names") and is kept.
+    columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
+    subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
+    groups: statuses(p.groups),
+    collapsed: statuses(p.collapsed) ?? [],
+    rail: p.rail && typeof p.rail === 'object'
+      ? Object.fromEntries(Object.entries(p.rail as Record<string, unknown>)
+        .filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean>
+      : {},
+  }
+}
+
+const store = createSharedPref<BoardPrefs>({
+  key: KEY,
+  prefKey: 'taskBoard',
+  endpoint: PERSONAL_PREFS,
+  fallback: DEFAULT_PREFS,
+  parse: parseBoardPrefs,
+  adoptLocalWhenAbsent: true,
+})
+
 export function readBoardPrefs(): BoardPrefs {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return DEFAULT_PREFS
-    const p = JSON.parse(raw) as Record<string, unknown>
-    return {
-      view: isView(p.view) ? p.view : DEFAULT_PREFS.view,
-      sort: readSort(p.sort),
-      columnSort: readColumnSort(p.columnSort),
-      lanes: isLane(p.lanes) ? p.lanes : 'none',
-      // A WIP limit is a number per column; anything else in the stored object is dropped rather
-      // than rendered as a limit nobody set.
-      wip: p.wip && typeof p.wip === 'object'
-        ? Object.fromEntries(Object.entries(p.wip as Record<string, unknown>)
-          .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
-        : {},
-      // A stored column id no longer in the table is dropped rather than rendering a blank cell;
-      // an EMPTY stored list is a real choice ("show me only the names") and is kept.
-      columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
-      subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
-      groups: statuses(p.groups),
-      collapsed: statuses(p.collapsed) ?? [],
-      rail: p.rail && typeof p.rail === 'object'
-        ? Object.fromEntries(Object.entries(p.rail as Record<string, unknown>)
-          .filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean>
-        : {},
-    }
-  } catch { return DEFAULT_PREFS }
+  return store.get()
 }
 
 export function writeBoardPrefs(patch: Partial<BoardPrefs>): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify({ ...readBoardPrefs(), ...patch }))
-  } catch { /* storage unavailable — the arrangement lasts this visit and no longer */ }
+  store.set({ ...store.get(), ...patch })
+}
+
+/** The arrangement, LIVE: a value the server answers after the board mounted still lands on it. */
+export function useBoardPrefs(): BoardPrefs {
+  return useSyncExternalStore(store.subscribe, store.get, store.serverSnapshot)
+}
+
+/**
+ * One field of the arrangement as a `[value, set]` pair — the shape the board's components held as
+ * a `useState` seeded once from `readBoardPrefs()`. Seeded once is the bug: a phone opening the
+ * board before the server answered kept the defaults until it was remounted.
+ */
+export function useBoardPref<K extends keyof BoardPrefs>(k: K): [BoardPrefs[K], (v: BoardPrefs[K]) => void] {
+  const value = useSyncExternalStore(store.subscribe, () => store.get()[k], () => store.serverSnapshot()[k])
+  return [value, (v: BoardPrefs[K]) => writeBoardPrefs({ [k]: v } as Partial<BoardPrefs>)]
 }

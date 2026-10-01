@@ -16,11 +16,10 @@
  * the same reason the board's columns and folds are remembered.
  */
 
-import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { microLabel, numeric, surface } from './board'
-import { railOpen, setRailOpen } from './boardPrefs'
+import { setRailOpen, useBoardPrefs } from './boardPrefs'
 
 export function RailSection({ id, title, badge, defaultOpen = false, children }: {
   /** Stable key for the remembered open state. */
@@ -32,11 +31,12 @@ export function RailSection({ id, title, badge, defaultOpen = false, children }:
   children: React.ReactNode
 }) {
   const isMobile = useIsMobile()
-  const [open, setOpen] = useState(() => railOpen(id, defaultOpen))
+  const stored = useBoardPrefs().rail[id]
+  const open = typeof stored === 'boolean' ? stored : defaultOpen
   return (
     <div style={{ ...surface, overflow: 'hidden' }}>
       <button
-        onClick={() => { setOpen(v => !v); setRailOpen(id, !open) }}
+        onClick={() => setRailOpen(id, !open)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
           background: 'none', border: 'none', cursor: 'pointer',
