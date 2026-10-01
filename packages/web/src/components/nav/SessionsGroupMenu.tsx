@@ -23,6 +23,7 @@ import { SESSION_SORTS, type SessionOrder, type SessionSort } from '@agentistics
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronsDownUp, ChevronsUpDown, ChevronUp, Eye, GripVertical, LayoutList } from 'lucide-react'
 import { reorderByDrag, stepOrder } from '../../lib/dragReorder'
+import { Toggle } from '../../pages/settings/primitives'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   ASIDE_CARD_COLOR_VALUES, ASIDE_GROUP_BY_VALUES,
@@ -205,13 +206,19 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
                   {SORT_LABEL[v][p.lang]}
                 </button>
               ))}
-              <button
-                onClick={() => p.onSort({ by: p.sort.by, dir: p.sort.dir === 'desc' ? 'asc' : 'desc' })}
-                aria-pressed={p.sort.dir === 'asc'}
-                style={rowStyle(p.sort.dir === 'asc')}
-              >
-                {pt ? 'Inverter a ordem' : 'Reverse the order'}
-              </button>
+              {/* A SWITCH, not another choice in the list above: it flips whichever order is chosen. */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', marginTop: 2,
+                minHeight: tap, fontSize: 12, color: 'var(--text-secondary)',
+                borderTop: '1px solid var(--border-subtle)',
+              }}>
+                <span aria-hidden style={{ flex: 1, minWidth: 0 }}>{pt ? 'Inverter a ordem' : 'Reverse the order'}</span>
+                <Toggle
+                  label={pt ? 'Inverter a ordem' : 'Reverse the order'}
+                  on={p.sort.dir === 'asc'}
+                  onToggle={() => p.onSort({ by: p.sort.by, dir: p.sort.dir === 'desc' ? 'asc' : 'desc' })}
+                />
+              </div>
               {p.groups.length > 1 && (
                 <>
                   <div style={sectionLabel}>{pt ? 'Ordem dos grupos' : 'Group order'}</div>
