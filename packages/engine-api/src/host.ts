@@ -10,6 +10,7 @@
  * passes only the floor that protects such stores (`protectedPaths`).
  */
 import type { CapabilityName, EngineEvent, HarnessId } from './mirrors'
+import type { ReuseSurface } from './reuse'
 
 /** Where an append's answer is read. A host's richer result is assignable to it. */
 export interface ProviderAppendResult {
@@ -53,9 +54,37 @@ export interface PersonAsker {
 /** Flags an engine honours, read by the host. */
 export type EngineFlag = 'provider' | 'ingest'
 
+/**
+ * Mirrors the host's `AuditAction` — must stay EQUAL (1.2; it was `string` before, which let an
+ * engine write an action no audit reader knows). An engine audits only through `audit()`, so the
+ * whole union is named: a narrower one would have to be widened every time the engine learns a
+ * verb, which is a contract bump for no change of meaning.
+ */
+export type EngineAuditAction =
+  | 'login.success' | 'login.failure' | 'login.mfa_challenge' | 'login.mfa_failure'
+  | 'logout' | 'password.change' | 'password.reset_cli'
+  | 'mfa.enable' | 'mfa.disable' | 'mfa.disable_refused' | 'mfa.recovery_used' | 'mfa.recovery_regenerated'
+  | 'password.recover' | 'password.recover_failure' | 'password.reset_requested'
+  | 'account.create' | 'account.update' | 'account.delete'
+  | 'password.reset_admin'
+  | 'team.create' | 'team.update' | 'team.delete'
+  | 'token.mint' | 'token.rotate' | 'token.revoke'
+  | 'machine.update'
+  | 'machine.session_action'
+  | 'repo.register' | 'repo.unregister'
+  | 'config.update' | 'bootstrap.consume'
+  | 'capability.denied' | 'authz.denied' | 'rate.blocked'
+  | 'host.misdirected'
+  | 'stepup.granted' | 'stepup.failure' | 'stepup.missing'
+  | 'fleet.input.open' | 'fleet.input.denied'
+  | 'shell.input.open' | 'shell.input.denied'
+  | 'shell.override.enabled'
+  | 'upgrade.started' | 'upgrade.denied'
+  | 'provider.set' | 'provider.remove'
+
 /** Mirrors the host's audit input. The host's builder still redacts secret-shaped fields. */
 export interface EngineAuditEvent {
-  action: string
+  action: EngineAuditAction
   actorId?: string
   targetId?: string
   ip: string
@@ -100,12 +129,15 @@ export type SafeError = (
 ) => { body: { error: string; ref: string }; logLine: string }
 
 /**
- * The public functions an engine may reuse, handed over as VALUES so it never deep-imports the
- * public tree. Its TYPE lives here and the host builds the value, so a public refactor that changes
- * a signature fails the public build where it happens. Growing it is a minor version bump; changing
- * a member is a major one. It starts empty: members join as the integrations move.
+ * The host's browser-provenance policy: the extra origins it allows (`AGENTISTICS_ALLOWED_ORIGINS`)
+ * and whether it runs as a dev server (no embedded dashboard — Vite's origin is then same-site). An
+ * engine route that runs a provenance check STRICTER than the host's CSRF gate reads both here
+ * rather than re-deriving them from the environment.
  */
-export interface ReuseSurface {}
+export interface EngineOriginPolicy {
+  allowedOrigins: string[]
+  dev: boolean
+}
 
 export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** Where things live. The engine reads no config of its own. */
@@ -116,6 +148,11 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
     home: string
     /** The env-override-resolved roots the host owns. */
     harnessRoots: Partial<Record<HarnessId, string>>
+    /**
+     * OpenCode's database FILE, as the host resolved it (1.2). `OPENCODE_DB_PATH` may point it
+     * outside `harnessRoots.opencode`, so `<root>/opencode.db` is not the same answer.
+     */
+    opencodeDbPath: string
   }
   /** The public journal. `null` = journal off or unwritable — the engine must cope. */
   journal: { sink(): Promise<ProviderJournalSink<E> | null>; status(): JournalStatus }
@@ -137,6 +174,13 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
     fileNative(link: Omit<NativeSessionLink, 'id' | 'linkedAt'>): Promise<FileResult>
     unfileNative(sessionId: string): Promise<void>
   }
+  /**
+   * The public functions an engine reuses (1.2: the full `ReuseSurface`). A 1.1 host passed `{}`;
+   * an engine built against 1.2 never loads on one (`apiCompatible`), and still checks completeness
+   * (`missingReuseMembers`) rather than trusting a value it did not type-check.
+   */
   readers: ReuseSurface
+  /** The host's browser-provenance policy (1.2). */
+  originPolicy(): EngineOriginPolicy
   now(): Date
 }

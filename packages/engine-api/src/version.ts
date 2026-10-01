@@ -10,7 +10,13 @@
  * shares with its replay), and a route's `handle` receives the request's `EngineRequestContext`.
  * Both optional, so an engine built against 1.0 still loads.
  */
-export const ENGINE_API_VERSION = '1.1.0'
+/**
+ * 1.2.0 — `ReuseSurface` carries the 48 public functions an engine reuses (it was empty), the host
+ * names its origin policy (`originPolicy()`) and OpenCode's database file (`paths.opencodeDbPath`),
+ * and `EngineAuditEvent.action` is the host's `AuditAction` union instead of `string`. An engine
+ * built against 1.1 still loads: it reads none of the new members.
+ */
+export const ENGINE_API_VERSION = '1.2.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
