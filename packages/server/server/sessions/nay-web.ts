@@ -61,7 +61,7 @@ export async function startNaySession(
   return { ...out, launch }
 }
 
-const groupsOf = (groups: { id: string; name: string; sessionKeys: string[]; parentId?: string }[] | undefined): SessionUserGroupsValue =>
+const groupsOf = (groups: { id: string; name: string; sessionKeys: string[]; parentId?: string; hidden?: boolean }[] | undefined): SessionUserGroupsValue =>
   ({ groups: (groups ?? []).map(g => ({ ...g, sessionKeys: [...g.sessionKeys] })) })
 
 export function defaultNayDeps(port: number): NaySpawnDeps {

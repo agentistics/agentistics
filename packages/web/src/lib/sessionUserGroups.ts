@@ -42,6 +42,9 @@ import {
   planMoveToGroup,
   canNestGroup,
   planNestGroup,
+  planSetGroupHidden,
+  groupConcealed,
+  hiddenGroups,
   type NestRefusal,
   type SessionUserGroup,
   type SessionUserGroupsValue,
@@ -50,6 +53,9 @@ import {
 // The pure rules live in `@agentistics/core` (`sessionGroups.ts`) so the server routes behind the MCP
 // tools use the SAME ones; they are re-exported here so every existing import keeps working.
 export {
+  planSetGroupHidden,
+  groupConcealed,
+  hiddenGroups,
   EMPTY_SESSION_GROUPS,
   planCreateGroup,
   planRenameGroup,
@@ -210,6 +216,13 @@ export function createSessionGroup(name: string): string | null {
 
 export function renameSessionGroup(id: string, name: string): void {
   store.set(planRenameGroup(store.get(), id, name))
+}
+
+/** Hide or show a folder in the sessions list — stored on the group, server-side (`planSetGroupHidden`). */
+export function setSessionGroupHidden(id: string, hidden: boolean): void {
+  const cur = store.get()
+  const next = planSetGroupHidden(cur, id, hidden)
+  if (next !== cur) store.set(next)
 }
 
 export function deleteSessionGroup(id: string): void {

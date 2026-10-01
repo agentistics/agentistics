@@ -32,6 +32,13 @@ export interface SessionUserGroup {
   /** The group this one is nested inside, if any. Absent (or on a legacy document, always absent)
    *  means top-level. See the module header for the one-level-deep rule. */
   parentId?: string
+  /**
+   * The person HID this folder from the sessions list. Its sessions are not deleted and stay in it;
+   * the folder (and everything inside it) is simply not drawn until it is shown again, from the
+   * list's arrange panel. Absent reads as shown, so every existing document is unchanged. Stored on
+   * the group, server-side, so a folder hidden on the desktop is hidden on the phone too.
+   */
+  hidden?: boolean
 }
 
 export interface SessionUserGroupsValue {
@@ -63,6 +70,46 @@ export function planCreateGroup(
   if (trimmed === '') return { next: current, id: null }
   const id = makeGroupId()
   return { next: { groups: [...current.groups, { id, name: trimmed, sessionKeys: [] }] }, id }
+}
+
+/**
+ * PURE: hide or show a folder. Any folder can be hidden — the Nay folder included, which always
+ * exists and so could otherwise never leave the list. A missing id, or a folder already in the
+ * asked-for state, returns `current` itself (no write). Showing DELETES the key rather than writing
+ * `false`, so a shown folder reads exactly like one that was never hidden.
+ */
+export function planSetGroupHidden(
+  current: SessionUserGroupsValue,
+  id: string,
+  hidden: boolean,
+): SessionUserGroupsValue {
+  const target = current.groups.find(g => g.id === id)
+  if (!target || (target.hidden === true) === hidden) return current
+  return {
+    groups: current.groups.map(g => {
+      if (g.id !== id) return g
+      if (hidden) return { ...g, hidden: true }
+      const { hidden: _drop, ...rest } = g
+      return rest
+    }),
+  }
+}
+
+/**
+ * PURE: is this folder off the list — hidden itself, or nested inside a hidden parent? A child is
+ * drawn under its parent, so hiding the parent takes the child with it.
+ */
+export function groupConcealed(current: SessionUserGroupsValue, id: string): boolean {
+  const g = current.groups.find(x => x.id === id)
+  if (!g) return false
+  if (g.hidden) return true
+  const parent = g.parentId ? current.groups.find(x => x.id === g.parentId) : undefined
+  return parent?.hidden === true
+}
+
+/** PURE: the folders the person hid, in list order — what the arrange panel offers to show again. */
+export function hiddenGroups(current: SessionUserGroupsValue): SessionUserGroup[] {
+  return current.groups.filter(g => g.hidden === true)
 }
 
 /** PURE: rename a group. A blank name is refused (unchanged); a missing id is a no-op. */
