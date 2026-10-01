@@ -35,7 +35,7 @@ import {
   type KeyedProviderId,
   type OpenAICompatibleEndpointId,
 } from './provider/provider-config.ts'
-import { originAllowed, originPolicy } from './reuse'
+import { originAllowed } from './reuse'
 import { host } from './host.ts'
 import type { EngineAuditEvent as AuditInput } from '@agentistics/engine-api'
 import {
@@ -125,7 +125,7 @@ export function defaultProviderWebDeps(): ProviderWebDeps {
     // The host's audit writer — its builder still redacts secret-shaped fields (spec §7.4).
     audit: (input) => host().audit(input),
     now: () => Date.now(),
-    allowedOrigins: originPolicy().allowedOrigins,
+    allowedOrigins: host().originPolicy().allowedOrigins,
     dev: false,
   }
 }

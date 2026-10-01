@@ -1,11 +1,11 @@
 /**
- * @agentistics/engine — the ONE export the host loads: `createEngine` (spec §2, contract 1.1).
+ * @agentistics/engine — the ONE export the host loads: `createEngine` (spec §2, contract 1.2).
  *
  * What it does, in order:
  *  1. installs the host (`host.ts`) — every default that used to read the public `config.ts` reads
  *     these services from now on;
- *  2. takes the host's reuse surface when it is complete, else the transitional bridge
- *     (`reuse.ts` / `public-bridge.ts`, spec §6);
+ *  2. takes the host's reuse surface (`host.readers`, contract 1.2 — `reuse.ts`, spec §6), and
+ *     refuses an incomplete one by throwing: the host then runs as a community build;
  *  3. builds the integration registry — TOTAL over `HarnessId` (spec §9) — and derives the
  *     manifest's `replay` from it rather than restating it;
  *  4. offers the provider route and the `provider` verb, exactly as the public tree's
@@ -42,7 +42,7 @@ export const ENGINE_VERSION: string = pkg.version
  * the engine would always claim the host's own version and `apiCompatible` would judge nothing.
  * Bumped by hand, in the same change that starts using something a newer contract adds.
  */
-export const BUILT_AGAINST_API = '1.1.0'
+export const BUILT_AGAINST_API = '1.2.0'
 
 /** The providers the `provider` verb can store a key for and call. */
 const PROVIDERS = ['anthropic', 'openai-compatible'] as const
@@ -56,9 +56,8 @@ export const createEngine: CreateEngine<AgentisticsEvent> = async host => {
     capability: 'localShell',
     async handle(req, url, ctx) {
       const { handleProviderRequest } = await import('./provider-web')
-      const { originPolicy } = await import('./reuse')
       try {
-        const out = await handleProviderRequest(req, url.pathname, ctx?.clientIp ?? 'unknown', { dev: originPolicy().dev })
+        const out = await handleProviderRequest(req, url.pathname, ctx?.clientIp ?? 'unknown', { dev: host.originPolicy().dev })
         return out === null ? null : Response.json(out.body, { status: out.status })
       } catch (err) {
         // A PUT body carries a key, so an unexpected failure is rendered NON-verbose regardless of
@@ -104,5 +103,5 @@ export const createEngine: CreateEngine<AgentisticsEvent> = async host => {
   return engine
 }
 
-/** Where this engine's reused public functions came from — `host` once the contract carries them. */
+/** Where this engine's reused public functions came from — `host` once `createEngine` ran. */
 export { readersSource }

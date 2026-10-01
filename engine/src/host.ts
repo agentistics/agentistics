@@ -14,6 +14,7 @@
 import { join } from 'node:path'
 import type { EngineHostServices } from '@agentistics/engine-api'
 import type { AgentisticsEvent, HarnessId } from '@agentistics/core'
+import { installedReaders, type ReuseSurface } from './reuse'
 
 export type HostServices = EngineHostServices<AgentisticsEvent>
 
@@ -57,12 +58,8 @@ export const claudeProjectsDir = (): string => join(harnessRoot('claude'), 'proj
 export const codexSessionsDir = (): string => join(harnessRoot('codex'), 'sessions')
 /** `<copilot root>/session-state` — `COPILOT_SESSION_STATE_DIR`. */
 export const copilotSessionStateDir = (): string => join(harnessRoot('copilot'), 'session-state')
-/**
- * `<opencode root>/opencode.db`. STATED LIMIT: `config.ts` also honours an `OPENCODE_DB_PATH`
- * override that `EngineHostServices.paths` has no field for, so a machine that sets it is read at the
- * default location by this engine until the contract carries the file (a minor bump).
- */
-export const opencodeDbPath = (): string => join(harnessRoot('opencode'), 'opencode.db')
+/** OpenCode's database file as the HOST resolved it — `OPENCODE_DB_PATH` included (contract 1.2). */
+export const opencodeDbPath = (): string => host().paths.opencodeDbPath
 
 /** The content store — raw provider captures land here (`CONTENT_DIR`). */
 export const contentDir = (): string => host().paths.contentDir
@@ -71,7 +68,9 @@ export const providerKeysDir = (): string => join(host().paths.dataDir, 'provide
 
 /**
  * A host for tests and scripts: every path under `root`, every capability off, the provider flag as
- * given, nothing audited or notified. The journal is absent unless `journal` is passed.
+ * given, nothing audited or notified. The journal is absent unless `journal` is passed. Its
+ * `readers` are the surface already installed (`test/preload.ts` installs the public host's own);
+ * with none installed they are EMPTY, and `createEngine` refuses them in a sentence.
  */
 export function testHost(root: string, over: Partial<HostServices> = {}): HostServices {
   const roots: Record<HarnessId, string> = {
@@ -90,6 +89,7 @@ export function testHost(root: string, over: Partial<HostServices> = {}): HostSe
       contentDir: join(root, '.agentistics', 'content'),
       home: root,
       harnessRoots: roots,
+      opencodeDbPath: join(roots.opencode, 'opencode.db'),
     },
     journal: { sink: async () => null, status: () => ({ state: 'disabled', reason: 'test-host' }) },
     protectedPaths: [],
@@ -113,7 +113,8 @@ export function testHost(root: string, over: Partial<HostServices> = {}): HostSe
       fileNative: async () => ({ ok: false as const, reason: 'test host' }),
       unfileNative: async () => {},
     },
-    readers: {},
+    readers: installedReaders() ?? ({} as ReuseSurface),
+    originPolicy: () => ({ allowedOrigins: [], dev: false }),
     now: () => new Date(),
   }
   return { ...base, ...over }

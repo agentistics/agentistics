@@ -1,5 +1,5 @@
 {
   "repository": "agentistics/agentistics",
-  "ref": "c25739c782b9f43aabb1157495683288ed7acc91",
-  "note": "The public commit this engine is built and tested against (origin/main, v2.83.0: the engine slot #840 + engine-api 1.1). Bump it in the same change that adapts the engine to a newer public tree."
+  "ref": "a1419a858eae17b875bf5a7f0367e05922975780",
+  "note": "The public commit this engine is built and tested against: feat/engine-api-1.2 (engine-api 1.2, PRs #847/#848, on top of origin/main v2.84.0). Moves to the merged main commit once the leader merges #848. Bump it in the same change that adapts the engine to a newer public tree."
 }

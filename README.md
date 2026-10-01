@@ -9,8 +9,7 @@ seven parity differentials and the parity matrix). The host loads it through
 ```
 engine/src/index.ts          createEngine(host) — the one export
 engine/src/host.ts           the installed EngineHostServices; every machine fact comes from here
-engine/src/reuse.ts          the reuse surface (spec §6) as live bindings: host.readers, else the bridge
-engine/src/public-bridge.ts  TRANSITIONAL — the one production file importing the public tree
+engine/src/reuse.ts          the reuse surface (spec §6) as live bindings over host.readers (contract 1.2)
 engine/src/conformance/      the conformance kit (to move into engine-api) + its test
 engine/src/integrations/     the seven replays; registry = createIntegrations(), total over HarnessId
 engine/src/projections/      differentials + parity matrix (proofs against the public legacy adapters)

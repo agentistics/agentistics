@@ -3,138 +3,145 @@
  *
  * The integrations and the provider verb import the public functions they reuse FROM HERE and never
  * from the public tree: one parser, one answer, with the dependency declared in one place. Each name
- * is a live binding (`export let`), so `installReaders` can swap the whole surface to the host's
- * `readers` without any importer changing.
+ * is a live binding (`export let`), filled by `installReaders` from the host's `readers` — contract
+ * 1.2's `ReuseSurface`, whose 48 members are exactly these.
  *
- * WHICH values: the host's, when `host.readers` carries EVERY member (a partial surface is refused
- * whole — mixing two builds of one parser family is two answers to one question); otherwise the
- * transitional `public-bridge.ts`. `readersSource()` says which, and `createEngine` reports it.
+ * There is no fallback. A host that offers an INCOMPLETE surface is refused whole, in a sentence
+ * naming what is missing (mixing two builds of one parser family is two answers to one question), so
+ * `createEngine` throws and the host runs as a community build. Before a surface is installed every
+ * binding is `undefined`: a caller that reaches one has run without `createEngine` (tests install
+ * the public host's own surface in `test/preload.ts`).
  */
-import { BRIDGE, type ReuseReaders } from './public-bridge'
+import { missingReuseMembers, type ReuseSurface } from '@agentistics/engine-api'
 
-export type { ReuseReaders }
-export type { AntigravityConversationSummary, AntigravityHistoryEntry, KimiState, AgentMetricsState, EditDelta, TranscriptPathMemo, AgentEntry, TranscriptCursor, TranscriptStat } from './public-bridge'
+export type { ReuseSurface }
+export type {
+  AntigravityConversationSummary,
+  AntigravityHistoryEntry,
+  KimiState,
+  AgentMetricsState,
+  EditDelta,
+  TranscriptPathMemo,
+  AgentEntry,
+  TranscriptCursor,
+  TranscriptStat,
+} from '@agentistics/engine-api'
 
-export let toSqliteUriPath = BRIDGE.toSqliteUriPath
-export let REPLAY_TYPES = BRIDGE.REPLAY_TYPES
-export let extractUserRequest = BRIDGE.extractUserRequest
-export let isSlashCommandPrompt = BRIDGE.isSlashCommandPrompt
-export let EDIT_TOOLS = BRIDGE.EDIT_TOOLS
-export let FILE_URI_RE = BRIDGE.FILE_URI_RE
-export let collectSubagentChildIds = BRIDGE.collectSubagentChildIds
-export let countLines = BRIDGE.countLines
-export let fileUriToPath = BRIDGE.fileUriToPath
-export let buildAntigravityParentMap = BRIDGE.buildAntigravityParentMap
-export let buildAntigravityWorkspaceMap = BRIDGE.buildAntigravityWorkspaceMap
-export let firstHistoryPrompt = BRIDGE.firstHistoryPrompt
-export let parseAntigravityHistory = BRIDGE.parseAntigravityHistory
-export let parseGenMetadataBlob = BRIDGE.parseGenMetadataBlob
-export let extractMessageText = BRIDGE.extractMessageText
-export let isGenuineUserMessage = BRIDGE.isGenuineUserMessage
-export let kimiAgentIds = BRIDGE.kimiAgentIds
-export let parseKimiState = BRIDGE.parseKimiState
-export let isToolError = BRIDGE.isToolError
-export let stripProvider = BRIDGE.stripProvider
-export let isoFromKimiTime = BRIDGE.isoFromKimiTime
-export let emptyAgentMetrics = BRIDGE.emptyAgentMetrics
-export let finishAgentMetrics = BRIDGE.finishAgentMetrics
-export let foldAgentEntry = BRIDGE.foldAgentEntry
-export let editDelta = BRIDGE.editDelta
-export let canonicalTool = BRIDGE.canonicalTool
-export let iterLines = BRIDGE.iterLines
-export let isHumanUserEntry = BRIDGE.isHumanUserEntry
-export let contextOfUsage = BRIDGE.contextOfUsage
-export let commandSummary = BRIDGE.commandSummary
-export let createTranscriptPathMemo = BRIDGE.createTranscriptPathMemo
-export let resolveMemoizedPath = BRIDGE.resolveMemoizedPath
-export let describedFrom = BRIDGE.describedFrom
-export let isNestedAgent = BRIDGE.isNestedAgent
-export let parseAgentMeta = BRIDGE.parseAgentMeta
-export let planAgentJoin = BRIDGE.planAgentJoin
-export let anchorHex = BRIDGE.anchorHex
-export let consumedEnd = BRIDGE.consumedEnd
-export let cursorFrom = BRIDGE.cursorFrom
-export let evictTranscriptStates = BRIDGE.evictTranscriptStates
-export let planTranscriptRead = BRIDGE.planTranscriptRead
-export let MAX_STATES = BRIDGE.MAX_STATES
-export let STATE_TTL_MS = BRIDGE.STATE_TTL_MS
-export let safeReadDir = BRIDGE.safeReadDir
-export let safeReadJson = BRIDGE.safeReadJson
-export let confirm = BRIDGE.confirm
-export let maskedInput = BRIDGE.maskedInput
-export let originAllowed = BRIDGE.originAllowed
-export let originPolicy = BRIDGE.originPolicy
+export let toSqliteUriPath!: ReuseSurface['toSqliteUriPath']
+export let REPLAY_TYPES!: ReuseSurface['REPLAY_TYPES']
+export let extractUserRequest!: ReuseSurface['extractUserRequest']
+export let isSlashCommandPrompt!: ReuseSurface['isSlashCommandPrompt']
+export let EDIT_TOOLS!: ReuseSurface['EDIT_TOOLS']
+export let FILE_URI_RE!: ReuseSurface['FILE_URI_RE']
+export let collectSubagentChildIds!: ReuseSurface['collectSubagentChildIds']
+export let countLines!: ReuseSurface['countLines']
+export let fileUriToPath!: ReuseSurface['fileUriToPath']
+export let buildAntigravityParentMap!: ReuseSurface['buildAntigravityParentMap']
+export let buildAntigravityWorkspaceMap!: ReuseSurface['buildAntigravityWorkspaceMap']
+export let firstHistoryPrompt!: ReuseSurface['firstHistoryPrompt']
+export let parseAntigravityHistory!: ReuseSurface['parseAntigravityHistory']
+export let parseGenMetadataBlob!: ReuseSurface['parseGenMetadataBlob']
+export let extractMessageText!: ReuseSurface['extractMessageText']
+export let isGenuineUserMessage!: ReuseSurface['isGenuineUserMessage']
+export let kimiAgentIds!: ReuseSurface['kimiAgentIds']
+export let parseKimiState!: ReuseSurface['parseKimiState']
+export let isToolError!: ReuseSurface['isToolError']
+export let stripProvider!: ReuseSurface['stripProvider']
+export let isoFromKimiTime!: ReuseSurface['isoFromKimiTime']
+export let emptyAgentMetrics!: ReuseSurface['emptyAgentMetrics']
+export let finishAgentMetrics!: ReuseSurface['finishAgentMetrics']
+export let foldAgentEntry!: ReuseSurface['foldAgentEntry']
+export let editDelta!: ReuseSurface['editDelta']
+export let canonicalTool!: ReuseSurface['canonicalTool']
+export let iterLines!: ReuseSurface['iterLines']
+export let isHumanUserEntry!: ReuseSurface['isHumanUserEntry']
+export let contextOfUsage!: ReuseSurface['contextOfUsage']
+export let commandSummary!: ReuseSurface['commandSummary']
+export let createTranscriptPathMemo!: ReuseSurface['createTranscriptPathMemo']
+export let resolveMemoizedPath!: ReuseSurface['resolveMemoizedPath']
+export let describedFrom!: ReuseSurface['describedFrom']
+export let isNestedAgent!: ReuseSurface['isNestedAgent']
+export let parseAgentMeta!: ReuseSurface['parseAgentMeta']
+export let planAgentJoin!: ReuseSurface['planAgentJoin']
+export let anchorHex!: ReuseSurface['anchorHex']
+export let consumedEnd!: ReuseSurface['consumedEnd']
+export let cursorFrom!: ReuseSurface['cursorFrom']
+export let evictTranscriptStates!: ReuseSurface['evictTranscriptStates']
+export let planTranscriptRead!: ReuseSurface['planTranscriptRead']
+export let MAX_STATES!: ReuseSurface['MAX_STATES']
+export let STATE_TTL_MS!: ReuseSurface['STATE_TTL_MS']
+export let safeReadDir!: ReuseSurface['safeReadDir']
+export let safeReadJson!: ReuseSurface['safeReadJson']
+export let confirm!: ReuseSurface['confirm']
+export let maskedInput!: ReuseSurface['maskedInput']
+export let originAllowed!: ReuseSurface['originAllowed']
 
-/** Every member the engine reuses — the list `installReaders` checks a host surface against. */
-export const READER_NAMES = Object.keys(BRIDGE) as (keyof ReuseReaders)[]
+let installed: ReuseSurface | null = null
 
-let source: 'host' | 'bridge' = 'bridge'
-
-export function readersSource(): 'host' | 'bridge' {
-  return source
+/** The surface in force, or `null` before a host has offered one. */
+export function installedReaders(): ReuseSurface | null {
+  return installed
 }
 
-/** PURE. The members `offered` lacks — empty means the host's surface is complete. */
-export function missingReaders(offered: object): (keyof ReuseReaders)[] {
-  const o = offered as Partial<Record<keyof ReuseReaders, unknown>>
-  return READER_NAMES.filter(k => typeof o[k] === 'undefined')
+/** Where the reused public functions come from — always the host's, once installed. */
+export function readersSource(): 'host' | 'absent' {
+  return installed ? 'host' : 'absent'
 }
 
-/**
- * Takes the host's surface when it is complete, else keeps (or goes back to) the bridge. Returns what
- * is now in force.
- */
-export function installReaders(offered: object): 'host' | 'bridge' {
-  const use = (missingReaders(offered).length === 0 ? offered : BRIDGE) as ReuseReaders
-  source = use === BRIDGE ? 'bridge' : 'host'
-  toSqliteUriPath = use.toSqliteUriPath
-  REPLAY_TYPES = use.REPLAY_TYPES
-  extractUserRequest = use.extractUserRequest
-  isSlashCommandPrompt = use.isSlashCommandPrompt
-  EDIT_TOOLS = use.EDIT_TOOLS
-  FILE_URI_RE = use.FILE_URI_RE
-  collectSubagentChildIds = use.collectSubagentChildIds
-  countLines = use.countLines
-  fileUriToPath = use.fileUriToPath
-  buildAntigravityParentMap = use.buildAntigravityParentMap
-  buildAntigravityWorkspaceMap = use.buildAntigravityWorkspaceMap
-  firstHistoryPrompt = use.firstHistoryPrompt
-  parseAntigravityHistory = use.parseAntigravityHistory
-  parseGenMetadataBlob = use.parseGenMetadataBlob
-  extractMessageText = use.extractMessageText
-  isGenuineUserMessage = use.isGenuineUserMessage
-  kimiAgentIds = use.kimiAgentIds
-  parseKimiState = use.parseKimiState
-  isToolError = use.isToolError
-  stripProvider = use.stripProvider
-  isoFromKimiTime = use.isoFromKimiTime
-  emptyAgentMetrics = use.emptyAgentMetrics
-  finishAgentMetrics = use.finishAgentMetrics
-  foldAgentEntry = use.foldAgentEntry
-  editDelta = use.editDelta
-  canonicalTool = use.canonicalTool
-  iterLines = use.iterLines
-  isHumanUserEntry = use.isHumanUserEntry
-  contextOfUsage = use.contextOfUsage
-  commandSummary = use.commandSummary
-  createTranscriptPathMemo = use.createTranscriptPathMemo
-  resolveMemoizedPath = use.resolveMemoizedPath
-  describedFrom = use.describedFrom
-  isNestedAgent = use.isNestedAgent
-  parseAgentMeta = use.parseAgentMeta
-  planAgentJoin = use.planAgentJoin
-  anchorHex = use.anchorHex
-  consumedEnd = use.consumedEnd
-  cursorFrom = use.cursorFrom
-  evictTranscriptStates = use.evictTranscriptStates
-  planTranscriptRead = use.planTranscriptRead
-  MAX_STATES = use.MAX_STATES
-  STATE_TTL_MS = use.STATE_TTL_MS
-  safeReadDir = use.safeReadDir
-  safeReadJson = use.safeReadJson
-  confirm = use.confirm
-  maskedInput = use.maskedInput
-  originAllowed = use.originAllowed
-  originPolicy = use.originPolicy
-  return source
+/** Installs the host's surface. Throws, naming every missing member, when it is incomplete. */
+export function installReaders(readers: object): void {
+  const missing = missingReuseMembers(readers)
+  if (missing.length > 0) {
+    throw new Error(`the host offered an incomplete reuse surface (missing: ${missing.join(', ')}) — this engine needs contract 1.2`)
+  }
+  const offered = readers as ReuseSurface
+  installed = offered
+  toSqliteUriPath = offered.toSqliteUriPath
+  REPLAY_TYPES = offered.REPLAY_TYPES
+  extractUserRequest = offered.extractUserRequest
+  isSlashCommandPrompt = offered.isSlashCommandPrompt
+  EDIT_TOOLS = offered.EDIT_TOOLS
+  FILE_URI_RE = offered.FILE_URI_RE
+  collectSubagentChildIds = offered.collectSubagentChildIds
+  countLines = offered.countLines
+  fileUriToPath = offered.fileUriToPath
+  buildAntigravityParentMap = offered.buildAntigravityParentMap
+  buildAntigravityWorkspaceMap = offered.buildAntigravityWorkspaceMap
+  firstHistoryPrompt = offered.firstHistoryPrompt
+  parseAntigravityHistory = offered.parseAntigravityHistory
+  parseGenMetadataBlob = offered.parseGenMetadataBlob
+  extractMessageText = offered.extractMessageText
+  isGenuineUserMessage = offered.isGenuineUserMessage
+  kimiAgentIds = offered.kimiAgentIds
+  parseKimiState = offered.parseKimiState
+  isToolError = offered.isToolError
+  stripProvider = offered.stripProvider
+  isoFromKimiTime = offered.isoFromKimiTime
+  emptyAgentMetrics = offered.emptyAgentMetrics
+  finishAgentMetrics = offered.finishAgentMetrics
+  foldAgentEntry = offered.foldAgentEntry
+  editDelta = offered.editDelta
+  canonicalTool = offered.canonicalTool
+  iterLines = offered.iterLines
+  isHumanUserEntry = offered.isHumanUserEntry
+  contextOfUsage = offered.contextOfUsage
+  commandSummary = offered.commandSummary
+  createTranscriptPathMemo = offered.createTranscriptPathMemo
+  resolveMemoizedPath = offered.resolveMemoizedPath
+  describedFrom = offered.describedFrom
+  isNestedAgent = offered.isNestedAgent
+  parseAgentMeta = offered.parseAgentMeta
+  planAgentJoin = offered.planAgentJoin
+  anchorHex = offered.anchorHex
+  consumedEnd = offered.consumedEnd
+  cursorFrom = offered.cursorFrom
+  evictTranscriptStates = offered.evictTranscriptStates
+  planTranscriptRead = offered.planTranscriptRead
+  MAX_STATES = offered.MAX_STATES
+  STATE_TTL_MS = offered.STATE_TTL_MS
+  safeReadDir = offered.safeReadDir
+  safeReadJson = offered.safeReadJson
+  confirm = offered.confirm
+  maskedInput = offered.maskedInput
+  originAllowed = offered.originAllowed
 }

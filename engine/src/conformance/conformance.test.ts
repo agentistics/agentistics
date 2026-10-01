@@ -17,7 +17,7 @@ import { readJsonLimited } from '@agentistics/server/server/limits'
 import { safeError } from '@agentistics/server/server/errors'
 import { BUILT_AGAINST_API, createEngine } from '../index'
 import { installHost, testHost } from '../host'
-import { readersSource } from '../reuse'
+import { installedReaders, readersSource } from '../reuse'
 import { runEngineConformance } from './kit'
 
 function freshHost() {
@@ -56,9 +56,19 @@ describe('this engine conforms', () => {
     expect([...r.manifest!.provides.replay]).toEqual([...HARNESS_ORDER])
   })
 
-  test('with contract 1.1 the host offers no readers, so the bridge is in force — and says so', async () => {
-    await createEngine(freshHost())
-    expect(readersSource()).toBe('bridge')
+  test('with contract 1.2 the host offers the whole reuse surface, and the engine runs on it', async () => {
+    const h = freshHost()
+    await createEngine(h)
+    expect(readersSource()).toBe('host')
+    expect(installedReaders()).toBe(h.readers)
+    installHost(freshHost())
+  })
+
+  test('an incomplete reuse surface is refused whole, naming what is missing', async () => {
+    const h = freshHost()
+    const { planTranscriptRead: _, ...partial } = h.readers
+    await expect(createEngine({ ...h, readers: partial as typeof h.readers })).rejects.toThrow(/missing: planTranscriptRead/)
+    expect(installedReaders()).toBe(h.readers)
     installHost(freshHost())
   })
 })

@@ -3,8 +3,9 @@
  * link-public.ts — makes this checkout resolvable on its own.
  *
  * The engine compiles against the PUBLIC repository's `@agentistics/core` and
- * `@agentistics/engine-api` (the only public packages it may import), plus — TRANSITIONALLY — the
- * public server tree behind `engine/src/public-bridge.ts` (see that file). Those are not published,
+ * `@agentistics/engine-api` (the only public packages it may import in production), plus the public
+ * server tree, which only the TESTS and the PROOFS read (the differentials compare against the public
+ * legacy readers, and `test/preload.ts` installs the host's own reuse surface). Those are not published,
  * so this links them from a public checkout into `node_modules/@agentistics/`, and links this
  * repository's own two packages beside them.
  *

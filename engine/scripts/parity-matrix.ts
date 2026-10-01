@@ -118,6 +118,11 @@ async function collectDiffs(): Promise<{
   // The engine reads every default root from its HOST, not the environment set above — so it runs
   // under a host rooted in the same throwaway home (`testHost` lays the roots out exactly as the env
   // overrides above do). Belt and braces, same as the env: a hidden default resolves to nothing real.
+  // The reused public parsers come from the public host's own surface — the value `hostServices()`
+  // hands a real engine — installed BEFORE the host so `testHost` carries it.
+  const { installReaders } = await import('../src/reuse')
+  const { buildReuseSurface } = await import('@agentistics/server/server/engine/reuse-surface')
+  installReaders(await buildReuseSurface())
   const { installHost, testHost } = await import('../src/host')
   installHost(testHost(SAFE_HOME))
 
