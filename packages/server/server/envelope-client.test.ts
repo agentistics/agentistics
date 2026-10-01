@@ -100,7 +100,7 @@ describe('sendRestriction', () => {
   it('what the central receives is opaque — no repo name, no rule, no private key', async () => {
     const central = fakeCentral()
     const kp = await loadOrCreateKeypair()
-    await sendRestriction(conn({ sources: [{ type: 'repo', value: 'github.com/acme/secret-repo' }] }), 'inst-1', { fetch: central.fetch })
+    await sendRestriction(conn({ sources: [{ type: 'repo', value: 'github.com/acme/secret-repo' }] }), 'inst-1', { fetch: central.fetch, notify: () => {} })
     const wire = JSON.stringify(central.deposited)
     expect(wire).not.toContain('secret-repo')
     expect(wire).not.toContain('denylist')

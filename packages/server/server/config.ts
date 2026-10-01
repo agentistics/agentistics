@@ -1,5 +1,8 @@
 import { join } from 'path'
 import { randomBytes } from 'node:crypto'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir, userInfo } from 'node:os'
+import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
 
 loadEnvConfig()
@@ -51,7 +54,17 @@ export const ARCHIVE_ENABLED = process.env.AGENTISTICS_ARCHIVE !== '0'
 // directory a pre-`~/.agentistics` legacy file may seed: see `legacyPreferencesSource` in
 // preferences.ts.
 export const DEFAULT_AGENTISTICS_DATA_DIR = join(HOME_DIR, '.agentistics')
-export const AGENTISTICS_DATA_DIR = process.env.AGENTISTICS_DIR ?? DEFAULT_AGENTISTICS_DATA_DIR
+// Under `bun test` this is a fresh temporary directory, never the owner's store — see data-dir.ts.
+// It is exported back into the environment so modules reading `AGENTISTICS_DIR` themselves, and
+// any child process a test spawns, land in the same isolated directory.
+const _dataDir = resolveDataDir({
+  env: process.env,
+  home: HOME_DIR,
+  ownerHome: (() => { try { return userInfo().homedir } catch { return HOME_DIR } })(),
+  makeTemp: () => mkdtempSync(join(tmpdir(), 'agentistics-test-data-')),
+})
+if (_dataDir.isolated) process.env.AGENTISTICS_DIR = _dataDir.dir
+export const AGENTISTICS_DATA_DIR = _dataDir.dir
 // EVERY path below is derived from AGENTISTICS_DATA_DIR, never from HOME_DIR directly. They used
 // to be built from the home directory, so `AGENTISTICS_DIR` relocated preferences and the
 // connection state while the consolidate store, the archive and the workflow runs silently stayed
