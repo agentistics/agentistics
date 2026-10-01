@@ -148,12 +148,15 @@ USER agentistics
 
 # SERVE_STATIC=1: server.ts will serve the embedded frontend on the same port.
 # AGENTISTICS_TEAM_CENTRAL=1: activate central aggregator mode.
+# AGENTISTICS_CONTAINER=1: no event producer, no scheduled backup, no self-upgrade (daemon-plan.ts,
+# upgrade-gate.ts) — an image is replaced, not upgraded in place.
 ENV SERVE_STATIC=1 \
+    AGENTISTICS_CONTAINER=1 \
     AGENTISTICS_TEAM_CENTRAL=1 \
     PORT=47291 \
     HOME=/data
 
-# `agentop server` — the same process `agentop central up --native` and a native machine run: the
-# server plus the in-process daemon (otel-watcher). `bun` stays in the image only for the
+# `agentop server` — the server, plus only the parts of the daemon a central or a container should run
+# (packages/server/server/daemon-plan.ts: a central starts none of it). `bun` stays in the image only for the
 # healthchecks in docker/*.yml (`bun -e "fetch(...)"`) and the forwarder above.
 CMD ["agentop", "server"]

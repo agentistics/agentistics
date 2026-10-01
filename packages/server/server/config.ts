@@ -156,6 +156,10 @@ export const TEAM_DIR = process.env.AGENTISTICS_TEAM_DIR ?? join(AGENTISTICS_DAT
 // TEAM_ORG namespaces docs; TEAM_INGEST_TOKEN (optional) gates ingestion.
 // ---------------------------------------------------------------------------
 export const TEAM_CENTRAL = process.env.AGENTISTICS_TEAM_CENTRAL === '1'
+// Set by the Dockerfile's runtime stage. Inside an image this process is replaced by pulling or
+// rebuilding the image, never by swapping its own binary, and it cannot reach the host's tmux — see
+// daemon-plan.ts and upgrade-gate.ts.
+export const IN_CONTAINER = process.env.AGENTISTICS_CONTAINER === '1'
 // Ingest-only hardening: when set on a central, the instance serves ONLY
 // `POST /api/team/ingest` (+ its OPTIONS preflight) and returns 404 for everything else —
 // the dashboard, login, /api/data, static assets, all of it. Intended for a public-facing

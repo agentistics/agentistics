@@ -25,7 +25,7 @@
 import { basename } from 'node:path'
 import { spawn } from 'node:child_process'
 import { CAPS } from './exposure'
-import { TEAM_CENTRAL } from './config'
+import { TEAM_CENTRAL, IN_CONTAINER } from './config'
 import { getVersionInfo } from './version'
 import { upgradeFromUiDecision, UPGRADE_REFUSALS, type UpgradeRefusal } from './upgrade-gate'
 import { writeAudit } from './audit'
@@ -87,6 +87,7 @@ export async function handleUpgradeRoute(
   const decision = upgradeFromUiDecision({
     capable: CAPS.localShell,
     central: TEAM_CENTRAL,
+    container: IN_CONTAINER,
     hasUpdate: info?.hasUpdate === true,
     latest: info?.latest ?? null,
   })
