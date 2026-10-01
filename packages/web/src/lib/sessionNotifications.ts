@@ -12,7 +12,7 @@ import {
   alertKey, DEFAULT_AUTO_DISMISS_SEC, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
   type NayAlertKind, type NayAnimation,
 } from './nayNotify'
-import { inboxAdd, observeFleet, pushAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
+import { inboxAdd, observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
 import { pushNotification, type NotificationType } from './notifications'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -795,4 +795,19 @@ export function notifyFleetTransitions(
 export function resetNotificationMemory(): void {
   unconfirmed = {}
   resetNayNotifyStore()
+}
+
+/**
+ * THE PREVIEW behind every "Testar" (owner, 2026-09-30: "cannot test combinations"). It plays what a
+ * real "needs you" notification does with the CURRENT settings, in the same order `deliver` does:
+ * the card with the chosen entrance, the button's shock, and the event's own sound when sound is on.
+ * A demo card carries no session, never enters the inbox and never reaches the bell. Do-not-disturb
+ * is deliberately NOT applied — a preview that shows nothing cannot preview anything; the settings
+ * screen says in words that do-not-disturb would silence it.
+ */
+export function previewNayNotification(lang: 'pt' | 'en'): void {
+  const settings = getNotificationSettings()
+  pushDemoAlert(lang)
+  requestShock()
+  if (settings.soundEnabled) playNotificationSound(settings.eventSounds.waiting, settings.soundVolume)
 }
