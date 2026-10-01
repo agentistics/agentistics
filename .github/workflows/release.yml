@@ -24,6 +24,12 @@ jobs:
     name: Build binary (Linux x64)
     runs-on: ubuntu-latest
     env:
+      # THE OFFICIAL BUILD carries the private engine (engine-interface spec §8/§9). It is official
+      # only in THIS repository and only on `main` (a push or a dispatch run from it) or a tag —
+      # never on a fork, never for a pull request (this workflow has no `pull_request` trigger and
+      # must never gain a `pull_request_target` one: that would hand the deploy key to a stranger's
+      # code). Everywhere else the build is the community one and nothing below asks for the key.
+      OFFICIAL: ${{ github.repository == 'agentistics/agentistics' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
       # The packages a release stamps its version onto, in ONE place.
       #
       # `packages/vscode` is deliberately ABSENT. The extension is versioned on its own line: it
@@ -183,6 +189,53 @@ jobs:
           echo "▶ $CURRENT → $NEXT  (bump: $BUMP, $COMMIT_COUNT commits)"
 
 
+      # ── The engine ─────────────────────────────────────────────────────────────────────────────
+      # Checked out AFTER the type check and the tests on purpose: those prove the public tree on its
+      # own (the engine's CI proves the pair), and a checkout inside the workspace before `bun test`
+      # would have the root test run pick up the engine's own suite. `.engine/` is gitignored and is
+      # not a workspace (`packages/*`), so `bun install --frozen-lockfile` above never saw it.
+      #
+      # The ONE secret: ENGINE_DEPLOY_KEY — the private half of a READ-ONLY deploy key registered on
+      # agentistics/agentistics-engine (and nowhere else). It grants nothing but reading that one
+      # repository and survives this repository changing owner. Its absence on an official run is a
+      # FAILED release, never a quiet community binary.
+      - name: Read engine.pin
+        if: env.OFFICIAL == 'true' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        id: engine_pin
+        env:
+          HAS_ENGINE_KEY: ${{ secrets.ENGINE_DEPLOY_KEY != '' }}
+        run: |
+          if [ "$HAS_ENGINE_KEY" != "true" ]; then
+            echo "::error::ENGINE_DEPLOY_KEY is not set — an official release cannot be built without the engine. Add the read-only deploy key of agentistics/agentistics-engine as this repository's ENGINE_DEPLOY_KEY secret."
+            exit 1
+          fi
+          REF=$(jq -r .ref engine.pin)
+          if ! echo "$REF" | grep -Eq '^[0-9a-f]{40}$|^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::engine.pin ref '$REF' is not a full commit SHA or a v<x.y.z> tag"
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "▶ engine pinned at $REF (api $(jq -r .api engine.pin))"
+
+      - name: Check out the engine at engine.pin
+        if: env.OFFICIAL == 'true' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: agentistics/agentistics-engine
+          ref: ${{ steps.engine_pin.outputs.ref }}
+          path: .engine
+          ssh-key: ${{ secrets.ENGINE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      # The engine resolves `@agentistics/core` / `@agentistics/engine-api` from THIS checkout: its
+      # postinstall (scripts/link-public.ts) links them from AGENTISTICS_PUBLIC_DIR.
+      - name: Install + link the engine
+        if: env.OFFICIAL == 'true' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        working-directory: .engine
+        env:
+          AGENTISTICS_PUBLIC_DIR: ..
+        run: bun install --frozen-lockfile
+
       - name: Bump version in package.json
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: |
@@ -201,15 +254,30 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun run build
 
+      # `build:assets` also regenerates the engine slot (packages/server/scripts/engine-slot.ts):
+      # pointed at `.engine` on the official build, so every binary compiled below — glibc, musl,
+      # Windows, both macOS ones, and the desktop sidecar that consumes the Windows one — carries it.
       - name: Embed frontend assets
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun run build:assets
+        env:
+          AGENTISTICS_ENGINE_DIR: ${{ env.OFFICIAL == 'true' && '.engine' || '' }}
+        run: |
+          bun run build:assets
+          if [ "$OFFICIAL" = "true" ] && ! grep -q "engineSlot = 'dir'" packages/server/server/engine-slot.generated.ts; then
+            echo "::error::the engine slot does not point at the checked-out engine — refusing to build an official binary without it"
+            exit 1
+          fi
 
+      # EVERY compile below is `--minify` (whitespace + syntax + identifiers) and NONE takes
+      # `--sourcemap`: these binaries are public (GitHub Releases, the desktop installer), and an
+      # unminified bundle carries the engine's source readable, module paths and all. Obfuscation
+      # beyond minify is a separate, later decision. The smoke step greps the result for marker
+      # strings an unminified engine carries (packages/server/scripts/assert-official-engine.ts).
       - name: Compile binary
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: |
           mkdir -p release
-          bun build --compile packages/server/bin/cli.ts --outfile ./release/agentop
+          bun build --compile --minify packages/server/bin/cli.ts --outfile ./release/agentop
 
       # Alpine and other musl-based distros have no glibc dynamic linker at all — the glibc binary
       # above fails there with a bare "not found" that names no missing library (the kernel is
@@ -219,11 +287,11 @@ jobs:
       # downloads the musl runtime for the target rather than needing one installed here.
       - name: Compile musl binary (cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile ./release/agentop-musl
+        run: bun build --compile --minify --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile ./release/agentop-musl
 
       - name: Compile Windows binary (cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop.exe
+        run: bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop.exe
 
       # Same cross-compile pattern as the musl and Windows binaries above — Bun downloads the
       # macOS runtime for each target rather than needing a macOS machine to build on. TWO
@@ -232,11 +300,11 @@ jobs:
       # `uname -m`.
       - name: Compile macOS binary (Intel, cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-x64
+        run: bun build --compile --minify --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-x64
 
       - name: Compile macOS binary (Apple Silicon, cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-arm64
+        run: bun build --compile --minify --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-arm64
 
       - name: Upload Windows binary artifact
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
@@ -250,6 +318,16 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: ./release/agentop --help
 
+      # THE RELEASE FAILS IF THE ENGINE IS ABSENT. `--version` must print `engine <v> (api <x.y.z>)`
+      # where <v> is the checked-out engine's own version (which is what tells it apart from the
+      # transitional in-tree engine, reporting the host's) and <x.y.z> satisfies engine.pin's range.
+      # It ALSO fails if the engine's source is readable in the binary: a module-header comment, an
+      # internal function name or an engine module path still present means it was built without
+      # --minify, or with a source map.
+      - name: Smoke test — the official binary carries the pinned engine, minified
+        if: env.OFFICIAL == 'true' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun packages/server/scripts/assert-official-engine.ts ./release/agentop --engine-dir .engine
+
       # The runner itself is glibc, so the musl binary cannot be exec'd directly here — it needs an
       # actual musl system. Alpine via Docker is the cheapest one, and it is also where the binary
       # needs libstdc++/libgcc (verified by hand: Bun's own runtime links them even in its musl
@@ -258,11 +336,14 @@ jobs:
       - name: Smoke test (musl)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: |
-          docker run --rm -v "$(pwd)/release:/release:ro" alpine:latest sh -c '
+          docker run --rm -e OFFICIAL="$OFFICIAL" -v "$(pwd)/release:/release:ro" alpine:latest sh -c '
             apk add --no-cache libstdc++ libgcc >/dev/null &&
             cp /release/agentop-musl /tmp/agentop-musl &&
             chmod +x /tmp/agentop-musl &&
-            /tmp/agentop-musl --help
+            /tmp/agentop-musl --help >/dev/null &&
+            if [ "$OFFICIAL" = "true" ]; then
+              /tmp/agentop-musl --version | grep -Eq "^engine [0-9]" || { echo "::error::the musl binary carries no engine"; exit 1; }
+            fi
           '
 
       # This runner is glibc/x86_64 Linux and can execute neither macOS binary — there is no
