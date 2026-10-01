@@ -1,0 +1,24 @@
+# FROZEN in the public repository — the ENGINE repo (agentistics/agentistics-engine) is the
+# source of truth for these paths (leader decision 2026-10-01). The public copies stay only until
+# ES.4 deletes them; a fix to any of them goes to the engine repo.
+#
+# Read by packages/server/scripts/frozen-paths-check.ts (the CI guard, `.github/workflows/ci.yml`
+# job `frozen-paths`) and by CLAUDE.md. One glob per line: `**` crosses directories, `*` stays
+# inside one path segment. Blank lines and `#` comments are ignored.
+#
+# The ONE exception is the ES.4 deletion PR: a PR whose title carries `[ES.4]` and whose ONLY
+# change to these paths is deletion passes. Anything else touching them fails.
+#
+# NOT frozen: packages/engine-api/** and the engine slot/host (packages/server/server/engine/**).
+
+packages/runtime/**
+packages/server/server/integrations/**
+packages/server/server/provider/**
+packages/server/server/cli-provider*.ts
+packages/server/server/provider-web*.ts
+packages/server/server/projections/differential*.ts
+packages/server/server/projections/parity-matrix*.ts
+packages/server/server/projections/p3-fixture-events.ts
+packages/server/scripts/parity-matrix*.ts
+packages/server/scripts/record-anthropic-fixtures.ts
+packages/server/test/fixtures/*-replay*/**

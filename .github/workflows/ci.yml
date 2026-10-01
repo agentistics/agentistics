@@ -9,6 +9,27 @@ on:
   pull_request:
 
 jobs:
+  # The paths in .github/frozen-engine-paths.txt are owned by the ENGINE repo
+  # (agentistics/agentistics-engine) — a PR may not change them here. The one exception is the
+  # ES.4 deletion PR: title tagged `[ES.4]` and only deletions under those paths. The checkout
+  # is the PR's merge commit, so HEAD^1 is the base it merges into and the diff is the PR.
+  frozen-paths:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Frozen engine paths
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bun packages/server/scripts/frozen-paths-check.ts HEAD^1 HEAD
+
   check:
     runs-on: ubuntu-latest
     steps:
