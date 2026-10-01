@@ -30,7 +30,7 @@ import {
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
 import {
-  collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs,
+  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs,
   type AsideBandId, type AsideCardColor, type AsideGroupBy,
 } from '../../lib/sessionsAsidePrefs'
 import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -714,7 +714,7 @@ export function SessionsAside({
     const allUserGroups = new Set(groupsValue.groups.map(g => g.id))
     setFoldedUserGroupsState(allUserGroups)
     writeAsideGroupPrefs({ collapsedUserGroups: [...allUserGroups] })
-    const allAutoKeys = new Set(bands.flatMap(b => b.groups.map(g => collapseKey(b.id, groupBy, g.key))))
+    const allAutoKeys = new Set(bands.flatMap(b => [bandCollapseKey(b.id), ...b.groups.map(g => collapseKey(b.id, groupBy, g.key))]))
     setFoldedGroupsState(allAutoKeys)
     writeAsideGroupPrefs({ collapsed: [...allAutoKeys] })
   }
@@ -2085,17 +2085,35 @@ function SessionBand({
   // One group under this band names it twice — the band heading is directly above. See the rule
   // in `fleetGroups.ts`; it is the same one the cockpit's cascade applies to its own root.
   const headings = showsGroupHeadings(groups)
+  const bandKey = bandCollapseKey(bandId)
+  const bandFolded = foldedGroups.has(bandKey)
+  const bandAttn = bandFolded ? groups.reduce((n, g) => n + attentionCount(g.sessions, dismissedAttn), 0) : 0
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{
-        display: 'flex', alignItems: 'baseline', gap: 6,
-        padding: '6px 9px 7px', fontSize: 10.5, fontWeight: 700,
-        textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)',
-      }}>
+      {/* The band folds like every other heading on this list (it used to be the one that did not).
+          Its key lives in the same per-viewer `collapsed` list as its sub-groups. */}
+      <button
+        type="button"
+        aria-expanded={!bandFolded}
+        onClick={() => {
+          if (bandFolded) onDismissAttn(groups.flatMap(g => attentionIds(g.sessions, dismissedAttn)))
+          onToggleGroupFold(bandKey)
+        }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+          background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', minHeight: tap,
+          padding: '6px 9px 7px', fontSize: 10.5, fontWeight: 700,
+          textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)',
+        }}
+      >
+        {bandFolded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-        <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{count}</span>
-      </div>
-      {groups.map(g => {
+        <span
+          {...(bandFolded && bandAttn > 0 ? { className: ATTN_COUNT_CLASS } : {})}
+          style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}
+        >{count}</span>
+      </button>
+      {!bandFolded && groups.map(g => {
         const ck = collapseKey(bandId, groupBy, g.key)
         const folded = foldedGroups.has(ck)
         // A small dot naming the state's own color, ONLY when grouping by status — free, and

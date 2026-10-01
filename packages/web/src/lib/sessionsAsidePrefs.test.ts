@@ -150,3 +150,14 @@ describe('foldedPinned / foldedGroupsSection', () => {
     expect(readAsideGroupPrefs().foldedGroupsSection).toBe(false)
   })
 })
+
+import { bandCollapseKey, collapseKey as groupCollapseKey } from './sessionsAsidePrefs'
+
+describe('bandCollapseKey', () => {
+  test('a band has its own fold key, distinct from every sub-group key', () => {
+    expect(bandCollapseKey('active')).not.toBe(bandCollapseKey('inactive'))
+    for (const by of ['project', 'task', 'status'] as const) {
+      expect(groupCollapseKey('active', by, 'band')).not.toBe(bandCollapseKey('active'))
+    }
+  })
+})

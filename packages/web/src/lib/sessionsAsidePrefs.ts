@@ -78,6 +78,14 @@ export function collapseKey(band: AsideBandId, groupBy: AsideGroupBy, key: strin
   return `${band}:${groupBy}:${key}`
 }
 
+/**
+ * The key a whole BAND (Ativas / Inativas) is folded under, in the same `collapsed` list as its
+ * sub-groups. It cannot collide with `collapseKey` — that one always has three `:`-separated parts.
+ */
+export function bandCollapseKey(band: AsideBandId): string {
+  return `band:${band}`
+}
+
 const isGroupBy = (v: unknown): v is AsideGroupBy =>
   typeof v === 'string' && (ASIDE_GROUP_BY_VALUES as readonly string[]).includes(v)
 
