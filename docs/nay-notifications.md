@@ -47,6 +47,25 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
   BEFORE the kill, which runs only if they worked.
 - **×** — dismiss.
 
+## In-app only, and where a notice goes when the card leaves (2026-09-30)
+
+- **No operating-system notifications from the web app.** The card, its sound and the header bell
+  are the whole delivery; the browser Notification API, its permission prompt and the hidden-tab
+  switch are gone. A tab in the background adds nothing beyond the bell (a card there would be
+  stale, and every hidden tab would ring). Desktop delivery when no browser is open is
+  `agentop events`' job and is untouched.
+- **The card counts down visibly**: a regressive bar along its foot, no number. Using the card
+  pauses the bar and the timer together; leaving it resumes from where they stopped.
+- **A card that leaves goes to the BELL**, not to a list inside the chat (the in-chat inbox and the
+  button's badge are gone). A bell entry about a session drops by itself once that session no
+  longer needs the person (`bellEntriesToDrop` / `pruneBell`, run on every fleet poll).
+- **Settings → Notifications chooses what notifies**: the sessions switch with a switch and a sound
+  per kind, plus a switch per category of everything else the bell carries
+  (`notificationCategories.ts`; a code no category claims is never muted). The chat's own choices
+  stay in Settings → Chat, and the page links there.
+- **Sounds**: a notification from a Nay conversation always rings the Nay sound (`resolveSound`);
+  "Precisa de você" and "Pede aprovação" mean other sessions.
+
 ## Following the button, and leaving by itself
 
 - **The dock ALWAYS reaches rest, wherever the button stopped** (`REST_AFTER_FRAMES`). A spring can

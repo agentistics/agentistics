@@ -12,8 +12,9 @@ import {
   alertKey, DEFAULT_AUTO_DISMISS_SEC, DEFAULT_NAY_ANIMATION, DEFAULT_STALE_MIN, formatWaiting, parseNayAnimation, type NayAlert,
   type NayAlertKind, type NayAnimation,
 } from './nayNotify'
-import { inboxAdd, observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
-import { pushNotification, type NotificationType } from './notifications'
+import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
+import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
+import { isNotificationCategory } from './notificationCategories'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
 /** The four original chimes, plus the thirteen synthesized in `notificationSounds.ts`. */
@@ -75,11 +76,8 @@ export interface NotificationSettings {
   autoDismissSec: number
   /** How the Nay button delivers a card. Chosen in the chat settings; see `nayNotify.ts`. */
   nayAnimation: NayAnimation
-  /**
-   * While this tab is in the BACKGROUND the in-app card cannot be seen, so the operating system's
-   * notification is used instead — the only delivery that reaches someone on another window.
-   */
-  systemWhenHidden: boolean
+  /** Kinds of bell notification turned off (`notificationCategories.ts`). Absent = none. */
+  mutedCategories: string[]
 }
 
 import { createSharedPref } from './sharedPref'
@@ -113,8 +111,8 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   doNotDisturb: false,
   staleAfterMin: DEFAULT_STALE_MIN,
   nayAnimation: DEFAULT_NAY_ANIMATION,
-  systemWhenHidden: true,
   autoDismissSec: DEFAULT_AUTO_DISMISS_SEC,
+  mutedCategories: [],
 }
 
 /**
@@ -143,8 +141,8 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
     doNotDisturb: parsed.doNotDisturb === true,
     staleAfterMin: Number.isFinite(stale) && stale >= 0 ? stale : DEFAULT_STALE_MIN,
     nayAnimation: parseNayAnimation(parsed.nayAnimation),
-    systemWhenHidden: parsed.systemWhenHidden !== false,
     autoDismissSec: Number.isFinite(autoDismiss) && autoDismiss >= 0 ? autoDismiss : DEFAULT_AUTO_DISMISS_SEC,
+    mutedCategories: Array.isArray(parsed.mutedCategories) ? parsed.mutedCategories.filter(isNotificationCategory) : [],
   }
 }
 
@@ -196,6 +194,10 @@ export function saveNotificationSettings(settings: NotificationSettings): void {
 export function subscribeNotificationSettings(fn: () => void): () => void {
   return store.subscribe(fn)
 }
+
+// The bell shows only what is not muted: keep its filter in step with the stored choice.
+setMutedCategories(store.get().mutedCategories ?? [])
+store.subscribe(() => setMutedCategories(store.get().mutedCategories ?? []))
 
 // ----------------------------------------------------------------------------
 // Audio Synthesis Engine (Web Audio API)
@@ -310,150 +312,13 @@ export function playNotificationSound(preset: SoundPreset = 'chime', volume: num
 }
 
 // ----------------------------------------------------------------------------
-// Browser Notifications
+// No operating-system notifications
 // ----------------------------------------------------------------------------
-
-export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  if (typeof window === 'undefined' || !('Notification' in window)) {
-    return 'denied'
-  }
-  if (Notification.permission === 'granted') {
-    return 'granted'
-  }
-  return await Notification.requestPermission()
-}
-
-/**
- * CAN THIS BROWSER NOTIFY AT ALL, and if not, why not — so the screen can say it.
- *
- * iOS is the case that forced this. Safari on iPhone exposes `Notification` **only to a web app
- * installed on the Home Screen** (16.4+); in an ordinary tab the API is simply absent, so a
- * settings screen that only knows `granted` / `denied` / `default` shows a permission button that
- * can never do anything, and the honest answer — "install it first" — is the one thing it cannot
- * say. That is the whole of "não tá pedindo permissão".
- *
- * `'unsupported'` is deliberately not folded into `'denied'`: one is a decision the user can
- * reverse from this screen, the other is a step they have to take somewhere else.
- */
-export type NotificationSupport = 'ok' | 'insecure' | 'needs-safari' | 'needs-install' | 'unsupported'
-
-/**
- * A window this module can read without asserting a DOM in a test. Only the four things it asks.
- */
-export interface SupportEnv {
-  hasNotification: boolean
-  secure: boolean
-  standalone: boolean
-  ios: boolean
-}
-
-/**
- * Which of the four reasons this browser cannot notify — PURE, so each one can be pinned.
- *
- * The order is the order the obstacles have to be cleared in, and it matters: telling somebody to
- * add the app to their Home Screen while they are on `http://` sends them to do the second step
- * first and land in the same place.
- *
- *  1. `insecure` — **the one that was actually happening.** Notifications, service workers and
- *     installability all require a SECURE CONTEXT. Reached over Tailscale as `http://100.x.y.z:47292`
- *     the origin is not one, so `navigator.serviceWorker` is undefined and the permission can never
- *     be granted however many times it is asked for. Tailscale hands out a real certificate —
- *     `tailscale serve` — and that is the whole fix; nothing in this app can substitute for it.
- *  2. `needs-safari` — an iOS home-screen app added from CHROME. Every browser on iOS is WebKit
- *     underneath, but only a web app added from SAFARI runs standalone, and only a standalone one is
- *     given the Notification API. A shortcut added from Chrome opens inside Chrome and never will be.
- *  3. `needs-install` — iOS, in a browser tab. Add it to the Home Screen (from Safari) and it works.
- *  4. `unsupported` — anything else with no API. Sound alerts still work; nothing else will.
- *
- * `denied` is deliberately none of these: it is a decision the user made and can reverse in the
- * system's own settings, and folding it in here would send them to fix the wrong thing.
- */
-export function supportFrom(env: SupportEnv): NotificationSupport {
-  if (!env.secure) return 'insecure'
-  if (env.hasNotification) return 'ok'
-  if (env.ios) return env.standalone ? 'needs-safari' : 'needs-install'
-  return 'unsupported'
-}
-
-export function notificationSupport(): NotificationSupport {
-  if (typeof window === 'undefined') return 'unsupported'
-  const nav = navigator as Navigator & { standalone?: boolean }
-  // iPadOS reports itself as a Mac, hence the touch check.
-  const ios = /iPad|iPhone|iPod/.test(nav.userAgent)
-    || (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1)
-  return supportFrom({
-    hasNotification: 'Notification' in window,
-    secure: window.isSecureContext !== false,
-    // `navigator.standalone` is iOS's own flag for a Safari-added web app; the media query catches
-    // the installed case on every other platform. Either one means "not in a tab".
-    standalone: nav.standalone === true
-      || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches),
-    ios,
-  })
-}
-
-export function getBrowserNotificationPermission(): NotificationPermission {
-  if (typeof window === 'undefined' || !('Notification' in window)) {
-    return 'denied'
-  }
-  return Notification.permission
-}
-
-export function triggerSessionNotification(options: {
-  title: string
-  body: string
-  tag?: string
-  soundPreset?: SoundPreset
-  soundVolume?: number
-  soundEnabled?: boolean
-}): void {
-  const settings = getNotificationSettings()
-  if (!settings.enabled) return
-
-  if (settings.soundEnabled && (options.soundEnabled ?? true)) {
-    playNotificationSound(options.soundPreset ?? settings.soundPreset, options.soundVolume ?? settings.soundVolume)
-  }
-
-  if (typeof window === 'undefined' || !('Notification' in window)) return
-  if (Notification.permission !== 'granted') return
-
-  const opts: NotificationOptions = {
-    body: options.body,
-    // The app's own icon, at the size a notification actually renders. `/favicon.ico` was a 16px
-    // image blown up to 48 on a phone.
-    icon: versionedAsset('/icons/icon-192.png'),
-    badge: versionedAsset('/icons/icon-192-maskable.png'),
-    ...(options.tag ? { tag: options.tag } : {}),
-    // SILENT, ALWAYS. The OS plays its OWN chime for a notification unless told not to, and that
-    // chime answers to neither the volume slider nor the sound switch above — so lowering the
-    // volume, or turning sound off, left a loud system sound on every toast (the Windows one in
-    // particular). The app's synthesized sound, which both controls DO govern, is the only audio.
-    silent: true,
-  }
-
-  // THE SERVICE WORKER IS THE PATH, NOT A FALLBACK. `new Notification()` is unimplemented in an
-  // installed iOS web app — the constructor exists and throws — so on the one platform this
-  // feature was reported broken on, the only thing that works is asking the registration to show
-  // it. It also works everywhere else, which is why it is tried FIRST rather than kept for iOS:
-  // one path that works in four places beats a branch that has to guess which place it is in.
-  const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined
-  if (sw) {
-    void sw.ready
-      .then(reg => reg.showNotification(options.title, opts))
-      .catch(() => { legacyNotification(options.title, opts) })
-    return
-  }
-  legacyNotification(options.title, opts)
-}
-
-/** The constructor, for a browser with no service worker registration (a dev server, an old one). */
-function legacyNotification(title: string, opts: NotificationOptions): void {
-  try {
-    new Notification(title, opts)
-  } catch {
-    /* A platform that has the constructor and refuses to run it — nothing left to try. */
-  }
-}
+//
+// The web app notifies IN-APP ONLY (owner, 2026-09-30): the Nay button's card, its sound, and the
+// header bell. The browser Notification API (permission prompt, service-worker toasts, the
+// "system notification while the tab is hidden" switch) is gone. Delivery to a desktop when no
+// browser is open belongs to `agentop events` (server/events/), which this does not touch.
 
 /**
  * What a notification needs to know about a session in order to NAME it.
@@ -602,18 +467,23 @@ interface Delivery {
 }
 
 /**
- * Where one event goes.
+ * Where one event goes — in-app only.
  *
- * - The BELL always gets it, so nothing is lost to do-not-disturb or to a closed card. Its `meta`
- *   is the same in every open tab (the minute, not the millisecond), so the server's dedupe keeps
- *   ONE row however many tabs saw the transition.
- * - A VISIBLE tab shows the Nay button's card and plays the event's sound — our own notification,
- *   not the operating system's.
- * - A tab in the BACKGROUND cannot show a card anybody will see, so it falls back to the system
- *   notification (unless that is switched off). Outside a browser — a test — that is the only path.
+ * - The BELL always gets it, so nothing is lost to do-not-disturb, a hidden tab or a card that left.
+ *   Its `meta` is the same in every open tab (the minute, not the millisecond), so the server's
+ *   dedupe keeps ONE row however many tabs saw the transition; it leaves by itself once the session
+ *   no longer needs the person (`pruneBell`, in `nayNotifyStore.ts`).
+ * - A VISIBLE tab shows the Nay button's card and plays the event's sound.
+ * - A tab in the BACKGROUND does nothing more: a card there would be stale by the time anybody
+ *   looked, and every hidden tab ringing would ring once per tab. The bell already has it.
  * - Do-not-disturb silences all of it except the bell.
  */
+/** Test seam: every delivery, as decided — the sentence and the event, before any channel runs. */
+let deliveryObserver: ((d: { event: NotifyEvent; title: string; body: string; nay: boolean }) => void) | null = null
+export function observeDeliveries(fn: typeof deliveryObserver): void { deliveryObserver = fn }
+
 function deliver(d: Delivery, settings: NotificationSettings): void {
+  deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({
       type: BELL_TYPE[d.event],
@@ -624,22 +494,12 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
       },
     })
   }
-  // The inbox keeps it until the session stops waiting — do-not-disturb included: it silences the
-  // announcement, never the record.
-  if (d.alert && typeof document !== 'undefined') inboxAdd(d.alert)
   if (settings.doNotDisturb) return
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) {
-    if (d.alert) pushAlert(d.alert)
-    if (d.shock) requestShock()
-    if (settings.soundEnabled) playNotificationSound(resolveSound(d.event, d.nay === true, settings), settings.soundVolume)
-    return
-  }
-  if (!settings.systemWhenHidden) return
-  triggerSessionNotification({
-    title: d.title, body: d.body, tag: d.tag,
-    soundPreset: resolveSound(d.event, d.nay === true, settings),
-  })
+  if (!visible) return
+  if (d.alert) pushAlert(d.alert)
+  if (d.shock) requestShock()
+  if (settings.soundEnabled) playNotificationSound(resolveSound(d.event, d.nay === true, settings), settings.soundVolume)
 }
 
 /** A snoozed card coming back: the card and its sound again, never the bell a second time. */

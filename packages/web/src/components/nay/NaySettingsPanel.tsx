@@ -198,7 +198,7 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
         ))}
         {choice(
           pt ? 'Some sozinho após' : 'Goes away after',
-          pt ? 'Fica enquanto você usa o cartão, e sempre fica na lista do botão.' : 'It stays while you use the card, and is always kept in the button’s list.',
+          pt ? 'Uma barra mostra o tempo que falta; pausa enquanto você usa o cartão. Depois, o aviso fica no sino.' : 'A bar shows the time left; it pauses while you use the card. Afterwards the notice is kept in the bell.',
           <Select value={String(notify.autoDismissSec)} onChange={v => saveNotify({ autoDismissSec: Number(v) })}
             options={AUTO_DISMISS_OPTIONS_SEC.map(n => ({ value: String(n), label: n === 0 ? (pt ? 'Nunca' : 'Never') : `${n} s` }))} />,
         )}
