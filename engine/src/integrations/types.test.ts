@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { CAPABILITY_STATES, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { createIntegrations, hasReplay, integrationsInOrder } from './types'
-import { CLAUDE_ADAPTER_VERSION } from './claude/replay-core'
+import { CLAUDE_ADAPTER_VERSION, CLAUDE_SOURCE_ID } from './claude/replay-core'
+import { CODEX_SOURCE_ID } from './codex/replay-core'
+import { GEMINI_SOURCE_ID } from './gemini/replay-core'
+import { COPILOT_SOURCE_ID } from './copilot/replay-core'
+import { ANTIGRAVITY_SOURCE_ID } from './antigravity/replay-core'
+import { KIMI_SOURCE_ID } from './kimi/replay-core'
+import { OPENCODE_SOURCE_ID } from './opencode/replay-core'
 import { installHost, testHost } from '../host'
 
 // Every replay's default root is the host's, so the registry is built under a host whose roots
@@ -51,6 +57,23 @@ describe('INTEGRATIONS', () => {
 
   test('no absence claims a live source in P1', () => {
     for (const id of HARNESS_ORDER) expect(INTEGRATIONS[id].live).toBeUndefined()
+  })
+
+  test("every integration's declared id matches the SOURCE_ID its own replay stamps on each emitted event's `source.id` — the public catch-up keys adapter versions by HarnessId (projections/adapter-versions.ts), so the two drifting apart would make it silently stop recognising this harness's stored events", () => {
+    const sourceIdByHarness: Record<HarnessId, string> = {
+      claude: CLAUDE_SOURCE_ID,
+      codex: CODEX_SOURCE_ID,
+      gemini: GEMINI_SOURCE_ID,
+      copilot: COPILOT_SOURCE_ID,
+      antigravity: ANTIGRAVITY_SOURCE_ID,
+      kimi: KIMI_SOURCE_ID,
+      opencode: OPENCODE_SOURCE_ID,
+    }
+    expect(HARNESS_ORDER.length).toBe(7)
+    for (const id of HARNESS_ORDER) {
+      expect(INTEGRATIONS[id].id).toBe(id)
+      expect(sourceIdByHarness[id]).toBe(id)
+    }
   })
 })
 
