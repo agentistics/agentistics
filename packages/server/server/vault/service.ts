@@ -29,6 +29,7 @@ import {
   memoryProtector, openRecord, openVault, refusalSentence, sealToBytes, writePrivateAtomic, initSentence,
   type Lang, type OpenState, type Platform, type Protector, type ProtectorId, type ProtectorIo,
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
+  makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
@@ -39,6 +40,8 @@ import { omittedSecrets } from '../backup/backup-plan'
 
 let _vaultDir = join(AGENTISTICS_DATA_DIR, 'vault')
 export function vaultDir(): string { return _vaultDir }
+/** SECRETS.4 §1.1: the runner scope's own vault, BESIDE the human one, never inside it. */
+export function runnerVaultDir(): string { return join(_vaultDir, '..', RUNNER_VAULT_DIR) }
 export function runDir(): string { return join(AGENTISTICS_DATA_DIR, 'run') }
 export function vaultSocketPath(): string { return join(runDir(), 'vault.sock') }
 
@@ -130,10 +133,9 @@ let _override: Protector[] | null = null
 /** Test seam: how auto-init chooses (`strict` = one protector, retried; else the candidates). */
 let _autoInit: { strict: Protector; delaysMs: number[] } | { candidates: Protector[] } | null = null
 
-export function protectorById(id: ProtectorId, passphrase?: string): Protector | null {
+export function protectorById(id: ProtectorId, passphrase?: string, dir: string = vaultDir()): Protector | null {
   const o = id !== 'passphrase' ? _override?.find(p => p.id === id) : undefined
   if (o) return o
-  const dir = vaultDir()
   switch (id) {
     case 'keychain': return keychainProtector(io())
     case 'dpapi': return dpapiProtector({ io: io(), vaultDir: dir, wsl: isWsl() })
@@ -255,9 +257,9 @@ export async function createVault(protector: Protector, passphrase?: string): Pr
   }
 }
 
-function protectorsFor(vault: VaultJson | null, passphrase?: string): Protector[] {
+function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string = vaultDir()): Protector[] {
   const ids = vault ? vault.wrappers.map(w => w.type) : []
-  return ids.map(id => protectorById(id, passphrase)).filter((p): p is Protector => p !== null)
+  return ids.map(id => protectorById(id, passphrase, dir)).filter((p): p is Protector => p !== null)
 }
 
 export function protectorLabel(id: ProtectorId | null): string | null {
@@ -603,6 +605,43 @@ export function vaultStatusSync(): { state: 'open' | 'locked' | 'uninitialized' 
 
 /** Is the vault open in this process right now (without trying to open it)? */
 export function vaultIsOpen(): boolean { return _opened !== null }
+
+// ── the runner scope (SECRETS.4 §1.1, §6) ──────────────────────────────────────────────────────
+//
+// A separate vault with a separate DEK. The runner code path receives ONLY a `RunnerHandle` —
+// nothing in it can name a human purpose — and nothing here ever reads the human vault's files.
+// Unlock, enrolment and the unattended order are S4.9; this is the storage half (S4.2).
+
+export type RunnerOpen =
+  | { ok: true; handle: RunnerHandle; machineId: string }
+  | { ok: false; state: Exclude<OpenState['state'], 'open'> }
+
+/** Create the runner vault for `machineId` under `protector` — built with `protectorById(id, _, runnerVaultDir())`
+ *  so a file-backed wrapper lands in the runner's directory, never the human one. */
+export async function initRunnerVault(protector: Protector, machineId: string): Promise<RunnerOpen> {
+  const dir = runnerVaultDir()
+  await mkdirP(dir, { recursive: true, mode: 0o700 })
+  const r = await initVault(io(), dir, protector, [], new Date(), { scope: 'cloud-runner', machineId })
+  if (!r.ok) return { ok: false, state: r.reason === 'exists' ? 'locked' : 'uninitialized' }
+  try { return { ok: true, handle: makeHandle('cloud-runner', r.dek, r.kid), machineId } } finally { r.dek.fill(0) }
+}
+
+/** Open the runner vault. The DEK goes into the handle and the local copy is zeroed. */
+export async function openRunnerVault(): Promise<RunnerOpen> {
+  const dir = runnerVaultDir()
+  const raw = await io().readFile(join(dir, 'vault.json'))
+  const v = parseVaultJson(raw)
+  const s = await openVault(io(), dir, protectorsFor(v, undefined, dir), 'cloud-runner')
+  if (s.state !== 'open') return { ok: false, state: s.state }
+  try { return { ok: true, handle: makeHandle('cloud-runner', s.dek, s.kid), machineId: s.vault.machineId ?? '' } } finally { s.dek.fill(0) }
+}
+
+/** "Deletes the runner scope" (§6.2): every runner wrapper and its vault.json. The human scope is untouched. */
+export async function destroyRunnerVault(): Promise<void> {
+  const dir = runnerVaultDir()
+  const v = parseVaultJson(await io().readFile(join(dir, 'vault.json')))
+  await destroyVault(io(), dir, protectorsFor(v, undefined, dir))
+}
 
 // ── test seams ────────────────────────────────────────────────────────────────────────────────
 

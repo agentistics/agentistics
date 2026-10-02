@@ -136,7 +136,12 @@ export type InitResult =
 /** Create a vault under `protector`, plus optional extra wrappers (the passphrase beside the OS one). */
 export async function initVault(
   io: ProtectorIo, dir: string, protector: Protector, extras: readonly Protector[] = [], now = new Date(),
+  opts: { scope?: VaultScope; machineId?: string } = {},
 ): Promise<InitResult> {
+  const scope = opts.scope ?? 'human'
+  // The runner scope is v2 from birth and names its machine; the human scope stays a v1 FILE until
+  // enrolment (downgrade safety — see serializeVaultJson).
+  if (scope === 'cloud-runner' && !opts.machineId) return { ok: false, reason: 'wrap-failed', detail: 'a runner vault needs the paired machine id' }
   const paths = vaultPaths(dir)
   if (parseVaultJson(await io.readFile(paths.file))) return { ok: false, reason: 'exists' }
   const { dek, kid } = newDataKey()
@@ -149,7 +154,9 @@ export async function initVault(
     }
     wrappers.push(w.record)
   }
-  const vault: VaultJson = { v: VAULT_VERSION, kid, createdAt: now.toISOString(), wrappers }
+  const vault: VaultJson = scope === 'human'
+    ? { v: VAULT_VERSION, scope, kid, createdAt: now.toISOString(), wrappers }
+    : { v: VAULT_VERSION_SCOPED, scope, kid, createdAt: now.toISOString(), wrappers, machineId: opts.machineId }
   // vault.json is written LAST and EXCLUSIVELY: until it exists there is no vault, so a crash in
   // between leaves only an unreferenced wrapped blob; and a second process that got here first wins —
   // this one then reports `exists` and the caller opens the winner's vault.
@@ -178,12 +185,13 @@ export type OpenState =
  * tried only when a passphrase was supplied — that is how a container, which has no OS protector,
  * opens the same key.
  */
-export async function openVault(io: ProtectorIo, dir: string, protectors: readonly Protector[]): Promise<OpenState> {
+export async function openVault(io: ProtectorIo, dir: string, protectors: readonly Protector[], expect: VaultScope = 'human'): Promise<OpenState> {
   const paths = vaultPaths(dir)
   const raw = await io.readFile(paths.file)
   if (raw === null) return { state: 'uninitialized' }
   const vault = parseVaultJson(raw)
-  if (!vault) return { state: 'corrupt' }
+  // A vault of the OTHER scope in this directory is not one this caller may open — never adopted.
+  if (!vault || vault.scope !== expect) return { state: 'corrupt' }
   const primary = vault.wrappers.find(w => w.type !== 'passphrase') ?? vault.wrappers[0]!
   const pass = vault.wrappers.find(w => w.type === 'passphrase')
   const primaryP = protectorFor(primary, protectors)

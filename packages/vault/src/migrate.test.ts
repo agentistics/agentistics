@@ -158,7 +158,7 @@ describe('migrateFile — correct at every crash point', () => {
   it('a stray tmp from a crash inside step 1 is unlinked', async () => {
     const s = sealer()
     const f = fakeFs()
-    f.files.set(ITEM.sealedPath + TMP_MARK + 'abcdef', { data: s.seal('a', 'b', new Uint8Array(1)), mode: 0o600, mtimeMs: 1 })
+    f.files.set(ITEM.sealedPath + TMP_MARK + 'abcdef', { data: s.seal('github-backup', 'b', new Uint8Array(1)), mode: 0o600, mtimeMs: 1 })
     expect(await migrateFile(f.fs, s, ITEM)).toEqual({ status: 'nothing' })
     expect([...f.files.keys()]).toEqual([])
   })
