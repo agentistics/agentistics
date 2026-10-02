@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
   type Protector, type ProtectorId, type StepUpState, type VaultJson,
 } from '@agentistics/vault'
 import {
@@ -487,14 +487,13 @@ export async function confirmRecoveryKey(typed: readonly string[]): Promise<{ ok
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
   try {
-    const p = recoveryProtector({ io: realProtectorIo(), vaultDir: vaultDir(), entropy: r.entropy })
-    const w = await p.wrap(o.dek, o.kid)
-    if (!w.ok) return refused('recovery-write-failed', w.reason)
-    // Verify from disk before recording it (the old wrapper file was replaced in place by `wrap`).
-    const back = await p.unwrap(w.record, o.kid)
-    const same = back.ok && timingSafeEqual(Buffer.from(back.dek), Buffer.from(o.dek))
-    if (back.ok) back.dek.fill(0)
-    if (!same) return refused('recovery-write-failed', 'the recovery key did not read back')
+    // Review S6: staged, verified from disk, THEN it replaces the old wrapper — a failure keeps the old words.
+    const w = await writeRecoveryVerified(realProtectorIo(), vaultDir(), o.dek, o.kid, r.entropy)
+    if (!w.ok) {
+      return refused('recovery-write-failed', vaultLang() === 'pt'
+        ? 'A nova chave de recuperação não pôde ser gravada. A chave anterior continua valendo; nada foi alterado.'
+        : 'The new recovery key could not be written. Your previous recovery key still works; nothing was changed.')
+    }
     const vault: VaultJson = { ...o.vault, v: 2, wrappers: [...o.vault.wrappers.filter(x => x.type !== 'recovery'), w.record] }
     await writeVaultJson(vault)
     o.vault = vault

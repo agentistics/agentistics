@@ -114,8 +114,8 @@ interface RecoveryFile { v: 1; nonce: string; ct: string }
  * `recover`); without it, `unwrap` is `unavailable` — the words are not something a service start can
  * ask for. The probe is a pure round trip (no device involved).
  */
-export function recoveryProtector(o: { io: ProtectorIo; vaultDir: string; entropy?: Uint8Array }): Protector {
-  const file = `${o.vaultDir}/${RECOVERY_FILE}`
+export function recoveryProtector(o: { io: ProtectorIo; vaultDir: string; entropy?: Uint8Array; file?: string }): Protector {
+  const file = `${o.vaultDir}/${o.file ?? RECOVERY_FILE}`
   return {
     id: 'recovery',
     label: (lang: Lang) => lang === 'pt' ? 'a chave de recuperação de 24 palavras' : 'the 24-word recovery key',
@@ -157,5 +157,32 @@ export function recoveryProtector(o: { io: ProtectorIo; vaultDir: string; entrop
       } finally { kek.fill(0); a?.fill(0) }
     },
     async remove() { await o.io.removeFile(file).catch(() => {}) },
+  }
+}
+
+/**
+ * Review S6: write a NEW recovery wrapper without ever leaving the vault with none. The wrapper goes to
+ * a STAGING file, is read back from disk and must open this very DEK, and only then replaces
+ * `dek.recovery` (an atomic write of the verified bytes); the staging file is removed on every path.
+ * A failure anywhere leaves the old wrapper — and so the old words — exactly as they were.
+ */
+export async function writeRecoveryVerified(
+  io: ProtectorIo, vaultDir: string, dek: Uint8Array, kid: string, entropy: Uint8Array,
+): Promise<{ ok: true; record: WrapperRecord } | { ok: false; reason: string }> {
+  const STAGING = `${RECOVERY_FILE}.new`
+  const staged = recoveryProtector({ io, vaultDir, entropy, file: STAGING })
+  try {
+    const w = await staged.wrap(dek, kid)
+    if (!w.ok) return { ok: false, reason: w.reason }
+    const back = await staged.unwrap(w.record, kid)
+    const same = back.ok && back.dek.length === dek.length && back.dek.every((b, i) => b === dek[i])
+    if (back.ok) back.dek.fill(0)
+    if (!same) return { ok: false, reason: 'the new recovery key did not read back from disk' }
+    const bytesOnDisk = await io.readFile(`${vaultDir}/${STAGING}`)
+    if (!bytesOnDisk) return { ok: false, reason: 'the new recovery key vanished before it could be kept' }
+    await io.writeFile(`${vaultDir}/${RECOVERY_FILE}`, bytesOnDisk)
+    return { ok: true, record: { type: 'recovery', createdAt: new Date().toISOString(), params: { file: RECOVERY_FILE } } }
+  } finally {
+    await io.removeFile(`${vaultDir}/${STAGING}`).catch(() => {})
   }
 }

@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
@@ -75,7 +76,9 @@ export async function enrolledVault(): Promise<{ words: string[] }> {
 beforeEach(() => { STORE.clear() })
 // Leave the process the way every other vault test file expects it (central-env.test.ts reads the
 // default test vault without resetting it — a locked fake left here would fail it).
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-review-done', 'vault') }); __resetGateForTests() })
+// A UNIQUE directory: a fixed one would keep the vault the next file creates there, and the run after
+// would read it as protector-lost (its memory key died with the previous process).
+afterAll(() => { __resetVaultForTests({ dir: join(mkdtempSync(join(tmpdir(), 'agentistics-review-done-')), 'vault') }); __resetGateForTests() })
 
 describe('step 0 — a presence enrolment failure reaches the UI as a sentence, never a reason code', () => {
   test('the bridge failure is said in words (EN), with no code and no .NET name', async () => {
