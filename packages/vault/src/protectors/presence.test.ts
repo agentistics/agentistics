@@ -199,7 +199,9 @@ function cliMachine(opts: { hmac?: boolean; devices?: boolean; assertErr?: strin
     const [, , credId, salt] = c.stdin.split('\n')
     if (opts.assertErr) return fail(opts.assertErr, 1)
     // hmac-secret = sha256(credId | salt): deterministic, key-bound
-    return ok(['cdh', 'rp', 'authdata', createHash('sha256').update(credId + '|' + salt).digest().toString('base64'), 'sig'].join('\n') + '\n')
+    // authdata as libfido2 prints it: CBOR byte string around rpIdHash ‖ flags (UP) ‖ signCount
+    const ad = Buffer.concat([Buffer.from([0x58, 37]), Buffer.alloc(32), Buffer.from([0x01]), Buffer.alloc(4)]).toString('base64')
+    return ok(['cdh', 'rp', ad, createHash('sha256').update(credId + '|' + salt).digest().toString('base64'), 'sig'].join('\n') + '\n')
   }
   return { answer }
 }
@@ -212,7 +214,7 @@ describe('fido2 (libfido2 CLIs)', () => {
     const w = await p.wrap(DEK, 'k1')
     expect(w.ok).toBe(true)
     expect(calls.map(c => c.cmd).every(c => c.startsWith('/usr/bin/'))).toBe(true)
-    expect(calls.find(c => c.cmd.endsWith('fido2-assert'))!.args).toEqual(['-G', '-h', '/dev/hidraw3'])
+    expect(calls.find(c => c.cmd.endsWith('fido2-assert'))!.args).toEqual(['-G', '-h', '-p', '/dev/hidraw3'])
     expect(files.has(`/v/${FIDO2_FILE}`)).toBe(true)
     const u = await p.unwrap(rec(w), 'k1')
     expect(u.ok && Buffer.from(u.dek).equals(Buffer.from(DEK))).toBe(true)

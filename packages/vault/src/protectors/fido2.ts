@@ -208,9 +208,18 @@ export function fido2Protector(o: Fido2Options): Protector {
     if (l.code !== 0 || !path) return { ok: false, code: 'presence-unavailable', reason: 'no security key is plugged in' }
     return { ok: true, path, token }
   }
-  async function hasHmac(d: { path: string; token: string }): Promise<boolean> {
+  /** What the key says about itself: hmac-secret support, and whether a PIN is SET (`clientPin`, not `noclientPin`). */
+  async function info(d: { path: string; token: string }): Promise<{ hmac: boolean; pin: boolean }> {
     const i = await run(d.token, ['-I', d.path], null)
-    return !('threw' in i) && i.code === 0 && /extension strings:.*hmac-secret/i.test(i.out)
+    if ('threw' in i || i.code !== 0) return { hmac: false, pin: false }
+    return { hmac: /extension strings:.*hmac-secret/i.test(i.out), pin: /^options:.*\bclientPin\b/im.test(i.out) }
+  }
+  /** Review S8: -p always (the touch); -v when the key has a PIN (spec §3.3: UV "when the key has one"). */
+  const verifyArgs = (pin: boolean): string[] => (pin ? ['-p', '-v'] : ['-p'])
+  /** The flags the key SIGNED must show what was asked: UP always, UV when -v was passed. */
+  function flagsHold(authdataB64: string | undefined, pin: boolean): boolean {
+    const f = authDataFlags(authdataB64 ?? '')
+    return f !== null && f.up && (!pin || f.uv)
   }
 
   async function make(): Promise<Out> {
@@ -218,11 +227,13 @@ export function fido2Protector(o: Fido2Options): Protector {
     if (web) return bridge('make', userId)
     const d = await device()
     if (!d.ok) return d
-    if (!(await hasHmac(d))) return { ok: false, code: 'no-hmac-secret', reason: NO_HMAC }
+    const k = await info(d)
+    if (!k.hmac) return { ok: false, code: 'no-hmac-secret', reason: NO_HMAC }
     const cred = await tool('fido2-cred')
     if (!cred) return { ok: false, code: 'presence-unavailable', reason: `fido2-cred was not found — ${FIDO2_INSTALL_HINT}` }
     const stdin = `${Buffer.from(randomBytes(32)).toString('base64')}\n${FIDO2_RP}\nvault\n${Buffer.from(userId).toString('base64')}\n`
-    const r = await run(cred, ['-M', '-h', d.path], stdin)
+    // fido2-cred has no -p (making a credential always needs a touch); -v when the key has a PIN.
+    const r = await run(cred, ['-M', '-h', ...(k.pin ? ['-v'] : []), d.path], stdin)
     if ('threw' in r) return { ok: false, code: r.threw, reason: 'fido2-cred did not answer' }
     if (r.code !== 0) { const f = cliFailure(r.err); return { ok: false, code: f.code, reason: f.detail } }
     // -M prints: client data hash, rp id, format, authdata, credential id, signature[, x509]
@@ -237,12 +248,15 @@ export function fido2Protector(o: Fido2Options): Protector {
     if (!d.ok) return d
     const assert = await tool('fido2-assert')
     if (!assert) return { ok: false, code: 'presence-unavailable', reason: `fido2-assert was not found — ${FIDO2_INSTALL_HINT}` }
+    const { pin } = await info(d)
     const stdin = `${Buffer.from(randomBytes(32)).toString('base64')}\n${FIDO2_RP}\n${credential}\n${Buffer.from(salt).toString('base64')}\n`
-    const r = await run(assert, ['-G', '-h', d.path], stdin)
+    const r = await run(assert, ['-G', '-h', ...verifyArgs(pin), d.path], stdin)
     if ('threw' in r) return { ok: false, code: r.threw, reason: 'fido2-assert did not answer' }
     if (r.code !== 0) { const f = cliFailure(r.err); return { ok: false, code: f.code, reason: f.detail } }
     // -G -h prints: client data hash, rp id, authdata, hmac-secret, signature
-    const hm = r.out.split(/\r?\n/)[3]?.trim()
+    const lines = r.out.split(/\r?\n/)
+    if (!flagsHold(lines[2]?.trim(), pin)) return { ok: false, code: 'presence-unavailable', reason: 'the security key did not confirm it was touched' }
+    const hm = lines[3]?.trim()
     if (!hm) return { ok: false, code: 'presence-unavailable', reason: 'fido2-assert returned no hmac-secret' }
     return { ok: true, out: hm }
   }
@@ -308,4 +322,21 @@ export function fido2Protector(o: Fido2Options): Protector {
       await o.io.removeFile(file).catch(() => {})
     },
   }
+}
+
+/**
+ * PURE. The UP / UV flags of authenticator data as libfido2's tools print it: base64 of a CBOR byte
+ * string (0x40–0x57 short, 0x58 one-byte length, 0x59 two-byte length) around rpIdHash(32) ‖ flags ‖
+ * signCount(4). `null` for anything that is not that shape — never a guess.
+ */
+export function authDataFlags(b64: string): { up: boolean; uv: boolean } | null {
+  let b: Buffer
+  try { b = Buffer.from(b64, 'base64') } catch { return null }
+  if (b.length < 1) return null
+  const h = b[0]!
+  let off: number, len: number
+  if (h >= 0x40 && h <= 0x57) { off = 1; len = h - 0x40 } else if (h === 0x58 && b.length >= 2) { off = 2; len = b[1]! } else if (h === 0x59 && b.length >= 3) { off = 3; len = b.readUInt16BE(1) } else return null
+  if (len < 37 || b.length < off + len) return null
+  const flags = b[off + 32]!
+  return { up: (flags & 0x01) !== 0, uv: (flags & 0x04) !== 0 }
 }
