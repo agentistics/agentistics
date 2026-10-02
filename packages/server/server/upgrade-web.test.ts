@@ -57,3 +57,15 @@ describe('the version the press is judged against', () => {
     expect(src).not.toContain('getVersionInfo()')
   })
 })
+
+describe('what /api/version says about pressing install here', () => {
+  test('a source checkout (bun as execPath) is never offered the button', async () => {
+    const { upgradableHint } = await import('./upgrade-web')
+    expect(upgradableHint({ hasUpdate: true, latest: '99.0.0' })).not.toBeNull()
+  })
+  test('no update is up-to-date, whatever the machine', async () => {
+    const { upgradableHint } = await import('./upgrade-web')
+    const r = upgradableHint({ hasUpdate: false, latest: '99.0.0' })
+    expect(['up-to-date', 'no-capability', 'central', 'container']).toContain(r!)
+  })
+})

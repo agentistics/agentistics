@@ -125,6 +125,11 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
+import { promptExit, shouldShowToast, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { consumeRestore, snoozeUpdate, startUpgrade, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
+import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
+import { UpgradeOverlay } from './components/UpgradeOverlay'
+import { UpdateFinale } from './components/UpdateFinale'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -1530,9 +1535,6 @@ export default function AppLayout() {
    * a web bundle newer than its server never hides a chat that still works.
    */
   const chatOffered = teamSession?.chatEnabled ?? true
-  // true when this instance is a team member pushing to a central (mode === 'member').
-  // Used only to tailor the upgrade command shown in the UpdateModal.
-  const [isMember, setIsMember] = useState(false)
 
   // IAM gate (central only)
   const [iam, setIam] = useState<IamState | undefined>(undefined)
@@ -1580,13 +1582,6 @@ export default function AppLayout() {
       .catch(() => setTeamSession(prev => resolveTeamSessionRefresh(prev, null, { required: false, authed: true })))
   }, [])
   useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
-
-  useEffect(() => {
-    fetch('/api/team/status')
-      .then(r => r.ok ? (r.json() as Promise<{ mode?: string }>) : null)
-      .then(s => setIsMember(s?.mode === 'member'))
-      .catch(() => {})
-  }, [])
 
   // Flip to login screen when any API call returns 401 (team password set but cookie expired)
   useEffect(() => {
@@ -2446,16 +2441,23 @@ export default function AppLayout() {
   const [filtersClip, setFiltersClip] = useState(false)
   const collapseFilters = () => { setFiltersClip(true); setFiltersCollapsed(true) }
   const expandFilters = () => { setFiltersClip(true); setFiltersCollapsed(false) }
-  const [updateInfo, setUpdateInfo] = useState<{ current: string; latest: string } | null>(null)
-  // Whether the full UpdateModal (a blocking, position:fixed/inset:0/z-9999 dialog) is open.
-  // Separate from `updateInfo` on purpose: the version CHECK is automatic, but the MODAL must
-  // never be — it sits on top of every drawer/popover in the app (all under z-index 2000), so an
-  // update firing while a user has, say, the "New tag" source picker open silently eats every
-  // click on the page with no visual cue on a dark theme (a 65%-black blur over an already
-  // near-black background reads as almost no change). `updateInfo` still drives the toast/bell
-  // (see the effect below) — that is the correct passive surface. The modal is opt-in, reached by
-  // clicking that toast/bell entry (see the 'agentistics:open-update-modal' listener).
+  /**
+   * THE UPDATE EXPERIENCE (UPD.1). `/api/version` is read once; `shouldShowToast` (updateToast.ts)
+   * decides whether this machine is offered the popup at all — a LOCAL installed binary only, with
+   * the server's own `upgradable` verdict, so a central, a container or a source checkout never
+   * sees a button the route would refuse. The popup is spoken by the Nay window (`NayUpdateCard`);
+   * leaving it hands the news to the bell (`promptExit`), and the bell entry opens `UpdateModal`.
+   * Both buttons start the one `startUpgrade` (upgradeFlow.ts), drawn by `UpgradeOverlay`.
+   */
+  const [versionAnswer, setVersionAnswer] = useState<VersionAnswer | null>(null)
+  // Whether the bell's sheet is open. Never automatic: it is a blocking dialog over every drawer,
+  // so it opens only from the bell entry (see the 'agentistics:open-update-modal' listener).
   const [showUpdateModal, setShowUpdateModal] = useState(false)
+  // The popup left this page (closed, timed out, installed): it does not come back until a reload.
+  const [promptGone, setPromptGone] = useState(false)
+  const updateSnooze = useUpdateSnooze()
+  const upgradeFlow = useUpgradeFlow()
+  const [finaleVersion, setFinaleVersion] = useState<string | null>(null)
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
   // not yet chosen (blocks the app), ArchiveMode = chosen.
   const [archiveChoice, setArchiveChoice] = useState<ArchiveMode | null | undefined>(undefined)
@@ -2675,27 +2677,45 @@ export default function AppLayout() {
     return () => { cancelled = true }
   }, [])
 
-  // Tracks which latest version we've already surfaced as a toast/bell notification,
-  // so re-renders (or an SSE re-check for the same version) don't re-push it.
-  const notifiedVersionRef = useRef<string | null>(null)
   useEffect(() => {
-    fetch('/api/version')
+    fetch('/api/version', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null)
-      .then((info: { current: string; latest: string; hasUpdate: boolean } | null) => {
-        if (info?.hasUpdate) {
-          // Only the passive surfaces (toast + bell) fire automatically. The blocking modal
-          // opens on demand — see `showUpdateModal` above.
-          setUpdateInfo({ current: info.current, latest: info.latest })
-          if (notifiedVersionRef.current !== info.latest) {
-            notifiedVersionRef.current = info.latest
-            pushNotification({ type: 'info', code: 'app.update_available', meta: { version: info.latest } })
-          }
-        }
+      .then((info: VersionAnswer | null) => {
+        if (!info) return
+        setVersionAnswer(info)
+        // Back from an in-place upgrade on the bundle it was for: put the person where they were
+        // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
+        const back = consumeRestore(info.current)
+        if (!back) return
+        const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
+        if (back.url !== here) navigate(back.url, { replace: true })
+        if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
+        setFinaleVersion(info.current)
       })
       .catch(() => {})
   }, [])
 
-  // The update toast/bell entry dispatches this to open the full modal on click.
+  // May this machine be offered the update at all, and is it snoozed? (`shouldShowToast`)
+  const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now(), central: isCentral })
+  const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
+  const promptVisible = updateVerdict.show && !promptGone && !showUpdateModal && upgradeFlow.phase === 'idle'
+  const onPromptExit = useCallback((exit: PromptExit) => {
+    if (!versionAnswer) return
+    const o = promptExit(exit, versionAnswer, Date.now())
+    setPromptGone(true)
+    if (o.snooze) snoozeUpdate(o.snooze.version, versionAnswer.critical === true)
+    if (o.bell) pushNotification(o.bell)
+    if (o.install) void startUpgrade(versionAnswer.latest, lang === 'pt' ? 'pt' : 'en')
+  }, [versionAnswer, lang])
+  const nayOffered = !teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
+    && teamSession?.capabilities?.localShell !== false && chatOffered
+  const renderUpdatePrompt = promptVisible && versionAnswer
+    ? (placement: UpdateCardPlacement) => (
+        <NayUpdateCard lang={lang} isMobile={isMobile} info={versionAnswer} placement={placement} onExit={onPromptExit} />
+      )
+    : undefined
+
+  // The bell's update entry dispatches this to open the sheet on click.
   useEffect(() => {
     const handler = () => setShowUpdateModal(true)
     window.addEventListener('agentistics:open-update-modal', handler)
@@ -4753,16 +4773,20 @@ export default function AppLayout() {
 
       {/* Update available modal — opt-in only, opened via the toast/bell (see
           'agentistics:open-update-modal'). Never auto-opens: see `showUpdateModal` above. */}
-      {updateInfo && showUpdateModal && (
+      {versionAnswer && showUpdateModal && updateInstallable && upgradeFlow.phase === 'idle' && (
         <UpdateModal
-          current={updateInfo.current}
-          latest={updateInfo.latest}
+          current={versionAnswer.current}
+          latest={versionAnswer.latest}
+          critical={versionAnswer.critical === true}
           lang={lang}
-          isCentral={isCentral}
-          isMember={isMember}
+          onLater={() => snoozeUpdate(versionAnswer.latest, versionAnswer.critical === true)}
           onClose={() => setShowUpdateModal(false)}
         />
       )}
+
+      {/* The one install flow's loader, and the finale on the bundle that arrived. */}
+      <UpgradeOverlay lang={lang} isMobile={isMobile} />
+      {finaleVersion && <UpdateFinale lang={lang} version={finaleVersion} onDone={() => setFinaleVersion(null)} />}
 
       {/* Info Modal */}
       {infoModalIndex !== null && (
@@ -4878,16 +4902,18 @@ export default function AppLayout() {
           is a managed session, so the panel needs BOTH the chat switch and the session power: the
           `localChat` capability + the user's chat switch (`chatOffered`), and `localShell`, which
           guards every `/api/fleet` route. Hidden on a pure central, which has no local harness. */}
-      {!teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
-        && teamSession?.capabilities?.localShell !== false && chatOffered && (
+      {nayOffered && (
         <NayDock
           lang={lang}
           isMobile={isMobile}
           ctx={appCtx}
           filters={filters}
           activeOnly={dockActiveOnly(inSessionsWorkspace, activeOnly)}
+          {...(renderUpdatePrompt ? { renderUpdatePrompt } : {})}
         />
       )}
+      {/* No Nay dock on this page (chat switched off): the update popup stands in its corner. */}
+      {!nayOffered && renderUpdatePrompt?.('corner')}
 
       {/* The footer — below the page on a phone. On the desktop board it is the LAST thing inside
           the page panel instead (see `<main>`), because the panel is what scrolls there. */}

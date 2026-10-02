@@ -47,7 +47,8 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
-import { setOpenSession, setVisibleSessions } from '../../lib/nayNotifyStore'
+import type { UpdateCardPlacement } from './NayUpdateCard'
+import { setOpenSession, setVisibleSessions, useNayAlerts } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { sessionPath } from '../../lib/sessionRoute'
@@ -106,11 +107,18 @@ export interface NayDockProps {
   /** The sidebar's own session filters, so the "Sessões" tab lists what the sidebar lists. */
   filters: Filters
   activeOnly: boolean
+  /**
+   * The "new version" popup (`NayUpdateCard`), when the app has one to say. The dock decides only
+   * WHERE: inside the open window, under its header, or spoken by the button while it is closed —
+   * and then only when no session card is up, so the two never stack on the button.
+   */
+  renderUpdatePrompt?: (placement: UpdateCardPlacement) => ReactNode
 }
 
-export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockProps) {
+export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdatePrompt }: NayDockProps) {
   const pt = lang === 'pt'
   const { fleet, loading, unsupported, stale, act } = useFleet(lang)
+  const sessionAlerts = useNayAlerts()
   const rowIndex = useFleetIndex(fleet.sessions)
 
   const [dock, setDock] = useState<DockState>(() => ({
@@ -521,6 +529,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         </IconButton>
       </header>
 
+      {!settingsOpen && renderUpdatePrompt?.('dock')}
+
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {settingsOpen ? (
           <DockSettingsScreen
@@ -580,6 +590,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1} />
+      {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
         <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
