@@ -26,14 +26,14 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
-  isPresenceId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
+  isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
   parseStepUpState, recoveryProtector, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
   type Protector, type ProtectorId, type StepUpState, type VaultJson,
 } from '@agentistics/vault'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
-  presenceWord, presenceCandidates,
+  presenceWord, presenceCandidates, chooseAutoProtector,
 } from './service'
 import { realProtectorIo } from './io'
 
@@ -395,6 +395,95 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
   return { ok: true, removed: r.removed }
+}
+
+// ── §7.1 / §7.4: what the Presence section lists, turning presence off, the owner's machine ──────
+
+export interface CredentialRow { type: ProtectorId; label: string; createdAt: string }
+
+/** The presence credentials this vault holds (never a key, never a handle) — gated like `list`. */
+export async function listCredentials(ctx: GateContext): Promise<
+  { ok: true; grant?: string; credentials: CredentialRow[]; recoveryCreatedAt: string | null; requirePresence: boolean } | Refusal
+> {
+  const g = await requireVaultStepUp('list', ctx)
+  if (!g.ok) return g
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const lang = vaultLang()
+  const credentials = o.vault.wrappers.filter(w => isPresenceId(w.type)).map(w => ({
+    type: w.type, label: protectorById(w.type)?.label(lang) ?? w.type, createdAt: w.createdAt,
+  }))
+  const rec = o.vault.wrappers.find(w => w.type === 'recovery')
+  return { ok: true, ...(g.grant ? { grant: g.grant } : {}), credentials, recoveryCreatedAt: rec?.createdAt ?? null, requirePresence: o.vault.requirePresence === true }
+}
+
+/** The 24 words open THIS vault's recovery wrapper? (typed on a TTY only — never reaches a web route). */
+async function wordsOpenThisVault(words: string, o: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<boolean> {
+  const rec = o.vault.wrappers.find(w => w.type === 'recovery')
+  const e = wordsToEntropy(words)
+  if (!rec || !e.ok) return false
+  try {
+    const u = await recoveryProtector({ io: realProtectorIo(), vaultDir: vaultDir(), entropy: e.entropy }).unwrap(rec, o.kid)
+    if (!u.ok) return false
+    const same = u.dek.length === o.dek.length && timingSafeEqual(Buffer.from(u.dek), Buffer.from(o.dek))
+    u.dek.fill(0)
+    return same
+  } finally { e.entropy.fill(0) }
+}
+
+/**
+ * §7.1 "Turn presence off" (code + gesture). The silent OS wrapper comes back FIRST (written and read
+ * back), only then are the presence keys removed — the same crash-safe order as enrolment, reversed.
+ * On the owner's machine (`requirePresence`) it additionally needs the recovery key (§7.4), which is
+ * typed on a terminal and never here in a web form: the caller passes `words` only from the socket.
+ */
+export async function disablePresence(ctx: GateContext, words?: string): Promise<{ ok: true; replacedBy: ProtectorId } | Refusal> {
+  const lang = vaultLang()
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!hasPresence(o.vault)) return refused('no-presence', lang === 'pt' ? 'Este cofre não usa presença.' : 'This vault does not use presence.')
+  if (o.vault.requirePresence && !words) {
+    return refused('recovery-required', lang === 'pt'
+      ? 'Esta é a máquina principal: desligar a presença exige a chave de recuperação, digitada em um terminal (`agentop vault disable-presence`).'
+      : 'This is the main machine: turning presence off needs the recovery key, typed on a terminal (`agentop vault disable-presence`).')
+  }
+  const g = await requireVaultStepUp('disable-presence', ctx)
+  if (!g.ok) return g
+  if (o.vault.requirePresence && !(await wordsOpenThisVault(words!, o))) {
+    return refused('recovery-denied', lang === 'pt' ? 'Essas palavras não abrem este cofre. Nada foi alterado.' : 'Those words do not open this vault. Nothing was changed.')
+  }
+  const c = await chooseAutoProtector()
+  if (!c.ok) {
+    return refused('no-protector', c.kind === 'unavailable'
+      ? (lang === 'pt' ? `Não há protetor do sistema para assumir (${c.reason}). A presença continua ligada.` : `There is no system protector to take over (${c.reason}). Presence stays on.`)
+      : (lang === 'pt' ? 'Nenhum protetor do sistema respondeu. A presença continua ligada.' : 'No system protector answered. Presence stays on.'))
+  }
+  const w = await c.protector.wrap(o.dek, o.kid)
+  if (!w.ok) return refused('presence-disable-failed', w.reason)
+  const back = await c.protector.unwrap(w.record, o.kid)
+  const same = back.ok && back.dek.length === o.dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(o.dek))
+  if (back.ok) back.dek.fill(0)
+  if (!same) { await c.protector.remove(w.record, o.kid); return refused('presence-disable-failed', 'the replacement wrapper did not give back the same key') }
+  const gone = o.vault.wrappers.filter(x => isPresenceId(x.type))
+  const next: VaultJson = { ...o.vault, v: 2, wrappers: [w.record, ...o.vault.wrappers.filter(x => !isPresenceId(x.type) && !isSilentId(x.type))] }
+  delete next.requirePresence
+  await writeVaultJson(next)
+  o.vault = next
+  for (const r of gone) await protectorById(r.type)?.remove(r, o.kid).catch(() => {})
+  vaultAudit({ type: 'vault.disable-presence', protector: c.protector.id })
+  return { ok: true, replacedBy: c.protector.id }
+}
+
+/** §7.4 `agentop vault enroll --require-presence`: mark THIS machine as the owner's. Only ever strengthens. */
+export async function requirePresenceHere(): Promise<{ ok: true } | Refusal> {
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (o.vault.requirePresence) return { ok: true }
+  const vault: VaultJson = { ...o.vault, v: 2, requirePresence: true }
+  await writeVaultJson(vault)
+  o.vault = vault
+  vaultAudit({ type: 'vault.require-presence' })
+  return { ok: true }
 }
 
 // ── §5.1 the idle period ────────────────────────────────────────────────────────────────────

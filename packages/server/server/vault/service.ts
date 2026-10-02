@@ -884,7 +884,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.unlock'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.unlock'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {

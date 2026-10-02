@@ -8,12 +8,13 @@
  * The shape is a closed list of named fields rather than a spread of anything read from disk.
  */
 import { basename } from 'node:path'
-import { isKid, parseSealed, parseVaultJson } from '@agentistics/vault'
+import { isKid, isPresenceId, parseSealed, parseVaultJson } from '@agentistics/vault'
 import { sealedFiles } from './boot'
-import { requireVaultStepUp, type GateContext } from './gate'
+import { requireVaultStepUp, stepUpState, type GateContext } from './gate'
+import { hardeningLines } from './hardening'
 import {
-  displayPath, lockVault, pendingPlaintextFiles, restoreWithFor, secretFs, vaultDir, vaultStatus,
-  type VaultState,
+  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
+  type LockedBy, type RecoveryStep, type VaultState,
 } from './service'
 
 export type VaultItemState = 'sealed' | 'pending' | 'unreadable'
@@ -44,6 +45,22 @@ export interface VaultView {
   pending: number
   canLock: boolean
   items: VaultItem[]
+  /** §7.1 — what the sections need. Facts about the vault, never a secret and never a value. */
+  wrappers: string[]
+  presence: boolean
+  /** The presence kinds this machine could enrol (§3.4); empty on a headless box. */
+  presenceAvailable: string[]
+  authenticator: { enrolledAt: string; lastUsedAt: string | null; failures: number; pausedUntil: string | null; frozen: boolean } | null
+  recoveryCreatedAt: string | null
+  /** The owner's machine (§7.4): enrolment is the default path and presence cannot be turned off lightly. */
+  requirePresence: boolean
+  autoLockMinutes: number
+  autoLockInMs: number | null
+  pendingStepup: boolean
+  lockedBy: LockedBy | null
+  recoveryTodo: RecoveryStep[] | null
+  /** §5.3 / §7.1 "Hardening": the report plus its already-localized lines (empty = nothing to say). */
+  hardening: { state: 'ok' | 'limited' | 'failed'; private: boolean | null; coreDumps: 'off' | 'on' | null; yama: string | null; lines: string[] } | null
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
@@ -66,11 +83,15 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
   const s = await vaultStatus()
   let createdAt: string | null = null
   let kid = s.kid
+  let stored: ReturnType<typeof parseVaultJson> = null
   try {
     const raw = await secretFs().readFile(`${vaultDir()}/vault.json`)
-    const v = parseVaultJson(raw ? new TextDecoder().decode(raw) : null)
-    if (v) { createdAt = v.createdAt; kid = kid ?? v.kid }
+    stored = parseVaultJson(raw ? new TextDecoder().decode(raw) : null)
+    if (stored) { createdAt = stored.createdAt; kid = kid ?? stored.kid }
   } catch { /* the view says "unknown" rather than failing */ }
+  const su = await stepUpState()
+  const STEP_MS = 30_000
+
   const items: VaultItem[] = []
   for (const f of files) {
     const st = await secretFs().lstat(f)
@@ -94,6 +115,17 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
   return {
     state: s.state, protector: s.protector, protectorLabel: s.protectorLabel, kid, createdAt,
     sentence: s.sentence, pending: s.pending, canLock: s.state === 'open', items,
+    wrappers: s.wrappers, presence: s.wrappers.some(w => isPresenceId(w)), presenceAvailable: presenceCandidates().map(p => p.id),
+    authenticator: stored?.stepup ? {
+      enrolledAt: stored.stepup.enrolledAt, lastUsedAt: su.lastStep !== null ? new Date(su.lastStep * STEP_MS).toISOString() : null,
+      failures: su.failures, pausedUntil: su.pausedUntilMs ? new Date(su.pausedUntilMs).toISOString() : null, frozen: su.frozen,
+    } : null,
+    recoveryCreatedAt: stored?.wrappers.find(w => w.type === 'recovery')?.createdAt ?? null,
+    requirePresence: stored?.requirePresence === true,
+    autoLockMinutes: stored?.autoLock?.minutes ?? 30,
+    autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
+    recoveryTodo: s.recoveryTodo ?? null,
+    hardening: s.hardening ? { state: s.hardening.state, private: s.hardening.private, coreDumps: s.hardening.coreDumps, yama: s.hardening.yama, lines: hardeningLines(s.hardening, vaultLang()) } : null,
   }
 }
 

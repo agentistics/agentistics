@@ -41,8 +41,9 @@ import {
 } from './service'
 import {
   addPassphraseAllowed, beginAuthenticator, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
-  enrolPresence, recoverWithWords, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
+  disablePresence, enrolPresence, recoverWithWords, requirePresenceHere, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
 } from './gate'
+import { readVaultView } from './inventory'
 import { setVaultOpHandler, type OpContext, type OpResult } from './socket'
 import { MAX_BODY } from './wire'
 import { realProtectorIo } from './io'
@@ -437,6 +438,20 @@ async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
   const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET })
   return { reply: r.ok ? { ok: true, removed: r.removed } : r }
 }
+/** §7.4: the 24 words are typed on the TTY and arrive here only from the socket (never HTTP). */
+async function opPresenceDisable(h: Record<string, unknown>): Promise<OpResult> {
+  if (h.words !== undefined && !str(h.words, 1024)) return bad()
+  const r = await disablePresence({ code: codeOf(h), session: SOCKET }, typeof h.words === 'string' ? h.words : undefined)
+  return { reply: r.ok ? { ok: true, replacedBy: r.replacedBy } : r }
+}
+async function opRequirePresence(): Promise<OpResult> {
+  const r = await requirePresenceHere()
+  return { reply: r.ok ? { ok: true } : r }
+}
+/** The metadata the web's sections read (no inventory): authenticator, credentials, auto-lock, hardening. */
+async function opView(): Promise<OpResult> {
+  return { reply: { ok: true, view: await readVaultView([], async () => []) } }
+}
 async function opSetAutoLock(h: Record<string, unknown>): Promise<OpResult> {
   const r = await setAutoLockMinutes(h.minutes, { code: codeOf(h), session: SOCKET })
   return { reply: r.ok ? { ok: true } : r }
@@ -459,6 +474,9 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'recovery-begin': return opRecoveryBegin(h)
     case 'recovery-confirm': return opRecoveryConfirm(h)
     case 'presence-enroll': return opPresenceEnroll(h)
+    case 'presence-disable': return opPresenceDisable(h)
+    case 'require-presence': return opRequirePresence()
+    case 'view': return opView()
     case 'set-auto-lock': return opSetAutoLock(h)
     case 'activity': return { reply: { ok: true } }
     case 'lock': return opLock(h)
