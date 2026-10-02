@@ -50,6 +50,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     RECOVERY_ALLOWED: 'action names', _mem: 'the step-up counters (integrity, not secret — §2.3)', _now: 'a clock',
     _grantKey: 'the in-memory HMAC key that signs 5-minute read grants (§2.4: minted at start, never on disk); signs, decrypts nothing',
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',
+    _flowUntil: 'a deadline (ms) after which the wizard\'s one verified code stops standing for later steps; no key material', _enrolWrong: 'a wrong-code counter for one enrolment',
     _recovery: 'NEW recovery entropy while its words are confirmed (§4.2): ≤ 10 min, zeroed on confirm/expiry',
   },
   'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle' },

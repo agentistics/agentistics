@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows,
+  rememberGrant, remainingMs, wordRows, wizardPlan, askWords,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -120,5 +120,33 @@ describe('words', () => {
     expect(vt('wiz_rec_warn', 'en')).toContain('this computer can open your vault')
     expect(vt('wiz_rec_warn', 'pt')).toContain('Guarde offline')
     expect(vt('wiz_rec_once', 'en')).toContain('no copy button')
+  })
+})
+
+describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
+  test('a fresh machine runs the device check FIRST, then authenticator → recovery → presence', () => {
+    expect(wizardPlan(['authenticator', 'recovery', 'presence'])).toEqual(['probe', 'authenticator', 'recovery', 'presence'])
+  })
+  test('a resume has no probe (the presence enrolment is its own double gesture); no presence device, no probe', () => {
+    expect(wizardPlan(['recovery', 'presence'])).toEqual(['recovery', 'presence'])
+    expect(wizardPlan(['authenticator', 'recovery'])).toEqual(['authenticator', 'recovery'])
+    expect(wizardPlan([])).toEqual([])
+  })
+  const words = { code: 'your code', presence: 'Windows Hello', and: ' and ', asks: 'Will ask for: {what}', nothing: 'Nothing more is asked.' }
+  test('a tooltip names exactly what the gate row asks', () => {
+    expect(askWords({ code: true, gesture: true }, words)).toBe('Will ask for: your code and Windows Hello')
+    expect(askWords({ code: true, gesture: false }, words)).toBe('Will ask for: your code')
+    expect(askWords({ code: false, gesture: true }, words)).toBe('Will ask for: Windows Hello')
+    expect(askWords({ code: false, gesture: false }, words)).toBe('Nothing more is asked.')
+  })
+  test('the owner’s wording is in place, in both languages', () => {
+    expect(vt('pres_off', 'pt')).toBe('Desligada. Hoje o cofre abre sozinho quando o agentistics liga, sem pedir sua digital/PIN.')
+    expect(vt('pres_turnOn', 'pt')).toBe('Exigir Windows Hello')
+    expect(vt('rec_create', 'pt')).toBe('Criar chave de recuperação')
+    expect(vt('rec_new', 'pt')).toBe('Gerar uma nova (a antiga para de valer)')
+    expect(vt('sec_hardening', 'pt')).toBe('Proteção da memória')
+    expect(vt('auth_explain', 'pt')).toBe('O código do app é pedido para abrir o cofre e para mudar estas configurações.')
+    expect(vt('rec_lost', 'pt')).toContain('agentop vault recover')
+    expect(vt('rec_create', 'en')).not.toBe(vt('rec_create', 'pt'))
   })
 })

@@ -419,8 +419,8 @@ async function opAuthenticatorBegin(h: Record<string, unknown>): Promise<OpResul
   return { reply: r.ok ? { ok: true, uri: r.uri, secret: r.secret } : r }
 }
 async function opAuthenticatorConfirm(h: Record<string, unknown>): Promise<OpResult> {
-  if (!str(h.code1, 16) || !str(h.code2, 16)) return bad()
-  const r = await confirmAuthenticator(h.code1, h.code2)
+  if (!str(h.code, 16)) return bad()
+  const r = await confirmAuthenticator(h.code)
   return { reply: r.ok ? { ok: true } : r }
 }
 /** Hands out the NEW 24 words — once, by design: they are written on paper (§4.2). */

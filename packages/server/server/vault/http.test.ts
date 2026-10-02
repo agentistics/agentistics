@@ -77,7 +77,7 @@ async function fresh(): Promise<void> {
 async function enrolOverHttp(): Promise<string[]> {
   const a = await http('POST', '/api/vault/authenticator/begin', {})
   seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code1: codeAt(-1), code2: codeAt(0) })).status).toBe(200)
+  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })).status).toBe(200)
   next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
   const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
@@ -138,20 +138,21 @@ describe('POST /api/vault/authenticator/begin + confirm', () => {
     expect(again).toMatchObject({ status: 403, json: { ok: false, code: 'already-served' } })
   })
 
-  test('confirm: two codes that are not consecutive are refused; nothing is sealed until they are', async () => {
+  test('confirm takes ONE code: a wrong one is refused and seals nothing; the right one seals and returns the read grant', async () => {
     const a = await http('POST', '/api/vault/authenticator/begin', {})
     seed = base32Decode(a.json.secret)
-    const wrong = await http('POST', '/api/vault/authenticator/confirm', { code1: codeAt(0), code2: codeAt(-1) })
+    const wrong = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
     expect(wrong).toMatchObject({ status: 403, json: { code: 'stepup-wrong' } })
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.stepup).toBeUndefined()
-    const ok = await http('POST', '/api/vault/authenticator/confirm', { code1: codeAt(-1), code2: codeAt(0) })
+    const ok = await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     expect(ok.status).toBe(200)
+    expect(typeof ok.json.grant).toBe('string')
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.stepup).toMatchObject({ digits: 6, period: 30 })
   })
 
   test('confirm without a begin, or with a malformed body, is refused', async () => {
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code1: '123456', code2: '123457' })).json.code).toBe('no-enrolment')
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code1: '123456' })).status).toBe(400)
+    expect((await http('POST', '/api/vault/authenticator/confirm', { code: '123456' })).json.code).toBe('no-enrolment')
+    expect((await http('POST', '/api/vault/authenticator/confirm', { code1: '123456' })).status).toBe(400) // the old two-code body is no longer a request
     expect((await http('POST', '/api/vault/authenticator/confirm')).status).toBe(400)
   })
 
@@ -220,7 +221,7 @@ describe('POST /api/vault/presence/enroll', () => {
   test('refuses before the recovery key exists (a lost device would lose the vault)', async () => {
     const a = await http('POST', '/api/vault/authenticator/begin', {})
     seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code1: codeAt(-1), code2: codeAt(0) })
+    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     next()
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })).json.code).toBe('needs-recovery')
   })
@@ -228,10 +229,10 @@ describe('POST /api/vault/presence/enroll', () => {
   test('is gated: no code 401, wrong code 403 with the vault untouched; the right one retires the silent wrapper', async () => {
     const a = await http('POST', '/api/vault/authenticator/begin', {})
     seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code1: codeAt(-1), code2: codeAt(0) })
-    next()
+    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     const r = await http('POST', '/api/vault/recovery/begin', {})
     await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
+    T += 11 * 60_000 // the wizard's window is over: adding presence later is a gated action again
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: wrongCode() })).status).toBe(403)
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).not.toContain('hello')
@@ -370,5 +371,75 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
     const after = await http('GET', '/api/vault')
     expect(after.json).toMatchObject({ state: 'locked', lockedBy: 'auto-lock', locked: true })
     expect(after.json.autoLockInMs).toBeNull()
+  })
+})
+
+describe('owner decision 2026-10-02 — ONE code, no second code after the wizard', () => {
+  test('a code one step off still passes (±1); the same code never works twice (replay floor)', async () => {
+    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    seed = base32Decode(a.json.secret)
+    const used = codeAt(-1)
+    expect((await http('POST', '/api/vault/authenticator/confirm', { code: used })).status).toBe(200)
+    // that very code, now as a step-up: refused as replayed
+    expect((await http('POST', '/api/vault/stepup', { code: used })).json.code).toBe('stepup-replayed')
+  })
+
+  test('five wrong codes drop the seed: the QR must be fetched again', async () => {
+    await http('POST', '/api/vault/authenticator/begin', {})
+    for (let i = 0; i < 4; i++) expect((await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })).json.code).toBe('stepup-wrong')
+    const fifth = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
+    expect(fifth.json.sentence).toContain('Start over')
+    expect((await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })).json.code).toBe('no-enrolment')
+  })
+
+  test('the grant from the confirm opens the inventory at once — no fresh code, no 30 s wait', async () => {
+    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    seed = base32Decode(a.json.secret)
+    const ok = await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
+    const r = await http('GET', '/api/vault', undefined, ok.json.grant)
+    expect(r.status).toBe(200)
+    expect(Array.isArray(r.json.items)).toBe(true)
+  })
+
+  test('recovery key and presence in the same wizard need NO second code; later (flow over) presence is gated again', async () => {
+    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    seed = base32Decode(a.json.secret)
+    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
+    const r = await http('POST', '/api/vault/recovery/begin', {})
+    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
+    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' }) // no code
+    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'] } })
+    // the flow is closed: adding a presence credential again asks for the code
+    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
+  })
+
+  test('without an enrolment in progress, presence still needs the code (the skip is not a hole)', async () => {
+    await enrolOverHttp()
+    next()
+    restart()
+    await http('POST', '/api/vault/unlock')
+    await http('POST', '/api/vault/unlock/code', { code: codeAt() })
+    next()
+    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
+  })
+})
+
+describe('POST /api/vault/presence/probe — the gesture check BEFORE anything changes', () => {
+  test('a working device passes, writes nothing and leaves no stored key behind', async () => {
+    const before = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
+    const keys = STORE.size
+    const r = await http('POST', '/api/vault/presence/probe', { protector: 'hello' })
+    expect(r).toMatchObject({ status: 200, json: { ok: true } })
+    expect(readFileSync(join(vaultDir(), 'vault.json'), 'utf8')).toBe(before)
+    expect(STORE.size).toBe(keys)
+    expect(hello.gestures).toBeGreaterThanOrEqual(1)
+  })
+  test('refuses a non-presence kind (400), a locked vault, and — once enrolled — an unauthenticated probe (401)', async () => {
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'dpapi' })).status).toBe(400)
+    await enrolOverHttp()
+    next()
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).status).toBe(401)
+    restart()
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).json.code).toBe('locked')
   })
 })

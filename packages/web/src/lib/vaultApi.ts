@@ -103,7 +103,8 @@ export const setAutoLock = (minutes: number, code?: string) => call('POST', '/ap
 export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
 
 export const authenticatorBegin = (code?: string) => call('POST', '/api/vault/authenticator/begin', code ? { code } : {}).then(r => reply<{ uri: string; secret: string }>(r))
-export const authenticatorConfirm = (code1: string, code2: string) => call('POST', '/api/vault/authenticator/confirm', { code1, code2 }).then(r => reply(r))
+export const authenticatorConfirm = (code: string) => call('POST', '/api/vault/authenticator/confirm', { code }).then(r => reply<{ grant: string }>(r))
+export const presenceProbe = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(code ? { code } : {}) }).then(r => reply(r))
 export const recoveryBegin = (code?: string) => call('POST', '/api/vault/recovery/begin', code ? { code } : {}).then(r => reply<{ words: string[]; positions: number[] }>(r))
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
 export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}) }).then(r => reply<{ removed: string[] }>(r))
@@ -149,6 +150,20 @@ export function needsTypedCode(g: { code: boolean; grant: boolean }, grantIsAliv
 }
 
 export type WizardStep = 'authenticator' | 'recovery' | 'presence'
+/** What the wizard runs: the device check leads whenever a fresh enrolment will end in presence. */
+export type WizardPhaseStep = 'probe' | WizardStep
+
+/** PURE. The whole §7.3 flow for what is missing: probe → authenticator → recovery → presence. */
+export function wizardPlan(missing: readonly WizardStep[]): WizardPhaseStep[] {
+  return missing.includes('presence') && missing.includes('authenticator') ? ['probe', ...missing] : [...missing]
+}
+
+/** PURE. What an action will ask, as words for a tooltip — from the gate row, narrowed by this vault. */
+export function askWords(g: { code: boolean; gesture: boolean }, words: { code: string; presence: string; and: string; asks: string; nothing: string }): string {
+  if (!g.code && !g.gesture) return words.nothing
+  const parts = [g.code ? words.code : null, g.gesture ? words.presence : null].filter(Boolean).join(words.and)
+  return words.asks.replace('{what}', parts)
+}
 /** PURE. What an "ultra secure" setup still lacks, in the one safe order (presence last — it retires the silent wrapper). */
 export function missingSteps(v: Pick<VaultView, 'authenticator' | 'recoveryCreatedAt' | 'presence' | 'presenceAvailable'>): WizardStep[] {
   const out: WizardStep[] = []

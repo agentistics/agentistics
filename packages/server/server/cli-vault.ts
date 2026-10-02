@@ -399,11 +399,10 @@ async function enrolAuthenticator(): Promise<number> {
   for (const l of qrHalfBlocks(String(a.uri))) process.stdout.write('  ' + l + '\n')
   process.stdout.write('\n' + t('Cannot scan it? Type this key into the app:\n', 'Não consegue escanear? Digite esta chave no app:\n'))
   process.stdout.write('  ' + String(a.secret).match(/.{1,4}/g)?.join(' ') + '\n\n')
-  process.stdout.write(t('Then type two codes in a row (wait for the app to show the next one):\n', 'Depois digite dois códigos seguidos (espere o app mostrar o próximo):\n'))
+  process.stdout.write(t('Then type the 6-digit code the app shows now:\n', 'Depois digite o código de 6 dígitos que o app mostra agora:\n'))
   for (let attempt = 0; attempt < 3; attempt++) {
-    const c1 = (await maskedInput(t('First code', 'Primeiro código'))).replace(/\s/g, '')
-    const c2 = (await maskedInput(t('Next code', 'Código seguinte'))).replace(/\s/g, '')
-    const r = await ask({ op: 'authenticator-confirm', code1: c1, code2: c2 })
+    const c = (await maskedInput(t('Authenticator code', 'Código do autenticador'))).replace(/\s/g, '')
+    const r = await ask({ op: 'authenticator-confirm', code: c })
     if (!r) return down()
     if (r.ok) { process.stdout.write(t('Authenticator set up.\n', 'Autenticador configurado.\n')); return 0 }
     process.stderr.write(String(r.sentence) + '\n')

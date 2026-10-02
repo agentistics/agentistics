@@ -272,30 +272,83 @@ export async function beginAuthenticator(ctx: GateContext, machineLabel: string)
   return { ok: true, uri: otpauthUri(secret, machineLabel, 'Agentistics'), secret }
 }
 
-/** Confirm with TWO CONSECUTIVE codes (the app holds the seed AND the clock is right), then seal it. */
-export async function confirmAuthenticator(code1: string, code2: string): Promise<{ ok: true } | Refusal> {
+/**
+ * An enrolment in progress (owner decision 2026-10-02, superseding §2.5's two codes): once the ONE
+ * verified code has proved the app holds the seed, the rest of THIS wizard (recovery key, presence)
+ * does not ask for it again. Memory only, 10 minutes, cleared when presence is enrolled or the vault locks.
+ */
+let _flowUntil = 0
+const flowActive = (): boolean => _now() < _flowUntil
+let _enrolWrong = 0
+const ENROL_MAX_WRONG = 5
+
+/**
+ * Confirm with ONE code (±1 step, so a slow typist or a small clock skew still passes), then seal the
+ * seed. The accepted step becomes the replay floor, so the same code never works twice; five wrong
+ * codes drop the seed and the QR must be fetched again. The verified code (plus the open vault) is
+ * what the caller turns into the 5-minute 'read' grant, so the screen needs no second code after.
+ */
+export async function confirmAuthenticator(code: string): Promise<{ ok: true; step: number } | Refusal> {
   const e = _enrolSeed
   if (!e || _now() > e.expiresMs) { dropEnrolSeed(); return refused('no-enrolment', vaultLang() === 'pt' ? 'Nenhuma configuração do autenticador em andamento.' : 'No authenticator setup is in progress.') }
   const nowSec = Math.floor(_now() / 1000)
-  // Wide enough to cover the user typing two codes in a row; the pair must be ADJACENT steps.
-  const s1 = matchTotp(e.seed, code1, nowSec, 3)
-  const s2 = matchTotp(e.seed, code2, nowSec, 3)
-  if (s1 === null || s2 === null || s2 !== s1 + 1) {
-    return refused('stepup-wrong', vaultLang() === 'pt' ? 'Esses dois códigos não são dois códigos seguidos deste autenticador. Tente de novo com os dois próximos.' : 'Those are not two consecutive codes from this authenticator. Try again with the next two.')
+  const s = matchTotp(e.seed, code, nowSec, 1)
+  if (s === null) {
+    if (++_enrolWrong >= ENROL_MAX_WRONG) {
+      dropEnrolSeed(); _enrolWrong = 0
+      return refused('stepup-wrong', vaultLang() === 'pt' ? 'Muitos códigos errados. Comece de novo e escaneie o QR code outra vez.' : 'Too many wrong codes. Start over and scan the QR code again.')
+    }
+    return refused('stepup-wrong', vaultLang() === 'pt' ? 'Esse código não é deste autenticador (ou o relógio do celular está diferente). Tente o código atual.' : 'That code is not from this authenticator (or the phone clock differs). Try the current code.')
   }
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
   try {
     await sealToFile(seedFile(), SEED_PURPOSE, SEED_NAME, e.seed)
   } finally { dropEnrolSeed() }
+  _enrolWrong = 0
   const vault: VaultJson = { ...o.vault, v: 2, stepup: { enrolledAt: new Date(_now()).toISOString(), digits: 6, period: 30 } }
   await writeVaultJson(vault)
   o.vault = vault
-  // A fresh authenticator starts a fresh counter; the replay floor is the second code's step.
-  await saveState({ v: 1, failures: 0, lastStep: s2, pausedUntilMs: null, frozen: false })
+  // A fresh authenticator starts a fresh counter; the replay floor is the step just used.
+  await saveState({ v: 1, failures: 0, lastStep: s, pausedUntilMs: null, frozen: false })
+  _flowUntil = _now() + ENROL_TTL_MS
   recoveryStepDone('authenticator')
   vaultAudit({ type: 'vault.enroll-authenticator' })
-  return { ok: true }
+  return { ok: true, step: s }
+}
+
+/**
+ * §7.3 step 1, BEFORE anything is changed: does this presence device complete a real round trip
+ * (wrap + unwrap, two gestures) with a throwaway key? Nothing is written to the vault and the
+ * throwaway key is removed. Gated like the enrolment it precedes, unless it is part of the first
+ * enrolment (no authenticator yet).
+ */
+export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true } | Refusal> {
+  const lang = vaultLang()
+  if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (o.vault.stepup && !flowActive() && !recoveryTodo()) {
+    // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
+    if (!flowActive()) {
+      const g = await requireVaultStepUp('enroll-presence', ctx)
+      if (!g.ok) return g
+    }
+  }
+  const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
+  if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
+  const dek = new Uint8Array(randomBytes(32))
+  const kid = randomBytes(8).toString('hex')
+  try {
+    const w = await presence.wrap(dek, kid)
+    if (!w.ok) return refused('presence-unavailable', w.reason)
+    const back = await presence.unwrap(w.record, kid)
+    await presence.remove(w.record, kid).catch(() => {})
+    const same = back.ok && back.dek.length === dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(dek))
+    if (back.ok) back.dek.fill(0)
+    if (!same) return refused('presence-unavailable', back.ok ? 'the device did not give back the same key' : back.reason)
+    return { ok: true }
+  } finally { dek.fill(0) }
 }
 
 async function writeVaultJson(v: VaultJson): Promise<void> {
@@ -383,8 +436,11 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!recoveryTodo()) {
     if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
     if (!o.vault.wrappers.some(w => w.type === 'recovery')) return refused('needs-recovery', lang === 'pt' ? 'Crie a chave de recuperação antes da presença (`agentop vault enroll --recovery`).' : 'Create the recovery key before presence (`agentop vault enroll --recovery`).')
-    const g = await requireVaultStepUp('enroll-presence', ctx)
-    if (!g.ok) return g
+    // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
+    if (!flowActive()) {
+      const g = await requireVaultStepUp('enroll-presence', ctx)
+      if (!g.ok) return g
+    }
   }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
   if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
@@ -392,6 +448,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
   if (!r.ok) return refused('presence-enrol-failed', r.reason)
   o.vault = r.vault
+  _flowUntil = 0
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
   return { ok: true, removed: r.removed }
@@ -518,5 +575,7 @@ export function __resetGateForTests(now?: () => number): void {
   _grantKey = randomBytes(32)
   dropEnrolSeed()
   dropRecovery()
+  _flowUntil = 0
+  _enrolWrong = 0
 }
 

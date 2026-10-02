@@ -98,8 +98,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/authenticator/confirm' && req.method === 'POST') {
     const b = await body()
-    if (!str(b.code1, 16) || !str(b.code2, 16)) return bad()
-    return reply(await gate.confirmAuthenticator(b.code1, b.code2))
+    if (!str(b.code, 16)) return bad()
+    const r = await gate.confirmAuthenticator(b.code)
+    // The code just verified (with the vault open) is the step-up: hand back the 5-minute 'read' grant.
+    return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
   }
   if (path === '/api/vault/recovery/begin' && req.method === 'POST') {
     // The FIRST recovery key needs only the open vault; a rotation is gated (code + gesture).
@@ -121,6 +123,11 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'A chave de recuperação é digitada só em um terminal, nesta máquina: rode `agentop vault recover`. Ela nunca é digitada em uma página.'
         : 'The recovery key is typed only on a terminal, on this machine: run `agentop vault recover`. It is never typed into a page.',
     })
+  }
+  if (path === '/api/vault/presence/probe' && req.method === 'POST') {
+    const b = await body()
+    if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
+    return reply(await gate.probePresence(b.protector, { code: codeOf(b), session }))
   }
   if (path === '/api/vault/presence/enroll' && req.method === 'POST') {
     const b = await body()

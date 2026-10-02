@@ -62,7 +62,7 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     'vault-reset': { req: { op: 'vault-reset' } },
     'unlock-code': { req: { op: 'unlock-code', code: '000000' } },
     recover: { req: { op: 'recover', words: 'abandon '.repeat(23) + 'art' } },
-    'authenticator-confirm': { req: { op: 'authenticator-confirm', code1: '000000', code2: '000001' } },
+    'authenticator-confirm': { req: { op: 'authenticator-confirm', code: '000000' } },
     'recovery-confirm': { req: { op: 'recovery-confirm', typed: ['a', 'b', 'c'] } },
     'presence-enroll': { req: { op: 'presence-enroll', protector: 'hello' } },
     'set-auto-lock': { req: { op: 'set-auto-lock', minutes: 45 } },

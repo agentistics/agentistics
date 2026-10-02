@@ -71,7 +71,7 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   expect(a.uri).toStartWith('otpauth://totp/Agentistics:test-box?')
   // The URI is served ONCE.
   expect((await beginAuthenticator(S, 'test-box')).ok).toBe(false)
-  expect((await confirmAuthenticator(codeAt(-1), codeAt(0))).ok).toBe(true)
+  expect((await confirmAuthenticator(codeAt(0))).ok).toBe(true)
   next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)
@@ -244,7 +244,7 @@ describe('§4.3 / §12.4 recovery', () => {
     const a = await beginAuthenticator(S, 'test-box')
     if (!a.ok) throw new Error(a.sentence)
     seed = base32Decode(a.secret)
-    expect((await confirmAuthenticator(codeAt(-1), codeAt(0))).ok).toBe(true)
+    expect((await confirmAuthenticator(codeAt(0))).ok).toBe(true)
     next()
     const k = await beginRecoveryKey(S)
     if (!k.ok) throw new Error(k.sentence)

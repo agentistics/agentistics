@@ -20,7 +20,8 @@ import {
   authenticatorBegin, authenticatorConfirm, cleanCode, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
   loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
-  type Credential, type LoadResult, type VaultView, type WizardStep,
+  askWords, presenceProbe, wizardPlan,
+  type Credential, type LoadResult, type VaultView, type WizardPhaseStep, type WizardStep,
 } from '../../lib/vaultApi'
 
 const TONE = {
@@ -108,8 +109,14 @@ export default function VaultSettings() {
   const left = remainingMs(view.autoLockInMs, reportedAt, now)
   const presWord = vt(presenceKey(view.wrappers), lang)
   const g = (action: string) => gateFor(view, action)
+  // Every gated button says, on hover and to assistive tech, exactly what it will ask.
+  const tip = (action: string): string => askWords(g(action), {
+    code: t('tip_code'), presence: vtf('tip_presence', lang, { presence: presWord }), and: t('tip_and'), asks: t('tip_asks'), nothing: t('tip_nothing'),
+  })
   const locked = view.state === 'locked'
   const steps = missingSteps(view)
+  // A section's button runs the WHOLE missing flow (never one lonely step); only a replacement is single.
+  const startSetup = (preferred: WizardStep) => setWizard(steps.length > 0 ? steps : [preferred])
   const canUpgrade = steps.length > 0 && view.state !== 'uninitialized' && view.state !== 'corrupt' && view.state !== 'protector-lost'
   const showBanner = canUpgrade && !view.recoveryTodo && (view.requirePresence || !dismissed) && open
   const dismiss = () => { setDismissed(true); try { localStorage.setItem(UPGRADE_DISMISS_KEY, '1') } catch { /* a convenience only */ } }
@@ -144,7 +151,7 @@ export default function VaultSettings() {
         </div>
         {locked && <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} />}
         {open && (
-          <button type="button" style={btn} onClick={() => ask('lock')} disabled={!view.canLock}>
+          <button type="button" style={btn} onClick={() => ask('lock')} disabled={!view.canLock} title={tip('lock')} aria-label={`${t('lockNow')}. ${tip('lock')}`}>
             {t('lockNow')} <Gate code={g('lock').code} gesture={g('lock').gesture} lang={lang} />
           </button>
         )}
@@ -168,7 +175,7 @@ export default function VaultSettings() {
             {view.requirePresence ? t('ultraRequired') : t('ultraBody')}
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <button type="button" style={hot} onClick={() => setWizard(steps)}>{t('ultraStart')}</button>
+            <button type="button" style={hot} onClick={() => setWizard(steps)} title={t('ultraBody')}>{t('ultraStart')}</button>
             {/* The owner's machine does not offer "skip" (§7.4). */}
             {!view.requirePresence && <button type="button" style={btn} onClick={dismiss}>{t('ultraLater')}</button>}
           </div>
@@ -192,17 +199,21 @@ export default function VaultSettings() {
             <>
               <PrefRow label={vtf('auth_ready', lang, { date: fmt(view.authenticator.enrolledAt) })}
                 sub={`${t('auth_lastUsed')}: ${view.authenticator.lastUsedAt ? fmt(view.authenticator.lastUsedAt) : t('auth_never')}`}>
-                <button type="button" style={btn} onClick={() => setWizard(['authenticator'])}>
+                <button type="button" style={btn} onClick={() => setWizard(['authenticator'])} title={tip('enroll-authenticator')} aria-label={`${t('auth_replace')}. ${tip('enroll-authenticator')}`}>
                   {t('auth_replace')} <Gate code={g('enroll-authenticator').code} gesture={g('enroll-authenticator').gesture} lang={lang} />
                 </button>
               </PrefRow>
+              <Note>{t('auth_explain')}</Note>
               {view.authenticator.pausedUntil && <Note tone="warn">{vtf('auth_paused', lang, { date: fmt(view.authenticator.pausedUntil) })}</Note>}
               {view.authenticator.frozen && <Note tone="bad">{t('auth_frozen')}</Note>}
             </>
           ) : (
-            <PrefRow label={t('auth_none')}>
-              <button type="button" style={hot} onClick={() => setWizard(['authenticator'])}>{t('auth_setup')}</button>
-            </PrefRow>
+            <>
+              <PrefRow label={t('auth_none')}>
+                <button type="button" style={hot} onClick={() => startSetup('authenticator')} title={t('ultraBody')}>{t('auth_setup')}</button>
+              </PrefRow>
+              <Note>{t('auth_explain')}</Note>
+            </>
           )}
           <Divider />
 
@@ -215,7 +226,7 @@ export default function VaultSettings() {
               {!creds && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{presWord}</div>}
               {view.presenceAvailable.includes('fido2') && (
                 <PrefRow label={t('pres_addKey')}>
-                  <button type="button" style={btn} onClick={() => setWizard(['presence'])}>
+                  <button type="button" style={btn} onClick={() => setWizard(['presence'])} title={tip('enroll-presence')} aria-label={`${t('pres_addKey')}. ${tip('enroll-presence')}`}>
                     {t('pres_addKey')} <Gate code={g('enroll-presence').code} gesture={g('enroll-presence').gesture} lang={lang} />
                   </button>
                 </PrefRow>
@@ -224,7 +235,7 @@ export default function VaultSettings() {
                 ? <Note>{t('pres_mainMachine')}</Note>
                 : (
                   <PrefRow label={t('pres_turnOff')} sub={t('pres_offConsequence')}>
-                    <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => ask('presence-off')}>
+                    <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => ask('presence-off')} title={tip('disable-presence')} aria-label={`${t('pres_turnOff')}. ${tip('disable-presence')}`}>
                       {t('pres_turnOff')} <Gate code={g('disable-presence').code} gesture={g('disable-presence').gesture} lang={lang} />
                     </button>
                   </PrefRow>
@@ -234,22 +245,23 @@ export default function VaultSettings() {
             <Note>{t('pres_unavailable')}</Note>
           ) : (
             <PrefRow label={t('pres_off')}>
-              <button type="button" style={hot} onClick={() => setWizard(view.authenticator && view.recoveryCreatedAt ? ['presence'] : steps)}>{t('pres_turnOn')}</button>
+              <button type="button" style={hot} onClick={() => startSetup('presence')} title={t('ultraBody')}>{t(view.presenceAvailable.includes('hello') ? 'pres_turnOn' : 'pres_turnOnKey')}</button>
             </PrefRow>
           )}
           <Divider />
 
           <SectionHeader label={t('sec_recovery')} />
-          <PrefRow label={view.recoveryCreatedAt ? vtf('rec_created', lang, { date: fmt(view.recoveryCreatedAt) }) : t('rec_none')} sub={view.recoveryCreatedAt ? t('rec_newHint') : undefined}>
-            <button type="button" style={view.recoveryCreatedAt ? btn : hot} onClick={() => setWizard(['recovery'])}>
-              {view.recoveryCreatedAt ? t('rec_new') : t('wiz_rec_show')} <Gate code={g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
+          <PrefRow label={view.recoveryCreatedAt ? vtf('rec_created', lang, { date: fmt(view.recoveryCreatedAt) }) : t('rec_none')} sub={undefined}>
+            <button type="button" style={view.recoveryCreatedAt ? btn : hot} title={view.recoveryCreatedAt ? tip('rotate-recovery') : t('ultraBody')}
+              onClick={() => (view.recoveryCreatedAt ? setWizard(['recovery']) : startSetup('recovery'))}>
+              {view.recoveryCreatedAt ? t('rec_new') : t('rec_create')} <Gate code={g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
             </button>
           </PrefRow>
           <Note>{t('rec_lost')}</Note>
           <Divider />
 
           <SectionHeader label={t('sec_autolock')} />
-          <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
+          <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} tipText={tip('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
           <Divider />
 
           <SectionHeader label={t('sec_hardening')} />
@@ -429,8 +441,8 @@ function StepUpCard({ lang, sentence, code: why, isMobile, onDone }: { lang: 'en
   )
 }
 
-function AutoLockRow({ view, lang, isMobile, gate, btn, onSave }: {
-  view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties; onSave: (minutes: number) => void
+function AutoLockRow({ view, lang, isMobile, gate, tipText, btn, onSave }: {
+  view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; tipText: string; btn: React.CSSProperties; onSave: (minutes: number) => void
 }) {
   const [text, setText] = useState(String(view.autoLockMinutes))
   useEffect(() => { setText(String(view.autoLockMinutes)) }, [view.autoLockMinutes])
@@ -438,36 +450,47 @@ function AutoLockRow({ view, lang, isMobile, gate, btn, onSave }: {
   const valid = parsed !== null && parsed >= AUTO_LOCK_MIN && parsed <= AUTO_LOCK_MAX
   return (
     <>
-      <PrefRow label={vt('auto_label', lang)} sub={vt('auto_hint', lang)}>
-        <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-          <input
-            value={text} onChange={e => setText(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" aria-label={vt('auto_label', lang)}
-            onBlur={() => { if (parsed !== null) setText(String(clampAutoLock(parsed))) }}
-            style={{ ...input, width: 84, marginBottom: 0, letterSpacing: 'normal', textAlign: 'right', minHeight: isMobile ? 44 : undefined }}
-          />
-          <button type="button" style={btn} disabled={!valid || parsed === view.autoLockMinutes} onClick={() => { if (parsed !== null) onSave(clampAutoLock(parsed)) }}>
-            {vt('auto_save', lang)} <Gate code={gate.code} gesture={gate.gesture} lang={lang} />
-          </button>
-        </span>
-      </PrefRow>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
+        <span>{vt('auto_before', lang)}</span>
+        <input
+          value={text} onChange={e => setText(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" aria-label={`${vt('auto_before', lang)} … ${vt('auto_after', lang)}`}
+          onBlur={() => { if (parsed !== null) setText(String(clampAutoLock(parsed))) }}
+          style={{ ...input, width: 76, marginBottom: 0, letterSpacing: 'normal', textAlign: 'right', minHeight: isMobile ? 44 : undefined }}
+        />
+        <span>{vt('auto_after', lang)}</span>
+        <button type="button" style={btn} disabled={!valid || parsed === view.autoLockMinutes} title={tipText} aria-label={`${vt('auto_save', lang)}. ${tipText}`}
+          onClick={() => { if (parsed !== null) onSave(clampAutoLock(parsed)) }}>
+          {vt('auto_save', lang)} <Gate code={gate.code} gesture={gate.gesture} lang={lang} />
+        </button>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 6 }}>{vt('auto_hint', lang)}</div>
       {!valid && text !== '' && <Note tone="warn">{vt('auto_invalid', lang)}</Note>}
     </>
   )
 }
 
+/** In plain words; the kernel detail (Yama, ptrace, core-dump limits) sits behind a small toggle. */
 function HardeningBlock({ view, lang }: { view: VaultView; lang: 'en' | 'pt' }) {
   const h = view.hardening
   if (!h) return <Note>{vt('hard_unknown', lang)}</Note>
-  const row = (ok: boolean, text: string) => (
-    <div key={text} style={{ fontSize: 12.5, color: ok ? 'var(--text-secondary)' : 'var(--accent-red, #ef4444)', lineHeight: 1.6 }}>
-      <span aria-hidden>{ok ? '✓' : '✗'}</span> {text}
-    </div>
-  )
+  const solid = h.private === true && h.coreDumps === 'off'
+  const broken = h.state === 'failed' || h.private === false || h.coreDumps === 'on'
+  const ok = (text: string) => <div key={text} style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}><span aria-hidden>✓</span> {text}</div>
+  const tech: string[] = [
+    ...(h.private !== null ? [vtf('hard_tech_private', lang, { v: h.private ? '✓' : '✗' })] : []),
+    ...(h.coreDumps !== null ? [vtf('hard_tech_core', lang, { v: h.coreDumps })] : []),
+    ...h.lines,
+  ]
   return (
     <div style={{ marginBottom: 6 }}>
-      {h.private !== null && row(h.private, vt(h.private ? 'hard_private' : 'hard_notPrivate', lang))}
-      {h.coreDumps !== null && row(h.coreDumps === 'off', vt(h.coreDumps === 'off' ? 'hard_core' : 'hard_coreOn', lang))}
-      {h.lines.map(l => <div key={l} style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 4 }}>{l}</div>)}
+      {solid && <>{ok(vt('hard_plain1', lang))}{ok(vt('hard_plain2', lang))}</>}
+      {broken && <div role="alert" style={{ fontSize: 12.5, color: 'var(--accent-red, #ef4444)', lineHeight: 1.6 }}><span aria-hidden>✗</span> {vt('hard_bad', lang)}</div>}
+      {tech.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11.5, color: 'var(--text-tertiary)', cursor: 'pointer', padding: '4px 0' }}>{vt('hard_details', lang)}</summary>
+          {tech.map(l => <div key={l} style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 4 }}>{l}</div>)}
+        </details>
+      )}
     </div>
   )
 }
@@ -529,17 +552,19 @@ type Phase = 'intro' | 'qr' | 'words' | 'confirm' | 'presence' | 'done'
 function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   lang: 'en' | 'pt'; isMobile: boolean; initial: VaultView; steps: WizardStep[]; onClose: () => void
 }) {
+  // The whole §7.3 flow: device check → authenticator → recovery key → presence (each only if still missing).
+  const [plan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps))
   const t = (k: VaultKey) => vt(k, lang)
   const [view, setView] = useState(initial)
   const [i, setI] = useState(0)
-  const step = steps[i]
+  const step = plan[i]
+  const [flowOk, setFlowOk] = useState(false) // the one verified code stands for the rest of THIS wizard
   const [phase, setPhase] = useState<Phase>('intro')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [oldCode, setOldCode] = useState('')
   const [uri, setUri] = useState<{ uri: string; secret: string } | null>(null)
   const [c1, setC1] = useState('')
-  const [c2, setC2] = useState('')
   // The 24 words live in this state for exactly as long as they are on screen, and are dropped the
   // moment the person confirms or leaves — never persisted, never copied anywhere by this page.
   const [words, setWords] = useState<string[] | null>(null)
@@ -560,14 +585,16 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   }
   const next = async () => {
     await refresh()
-    setError(null); setOldCode(''); setC1(''); setC2(''); setPresCode(''); setUri(null); setWords(null); setTyped(['', '', ''])
-    if (i + 1 < steps.length) { setI(i + 1); setPhase('intro') } else { setFinished(true); setPhase('done') }
+    setError(null); setOldCode(''); setC1(''); setPresCode(''); setUri(null); setWords(null); setTyped(['', '', ''])
+    if (i + 1 < plan.length) { setI(i + 1); setPhase('intro') } else { setFinished(true); setPhase('done') }
   }
-  const fail = (s: string) => { setError(s || t('network')); setBusy(false) }
+  // A failure names the step it stopped at; reopening the wizard resumes from what is still missing.
+  const fail = (s: string) => { setError(`${vtf('wiz_failedAt', lang, { step: t(`wiz_step_${step ?? 'presence'}` as VaultKey) })} ${s || t('network')}`); setBusy(false) }
 
   const gateOf = (action: string) => gateFor(view, action)
   const needCodeFor = (action: string) => needsTypedCode({ ...gateOf(action), grant: false }, false)
-  const stepNo = Math.min(i + 1, steps.length)
+  const stepNo = Math.min(i + 1, plan.length)
+  const presenceCodeNeeded = needCodeFor('enroll-presence') && !flowOk
 
   // ── authenticator
   const showQr = async () => {
@@ -579,11 +606,11 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     setUri({ uri: r.uri, secret: r.secret }); setPhase('qr')
   }
   const confirmAuth = async () => {
-    if (busy || !codeComplete(c1) || !codeComplete(c2)) return
+    if (busy || !codeComplete(c1)) return
     setBusy(true); setError(null)
-    const r = await authenticatorConfirm(c1, c2)
-    if (!r.ok) { setC1(''); setC2(''); return fail(r.sentence) }
-    setBusy(false); setUri(null)
+    const r = await authenticatorConfirm(c1)
+    if (!r.ok) { setC1(''); return fail(r.sentence) }
+    setBusy(false); setUri(null); setFlowOk(true)
     await next()
   }
 
@@ -605,11 +632,21 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     await next()
   }
 
+  // ── device check (before anything changes)
+  const probe = async () => {
+    if (busy) return
+    setBusy(true); setError(null)
+    const r = await presenceProbe(kind)
+    if (!r.ok) return fail(r.sentence)
+    setBusy(false)
+    await next()
+  }
+
   // ── presence
   const enrolPresence = async () => {
     if (busy) return
     setBusy(true); setError(null)
-    const r = await presenceEnrol(kind, needCodeFor('enroll-presence') ? presCode : undefined)
+    const r = await presenceEnrol(kind, presenceCodeNeeded ? presCode : undefined)
     if (!r.ok) { setPresCode(''); return fail(r.sentence) }
     setBusy(false)
     await next()
@@ -621,16 +658,25 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     ? vtf('wiz_done_presence', lang, { presence: vt(presenceKey(view.wrappers), lang), n: view.autoLockMinutes })
     : vtf('wiz_done_plain', lang, { n: view.autoLockMinutes })
   const cta: React.CSSProperties = { ...primaryBtn, minHeight: isMobile ? 44 : undefined }
-  const prog = steps.length > 1 && phase !== 'done'
+  const prog = plan.length > 1 && phase !== 'done'
 
   return (
     <div style={overlay} role="dialog" aria-modal="true" aria-label={t('wiz_title')}>
       <div className="ag-vault-wizard" style={{ ...card, maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }}>
         <style>{PRINT_CSS}</style>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{t('wiz_title')}</div>
-        {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: steps.length })}</div>}
+        {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: plan.length })}</div>}
         {phase !== 'done' && <Note>{t('wiz_safe')}</Note>}
 
+        {phase === 'intro' && step === 'probe' && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_probe_title')}</div>
+            <Note>{vtf('wiz_probe_intro', lang, { presence: vt(presenceKey([kind]), lang) })}</Note>
+            <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
+            {error && <Err text={error} />}
+            <button type="button" style={cta} disabled={busy} onClick={() => { void probe() }}>{busy ? t('unlocking') : t('wiz_probe_go')}</button>
+          </div>
+        )}
         {phase === 'intro' && step === 'authenticator' && (
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_auth_title')}</div>
@@ -650,10 +696,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '8px 0 6px' }}>{t('wiz_auth_type')}</div>
               <code style={{ ...codeBlock, display: 'block', marginBottom: 0 }}>{uri.secret.match(/.{1,4}/g)?.join(' ')}</code>
             </details>
-            <CodeField value={c1} onChange={setC1} label={t('wiz_code1')} autoFocus />
-            <CodeField value={c2} onChange={setC2} label={t('wiz_code2')} />
+            <CodeField value={c1} onChange={setC1} label={t('wiz_code')} autoFocus />
             {error && <Err text={error} />}
-            <button type="submit" style={cta} disabled={busy || !codeComplete(c1) || !codeComplete(c2)}>{busy ? t('working') : t('codeConfirm')}</button>
+            <button type="submit" style={cta} disabled={busy || !codeComplete(c1)}>{busy ? t('working') : t('codeConfirm')}</button>
           </form>
         )}
 
@@ -725,9 +770,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
               </div>
             )}
             <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
-            {needCodeFor('enroll-presence') && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_pres_code')} autoFocus />}
+            {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (needCodeFor('enroll-presence') && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
+            <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
               {busy ? t('unlocking') : t('wiz_pres_go')}
             </button>
           </div>
