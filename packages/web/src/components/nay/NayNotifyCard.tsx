@@ -486,18 +486,25 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         position: 'fixed', zIndex: NAY_NOTIFY_CARD_Z, width, maxWidth: 'calc(100vw - 24px)',
         background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
-        fontSize: 13, color: 'var(--text-primary)', overflowY: 'auto', overscrollBehavior: 'contain',
+        fontSize: 13, color: 'var(--text-primary)', display: 'flex', flexDirection: 'column',
       }}
     >
       {showTail && <span aria-hidden ref={tailRef} style={tailStyle} />}
+      {/* THE SHELL clips to the card's rounded edge and never scrolls itself. It used to be the card that
+          scrolled (`overflowY: auto` + the follow loop's max-height), which made the whole header
+          scroll away and left the countdown bar — absolute in a scroll container — scrolling with the
+          content, so it landed across the buttons. Now only the message region scrolls (below), and the
+          bar is pinned to the shell, which does not move. The tail stays outside the shell: it sits past
+          the card's edge and `overflow: hidden` here would cut it off. */}
+      <div data-nay-shell style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', borderRadius: 'inherit' }}>
       {settings.autoDismissSec > 0 && (
         // The time left before the card leaves by itself; inset so it follows the card's rounded foot.
         <div aria-hidden style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, overflow: 'hidden', borderRadius: 2, pointerEvents: 'none' }}>
           <div ref={progressRef} style={{ height: '100%', background: 'var(--anthropic-orange)', opacity: 0.85, transformOrigin: 'left center', transform: 'scaleX(1)' }} />
         </div>
       )}
-      <div style={{ position: 'relative', display: 'grid', gap: 10, padding: 12 }}>
-        <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10, padding: 12, flex: '1 1 auto', minHeight: 0 }}>
+        <div data-rise style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6 }} />
           <span style={{ fontWeight: 650, fontSize: 12.5 }}>Nay</span>
           {alerts.length > 1 && (
@@ -512,6 +519,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           </button>
         </div>
 
+        {/* The only part that scrolls: the sentence, the session card and the message preview. */}
+        <div data-nay-body style={{ display: 'grid', gap: 10, flex: '0 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', alignContent: 'start' }}>
         <div data-rise data-say style={{ fontSize: 13.5, fontWeight: 500 }}>{say}</div>
 
         <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
@@ -542,7 +551,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         {alert.demo && (
           <span data-rise style={hint}>{pt ? 'Exemplo das configurações: não há sessão por trás, então só adiar e dispensar funcionam.' : 'A settings example: there is no session behind it, so only snooze and dismiss work.'}</span>
         )}
-        <div data-rise style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        </div>
+        <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
           {!alert.demo && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
@@ -566,10 +576,11 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           )}
         </div>
 
+        {/* Notice and drawer (snooze / approve / end) get their own bounded region: they can be tall. */}
         {notice && <span role="alert" style={{ ...hint, color: 'var(--accent-red)' }}>{notice}</span>}
 
         {drawer && (
-          <div style={{ display: 'grid', gap: 7, borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
+          <div data-nay-drawer style={{ display: 'grid', gap: 7, borderTop: '1px dashed var(--border)', paddingTop: 10, flex: '0 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', alignContent: 'start' }}>
             {drawer === 'approve' && approveBody()}
             {drawer === 'snooze' && (
               <>
@@ -610,6 +621,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   </>)
