@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, recoveryProtector, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
   type Protector, type ProtectorId, type StepUpState, type VaultJson,
 } from '@agentistics/vault'
 import {
@@ -446,12 +446,32 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
   const all: Protector[] = [presence, ...o.vault.wrappers.map(w => protectorById(w.type)).filter((p): p is Protector => p !== null)]
   const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
-  if (!r.ok) return refused('presence-enrol-failed', r.reason)
+  if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
   _flowUntil = 0
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
   return { ok: true, removed: r.removed }
+}
+
+/**
+ * A failed presence enrolment, said to a PERSON. A protector's reason is `<code>: <detail-key>` — a
+ * fact for the code, never a sentence: the UI once showed
+ * `presence-unavailable: System.Management.Automation.PSInvalidCastException` verbatim.
+ */
+function enrolFailure(id: ProtectorId, reason: string): Refusal {
+  const lang = vaultLang()
+  const word = presenceWord(id)
+  const code = presenceCode(reason)
+  if (code) return refused(code, presenceSentence(code, lang, word, reason))
+  if (reason.startsWith('no-hmac-secret')) {
+    return refused('presence-no-hmac-secret', lang === 'pt'
+      ? 'Esta chave de segurança não suporta hmac-secret, que o cofre exige. Use uma YubiKey 5, SoloKey 2, Nitrokey 3 ou outra chave que liste hmac-secret. Nada foi alterado.'
+      : 'This security key does not support hmac-secret, which the vault needs. Use a YubiKey 5, SoloKey 2, Nitrokey 3 or another key that lists hmac-secret. Nothing was changed.')
+  }
+  return refused('presence-enrol-failed', lang === 'pt'
+    ? `Não foi possível ligar ${word} (o cofre não pôde ser gravado). Nada foi alterado; o cofre continua como estava.`
+    : `${word} could not be turned on (the vault could not be written). Nothing was changed; the vault is as it was.`)
 }
 
 // ── §7.1 / §7.4: what the Presence section lists, turning presence off, the owner's machine ──────
