@@ -393,3 +393,101 @@ describe('S5 — onStateChange / lockedBy / autoLockInMs are fed by the vault', 
     expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'stepup-frozen' })
   })
 })
+
+// ── S7: turning presence on makes a NEW data key; every earlier silent copy opens nothing ─────────
+
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { openRecord, parseVaultJson } from '@agentistics/vault'
+import { __rekeyCrashAtForTests } from './rekey'
+import { completeUnlock } from './gate'
+import { openFromFile, unlockWithGesture, vaultDir } from './service'
+
+describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
+  const vaultJson = () => parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+  const leftovers = () => [
+    ...readdirSync(dir).filter(f => f.endsWith('.rekey')),
+    ...readdirSync(vaultDir()).filter(f => f.endsWith('.rekey') || f === 'rekey.json'),
+  ]
+  /** The "old copy of dek.dpapi": what the silent wrapper held before enrolment. */
+  async function silentCopy(): Promise<{ kid: string; dek: Uint8Array }> {
+    const kid = vaultJson().kid
+    return { kid, dek: new Uint8Array(STORE.get(`dpapi:${kid}`)!) }
+  }
+  const gh = () => readFileSync(join(dir, 'gh.sealed'))
+
+  test('a copy of the old silent wrapper opens NOTHING after enrolment; everything still reads; words and code still work', async () => {
+    const { words } = await enrolledVault()
+    const old = await silentCopy()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    const v = vaultJson()
+    expect(v.kid).not.toBe(old.kid)
+    expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
+    // The thief's copy: the old DEK no longer opens the record (it is sealed under the new kid).
+    expect(openRecord({ dek: old.dek, kid: old.kid, purpose: 'github-backup', name: 'github-backup', bytes: gh() }).ok).toBe(false)
+    expect(JSON.parse(gh().toString()).kid).toBe(v.kid)
+    const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+    expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
+    expect(leftovers()).toEqual([])
+    expect(STORE.has(`dpapi:${old.kid}`)).toBe(false) // retired under ITS kid, not the new one
+    // The authenticator seed was re-sealed too: a code still verifies.
+    expect((await requireVaultStepUp('list', { session: 'socket', code: codeAt() })).ok).toBe(true)
+    next()
+    // And the SAME 24 words open the rotated vault.
+    restart()
+    expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
+  })
+
+  test('a crash while re-sealing leaves the old vault opening, every record readable, nothing staged after the next open', async () => {
+    await enrolledVault()
+    const old = await silentCopy()
+    __rekeyCrashAtForTests('prepare-mid')
+    await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
+    restart()
+    const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+    expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
+    expect(vaultJson().kid).toBe(old.kid)
+    expect(leftovers()).toEqual([])
+  })
+
+  for (const point of ['before-commit-mark', 'before-finish']) {
+    test(`a crash after the commit (${point}) is finished on the next unlock — the code still works, nothing is lost`, async () => {
+      await enrolledVault()
+      const old = await silentCopy()
+      __rekeyCrashAtForTests(point)
+      await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
+      next()
+      restart()
+      expect(vaultJson().kid).not.toBe(old.kid)
+      const u = await unlockWithGesture()
+      expect(u.ok && u.state).toBe('pending-stepup')
+      expect((await completeUnlock(codeAt())).ok).toBe(true)
+      const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+      expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
+      expect(leftovers()).toEqual([])
+      expect(existsSync(join(vaultDir(), 'dek.recovery'))).toBe(true)
+    })
+  }
+
+  test('outside the setup that made the recovery key, the terminal supplies the words; wrong words change nothing', async () => {
+    const { words } = await enrolledVault()
+    T += 11 * 60_000
+    const none = await enrolPresence('hello', { ...S, code: codeAt() })
+    expect(!none.ok && none.code).toBe('presence-needs-recovery-words')
+    const kid0 = vaultJson().kid
+    const wrong = await enrolPresence('hello', { ...S, code: codeAt(), words: Array(24).fill('abandon').join(' ').replace(/abandon$/, 'art') })
+    expect(!wrong.ok && wrong.code).toBe('recovery-denied')
+    expect(vaultJson().kid).toBe(kid0)
+    next()
+    const ok = await enrolPresence('hello', { ...S, code: codeAt(), words: words.join(' ') })
+    expect(ok.ok).toBe(true)
+    expect(vaultJson().kid).not.toBe(kid0)
+  })
+
+  test('the words never come from a page: an HTTP session is refused even when it sends them', async () => {
+    const { words } = await enrolledVault()
+    T += 11 * 60_000
+    const r = await enrolPresence('hello', { session: 'http:local', code: codeAt(), words: words.join(' ') })
+    expect(!r.ok && r.code).toBe('presence-needs-recovery-words')
+  })
+})

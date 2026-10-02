@@ -232,14 +232,31 @@ describe('POST /api/vault/presence/enroll', () => {
     const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    const r = await http('POST', '/api/vault/recovery/begin', {})
+    T += 11 * 60_000 // the wizard's window is over: what follows is gated again
+    // (a first recovery key outside the window costs the code — review S2)
+    const r = await http('POST', '/api/vault/recovery/begin', { code: codeAt() })
+    next()
     await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
-    T += 11 * 60_000 // the wizard's window is over: adding presence later is a gated action again
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: wrongCode() })).status).toBe(403)
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).not.toContain('hello')
     const ok = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
     expect(ok).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'] } })
+  })
+
+  test('review S7: presence on a silent vault, long after the recovery key was made, asks for the words on a terminal', async () => {
+    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) }) // no enrolment: refused, harmless
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
+    seed = base32Decode(a.json.secret)
+    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
+    next()
+    const r = await http('POST', '/api/vault/recovery/begin', {})
+    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
+    T += 11 * 60_000 // the held words are gone
+    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+    expect(p.json.code).toBe('presence-needs-recovery-words')
+    expect(String(p.json.sentence)).toContain('agentop vault enroll --presence')
+    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('dpapi')
   })
 })
 

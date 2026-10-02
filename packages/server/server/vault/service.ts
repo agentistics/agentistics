@@ -426,6 +426,11 @@ export async function pendingPlaintext(): Promise<number> {
   return n
 }
 
+/** Review S7: a data-key rotation a crash interrupted is completed (or rolled back) on the next open. */
+async function finishPendingRekey(kid: string): Promise<void> {
+  try { await (await import('./rekey')).finishRekeyIfPending(kid) } catch { /* retried at the next open */ }
+}
+
 async function tryOpen(passphrase?: string, opts: { presence?: boolean } = {}): Promise<OpenState> {
   const raw = await io().readFile(join(vaultDir(), 'vault.json'))
   let vault: VaultJson | null = null
@@ -551,6 +556,7 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
     }
     adopt(s)
     _lockedBy = 'start'
+    await finishPendingRekey(s.kid)
     void runMigrations()
     return { ok: true, state: 'open' }
   }
@@ -607,6 +613,7 @@ export async function openWithRecovery(entropy: Uint8Array): Promise<{ ok: true 
   abandonPending()
   if (_opened) lockVault('user')
   adopt({ state: 'open', kid: vault.kid, dek: u.dek, vault, via: 'recovery' })
+  await finishPendingRekey(vault.kid)
   _recoveryTodo = new Set<RecoveryStep>([...(hasPresence(vault) || vault.requirePresence ? ['presence' as const] : []), 'authenticator', 'recovery'])
   vaultAudit({ type: 'vault.recovered' })
   return { ok: true }
@@ -657,6 +664,7 @@ export async function ensureVaultOpen(opts: { create?: boolean; migrate?: boolea
   })()
   try {
     const o = await _inflight
+    if (o) await finishPendingRekey(o.kid)
     // SCHEDULED, never awaited here: a caller can be inside the preferences write chain (sealing a
     // token), and the preferences migrator queues on that same chain — awaiting it would deadlock.
     // A caller that needs the pass finished (`agentop vault …`, server boot, a test) awaits
@@ -884,6 +892,12 @@ export async function openFromFile(path: string, purpose: string, name: string):
   const bytes = await secretFs().readFile(path)
   if (!bytes) return { ok: false, absent: true }
   const r = await openBytes(purpose, name, bytes, displayPath(path))
+  if (!r.ok && r.code === 'wrong-machine') {
+    // Review S7: between a data-key rotation's commit and its finish, the re-sealed copy sits beside
+    // the old one (`<file>.rekey`); a reader in that window takes it rather than failing.
+    const staged = await secretFs().readFile(path + '.rekey')
+    if (staged) { const s2 = await openBytes(purpose, name, staged, displayPath(path)); if (s2.ok) return s2 }
+  }
   return r.ok ? r : { ok: false, absent: false, code: r.code, sentence: r.sentence }
 }
 

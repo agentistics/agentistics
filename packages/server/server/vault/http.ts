@@ -154,7 +154,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/recovery/confirm' && req.method === 'POST') {
     const b = await body()
     if (!Array.isArray(b.typed) || b.typed.length !== 3 || !b.typed.every(w => str(w, 16))) return bad()
-    return reply(await gate.confirmRecoveryKey(b.typed as string[]))
+    return reply(await gate.confirmRecoveryKey(b.typed as string[], { session }))
   }
   if (path === '/api/vault/recover' && req.method === 'POST') {
     // §4.3: the 24 words are typed on a terminal, never into a web form. The page hands off.

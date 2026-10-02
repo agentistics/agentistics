@@ -444,12 +444,15 @@ async function opRecoveryBegin(h: Record<string, unknown>): Promise<OpResult> {
 }
 async function opRecoveryConfirm(h: Record<string, unknown>): Promise<OpResult> {
   if (!Array.isArray(h.typed) || h.typed.length !== 3 || !h.typed.every(w => str(w, 16))) return bad()
-  const r = await confirmRecoveryKey(h.typed as string[])
+  const r = await confirmRecoveryKey(h.typed as string[], { session: SOCKET })
   return { reply: r.ok ? { ok: true } : r }
 }
 async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
   if (h.protector !== 'hello' && h.protector !== 'fido2') return bad()
-  const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET })
+  if (h.words !== undefined && !str(h.words, 1024)) return bad()
+  // Review S7: the 24 words (typed on the TTY) — only ever from the socket, so the new data key can be
+  // wrapped under the recovery key when it was not confirmed in this same setup.
+  const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET, ...(typeof h.words === 'string' ? { words: h.words } : {}) })
   return { reply: r.ok ? { ok: true, removed: r.removed } : r }
 }
 /** §7.4: the 24 words are typed on the TTY and arrive here only from the socket (never HTTP). */

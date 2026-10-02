@@ -391,7 +391,9 @@ export async function finishRetirement(
   for (const r of vault.retired) {
     const p = protectorFor(r, all)
     if (!p) { left.push(r); continue }
-    await p.remove(r, vault.kid)
+    // A wrapper retired by a data-key ROTATION (review S7) was written under the OLD kid, and the
+    // keychain / libsecret entries are named by it: remove it under that kid, never the current one.
+    await p.remove(r, typeof r.params?.kid === 'string' ? r.params.kid : vault.kid)
     removed.push(r.type)
   }
   const next: VaultJson = { ...vault, ...(left.length ? { retired: left } : {}) }

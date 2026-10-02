@@ -78,7 +78,7 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   if (!r.ok) throw new Error(r.sentence)
   expect(r.words).toHaveLength(24)
   expect((await confirmRecoveryKey(['zoo', 'zoo', 'zoo'])).ok).toBe(r.positions.every(p => r.words[p - 1] === 'zoo'))
-  expect((await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!))).ok).toBe(true)
+  expect((await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), S)).ok).toBe(true)
   const p = await enrolPresence('hello', { ...S, code: codeAt() })
   expect(p).toMatchObject({ ok: true, removed: ['dpapi'] })
   next()

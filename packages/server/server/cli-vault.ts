@@ -456,7 +456,13 @@ async function enrolPresence(kind: 'hello' | 'fido2'): Promise<number> {
   process.stdout.write('\n' + (kind === 'hello'
     ? t('Agentistics is checking that Windows Hello can protect your vault — confirm twice.\n', 'O Agentistics está verificando se o Windows Hello pode proteger o seu cofre — confirme duas vezes.\n')
     : t('Agentistics is checking that your security key can protect your vault — touch it when it blinks (twice).\n', 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela quando piscar (duas vezes).\n')))
-  const r = await askGated({ op: 'presence-enroll', protector: kind })
+  let r = await askGated({ op: 'presence-enroll', protector: kind })
+  if (r && !r.ok && r.code === 'presence-needs-recovery-words' && process.stdin.isTTY && process.stdout.isTTY) {
+    // Review S7: presence makes a NEW vault key, and the recovery key must follow it — typed here, on the TTY.
+    process.stdout.write(t('Turning presence on replaces the vault key; your recovery key must follow it.\n', 'Ligar a presença troca a chave do cofre; a sua chave de recuperação precisa acompanhar.\n'))
+    const words = await maskedInput(t('Your 24 words (spaces between them; 4 letters each is enough)', 'Suas 24 palavras (com espaços; 4 letras de cada bastam)'))
+    r = await askGated({ op: 'presence-enroll', protector: kind, words })
+  }
   if (!r) return down()
   if (!r.ok) return said(r)
   process.stdout.write(t('Presence enrolled; the silent system wrapper was removed.\n', 'Presença configurada; o invólucro silencioso do sistema foi removido.\n'))
