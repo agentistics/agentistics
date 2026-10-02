@@ -396,7 +396,7 @@ async function cmdEnroll(args: string[]): Promise<number> {
     return 1
   }
   for (const step of steps) {
-    const rc = step === 'authenticator' ? await enrolAuthenticator() : step === 'recovery' ? await enrolRecovery() : await enrolPresence(presence!)
+    const rc = step === 'authenticator' ? await enrolAuthenticator() : step === 'recovery' ? await enrolRecovery() : await enrolPresence(presence!, steps.includes('recovery'))
     if (rc !== 0) return rc
   }
   view = await readView()
@@ -457,20 +457,29 @@ async function enrolRecovery(): Promise<number> {
   return 1
 }
 
-async function enrolPresence(kind: 'hello' | 'fido2'): Promise<number> {
+async function enrolPresence(kind: 'hello' | 'fido2', recoveryPlanned = false): Promise<number> {
   process.stdout.write('\n' + (kind === 'hello'
     ? t('Agentistics is checking that Windows Hello can protect your vault — confirm twice.\n', 'O Agentistics está verificando se o Windows Hello pode proteger o seu cofre — confirme duas vezes.\n')
     : t('Agentistics is checking that your security key can protect your vault — touch it when it blinks (twice).\n', 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela quando piscar (duas vezes).\n')))
   let r = await askGated({ op: 'presence-enroll', protector: kind })
   if (r && !r.ok && r.code === 'presence-needs-recovery-words' && process.stdin.isTTY && process.stdout.isTTY) {
     // Review S7: presence makes a NEW vault key, and the recovery key must follow it — typed here, on the TTY.
+    // Leader decision 2: the words are typed for THIS call only (never kept); without them, NEW words.
     process.stdout.write(t('Turning presence on replaces the vault key; your recovery key must follow it.\n', 'Ligar a presença troca a chave do cofre; a sua chave de recuperação precisa acompanhar.\n'))
-    const words = await maskedInput(t('Your 24 words (spaces between them; 4 letters each is enough)', 'Suas 24 palavras (com espaços; 4 letras de cada bastam)'))
-    r = await askGated({ op: 'presence-enroll', protector: kind, words })
+    const words = (await maskedInput(t('Your 24 words (or press Enter with nothing to make NEW words instead)', 'Suas 24 palavras (ou Enter vazio para criar palavras NOVAS)'))).trim()
+    if (words) {
+      r = await askGated({ op: 'presence-enroll', protector: kind, words })
+    } else {
+      const yes = await confirm(t('Make new recovery words after presence? Your OLD words will stop working.', 'Criar palavras de recuperação novas depois da presença? As palavras ANTIGAS deixam de funcionar.'), false)
+      if (!yes) return 1
+      r = await askGated({ op: 'presence-enroll', protector: kind, replaceRecovery: true })
+    }
   }
   if (!r) return down()
   if (!r.ok) return said(r)
-  process.stdout.write(t('Presence enrolled; the silent system wrapper was removed.\n', 'Presença configurada; o invólucro silencioso do sistema foi removido.\n'))
+  process.stdout.write(t('Presence enrolled; the silent system wrapper was removed and the vault key replaced.\n', 'Presença configurada; o invólucro silencioso do sistema foi removido e a chave do cofre trocada.\n'))
+  // The recovery key is owed now (none yet, or the old words were replaced): made right here, LAST.
+  if (r.recoveryOwed === true && !recoveryPlanned) return enrolRecovery()
   return 0
 }
 

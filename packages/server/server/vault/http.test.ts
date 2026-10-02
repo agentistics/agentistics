@@ -81,11 +81,14 @@ async function enrolOverHttp(): Promise<string[]> {
   seed = base32Decode(a.json.secret)
   expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })).status).toBe(200)
   next()
+  // Leader decision 2: presence, THEN the recovery key (the words wrap the final data key).
+  const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+  expect(p.status).toBe(200)
+  expect(p.json.recoveryOwed).toBe(true)
+  next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
   const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
   expect((await http('POST', '/api/vault/recovery/confirm', { typed })).status).toBe(200)
-  const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
-  expect(p.status).toBe(200)
   next()
   return r.json.words as string[]
 }
@@ -220,12 +223,13 @@ describe('POST /api/vault/presence/enroll', () => {
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).json.code).toBe('needs-authenticator')
   })
 
-  test('refuses before the recovery key exists (a lost device would lose the vault)', async () => {
+  test('leader decision 2: presence comes BEFORE the recovery key, and says the key is owed', async () => {
     const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     next()
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })).json.code).toBe('needs-recovery')
+    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+    expect(p).toMatchObject({ status: 200, json: { ok: true, recoveryOwed: true } })
   })
 
   test('is gated: no code 401, wrong code 403 with the vault untouched; the right one retires the silent wrapper', async () => {
@@ -233,10 +237,6 @@ describe('POST /api/vault/presence/enroll', () => {
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     T += 11 * 60_000 // the wizard's window is over: what follows is gated again
-    // (a first recovery key outside the window costs the code — review S2)
-    const r = await http('POST', '/api/vault/recovery/begin', { code: codeAt() })
-    next()
-    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: wrongCode() })).status).toBe(403)
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).not.toContain('hello')
@@ -420,14 +420,15 @@ describe('owner decision 2026-10-02 — ONE code, no second code after the wizar
     expect(Array.isArray(r.json.items)).toBe(true)
   })
 
-  test('recovery key and presence in the same wizard need NO second code; later (flow over) presence is gated again', async () => {
+  test('presence and the recovery key in the same wizard need NO second code; later (flow over) presence is gated again', async () => {
     const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    const r = await http('POST', '/api/vault/recovery/begin', {})
-    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
     const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' }) // no code
-    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'] } })
+    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'], recoveryOwed: true } })
+    const r = await http('POST', '/api/vault/recovery/begin', {}) // no code: still inside the wizard
+    expect(r.status).toBe(200)
+    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
     // the flow is closed: adding a presence credential again asks for the code
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
   })

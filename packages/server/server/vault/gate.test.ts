@@ -74,13 +74,16 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   expect((await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')).ok).toBe(false)
   expect((await confirmAuthenticator(codeAt(0), S)).ok).toBe(true)
   next()
+  // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words are
+  // made LAST so they wrap the final key and are never kept in memory across steps).
+  const p = await enrolPresence('hello', { ...S, code: codeAt() })
+  expect(p).toMatchObject({ ok: true, removed: ['dpapi'], recoveryOwed: true })
+  next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)
   expect(r.words).toHaveLength(24)
   expect((await confirmRecoveryKey(['zoo', 'zoo', 'zoo'])).ok).toBe(r.positions.every(p => r.words[p - 1] === 'zoo'))
   expect((await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), S)).ok).toBe(true)
-  const p = await enrolPresence('hello', { ...S, code: codeAt() })
-  expect(p).toMatchObject({ ok: true, removed: ['dpapi'] })
   next()
   return { words: r.words }
 }

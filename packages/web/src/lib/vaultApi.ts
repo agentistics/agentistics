@@ -111,7 +111,8 @@ export const authenticatorConfirm = (code: string) => call('POST', '/api/vault/a
 export const presenceProbe = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(code ? { code } : {}) }).then(r => reply(r))
 export const recoveryBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/recovery/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ words: string[]; positions: number[] }>(r))
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
-export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}) }).then(r => reply<{ removed: string[] }>(r))
+/** `replaceRecovery`: no words at hand — make NEW words after presence (the old ones stop working). */
+export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string, replaceRecovery?: boolean) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}), ...(replaceRecovery ? { replaceRecovery: true } : {}) }).then(r => reply<{ removed: string[]; recoveryOwed: boolean }>(r))
 export const presenceDisable = (code?: string) => call('POST', '/api/vault/presence/disable', code ? { code } : {}).then(r => reply(r))
 export interface Credential { type: string; label: string; createdAt: string }
 export const credentials = () => call('GET', '/api/vault/credentials').then(r => reply<{ credentials: Credential[]; recoveryCreatedAt: string | null; requirePresence: boolean }>(r))
@@ -171,9 +172,11 @@ export function askWords(g: { code: boolean; gesture: boolean }, words: { code: 
 /** PURE. What an "ultra secure" setup still lacks, in the one safe order (presence last — it retires the silent wrapper). */
 export function missingSteps(v: Pick<VaultView, 'authenticator' | 'recoveryCreatedAt' | 'presence' | 'presenceAvailable'>): WizardStep[] {
   const out: WizardStep[] = []
+  // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words made
+  // last wrap the final one and are never kept in memory across steps).
   if (!v.authenticator) out.push('authenticator')
-  if (!v.recoveryCreatedAt) out.push('recovery')
   if (!v.presence && v.presenceAvailable.length > 0) out.push('presence')
+  if (!v.recoveryCreatedAt) out.push('recovery')
   return out
 }
 

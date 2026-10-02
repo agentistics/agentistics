@@ -52,7 +52,9 @@ export interface EnrolState {
  * flags force a step (replace the phone, a new recovery key); none = what is still missing.
  */
 export function stepsToRun(a: EnrolArgs, s: EnrolState): EnrolStep[] {
-  const order: EnrolStep[] = ['authenticator', 'recovery', 'presence']
+  // Leader decision 2: presence BEFORE the recovery key — presence replaces the data key, so the words
+  // made last wrap the final key and never have to be kept in memory across steps.
+  const order: EnrolStep[] = ['authenticator', 'presence', 'recovery']
   if (a.only.length > 0) return order.filter(x => a.only.includes(x))
   return order.filter(x => (x === 'authenticator' ? !s.authenticator : x === 'recovery' ? !s.recovery : !s.presence && s.available.length > 0))
 }

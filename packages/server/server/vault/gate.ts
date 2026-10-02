@@ -202,6 +202,11 @@ export interface GateContext {
   setupCode?: string
   /** Review S7: the 24 words, typed on a TTY and passed ONLY by the socket — never read from an HTTP body. */
   words?: string
+  /**
+   * Leader decision 2: no words at hand — make NEW recovery words after presence instead. The old words
+   * stop working (the data key they wrap is replaced), and a recovery key is owed.
+   */
+  replaceRecovery?: boolean
 }
 
 export type GateResult = { ok: true; grant?: string } | Refusal
@@ -456,21 +461,6 @@ async function writeVaultJson(v: VaultJson): Promise<void> {
 let _recovery: { entropy: Uint8Array; words: string[]; positions: number[]; expiresMs: number } | null = null
 function dropRecovery(): void { _recovery?.entropy.fill(0); _recovery = null }
 
-/**
- * Review S7: turning presence on makes a NEW data key, and the recovery wrapper must follow it — which
- * needs the words' entropy. So a just-CONFIRMED recovery key's entropy is kept, in this service's
- * memory only, for the session that confirmed it, at most 10 minutes: long enough for the wizard's next
- * step (presence), zeroed when that step uses it, on lock, and on expiry. (§4.2 zeroed it at once; this
- * is the stated deviation, and the reason for it.)
- */
-let _heldRecovery: { entropy: Uint8Array; session: string; until: number } | null = null
-function dropHeldRecovery(): void { _heldRecovery?.entropy.fill(0); _heldRecovery = null }
-function heldRecoveryFor(ctx: { session: string }): Uint8Array | null {
-  const h = _heldRecovery
-  if (!h) return null
-  if (_now() > h.until) { dropHeldRecovery(); return null }
-  return h.session === ctx.session ? h.entropy : null
-}
 
 /** Generate the 24 words. The FIRST recovery key needs only the open vault; a rotation is gated. */
 export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; words: string[]; positions: number[] } | Refusal> {
@@ -515,8 +505,10 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
     const vault: VaultJson = { ...o.vault, v: 2, wrappers: [...o.vault.wrappers.filter(x => x.type !== 'recovery'), w.record] }
     await writeVaultJson(vault)
     o.vault = vault
-    dropHeldRecovery()
-    _heldRecovery = { entropy: new Uint8Array(r.entropy), session: ctx.session, until: _now() + ENROL_TTL_MS }
+    // The recovery key is the LAST step of the wizard (leader decision 2): once it exists and presence is
+    // on (or this machine has none), the wizard's one-code window has nothing left to stand for.
+    if (hasPresence(vault) || presenceCandidates().length === 0) _flow = null
+    void ctx
   } finally { dropRecovery() }
   recoveryStepDone('recovery')
   vaultAudit({ type: 'vault.rotate-recovery' })
@@ -551,7 +543,7 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
  * a recovery key exist (otherwise a lost device would lose the vault), and through `enrollPresence`,
  * which verifies the new wrapper by a real unwrap before anything is removed.
  */
-export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[] } | Refusal> {
+export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean } | Refusal> {
   const lang = vaultLang()
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
   const o = await ensureVaultOpen({ create: false, migrate: false })
@@ -559,10 +551,10 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (recoveryTodo() && !fromSocket(ctx)) return recoveryTtyOnly()
   if (!recoveryTodo()) {
     if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
-    if (!o.vault.wrappers.some(w => w.type === 'recovery')) return refused('needs-recovery', lang === 'pt' ? 'Crie a chave de recuperação antes da presença (`agentop vault enroll --recovery`).' : 'Create the recovery key before presence (`agentop vault enroll --recovery`).')
     // Review S7: known BEFORE the code is spent — otherwise the terminal would ask for a code, learn the
     // words are needed, and ask again for a code the replay floor has just burned.
-    if (o.vault.wrappers.some(w => isSilentId(w.type)) && !heldRecoveryFor(ctx) && !(ctx.words && fromSocket(ctx))) return needsRecoveryWords()
+    if (o.vault.wrappers.some(w => isSilentId(w.type)) && o.vault.wrappers.some(w => w.type === 'recovery')
+      && !(ctx.words && fromSocket(ctx)) && ctx.replaceRecovery !== true) return needsRecoveryWords()
     // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
     if (!flowActive(ctx)) {
       const g = await requireVaultStepUp('enroll-presence', ctx)
@@ -577,25 +569,33 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (o.vault.wrappers.some(w => isSilentId(w.type))) {
     const k = await enrolWithNewKey(id, presence, all, o, ctx)
     if (!k.ok) return k
-    _flow = null
     recoveryStepDone('presence')
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
     vaultAudit({ type: 'vault.rekey', protector: id })
-    return { ok: true, removed: k.removed }
+    return { ok: true, removed: k.removed, recoveryOwed: afterPresence(o.vault) }
   }
   const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
   if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
-  _flow = null
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
-  return { ok: true, removed: r.removed }
+  return { ok: true, removed: r.removed, recoveryOwed: afterPresence(o.vault) }
+}
+
+/**
+ * After presence: is the recovery key still owed? While it is, the wizard's one-code window stays
+ * open for its LAST step (leader decision 2); once it exists, the window closes.
+ */
+function afterPresence(v: VaultJson): boolean {
+  const owed = !v.wrappers.some(w => w.type === 'recovery')
+  if (!owed) _flow = null
+  return owed
 }
 
 function needsRecoveryWords(): Refusal {
   return refused('presence-needs-recovery-words', vaultLang() === 'pt'
-    ? 'Ligar a presença troca a chave do cofre, e a chave de recuperação precisa acompanhar: faça a chave de recuperação e a presença na mesma configuração, ou rode `agentop vault enroll --presence` num terminal (ele pede as 24 palavras). Nada foi alterado.'
-    : 'Turning presence on replaces the vault key, and the recovery key has to follow it: create the recovery key and turn presence on in the same setup, or run `agentop vault enroll --presence` in a terminal (it asks for your 24 words). Nothing was changed.')
+    ? 'Ligar a presença troca a chave do cofre, e a chave de recuperação precisa acompanhar. Digite as suas 24 palavras num terminal (`agentop vault enroll --presence`), ou crie palavras de recuperação novas agora — as antigas deixam de funcionar. Nada foi alterado.'
+    : 'Turning presence on replaces the vault key, and the recovery key has to follow it. Type your 24 words in a terminal (`agentop vault enroll --presence`), or make new recovery words now — your old words will stop working. Nothing was changed.')
 }
 
 /**
@@ -616,15 +616,17 @@ async function enrolWithNewKey(
       ? 'Este cofre também abre com uma senha, e ligar a presença troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
       : 'This vault also opens with a passphrase, and turning presence on replaces the vault key — the passphrase cannot follow it. Nothing was changed.')
   }
-  // The recovery wrapper must follow the new key: the words of the key just confirmed in this session,
-  // or the words typed on the terminal now. In RECOVERY mode the old words are exposed and a NEW
-  // recovery key is the next step owed, so the old wrapper is dropped rather than carried.
+  // The recovery wrapper must follow the new key. Leader decision 2: words are NEVER kept across steps,
+  // so they are either typed on the terminal for THIS call (zeroed when it returns), or the old wrapper
+  // is DROPPED and new words are made after presence — when there is none yet (the wizard's order:
+  // authenticator → presence → recovery), when the person chose new words, or in RECOVERY mode (the old
+  // words were just typed and are treated as exposed).
   const inRecovery = recoveryTodo()?.includes('recovery') === true
+  const hasRecovery = o.vault.wrappers.some(w => w.type === 'recovery')
   let entropy: Uint8Array | null = null
   let typed: Uint8Array | null = null
-  if (!inRecovery) {
-    entropy = heldRecoveryFor(ctx)
-    if (!entropy && ctx.words && fromSocket(ctx)) {
+  if (!inRecovery && hasRecovery) {
+    if (ctx.words && fromSocket(ctx)) {
       const e = wordsToEntropy(ctx.words)
       if (e.ok) {
         if (await wordsOpenThisVault(ctx.words, o)) typed = entropy = e.entropy
@@ -632,7 +634,7 @@ async function enrolWithNewKey(
       }
       if (!entropy) return refused('recovery-denied', lang === 'pt' ? 'Essas palavras não abrem este cofre. Nada foi alterado.' : 'Those words do not open this vault. Nothing was changed.')
     }
-    if (!entropy) return needsRecoveryWords()
+    if (!entropy && ctx.replaceRecovery !== true) return needsRecoveryWords()
   }
   const next = newDataKey()
   const recFile = join(vaultDir(), RECOVERY_FILE)
@@ -676,12 +678,13 @@ async function enrolWithNewKey(
     o.dek = next.dek; o.kid = next.kid; o.vault = vault
     oldDek.fill(0)
     await finishRekey(files)
+    // Dropped (new words to come): the old file wraps a key that no longer opens anything; remove it too.
+    if (!entropy && hasRecovery) await realProtectorIo().removeFile(recFile).catch(() => {})
     const done = await finishRetirement(realProtectorIo(), vaultDir(), vault, all)
     o.vault = done.vault
     return { ok: true, removed: done.removed }
   } finally {
     if (!committed) next.dek.fill(0)
-    dropHeldRecovery()
     typed?.fill(0)
   }
 }
@@ -829,7 +832,6 @@ export function __resetGateForTests(now?: () => number): void {
   dropRecovery()
   _flow = null
   _setup = null
-  dropHeldRecovery()
   _enrolWrong = 0
 }
 

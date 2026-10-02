@@ -174,8 +174,9 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/presence/enroll' && req.method === 'POST') {
     const b = await body()
     if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
-    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session })
-    return reply(r.ok ? { ok: true, removed: r.removed } : r)
+    // The 24 words are never accepted here; a page may only choose NEW words (leader decision 2).
+    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session, ...(b.replaceRecovery === true ? { replaceRecovery: true } : {}) })
+    return reply(r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed } : r)
   }
   if (path === '/api/vault/presence/disable' && req.method === 'POST') {
     // Never takes the 24 words: on the owner's machine it refuses and points at the terminal verb.

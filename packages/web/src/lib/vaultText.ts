@@ -257,6 +257,11 @@ export const VAULT_TEXT = {
   wiz_code: { en: 'Code from the app', pt: 'Código do app' },
   wiz_oldCode: { en: 'Type the current code from your authenticator to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   wiz_setup_label: { en: 'Setup code (8 digits)', pt: 'Código de configuração (8 dígitos)' },
+  wiz_pres_newWords: { en: 'Turn presence on and make new recovery words', pt: 'Ligar a presença e criar palavras de recuperação novas' },
+  wiz_pres_newWords_warn: {
+    en: 'Your current 24 words will stop working: turning presence on replaces the vault key. New words are made right after. To keep your words instead, run `agentop vault enroll --presence` in a terminal and type them there.',
+    pt: 'As suas 24 palavras atuais deixarão de funcionar: ligar a presença troca a chave do cofre. Palavras novas são criadas logo em seguida. Para manter as suas palavras, rode `agentop vault enroll --presence` num terminal e digite-as lá.',
+  },
   wiz_setup_why: {
     en: 'The first setup from this page needs a code only this computer can show: run `agentop vault setup-code` in a terminal here. It works once, for 10 minutes.',
     pt: 'A primeira configuração por esta página precisa de um código que só este computador mostra: rode `agentop vault setup-code` num terminal aqui. Vale uma vez, por 10 minutos.',

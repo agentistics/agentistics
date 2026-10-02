@@ -567,7 +567,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   lang: 'en' | 'pt'; isMobile: boolean; initial: VaultView; steps: WizardStep[]; onClose: () => void
 }) {
   // The whole §7.3 flow: device check → authenticator → recovery key → presence (each only if still missing).
-  const [plan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps))
+  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps))
   const t = (k: VaultKey) => vt(k, lang)
   const [view, setView] = useState(initial)
   const [i, setI] = useState(0)
@@ -592,6 +592,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const [needSetup, setNeedSetup] = useState(false)
   const [setupCode, setSetupCode] = useState('')
   const [askCode, setAskCode] = useState(false)
+  // Leader decision 2: a recovery key that already exists must follow the new data key — the page never
+  // takes the 24 words, so it offers NEW words instead (the old ones stop working), or the terminal.
+  const [needWords, setNeedWords] = useState(false)
   const [finished, setFinished] = useState(false)
 
   useEffect(() => () => { setWords(null) }, [])
@@ -672,12 +675,18 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   }
 
   // ── presence
-  const enrolPresence = async () => {
+  const enrolPresence = async (replaceRecovery = false) => {
     if (busy) return
     setBusy(true); setError(null)
-    const r = await presenceEnrol(kind, presenceCodeNeeded ? presCode : undefined)
-    if (!r.ok) { setPresCode(''); return fail(r.sentence) }
-    setBusy(false)
+    const r = await presenceEnrol(kind, presenceCodeNeeded ? presCode : undefined, replaceRecovery)
+    if (!r.ok) {
+      setPresCode('')
+      if (r.code === 'presence-needs-recovery-words') { setNeedWords(true); setBusy(false); setError(r.sentence); return }
+      return fail(r.sentence)
+    }
+    setBusy(false); setNeedWords(false)
+    // The recovery key is owed now: it is the LAST step (append it when this wizard did not plan it).
+    if (r.recoveryOwed && !plan.slice(i + 1).includes('recovery')) setPlan(p => [...p, 'recovery'])
     await next()
   }
 
@@ -803,9 +812,19 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
-              {busy ? t('unlocking') : t('wiz_pres_go')}
-            </button>
+            {!needWords && (
+              <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
+                {busy ? t('unlocking') : t('wiz_pres_go')}
+              </button>
+            )}
+            {needWords && (
+              <>
+                <Note tone="warn">{t('wiz_pres_newWords_warn')}</Note>
+                <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence(true) }}>
+                  {busy ? t('unlocking') : t('wiz_pres_newWords')}
+                </button>
+              </>
+            )}
           </div>
         )}
 

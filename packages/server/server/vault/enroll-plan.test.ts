@@ -18,8 +18,8 @@ describe('parseEnrolArgs', () => {
 
 describe('stepsToRun — the §7.3 order, and only what is missing', () => {
   const none = { authenticator: false, recovery: false, presence: false, available: ['hello'] }
-  test('a fresh machine runs all three, authenticator first and presence LAST', () => {
-    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, none)).toEqual(['authenticator', 'recovery', 'presence'])
+  test('a fresh machine runs all three: authenticator, presence, then the recovery key LAST (leader decision 2)', () => {
+    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, none)).toEqual(['authenticator', 'presence', 'recovery'])
   })
   test('a machine with no presence device skips presence (never offered and failing)', () => {
     expect(stepsToRun({ only: [], presence: null, requirePresence: false }, { ...none, available: [] })).toEqual(['authenticator', 'recovery'])

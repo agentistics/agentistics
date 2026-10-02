@@ -42,6 +42,7 @@ export let dir = ''
 export let dpapi = fake('dpapi')
 export let hello = fake('hello')
 export const S = { session: 'socket' }
+let lastWords: string[] = []
 
 export function restart(): void {
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [dpapi, hello], autoInit: { candidates: [dpapi] } })
@@ -57,6 +58,26 @@ export async function silentVault(): Promise<void> {
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('MARK'))
 }
 
+/** …plus the authenticator only (the leader's order puts presence BEFORE the recovery key). */
+export async function authVault(): Promise<void> {
+  await silentVault()
+  const a = await beginAuthenticator(S, 'box')
+  if (!a.ok) throw new Error(a.sentence)
+  seed = base32Decode(a.secret)
+  const c = await confirmAuthenticator(codeAt(0), S)
+  if (!c.ok) throw new Error(c.sentence)
+  next()
+}
+
+/** Make the recovery key now (socket); returns the words. */
+export async function makeRecovery(): Promise<string[]> {
+  const r = await beginRecoveryKey(S)
+  if (!r.ok) throw new Error(r.sentence)
+  const k = await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), S)
+  if (!k.ok) throw new Error(k.sentence)
+  return r.words
+}
+
 /** …plus the authenticator and a recovery key (through the socket session), presence NOT yet enrolled. */
 export async function enrolledVault(): Promise<{ words: string[] }> {
   await silentVault()
@@ -70,6 +91,7 @@ export async function enrolledVault(): Promise<{ words: string[] }> {
   if (!r.ok) throw new Error(r.sentence)
   const k = await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!))
   if (!k.ok) throw new Error(k.sentence)
+  lastWords = r.words
   return { words: r.words }
 }
 
@@ -82,7 +104,7 @@ afterAll(() => { __resetVaultForTests({ dir: join(mkdtempSync(join(tmpdir(), 'ag
 
 describe('step 0 — a presence enrolment failure reaches the UI as a sentence, never a reason code', () => {
   test('the bridge failure is said in words (EN), with no code and no .NET name', async () => {
-    await enrolledVault()
+    await authVault()
     hello.wrapFails = 'presence-unavailable: bridge-failed'
     const r = await enrolPresence('hello', { ...S, code: codeAt() })
     expect(r.ok).toBe(false)
@@ -93,7 +115,7 @@ describe('step 0 — a presence enrolment failure reaches the UI as a sentence, 
     expect(r.sentence).toContain('Windows Hello')
   })
   test('a reason that is not a presence code still becomes a sentence, not the raw text', async () => {
-    await enrolledVault()
+    await authVault()
     hello.wrapFails = 'no-hmac-secret: this security key does not support hmac-secret'
     const r = await enrolPresence('hello', { ...S, code: codeAt() })
     expect(!r.ok && r.sentence).not.toMatch(/^no-hmac-secret:/)
@@ -169,9 +191,10 @@ import { vaultStatus } from './service'
 
 describe('M2 — in recovery mode the re-enrolment steps answer the local socket (TTY), never HTTP', () => {
   async function inRecovery(): Promise<void> {
-    const { words } = await enrolledVault()
+    await authVault()
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
     next()
+    const words = await makeRecovery()
     restart()
     expect((await vaultStatus()).state).toBe('locked')
     const r = await recoverWithWords(words.join(' '))
@@ -336,7 +359,7 @@ describe('S3 — reset when the vault cannot open: allowed from the terminal, wi
     expect(r.reply.ok).toBe(true)
   })
   test('a vault that is merely LOCKED behind presence is not reset that way — the sentence says unlock first', async () => {
-    const { } = await enrolledVault()
+    await authVault()
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
     next()
     restart(); installVaultOps()
@@ -416,10 +439,11 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
   const gh = () => readFileSync(join(dir, 'gh.sealed'))
 
   test('a copy of the old silent wrapper opens NOTHING after enrolment; everything still reads; words and code still work', async () => {
-    const { words } = await enrolledVault()
+    await authVault()
     const old = await silentCopy()
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
     next()
+    const words = await makeRecovery() // LAST: the words wrap the final key
     const v = vaultJson()
     expect(v.kid).not.toBe(old.kid)
     expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
@@ -439,7 +463,7 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
   })
 
   test('a crash while re-sealing leaves the old vault opening, every record readable, nothing staged after the next open', async () => {
-    await enrolledVault()
+    await authVault()
     const old = await silentCopy()
     __rekeyCrashAtForTests('prepare-mid')
     await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
@@ -452,10 +476,10 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
 
   for (const point of ['before-commit-mark', 'before-finish']) {
     test(`a crash after the commit (${point}) is finished on the next unlock — the code still works, nothing is lost`, async () => {
-      await enrolledVault()
+      await enrolledVault() // a recovery key exists: the terminal brings the words, so it must follow too
       const old = await silentCopy()
       __rekeyCrashAtForTests(point)
-      await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
+      await expect(enrolPresence('hello', { ...S, code: codeAt(), words: lastWords.join(' ') })).rejects.toThrow('injected crash')
       next()
       restart()
       expect(vaultJson().kid).not.toBe(old.kid)
@@ -466,12 +490,14 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
       expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
       expect(leftovers()).toEqual([])
       expect(existsSync(join(vaultDir(), 'dek.recovery'))).toBe(true)
+      // …and the words still open the rotated vault (the staged recovery wrapper was finished too).
+      restart()
+      expect((await recoverWithWords(lastWords.join(' '))).ok).toBe(true)
     })
   }
 
   test('outside the setup that made the recovery key, the terminal supplies the words; wrong words change nothing', async () => {
     const { words } = await enrolledVault()
-    T += 11 * 60_000
     const none = await enrolPresence('hello', { ...S, code: codeAt() })
     expect(!none.ok && none.code).toBe('presence-needs-recovery-words')
     const kid0 = vaultJson().kid
@@ -486,7 +512,6 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
 
   test('the words never come from a page: an HTTP session is refused even when it sends them', async () => {
     const { words } = await enrolledVault()
-    T += 11 * 60_000
     const r = await enrolPresence('hello', { session: 'http:local', code: codeAt(), words: words.join(' ') })
     expect(!r.ok && r.code).toBe('presence-needs-recovery-words')
   })
@@ -522,5 +547,60 @@ describe('decision 3 — the setup code never reaches a log; it is minted on dem
     expect(a.code).not.toBe(b.code) // a fresh code each time (a collision is 1 in 10^8)
     expect((await beginAuthenticator({ session: 'http:local', setupCode: a.code }, 'box')).ok).toBe(false)
     expect((await beginAuthenticator({ session: 'http:local', setupCode: b.code }, 'box')).ok).toBe(true)
+  })
+})
+
+// ── Leader decision 2: no recovery words in memory across steps — fixed by ORDER ────────────────
+
+import { wizardPlan, missingSteps } from '../../../web/src/lib/vaultApi'
+import { stepsToRun } from './enroll-plan'
+
+describe('decision 2 — authenticator → presence (the key rotates) → recovery LAST; words never linger', () => {
+  test('a just-confirmed recovery key is NOT kept: presence right after it still needs the words', async () => {
+    await enrolledVault() // recovery confirmed a moment ago, same session
+    const r = await enrolPresence('hello', { ...S, code: codeAt() })
+    expect(!r.ok && r.code).toBe('presence-needs-recovery-words')
+  })
+  test('the order: presence before the recovery key is allowed, says the key is owed, and the words made after it open the vault', async () => {
+    await authVault()
+    const p = await enrolPresence('hello', { ...S, code: codeAt() })
+    expect(p.ok && p.recoveryOwed).toBe(true)
+    next()
+    const words = await makeRecovery()
+    restart()
+    expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
+  })
+  test('no words at hand: NEW words are offered — the old ones stop working, and a recovery key is owed', async () => {
+    const { words: oldWords } = await enrolledVault()
+    const r = await enrolPresence('hello', { ...S, code: codeAt(), replaceRecovery: true })
+    expect(r.ok && r.recoveryOwed).toBe(true)
+    next()
+    const newWords = await makeRecovery()
+    restart()
+    expect((await recoverWithWords(oldWords.join(' '))).ok).toBe(false)
+    restart()
+    expect((await recoverWithWords(newWords.join(' '))).ok).toBe(true)
+  })
+  test('the refusal offers both ways out, in words', async () => {
+    await enrolledVault()
+    const r = await enrolPresence('hello', { ...S, code: codeAt() })
+    expect(!r.ok && r.sentence).toContain('agentop vault enroll --presence')
+    expect(!r.ok && r.sentence).toMatch(/new recovery words/i)
+  })
+  test('the page\'s wizard keeps its flow through presence: the recovery key after it needs no second code', async () => {
+    await silentVault()
+    const W = { session: 'http:local' }
+    const a = await beginAuthenticator({ ...W, setupCode: mintSetupCode().code }, 'box')
+    if (!a.ok) throw new Error(a.sentence)
+    seed = base32Decode(a.secret)
+    expect((await confirmAuthenticator(codeAt(), W)).ok).toBe(true)
+    next()
+    expect((await enrolPresence('hello', W)).ok).toBe(true)
+    expect((await beginRecoveryKey(W)).ok).toBe(true)
+  })
+  test('the wizard and the terminal both run authenticator → presence → recovery', () => {
+    expect(missingSteps({ authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
+    expect(stepsToRun({ only: [], presence: null, requirePresence: false } as never, { authenticator: false, recovery: false, presence: false, available: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
   })
 })

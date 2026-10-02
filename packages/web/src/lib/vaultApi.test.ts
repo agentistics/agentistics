@@ -71,8 +71,8 @@ describe('gates — read from the SERVER table, then narrowed by what this vault
 
 describe('what the wizard still has to do', () => {
   const none = { authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] }
-  test('fresh: authenticator, recovery, presence — presence LAST', () => {
-    expect(missingSteps(none)).toEqual(['authenticator', 'recovery', 'presence'])
+  test('fresh: authenticator, presence, recovery — the recovery key LAST (leader decision 2)', () => {
+    expect(missingSteps(none)).toEqual(['authenticator', 'presence', 'recovery'])
   })
   test('no presence device: the step is not offered (never offered and failing)', () => {
     expect(missingSteps({ ...none, presenceAvailable: [] })).toEqual(['authenticator', 'recovery'])
@@ -124,11 +124,11 @@ describe('words', () => {
 })
 
 describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
-  test('a fresh machine runs the device check FIRST, then authenticator → recovery → presence', () => {
-    expect(wizardPlan(['authenticator', 'recovery', 'presence'])).toEqual(['probe', 'authenticator', 'recovery', 'presence'])
+  test('a fresh machine runs the device check FIRST, then authenticator → presence → recovery', () => {
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
   })
   test('a resume has no probe (the presence enrolment is its own double gesture); no presence device, no probe', () => {
-    expect(wizardPlan(['recovery', 'presence'])).toEqual(['recovery', 'presence'])
+    expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
     expect(wizardPlan(['authenticator', 'recovery'])).toEqual(['authenticator', 'recovery'])
     expect(wizardPlan([])).toEqual([])
   })
