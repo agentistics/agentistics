@@ -416,7 +416,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         // permission, an unreachable recognition service, a missing microphone and a moment of
         // silence all looked identical: the button lit up and went out. A button that fails
         // silently is indistinguishable from a broken one.
-        setNotice(dictationError(e?.error ?? 'unknown', pt ? 'pt' : 'en'))
+        // `aborted` (our own stop, or the send ending it) has no sentence and must not clear another notice.
+        const why = dictationError(e?.error ?? 'unknown', pt ? 'pt' : 'en')
+        if (why) setNotice(why)
       }
       rec.start()
       recognitionRef.current = rec
