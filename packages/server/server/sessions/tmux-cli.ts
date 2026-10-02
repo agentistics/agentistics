@@ -136,7 +136,7 @@ export const PANE_COLS = 120
 export const PANE_ROWS = 50
 
 export function newSessionArgs(
-  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string; path?: string },
+  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string; path?: string; env?: Record<string, string> },
 ): string[] {
   const env = o.truecolor ? ['-e', 'COLORTERM=truecolor'] : []
   // THE PANE GETS THE CALLER'S PATH, stated explicitly rather than left to tmux. A tmux server
@@ -147,6 +147,8 @@ export function newSessionArgs(
   // ours; with `-e` the next spawn after a PATH fix finds the harness on any version, and no live
   // session has to be killed to get there.
   if (o.path) env.push('-e', `PATH=${o.path}`)
+  // The login-resolved toolchain variables (`login-env.ts`, an allowlist — never credentials).
+  for (const [k, v] of Object.entries(o.env ?? {})) if (k !== 'PATH' || !o.path) env.push('-e', `${k}=${v}`)
   return sock([
     'new-session', '-d', '-s', tmuxName(o.id),
     '-x', String(PANE_COLS), '-y', String(PANE_ROWS),
@@ -388,7 +390,7 @@ export function serverOptionsArgs(profile: TerminalProfile): string[][] {
  */
 export function spawnArgs(
   profile: TerminalProfile,
-  o: { id: string; cwd: string; argv: string[]; path?: string },
+  o: { id: string; cwd: string; argv: string[]; path?: string; env?: Record<string, string> },
 ): string[] {
   // ONE profile drives both halves of truecolor: the client-side capability
   // (`terminal-features` in serverOptionsArgs) and the pane-side `COLORTERM` here. Deriving the
@@ -398,6 +400,7 @@ export function spawnArgs(
     newSessionArgs({
       id: o.id, cwd: o.cwd, argv: o.argv, truecolor: profile.truecolorTerm !== null,
       ...(o.path ? { path: o.path } : {}),
+      ...(o.env ? { env: o.env } : {}),
     }),
   ]
   const chained: string[] = []

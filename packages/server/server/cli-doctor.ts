@@ -111,6 +111,17 @@ export async function runDoctor(argv: string[]): Promise<never> {
     console.log(`    ${DIM}${c.detail}${RESET}`)
   }
 
+  // The environment sessions start in (login-env.ts): counts and names only, never values.
+  {
+    const { resolveLoginEnv } = await import('./sessions/login-env')
+    const r = await resolveLoginEnv()
+    const icon = r.source === 'login' ? `${GREEN}✓${RESET}` : `${YELLOW}!${RESET}`
+    const segs = (r.env?.PATH ?? '').split(':').filter(Boolean).length
+    const vars = Object.keys(r.env ?? {}).filter(k => k !== 'PATH').join(', ') || 'none'
+    console.log(`\n  ${icon} Session environment (${r.source})`)
+    console.log(`    ${DIM}login-shell PATH: ${segs} entries; toolchain vars: ${vars}${RESET}`)
+  }
+
   if (dbError) {
     console.log(`\n  ${YELLOW}!${RESET} Database unreachable — owner-MFA and machine-token checks could not run.`)
     console.log(`    ${DIM}${dbError}${RESET}`)
