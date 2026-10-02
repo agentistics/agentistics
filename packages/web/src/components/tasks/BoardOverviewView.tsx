@@ -180,7 +180,7 @@ export function BoardOverviewView({ o, statuses }: {
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Section title="Delivery">
+      <Section title="Task">
         <Big
           label="In flight" value={String(o.inFlight)}
           icon={<CircleDashed size={13} style={{ color: 'var(--anthropic-orange)' }} />}
@@ -198,14 +198,14 @@ export function BoardOverviewView({ o, statuses }: {
         <Big
           label="Avg delivery time" value={fmtDuration(o.avgDeliveryMs) ?? NA}
           icon={<Timer size={13} style={{ color: 'var(--accent-blue)' }} />}
-          help="Mean wall-clock time from a task's creation to its delivery."
+          help="Mean wall-clock time from a task's creation to its task."
           gap={o.avgDeliveryMs === null ? 'Nothing delivered yet — an open task has no duration.' : undefined}
         />
       </Section>
 
       <Section title="Cost">
         <Big
-          label="Avg cost / delivery" value={money(o.avgCostPerDelivered, o.deliveredCostByHarness)} accent
+          label="Avg cost / task" value={money(o.avgCostPerDelivered, o.deliveredCostByHarness)} accent
           icon={<Coins size={13} style={{ color: 'var(--anthropic-orange)' }} />}
           help="Mean spend across delivered tasks that could be priced."
           gap={o.avgCostPerDelivered === null

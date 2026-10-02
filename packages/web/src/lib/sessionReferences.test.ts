@@ -35,7 +35,7 @@ describe('the delivery row', () => {
   test('is a link to the task, by its name — the ref the board resolves', () => {
     const [row] = sessionReferences({ ...base, task: 'O terminal' })
     expect(row).toMatchObject({
-      id: 'task', label: 'Entrega', detail: 'O terminal', action: { type: 'task', ref: 'O terminal' },
+      id: 'task', label: 'Tarefa', detail: 'O terminal', action: { type: 'task', ref: 'O terminal' },
     })
   })
 
@@ -45,7 +45,7 @@ describe('the delivery row', () => {
   })
 
   test('is worded in English on request', () => {
-    expect(sessionReferences({ ...base, pt: false, task: 'x' })[0]!.label).toBe('Delivery')
+    expect(sessionReferences({ ...base, pt: false, task: 'x' })[0]!.label).toBe('Task')
   })
 })
 

@@ -499,7 +499,7 @@ function BlockedBy({ id, task, lang, statuses, onChanged, bare }: {
           // is exactly when picking a blocker by scrolling stops working.
           <Select
             value=""
-            placeholder={pt ? 'Escolher uma entrega…' : 'Pick a delivery…'}
+            placeholder={pt ? 'Escolher uma tarefa…' : 'Pick a task…'}
             searchPlaceholder={pt ? 'Buscar…' : 'Search…'}
             options={(rows ?? [])
               // A task never blocks itself, and one already listed is not offered twice.
@@ -946,7 +946,7 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
         maxLength={DESCRIPTION_MAX_LENGTH}
         style={{ ...field(isMobile), minHeight: 90, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
         value={text}
-        placeholder="What is this delivery for? Markdown works. Paste a file, or attach one."
+        placeholder="What is this task for? Markdown works. Paste a file, or attach one."
         onChange={e => setText(e.target.value)}
         onPaste={e => {
           const fl = Array.from(e.clipboardData?.files ?? [])
@@ -1486,7 +1486,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             * the one control, and it is at the top of this rail on every screen.
             */}
           {/* DELETING is offered only where the caller has somewhere to go afterwards. In the
-              session aside there is nowhere: the delivery this panel is a view OF would be gone,
+              session aside there is nowhere: the task this panel is a view OF would be gone,
               and the panel would sit on a record that no longer answers. The board's own page
               navigates back to the list, which is why it passes `onDeleted`. */}
           {onDeleted && (

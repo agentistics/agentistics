@@ -65,7 +65,7 @@ export function NewTaskWizard({ onDone, onClose, onCreateSession, session }: New
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={microLabel}>{session ? 'New task for this session' : 'New task'}</span>
-          <BetaTag what="The delivery board" />
+          <BetaTag what="Agentask" />
           <span style={{ flex: 1 }} />
           <button
             onClick={onClose}

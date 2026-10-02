@@ -2543,6 +2543,13 @@ packages/vscode/src/
 
 ## The task board (ALM) — `/tasks`, and the orchestration surface on top of it
 
+**The product name is Agentask** (owner decision 2026-10-02) — in both languages, in the nav, page titles,
+notification categories and MCP descriptions. It replaces "Entregas"/"Deliveries". Internal identifiers,
+the `/tasks` route, `/api/tasks`, the `agentistics_task_*` MCP tool names, types and stored keys keep their
+names (renaming them would break clients and stored data), and one item inside Agentask is a **task**
+("tarefa"). Many comments below still say "delivery": read it as "task". `packages/web/src/lib/agentask-name.lint.test.ts`
+keeps the old label out of user-visible strings.
+
 What each piece of work COST, in how many rounds and across how many sessions — and, once several
 agents are driving it, which of them may pick up what. Full write-up in
 `docs/superpowers/specs/2026-09-05-task-measurement-design.md`; these are the invariants.

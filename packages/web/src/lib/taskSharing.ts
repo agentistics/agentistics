@@ -38,8 +38,8 @@ export function sharingCopy(o: {
     return {
       label: pt ? 'Compartilhar com a central' : 'Share with the central',
       body: pt
-        ? 'Esta entrega fica só nesta máquina. Nada dela viaja.'
-        : 'This delivery stays on this machine. None of it travels.',
+        ? 'Esta tarefa fica só nesta máquina. Nada dela viaja.'
+        : 'This task stays on this machine. None of it travels.',
     }
   }
 
@@ -49,8 +49,8 @@ export function sharingCopy(o: {
       // Marked shared and nothing to share: said out loud, or the switch reads as a share that
       // already happened.
       body: pt
-        ? 'Marcada para compartilhar — mas esta máquina não está conectada a nenhuma central, então nada viaja. Se você conectar uma, esta entrega passa a ser enviada.'
-        : 'Marked as shared — but this machine is connected to no central, so nothing travels. Connect one and this delivery starts being sent.',
+        ? 'Marcada para compartilhar — mas esta máquina não está conectada a nenhuma central, então nada viaja. Se você conectar uma, esta tarefa passa a ser enviada.'
+        : 'Marked as shared — but this machine is connected to no central, so nothing travels. Connect one and this task starts being sent.',
     }
   }
 
@@ -64,7 +64,7 @@ export function sharingCopy(o: {
       ? `O título, a descrição, os comentários, as subtarefas e os NOMES dos arquivos vão ${where}. Os arquivos em si não viajam, e nenhum número calculado aqui viaja: a central soma o que ela já tem.`
       : `The title, the description, the comments, the subtasks and the NAMES of the files go ${where}. The files themselves do not travel, and no figure computed here travels: the central adds up what it already holds.`,
     sessions: pt
-      ? 'As sessões seguem as regras de compartilhamento desta conexão, sem exceção — um repositório que você retém continua retido, e a central mostra que a entrega está medida a menos.'
-      : 'The sessions still follow this connection’s sharing rules, without exception — a repository you withhold stays withheld, and the central says the delivery is measured short.',
+      ? 'As sessões seguem as regras de compartilhamento desta conexão, sem exceção — um repositório que você retém continua retido, e a central mostra que a tarefa está medida a menos.'
+      : 'The sessions still follow this connection’s sharing rules, without exception — a repository you withhold stays withheld, and the central says the task is measured short.',
   }
 }

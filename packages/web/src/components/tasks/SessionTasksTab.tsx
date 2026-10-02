@@ -94,16 +94,16 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
   return (
     <div style={{ display: 'grid', gap: 12, padding: 10, alignContent: 'start' }}>
       {/* The caveat rides the FEATURE, not the page: this panel is the board reaching into the
-          session workspace, and a reader here never passes the Deliveries header. */}
+          session workspace, and a reader here never passes the Tasks header. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span style={microLabel}>{pt ? 'Entregas' : 'Deliveries'}</span>
+        <span style={microLabel}>Agentask</span>
         <BetaTag what={pt ? 'A vinculação de tarefas' : 'Filing sessions under tasks'} />
       </div>
       {p.session.task
         ? (
           <>
             {/* The filing bar — the one question that is about the SESSION rather than about the
-                delivery, kept above the delivery itself so the two are never confused. */}
+                task, kept above the task itself so the two are never confused. */}
             <div style={{ ...surface, padding: 10, display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={microLabel}>{pt ? 'Esta sessão está em' : 'This session is filed under'}</span>
@@ -166,18 +166,18 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
               )
               : (
                 <div style={{ ...surface, padding: 12, fontSize: 12, color: 'var(--text-tertiary)' }}>
-                  {pt ? 'Carregando a entrega…' : 'Loading the delivery…'}
+                  {pt ? 'Carregando a tarefa…' : 'Loading the task…'}
                 </div>
               )}
           </>
         )
         : (
           <div style={{ ...surface, padding: 12, display: 'grid', gap: 9 }}>
-            <span style={microLabel}>{pt ? 'Sem entrega' : 'Not filed under a delivery'}</span>
+            <span style={microLabel}>{pt ? 'Sem tarefa' : 'Not filed under a task'}</span>
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
               {pt
-                ? 'Uma sessão fora de uma entrega continua sendo medida — o que não existe é o custo POR entrega. Filie esta a uma subtarefa, ou crie a entrega aqui mesmo.'
-                : 'A session outside a delivery is still measured — what does not exist is the cost PER delivery. File this one under a subtask, or create the delivery right here.'}
+                ? 'Uma sessão fora de uma tarefa continua sendo medida — o que não existe é o custo POR tarefa. Filie esta a uma subtarefa, ou crie a tarefa aqui mesmo.'
+                : 'A session outside a task is still measured — what does not exist is the cost PER task. File this one under a subtask, or create the task right here.'}
             </span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button style={button(isMobile)} disabled={busy} onClick={() => setPicking(true)}>

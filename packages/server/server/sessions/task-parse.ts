@@ -39,7 +39,7 @@ export type TaskCommand =
 // wrong — the one moment they are certainly reading it.
 const USAGE = 'Usage: agentop task [ls | show <id|name> | deliver <id|name> | abandon <id|name>'
   + ' | share <id|name> | unshare <id|name>]'
-  + '\n(beta — the delivery board is new and still changing)'
+  + '\n(beta — Agentask, the task board, is new and still changing)'
 
 export function parseTaskArgs(argv: string[]): TaskCommand {
   const json = argv.includes('--json')

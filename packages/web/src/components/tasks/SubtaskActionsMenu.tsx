@@ -81,8 +81,8 @@ function refusalText(pt: boolean, reason: StatusRefusalReason | undefined): stri
   switch (reason) {
     case 'invalid_group':
       return pt
-        ? 'Esse grupo não existe mais, ou pertence a outra entrega.'
-        : 'That group no longer exists, or belongs to another delivery.'
+        ? 'Esse grupo não existe mais, ou pertence a outra tarefa.'
+        : 'That group no longer exists, or belongs to another task.'
     case 'subtask_has_sessions':
       return pt
         ? 'Essa subtarefa já tem uma sessão filiada — desfilie antes de agrupar.'

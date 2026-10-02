@@ -153,15 +153,15 @@ export function TaskPicker(p: TaskPickerProps) {
 
         <span style={{ ...microLabel, fontSize: 9 }}>
           {pt
-            ? 'Onde a sessão fica — direto na entrega, ou em UMA subtarefa'
-            : 'Where the session sits — directly on the delivery, or under ONE subtask'}
+            ? 'Onde a sessão fica — direto na tarefa, ou em UMA subtarefa'
+            : 'Where the session sits — directly on the task, or under ONE subtask'}
         </span>
 
         {(detail?.subtasks.length ?? 0) === 0 && !adding && (
           <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
             {pt
-              ? 'Esta entrega ainda não tem subtarefas. Escolha "direto na entrega" abaixo, ou quebre em subtarefas.'
-              : 'This delivery has no subtasks yet. Pick "directly on the delivery" below, or break it into subtasks.'}
+              ? 'Esta tarefa ainda não tem subtarefas. Escolha "direto na tarefa" abaixo, ou quebre em subtarefas.'
+              : 'This task has no subtasks yet. Pick "directly on the task" below, or break it into subtasks.'}
           </p>
         )}
 
@@ -182,7 +182,7 @@ export function TaskPicker(p: TaskPickerProps) {
           >
             <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {pt ? '— direto na entrega —' : '— directly on the delivery —'}
+              {pt ? '— direto na tarefa —' : '— directly on the task —'}
             </span>
           </button>
           {(detail?.subtasks ?? []).map(st => (
@@ -282,7 +282,7 @@ export function TaskPicker(p: TaskPickerProps) {
         </div>
         {exact && (
           <div style={{ ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 2px' }}>
-            <Check size={11} style={{ verticalAlign: -1 }} /> {pt ? 'Essa entrega já existe — escolha acima.' : 'That delivery already exists — pick it above.'}
+            <Check size={11} style={{ verticalAlign: -1 }} /> {pt ? 'Essa tarefa já existe — escolha acima.' : 'That task already exists — pick it above.'}
           </div>
         )}
       </div>
