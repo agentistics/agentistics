@@ -20,6 +20,7 @@
  * A dialog that invents its own chrome reads as a different product from the one beside it.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { reopeningLabel } from '../../lib/reopeningStore'
 import { ArrowLeft, Forward, Loader, Paperclip, RotateCcw, Search, Send, X } from 'lucide-react'
 import {
   PICK_TABS, filterPickRows, initialPick, pickAllState, pickEmpty, pickTabHint,
@@ -663,11 +664,13 @@ export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClo
               fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
             }}
           >
-            {kind === 'reopen'
+            {busy
+              ? <Loader size={13} className="ag-working-spin" />
+              : kind === 'reopen'
               ? <RotateCcw size={13} />
               : step !== 'compose' ? null
               : forwarding && !direct ? <Forward size={13} /> : <Send size={13} />}
-            {primary.label}
+            {busy && kind === 'reopen' ? reopeningLabel(pt) : primary.label}
           </button>
         </footer>
       </div>

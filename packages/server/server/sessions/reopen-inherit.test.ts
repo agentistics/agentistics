@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { inheritedIdentity } from './reopen-inherit'
+import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
+import { planSpawn } from './spawn-spec'
 import type { ManagedSession } from './types'
 
 const prev: ManagedSession = {
@@ -37,5 +38,36 @@ describe('every reopen path inherits identity', () => {
     const src = await read('./cli-session.ts')
     expect(src).toContain('...inheritedIdentity(m)')
     expect(src).toContain('...inheritedIdentity(previous)')
+  })
+})
+
+describe('inheritedLaunch — a reopen keeps the model and effort', () => {
+  it('re-applies both where the harness takes them', () => {
+    expect(inheritedLaunch({ ...prev, model: 'sonnet', effort: 'high' }, 'claude')).toEqual({ model: 'sonnet', effort: 'high' })
+  })
+  it('drops only the option the CLI cannot take', () => {
+    expect(inheritedLaunch({ ...prev, model: 'sonnet', effort: 'bogus' }, 'claude')).toEqual({ model: 'sonnet' })
+    expect(inheritedLaunch({ ...prev, harness: 'codex', model: 'm', effort: 'high' }, 'codex')).toEqual({ model: 'm' })
+  })
+  it('is empty without a row or without recorded options', () => {
+    expect(inheritedLaunch(undefined, 'claude')).toEqual({})
+    expect(inheritedLaunch(prev, 'claude')).toEqual({})
+  })
+  it('the resume argv carries --model / --effort', () => {
+    const l = inheritedLaunch({ ...prev, model: 'sonnet', effort: 'high' }, 'claude')
+    const plan = planSpawn({ harness: 'claude', cwd: '/x', resumeId: 'c1', ...l })
+    expect(plan.ok && plan.plan.argv).toEqual(expect.arrayContaining(['--resume', 'c1', '--model', 'sonnet', '--effort', 'high']))
+  })
+})
+
+describe('spawnManaged writes the registry row before the session exists', () => {
+  it('addSession precedes backend.spawn, and a failed launch removes the row', async () => {
+    const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
+    const fn = src.slice(src.indexOf('async function spawnManaged('))
+    const add = fn.indexOf('await addSession(await spawnRow(')
+    const spawn = fn.indexOf('await backend.spawn(')
+    expect(add).toBeGreaterThan(0)
+    expect(add).toBeLessThan(spawn)
+    expect(fn.match(/await abandon\(\)/g)?.length).toBe(2)
   })
 })

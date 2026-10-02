@@ -21,7 +21,7 @@ import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/spl
 
 import {
   ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
-  PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
+  Loader, PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -46,6 +46,7 @@ import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
+import { reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
 import { buildPickRows } from '../../lib/sessionPick'
 import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -613,7 +614,8 @@ export function SessionsAside({
       return
     }
     if (!act) return
-    void act({ id, action }).then(out => {
+    const call = () => act({ id, action })
+    void (action === 'resume' ? withReopening([id], call) : call()).then(out => {
       setNotice(out.message)
       // A REOPEN LANDS SOMEWHERE, here too. It retires the row it was asked about, so a reader
       // sitting on that row is left on an id the next poll drops — and this handler kept only the
@@ -1344,7 +1346,8 @@ export function SessionsAside({
              * fleet polls every five seconds, and "all of them" resolved on the server a moment
              * later is not the list this person just read and agreed to.
              */
-            void act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
+            const call = () => act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
+            void (picking === 'reopen' ? withReopening(ids, call) : call())
               .then(out => { setNotice(out.message); setPicking(null) })
               .finally(() => { endDispatch(groupActingRef); setGroupBusy(false) })
           }}
@@ -2291,6 +2294,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   cardColor: AsideCardColor
 }) {
   const wants = sessionNotify(session)
+  const reopening = useReopening().has(session.id)
   const goTo = useContext(GoToSessionContext)
   const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
@@ -2357,6 +2361,12 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
+      {reopening && (
+        <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
+          <Loader size={12} className="ag-working-spin" />
+          {reopeningLabel(lang !== 'en')}
+        </span>
+      )}
       <SessionFacts
         session={session}
         selected={selected}

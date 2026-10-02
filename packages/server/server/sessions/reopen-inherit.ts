@@ -1,3 +1,5 @@
+import type { HarnessId } from '@agentistics/core'
+import { planSpawn } from './spawn-spec'
 import type { ManagedSession } from './types'
 
 /**
@@ -30,5 +32,26 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
     out.harnessName = prev.harnessName
     if (prev.harnessNameSince !== undefined) out.harnessNameSince = prev.harnessNameSince
   }
+  return out
+}
+
+/**
+ * The model and effort a reopen re-applies — `claude --resume <id>` alone comes back on the GLOBAL
+ * default, so a Sonnet worker returned as whatever the machine's default is.
+ *
+ * Only what this harness's CLI can actually take: `planSpawn` is the judge (a harness with no
+ * `--effort`, or a recorded value outside the closed enum, drops THAT option and keeps the other),
+ * so a reopen is never refused over a launch option it could have started without.
+ */
+export function inheritedLaunch(
+  prev: ManagedSession | undefined,
+  harness: HarnessId,
+): { model?: string; effort?: string } {
+  if (!prev) return {}
+  const accepts = (o: { model?: string; effort?: string }) =>
+    planSpawn({ harness, cwd: prev.cwd, resumeId: 'x', ...o }).ok
+  const out: { model?: string; effort?: string } = {}
+  if (prev.model && accepts({ model: prev.model })) out.model = prev.model
+  if (prev.effort && accepts({ effort: prev.effort })) out.effort = prev.effort
   return out
 }

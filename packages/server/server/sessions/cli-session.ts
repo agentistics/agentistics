@@ -32,7 +32,7 @@ import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
-import { inheritedIdentity } from './reopen-inherit'
+import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { conversationForProcess, loadConversations } from './conversations'
 import { resolveBackend } from './index'
@@ -559,7 +559,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
 
   for (const row of plan.reopen) {
     const m = row.entry
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId })
+    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...inheritedLaunch(m, m.harness) })
     if (!planned.ok) { skipped.push(m.id); continue }
     const id = newSessionId()
     try {
@@ -580,6 +580,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // INHERITED from the row being replaced, never taken from the request: a reopened session is
       // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
       ...inheritedIdentity(m),
+      ...inheritedLaunch(m, m.harness),
       label: row.label,
       // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
       // reopen verb has recorded it since it was written; this path had not, so the same gesture
