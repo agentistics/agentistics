@@ -28,7 +28,7 @@ describe('the registry — one place says where each key lives on a machine', ()
     const legacy = [
       'theme', 'lang', 'currency', 'cardOrder', 'cardPrecision', 'monthlyBudgetUSD',
       'chatModel', 'chatHarness', 'chatEffort', 'chatSoundEnabled', 'chatSoundId', 'nayMotion',
-      'pinnedSessions', 'sessionGroups', 'idleSessions', 'dismissedHealth', 'notificationSettings',
+      'pinnedSessions', 'mutedSessions', 'sessionGroups', 'idleSessions', 'dismissedHealth', 'notificationSettings',
       'tagsLayout', 'galleryView', 'galleryScope', 'skillFormat', 'pricingGroupBy',
     ] as const
     for (const k of legacy) expect(`${k}:${machineHome(k)}`).toBe(`${k}:top`)

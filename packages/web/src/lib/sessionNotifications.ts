@@ -13,6 +13,7 @@ import {
   type NayAlertKind, type NayAnimation,
 } from './nayNotify'
 import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifyStore, setSnoozeReleaseHandler, waitingSince } from './nayNotifyStore'
+import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
 
@@ -482,7 +483,20 @@ interface Delivery {
 let deliveryObserver: ((d: { event: NotifyEvent; title: string; body: string; nay: boolean }) => void) | null = null
 export function observeDeliveries(fn: typeof deliveryObserver): void { deliveryObserver = fn }
 
+/**
+ * Managed id -> the key a mute is stored under (`sessionIdentityKey`: conversationId ?? id). Filled
+ * from every fleet snapshot, because a delivery only carries the managed id. A row this page has not
+ * seen falls back to the id itself, which is the key whenever no conversation is linked.
+ */
+const muteKeyById = new Map<string, string>()
+function isMutedId(id: string): boolean {
+  return isSessionMuted(muteKeyById.get(id) ?? id)
+}
+
 function deliver(d: Delivery, settings: NotificationSettings): void {
+  // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
+  // computed upstream of here and never touched. The observer still sees it: it is the decision log.
+  if (isMutedId(d.bell.id)) return
   deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({
@@ -506,6 +520,7 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
 setSnoozeReleaseHandler(alert => {
   const settings = getNotificationSettings()
   if (!settings.enabled || settings.doNotDisturb) return
+  if (isMutedId(alert.sessionId)) return
   if (!pushAlert(alert)) return
   const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
   if (settings.soundEnabled) playNotificationSound(resolveSound(event, alert.nay === true, settings), settings.soundVolume)
@@ -558,7 +573,7 @@ export function fleetActivityStates(
  */
 let unconfirmed: Record<string, SessionActivity> = {}
 
-type FleetNotifyRow = { id: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
+type FleetNotifyRow = { id: string; conversationId?: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
 
 /**
  * "Not opened for a while": read this poll into the store's waiting clocks and raise each session
@@ -595,6 +610,7 @@ export function notifyFleetTransitions(
   lang: 'pt' | 'en',
 ): Record<string, SessionActivity> {
   const seen = fleetActivityStates(rows)
+  for (const r of rows) muteKeyById.set(r.id, r.conversationId ?? r.id)
   raiseStale(rows, lang)
   // `null` is the first snapshot — see the rule above. It is deliberately distinct from `{}`, which
   // is a machine that genuinely had no sessions a moment ago and now has one.

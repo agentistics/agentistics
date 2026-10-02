@@ -45,7 +45,7 @@ import { dedupeEvents } from './event-dedupe'
 import { EMPTY_MEMORY, planEvents, seedMemory, type EventMemory } from './event-plan'
 import { createEventStore, type EventStore } from './event-store'
 import type { EventCandidate, SessionEvent } from './event-types'
-import { deliver, type DeliveryReport } from './notifier'
+import { deliver, readMutedKeys, type DeliveryReport } from './notifier'
 import { desktopSetup, type DesktopSetup } from './desktop'
 import { kindsToRecord, type Subscription } from './subscriptions'
 
@@ -159,6 +159,7 @@ export function createProducer(o: {
     const delivery = await deliver({
       events: written,
       subscriptions: subs,
+      muted: await readMutedKeys(),
       ...(desktop ? { desktop } : {}),
     })
     return { written, delivery }
