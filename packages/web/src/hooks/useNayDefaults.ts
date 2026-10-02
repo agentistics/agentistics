@@ -18,7 +18,9 @@ const emit = () => { for (const l of listeners) l() }
 
 function load(): Promise<void> {
   if (loading) return loading
-  loading = fetch('/api/preferences')
+  // `/api/user-prefs`: these are a person's defaults, per ACCOUNT on a central. On a machine they
+  // stay the top-level keys of preferences.json the Nay launcher reads server-side.
+  loading = fetch('/api/user-prefs')
     .then(r => (r.ok ? r.json() : {}) as Promise<{ chatHarness?: string; chatModel?: string; chatEffort?: string }>)
     .catch(() => ({}) as { chatHarness?: string; chatModel?: string; chatEffort?: string })
     .then(p => {
@@ -31,7 +33,7 @@ function load(): Promise<void> {
 export function saveNayDefaults(next: NayLaunchChoice): void {
   current = next
   emit()
-  void fetch('/api/preferences', {
+  void fetch('/api/user-prefs', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chatHarness: next.harness, chatModel: next.model, chatEffort: next.effort }),

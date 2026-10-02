@@ -21,10 +21,13 @@
  *    exactly where it was the day the screen is wide again.
  *
  *  - THE STORE is per SESSION (`sessionIdentityKey`, the one key a session survives a reopen
- *    under) and per BROWSER (`localStorage`, never `/api/preferences`: on a central that file is
- *    shared by everyone signed in, and one person's windows would open on everyone's screen — the
- *    same reason `panelSlots.ts` gives for its own layout). Every read and write is guarded: a
- *    private window, cleared site data or blocked storage costs the memory, never the feature.
+ *    under) and per PERSON on the server (`/api/user-prefs`, `floatingPanels`, through
+ *    `sharedPref.ts`; owner, 2026-09-30: "a posição das abas" must survive a device change). On a
+ *    central that route is per ACCOUNT, so one person's windows still never open on everyone's
+ *    screen. Positions are stored relative to the session area and re-clamped on draw (above),
+ *    which is what lets one stored arrangement serve a phone-sized and a desktop-sized area. The
+ *    browser copy under the old key is the first paint and the one-time migration source; every
+ *    touch of it is guarded.
  *
  * WHICH SESSION IS "CURRENT" is a module-level fact set by the page that shows one
  * (`setFloatingSession`). It exists so that `panelSlots.usePanelSlots()` — read independently by
@@ -36,6 +39,7 @@
  * wide enough for a window there, and the panels stay exactly where they were docked.
  */
 
+import { createSharedPref, type SharedPrefStore } from './sharedPref'
 import { useSyncExternalStore } from 'react'
 import { isPanelId, type PanelId } from './panelSlots'
 import { getActivePane, usePaneId, type PaneId } from './paneScope'
@@ -257,12 +261,26 @@ export function writeEntry(book: FloatingBook, key: string, windows: FloatingSet
   return { v: 1, sessions }
 }
 
+// Created on first use, never at import — see the circular-import note on `loaded` below.
+let shared: SharedPrefStore<FloatingBook> | null = null
+function bookStore(): SharedPrefStore<FloatingBook> {
+  if (shared) return shared
+  const store = createSharedPref<FloatingBook>({
+    key: STORAGE_KEY, prefKey: 'floatingPanels', fallback: EMPTY_BOOK, adoptLocalWhenAbsent: true,
+    parse: raw => (raw && typeof raw === 'object' ? parseBook(JSON.stringify(raw)) : null),
+  })
+  // The server's copy landing (or another device's change, on refocus) redraws the windows.
+  store.subscribe(() => { loaded = store.get(); emit() })
+  shared = store
+  return store
+}
+
 function loadBook(): FloatingBook {
-  try { return parseBook(globalThis.localStorage?.getItem(STORAGE_KEY) ?? null) } catch { return EMPTY_BOOK }
+  return bookStore().get()
 }
 
 function saveBook(book: FloatingBook): void {
-  try { globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(book)) } catch { /* memory only */ }
+  bookStore().set(book)
 }
 
 // ---------------------------------------------------------------------------------------------

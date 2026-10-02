@@ -41,11 +41,14 @@
  * `localStorage`, no React. That is what makes "every panel × placement × slot" a table a test can
  * walk exhaustively.
  *
- * THE STORE, layered on top, is the per-browser preference (`localStorage`, key
- * `agentistics-panel-slots` — UNCHANGED from before this pass, so an existing reader's layout is
- * still found), never `/api/preferences` (shared by everyone signed in on a central). Guarded exactly
- * like `shellBand.ts`'s own `readBandPrefs`: a private window, cleared site data or a browser
- * blocking storage costs the memory, never the feature.
+ * THE STORE, layered on top, keeps TWO halves apart (2026-10-01). Where each panel is docked, its
+ * order, its pin and what is open are a person's CHOICES and live on the server (`/api/user-prefs`,
+ * `panelSlots`, one record per pane), so the layout reads the same from every device — per ACCOUNT
+ * on a central, never the shared machine file. The rail's WIDTH depends on the screen and stays per
+ * browser: a phone and a desktop must not fight over one value. The browser copy (`localStorage`,
+ * key `agentistics-panel-slots` — UNCHANGED, so an existing layout is still found; the first paint
+ * plus the width) is guarded exactly like `shellBand.ts`'s own `readBandPrefs`: a private window,
+ * cleared site data or a browser blocking storage costs the memory, never the feature.
  *
  * MIGRATION. A value written by the OLD model (no `placement` field, a bare `right`/`bottom` id from
  * the five-id domain, `'contents'` among them) is detected and converted: whatever occupied `bottom`
@@ -74,6 +77,7 @@
  * convention as every other field this store persists.
  */
 
+import { createSharedPref, type SharedPrefStore } from './sharedPref'
 import { reorderByDrag } from './dragReorder'
 import { clampRailWidth, RAIL_WIDTH_FLOOR_PX } from './railFit'
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
@@ -582,7 +586,7 @@ export function resolveForGates(layout: SlotLayout, gates: PanelGates): SlotLayo
 }
 
 // ---------------------------------------------------------------------------------------------
-// The store — a per-browser preference, guarded like `shellBand.ts`'s `readBandPrefs`.
+// The store — choices on the server, the rail width per browser (see the header).
 // ---------------------------------------------------------------------------------------------
 
 const STORAGE_KEY = 'agentistics-panel-slots'
@@ -708,7 +712,15 @@ export function readLayout(storage?: Storage, key: string = STORAGE_KEY): SlotLa
   try {
     const raw = (storage ?? globalThis.localStorage)?.getItem(key)
     if (!raw) return EMPTY_SLOT_LAYOUT
-    const v = JSON.parse(raw) as unknown
+    return parseLayout(JSON.parse(raw) as unknown)
+  } catch {
+    return EMPTY_SLOT_LAYOUT
+  }
+}
+
+/** PURE: a stored layout VALUE (already JSON-parsed) as a `SlotLayout`. Total, like `readLayout`. */
+export function parseLayout(v: unknown): SlotLayout {
+  try {
     if (typeof v !== 'object' || v === null) return EMPTY_SLOT_LAYOUT
     const r = v as Record<string, unknown>
     if (isLegacyShape(r)) return migrateLegacy(r)
@@ -753,11 +765,54 @@ function writeLayout(layout: SlotLayout, storage?: Storage, key: string = STORAG
 interface PaneLayoutStore { state: SlotLayout; listeners: Set<() => void> }
 const stores = new Map<PaneId, PaneLayoutStore>()
 
+/** The CHOICE half of a layout — everything but the screen-dependent rail width. */
+type SharedLayouts = Partial<Record<PaneId, Record<string, unknown>>>
+function choiceOf(layout: SlotLayout): Record<string, unknown> {
+  const { railWidth: _width, ...rest } = layout
+  return { version: LAYOUT_VERSION, ...rest }
+}
+
+// Created on first use, never at import: `floatingPanels.ts` imports `isPanelId` from here.
+let shared: SharedPrefStore<SharedLayouts | null> | null = null
+function sharedLayouts(): SharedPrefStore<SharedLayouts | null> {
+  if (shared) return shared
+  const store = createSharedPref<SharedLayouts | null>({
+    key: 'agentistics-panel-slots-ui', prefKey: 'panelSlots', fallback: null, adoptLocalWhenAbsent: true,
+    parse: raw => (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as SharedLayouts : null),
+    // The one-time migration source: the per-pane layouts this browser held before they moved.
+    seed: () => {
+      const out: SharedLayouts = {}
+      for (const pane of ['main', 'split'] as const) {
+        const local = readLayout(undefined, paneStorageKey(STORAGE_KEY, pane))
+        if (local !== EMPTY_SLOT_LAYOUT) out[pane] = choiceOf(local)
+      }
+      return Object.keys(out).length > 0 ? out : null
+    },
+  })
+  // The server's copy landing (or another device's change, on refocus) re-applies the choices to
+  // every pane already drawn, keeping each pane's own rail width.
+  store.subscribe(() => {
+    for (const [pane, st] of stores) {
+      const choice = store.get()?.[pane]
+      if (!choice) continue
+      const next = { ...parseLayout(choice), railWidth: st.state.railWidth }
+      if (JSON.stringify(next) === JSON.stringify(st.state)) continue
+      st.state = next
+      writeLayout(next, undefined, paneStorageKey(STORAGE_KEY, pane))
+      for (const l of st.listeners) l()
+    }
+  })
+  shared = store
+  return store
+}
+
 function storeOf(pane: PaneId): PaneLayoutStore {
   let st = stores.get(pane)
   if (!st) {
     const key = paneStorageKey(STORAGE_KEY, pane)
     let initial = readLayout(undefined, key)
+    const choice = sharedLayouts().get()?.[pane]
+    if (choice) initial = { ...parseLayout(choice), railWidth: initial.railWidth }
     if (pane !== 'main' && initial === EMPTY_SLOT_LAYOUT) initial = storeOf('main').state
     st = { state: initial, listeners: new Set() }
     stores.set(pane, st)
@@ -770,6 +825,8 @@ function commitTo(next: SlotLayout, pane: PaneId): void {
   if (next === st.state) return
   st.state = next
   writeLayout(next, undefined, paneStorageKey(STORAGE_KEY, pane))
+  const all = sharedLayouts()
+  all.set({ ...(all.get() ?? {}), [pane]: choiceOf(next) })
   for (const l of st.listeners) l()
 }
 

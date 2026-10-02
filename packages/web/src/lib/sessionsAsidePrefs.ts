@@ -1,21 +1,25 @@
 /**
  * sessionsAsidePrefs.ts — how the Sessions workspace's aside arranges its own list.
  *
- * `localStorage`, deliberately not `/api/preferences` — the same rule and the same reason
- * `boardPrefs.ts` states: on a central, `preferences.json` is shared by every signed-in user, and
- * this is a per-viewer arrangement of a list (which grouping, in what order, which groups are
- * folded, how a card shows its status), not a fact about the work like a pin. One person's
- * collapsed groups must not collapse them for the whole team looking at that central's relayed
- * fleet.
+ * A CHOICE, so it lives on the SERVER (`/api/user-prefs`, `sessionsAside`, through
+ * `sharedPref.ts`) and reads the same on every device (owner, 2026-09-30: "o estilo das sessões
+ * listadas no aside"). It used to be `localStorage` because on a central `preferences.json` is
+ * shared by every signed-in user; `/api/user-prefs` is per ACCOUNT there, so one person's collapsed
+ * groups still never collapse them for the team. The browser copy under the same key is the first
+ * paint and the one-time migration source.
  *
  * Every read and write is guarded: a private window, cleared site data, or blocked storage makes
  * the accessor throw, and an aside that will not render because it could not remember its
  * arrangement is worse than one that opens on the defaults.
  */
 
+import { createPersonalDoc } from './sharedPref'
 import { DEFAULT_ORDER, SESSION_SORTS, type SessionOrder } from '@agentistics/tui/control/session-order'
 
-const KEY = 'agentistics-sessions-aside-v1'
+const doc = createPersonalDoc('agentistics-sessions-aside-v1', 'sessionsAside')
+
+/** Fires when the arrangement changes — here or, after a load, on another device. */
+export const subscribeAsideGroupPrefs = (fn: () => void): (() => void) => doc.subscribe(fn)
 
 /** The sub-grouping inside each Active/Inactive band. */
 export type AsideGroupBy = 'project' | 'task' | 'status'
@@ -38,11 +42,9 @@ export interface AsideGroupPrefs {
   /** Collapsed groups, keyed `${band}:${groupBy}:${key}` — see `collapseKey`. */
   collapsed: string[]
   cardColor: AsideCardColor
-  /** Collapsed USER groups (`sessionUserGroups.ts`), keyed by the group's own id. Per-viewer, same
-   *  as `collapsed` above — a person's folded "Saved to later" band on their phone must not fold
-   *  it on their desktop too, the same reasoning `boardPrefs.ts` states for the board's columns.
-   *  Membership itself lives on the SERVER (`sessionUserGroups.ts`); only "is it folded right now
-   *  on THIS screen" lives here. */
+  /** Collapsed USER groups (`sessionUserGroups.ts`), keyed by the group's own id. Part of the
+   *  arrangement, so it travels with the rest of this document (server-side since 2026-10-01).
+   *  Membership itself is a separate store (`sessionUserGroups.ts`). */
   collapsedUserGroups: string[]
   /** What the sessions INSIDE each group are ordered by (the cockpit's own `SessionOrder`, so the two
    *  surfaces answer "sort by recent" the same way). The default is the one that puts what is
@@ -103,10 +105,15 @@ function readOrder(v: unknown): Partial<Record<AsideGroupBy, string[]>> {
 }
 
 export function readAsideGroupPrefs(): AsideGroupPrefs {
+  return parseAsideGroupPrefs(doc.get())
+}
+
+/** PURE: a stored arrangement (already JSON-parsed) as `AsideGroupPrefs`. Total — junk yields the
+ *  defaults, field by field. */
+export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return DEFAULT_ASIDE_GROUP_PREFS
-    const p = JSON.parse(raw) as Record<string, unknown>
+    if (!stored || typeof stored !== 'object') return DEFAULT_ASIDE_GROUP_PREFS
+    const p = stored as Record<string, unknown>
     return {
       groupBy: isGroupBy(p.groupBy) ? p.groupBy : DEFAULT_ASIDE_GROUP_PREFS.groupBy,
       order: readOrder(p.order),
@@ -129,7 +136,7 @@ export function readAsideGroupPrefs(): AsideGroupPrefs {
 
 export function writeAsideGroupPrefs(patch: Partial<AsideGroupPrefs>): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ...readAsideGroupPrefs(), ...patch }))
+    doc.set({ ...readAsideGroupPrefs(), ...patch } as unknown as Record<string, unknown>)
   } catch { /* storage unavailable — the arrangement lasts this visit and no longer */ }
 }
 
