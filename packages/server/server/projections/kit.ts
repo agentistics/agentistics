@@ -19,6 +19,7 @@ import {
   USAGE_COUNTERS,
   absentUsageCounters,
   calcCost,
+  hasModelPrice,
   isLocalModelId,
   weakestConfidence,
   type AgentisticsEvent,
@@ -173,7 +174,9 @@ export function foldCostResponse(cell: CostCell, e: AgentisticsEvent<'model.comp
     return
   }
   const model = pricingModelOf(e)
-  if (!model || isLocalModelId(model)) { cell.unpriced++; return }
+  // No model, a local model, or a model the table does not know: UNPRICED, never a guessed figure.
+  // (`calcCost` would price an unknown id at a Sonnet-class fallback — an OpenRouter model, say.)
+  if (!model || isLocalModelId(model) || !hasModelPrice(model)) { cell.unpriced++; return }
   const t = cell.table
   // An absent counter contributes nothing to the priced sum; `absent` is what says the sum is partial.
   t.input += u.input ?? 0; t.output += u.output ?? 0; t.cacheRead += u.cacheRead ?? 0; t.cacheWrite += u.cacheWrite ?? 0

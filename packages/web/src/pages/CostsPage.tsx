@@ -1,6 +1,6 @@
 import React from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { TrendingUp, Zap, Target, Sparkles, Sigma } from 'lucide-react'
+import { TrendingUp, Zap, Target, Sparkles, Sigma, Cpu } from 'lucide-react'
 import { planAllocation } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -9,6 +9,8 @@ import { ModelBreakdown } from '../components/ModelBreakdown'
 import { BudgetPanel } from '../components/BudgetPanel'
 import { CacheHitRatePanel } from '../components/CacheHitRatePanel'
 import { TokenTotalsPanel } from '../components/TokenTotalsPanel'
+import { NativeUsagePanel } from '../components/NativeUsagePanel'
+import { useNativeUsage } from '../lib/nativeUsage'
 
 export default function CostsPage() {
   const ctx = useOutletContext<AppContext>()
@@ -19,6 +21,8 @@ export default function CostsPage() {
     setExpandedChart,
   } = ctx
   const isMobile = useIsMobile()
+  // The native harness's own calls; absent (no card) when there are none or no projections.
+  const native = useNativeUsage()
 
   return (
     <>
@@ -55,6 +59,12 @@ export default function CostsPage() {
           }
         />
       </Section>
+
+      {native && (
+        <Section flashId="native" title={<><Cpu size={14} /> {lang === 'pt' ? 'Agentistics (nativo)' : 'Agentistics (native)'}</>}>
+          <NativeUsagePanel usage={native} currency={currency} brlRate={brlRate} lang={lang} />
+        </Section>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, alignItems: 'stretch' }}>
         <Section flashId="budget" style={{ height: '100%' }} title={<><Target size={14} /> {lang === 'pt' ? 'Orçamento & projeção' : 'Budget & forecast'}</>}>
