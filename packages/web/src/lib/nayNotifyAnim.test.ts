@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from 'bun:test'
+import { describe, expect, test, beforeEach, beforeAll, afterAll } from 'bun:test'
 import type { CardPlacement, NayAnimation } from './nayNotify'
 import { playEnter } from './nayNotifyAnim'
 
@@ -32,13 +32,23 @@ class FakeEl {
 let layer: FakeEl | null = null
 const body = new FakeEl('body')
 const g = globalThis as unknown as Record<string, unknown>
-g.document = {
+// The fake DOM is installed for THIS file only and the real globals are put back afterwards — other
+// test files in the same run (Studio, the watermark…) read `document` and must not inherit this one.
+const saved = { document: g.document, window: g.window }
+const fakeDocument = {
   body,
   getElementById: (id: string) => (layer && id === 'ag-nay-fx' ? layer : null),
   createElement: () => new FakeEl(),
   createElementNS: (_: string, tag: string) => { const e = new FakeEl(tag); return Object.assign(e, { setAttribute() {} }) },
 }
-g.window = { innerWidth: 1000, innerHeight: 800, setTimeout, clearTimeout }
+beforeAll(() => {
+  g.document = fakeDocument
+  g.window = { innerWidth: 1000, innerHeight: 800, setTimeout, clearTimeout }
+})
+afterAll(() => {
+  if (saved.document === undefined) delete g.document; else g.document = saved.document
+  if (saved.window === undefined) delete g.window; else g.window = saved.window
+})
 
 const P: CardPlacement = { left: 0, top: 0, originX: 50, originY: 20, tail: true, tailSide: 'top', tailX: 40 } as CardPlacement
 const KINDS: NayAnimation[] = ['unfurl', 'voice', 'launch', 'balloon']
