@@ -67,6 +67,9 @@ export * from './canonical/projection'
 export * from './canonical/event-id'
 // A1.4: CapabilityState beside HARNESS_CAPABILITIES (derived, nothing reads it yet).
 export * from './canonical/capabilities'
+export * from './canonical/transcript'
+export * from './canonical/conversation-link'
+export * from './transcriptSentence'
 // B1 — the provider-neutral, PURE provider contract (usage mapping, error taxonomy, retry plan,
 // stop reason, edit policy). One block on purpose: this barrel is also edited by A1's subtasks.
 export * from './provider/usage'

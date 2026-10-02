@@ -1552,8 +1552,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
     // though the CLI had been handed that conversation, which is the one thing the field exists to
     // keep apart — see `ManagedSession.conversationLink`.
-    recordConversation: (id, conversationId, conversationLink) =>
-      patchSession(id, { conversationId, conversationLink }),
+    recordConversation: (id, conversationId, conversationLink, conversationLinkVia) =>
+      patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) }),
     // The per-process log link — antigravity's only exact answer, and the reason its chat view was
     // permanently empty while its terminal worked. Wired HERE and deliberately not on
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
@@ -1724,8 +1724,8 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
         id, harness, pid,
         knownLog: logByPid.get(pid),
         readProcessConversation,
-        recordConversation: (sid, conversationId, link) =>
-          patchSession(sid, { conversationId, conversationLink: link }),
+        recordConversation: (sid, conversationId, link, via) =>
+          patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) }),
       }).catch(() => false)
       if (linked) return
     }

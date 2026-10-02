@@ -26,6 +26,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
+import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
 import type { ManagedSession } from './types'
 import { withFileLock } from './file-lock'
 
@@ -68,6 +69,8 @@ export interface SessionPatch {
   conversationId?: string
   /** See `ManagedSession.conversationLink`. Written beside `conversationId`, never on its own. */
   conversationLink?: 'assigned' | 'observed'
+  /** See `ManagedSession.conversationLinkVia`. Written beside `conversationLink`. */
+  conversationLinkVia?: ConversationLinkReason
   /** The harness's own `/rename` name, persisted so the title survives the process — see
    *  `ManagedSession.harnessName`. Written by the poller only when it CHANGES, one write per rename. */
   harnessName?: string
@@ -137,6 +140,10 @@ function sanitize(raw: unknown): ManagedSession | null {
     // about whether a cost came from an assigned id or a claimed one, as though it meant something.
     ...(s.conversationLink === 'assigned' || s.conversationLink === 'observed'
       ? { conversationLink: s.conversationLink }
+      : {}),
+    // Only the words the vocabulary holds: an unknown one would read as a provenance nobody decided.
+    ...(typeof s.conversationLinkVia === 'string' && (LINK_REASONS as readonly string[]).includes(s.conversationLinkVia)
+      ? { conversationLinkVia: s.conversationLinkVia as ConversationLinkReason }
       : {}),
     // A number, and finite: this is a hand-editable file, and `lastSeenMs: "yesterday"` reaching
     // `crash-group.ts` would put a NaN comparison in charge of which sessions get reopened.

@@ -283,7 +283,7 @@ async function start(
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
-      ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const }
+      ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const }
       : {}),
     ...(await recordedRepo(cwd)),
   })
@@ -474,7 +474,7 @@ async function batch(
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.name ? { label: spec.name } : {}),
       ...(planned.plan.conversationId
-        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const }
+        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const }
         : {}),
       ...(await recordedRepo(cwd)),
     })
@@ -587,7 +587,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // left a row that knew which conversation it drove or one that did not, depending on where it
       // was pressed. `planTaskReopen` exists to stop precisely that kind of drift.
       ...(planned.plan.conversationId
-        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const }
+        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'resumed-id' as const }
         : {}),
       // The REPLACEMENT re-measures rather than copying `m.repo`: a reopen is the moment to notice
       // that the worktree came back, and copying a recorded value would carry one stale answer

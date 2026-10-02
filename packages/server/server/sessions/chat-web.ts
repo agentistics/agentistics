@@ -36,6 +36,7 @@ import { conversationOfRow } from './row-conversation'
 import { pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_LOGS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
+import type { SessionConversationLink } from '@agentistics/core'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
 
@@ -68,6 +69,8 @@ export interface ChatPayload {
    * words. See `transcript-availability.ts`.
    */
   transcript?: TranscriptAvailability
+  /** WHERE this session's conversation link came from (LIVE.1). Additive; absent = not linked yet. */
+  link?: SessionConversationLink | null
   /** True while the session is running, so the view knows whether to expect more. */
   live: boolean
   /**
@@ -116,7 +119,7 @@ async function retentionSetting(harness: string): Promise<number | undefined> {
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-export async function readSessionChat(
+async function readSessionChatCore(
   host: StartHost,
   lang: CliLang,
   id: string,
@@ -125,6 +128,7 @@ export async function readSessionChat(
   // file unreadable under a `PROJECTS_DIR` fixed at import time, which is why that branch went
   // untested long enough to become a blank pane in front of a user.
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+  onRow: (row: { link?: SessionConversationLink | null }) => void = () => undefined,
 ): Promise<ChatPayload> {
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
@@ -141,6 +145,7 @@ export async function readSessionChat(
     }
   }
 
+  onRow(row)
   const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
 
   // The EXACT link, or nothing. `conversationBlind` is the row's own sentence for a harness that
@@ -309,5 +314,26 @@ export async function readSessionChat(
             : `This is the end of a longer conversation — its last ${MAX_TURNS} turns. What came before is still in the transcript, outside this window.`,
         }
       : {}),
+  }
+}
+
+/**
+ * The chat for one session, plus the two canonical facts (LIVE.1): `transcript` (always present
+ * on a success path — `present/resolved` when the file was read) and `link` (the row's provenance).
+ */
+export async function readSessionChat(
+  host: StartHost,
+  lang: CliLang,
+  id: string,
+  readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+): Promise<ChatPayload> {
+  let link: SessionConversationLink | null | undefined
+  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link })
+  const transcript: TranscriptAvailability | undefined = p.transcript
+    ?? (p.unavailable === undefined && p.turns.length > 0 ? { state: 'present', reason: 'resolved' } : undefined)
+  return {
+    ...p,
+    ...(transcript ? { transcript } : {}),
+    ...(link !== undefined ? { link } : {}),
   }
 }

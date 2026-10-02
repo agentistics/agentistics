@@ -11,7 +11,7 @@
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import type { ConversationLinkReason, HarnessId } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
 import type { HarnessProcess } from '../live-sessions'
@@ -125,13 +125,13 @@ export async function linkProcessConversation(o: {
   pid: number
   knownLog?: string | null
   readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
-  recordConversation: (id: string, conversationId: string, link: 'assigned') => Promise<unknown>
+  recordConversation: (id: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason) => Promise<unknown>
 }): Promise<boolean> {
   if (!HARNESS_PROCESS_LOGS[o.harness]) return false
   const found = await o.readProcessConversation(o.harness, o.pid, o.knownLog).catch(() => null)
   if (!found) return false
   try {
-    await o.recordConversation(o.id, found, 'assigned')
+    await o.recordConversation(o.id, found, 'assigned', 'process-log')
     return true
   } catch {
     return false
@@ -187,6 +187,8 @@ export function createSessionsPoller(o: {
      * kind: a second path to this field is a second place for the two to disagree.
      */
     link: 'assigned' | 'observed',
+    /** WHERE the link came from (LIVE.1) — one of the three recording sites says so. */
+    via?: ConversationLinkReason,
   ) => Promise<unknown>
   /**
    * The conversation the process behind one of our panes is writing, from the log that process
@@ -457,7 +459,7 @@ export function createSessionsPoller(o: {
           const exact = harnessSessions.byManagedId.get(m.id)?.sessionId
           if (!exact || m.conversationId === exact) continue
           recordConvWrites++
-          await o.recordConversation(m.id, exact, 'assigned').catch(() => undefined)
+          await o.recordConversation(m.id, exact, 'assigned', 'harness-session-file').catch(() => undefined)
         }
       }
       markFleetPhase(`poll: recordConversation x${recordConvWrites}`, recordConvStart)
@@ -565,7 +567,7 @@ export function createSessionsPoller(o: {
           }).catch(() => null)
           if (!found) continue
           try {
-            await o.recordConversation(m.id, found, 'assigned')
+            await o.recordConversation(m.id, found, 'assigned', 'first-sighting')
             taken.add(found)
             afterWrites++
           } catch {
@@ -603,7 +605,7 @@ export function createSessionsPoller(o: {
         })
         for (const claim of plan.claims) {
           claimWrites++
-          await o.recordConversation(claim.rowId, claim.sessionId, 'observed').catch(() => undefined)
+          await o.recordConversation(claim.rowId, claim.sessionId, 'observed', 'first-sighting').catch(() => undefined)
         }
       }
       markFleetPhase(`poll: firstSightingClaims x${claimWrites}`, claimStart)

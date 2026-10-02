@@ -13,7 +13,9 @@
 export function bornConversationLink(
   assignedId: string | undefined,
   resumeId: string | undefined,
-): { conversationId: string; conversationLink: 'assigned' } | undefined {
+): { conversationId: string; conversationLink: 'assigned'; conversationLinkVia: 'assigned-id' | 'resumed-id' } | undefined {
   const id = assignedId ?? resumeId
-  return id ? { conversationId: id, conversationLink: 'assigned' } : undefined
+  return id
+    ? { conversationId: id, conversationLink: 'assigned', conversationLinkVia: assignedId ? 'assigned-id' : 'resumed-id' }
+    : undefined
 }
