@@ -17,7 +17,7 @@ import { SectionHeader, Divider, PrefRow } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
-  authenticatorBegin, authenticatorConfirm, cleanCode, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
+  authenticatorBegin, authenticatorConfirm, cleanCode, cleanSetupCode, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
   loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   askWords, presenceProbe, wizardPlan,
@@ -360,6 +360,20 @@ function Note({ children, tone }: { children: React.ReactNode; tone?: 'warn' | '
   return <div role={tone ? 'alert' : undefined} style={{ fontSize: 12, color, lineHeight: 1.6, marginBottom: 12 }}>{children}</div>
 }
 
+/** Review S2: the 8-digit setup code this machine's terminal shows (`agentop vault setup-code`). */
+function SetupCodeField({ value, onChange, label, why }: { value: string; onChange: (v: string) => void; label: string; why: string }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 10 }}>
+      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{why}</span>
+      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</span>
+      <input
+        value={value} onChange={e => onChange(cleanSetupCode(e.target.value))} placeholder="1234 5678" style={{ ...input, marginBottom: 0 }}
+        inputMode="numeric" autoComplete="off" autoFocus maxLength={9}
+      />
+    </label>
+  )
+}
+
 function CodeField({ value, onChange, label, autoFocus, onEnter }: { value: string; onChange: (v: string) => void; label: string; autoFocus?: boolean; onEnter?: () => void }) {
   return (
     <label style={{ display: 'block', marginBottom: 10 }}>
@@ -572,6 +586,12 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const [typed, setTyped] = useState<string[]>(['', '', ''])
   const [kind, setKind] = useState<'hello' | 'fido2'>(initial.presenceAvailable.includes('hello') ? 'hello' : 'fido2')
   const [presCode, setPresCode] = useState('')
+  // Review S2: the server answers `setup-code-required` for a page's FIRST enrolment; the code comes
+  // from this machine's terminal (`agentop vault setup-code`). `askCode`: a first recovery key outside
+  // this session's wizard needs the authenticator code.
+  const [needSetup, setNeedSetup] = useState(false)
+  const [setupCode, setSetupCode] = useState('')
+  const [askCode, setAskCode] = useState(false)
   const [finished, setFinished] = useState(false)
 
   useEffect(() => () => { setWords(null) }, [])
@@ -600,9 +620,13 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const showQr = async () => {
     if (busy) return
     setBusy(true); setError(null)
-    const r = await authenticatorBegin(needCodeFor('enroll-authenticator') ? oldCode : undefined)
+    const r = await authenticatorBegin(needCodeFor('enroll-authenticator') ? oldCode : undefined, needSetup ? setupCode : undefined)
     setBusy(false)
-    if (!r.ok) return fail(r.sentence)
+    if (!r.ok) {
+      if (r.code === 'setup-code-required') { setNeedSetup(true); setSetupCode('') }
+      return fail(r.sentence)
+    }
+    setNeedSetup(false); setSetupCode('')
     setUri({ uri: r.uri, secret: r.secret }); setPhase('qr')
   }
   const confirmAuth = async () => {
@@ -618,9 +642,14 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const showWords = async () => {
     if (busy) return
     setBusy(true); setError(null)
-    const r = await recoveryBegin(needCodeFor('rotate-recovery') && view.recoveryCreatedAt ? oldCode : undefined)
+    const r = await recoveryBegin((needCodeFor('rotate-recovery') && view.recoveryCreatedAt) || askCode ? oldCode : undefined, needSetup ? setupCode : undefined)
     setBusy(false)
-    if (!r.ok) return fail(r.sentence)
+    if (!r.ok) {
+      if (r.code === 'setup-code-required') { setNeedSetup(true); setSetupCode('') }
+      if (r.code === 'stepup-required') { setAskCode(true); setOldCode('') }
+      return fail(r.sentence)
+    }
+    setNeedSetup(false); setSetupCode(''); setAskCode(false)
     setWords(r.words); setPositions(r.positions); setTyped(['', '', '']); setPhase('words')
   }
   const confirmWords = async () => {
@@ -682,8 +711,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_auth_title')}</div>
             <Note>{t('wiz_auth_intro')}</Note>
             {needCodeFor('enroll-authenticator') && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
+            {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode))} onClick={() => { void showQr() }}>{busy ? t('working') : t('wiz_auth_show')}</button>
+            <button type="button" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showQr() }}>{busy ? t('working') : t('wiz_auth_show')}</button>
           </div>
         )}
         {phase === 'qr' && uri && (
@@ -707,10 +737,11 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_rec_title')}</div>
             <Note>{t('wiz_rec_intro')}</Note>
             {rotating && <Note tone="warn">{t('wiz_rec_rotate')}</Note>}
-            {rotating && needCodeFor('rotate-recovery') && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
+            {((rotating && needCodeFor('rotate-recovery')) || askCode) && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
+            {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {rotating && gateOf('rotate-recovery').gesture && <Note>{vtf('gate_dialog_presence', lang, { presence: vt(presenceKey(view.wrappers), lang) })}</Note>}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (rotating && needCodeFor('rotate-recovery') && !codeComplete(oldCode))} onClick={() => { void showWords() }}>{busy ? t('working') : t('wiz_rec_show')}</button>
+            <button type="button" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showWords() }}>{busy ? t('working') : t('wiz_rec_show')}</button>
           </div>
         )}
         {phase === 'words' && words && (

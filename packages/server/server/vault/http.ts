@@ -135,20 +135,20 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // Re-enrolment is gated by the OLD code inside `beginAuthenticator`; the URI is served once.
     const b = await body()
     const label = typeof b.label === 'string' && /^[\w .@-]{1,64}$/.test(b.label) ? b.label : (hostname().replace(/[^\w.-]/g, '') || 'this machine').slice(0, 64)
-    const r = await gate.beginAuthenticator({ code: codeOf(b), session }, label)
+    const r = await gate.beginAuthenticator({ code: codeOf(b), session, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) }, label)
     return reply(r.ok ? { ok: true, uri: r.uri, secret: r.secret } : r)
   }
   if (path === '/api/vault/authenticator/confirm' && req.method === 'POST') {
     const b = await body()
     if (!str(b.code, 16)) return bad()
-    const r = await gate.confirmAuthenticator(b.code)
+    const r = await gate.confirmAuthenticator(b.code, { session })
     // The code just verified (with the vault open) is the step-up: hand back the 5-minute 'read' grant.
     return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
   }
   if (path === '/api/vault/recovery/begin' && req.method === 'POST') {
     // The FIRST recovery key needs only the open vault; a rotation is gated (code + gesture).
     const b = await body()
-    const r = await gate.beginRecoveryKey({ code: codeOf(b), session })
+    const r = await gate.beginRecoveryKey({ code: codeOf(b), session, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) })
     return reply(r.ok ? { ok: true, words: r.words, positions: r.positions } : r)
   }
   if (path === '/api/vault/recovery/confirm' && req.method === 'POST') {

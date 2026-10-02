@@ -22,7 +22,7 @@
  * The TOTP seed is sealed IN the vault (`vault/totp-seed`); it is opened per check and zeroed. A code is
  * never logged or audited; failures are audited as `vault.stepup-failed` / `vault.stepup-frozen`.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
@@ -42,7 +42,7 @@ import { realProtectorIo } from './io'
 export type VaultAction =
   | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock'
   | 'change-protector' | 'rekey' | 'enroll-presence' | 'disable-presence' | 'reset' | 'rotate-recovery'
-  | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase'
+  | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase' | 'create-recovery'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -63,6 +63,9 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'rotate-runner': { code: true, gesture: true, grant: null },
   'enroll-authenticator': { code: true, gesture: true, grant: null },
   'add-passphrase': { code: true, gesture: true, grant: null },
+  // Review S2: the FIRST recovery key, asked by a page outside its own wizard — it hands out the root
+  // key, so it costs the code (no grant reuse); the gesture is not owed because nothing is replaced.
+  'create-recovery': { code: true, gesture: false, grant: null },
 }
 
 /**
@@ -194,6 +197,8 @@ export interface GateContext {
   grant?: string | null
   /** What a grant is bound to: the HTTP session, or 'socket' for the local CLI. */
   session: string
+  /** Review S2: the one-time code the service printed locally — the proof a FIRST enrolment over HTTP needs. */
+  setupCode?: string
 }
 
 export type GateResult = { ok: true; grant?: string } | Refusal
@@ -282,6 +287,9 @@ export async function beginAuthenticator(ctx: GateContext, machineLabel: string)
   if (enrolled(o.vault)) {
     const g = await requireVaultStepUp('enroll-authenticator', ctx)
     if (!g.ok) return g
+  } else if (!recoveryTodo()) {
+    const p = firstEnrolProof(ctx)
+    if (!p.ok) return p
   }
   if (_enrolSeed && _enrolSeed.served && _now() < _enrolSeed.expiresMs) {
     return refused('already-served', vaultLang() === 'pt' ? 'O código QR desta configuração já foi mostrado uma vez. Comece de novo.' : 'This setup\'s QR code was already shown once. Start over.')
@@ -298,8 +306,57 @@ export async function beginAuthenticator(ctx: GateContext, machineLabel: string)
  * verified code has proved the app holds the seed, the rest of THIS wizard (recovery key, presence)
  * does not ask for it again. Memory only, 10 minutes, cleared when presence is enrolled or the vault locks.
  */
-let _flowUntil = 0
-const flowActive = (): boolean => _now() < _flowUntil
+let _flow: { until: number; session: string } | null = null
+/** The wizard flow belongs to the session that verified the code — another session is not "inside" it. */
+const flowActive = (ctx: { session: string }): boolean => _flow !== null && _now() < _flow.until && _flow.session === ctx.session
+
+// ── review S2: the FIRST enrolment over HTTP needs a proof from this machine ─────────────────────
+//
+// Before an authenticator exists there is no code to ask, so a page reaching this API (an XSS, a
+// mistaken exposure) could enrol ITS authenticator and receive the first 24 words — after which the
+// owner is locked out of every gated action. The proof is a one-time SETUP CODE that only this machine
+// can read: the service prints it to its own log when a page asks without one, and `agentop vault
+// setup-code` prints it on the terminal. 8 digits, 10 minutes, single use, five wrong tries burn it.
+// The local terminal (vault.sock) needs none — it IS this machine.
+
+const SETUP_TTL_MS = 10 * 60_000
+const SETUP_MAX_WRONG = 5
+let _setup: { code: string; until: number; wrong: number } | null = null
+let _onSetupCode: (line: string) => void = (line) => { try { process.stderr.write(`agentop: ${line}\n`) } catch { /* never breaks */ } }
+export function setSetupCodeReporter(fn: (line: string) => void): void { _onSetupCode = fn }
+
+/** Mint (or re-show the live) setup code. Called by the socket op and when a page asks without one. */
+export function mintSetupCode(): { code: string; expiresInMs: number } {
+  if (!_setup || _now() >= _setup.until) _setup = { code: String(randomInt(0, 100_000_000)).padStart(8, '0'), until: _now() + SETUP_TTL_MS, wrong: 0 }
+  return { code: _setup.code, expiresInMs: _setup.until - _now() }
+}
+
+function setupRequired(): Refusal {
+  const live = _setup && _now() < _setup.until
+  if (!live) {
+    const { code } = mintSetupCode()
+    _onSetupCode(`vault setup code for the dashboard: ${code} (valid 10 minutes, once) — or run \`agentop vault setup-code\``)
+  }
+  return refused('setup-code-required', vaultLang() === 'pt'
+    ? 'Para a primeira configuração pela página, digite o código de configuração que esta máquina mostra: rode `agentop vault setup-code` num terminal (ele também está no log do agentop).'
+    : 'For the first setup from a page, type the setup code this machine shows: run `agentop vault setup-code` in a terminal (it is also in the agentop log).')
+}
+
+/** Spend the setup code: right → consumed; wrong → counted, and the 5th wrong burns it. */
+function spendSetupCode(given: string | undefined): boolean {
+  const s = _setup
+  if (!s || _now() >= s.until || !given) return false
+  const a = Buffer.from(given.replace(/\s/g, '')), b = Buffer.from(s.code)
+  if (a.length === b.length && timingSafeEqual(a, b)) { _setup = null; return true }
+  if (++s.wrong >= SETUP_MAX_WRONG) _setup = null
+  return false
+}
+
+/** A first enrolment (nothing to ask a code for yet): the socket, or a page with the setup code. */
+function firstEnrolProof(ctx: GateContext): { ok: true } | Refusal {
+  if (fromSocket(ctx)) return { ok: true }
+  return spendSetupCode(ctx.setupCode) ? { ok: true } : setupRequired()
+}
 let _enrolWrong = 0
 const ENROL_MAX_WRONG = 5
 
@@ -309,7 +366,7 @@ const ENROL_MAX_WRONG = 5
  * codes drop the seed and the QR must be fetched again. The verified code (plus the open vault) is
  * what the caller turns into the 5-minute 'read' grant, so the screen needs no second code after.
  */
-export async function confirmAuthenticator(code: string): Promise<{ ok: true; step: number } | Refusal> {
+export async function confirmAuthenticator(code: string, ctx: { session: string } = { session: SOCKET_SESSION }): Promise<{ ok: true; step: number } | Refusal> {
   const e = _enrolSeed
   if (!e || _now() > e.expiresMs) { dropEnrolSeed(); return refused('no-enrolment', vaultLang() === 'pt' ? 'Nenhuma configuração do autenticador em andamento.' : 'No authenticator setup is in progress.') }
   const nowSec = Math.floor(_now() / 1000)
@@ -332,7 +389,7 @@ export async function confirmAuthenticator(code: string): Promise<{ ok: true; st
   o.vault = vault
   // A fresh authenticator starts a fresh counter; the replay floor is the step just used.
   await saveState({ v: 1, failures: 0, lastStep: s, pausedUntilMs: null, frozen: false })
-  _flowUntil = _now() + ENROL_TTL_MS
+  _flow = { until: _now() + ENROL_TTL_MS, session: ctx.session }
   recoveryStepDone('authenticator')
   vaultAudit({ type: 'vault.enroll-authenticator' })
   return { ok: true, step: s }
@@ -349,9 +406,9 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (o.vault.stepup && !flowActive() && !recoveryTodo()) {
+  if (o.vault.stepup && !flowActive(ctx) && !recoveryTodo()) {
     // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
-    if (!flowActive()) {
+    if (!flowActive(ctx)) {
       const g = await requireVaultStepUp('enroll-presence', ctx)
       if (!g.ok) return g
     }
@@ -362,12 +419,12 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
   const kid = randomBytes(8).toString('hex')
   try {
     const w = await presence.wrap(dek, kid)
-    if (!w.ok) return refused('presence-unavailable', w.reason)
+    if (!w.ok) return enrolFailure(id, w.reason)
     const back = await presence.unwrap(w.record, kid)
     await presence.remove(w.record, kid).catch(() => {})
     const same = back.ok && back.dek.length === dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(dek))
     if (back.ok) back.dek.fill(0)
-    if (!same) return refused('presence-unavailable', back.ok ? 'the device did not give back the same key' : back.reason)
+    if (!same) return back.ok ? enrolFailure(id, 'presence-unavailable: bridge-failed') : enrolFailure(id, back.reason)
     return { ok: true }
   } finally { dek.fill(0) }
 }
@@ -388,6 +445,16 @@ export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; wo
   if (o.vault.wrappers.some(w => w.type === 'recovery')) {
     const g = await requireVaultStepUp('rotate-recovery', ctx)
     if (!g.ok) return g
+  } else if (!recoveryTodo() && !fromSocket(ctx) && !flowActive(ctx)) {
+    // Review S2: the FIRST 24 words, to a page outside its own wizard — the code if one exists, else
+    // the setup code (nothing else on this machine can be asked yet).
+    if (enrolled(o.vault)) {
+      const g = await requireVaultStepUp('create-recovery', ctx)
+      if (!g.ok) return g
+    } else {
+      const p = firstEnrolProof(ctx)
+      if (!p.ok) return p
+    }
   }
   dropRecovery()
   const entropy = newRecoveryEntropy()
@@ -459,7 +526,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
     if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
     if (!o.vault.wrappers.some(w => w.type === 'recovery')) return refused('needs-recovery', lang === 'pt' ? 'Crie a chave de recuperação antes da presença (`agentop vault enroll --recovery`).' : 'Create the recovery key before presence (`agentop vault enroll --recovery`).')
     // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
-    if (!flowActive()) {
+    if (!flowActive(ctx)) {
       const g = await requireVaultStepUp('enroll-presence', ctx)
       if (!g.ok) return g
     }
@@ -470,7 +537,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
   if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
-  _flowUntil = 0
+  _flow = null
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
   return { ok: true, removed: r.removed }
@@ -617,7 +684,8 @@ export function __resetGateForTests(now?: () => number): void {
   _grantKey = randomBytes(32)
   dropEnrolSeed()
   dropRecovery()
-  _flowUntil = 0
+  _flow = null
+  _setup = null
   _enrolWrong = 0
 }
 

@@ -105,10 +105,11 @@ export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code
 export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
 export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
 
-export const authenticatorBegin = (code?: string) => call('POST', '/api/vault/authenticator/begin', code ? { code } : {}).then(r => reply<{ uri: string; secret: string }>(r))
+/** `setupCode`: the one-time code `agentop vault setup-code` prints — a page's FIRST enrolment needs it (review S2). */
+export const authenticatorBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/authenticator/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ uri: string; secret: string }>(r))
 export const authenticatorConfirm = (code: string) => call('POST', '/api/vault/authenticator/confirm', { code }).then(r => reply<{ grant: string }>(r))
 export const presenceProbe = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(code ? { code } : {}) }).then(r => reply(r))
-export const recoveryBegin = (code?: string) => call('POST', '/api/vault/recovery/begin', code ? { code } : {}).then(r => reply<{ words: string[]; positions: number[] }>(r))
+export const recoveryBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/recovery/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ words: string[]; positions: number[] }>(r))
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
 export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}) }).then(r => reply<{ removed: string[] }>(r))
 export const presenceDisable = (code?: string) => call('POST', '/api/vault/presence/disable', code ? { code } : {}).then(r => reply(r))
@@ -185,4 +186,7 @@ export function wordRows(words: readonly string[], perRow = 4): { n: number; wor
 
 /** PURE. Digits only, at most 6 — what a code field holds. */
 export function cleanCode(s: string): string { return s.replace(/\D/g, '').slice(0, 6) }
+/** The 8-digit setup code (`agentop vault setup-code`), spaces and dashes ignored. */
+export function cleanSetupCode(s: string): string { return s.replace(/\D/g, '').slice(0, 8) }
+export const setupCodeComplete = (s: string): boolean => /^\d{8}$/.test(s)
 export const codeComplete = (s: string): boolean => /^\d{6}$/.test(s)

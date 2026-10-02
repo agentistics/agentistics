@@ -62,7 +62,7 @@ export async function enrolledVault(): Promise<{ words: string[] }> {
   const a = await beginAuthenticator(S, 'box')
   if (!a.ok) throw new Error(a.sentence)
   seed = base32Decode(a.secret)
-  const c = await confirmAuthenticator(codeAt(-1), codeAt(0))
+  const c = await confirmAuthenticator(codeAt(0), S)
   if (!c.ok) throw new Error(c.sentence)
   next()
   const r = await beginRecoveryKey(S)
@@ -245,5 +245,76 @@ describe('N1 — the socket gate fails CLOSED until the real one is installed', 
       const g = await DEFAULT_SOCKET_GATE(a, {})
       expect(g.ok).toBe(false)
     }
+  })
+})
+
+// ── S2: the FIRST enrolment over HTTP needs a local proof ─────────────────────────────────────
+
+import { mintSetupCode, probePresence } from './gate'
+
+describe('S2 — first enrolment from a page needs a proof from this machine', () => {
+  const WEB = { session: 'http:local' }
+  test('the first authenticator over HTTP is refused without a setup code (no seed handed out)', async () => {
+    await silentVault()
+    const r = await beginAuthenticator(WEB, 'box')
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect(!r.ok && r.sentence).toContain('agentop vault setup-code')
+    expect(JSON.stringify(r)).not.toContain('otpauth')
+  })
+  test('with the code the service printed, it proceeds — once', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    expect(code).toMatch(/^\d{8}$/)
+    const r = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    expect(r.ok).toBe(true)
+    const again = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    expect(!again.ok && again.code).toBe('setup-code-required')
+  })
+  test('five wrong setup codes burn it', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    for (let i = 0; i < 5; i++) expect((await beginAuthenticator({ ...WEB, setupCode: '00000000' }, 'box')).ok).toBe(false)
+    const r = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    expect(!r.ok && r.code).toBe('setup-code-required')
+  })
+  test('an expired setup code is refused', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    T += 11 * 60_000
+    expect((await beginAuthenticator({ ...WEB, setupCode: code }, 'box')).ok).toBe(false)
+  })
+  test('the local terminal (socket) needs no setup code', async () => {
+    await silentVault()
+    expect((await beginAuthenticator(S, 'box')).ok).toBe(true)
+  })
+  test('the first recovery key over HTTP, outside THIS session\'s wizard, needs the authenticator code', async () => {
+    await silentVault()
+    const a = await beginAuthenticator(S, 'box')
+    if (!a.ok) throw new Error(a.sentence)
+    seed = base32Decode(a.secret)
+    expect((await confirmAuthenticator(codeAt(), S)).ok).toBe(true)
+    next()
+    // The wizard flow belongs to the session that verified the code — a page is not that session.
+    const r = await beginRecoveryKey(WEB)
+    expect(!r.ok && r.code).toBe('stepup-required')
+    const ok = await beginRecoveryKey({ ...WEB, code: codeAt() })
+    expect(ok.ok).toBe(true)
+  })
+  test('inside the same session\'s wizard the verified code stands for the recovery step', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    const a = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    if (!a.ok) throw new Error(a.sentence)
+    seed = base32Decode(a.secret)
+    expect((await confirmAuthenticator(codeAt(), WEB)).ok).toBe(true)
+    next()
+    expect((await beginRecoveryKey(WEB)).ok).toBe(true)
+  })
+  test('a failed device check is said in words, never as a reason code', async () => {
+    await silentVault()
+    hello.wrapFails = 'presence-unavailable: bridge-failed'
+    const r = await probePresence('hello', S)
+    expect(!r.ok && r.sentence).not.toContain('bridge-failed')
+    expect(!r.ok && r.code).toBe('presence-unavailable')
   })
 })

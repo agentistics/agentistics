@@ -150,3 +150,38 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
     expect(vt('rec_create', 'en')).not.toBe(vt('rec_create', 'pt'))
   })
 })
+
+// ── review M1 / S2: what the page SENDS ─────────────────────────────────────────────────────────
+
+import { authenticatorBegin, cleanSetupCode, setupCodeComplete, unlockGesture } from './vaultApi'
+
+describe('review M1/S2 — the dashboard\'s vault requests', () => {
+  const seen: { url: string; init: RequestInit }[] = []
+  const realFetch = globalThis.fetch
+  const capture = () => {
+    seen.length = 0
+    globalThis.fetch = (async (url: string, init: RequestInit) => { seen.push({ url, init }); return new Response('{"ok":true}') }) as unknown as typeof fetch
+  }
+  test('every POST is JSON, even one with nothing to say (the server refuses any other type)', async () => {
+    capture()
+    try { await unlockGesture() } finally { globalThis.fetch = realFetch }
+    const h = seen[0]!.init.headers as Record<string, string>
+    expect(h['Content-Type']).toBe('application/json')
+    expect(seen[0]!.init.body).toBe('{}')
+  })
+  test('the setup code travels in the begin body when one is given', async () => {
+    capture()
+    try { await authenticatorBegin(undefined, '12345678') } finally { globalThis.fetch = realFetch }
+    expect(JSON.parse(String(seen[0]!.init.body))).toEqual({ setupCode: '12345678' })
+  })
+  test('the setup code field keeps 8 digits and ignores spaces and dashes', () => {
+    expect(cleanSetupCode('1234 5678')).toBe('12345678')
+    expect(cleanSetupCode('1234-56789')).toBe('12345678')
+    expect(setupCodeComplete('12345678')).toBe(true)
+    expect(setupCodeComplete('1234567')).toBe(false)
+  })
+  test('the setup-code sentence exists in EN and PT and names the terminal command', () => {
+    expect(vt('wiz_setup_why', 'en')).toContain('agentop vault setup-code')
+    expect(vt('wiz_setup_why', 'pt')).toContain('agentop vault setup-code')
+  })
+})

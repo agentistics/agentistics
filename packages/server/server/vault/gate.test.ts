@@ -15,7 +15,7 @@ import {
   sealToFile, unlockWithGesture, vaultDir, vaultStatus,
 } from './service'
 import {
-  VAULT_ACTION_ROWS, __resetGateForTests, beginAuthenticator, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
+  VAULT_ACTION_ROWS, __resetGateForTests, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
   enrolPresence, grantValid, mintGrant, recoverWithWords, requireVaultStepUp, setAutoLockMinutes, stepUpState, addPassphraseAllowed,
   type VaultAction,
 } from './gate'
@@ -65,13 +65,14 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   dpapi = fake('dpapi'); hello = fake('hello')
   restart()
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode(MARK))
-  const a = await beginAuthenticator(S, 'test-box')
+  // The page's first enrolment carries the one-time setup code the service printed (review S2).
+  const a = await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')
   if (!a.ok) throw new Error(a.sentence)
   seed = base32Decode(a.secret)
   expect(a.uri).toStartWith('otpauth://totp/Agentistics:test-box?')
   // The URI is served ONCE.
-  expect((await beginAuthenticator(S, 'test-box')).ok).toBe(false)
-  expect((await confirmAuthenticator(codeAt(0))).ok).toBe(true)
+  expect((await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')).ok).toBe(false)
+  expect((await confirmAuthenticator(codeAt(0), S)).ok).toBe(true)
   next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)

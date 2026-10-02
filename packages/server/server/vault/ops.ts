@@ -40,7 +40,7 @@ import {
   vaultRole, vaultStatus, withSecret, noteVaultActivity,
 } from './service'
 import {
-  addPassphraseAllowed, beginAuthenticator, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
+  addPassphraseAllowed, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
   disablePresence, enrolPresence, recoverWithWords, requirePresenceHere, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
 } from './gate'
 import { readVaultView } from './inventory'
@@ -429,10 +429,15 @@ async function opAuthenticatorBegin(h: Record<string, unknown>): Promise<OpResul
 }
 async function opAuthenticatorConfirm(h: Record<string, unknown>): Promise<OpResult> {
   if (!str(h.code, 16)) return bad()
-  const r = await confirmAuthenticator(h.code)
+  const r = await confirmAuthenticator(h.code, { session: SOCKET })
   return { reply: r.ok ? { ok: true } : r }
 }
 /** Hands out the NEW 24 words — once, by design: they are written on paper (§4.2). */
+/** Review S2: the one-time code a page needs for a FIRST enrolment — printed to this machine's terminal. */
+async function opSetupCode(): Promise<OpResult> {
+  const r = mintSetupCode()
+  return { reply: { ok: true, code: r.code, expiresInMs: r.expiresInMs } }
+}
 async function opRecoveryBegin(h: Record<string, unknown>): Promise<OpResult> {
   const r = await beginRecoveryKey({ code: codeOf(h), session: SOCKET })
   return { reply: r.ok ? { ok: true, words: r.words, positions: r.positions } : r }
@@ -481,6 +486,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'authenticator-begin': return opAuthenticatorBegin(h)
     case 'authenticator-confirm': return opAuthenticatorConfirm(h)
     case 'recovery-begin': return opRecoveryBegin(h)
+    case 'setup-code': return opSetupCode()
     case 'recovery-confirm': return opRecoveryConfirm(h)
     case 'presence-enroll': return opPresenceEnroll(h)
     case 'presence-disable': return opPresenceDisable(h)
@@ -513,7 +519,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
  */
 export const VAULT_OPS = [
   'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
-  'recovery-begin', 'recovery-confirm', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
+  'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
 ] as const
 

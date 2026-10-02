@@ -13,7 +13,7 @@ import { base32Decode, hotp, parseVaultJson, type Protector, type ProtectorId, t
 import {
   __resetVaultForTests, __setVaultClockForTests, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
 } from './service'
-import { __resetGateForTests } from './gate'
+import { __resetGateForTests, mintSetupCode } from './gate'
 import { handleVaultHttp } from './http'
 
 const STORE = new Map<string, Uint8Array>()
@@ -72,9 +72,12 @@ async function fresh(): Promise<void> {
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET'))
 }
 
+/** The one-time code the service prints for a page's FIRST enrolment (review S2). */
+const setup = (): { setupCode: string } => ({ setupCode: mintSetupCode().code })
+
 /** The wizard's whole path over HTTP; returns the 24 words. */
 async function enrolOverHttp(): Promise<string[]> {
-  const a = await http('POST', '/api/vault/authenticator/begin', {})
+  const a = await http('POST', '/api/vault/authenticator/begin', setup())
   seed = base32Decode(a.json.secret)
   expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })).status).toBe(200)
   next()
@@ -128,17 +131,17 @@ describe('GET /api/vault — the payload the sections read', () => {
 
 describe('POST /api/vault/authenticator/begin + confirm', () => {
   test('begin serves the otpauth URI ONCE, no-store; a second begin is refused', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', { label: 'my-box' })
+    const a = await http('POST', '/api/vault/authenticator/begin', { label: 'my-box', ...setup() })
     expect(a.status).toBe(200)
     expect(a.headers.get('cache-control')).toBe('no-store')
     expect(a.json.uri).toStartWith('otpauth://totp/Agentistics:my-box?')
     expect(a.json.secret).toMatch(/^[A-Z2-7]+$/)
-    const again = await http('POST', '/api/vault/authenticator/begin', {})
+    const again = await http('POST', '/api/vault/authenticator/begin', setup())
     expect(again).toMatchObject({ status: 403, json: { ok: false, code: 'already-served' } })
   })
 
   test('confirm takes ONE code: a wrong one is refused and seals nothing; the right one seals and returns the read grant', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     const wrong = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
     expect(wrong).toMatchObject({ status: 403, json: { code: 'stepup-wrong' } })
@@ -173,7 +176,7 @@ describe('POST /api/vault/authenticator/begin + confirm', () => {
 
 describe('POST /api/vault/recovery/begin + confirm', () => {
   test('begin serves 24 words and 3 positions once; confirm needs those exact words', async () => {
-    const r = await http('POST', '/api/vault/recovery/begin', {})
+    const r = await http('POST', '/api/vault/recovery/begin', setup())
     expect(r.status).toBe(200)
     expect(r.headers.get('cache-control')).toBe('no-store')
     expect(r.json.words).toHaveLength(24)
@@ -218,7 +221,7 @@ describe('POST /api/vault/presence/enroll', () => {
   })
 
   test('refuses before the recovery key exists (a lost device would lose the vault)', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     next()
@@ -226,7 +229,7 @@ describe('POST /api/vault/presence/enroll', () => {
   })
 
   test('is gated: no code 401, wrong code 403 with the vault untouched; the right one retires the silent wrapper', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     const r = await http('POST', '/api/vault/recovery/begin', {})
@@ -375,7 +378,7 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
 
 describe('owner decision 2026-10-02 — ONE code, no second code after the wizard', () => {
   test('a code one step off still passes (±1); the same code never works twice (replay floor)', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     const used = codeAt(-1)
     expect((await http('POST', '/api/vault/authenticator/confirm', { code: used })).status).toBe(200)
@@ -384,7 +387,7 @@ describe('owner decision 2026-10-02 — ONE code, no second code after the wizar
   })
 
   test('five wrong codes drop the seed: the QR must be fetched again', async () => {
-    await http('POST', '/api/vault/authenticator/begin', {})
+    await http('POST', '/api/vault/authenticator/begin', setup())
     for (let i = 0; i < 4; i++) expect((await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })).json.code).toBe('stepup-wrong')
     const fifth = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
     expect(fifth.json.sentence).toContain('Start over')
@@ -392,7 +395,7 @@ describe('owner decision 2026-10-02 — ONE code, no second code after the wizar
   })
 
   test('the grant from the confirm opens the inventory at once — no fresh code, no 30 s wait', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     const ok = await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     const r = await http('GET', '/api/vault', undefined, ok.json.grant)
@@ -401,7 +404,7 @@ describe('owner decision 2026-10-02 — ONE code, no second code after the wizar
   })
 
   test('recovery key and presence in the same wizard need NO second code; later (flow over) presence is gated again', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', {})
+    const a = await http('POST', '/api/vault/authenticator/begin', setup())
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     const r = await http('POST', '/api/vault/recovery/begin', {})

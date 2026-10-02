@@ -37,6 +37,7 @@ const HELP = `Usage: agentop vault <command>
   enroll                   make the vault ultra secure: authenticator, recovery key, presence (what is still missing)
         [--authenticator] [--recovery] [--presence hello|fido2] [--require-presence]
   recover                  open the vault with your 24-word recovery key (terminal only)
+  setup-code               print the one-time code the dashboard asks for its FIRST vault setup
   disable-presence         turn presence off (code + gesture; the main machine also needs the 24 words)
 
 There is no command that decrypts secrets back to plain text.`
@@ -319,6 +320,18 @@ async function cmdReset(args: string[]): Promise<number> {
  * never in a web form) and handed to the service, which opens the vault in RECOVERY mode. Then the
  * three steps are owed: presence, the authenticator, a NEW recovery key (the old words were just typed).
  */
+/** Review S2: the one-time code a page needs to start the FIRST enrolment — shown here, on this machine. */
+async function cmdSetupCode(): Promise<number> {
+  const r = await ask({ op: 'setup-code' })
+  if (!r) return down()
+  if (!r.ok || typeof r.code !== 'string') return said(r)
+  const mins = Math.max(1, Math.ceil(Number(r.expiresInMs ?? 0) / 60_000))
+  process.stdout.write(t(
+    `Setup code: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nType it in Settings → Vault. It works once, for ${mins} minutes.\n`,
+    `Código de configuração: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nDigite-o em Configurações → Cofre. Vale uma vez, por ${mins} minutos.\n`))
+  return 0
+}
+
 async function cmdRecover(): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stderr.write(t('The recovery key is typed only on a terminal.\n', 'A chave de recuperação só é digitada em um terminal.\n'))
@@ -482,6 +495,7 @@ export async function runVault(args: string[]): Promise<number> {
     case 'add-passphrase': return cmdAddPassphrase()
     case 'reset': return cmdReset(rest)
     case 'recover': return cmdRecover()
+    case 'setup-code': return cmdSetupCode()
     case 'enroll': return cmdEnroll(rest)
     case 'disable-presence': return cmdDisablePresence()
     case '--help': case '-h': case 'help':
