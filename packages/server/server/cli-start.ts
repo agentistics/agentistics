@@ -1260,6 +1260,30 @@ export async function restartNativeServer(
   return ok ? { ok: true, message: s.restartedDone } : { ok: false, message: mode.failure ?? s.localStartFailed }
 }
 
+/**
+ * Bounce whatever is running so it re-reads a configuration the server only reads at boot
+ * (`agentop experimental enable|disable`). A bounce, never a rebuild. `nothing-running` is its own
+ * answer — the caller persisted a preference and there is no process to apply it to, which is not a
+ * failure and must not be reported as a restart that never happened.
+ */
+export async function restartForConfigChange(): Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string }> {
+  const s = cliStrings(await resolveLang())
+  const { unitInstalled } = await import('./autostart')
+  const targets = await runningRuntimes()
+  const unit = await unitInstalled('server')
+  if (targets.length === 0 && !unit) return { state: 'nothing-running', message: s.nothingRunning }
+  let ok = true
+  let message = s.restartedDone
+  if (targets.includes('local') || unit) {
+    const r = await restartNativeServer(false)
+    ok = r.ok && ok
+    message = r.message
+  }
+  const docker = targets.filter(t => t !== 'local')
+  if (docker.length > 0) ok = (await restartRuntimes(s, docker, {})) && ok
+  return { state: ok ? 'restarted' : 'failed', message }
+}
+
 export async function restartAllServices(rebuild = false, flags: RebuildFlags = {}): Promise<number> {
   const s = cliStrings(await resolveLang())
   const targets = await runningRuntimes()
