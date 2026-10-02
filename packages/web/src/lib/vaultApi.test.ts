@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows, wizardPlan, askWords,
+  rememberGrant, remainingMs, wordRows, wizardPlan, askWords, sectionBadge, howNow, howConfirms, primarySection,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -183,5 +183,50 @@ describe('review M1/S2 — the dashboard\'s vault requests', () => {
   test('the setup-code sentence exists in EN and PT and names the terminal command', () => {
     expect(vt('wiz_setup_why', 'en')).toContain('agentop vault setup-code')
     expect(vt('wiz_setup_why', 'pt')).toContain('agentop vault setup-code')
+  })
+})
+
+describe('VAULT.UX2 — what a glance says', () => {
+  const base = { authenticator: null, presence: false, presenceAvailable: ['hello'], recoveryCreatedAt: null, hardening: null }
+  test('missing setup is a "!" (warn); presence the machine can have is only "recommended"; one it cannot have is "not available"', () => {
+    expect(sectionBadge(base, 'authenticator')).toEqual({ tone: 'warn', key: 'badge_missing' })
+    expect(sectionBadge(base, 'recovery')).toEqual({ tone: 'warn', key: 'badge_missing' })
+    expect(sectionBadge(base, 'presence')).toEqual({ tone: 'rec', key: 'badge_recommended' })
+    expect(sectionBadge({ ...base, presenceAvailable: [] }, 'presence')).toEqual({ tone: 'off', key: 'badge_na' })
+  })
+  test('configured is ✓; a frozen or paused authenticator is attention, not configured', () => {
+    const a = { enrolledAt: 'x', lastUsedAt: null, failures: 0, pausedUntil: null, frozen: false }
+    expect(sectionBadge({ ...base, authenticator: a, presence: true, recoveryCreatedAt: 'y' }, 'authenticator').tone).toBe('ok')
+    expect(sectionBadge({ ...base, authenticator: a, presence: true, recoveryCreatedAt: 'y' }, 'presence').key).toBe('badge_on')
+    expect(sectionBadge({ ...base, authenticator: { ...a, frozen: true } }, 'authenticator')).toEqual({ tone: 'warn', key: 'badge_attention' })
+    expect(sectionBadge({ ...base, authenticator: { ...a, pausedUntil: 'z' } }, 'authenticator').key).toBe('badge_attention')
+  })
+  test('memory protection: only claimed when verified; a failure or a leak is attention; Windows (limited) is stated, not praised', () => {
+    const h = (o: object) => ({ state: 'ok', private: true, coreDumps: 'off', yama: null, lines: [], ...o }) as never
+    expect(sectionBadge({ ...base, hardening: h({}) }, 'memory')).toEqual({ tone: 'ok', key: 'badge_active' })
+    expect(sectionBadge({ ...base, hardening: h({ private: false }) }, 'memory').tone).toBe('warn')
+    expect(sectionBadge({ ...base, hardening: h({ coreDumps: 'on' }) }, 'memory').tone).toBe('warn')
+    expect(sectionBadge({ ...base, hardening: h({ state: 'failed' }) }, 'memory').tone).toBe('warn')
+    expect(sectionBadge({ ...base, hardening: h({ state: 'limited', private: null, coreDumps: null }) }, 'memory').tone).toBe('off')
+    expect(sectionBadge(base, 'memory').tone).toBe('off')
+  })
+  test('secrets: pending plaintext is a warning, otherwise ✓', () => {
+    expect(sectionBadge(base, 'secrets', { sealed: 3, pending: 0 })).toEqual({ tone: 'ok', key: 'badge_sealed' })
+    expect(sectionBadge(base, 'secrets', { sealed: 3, pending: 1 })).toEqual({ tone: 'warn', key: 'badge_pending' })
+  })
+  test('where the person is on locked → confirm → open, and what step 2 asks', () => {
+    expect(howNow({ state: 'locked', pendingStepup: false })).toBe(0)
+    expect(howNow({ state: 'locked', pendingStepup: true })).toBe(1)
+    expect(howNow({ state: 'open', pendingStepup: false })).toBe(2)
+    const a = { enrolledAt: 'x', lastUsedAt: null, failures: 0, pausedUntil: null, frozen: false }
+    expect(howConfirms({ authenticator: null, presence: false })).toBe('nothing')
+    expect(howConfirms({ authenticator: a, presence: false })).toBe('code')
+    expect(howConfirms({ authenticator: a, presence: true })).toBe('both')
+  })
+  test('exactly ONE primary action: the first missing step, and none while the banner carries it', () => {
+    expect(primarySection(['authenticator', 'recovery', 'presence'], false)).toBe('authenticator')
+    expect(primarySection(['recovery', 'presence'], false)).toBe('recovery')
+    expect(primarySection(['authenticator'], true)).toBeNull()
+    expect(primarySection([], false)).toBeNull()
   })
 })

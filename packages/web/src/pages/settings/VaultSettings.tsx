@@ -10,17 +10,18 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { FingerprintPattern, KeyRound, Loader2, Printer } from 'lucide-react'
+import { FingerprintPattern, KeyRound, List, Loader2, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer, Vault } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { SectionHeader, Divider, PrefRow } from './primitives'
+import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
   authenticatorBegin, authenticatorConfirm, cleanCode, cleanSetupCode, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
   loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
-  askWords, presenceProbe, wizardPlan,
+  askWords, howConfirms, howNow, presenceProbe, primarySection, sectionBadge, wizardPlan,
+  type BadgeKey, type SectionId, type Tone,
   type Credential, type LoadResult, type VaultView, type WizardPhaseStep, type WizardStep,
 } from '../../lib/vaultApi'
 
@@ -119,10 +120,18 @@ export default function VaultSettings() {
   const startSetup = (preferred: WizardStep) => setWizard(steps.length > 0 ? steps : [preferred])
   const canUpgrade = steps.length > 0 && view.state !== 'uninitialized' && view.state !== 'corrupt' && view.state !== 'protector-lost'
   const showBanner = canUpgrade && !view.recoveryTodo && (view.requirePresence || !dismissed) && open
+  const primary = primarySection(steps, showBanner)
+  const styleFor = (id: WizardStep): React.CSSProperties => (primary === id ? hot : btn)
   const dismiss = () => { setDismissed(true); try { localStorage.setItem(UPGRADE_DISMISS_KEY, '1') } catch { /* a convenience only */ } }
 
   const items = orderItems(res.kind === 'view' ? view.items : [])
   const pending = items.filter(i => i.state === 'pending')
+  const counts = { sealed: res.kind === 'view' ? view.items.filter(i => i.state === 'sealed').length : 0, pending: pending.length }
+  const badgeOf = (id: SectionId): { tone: Tone; text: string } => {
+    const b = sectionBadge(view, id, counts)
+    const n = id === 'autolock' ? view.autoLockMinutes : id === 'secrets' ? (b.key === 'badge_pending' ? counts.pending : counts.sealed) : 0
+    return { tone: b.tone, text: vtf(b.key as BadgeKey, lang, { n }) }
+  }
 
   // An action's proofs: the icons say what it asks; a dialog collects the code (and warns about the gesture).
   const ask = (kind: 'lock' | 'autolock' | 'presence-off', minutes?: number) => {
@@ -143,27 +152,46 @@ export default function VaultSettings() {
   return (
     <>
       <SectionHeader label={t('title')} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', background: open ? TONE.sealed : locked ? TONE.pending : TONE.unreadable, flexShrink: 0 }} />
-          <strong style={{ fontSize: 15 }}>{t(stateKey(view.state))}</strong>
-          {open && left !== null && <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{vtf('openLocksIn', lang, { n: minutesLeft(left) })}</span>}
+      {locked ? (
+        // THE HERO: the empty state of a locked vault is the vault itself, with the one way in under it.
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 10, padding: isMobile ? '18px 4px 20px' : '26px 12px 28px', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 18, background: 'var(--bg-surface, transparent)' }}>
+          <span aria-hidden style={{ width: 88, height: 88, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
+            <Vault size={46} strokeWidth={1.6} />
+          </span>
+          <strong style={{ fontSize: 17 }}>{t('hero_locked')}</strong>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 440 }}>
+            {view.authenticator
+              ? (view.presence ? vtf('lockedIntro_presence', lang, { presence: presWord }) : t('lockedIntro_code'))
+              : t('intro')}
+          </div>
+          <div style={{ width: isMobile ? '100%' : undefined, marginTop: 4 }}>
+            <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} center />
+          </div>
+          {view.sentence && <div role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6, maxWidth: 440 }}>{view.sentence}</div>}
         </div>
-        {locked && <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} />}
-        {open && (
-          <button type="button" style={btn} onClick={() => ask('lock')} disabled={!view.canLock} title={tip('lock')} aria-label={`${t('lockNow')}. ${tip('lock')}`}>
-            {t('lockNow')} <Gate code={g('lock').code} gesture={g('lock').gesture} lang={lang} />
-          </button>
-        )}
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 18 }}>
-        {locked && view.authenticator
-          ? (view.presence ? vtf('lockedIntro_presence', lang, { presence: presWord }) : t('lockedIntro_code'))
-          : t('intro')}
-      </div>
-      {view.sentence && view.state !== 'open' && (
-        <div role="status" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>{view.sentence}</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <span aria-hidden style={{ width: 34, height: 34, borderRadius: 10, display: 'grid', placeItems: 'center', flexShrink: 0, color: open ? TONE.sealed : TONE.unreadable, background: `color-mix(in srgb, ${open ? TONE.sealed : TONE.unreadable} 14%, transparent)` }}>
+                {open ? <LockOpen size={18} /> : <Lock size={18} />}
+              </span>
+              <strong style={{ fontSize: 15 }}>{open && left !== null ? vtf('openLocksIn', lang, { n: minutesLeft(left) }) : t(stateKey(view.state))}</strong>
+            </div>
+            {open && (
+              <button type="button" style={btn} onClick={() => ask('lock')} disabled={!view.canLock} title={tip('lock')} aria-label={`${t('lockNow')}. ${tip('lock')}`}>
+                {t('lockNow')} <Gate code={g('lock').code} gesture={g('lock').gesture} lang={lang} />
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>{t('intro')}</div>
+          {view.sentence && view.state !== 'open' && (
+            <div role="status" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>{view.sentence}</div>
+          )}
+        </>
       )}
+
+      <HowStrip view={view} lang={lang} isMobile={isMobile} minutes={view.autoLockMinutes} presWord={presWord} />
 
       {showBanner && (
         <div role="status" style={{
@@ -188,85 +216,83 @@ export default function VaultSettings() {
 
       {res.kind === 'view' && open && (
         <>
-          <SectionHeader label={t('sec_status')} />
-          <PrefRow label={t('protector')}><span style={{ fontSize: 13, textAlign: 'right', minWidth: 0 }}>{view.protectorLabel ?? t('none')}</span></PrefRow>
-          <PrefRow label={t('keyId')}><span style={mono}>{view.kid ?? t('none')}</span></PrefRow>
-          <PrefRow label={t('created')}><span style={{ fontSize: 13 }}>{view.createdAt ? fmt(view.createdAt) : t('none')}</span></PrefRow>
-          <Divider />
+          <Sec icon={open ? LockOpen : Lock} title={t('sec_status')} desc={t('sec_status_d')} badge={{ tone: 'ok', text: t('state_open') }}>
+            <PrefRow label={t('protector')}><span style={{ fontSize: 13, textAlign: 'right', minWidth: 0 }}>{view.protectorLabel ?? t('none')}</span></PrefRow>
+            <PrefRow label={t('keyId')}><span style={mono}>{view.kid ?? t('none')}</span></PrefRow>
+            <PrefRow label={t('created')}><span style={{ fontSize: 13 }}>{view.createdAt ? fmt(view.createdAt) : t('none')}</span></PrefRow>
+          </Sec>
 
-          <SectionHeader label={t('sec_authenticator')} />
-          {view.authenticator ? (
-            <>
-              <PrefRow label={vtf('auth_ready', lang, { date: fmt(view.authenticator.enrolledAt) })}
-                sub={`${t('auth_lastUsed')}: ${view.authenticator.lastUsedAt ? fmt(view.authenticator.lastUsedAt) : t('auth_never')}`}>
-                <button type="button" style={btn} onClick={() => setWizard(['authenticator'])} title={tip('enroll-authenticator')} aria-label={`${t('auth_replace')}. ${tip('enroll-authenticator')}`}>
-                  {t('auth_replace')} <Gate code={g('enroll-authenticator').code} gesture={g('enroll-authenticator').gesture} lang={lang} />
-                </button>
-              </PrefRow>
-              <Note>{t('auth_explain')}</Note>
-              {view.authenticator.pausedUntil && <Note tone="warn">{vtf('auth_paused', lang, { date: fmt(view.authenticator.pausedUntil) })}</Note>}
-              {view.authenticator.frozen && <Note tone="bad">{t('auth_frozen')}</Note>}
-            </>
-          ) : (
-            <>
-              <PrefRow label={t('auth_none')}>
-                <button type="button" style={hot} onClick={() => startSetup('authenticator')} title={t('ultraBody')}>{t('auth_setup')}</button>
-              </PrefRow>
-              <Note>{t('auth_explain')}</Note>
-            </>
-          )}
-          <Divider />
-
-          <SectionHeader label={t('sec_presence')} />
-          {view.presence ? (
-            <>
-              {(creds?.credentials ?? []).map(c => (
-                <PrefRow key={`${c.type}-${c.createdAt}`} label={c.label} sub={vtf('pres_since', lang, { date: fmt(c.createdAt) })}><span /></PrefRow>
-              ))}
-              {!creds && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{presWord}</div>}
-              {view.presenceAvailable.includes('fido2') && (
-                <PrefRow label={t('pres_addKey')}>
-                  <button type="button" style={btn} onClick={() => setWizard(['presence'])} title={tip('enroll-presence')} aria-label={`${t('pres_addKey')}. ${tip('enroll-presence')}`}>
-                    {t('pres_addKey')} <Gate code={g('enroll-presence').code} gesture={g('enroll-presence').gesture} lang={lang} />
+          <Sec icon={Smartphone} title={t('sec_authenticator')} desc={t('auth_explain')} badge={badgeOf('authenticator')}>
+            {view.authenticator ? (
+              <>
+                <PrefRow label={vtf('auth_ready', lang, { date: fmt(view.authenticator.enrolledAt) })}
+                  sub={`${t('auth_lastUsed')}: ${view.authenticator.lastUsedAt ? fmt(view.authenticator.lastUsedAt) : t('auth_never')}`}>
+                  <button type="button" style={btn} onClick={() => setWizard(['authenticator'])} title={tip('enroll-authenticator')} aria-label={`${t('auth_replace')}. ${tip('enroll-authenticator')}`}>
+                    {t('auth_replace')} <Gate code={g('enroll-authenticator').code} gesture={g('enroll-authenticator').gesture} lang={lang} />
                   </button>
                 </PrefRow>
-              )}
-              {view.requirePresence
-                ? <Note>{t('pres_mainMachine')}</Note>
-                : (
-                  <PrefRow label={t('pres_turnOff')} sub={t('pres_offConsequence')}>
-                    <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => ask('presence-off')} title={tip('disable-presence')} aria-label={`${t('pres_turnOff')}. ${tip('disable-presence')}`}>
-                      {t('pres_turnOff')} <Gate code={g('disable-presence').code} gesture={g('disable-presence').gesture} lang={lang} />
+                {view.authenticator.pausedUntil && <Note tone="warn">{vtf('auth_paused', lang, { date: fmt(view.authenticator.pausedUntil) })}</Note>}
+                {view.authenticator.frozen && <Note tone="bad">{t('auth_frozen')}</Note>}
+              </>
+            ) : (
+              <PrefRow label={t('auth_none')}>
+                <button type="button" style={styleFor('authenticator')} onClick={() => startSetup('authenticator')} title={t('ultraBody')}>{t('auth_setup')}</button>
+              </PrefRow>
+            )}
+          </Sec>
+
+          <Sec icon={FingerprintPattern} title={t('sec_presence')} desc={t('sec_presence_d')} badge={badgeOf('presence')}>
+            {view.presence ? (
+              <>
+                {(creds?.credentials ?? []).map(c => (
+                  <PrefRow key={`${c.type}-${c.createdAt}`} label={c.label} sub={vtf('pres_since', lang, { date: fmt(c.createdAt) })}><span /></PrefRow>
+                ))}
+                {!creds && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{presWord}</div>}
+                {view.presenceAvailable.includes('fido2') && (
+                  <PrefRow label={t('pres_addKey')}>
+                    <button type="button" style={btn} onClick={() => setWizard(['presence'])} title={tip('enroll-presence')} aria-label={`${t('pres_addKey')}. ${tip('enroll-presence')}`}>
+                      {t('pres_addKey')} <Gate code={g('enroll-presence').code} gesture={g('enroll-presence').gesture} lang={lang} />
                     </button>
                   </PrefRow>
                 )}
-            </>
-          ) : view.presenceAvailable.length === 0 ? (
-            <Note>{t('pres_unavailable')}</Note>
-          ) : (
-            <PrefRow label={t('pres_off')}>
-              <button type="button" style={hot} onClick={() => startSetup('presence')} title={t('ultraBody')}>{t(view.presenceAvailable.includes('hello') ? 'pres_turnOn' : 'pres_turnOnKey')}</button>
+                {view.requirePresence
+                  ? <Note>{t('pres_mainMachine')}</Note>
+                  : (
+                    <PrefRow label={t('pres_turnOff')} sub={t('pres_offConsequence')}>
+                      <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => ask('presence-off')} title={tip('disable-presence')} aria-label={`${t('pres_turnOff')}. ${tip('disable-presence')}`}>
+                        {t('pres_turnOff')} <Gate code={g('disable-presence').code} gesture={g('disable-presence').gesture} lang={lang} />
+                      </button>
+                    </PrefRow>
+                  )}
+              </>
+            ) : view.presenceAvailable.length === 0 ? (
+              <Note>{t('pres_unavailable')}</Note>
+            ) : (
+              <>
+                <Note>{t('pres_off')}</Note>
+                <button type="button" style={styleFor('presence')} onClick={() => startSetup('presence')} title={t('ultraBody')}>{t(view.presenceAvailable.includes('hello') ? 'pres_turnOn' : 'pres_turnOnKey')}</button>
+              </>
+            )}
+          </Sec>
+
+          <Sec icon={KeyRound} title={t('sec_recovery')} desc={t('sec_recovery_d')} badge={badgeOf('recovery')}>
+            <Note tone="warn">{t('rec_offline')}</Note>
+            <PrefRow label={view.recoveryCreatedAt ? vtf('rec_created', lang, { date: fmt(view.recoveryCreatedAt) }) : t('rec_none')}>
+              <button type="button" style={view.recoveryCreatedAt ? btn : styleFor('recovery')} title={view.recoveryCreatedAt ? tip('rotate-recovery') : t('ultraBody')}
+                onClick={() => (view.recoveryCreatedAt ? setWizard(['recovery']) : startSetup('recovery'))}>
+                {view.recoveryCreatedAt ? t('rec_new') : t('rec_create')} <Gate code={g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
+              </button>
             </PrefRow>
-          )}
-          <Divider />
+            <Note>{t('rec_lost')}</Note>
+          </Sec>
 
-          <SectionHeader label={t('sec_recovery')} />
-          <PrefRow label={view.recoveryCreatedAt ? vtf('rec_created', lang, { date: fmt(view.recoveryCreatedAt) }) : t('rec_none')} sub={undefined}>
-            <button type="button" style={view.recoveryCreatedAt ? btn : hot} title={view.recoveryCreatedAt ? tip('rotate-recovery') : t('ultraBody')}
-              onClick={() => (view.recoveryCreatedAt ? setWizard(['recovery']) : startSetup('recovery'))}>
-              {view.recoveryCreatedAt ? t('rec_new') : t('rec_create')} <Gate code={g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
-            </button>
-          </PrefRow>
-          <Note>{t('rec_lost')}</Note>
-          <Divider />
+          <Sec icon={Timer} title={t('sec_autolock')} desc={t('sec_autolock_d')} badge={badgeOf('autolock')}>
+            <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} tipText={tip('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
+          </Sec>
 
-          <SectionHeader label={t('sec_autolock')} />
-          <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} tipText={tip('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
-          <Divider />
-
-          <SectionHeader label={t('sec_hardening')} />
-          <HardeningBlock view={view} lang={lang} />
-          <Divider />
+          <Sec icon={ShieldCheck} title={t('sec_hardening')} desc={t('sec_memory_d')} badge={badgeOf('memory')}>
+            <HardeningBlock view={view} lang={lang} />
+          </Sec>
         </>
       )}
 
@@ -281,8 +307,7 @@ export default function VaultSettings() {
       )}
 
       {res.kind === 'view' && open && (
-        <>
-          <SectionHeader label={t('secretsHeader')} />
+        <Sec icon={List} title={t('secretsHeader')} desc={t('sec_secrets_d')} badge={badgeOf('secrets')} last>
           {items.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('secretsEmpty')}</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {items.map((i, n) => {
@@ -308,8 +333,7 @@ export default function VaultSettings() {
               )
             })}
           </div>
-          <Divider />
-        </>
+        </Sec>
       )}
 
       <details>
@@ -339,6 +363,82 @@ export default function VaultSettings() {
         />
       )}
     </>
+  )
+}
+
+// ── VAULT.UX2: the header strip, and a section that says what it is ─────────────────────────────
+
+const TONE_COLOR: Record<Tone, string> = {
+  ok: 'var(--accent-green, #22c55e)', warn: 'var(--accent-orange, #f59e0b)', rec: 'var(--anthropic-orange, #f59e0b)', off: 'var(--text-tertiary)',
+}
+const TONE_DOT: Record<Tone, 'ok' | 'warn' | 'error' | 'unknown'> = { ok: 'ok', warn: 'warn', rec: 'warn', off: 'unknown' }
+
+/** The state a section is in, as a badge — a dot AND a glyph in the words, so colour is never the only cue. */
+function Badge({ tone, text }: { tone: Tone; text: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, color: TONE_COLOR[tone], whiteSpace: 'nowrap' }}>
+      <StatusDot state={TONE_DOT[tone]} size={7} />{text}
+    </span>
+  )
+}
+
+/** One section of the page: an icon, the title, ONE line on what it is and why it matters, and its badge. */
+function Sec({ icon: Icon, title, desc, badge, children, last }: {
+  icon: React.ComponentType<{ size?: number }>; title: string; desc: string; badge: { tone: Tone; text: string }; children: React.ReactNode; last?: boolean
+}) {
+  return (
+    <section style={{ marginBottom: last ? 0 : 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+          <span aria-hidden style={{ width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
+            <Icon size={15} />
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>{title}</span>
+        </div>
+        <Badge tone={badge.tone} text={badge.text} />
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '6px 0 14px' }}>{desc}</div>
+      {children}
+      {!last && <Divider />}
+    </section>
+  )
+}
+
+/** "How your vault works": locked → you confirm → open for N min, with where you are now lit up. */
+function HowStrip({ view, lang, isMobile, minutes, presWord }: { view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; minutes: number; presWord: string }) {
+  const now = howNow(view)
+  const how = howConfirms(view)
+  const confirmBody = how === 'both' ? vtf('how2_both', lang, { presence: presWord }) : how === 'code' ? vt('how2_code', lang) : vt('how2_nothing', lang)
+  const steps: { icons: React.ReactNode; title: string; body: string }[] = [
+    { icons: <Lock size={16} />, title: vt('how1_t', lang), body: vt('how1_b', lang) },
+    {
+      icons: <>{how === 'both' && <FingerprintPattern size={16} />}{how !== 'nothing' && <Smartphone size={16} />}{how === 'nothing' && <KeyRound size={16} />}</>,
+      title: vt('how2_t', lang), body: confirmBody,
+    },
+    { icons: <LockOpen size={16} />, title: vtf('how3_t', lang, { n: minutes }), body: vt('how3_b', lang) },
+  ]
+  return (
+    <div role="group" aria-label={vt('how_title', lang)} style={{ marginBottom: 20 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8 }}>{vt('how_title', lang)}</div>
+      <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+        {steps.map((st, i) => {
+          const here = i === now
+          return (
+            <li key={i} aria-current={here ? 'step' : undefined} style={{
+              border: '1px solid ' + (here ? 'var(--anthropic-orange)' : 'var(--border)'), borderRadius: 10, padding: '10px 12px', minWidth: 0,
+              background: here ? 'var(--anthropic-orange-dim)' : 'transparent', opacity: here ? 1 : 0.8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span aria-hidden style={{ display: 'inline-flex', gap: 3, alignItems: 'center', color: here ? 'var(--anthropic-orange)' : 'var(--text-secondary)' }}>{st.icons}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>{i + 1}. {st.title}</span>
+                {here && <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, color: 'var(--anthropic-orange)' }}>{vt('how_here', lang)}</span>}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, marginTop: 4 }}>{st.body}</div>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
   )
 }
 
@@ -388,7 +488,7 @@ function CodeField({ value, onChange, label, autoFocus, onEnter }: { value: stri
 }
 
 /** The locked state's button: gesture first (the SERVICE raises the dialog), then the code field. */
-function UnlockControl({ view, lang, onOpened, btn, isMobile }: { view: VaultView; lang: 'en' | 'pt'; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean }) {
+function UnlockControl({ view, lang, onOpened, btn, isMobile, center }: { view: VaultView; lang: 'en' | 'pt'; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean }) {
   const [phase, setPhase] = useState<'idle' | 'gesture' | 'code'>(view.pendingStepup ? 'code' : 'idle')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -413,7 +513,7 @@ function UnlockControl({ view, lang, onOpened, btn, isMobile }: { view: VaultVie
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : 'flex-end', gap: 8, width: isMobile ? '100%' : undefined }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-end', gap: 8, width: isMobile ? '100%' : undefined }}>
       {phase !== 'code' && (
         <button type="button" style={btn} onClick={() => { void gesture() }} disabled={phase === 'gesture'}>
           {phase === 'gesture' && <Loader2 size={14} className="ag-spin" />}
@@ -427,7 +527,7 @@ function UnlockControl({ view, lang, onOpened, btn, isMobile }: { view: VaultVie
           <button type="submit" style={{ ...btn, width: '100%', justifyContent: 'center' }} disabled={!codeComplete(code) || busy}>{vt('codeConfirm', lang)}</button>
         </form>
       )}
-      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: isMobile ? 'left' : 'right' }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: isMobile ? 'left' : center ? 'center' : 'right' }}>{error}</div>}
     </div>
   )
 }
