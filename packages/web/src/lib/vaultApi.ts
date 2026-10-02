@@ -193,3 +193,58 @@ export function cleanCode(s: string): string { return s.replace(/\D/g, '').slice
 export function cleanSetupCode(s: string): string { return s.replace(/\D/g, '').slice(0, 8) }
 export const setupCodeComplete = (s: string): boolean => /^\d{8}$/.test(s)
 export const codeComplete = (s: string): boolean => /^\d{6}$/.test(s)
+
+// ── what a glance should say (VAULT.UX2) ─────────────────────────────────────────────────────
+
+export type Tone = 'ok' | 'warn' | 'rec' | 'off'
+export type BadgeKey =
+  | 'badge_configured' | 'badge_missing' | 'badge_recommended' | 'badge_on' | 'badge_na' | 'badge_attention'
+  | 'badge_active' | 'badge_limited' | 'badge_minutes' | 'badge_sealed' | 'badge_pending'
+export type SectionId = 'authenticator' | 'presence' | 'recovery' | 'autolock' | 'memory' | 'secrets'
+
+/**
+ * PURE. The badge each section wears: a tone (colour AND a glyph in the words, never colour alone) and
+ * the text key. "missing" is only said for what the setup can still add; a thing this machine cannot
+ * have is "not available here", which is a fact and not a to-do.
+ */
+export function sectionBadge(
+  v: Pick<VaultView, 'authenticator' | 'presence' | 'presenceAvailable' | 'recoveryCreatedAt' | 'hardening'>,
+  id: SectionId, counts: { sealed: number; pending: number } = { sealed: 0, pending: 0 },
+): { tone: Tone; key: BadgeKey } {
+  switch (id) {
+    case 'authenticator':
+      if (!v.authenticator) return { tone: 'warn', key: 'badge_missing' }
+      return v.authenticator.frozen || v.authenticator.pausedUntil ? { tone: 'warn', key: 'badge_attention' } : { tone: 'ok', key: 'badge_configured' }
+    case 'presence':
+      if (v.presence) return { tone: 'ok', key: 'badge_on' }
+      return v.presenceAvailable.length === 0 ? { tone: 'off', key: 'badge_na' } : { tone: 'rec', key: 'badge_recommended' }
+    case 'recovery': return v.recoveryCreatedAt ? { tone: 'ok', key: 'badge_configured' } : { tone: 'warn', key: 'badge_missing' }
+    case 'autolock': return { tone: 'ok', key: 'badge_minutes' }
+    case 'memory': {
+      const h = v.hardening
+      if (!h) return { tone: 'off', key: 'badge_limited' }
+      if (h.state === 'failed' || h.private === false || h.coreDumps === 'on') return { tone: 'warn', key: 'badge_attention' }
+      return h.private === true && h.coreDumps === 'off' ? { tone: 'ok', key: 'badge_active' } : { tone: 'off', key: 'badge_limited' }
+    }
+    case 'secrets': return counts.pending > 0 ? { tone: 'warn', key: 'badge_pending' } : { tone: 'ok', key: 'badge_sealed' }
+  }
+}
+
+/** PURE. Which of the three steps of "how your vault works" the person is on NOW: 0 locked, 1 confirming, 2 open. */
+export function howNow(v: Pick<VaultView, 'state' | 'pendingStepup'>): 0 | 1 | 2 {
+  return v.state === 'open' ? 2 : v.pendingStepup ? 1 : 0
+}
+
+/** PURE. What step 2 asks of THIS vault: nothing yet, the code alone, or the gesture and the code. */
+export function howConfirms(v: Pick<VaultView, 'authenticator' | 'presence'>): 'nothing' | 'code' | 'both' {
+  return v.presence && v.authenticator ? 'both' : v.authenticator ? 'code' : v.presence ? 'both' : 'nothing'
+}
+
+/**
+ * PURE. The ONE primary action of the page: the first thing the setup still lacks, and only when the
+ * banner (which carries its own primary) is not showing. Everything else that is missing keeps a
+ * quiet button — two loud buttons for one flow is how a person stops knowing where to start.
+ */
+export function primarySection(missing: readonly WizardStep[], bannerShowing: boolean): WizardStep | null {
+  return bannerShowing ? null : (missing[0] ?? null)
+}
