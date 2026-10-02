@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parseFrozenList } from './frozen-paths'
-import { checkPush, parsePushLines, planRange } from './push-guard'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
+import { parseFrozenList, parseNameStatus } from './frozen-paths'
+import { capReport, checkPush, checkRemotes, engineOnlyCommits, evaluatePush, issueBody, issueTitle, MAX_REPORT_LINES, parsePushLines, planRange, type GitRun, type PushRef } from './push-guard'
 
 const LIST = parseFrozenList(readFileSync(join(import.meta.dir, '../../../.github/frozen-engine-paths.txt'), 'utf8'))
 const Z = '0'.repeat(40)
@@ -47,5 +49,68 @@ describe('planRange', () => {
 describe('parsePushLines', () => {
   test('reads git stdin and drops junk', () => {
     expect(parsePushLines(`refs/heads/a ${A} refs/heads/a ${Z}\n\nbad\n`)).toEqual([{ localRef: 'refs/heads/a', localSha: A, remoteRef: 'refs/heads/a', remoteSha: Z }])
+  })
+})
+
+
+describe('the wider check', () => {
+  test('a remote pointing at the engine repo is refused, others pass', () => {
+    expect(checkRemotes([{ name: 'origin', url: 'git@github.com:agentistics/agentistics.git' }])).toEqual([])
+    expect(checkRemotes([{ name: 'eng', url: 'https://github.com/agentistics/agentistics-engine.git' }])[0]).toContain('"eng"')
+  })
+  test('engine-only commits = in engine main, not in public main', () => {
+    expect(engineOnlyCommits(['a', 'b', 'c'], new Set(['a', 'b']), new Set(['b']))).toEqual(['a'])
+  })
+  test('a report is capped at 20 lines', () => {
+    const out = capReport(Array.from({ length: 50 }, (_, i) => `l${i}`))
+    expect(out).toHaveLength(MAX_REPORT_LINES)
+    expect(out.at(-1)).toBe('… and 31 more.')
+  })
+  test('issue body lists paths+commits and says detection, not prevention', () => {
+    const b = issueBody('feat/x', 'a'.repeat(40), [{ path: 'engine/src/a.ts', commit: 'abc1234', ref: 'refs/heads/feat/x' }])
+    expect(b).toContain('`engine/src/a.ts` (commit abc1234)')
+    expect(b).toContain('detection, not prevention')
+    expect(issueTitle('feat/x')).toBe('Engine paths on public branch feat/x')
+  })
+})
+
+// Fixture repos: real git, a temp public clone and a temp engine clone.
+describe('evaluatePush over fixture repos', () => {
+  const sh = (cwd: string, ...a: string[]) => Bun.spawnSync(['git', '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'core.hooksPath=/dev/null', ...a], { cwd, env: gitTestEnv() })
+  const run = (cwd: string): GitRun => a => { const r = sh(cwd, ...a); return { code: r.exitCode, out: r.stdout.toString() } }
+  const commit = (d: string, file: string, msg: string) => {
+    mkdirSync(join(d, file, '..'), { recursive: true }); writeFileSync(join(d, file), msg); sh(d, 'add', '-A'); sh(d, 'commit', '-qm', msg)
+    return sh(d, 'rev-parse', 'HEAD').stdout.toString().trim()
+  }
+  const mk = () => {
+    const d = mkdtempSync(join(tmpdir(), 'pg-')); sh(d, 'init', '-q', '-b', 'main'); const base = commit(d, 'README', 'base')
+    sh(d, 'update-ref', 'refs/remotes/origin/main', base); return d
+  }
+  const ref = (sha: string): PushRef => ({ localRef: 'refs/heads/b', localSha: sha, remoteRef: 'refs/heads/b', remoteSha: Z })
+
+  test('clean range passes quietly; a planted engine path on a new branch is named', () => {
+    const d = mk(); sh(d, 'checkout', '-qb', 'b')
+    const ok = commit(d, 'src/a.ts', 'fine')
+    expect(evaluatePush([ref(ok)], { frozen: LIST, git: run(d) }, parseNameStatus)).toMatchObject({ ok: true, lines: [] })
+    const bad = commit(d, 'engine/src/x.ts', 'leak')
+    const ev = evaluatePush([ref(bad)], { frozen: LIST, git: run(d) }, parseNameStatus)
+    expect(ev.ok).toBe(false)
+    expect(ev.lines[0]).toContain('engine/src/x.ts')
+    expect(ev.hits[0]!.commit.length).toBeGreaterThanOrEqual(7)
+  })
+  test('a remote to the engine repo refuses an otherwise clean push', () => {
+    const d = mk(); sh(d, 'checkout', '-qb', 'b'); const c = commit(d, 'a', 'x')
+    sh(d, 'remote', 'add', 'eng', 'https://github.com/agentistics/agentistics-engine.git')
+    expect(evaluatePush([ref(c)], { frozen: LIST, git: run(d), checkRemote: true }, parseNameStatus).ok).toBe(false)
+  })
+  test('a commit on the engine main but not the public main is refused; an absent engine clone skips', () => {
+    const d = mk(); const e = mkdtempSync(join(tmpdir(), 'pg-e-'))
+    sh(e, 'init', '-q', '-b', 'main'); sh(e, 'commit', '-q', '--allow-empty', '-m', 'seed')
+    sh(d, 'checkout', '-qb', 'b'); const c = commit(d, 'a', 'shared')
+    sh(e, 'fetch', '-q', d, 'b'); sh(e, 'update-ref', 'refs/remotes/origin/main', c)
+    const withEngine = evaluatePush([ref(c)], { frozen: LIST, git: run(d), engineGit: run(e) }, parseNameStatus)
+    expect(withEngine.ok).toBe(false)
+    expect(withEngine.lines[0]).toContain('engine')
+    expect(evaluatePush([ref(c)], { frozen: LIST, git: run(d) }, parseNameStatus).ok).toBe(true)
   })
 })

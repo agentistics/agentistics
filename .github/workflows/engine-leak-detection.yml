@@ -1,0 +1,59 @@
+# DETECTION, not prevention. GitHub refuses push rules on a public repository, so a branch that
+# carries engine code can still be pushed; this job makes that visible within a minute: the check
+# goes red and ONE issue per branch is opened (or commented on). The rule is
+# packages/server/scripts/push-guard.ts over .github/frozen-engine-paths.txt + the engine layout.
+name: Engine leak detection
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect:
+    if: github.event.deleted != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Check the pushed range
+        id: check
+        continue-on-error: true
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          ISSUE_BODY_FILE: ${{ runner.temp }}/issue-body.md
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main || true
+          bun packages/server/scripts/push-guard-action.ts
+
+      - name: Open or update the issue
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          BODY: ${{ runner.temp }}/issue-body.md
+        run: |
+          title="Engine paths on public branch ${BRANCH}"
+          existing=$(gh issue list --state open --label security --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$BODY"
+          else
+            gh label create security --color B60205 --description "security finding" 2>/dev/null || true
+            gh issue create --title "$title" --label security --assignee blpsoares --body-file "$BODY"
+          fi
+
+      - name: Fail on a leak
+        if: steps.check.outcome == 'failure'
+        run: exit 1
