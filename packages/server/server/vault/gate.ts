@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
   type Protector, type ProtectorId, type StepUpState, type VaultJson,
 } from '@agentistics/vault'
 import {
@@ -35,6 +35,7 @@ import {
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
   presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus,
 } from './service'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
 import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markCommitted, prepareRekey } from './rekey'
 
@@ -360,9 +361,10 @@ export function mintSetupCode(): { code: string; expiresInMs: number } {
 
 function setupRequired(): Refusal {
   // Nothing is minted or reported here: the code exists only once a terminal asks for one.
+  const cmd = setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR)
   return refused('setup-code-required', vaultLang() === 'pt'
-    ? 'Para a primeira configuração pela página, digite o código de configuração desta máquina: rode `agentop vault setup-code` num terminal aqui.'
-    : 'For the first setup from a page, type this machine\'s setup code: run `agentop vault setup-code` in a terminal here.')
+    ? `Para a primeira configuração pela página, digite o código de configuração desta máquina: rode \`${cmd}\`. ${setupCodeWhere('pt')}`
+    : `For the first setup from a page, type this machine's setup code: run \`${cmd}\`. ${setupCodeWhere('en')}`)
 }
 
 /** Spend the setup code: right → consumed; wrong → counted, and the 5th wrong burns it. */
@@ -375,10 +377,37 @@ function spendSetupCode(given: string | undefined): boolean {
   return false
 }
 
-/** A first enrolment (nothing to ask a code for yet): the socket, or a page with the setup code. */
+/**
+ * The setup code, already spent by THIS session at the start of its wizard (owner, 2026-10-02: the
+ * page used to ask for it only after the Hello gestures, as a red failure). Memory only, bound to the
+ * session that typed it, 10 minutes — the window the code itself would have had.
+ */
+let _setupProof: { until: number; session: string } | null = null
+const setupProofHeld = (ctx: { session: string }): boolean => _setupProof !== null && _now() < _setupProof.until && _setupProof.session === ctx.session
+
+/** A first enrolment (nothing to ask a code for yet): the socket, this session's proof, or the setup code. */
 function firstEnrolProof(ctx: GateContext): { ok: true } | Refusal {
-  if (fromSocket(ctx)) return { ok: true }
+  if (fromSocket(ctx) || setupProofHeld(ctx)) return { ok: true }
   return spendSetupCode(ctx.setupCode) ? { ok: true } : setupRequired()
+}
+
+/** Over the vault file + this session: does a page starting the setup still owe the setup code? */
+export function setupCodeOwed(stepupEnrolled: boolean, ctx: { session: string }): boolean {
+  return !stepupEnrolled && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx)
+}
+
+/**
+ * The wizard's FIRST step when `setupCodeOwed`: spend the code BEFORE any gesture, and hold the proof
+ * for this session so the steps that follow (the device check, the authenticator, the first words) do
+ * not ask again. Not owed → nothing to check. Wrong → the same refusal, and the 5th wrong burns the code.
+ */
+export async function acceptSetupCode(ctx: GateContext): Promise<{ ok: true } | Refusal> {
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!setupCodeOwed(enrolled(o.vault), ctx)) return { ok: true }
+  if (!spendSetupCode(ctx.setupCode)) return setupRequired()
+  _setupProof = { until: _now() + SETUP_TTL_MS, session: ctx.session }
+  return { ok: true }
 }
 let _enrolWrong = 0
 const ENROL_MAX_WRONG = 5
@@ -435,21 +464,45 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
       const g = await requireVaultStepUp('enroll-presence', ctx)
       if (!g.ok) return g
     }
+  } else if (!o.vault.stepup && !recoveryTodo()) {
+    // A first enrolment from a page: the setup code comes BEFORE any gesture, never after them.
+    const p = firstEnrolProof(ctx)
+    if (!p.ok) return p
   }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
   if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
   const dek = new Uint8Array(randomBytes(32))
   const kid = randomBytes(8).toString('hex')
   try {
-    const w = await presence.wrap(dek, kid)
+    // Wrap only (PRESENCE_GESTURES.probe = 2): it proves the bridge answers and the person can confirm.
+    // Owner, 2026-10-02: the old wrap + unwrap raised a THIRD dialog under "confirm twice". That the key
+    // is REPRODUCIBLE is proved by the enrolment's own verifying unwrap, which changes nothing until it has.
+    const w = await countGestures(ctx, id, PRESENCE_GESTURES.probe, () => presence.wrap(dek, kid))
     if (!w.ok) return enrolFailure(id, w.reason)
-    const back = await presence.unwrap(w.record, kid)
     await presence.remove(w.record, kid).catch(() => {})
-    const same = back.ok && back.dek.length === dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(dek))
-    if (back.ok) back.dek.fill(0)
-    if (!same) return back.ok ? enrolFailure(id, 'presence-unavailable: bridge-failed') : enrolFailure(id, back.reason)
     return { ok: true }
   } finally { dek.fill(0) }
+}
+
+// ── live gesture progress (owner, 2026-10-02): "confirmation i of n" while the dialogs are up ────
+
+let _gestures: { session: string; kind: ProtectorId; done: number; total: number } | null = null
+
+/** Run `fn` while counting the gestures it raises, for THIS session's page to poll. */
+async function countGestures<T>(ctx: { session: string }, kind: ProtectorId, total: number, fn: () => Promise<T>): Promise<T> {
+  const mine = { session: ctx.session, kind, done: 0, total }
+  _gestures = mine
+  setGestureListener(() => { mine.done = Math.min(mine.total, mine.done + 1) })
+  try { return await fn() } finally {
+    setGestureListener(null)
+    if (_gestures === mine) _gestures = null
+  }
+}
+
+/** What the page draws while its gesture request is in flight; another session sees nothing. */
+export function gestureProgress(ctx: { session: string }): { kind: ProtectorId; done: number; total: number } | null {
+  const g = _gestures
+  return g && g.session === ctx.session ? { kind: g.kind, done: g.done, total: g.total } : null
 }
 
 async function writeVaultJson(v: VaultJson): Promise<void> {
@@ -567,14 +620,14 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   // Review S7: retiring a SILENT wrapper means a NEW data key — the old one survives in every earlier
   // copy of that wrapper. A second presence credential (no silent wrapper left) keeps the key.
   if (o.vault.wrappers.some(w => isSilentId(w.type))) {
-    const k = await enrolWithNewKey(id, presence, all, o, ctx)
+    const k = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrolWithNewKey(id, presence, all, o, ctx))
     if (!k.ok) return k
     recoveryStepDone('presence')
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
     vaultAudit({ type: 'vault.rekey', protector: id })
     return { ok: true, removed: k.removed, recoveryOwed: afterPresence(o.vault) }
   }
-  const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
+  const r = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all))
   if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
   recoveryStepDone('presence')
@@ -832,6 +885,8 @@ export function __resetGateForTests(now?: () => number): void {
   dropRecovery()
   _flow = null
   _setup = null
+  _setupProof = null
+  _gestures = null
   _enrolWrong = 0
 }
 

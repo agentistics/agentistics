@@ -31,6 +31,7 @@ const FILES = [
 const ALLOWED: Record<string, Record<string, string>> = {
   'vault/src/recovery.ts': { INDEX: 'the public BIP-39 word → index table', BY_PREFIX: 'the public 4-letter prefix → index table' },
   'vault/src/protectors/memory.ts': { store: 'the TEST-ONLY in-memory protector; the host never offers it outside `bun test`' },
+  'vault/src/protectors/presence.ts': { _gestureListener: 'the service\'s progress callback; it receives no argument, so no key material can pass through it' },
   'server/server/vault/central-env.ts': { SECRET_SET: 'the NAMES of the secret keys, not values' },
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
@@ -51,6 +52,8 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _grantKey: 'the in-memory HMAC key that signs 5-minute read grants (§2.4: minted at start, never on disk); signs, decrypts nothing',
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',
     _flow: 'a deadline (ms) + the session it belongs to, after which the wizard\'s one verified code stops standing for later steps; no key material', _enrolWrong: 'a wrong-code counter for one enrolment',
+    _setupProof: 'a deadline (ms) + the session that already spent the setup code; never the code itself',
+    _gestures: 'how many presence prompts of one request were answered (counts only, for the page\'s progress line)',
     _setup: 'the one-time SETUP code a page needs for a FIRST enrolment (review S2): 8 digits, 10 min, single use; authorises, decrypts nothing',
     _recovery: 'NEW recovery entropy while its words are confirmed (§4.2): ≤ 10 min, zeroed on confirm/expiry',
   },

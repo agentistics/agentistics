@@ -31,9 +31,9 @@ import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import {
-  addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, type ProtectorId,
+  addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
 } from '@agentistics/vault'
-import { AGENTISTICS_DATA_DIR } from '../config'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import {
   adoptCreated, chooseAutoProtector, createVault, ensureVaultOpen, lockVault, protectorById, protectorLabel,
   refused, runMigrations, sealBytes, sentence, unlockWithGesture, vaultAudit, vaultDir, vaultExists, vaultLang,
@@ -438,7 +438,7 @@ async function opSetupCode(h: Record<string, unknown>): Promise<OpResult> {
   // Leader decision 3: shown ONLY on a terminal. The CLI checks its own stdin/stdout and says so; a
   // caller that does not is refused (a same-user process could claim it — the socket's boundary is the
   // OS account — but no script, pipe or log is ever handed one by accident).
-  if (h.tty !== true) return { reply: refused('tty-only', vaultLang() === 'pt' ? 'O código de configuração só é mostrado num terminal: rode `agentop vault setup-code` num terminal.' : 'The setup code is shown only on a terminal: run `agentop vault setup-code` in a terminal.') }
+  if (h.tty !== true) return { reply: refused('tty-only', setupCodeTtyRefusal(vaultLang(), setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR))) }
   const r = mintSetupCode()
   return { reply: { ok: true, code: r.code, expiresInMs: r.expiresInMs } }
 }

@@ -19,7 +19,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
 import {
-  deriveKek, describeThrown, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
+  deriveKek, describeThrown, gestureDone, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
   type PresenceCode,
 } from './presence'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
@@ -125,6 +125,7 @@ export function helloProtector(o: HelloOptions): Protector {
       const code: PresenceCode = e.code === 'no-hmac-secret' ? 'presence-unavailable' : e.code
       return { ok: false, code, reason: e.detail }
     }
+    if (verb === 'create' || verb === 'sign') gestureDone()
     return { ok: true, out: text(r.stdout).trim() }
   }
 

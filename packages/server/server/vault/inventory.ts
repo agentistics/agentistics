@@ -8,9 +8,10 @@
  * The shape is a closed list of named fields rather than a spread of anything read from disk.
  */
 import { basename } from 'node:path'
-import { isKid, isPresenceId, parseSealed, parseVaultJson } from '@agentistics/vault'
+import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, requireVaultStepUp, stepUpState, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, stepUpState, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
   displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
@@ -63,6 +64,15 @@ export interface VaultView {
   /** The server's own §2.4 table, so the screen draws 🔑 / 👆 from the rule instead of a second copy of it. */
   gates: Record<string, { code: boolean; gesture: boolean; grant: boolean }>
   hardening: { state: 'ok' | 'limited' | 'failed'; private: boolean | null; coreDumps: 'off' | 'on' | null; yama: string | null; lines: string[] } | null
+  /**
+   * Review S2, owner 2026-10-02: a page's FIRST enrolment owes the setup code, and the page asks for it
+   * as its first step — before any gesture. `command` is the exact line that reaches THIS service (with
+   * `AGENTISTICS_DIR=` when it runs on a non-default data dir); `where` says, in words, that it must be a
+   * real terminal. `owed` is false once this session has spent one.
+   */
+  setupCode: { owed: boolean; command: string; where: string }
+  /** How many prompts the device check / the enrolment raise (presence.ts `PRESENCE_GESTURES`) — the page states these numbers, never its own. */
+  gestures: { probe: number; enroll: number }
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
@@ -81,7 +91,7 @@ export function kindOfPendingFile(file: string): VaultItem['kind'] {
 }
 
 /** `files` / `pendingFiles` are seams for tests; production reads the host's own lists. */
-export async function readVaultView(files: string[] = sealedFiles(), pendingFiles?: () => Promise<string[]>): Promise<VaultView> {
+export async function readVaultView(files: string[] = sealedFiles(), pendingFiles?: () => Promise<string[]>, session = ''): Promise<VaultView> {
   const s = await vaultStatus()
   let createdAt: string | null = null
   let kid = s.kid
@@ -128,6 +138,12 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
     recoveryTodo: s.recoveryTodo ?? null,
     gates: Object.fromEntries(Object.entries(VAULT_ACTION_ROWS).map(([k, r]) => [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }])),
+    gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
+    setupCode: {
+      owed: setupCodeOwed(Boolean(stored?.stepup), { session }),
+      command: setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR),
+      where: setupCodeWhere(vaultLang()),
+    },
     hardening: s.hardening ? { state: s.hardening.state, private: s.hardening.private, coreDumps: s.hardening.coreDumps, yama: s.hardening.yama, lines: hardeningLines(s.hardening, vaultLang()) } : null,
   }
 }

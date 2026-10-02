@@ -88,16 +88,16 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault' && req.method === 'GET') {
     // The inventory only after a step-up (`list`); the state alone is always readable.
     const s = await vaultStatus()
-    if (s.state !== 'open') return new Response(JSON.stringify({ ...(await readVaultView([], async () => [])), locked: true }), { headers: noStore })
+    if (s.state !== 'open') return new Response(JSON.stringify({ ...(await readVaultView([], async () => [], session)), locked: true }), { headers: noStore })
     const g = await gate.requireVaultStepUp('list', { grant, session })
     if (!g.ok) {
       return new Response(JSON.stringify({
         needsStepUp: true, code: g.code, sentence: g.sentence, state: s.state, lockedBy: s.lockedBy ?? null,
         // What the screen needs to draw the step-up prompt itself — facts only, never an inventory.
-        view: { ...(await readVaultView([], async () => [])), locked: false },
+        view: { ...(await readVaultView([], async () => [], session)), locked: false },
       }), { status: statusOf(g.code), headers: noStore })
     }
-    return new Response(JSON.stringify(await readVaultView()), { headers: noStore })
+    return new Response(JSON.stringify(await readVaultView(undefined, undefined, session)), { headers: noStore })
   }
   if (path === '/api/vault/stepup' && req.method === 'POST') {
     const b = await body()
@@ -131,6 +131,13 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
 
   // ── SECRETS.4 §7.1: the enrolment wizard and the sections' actions ────────────────────────────
 
+  if (path === '/api/vault/setup-code' && req.method === 'POST') {
+    // The wizard's FIRST step on a page's first enrolment: the setup code is spent here, before any
+    // gesture, and the proof is held for this session for the rest of the wizard.
+    const b = await body()
+    if (!str(b.setupCode, 16)) return bad()
+    return reply(await gate.acceptSetupCode({ session, setupCode: b.setupCode }))
+  }
   if (path === '/api/vault/authenticator/begin' && req.method === 'POST') {
     // Re-enrolment is gated by the OLD code inside `beginAuthenticator`; the URI is served once.
     const b = await body()
@@ -170,6 +177,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
     return reply(await gate.probePresence(b.protector, { code: codeOf(b), session }))
+  }
+  if (path === '/api/vault/presence/progress' && req.method === 'GET') {
+    // Polled by the page while its probe / enrolment request is in flight: "confirmation i of n".
+    return new Response(JSON.stringify({ ok: true, progress: gate.gestureProgress({ session }) }), { headers: noStore })
   }
   if (path === '/api/vault/presence/enroll' && req.method === 'POST') {
     const b = await body()

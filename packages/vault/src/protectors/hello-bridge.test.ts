@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'bun:test'
 import { helloProtector, HELLO_SCRIPT } from './hello'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
-import { parseBridgeError, presenceSentence, PRESENCE_DETAILS } from './presence'
+import { parseBridgeError, presenceSentence, PRESENCE_DETAILS, PRESENCE_GESTURES, setGestureListener } from './presence'
 import { bytes, text, type ProtectorIo, type RunResult } from './types'
 
 const CAST = 'PRESENCE-ERROR unavailable bridge-failed System.Management.Automation.PSInvalidCastException 0x80004002'
@@ -94,5 +94,51 @@ describe('the sentence a person reads', () => {
   it('a raw .NET type that slipped into a reason anyway is not repeated to the person', () => {
     const s = presenceSentence('presence-unavailable', 'en', 'Windows Hello', 'presence-unavailable: System.Management.Automation.PSInvalidCastException')
     expect(s).not.toMatch(/System\./)
+  })
+})
+
+describe('the gesture count the page states is the count the bridge raises (owner 2026-10-02)', () => {
+  // A fake PowerShell that answers every verb: create → ok, sign → a fixed signature.
+  function okIo(calls: string[]): ProtectorIo {
+    const files = new Map<string, Uint8Array>()
+    return {
+      async run(_p, _a, stdin): Promise<RunResult> {
+        const verb = text(stdin ?? new Uint8Array()).split('\n')[0]!
+        calls.push(verb)
+        return { code: 0, stdout: bytes(verb === 'sign' ? Buffer.alloc(256, 7).toString('base64') : 'ok'), stderr: '' }
+      },
+      async readFile(f) { return files.get(f) ?? null },
+      async writeFile(f, b) { files.set(f, b) }, async removeFile(f) { files.delete(f) }, async createExclusive() { return true },
+      async firstExisting(c) { return c.find(x => x === WSL_INTEROP || x === WSL_POWERSHELL) ?? null },
+      async which() { return null },
+    }
+  }
+  it('the device check (wrap) raises PRESENCE_GESTURES.probe; the enrolment round trip PRESENCE_GESTURES.enroll', async () => {
+    const calls: string[] = []
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const p = helloProtector({ io: okIo(calls), vaultDir: '/v', wsl: true })
+      const w = await p.wrap(new Uint8Array(32).fill(1), 'k1')
+      expect(w.ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.probe)
+      expect(calls.filter(c => c === 'create' || c === 'sign').length).toBe(PRESENCE_GESTURES.probe)
+      if (!w.ok) return
+      const u = await p.unwrap(w.record, 'k1')
+      expect(u.ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+      // delete/check raise no dialog and tick nothing
+      await p.remove(w.record, 'k1')
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+    } finally { setGestureListener(null) }
+  })
+  it('a failed or cancelled prompt does not count as one answered', async () => {
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const io: ProtectorIo = { ...okIo([]), async run(): Promise<RunResult> { return { code: 3, stdout: new Uint8Array(), stderr: 'PRESENCE-ERROR cancelled' } } }
+      expect((await helloProtector({ io, vaultDir: '/v', wsl: true }).wrap(new Uint8Array(32), 'k1')).ok).toBe(false)
+      expect(ticks).toBe(0)
+    } finally { setGestureListener(null) }
   })
 })

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows, wizardPlan, askWords, sectionBadge, howNow, howConfirms, primarySection,
+  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, askWords, sectionBadge, howNow, howConfirms, primarySection,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -127,6 +127,21 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
   test('a fresh machine runs the device check FIRST, then authenticator → presence → recovery', () => {
     expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
   })
+  test('a first page enrolment asks the setup code FIRST — before the device check and any gesture (owner 2026-10-02)', () => {
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'], true)).toEqual(['setup', 'probe', 'authenticator', 'presence', 'recovery'])
+    expect(wizardPlan(['authenticator', 'recovery'], true)).toEqual(['setup', 'authenticator', 'recovery'])
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'], false)[0]).toBe('probe')
+    expect(wizardPlan([], true)).toEqual([])
+  })
+  test('the setup step is a calm step with its own words, in both languages', () => {
+    for (const lang of ['en', 'pt'] as const) {
+      for (const k of ['wiz_setup_title', 'wiz_setup_intro', 'wiz_setup_run', 'wiz_setup_valid', 'wiz_setup_go', 'wiz_step_setup'] as const) {
+        expect(vt(k, lang).length).toBeGreaterThan(0)
+      }
+    }
+    expect(vt('wiz_setup_intro', 'pt')).toContain('Nada é pedido ao Windows Hello')
+    expect(vt('wiz_setup_intro', 'en')).toContain('Nothing is asked of Windows Hello')
+  })
   test('a resume has no probe (the presence enrolment is its own double gesture); no presence device, no probe', () => {
     expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
     expect(wizardPlan(['authenticator', 'recovery'])).toEqual(['authenticator', 'recovery'])
@@ -228,5 +243,22 @@ describe('VAULT.UX2 — what a glance says', () => {
     expect(primarySection(['recovery', 'presence'], false)).toBe('recovery')
     expect(primarySection(['authenticator'], true)).toBeNull()
     expect(primarySection([], false)).toBeNull()
+  })
+})
+
+describe('live gesture progress (owner 2026-10-02)', () => {
+  test('"confirmation i of n" names the one being asked, never past n', () => {
+    expect(gestureStep({ kind: 'hello', done: 0, total: 2 })).toEqual({ i: 1, n: 2 })
+    expect(gestureStep({ kind: 'hello', done: 1, total: 2 })).toEqual({ i: 2, n: 2 })
+    expect(gestureStep({ kind: 'hello', done: 2, total: 2 })).toEqual({ i: 2, n: 2 })
+    expect(gestureStep(null)).toBeNull()
+    expect(gestureStep({ kind: 'hello', done: 0, total: 0 })).toBeNull()
+  })
+  test('the counts are said with the number, in both languages', () => {
+    expect(vtf('wiz_pres_checkHello', 'pt', { n: 2 })).toContain('2 vezes')
+    expect(vtf('wiz_pres_enrolHello', 'pt', { n: 3 })).toContain('3 vezes')
+    expect(vtf('wiz_gesture_progress', 'pt', { i: 1, n: 2 })).toBe('Confirmação 1 de 2')
+    expect(vtf('wiz_gesture_progress', 'en', { i: 2, n: 3 })).toBe('Confirmation 2 of 3')
+    expect(vtf('wiz_pres_checkHello', 'pt', { n: 2 })).not.toContain('duas vezes')
   })
 })

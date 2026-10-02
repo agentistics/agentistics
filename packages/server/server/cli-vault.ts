@@ -13,8 +13,9 @@
 import { existsSync, rmSync } from 'node:fs'
 import {
   checkPassphrase, destroyVault, migratedSentence, passphraseCheckSentence, refusalSentence,
-  type ProtectorId,
+  setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
 } from '@agentistics/vault'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from './config'
 import { realProtectorIo } from './vault/io'
 import {
   allRestoreWith, displayPath, pendingPlaintextFiles, protectorById, vaultDir, vaultExists, vaultLang, vaultStatus,
@@ -324,7 +325,8 @@ async function cmdReset(args: string[]): Promise<number> {
 async function cmdSetupCode(): Promise<number> {
   // Shown on a terminal only: never into a pipe, a file or a log (leader decision 3).
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write(t('The setup code is shown only on a terminal.\n', 'O código de configuração só é mostrado num terminal.\n'))
+    // The TTY rule stands; the refusal says WHERE a real terminal is (an assistant's `!` is not one).
+    process.stderr.write(setupCodeTtyRefusal(vaultLang(), setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR)) + '\n')
     return 1
   }
   const r = await ask({ op: 'setup-code', tty: true })

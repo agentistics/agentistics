@@ -604,3 +604,128 @@ describe('decision 2 — authenticator → presence (the key rotates) → recove
     expect(stepsToRun({ only: [], presence: null, requirePresence: false } as never, { authenticator: false, recovery: false, presence: false, available: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
   })
 })
+
+// ── owner 2026-10-02: the setup code comes FIRST, before any gesture ───────────────────────────
+// The release preview did the Windows Hello gestures and only THEN asked for the setup code, as a red
+// failure. `acceptSetupCode` spends it first and holds a proof for that session; the device check
+// refuses without it; the view says it is owed, with the exact command and WHERE to run it.
+
+import { setupCodeCommand, setupCodeTtyRefusal, setupCodeWhere } from '@agentistics/vault'
+import { acceptSetupCode, setupCodeOwed } from './gate'
+import { readVaultView } from './inventory'
+
+const SWEB = { session: 'http:local' }
+const OTHER = { session: 'http:other' }
+
+describe('the setup code is asked BEFORE any gesture', () => {
+  test('the device check of a first page enrolment is refused without it — no gesture is raised', async () => {
+    await silentVault()
+    const before = hello.gestures
+    const r = await probePresence('hello', SWEB)
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect(hello.gestures).toBe(before)
+  })
+  test('accepting the code first carries the whole wizard: probe, authenticator, first words — no second code', async () => {
+    await silentVault()
+    expect(setupCodeOwed(false, SWEB)).toBe(true)
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    expect(setupCodeOwed(false, SWEB)).toBe(false)
+    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect((await beginAuthenticator(SWEB, 'box')).ok).toBe(true)
+  })
+  test('the proof belongs to the session that typed the code', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    expect(setupCodeOwed(false, OTHER)).toBe(true)
+    const r = await beginAuthenticator(OTHER, 'box')
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect((await beginRecoveryKey(OTHER)).ok).toBe(false)
+  })
+  test('the proof expires with the code\'s own 10 minutes', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    T += 11 * 60_000
+    expect(setupCodeOwed(false, SWEB)).toBe(true)
+  })
+  test('a wrong code is refused with the setup sentence, and the 5th wrong burns the real one', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    for (let i = 0; i < 5; i++) {
+      const r = await acceptSetupCode({ ...SWEB, setupCode: '00000000' })
+      expect(!r.ok && r.code).toBe('setup-code-required')
+    }
+    expect((await acceptSetupCode({ ...SWEB, setupCode: code })).ok).toBe(false)
+  })
+  test('not owed (the terminal) → accepted with nothing to check', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ session: 'socket' })).ok).toBe(true)
+  })
+  test('the view says it is owed, with the command and where to run it', async () => {
+    await silentVault()
+    const v = await readVaultView([], async () => [], SWEB.session)
+    expect(v.setupCode.owed).toBe(true)
+    expect(v.setupCode.command).toContain('agentop vault setup-code')
+    expect(v.setupCode.where).toBe(setupCodeWhere('en'))
+    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+    expect((await readVaultView([], async () => [], SWEB.session)).setupCode.owed).toBe(false)
+  })
+})
+
+describe('the command reaches THIS service, and the refusal says where a terminal is', () => {
+  test('the default data dir needs no env; any other one carries AGENTISTICS_DIR', () => {
+    expect(setupCodeCommand('/home/a/.agentistics', '/home/a/.agentistics')).toBe('agentop vault setup-code')
+    expect(setupCodeCommand('/tmp/s4-preview', '/home/a/.agentistics')).toBe('AGENTISTICS_DIR=/tmp/s4-preview agentop vault setup-code')
+    expect(setupCodeCommand('/tmp/my dir', '/home/a/.agentistics')).toBe("AGENTISTICS_DIR='/tmp/my dir' agentop vault setup-code")
+    expect(setupCodeCommand("/tmp/o'k", '/x')).toBe("AGENTISTICS_DIR='/tmp/o'\\''k' agentop vault setup-code")
+  })
+  test('the owner\'s wording, in PT, and its EN twin', () => {
+    expect(setupCodeWhere('pt')).toBe('Abra o terminal do Ubuntu/WSL (ou o Terminal do macOS/Linux) e rode o comando lá. Dentro de um chat de assistente ou de uma IDE ele não aparece, por segurança.')
+    expect(setupCodeWhere('en')).toContain('Ubuntu/WSL')
+    expect(setupCodeWhere('en')).toContain('assistant')
+  })
+  test('the TTY refusal names where to run it and the exact command', () => {
+    const pt = setupCodeTtyRefusal('pt', 'AGENTISTICS_DIR=/tmp/p agentop vault setup-code')
+    expect(pt).toContain(setupCodeWhere('pt'))
+    expect(pt).toContain('AGENTISTICS_DIR=/tmp/p agentop vault setup-code')
+    expect(setupCodeTtyRefusal('en')).toContain(setupCodeWhere('en'))
+  })
+})
+
+// ── owner 2026-10-02: the device check states its real gesture count and reports progress ───────
+
+import { PRESENCE_GESTURES, gestureDone } from '@agentistics/vault'
+import { gestureProgress } from './gate'
+
+describe('the device check: wrap only, with live "confirmation i of n" for the page', () => {
+  test('it raises the probe count, never a third verifying unwrap', async () => {
+    await silentVault()
+    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+    const before = hello.gestures // the fake counts UNWRAPS
+    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect(hello.gestures).toBe(before)
+  })
+  test('progress is visible to the asking session while the dialogs are up, to nobody else, and gone after', async () => {
+    await silentVault()
+    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+    const seen: unknown[] = []
+    const wrap = hello.wrap.bind(hello)
+    hello.wrap = async (dek, kid) => {
+      seen.push(gestureProgress(SWEB)); gestureDone()
+      seen.push(gestureProgress(SWEB)); seen.push(gestureProgress(OTHER)); gestureDone(); gestureDone()
+      seen.push(gestureProgress(SWEB))
+      return wrap(dek, kid)
+    }
+    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect(seen).toEqual([
+      { kind: 'hello', done: 0, total: PRESENCE_GESTURES.probe },
+      { kind: 'hello', done: 1, total: PRESENCE_GESTURES.probe },
+      null,
+      { kind: 'hello', done: PRESENCE_GESTURES.probe, total: PRESENCE_GESTURES.probe }, // capped at n
+    ])
+    expect(gestureProgress(SWEB)).toBeNull()
+  })
+  test('the view states the counts the page prints', async () => {
+    await silentVault()
+    expect((await readVaultView([], async () => [], SWEB.session)).gestures).toEqual({ probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll })
+  })
+})

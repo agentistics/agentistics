@@ -17,7 +17,7 @@ import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
-  authenticatorBegin, authenticatorConfirm, cleanCode, cleanSetupCode, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
+  authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanCode, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
   loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   askWords, howConfirms, howNow, presenceProbe, primarySection, sectionBadge, wizardPlan,
@@ -464,7 +464,7 @@ function Note({ children, tone }: { children: React.ReactNode; tone?: 'warn' | '
 function SetupCodeField({ value, onChange, label, why }: { value: string; onChange: (v: string) => void; label: string; why: string }) {
   return (
     <label style={{ display: 'block', marginBottom: 10 }}>
-      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{why}</span>
+      {why && <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{why}</span>}
       <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</span>
       <input
         value={value} onChange={e => onChange(cleanSetupCode(e.target.value))} placeholder="1234 5678" style={{ ...input, marginBottom: 0 }}
@@ -659,7 +659,7 @@ function useEscape(onEsc: () => void) {
   }, [onEsc])
 }
 
-// ── the enrolment wizard (§7.3): authenticator → recovery key → presence ─────────────────────────
+// ── the enrolment wizard (§7.3): [setup code] → [device check] → authenticator → presence → recovery key ─────────────────────────
 
 type Phase = 'intro' | 'qr' | 'words' | 'confirm' | 'presence' | 'done'
 
@@ -667,7 +667,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   lang: 'en' | 'pt'; isMobile: boolean; initial: VaultView; steps: WizardStep[]; onClose: () => void
 }) {
   // The whole §7.3 flow: device check → authenticator → recovery key → presence (each only if still missing).
-  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps))
+  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps, initial.setupCode?.owed === true))
   const t = (k: VaultKey) => vt(k, lang)
   const [view, setView] = useState(initial)
   const [i, setI] = useState(0)
@@ -700,6 +700,29 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   useEffect(() => () => { setWords(null) }, [])
   useEscape(() => { if (!busy) onClose() })
 
+  // Live "confirmation i of n" while the service has a Windows Hello / key dialog up (owner 2026-10-02).
+  const [gestureTotal, setGestureTotal] = useState(0)
+  const [gestureNow, setGestureNow] = useState<{ i: number; n: number } | null>(null)
+  useEffect(() => {
+    if (gestureTotal === 0) { setGestureNow(null); return }
+    let alive = true
+    setGestureNow({ i: 1, n: gestureTotal })
+    const tick = async () => {
+      const r = await presenceProgress()
+      const g = r.ok ? gestureStep(r.progress) : null
+      if (alive && g) setGestureNow(g)
+    }
+    const id = setInterval(() => { void tick() }, 500)
+    return () => { alive = false; clearInterval(id) }
+  }, [gestureTotal])
+  const probeGestures = view.gestures?.probe ?? 2
+  const enrolGestures = view.gestures?.enroll ?? 3
+  const gestureLine = gestureNow && (
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
+      <Loader2 size={14} className="ag-spin" /> {vtf('wiz_gesture_progress', lang, { i: gestureNow.i, n: gestureNow.n })}
+    </div>
+  )
+
   const refresh = async (): Promise<VaultView> => {
     const r = await loadVault()
     const v = r.kind === 'view' || r.kind === 'needs-stepup' ? r.view : view
@@ -718,6 +741,17 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const needCodeFor = (action: string) => needsTypedCode({ ...gateOf(action), grant: false }, false)
   const stepNo = Math.min(i + 1, plan.length)
   const presenceCodeNeeded = needCodeFor('enroll-presence') && !flowOk
+
+  // ── setup code: spent FIRST, before any gesture; the server holds the proof for this session
+  const acceptSetup = async () => {
+    if (busy || !setupCodeComplete(setupCode)) return
+    setBusy(true); setError(null)
+    const r = await setupCodeAccept(setupCode)
+    setSetupCode('')
+    if (!r.ok) { setBusy(false); setError(r.sentence || t('network')); return }
+    setBusy(false)
+    await next()
+  }
 
   // ── authenticator
   const showQr = async () => {
@@ -768,7 +802,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const probe = async () => {
     if (busy) return
     setBusy(true); setError(null)
+    setGestureTotal(probeGestures)
     const r = await presenceProbe(kind)
+    setGestureTotal(0)
     if (!r.ok) return fail(r.sentence)
     setBusy(false)
     await next()
@@ -778,7 +814,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const enrolPresence = async (replaceRecovery = false) => {
     if (busy) return
     setBusy(true); setError(null)
+    setGestureTotal(enrolGestures)
     const r = await presenceEnrol(kind, presenceCodeNeeded ? presCode : undefined, replaceRecovery)
+    setGestureTotal(0)
     if (!r.ok) {
       setPresCode('')
       if (r.code === 'presence-needs-recovery-words') { setNeedWords(true); setBusy(false); setError(r.sentence); return }
@@ -806,11 +844,25 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: plan.length })}</div>}
         {phase !== 'done' && <Note>{t('wiz_safe')}</Note>}
 
+        {phase === 'intro' && step === 'setup' && (
+          <form onSubmit={e => { e.preventDefault(); void acceptSetup() }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_setup_title')}</div>
+            <Note>{t('wiz_setup_intro')}</Note>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('wiz_setup_run')}</div>
+            <code style={{ ...codeBlock, display: 'block', marginBottom: 6, overflowX: 'auto', whiteSpace: 'pre' }}>{view.setupCode?.command ?? 'agentop vault setup-code'}</code>
+            {view.setupCode?.where && <Note>{view.setupCode.where}</Note>}
+            <Note>{t('wiz_setup_valid')}</Note>
+            <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why="" />
+            {error && <Err text={error} />}
+            <button type="submit" style={cta} disabled={busy || !setupCodeComplete(setupCode)}>{busy ? t('working') : t('wiz_setup_go')}</button>
+          </form>
+        )}
         {phase === 'intro' && step === 'probe' && (
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_probe_title')}</div>
+            {gestureLine}
             <Note>{vtf('wiz_probe_intro', lang, { presence: vt(presenceKey([kind]), lang) })}</Note>
-            <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
+            <Note>{vtf(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey', lang, { n: probeGestures })}</Note>
             {error && <Err text={error} />}
             <button type="button" style={cta} disabled={busy} onClick={() => { void probe() }}>{busy ? t('unlocking') : t('wiz_probe_go')}</button>
           </div>
@@ -898,6 +950,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         {phase === 'intro' && step === 'presence' && (
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_pres_title')}</div>
+            {gestureLine}
             <Note>{t('wiz_pres_intro')}</Note>
             {view.presenceAvailable.length > 1 && (
               <div role="radiogroup" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -909,7 +962,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
                 ))}
               </div>
             )}
-            <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
+            <Note>{vtf(kind === 'hello' ? 'wiz_pres_enrolHello' : 'wiz_pres_enrolKey', lang, { n: enrolGestures })}</Note>
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
             {!needWords && (

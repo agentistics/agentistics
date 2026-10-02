@@ -149,3 +149,26 @@ export function zero(b: Uint8Array): void {
 export function describeThrown(err: unknown): PresenceCode {
   return /time/i.test(String((err as Error)?.message ?? err)) ? 'presence-timeout' : 'presence-unavailable'
 }
+
+// ── live progress: one tick per COMPLETED gesture ────────────────────────────────────────────────
+//
+// Owner, 2026-10-02: a step that says "confirm twice" and then raises a third dialog is a step nobody
+// can trust, and a person with a Hello dialog in front of them has no way to know how many are left.
+// Each bridge ticks here after a prompt the person actually answered (Hello create/sign, a key's
+// make/assert); the service turns the ticks into "confirmation i of n" for the page. Nothing secret
+// passes through: the listener receives no argument at all.
+
+let _gestureListener: (() => void) | null = null
+/** The service's hook; `null` detaches. One listener — the service owns one gesture at a time. */
+export function setGestureListener(fn: (() => void) | null): void { _gestureListener = fn }
+/** Called by a bridge after a gesture completed. Never throws into the bridge. */
+export function gestureDone(): void { try { _gestureListener?.() } catch { /* progress is advisory */ } }
+
+/**
+ * How many prompts each operation raises, per presence kind — the ONE place the page's counts come
+ * from. A round trip (enrolment) is create/make + sign/assert + a verifying sign/assert = 3: the third
+ * proves the KEK is reproducible before anything is retired. The device check is wrap only = 2: it
+ * proves the bridge and the gesture work; reproducibility is proved by the enrolment that follows,
+ * which changes nothing until it has.
+ */
+export const PRESENCE_GESTURES = { probe: 2, enroll: 3, unlock: 1 } as const

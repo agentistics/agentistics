@@ -448,11 +448,28 @@ describe('POST /api/vault/presence/probe — the gesture check BEFORE anything c
   test('a working device passes, writes nothing and leaves no stored key behind', async () => {
     const before = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
     const keys = STORE.size
+    // Owner 2026-10-02: on a first page enrolment the setup code comes BEFORE any gesture.
+    const gesturesBefore = hello.gestures
+    const refused = await http('POST', '/api/vault/presence/probe', { protector: 'hello' })
+    expect(refused).toMatchObject({ status: 403, json: { ok: false, code: 'setup-code-required' } })
+    expect(hello.gestures).toBe(gesturesBefore)
+    expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
     const r = await http('POST', '/api/vault/presence/probe', { protector: 'hello' })
     expect(r).toMatchObject({ status: 200, json: { ok: true } })
     expect(readFileSync(join(vaultDir(), 'vault.json'), 'utf8')).toBe(before)
     expect(STORE.size).toBe(keys)
-    expect(hello.gestures).toBeGreaterThanOrEqual(1)
+    // Wrap only: no verifying unwrap here (the fake counts unwraps) — reproducibility is the enrolment's check.
+    expect(hello.gestures).toBe(gesturesBefore)
+  })
+  test('the view tells the page the setup code is owed, then not owed once this session spent it', async () => {
+    expect((await http('GET', '/api/vault')).json.setupCode).toMatchObject({ owed: true })
+    expect((await http('POST', '/api/vault/setup-code', { setupCode: '00000000' })).json.code).toBe('setup-code-required')
+    expect((await http('POST', '/api/vault/setup-code', setup())).json).toMatchObject({ ok: true })
+    const v = (await http('GET', '/api/vault')).json
+    expect((v.setupCode ?? (v.view as Record<string, unknown>)?.setupCode) as { owed: boolean }).toMatchObject({ owed: false })
+  })
+  test('progress is readable while nothing is in flight: null', async () => {
+    expect((await http('GET', '/api/vault/presence/progress')).json).toMatchObject({ ok: true, progress: null })
   })
   test('refuses a non-presence kind (400), a locked vault, and — once enrolled — an unauthenticated probe (401)', async () => {
     expect((await http('POST', '/api/vault/presence/probe', { protector: 'dpapi' })).status).toBe(400)

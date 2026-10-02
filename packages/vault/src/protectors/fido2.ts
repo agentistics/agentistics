@@ -18,7 +18,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
 import {
-  deriveKek, describeThrown, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
+  deriveKek, describeThrown, gestureDone, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
   type PresenceCode,
 } from './presence'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
@@ -222,6 +222,9 @@ export function fido2Protector(o: Fido2Options): Protector {
     return f !== null && f.up && (!pin || f.uv)
   }
 
+  /** A completed prompt ticks the page's progress counter (presence.ts `gestureDone`). */
+  async function counted(p: Promise<Out>): Promise<Out> { const r = await p; if (r.ok) gestureDone(); return r }
+
   async function make(): Promise<Out> {
     const userId = new Uint8Array(randomBytes(32))
     if (web) return bridge('make', userId)
@@ -273,21 +276,21 @@ export function fido2Protector(o: Fido2Options): Protector {
     /** Costs gestures (a make + a get, twice): enrolment only. Refuses a key without hmac-secret. */
     async probe(): Promise<ProbeResult> {
       if (web) { const c = await bridge('check'); if (!c.ok) return fail(c) }
-      const m = await make()
+      const m = await counted(make())
       if (!m.ok) return fail(m)
       const salt = probeValue()
-      const a = await secret(m.out, salt)
+      const a = await counted(secret(m.out, salt))
       if (!a.ok) return fail(a)
-      const b = await secret(m.out, salt)
+      const b = await counted(secret(m.out, salt))
       if (!b.ok) return fail(b)
       if (a.out !== b.out) return { ok: false, reason: presenceReason('presence-unavailable', 'the key answered differently for the same salt') }
       return { ok: true }
     },
     async wrap(dek, kid) {
-      const m = await make()
+      const m = await counted(make())
       if (!m.ok) return fail(m)
       const salt = new Uint8Array(randomBytes(32))
-      const s = await secret(m.out, salt)
+      const s = await counted(secret(m.out, salt))
       if (!s.ok) return fail(s)
       const key = new Uint8Array(Buffer.from(s.out, 'base64'))
       const kek = deriveKek(key, kid, 'fido2')
@@ -307,7 +310,7 @@ export function fido2Protector(o: Fido2Options): Protector {
       } catch {
         return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', `${FIDO2_FILE} is damaged`) }
       }
-      const s = await secret(f.credential, new Uint8Array(Buffer.from(f.salt, 'base64')))
+      const s = await counted(secret(f.credential, new Uint8Array(Buffer.from(f.salt, 'base64'))))
       if (!s.ok) {
         const code: PresenceCode = s.code === 'no-hmac-secret' ? 'presence-unavailable' : s.code
         return { ok: false, kind: kindOf(code), reason: presenceReason(code, s.reason) }
