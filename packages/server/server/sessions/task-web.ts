@@ -28,7 +28,9 @@ import {
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
 import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
 import { planMove } from './task-rank'
-import { compareBy, repoShortName, sessionLabel } from '@agentistics/core'
+import { resolveAttachmentRead } from './attachment-web'
+import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
+import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
 
@@ -75,6 +77,16 @@ export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
   }
 }
 
+/**
+ * Attachments as an assistant reads them: the stored `{name, path}` plus the `url` that serves it
+ * (the chat's own attachment door). Applied to the detail reply only — the book keeps the bare
+ * reference, so the store never holds a URL that a changed port would make wrong.
+ */
+export function withAttachmentRefs<C extends { attachments?: ChatAttachmentRef[] }>(c: C): C {
+  if (!c.attachments || c.attachments.length === 0) return c
+  return { ...c, attachments: c.attachments.map(chatAttachmentRef) }
+}
+
 export async function showTask(
   ref: string,
   filter?: TaskFilter,
@@ -91,7 +103,7 @@ export async function showTask(
       rows: w.rollupRows,
       metas: scoped.metas,
       costOf: w.costOf,
-      comments: w.book.comments.filter(c => c.taskId === task.id),
+      comments: w.book.comments.filter(c => c.taskId === task.id).map(withAttachmentRefs),
       subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
       files: w.book.files.filter(f => f.taskId === task.id),
     }),
@@ -336,20 +348,43 @@ export async function deleteTask(ref: string): Promise<boolean> {
   return true
 }
 
-export async function addComment(ref: string, o: { author: string; body: string }): Promise<boolean> {
+/**
+ * Leave a comment on a task, or — with `subtaskId` — on one of its subtasks or subtask GROUPS.
+ * An unknown, deleted or foreign subtask is REFUSED with a sentence (`planCommentTarget`), never
+ * quietly filed on the task. The activity log names the target, so "someone commented" always says
+ * on WHAT.
+ */
+export async function addComment(
+  ref: string,
+  o: { author: string; body: string; subtaskId?: string; attachments?: unknown },
+): Promise<
+  | { ok: true; id: string }
+  | { ok: false; reason: 'empty' | 'no_such_task' | CommentTargetRefusal; message: string }
+> {
   const body = o.body.trim()
-  if (!body) return false
+  // Only paths inside agentop's attachments directory survive — see `commentAttachments.ts`.
+  const attachments = sanitizeCommentAttachments(o.attachments, resolveAttachmentRead)
+  if (!body && attachments.length === 0) {
+    return { ok: false, reason: 'empty', message: 'A comment needs a body or an attachment.' }
+  }
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
-  if (!task) return false
+  if (!task) return { ok: false, reason: 'no_such_task', message: `No task "${ref}" exists.` }
+  const plan = planCommentTarget(task.id, o.subtaskId, w.book.subtasks)
+  if (!plan.ok) return plan
+  const author = o.author.trim() || 'unknown'
+  const id = newCommentId()
   await w.store.addComment({
-    id: newCommentId(),
+    id,
     taskId: task.id,
-    author: o.author.trim() || 'unknown',
+    ...(plan.subtaskId ? { subtaskId: plan.subtaskId } : {}),
+    author,
     body,
+    ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: new Date().toISOString(),
   })
-  return true
+  await w.store.logEvents([event(task.id, author, 'comment', { detail: commentTargetPhrase(plan.target) })])
+  return { ok: true, id }
 }
 
 /** An empty body is a DELETE by another name, so it is refused rather than silently blanking a row. */

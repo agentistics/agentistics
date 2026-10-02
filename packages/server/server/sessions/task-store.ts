@@ -20,7 +20,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { isValidStatusColor, normalizeStagedSession, type TaskStatusDef } from '@agentistics/core'
+import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { historicalLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -306,10 +306,16 @@ function str(v: unknown): string | undefined {
 function sanitizeComment(raw: unknown): TaskComment | null {
   if (!raw || typeof raw !== 'object') return null
   const c = raw as Record<string, unknown>
-  const id = str(c.id); const taskId = str(c.taskId); const body = str(c.body)
-  if (!id || !taskId || !body) return null
+  const id = str(c.id); const taskId = str(c.taskId); const body = str(c.body) ?? ''
+  const attachments = sanitizeCommentAttachments(c.attachments)
+  // Words, files or both — a comment with neither says nothing.
+  if (!id || !taskId || (!body && attachments.length === 0)) return null
+  const subtaskId = str(c.subtaskId)
   return {
     id, taskId, body,
+    ...(attachments.length > 0 ? { attachments } : {}),
+    // Absent on every comment written before threads existed — read as the task's own.
+    ...(subtaskId ? { subtaskId } : {}),
     author: str(c.author) ?? 'unknown',
     createdAt: str(c.createdAt) ?? new Date(0).toISOString(),
   }
@@ -570,6 +576,14 @@ export function createTaskStore(file: string): TaskStore {
           subtasks: book.subtasks
             .filter(t => t.id !== id)
             .map(t => (t.parentGroupId === id ? { ...t, parentGroupId: undefined } : t)),
+          // Its comments are RE-HOMED onto the task, in the same write — deleting a board entry
+          // never deletes what people said on it. Clearing the target is exactly how a comment
+          // written before threads existed reads, so nothing downstream needs a new case.
+          comments: book.comments.map(c => {
+            if (c.subtaskId !== id) return c
+            const { subtaskId: _gone, ...rest } = c
+            return rest
+          }),
           // A conversation filed on the removed subtask falls back to its DELIVERY — the repair
           // `reconcileAttachment` applies to a registry row whose `subtaskId` names nothing. Left
           // dangling it would still count on the task but sit in no bucket, in the same write.

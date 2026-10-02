@@ -8,7 +8,7 @@
  */
 
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
-import { groupProgress, sessionTokenTotal } from '@agentistics/core'
+import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
 import type {
   Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile,
 } from './task-model'
@@ -74,7 +74,17 @@ export interface TaskListRow {
    * touched it. Counted here rather than in the browser so the list and the detail can never
    * disagree about how many comments a task has.
    */
-  counts: { comments: number; subtasks: number; subtasksDone: number; files: number }
+  counts: {
+    /** Every comment of the task — what the task's own thread shows. */
+    comments: number
+    /**
+     * Per subtask/group id, the size of THAT thread (`commentCounts`): a group counts its own
+     * comments plus its members'. Absent = none. So the number on a row is what opens when it is
+     * pressed.
+     */
+    commentsBySubtask: Record<string, number>
+    subtasks: number; subtasksDone: number; files: number
+  }
   /** Distinct harnesses of this task's sessions, in first-seen order. */
   harnesses: string[]
   /**
@@ -100,7 +110,14 @@ export interface TaskDetail {
   rollup: AttemptRollup
   stats: TaskStats
   sessions: TaskSessionRow[]
+  /** Every comment, flat, oldest first — each carries its own `subtaskId` when it has a target. */
   comments: TaskComment[]
+  /**
+   * The same comments filed under their OWN target (task first, then subtasks in creation order;
+   * empty targets omitted) — `commentsByTarget`, with no aggregation. The grouped shape an
+   * assistant reads; a surface wanting a group's aggregated thread uses `commentThread`.
+   */
+  commentThreads: { target: CommentTarget; comments: TaskComment[] }[]
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
@@ -377,8 +394,9 @@ export function subtaskViews(
  * Returns the empty list for anything that is not, right now, an actual group — the id names no
  * subtask, or names one that is not `isGroup: true`. This is the pure building block a route/UI
  * scoping a session's aside to its group would filter subtasks/comments/rows against; it does not
- * itself touch comments (`TaskComment` carries no `subtaskId` today — comments stay task-wide, per
- * §C.5) or sessions — a caller filters those by the ids this returns.
+ * itself touch comments (their thread rule — a group shows its own and its members' — lives in
+ * `@agentistics/core`'s `commentThreads.ts`) or sessions — a caller filters those by the ids this
+ * returns.
  */
 export function groupVisibility(groupId: string, subtasks: readonly Subtask[]): readonly string[] {
   const group = subtasks.find(s => s.id === groupId)
@@ -423,12 +441,14 @@ export function buildTaskList(o: {
   return o.tasks.map(task => {
     const mine = rowsOfTask(task, o.rows, owners)
     const subs = (o.subtasks ?? []).filter(t => t.taskId === task.id)
+    const comments = commentCounts((o.comments ?? []).filter(c => c.taskId === task.id), subs)
     return {
       task,
       attempts: o.attempts.filter(a => a.taskId === task.id).length,
       rollup: rollupAttempt({ sessions: rollupSessionsFor(mine, o.metas, o.costOf) }),
       counts: {
-        comments: (o.comments ?? []).filter(c => c.taskId === task.id).length,
+        comments: comments.task,
+        commentsBySubtask: comments.bySubtask,
         subtasks: subs.length,
         subtasksDone: subs.filter(t => t.done).length,
         files: (o.files ?? []).filter(f => f.taskId === task.id).length,
@@ -502,6 +522,10 @@ export function buildTaskDetail(o: {
     }),
     // Newest last, the way a conversation reads.
     comments: [...(o.comments ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    commentThreads: commentsByTarget(
+      o.comments ?? [],
+      [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    ),
     subtasks: [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     files: [...(o.files ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     subtaskRollups: subtaskViews(o.task, o.subtasks ?? [], mine, o.metas, o.costOf),

@@ -11,7 +11,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { PRIORITY_ORDER, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
+import { PRIORITY_ORDER, type ChatAttachmentRef, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
 import type { HarnessId, StagedSessionDraft } from '@agentistics/core'
 
 /**
@@ -402,8 +402,18 @@ export interface Attempt {
 export interface TaskComment {
   id: string
   taskId: string
+  /**
+   * The subtask — or subtask GROUP — this comment was left on. ABSENT means the task itself, which
+   * is also how every comment written before threads existed reads: the migration is additive, a
+   * missing field and nothing else. Which thread SHOWS a comment (a group also shows its members')
+   * is `@agentistics/core`'s `commentThreads.ts`, never re-derived here.
+   */
+  subtaskId?: string
   author: string
+  /** May be empty ONLY when `attachments` is not — a comment is words, files, or both. */
   body: string
+  /** Files left with the comment — references into the chat's own attachment store. Absent = none. */
+  attachments?: ChatAttachmentRef[]
   createdAt: string
 }
 

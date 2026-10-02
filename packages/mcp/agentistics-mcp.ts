@@ -17,6 +17,7 @@ import {
   HARNESS_IDS,
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
+import { taskCommentRequest } from "./task-comment-args.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
@@ -185,7 +186,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). `ref` is the task id or its exact title.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). Comments come twice: `comments` (flat, oldest first, each with `subtaskId` when it was left on a subtask or group) and `commentThreads` — the same comments grouped by their OWN target (`target: {kind: 'task'|'group'|'subtask', id, title}`; the task first, empty targets omitted). `ref` is the task id or its exact title.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string", description: "Task id or exact title." } },
@@ -252,11 +253,24 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_comment",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on. `author` is free text — say who you are (e.g. 'claude:3f5f').",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f').",
     inputSchema: {
       type: "object",
-      properties: { ref: { type: "string" }, body: { type: "string" }, author: { type: "string" } },
-      required: ["ref", "body"],
+      properties: {
+        ref: { type: "string" },
+        body: { type: "string" },
+        author: { type: "string" },
+        subtaskId: {
+          type: "string",
+          description: "Optional target: a subtask or subtask GROUP id of this task (from agentistics_task's `subtasks`). Omit for the task itself.",
+        },
+        attachments: {
+          type: "array",
+          description: "Optional files left with the comment, as {name, path} references to files already in agentop's attachments directory (the path the chat upload returns). Paths outside it are dropped. At most 10.",
+          items: { type: "object", properties: { name: { type: "string" }, path: { type: "string" } }, required: ["path"] },
+        },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -764,10 +778,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_comment": {
-        const a = args as any;
-        const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/comments`, {
-          body: a?.body, author: a?.author ?? "assistant",
-        });
+        // The route stays LITERAL here: agentToolPolicy.lint reads each handler's routes off this source.
+        const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String((args as any)?.ref))}/comments`,
+          taskCommentRequest(args).payload);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_subtask": {

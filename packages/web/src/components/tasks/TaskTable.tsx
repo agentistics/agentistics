@@ -67,6 +67,7 @@ import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
 import { subtaskGridLayout } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
+import { CommentCountButton, CommentThreadDialog } from './CommentThreadDialog'
 import { HarnessBadges } from './HarnessBadges'
 import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
 import { useStagedFire } from './useStagedFire'
@@ -212,6 +213,9 @@ function cellFor(
   lang: 'pt' | 'en',
   money: Money,
   statuses: readonly TaskStatusDef[] | null,
+  /** Opens the task's own comment thread over the table — see `CommentThreadDialog`. */
+  onOpenComments: () => void,
+  isMobile: boolean,
 ): React.ReactNode {
   const r = row.rollup
   switch (col) {
@@ -280,11 +284,16 @@ function cellFor(
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
       : <span style={{ ...numeric, fontSize: 12 }}>{row.counts.subtasksDone}/{row.counts.subtasks}</span>
     case 'attempts': return <Num v={row.attempts} />
-    case 'comments': return row.counts.comments === 0
-      ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-      : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...numeric, fontSize: 12 }}>
-          <MessageSquare size={11} />{row.counts.comments}
-        </span>
+    // The task's thread shows EVERY comment of the task (its subtasks' and groups' included,
+    // labelled) — `commentThread`'s downward rule — so this count is what opens.
+    case 'comments': return (
+      <CommentCountButton
+        count={row.counts.comments}
+        label={lang === 'pt' ? `Comentários: ${row.task.title}` : `Comments: ${row.task.title}`}
+        mobile={isMobile}
+        onOpen={onOpenComments}
+      />
+    )
     case 'files': return row.counts.files === 0
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
       : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...numeric, fontSize: 12 }}>
@@ -309,9 +318,14 @@ function cellFor(
 
 function SubtaskRows({
   subtasks, subtaskRollups, indent, mainCols, subtaskCols, sessions, lang, nowMs, statuses, onPatch, onRemove,
-  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor,
+  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor, commentCounts, onOpenComments,
 }: {
   subtasks: Subtask[]
+  /** Each subtask's/group's THREAD size (`TaskListRow.counts.commentsBySubtask`) — a group's
+   *  includes its members' comments. Absent key = none. */
+  commentCounts: Readonly<Record<string, number>>
+  /** Open one subtask's or group's thread over the table. */
+  onOpenComments: (subtask: Subtask) => void
   /** The delivery's own `TaskDetail.subtaskRollups` — a GROUP's own `groupProgress` (§F.1), and now
    *  also the per-subtask Cost/Tokens cells (owner-approved reversal of this table's earlier "the
    *  rest of this row's numbers stay off this table by design" — they no longer do, and are drawn
@@ -412,6 +426,7 @@ function SubtaskRows({
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
           <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <SubtaskActionsMenu
               subtask={t}
               siblings={subtasks}
@@ -422,6 +437,16 @@ function SubtaskRows({
               onRemove={onRemove}
               staged={stagedFor(t)}
             />
+            {/* Right beside the gear (owner, 2026-10-02): every row — group, member, loose — carries
+                its thread's count and the way into it. Not a picker column, so no stored column
+                arrangement can hide the only way to comment on a subtask from the table. */}
+            <CommentCountButton
+              count={commentCounts[t.id] ?? 0}
+              label={lang === 'pt' ? `Comentários: ${t.title}` : `Comments: ${t.title}`}
+              mobile={isMobile}
+              onOpen={() => onOpenComments(t)}
+            />
+            </span>
           </td>
           {/* A MEMBER is indented one level further than the base subtask indent — the visual
               nesting that replaces the old "parte do grupo" caption for every properly clustered
@@ -619,6 +644,9 @@ export interface TaskTableProps {
   /** Re-read ONE delivery's detail, cached or not — `onExpand` is a no-op once it is cached, so a
    *  write that must show its result (a staged draft saved, a session fired) calls this instead. */
   onRefreshDetail: (ref: string) => Promise<unknown> | void
+  /** A comment was written/edited/removed from a row's thread — re-read what carries the COUNTS
+   *  (the list) so the number on the row follows. Absent = the counts refresh on the next poll. */
+  onCommentsChanged?: (ref: string) => Promise<unknown> | void
   /** Drawn at the START of the toolbar row — the page's search box, so the table has ONE row of
    *  controls instead of a search row above a controls row. */
   toolbarStart?: React.ReactNode
@@ -674,6 +702,8 @@ export function TaskTable(p: TaskTableProps) {
   const [subDraft, setSubDraft] = useState<Record<string, string>>({})
   /** Which subtask is being given a session — `taskId/subtaskId`, so the patch knows both. */
   const [linkingSub, setLinkingSub] = useState<{ task: string; sub: string } | null>(null)
+  /** The comment thread open over the table, if any — a task's (`target: null`), a group's or a subtask's. */
+  const [thread, setThread] = useState<{ taskId: string; target: string | null; title: string } | null>(null)
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
   /**
@@ -1059,6 +1089,8 @@ export function TaskTable(p: TaskTableProps) {
                             onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
                             onOpenSession={p.onOpenSession}
                             stagedFor={stagedFor(row.task.id, detail?.files ?? [])}
+                            commentCounts={row.counts.commentsBySubtask ?? {}}
+                            onOpenComments={t => setThread({ taskId: row.task.id, target: t.id, title: t.title })}
                           />
                           <tr style={{ background: 'var(--bg-surface)' }}>
                             <td style={{ padding: '5px 10px' }} />
@@ -1148,6 +1180,7 @@ export function TaskTable(p: TaskTableProps) {
                                 belongs to the row, and pressing it never leaves the board. It is a
                                 pointer convenience over the chevron's button, not a second tab stop. */}
                             <td style={{ padding: cellPad }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                               <span
                                 role="presentation"
                                 onClick={() => {
@@ -1155,13 +1188,23 @@ export function TaskTable(p: TaskTableProps) {
                                   if (!open) p.onExpand(row.task.id)
                                 }}
                                 style={{
-                                  display: 'block', cursor: 'pointer', minWidth: 0, textAlign: 'left',
+                                  display: 'block', cursor: 'pointer', minWidth: 0, textAlign: 'left', flex: 1,
                                   fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)',
                                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                   ...(isMobile ? { minHeight: 44, lineHeight: '44px' } : {}),
                                 }}
                               >
                                 {row.task.title}
+                              </span>
+                              {/* The task's thread, from its own row — in the title cell like every
+                                  subtask row's, because the Comments column is off by default and a
+                                  hidden column is no way in. */}
+                              <CommentCountButton
+                                count={row.counts.comments}
+                                label={(p.lang ?? 'en') === 'pt' ? `Comentários: ${row.task.title}` : `Comments: ${row.task.title}`}
+                                mobile={isMobile}
+                                onOpen={() => setThread({ taskId: row.task.id, target: null, title: row.task.title })}
+                              />
                               </span>
                             </td>
                             {cols.map(c => (
@@ -1177,6 +1220,8 @@ export function TaskTable(p: TaskTableProps) {
                                   p.lang ?? 'en',
                                   money,
                                   p.statuses,
+                                  () => setThread({ taskId: row.task.id, target: null, title: row.task.title }),
+                                  isMobile,
                                 )}
                               </td>
                             ))}
@@ -1272,6 +1317,16 @@ export function TaskTable(p: TaskTableProps) {
         }}
       />
 
+      {thread && (
+        <CommentThreadDialog
+          taskId={thread.taskId}
+          target={thread.target}
+          title={thread.title}
+          lang={p.lang ?? 'en'}
+          onClose={() => setThread(null)}
+          onChanged={() => p.onCommentsChanged?.(thread.taskId)}
+        />
+      )}
       {linkingSub && (
         <SessionPicker
           // A subtask holds any number of sessions, so the picker is MULTIPLE and the attaches are
