@@ -168,3 +168,28 @@ test('a session waiting on a dialog before it has a conversation says so, not "n
   expect(out.unavailable).toContain('waiting for your answer')
   expect(out.live).toBe(true)
 })
+
+test('a RUNNING agy session with no conversation yet is an EMPTY chat — the composer is how the first message gets sent', async () => {
+  // agy creates its conversation on the first message, so a session started with no prompt has no
+  // link until then. The refusal here replaced the composer and left only the terminal.
+  const out = await readSessionChat(
+    hostWithRow({ harness: 'antigravity', state: 'working', conversationId: undefined }), 'pt', 'sess1',
+  )
+  expect(out.unavailable).toBeUndefined()
+  expect(out.live).toBe(true)
+  expect(out.turns).toEqual([])
+})
+
+test('a harness that can never link keeps its refusal even while running', async () => {
+  const out = await readSessionChat(
+    hostWithRow({ harness: 'gemini', state: 'working', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
+  )
+  expect(out.unavailable).toBe('no link ever')
+})
+
+test('an ENDED agy session with no conversation keeps the refusal — there it is never coming', async () => {
+  const out = await readSessionChat(
+    hostWithRow({ harness: 'antigravity', state: 'exited', conversationId: undefined }), 'en', 'sess1',
+  )
+  expect(out.unavailable).toBeTruthy()
+})
