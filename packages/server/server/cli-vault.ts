@@ -322,7 +322,12 @@ async function cmdReset(args: string[]): Promise<number> {
  */
 /** Review S2: the one-time code a page needs to start the FIRST enrolment — shown here, on this machine. */
 async function cmdSetupCode(): Promise<number> {
-  const r = await ask({ op: 'setup-code' })
+  // Shown on a terminal only: never into a pipe, a file or a log (leader decision 3).
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stderr.write(t('The setup code is shown only on a terminal.\n', 'O código de configuração só é mostrado num terminal.\n'))
+    return 1
+  }
+  const r = await ask({ op: 'setup-code', tty: true })
   if (!r) return down()
   if (!r.ok || typeof r.code !== 'string') return said(r)
   const mins = Math.max(1, Math.ceil(Number(r.expiresInMs ?? 0) / 60_000))

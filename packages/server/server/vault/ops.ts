@@ -434,7 +434,11 @@ async function opAuthenticatorConfirm(h: Record<string, unknown>): Promise<OpRes
 }
 /** Hands out the NEW 24 words — once, by design: they are written on paper (§4.2). */
 /** Review S2: the one-time code a page needs for a FIRST enrolment — printed to this machine's terminal. */
-async function opSetupCode(): Promise<OpResult> {
+async function opSetupCode(h: Record<string, unknown>): Promise<OpResult> {
+  // Leader decision 3: shown ONLY on a terminal. The CLI checks its own stdin/stdout and says so; a
+  // caller that does not is refused (a same-user process could claim it — the socket's boundary is the
+  // OS account — but no script, pipe or log is ever handed one by accident).
+  if (h.tty !== true) return { reply: refused('tty-only', vaultLang() === 'pt' ? 'O código de configuração só é mostrado num terminal: rode `agentop vault setup-code` num terminal.' : 'The setup code is shown only on a terminal: run `agentop vault setup-code` in a terminal.') }
   const r = mintSetupCode()
   return { reply: { ok: true, code: r.code, expiresInMs: r.expiresInMs } }
 }
@@ -489,7 +493,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'authenticator-begin': return opAuthenticatorBegin(h)
     case 'authenticator-confirm': return opAuthenticatorConfirm(h)
     case 'recovery-begin': return opRecoveryBegin(h)
-    case 'setup-code': return opSetupCode()
+    case 'setup-code': return opSetupCode(h)
     case 'recovery-confirm': return opRecoveryConfirm(h)
     case 'presence-enroll': return opPresenceEnroll(h)
     case 'presence-disable': return opPresenceDisable(h)

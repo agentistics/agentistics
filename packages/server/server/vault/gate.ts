@@ -338,31 +338,26 @@ const flowActive = (ctx: { session: string }): boolean => _flow !== null && _now
 // Before an authenticator exists there is no code to ask, so a page reaching this API (an XSS, a
 // mistaken exposure) could enrol ITS authenticator and receive the first 24 words — after which the
 // owner is locked out of every gated action. The proof is a one-time SETUP CODE that only this machine
-// can read: the service prints it to its own log when a page asks without one, and `agentop vault
-// setup-code` prints it on the terminal. 8 digits, 10 minutes, single use, five wrong tries burn it.
-// The local terminal (vault.sock) needs none — it IS this machine.
+// can read: `agentop vault setup-code`, on a TERMINAL, mints it. It is NEVER written to a log (leader
+// decision: logs get copied — backups, support, bug reports), never minted because a page asked, and
+// each request mints a NEW one (an earlier code shown on some other screen stops working). 8 digits,
+// 10 minutes, single use, five wrong tries burn it. The local terminal (vault.sock) needs none.
 
 const SETUP_TTL_MS = 10 * 60_000
 const SETUP_MAX_WRONG = 5
 let _setup: { code: string; until: number; wrong: number } | null = null
-let _onSetupCode: (line: string) => void = (line) => { try { process.stderr.write(`agentop: ${line}\n`) } catch { /* never breaks */ } }
-export function setSetupCodeReporter(fn: (line: string) => void): void { _onSetupCode = fn }
 
-/** Mint (or re-show the live) setup code. Called by the socket op and when a page asks without one. */
+/** Mint a NEW setup code (replacing any live one). Only the socket op calls it, for a terminal. */
 export function mintSetupCode(): { code: string; expiresInMs: number } {
-  if (!_setup || _now() >= _setup.until) _setup = { code: String(randomInt(0, 100_000_000)).padStart(8, '0'), until: _now() + SETUP_TTL_MS, wrong: 0 }
-  return { code: _setup.code, expiresInMs: _setup.until - _now() }
+  _setup = { code: String(randomInt(0, 100_000_000)).padStart(8, '0'), until: _now() + SETUP_TTL_MS, wrong: 0 }
+  return { code: _setup.code, expiresInMs: SETUP_TTL_MS }
 }
 
 function setupRequired(): Refusal {
-  const live = _setup && _now() < _setup.until
-  if (!live) {
-    const { code } = mintSetupCode()
-    _onSetupCode(`vault setup code for the dashboard: ${code} (valid 10 minutes, once) — or run \`agentop vault setup-code\``)
-  }
+  // Nothing is minted or reported here: the code exists only once a terminal asks for one.
   return refused('setup-code-required', vaultLang() === 'pt'
-    ? 'Para a primeira configuração pela página, digite o código de configuração que esta máquina mostra: rode `agentop vault setup-code` num terminal (ele também está no log do agentop).'
-    : 'For the first setup from a page, type the setup code this machine shows: run `agentop vault setup-code` in a terminal (it is also in the agentop log).')
+    ? 'Para a primeira configuração pela página, digite o código de configuração desta máquina: rode `agentop vault setup-code` num terminal aqui.'
+    : 'For the first setup from a page, type this machine\'s setup code: run `agentop vault setup-code` in a terminal here.')
 }
 
 /** Spend the setup code: right → consumed; wrong → counted, and the 5th wrong burns it. */

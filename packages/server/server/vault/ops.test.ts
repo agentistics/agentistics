@@ -71,7 +71,7 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     'authenticator-begin': { req: { op: 'authenticator-begin' } },
     'recovery-begin': { req: { op: 'recovery-begin' } },
     // A one-time code for a page's FIRST enrolment (review S2) — minted, never a held secret.
-    'setup-code': { req: { op: 'setup-code' } },
+    'setup-code': { req: { op: 'setup-code', tty: true } },
   }
 
   for (const op of VAULT_OPS) {

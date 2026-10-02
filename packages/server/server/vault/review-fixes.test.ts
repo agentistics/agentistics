@@ -491,3 +491,36 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
     expect(!r.ok && r.code).toBe('presence-needs-recovery-words')
   })
 })
+
+// ── Leader decision 3: the setup code is shown ONLY on demand, on a terminal — never in a log ─────
+
+
+describe('decision 3 — the setup code never reaches a log; it is minted on demand for a TTY', () => {
+  test('a page asking without a code gets a sentence naming the command — and nothing is minted or logged', async () => {
+    await silentVault()
+    const r = await beginAuthenticator({ session: 'http:local' }, 'box')
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect(!r.ok && r.sentence).toContain('agentop vault setup-code')
+    expect(!r.ok && r.sentence).not.toMatch(/\blog\b/)
+    // Nothing was minted for the page to guess at: no 8-digit code is live.
+    expect((await beginAuthenticator({ session: 'http:local', setupCode: '00000000' }, 'box')).ok).toBe(false)
+  })
+  test('the socket op refuses a caller that is not on a terminal', async () => {
+    await silentVault()
+    installVaultOps()
+    const r = await op({ op: 'setup-code' })
+    expect(r.reply.ok).toBe(false)
+    expect(!r.reply.ok && r.reply.code).toBe('tty-only')
+    const t = await op({ op: 'setup-code', tty: true })
+    expect(t.reply.ok && typeof t.reply.code).toBe('string')
+  })
+  test('each request mints a NEW code: an earlier one shown on some other screen stops working', async () => {
+    await silentVault()
+    installVaultOps()
+    const a = (await op({ op: 'setup-code', tty: true })).reply as { code: string }
+    const b = (await op({ op: 'setup-code', tty: true })).reply as { code: string }
+    expect(a.code).not.toBe(b.code) // a fresh code each time (a collision is 1 in 10^8)
+    expect((await beginAuthenticator({ session: 'http:local', setupCode: a.code }, 'box')).ok).toBe(false)
+    expect((await beginAuthenticator({ session: 'http:local', setupCode: b.code }, 'box')).ok).toBe(true)
+  })
+})

@@ -258,8 +258,8 @@ export const VAULT_TEXT = {
   wiz_oldCode: { en: 'Type the current code from your authenticator to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   wiz_setup_label: { en: 'Setup code (8 digits)', pt: 'Código de configuração (8 dígitos)' },
   wiz_setup_why: {
-    en: 'The first setup from this page needs a code only this computer can show: run `agentop vault setup-code` in a terminal here (it is also in the agentop log). It works once, for 10 minutes.',
-    pt: 'A primeira configuração por esta página precisa de um código que só este computador mostra: rode `agentop vault setup-code` num terminal aqui (ele também está no log do agentop). Vale uma vez, por 10 minutos.',
+    en: 'The first setup from this page needs a code only this computer can show: run `agentop vault setup-code` in a terminal here. It works once, for 10 minutes.',
+    pt: 'A primeira configuração por esta página precisa de um código que só este computador mostra: rode `agentop vault setup-code` num terminal aqui. Vale uma vez, por 10 minutos.',
   },
   wiz_probe_title: { en: 'First, check your device', pt: 'Primeiro, vamos testar o seu dispositivo' },
   wiz_probe_intro: {

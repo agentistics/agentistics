@@ -52,7 +52,6 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',
     _flow: 'a deadline (ms) + the session it belongs to, after which the wizard\'s one verified code stops standing for later steps; no key material', _enrolWrong: 'a wrong-code counter for one enrolment',
     _setup: 'the one-time SETUP code a page needs for a FIRST enrolment (review S2): 8 digits, 10 min, single use; authorises, decrypts nothing',
-    _onSetupCode: 'the log sink the setup code is printed to',
     _recovery: 'NEW recovery entropy while its words are confirmed (§4.2): ≤ 10 min, zeroed on confirm/expiry',
     _heldRecovery: 'review S7: a JUST-CONFIRMED recovery entropy, kept ≤ 10 min for the session that confirmed it so the NEW data key of a presence enrolment can be wrapped under the same words; zeroed when used, on expiry, on reset',
   },
