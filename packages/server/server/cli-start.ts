@@ -118,6 +118,7 @@ import { awaitReplacement, type RestartVerdict, type ServingObservation } from '
 import { resolveLang } from './cli-lang'
 import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
+import { inheritedIdentity } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -1745,6 +1746,8 @@ async function spawnManaged(req: {
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
   taskId?: string
   attemptId?: string
+  /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
+  inherit?: ManagedSession
   /**
    * Start even if the memory budget refuses. The refusal it overrode still travels on the result
    * (`overridden`/`note`) — nothing is admitted silently. See `spawn-admission.ts`.
@@ -1854,6 +1857,8 @@ async function spawnManaged(req: {
     // minute would otherwise carry no evidence it was ever alive, and would sit out the very crash
     // it was part of. See `crash-group.ts`.
     lastSeenMs: Date.now(),
+    // The replaced row's identity first, so anything the request states explicitly wins below.
+    ...inheritedIdentity(req.inherit),
     ...(req.model ? { model: req.model } : {}),
     ...(req.effort ? { effort: req.effort } : {}),
     ...(req.label ? { label: req.label } : {}),
@@ -2066,6 +2071,7 @@ async function reopenEntries(
         cwd: m.cwd,
         resumeId: row.resumeId,
         label: row.label,
+        inherit: m,
         attach: false,
         // The task travels with the session, whichever set this reopen was chosen from: a fall does
         // not un-file the work someone filed.
@@ -2583,7 +2589,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
-      label: req.label,
+      ...(req.label ? { label: req.label } : {}),
+      ...(previous ? { inherit: previous } : {}),
       attach: req.attach,
       ...(previous?.task ? { task: previous.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
