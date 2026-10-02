@@ -11,7 +11,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { PRIORITY_ORDER, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
+import { PRIORITY_ORDER, type TaskPriorityId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import type { HarnessId, StagedSessionDraft } from '@agentistics/core'
 
 /**
@@ -238,7 +238,8 @@ export { PRIORITY_ORDER }
 export function migratePriority(raw: unknown): TaskPriority {
   return typeof raw === 'string' && (PRIORITY_ORDER as readonly string[]).includes(raw)
     ? raw as TaskPriority
-    : 'none'
+    // Absent, a legacy `none` and an unknown word all become `low` — there is no "unset" priority.
+    : 'low'
 }
 
 /**
@@ -315,6 +316,8 @@ export interface Task {
   startDate?: string
   /** Free-text labels. Filtering and grouping only; they carry no rule. */
   labels?: string[]
+  /** An id of `TaskBook.types` (`@agentistics/core`'s `taskType.ts`). Absent = nobody classified it. */
+  type?: string
   /**
    * Where the card sits when the board is ordered BY HAND (`task-rank.ts`).
    *
@@ -637,6 +640,14 @@ export interface TaskBook {
    * file is not bound by that).
    */
   statuses: TaskStatusDef[]
+  /** The TYPE vocabulary — same shape and lifecycle as `statuses`, seeded with CORE by `ensureTypesSeeded`. */
+  types: TaskTypeDef[]
+  /**
+   * Has the type list ever been seeded? An EMPTY list is a real answer for types (a person may
+   * delete every one, CORE included), so emptiness alone cannot mean "never seeded" the way it does
+   * for statuses. Written once by `seedTypes`; absent on a book that predates the feature.
+   */
+  typesSeeded?: boolean
   /**
    * The activity log, newest LAST, for every task at once.
    *

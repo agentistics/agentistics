@@ -20,7 +20,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { isValidStatusColor, normalizeStagedSession, type TaskStatusDef } from '@agentistics/core'
+import { isValidStatusColor, normalizeStagedSession, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { historicalLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -44,6 +44,7 @@ export interface TaskPatch {
   dueDate?: string
   startDate?: string
   labels?: string[]
+  type?: string
   rank?: string
   blockedReason?: string
   /**
@@ -70,6 +71,7 @@ const EMPTY_BOOK = (): TaskBook => ({
   // Absent/empty is exactly what `planStatusMigration` reads as "never seeded yet" — see
   // `task-source.ts`'s `ensureStatusesSeeded`, which fills this in on the very next load.
   statuses: [],
+  types: [],
 })
 
 /**
@@ -151,6 +153,13 @@ export interface TaskStore {
    *  the one that checks `canDeleteStatus` BEFORE calling this; this method trusts that call. */
   removeStatus(id: string): Promise<boolean>
 
+  /** Seed the type list once (no-op when one exists) — `task-source.ts`'s `ensureTypesSeeded`. */
+  seedTypes(list: readonly TaskTypeDef[]): Promise<void>
+  /** Add a type or edit one's label/color; the id never changes. */
+  upsertType(def: TaskTypeDef): Promise<void>
+  /** False when no type carries that id. The caller checks `canDeleteType` first. */
+  removeType(id: string): Promise<boolean>
+
   /**
    * File a HISTORICAL conversation (see `HistoricalSession`) — or MOVE it, when it already holds a
    * link. One link per conversation, decided under the lock, so `replaced` is exactly what THIS write
@@ -217,6 +226,7 @@ function sanitizeTask(raw: unknown): Task | null {
     ...(Array.isArray(t.labels)
       ? { labels: t.labels.filter((v): v is string => typeof v === 'string' && v !== '') }
       : {}),
+    ...(typeof t.type === 'string' && t.type ? { type: t.type } : {}),
     ...(typeof t.rank === 'string' && t.rank ? { rank: t.rank } : {}),
     ...(typeof t.blockedReason === 'string' && t.blockedReason
       ? { blockedReason: t.blockedReason }
@@ -365,6 +375,14 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
 
 /** A status entry with no `id`, no `label` or an invalid `color` is dropped outright — a half-read
  *  status is worse than none, the same rule `sanitizeLink` applies to a task's outbound links. */
+function sanitizeTypeDef(raw: unknown): TaskTypeDef | null {
+  if (!raw || typeof raw !== 'object') return null
+  const s = raw as Record<string, unknown>
+  const id = str(s.id); const label = str(s.label)
+  if (!id || !label || !isValidStatusColor(s.color)) return null
+  return { id, label, color: s.color, order: typeof s.order === 'number' && Number.isFinite(s.order) ? s.order : 0 }
+}
+
 function sanitizeStatusDef(raw: unknown): TaskStatusDef | null {
   if (!raw || typeof raw !== 'object') return null
   const s = raw as Record<string, unknown>
@@ -459,6 +477,8 @@ export function createTaskStore(file: string): TaskStore {
         // Absent on a book written before this feature existed — same reason every field above goes
         // through `arr` rather than trusting it to be there.
         statuses: arr(raw.statuses).map(sanitizeStatusDef).filter((s): s is TaskStatusDef => s !== null),
+        types: arr(raw.types).map(sanitizeTypeDef).filter((s): s is TaskTypeDef => s !== null),
+        ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
       }
     } catch {
       corrupt = true
@@ -614,6 +634,8 @@ export function createTaskStore(file: string): TaskStore {
           events: book.events.filter(e => e.taskId !== id),
           // The status VOCABULARY is board-wide, not per-task — deleting a task never touches it.
           statuses: book.statuses,
+          types: book.types,
+          ...(book.typesSeeded ? { typesSeeded: true } : {}),
           // Remembered as DELETED, or the legacy migration mints it again on the next read.
           tombstones: [...new Set([...book.tombstones, id])],
         })
@@ -736,6 +758,27 @@ export function createTaskStore(file: string): TaskStore {
           historicalSessions: book.historicalSessions.filter(h => h.id !== found.id),
         })
         return found
+      })
+    },
+    seedTypes(list) {
+      return enqueue(async () => {
+        const book = await read()
+        if (book.typesSeeded || book.types.length > 0) return
+        await write({ ...book, types: [...list], typesSeeded: true })
+      })
+    },
+    upsertType(def) {
+      return enqueue(async () => {
+        const book = await read()
+        await write({ ...book, types: [...book.types.filter(s => s.id !== def.id), def] })
+      })
+    },
+    removeType(id) {
+      return enqueue(async () => {
+        const book = await read()
+        if (!book.types.some(s => s.id === id)) return false
+        await write({ ...book, types: book.types.filter(s => s.id !== id) })
+        return true
       })
     },
     removeStatus(id) {

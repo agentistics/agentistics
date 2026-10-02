@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  ariaSortOf, canReorderBy, compareBy, cycleSort, DEFAULT_SORT, nextSort, sortRows, sortRowsBy,
+  ariaSortOf, canReorderBy, compareBy, cycleSort, DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows, sortRowsBy,
   type SortableRow,
 } from './taskSort'
 
@@ -164,5 +164,22 @@ describe('cycleSort / ariaSortOf / canReorderBy', () => {
     expect(canReorderBy(DEFAULT_SORT)).toBe(true)
     expect(canReorderBy({ key: 'manual', dir: 'desc' })).toBe(false)
     expect(canReorderBy({ key: 'cost', dir: 'asc' })).toBe(false)
+  })
+})
+
+describe('priority sort has no unset level', () => {
+  const row = (id: string, priority?: string) => ({
+    task: { id, title: id, status: 'todo', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...(priority ? { priority } : {}) },
+  })
+  it('orders urgent > high > medium > low, with absent and legacy none ranking as low', () => {
+    const out = sortRows(
+      [row('a', 'low'), row('b'), row('c', 'urgent'), row('d', 'none'), row('e', 'medium'), row('f', 'high')],
+      { key: 'priority', dir: 'asc' },
+    ).map(r => r.task.id)
+    expect(out.slice(0, 3)).toEqual(['c', 'f', 'e'])
+    expect(new Set(out.slice(3))).toEqual(new Set(['a', 'b', 'd']))
+  })
+  it('offers exactly four choices', () => {
+    expect(PRIORITY_ORDER).toEqual(['urgent', 'high', 'medium', 'low'])
   })
 })

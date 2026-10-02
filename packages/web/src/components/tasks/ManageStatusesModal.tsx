@@ -24,10 +24,42 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useDismissOverlay } from '../../lib/dismissOverlay'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import {
-  createTaskStatus, deleteTaskStatus, editTaskStatus, fetchTaskStatuses, type TaskStatusRow,
+  createTaskStatus, createTaskType, deleteTaskStatus, deleteTaskType, editTaskStatus, editTaskType,
+  fetchTaskStatuses, fetchTaskTypes, type TaskStatusRow, type TaskTypeRow,
 } from '../../lib/tasks'
 import { button, field, microLabel, surface } from './board'
-import type { Lang } from './copy'
+import { boardCopy, type Lang } from './copy'
+
+/**
+ * The modal edits ONE vocabulary, chosen by `kind` — the status list or the task-type list. The two
+ * are the same shape (id, label, colour, usage) and the same gestures, so they share this screen
+ * rather than a clone of it; what differs is the endpoint set, the words, and that only a status
+ * can be `protected`.
+ */
+export type VocabKind = 'status' | 'type'
+type VocabRow = (TaskStatusRow | TaskTypeRow) & { protected?: boolean }
+
+interface VocabApi {
+  fetch: () => Promise<VocabRow[]>
+  create: (label: string, color: string) => Promise<{ ok: true; row: VocabRow } | { ok: false }>
+  edit: (id: string, patch: { label?: string; color?: string }) => Promise<boolean>
+  remove: (id: string) => Promise<{ ok: boolean }>
+}
+
+const API: Record<VocabKind, VocabApi> = {
+  status: {
+    fetch: fetchTaskStatuses,
+    create: async (l, c) => { const o = await createTaskStatus(l, c); return o.ok ? { ok: true, row: o.status } : { ok: false } },
+    edit: editTaskStatus,
+    remove: deleteTaskStatus,
+  },
+  type: {
+    fetch: fetchTaskTypes,
+    create: async (l, c) => { const o = await createTaskType(l, c); return o.ok ? { ok: true, row: o.type } : { ok: false } },
+    edit: editTaskType,
+    remove: deleteTaskType,
+  },
+}
 
 /** The same eight-swatch row `TagsPage.tsx` uses for a tag's colour, restated here — a status and a
  *  tag both want "pick one of a handful, or open the native picker for anything else", and the two
@@ -88,7 +120,10 @@ function ColorPicker({ color, onPick }: { color: string; onPick: (c: string) => 
 
 /** Why a delete control is disabled, said in words rather than left to a tooltip nobody hovers on
  *  a touch screen. */
-function deleteReason(row: TaskStatusRow, lang: Lang): string | null {
+function deleteReason(row: VocabRow, lang: Lang, kind: VocabKind): string | null {
+  if (kind === 'type') {
+    return row.usageCount > 0 ? boardCopy(lang).types.inUse.replace('{n}', String(row.usageCount)) : null
+  }
   if (row.protected) {
     return lang === 'pt'
       ? 'Este é um dos quatro status protegidos e nunca pode ser excluído.'
@@ -103,11 +138,12 @@ function deleteReason(row: TaskStatusRow, lang: Lang): string | null {
 }
 
 function StatusRow({
-  row, lang, onSaved, onDeleted,
+  row, lang, kind, onSaved, onDeleted,
 }: {
-  row: TaskStatusRow
+  row: VocabRow
   lang: Lang
-  onSaved: (next: TaskStatusRow) => void
+  kind: VocabKind
+  onSaved: (next: VocabRow) => void
   onDeleted: () => void
 }) {
   const isMobile = useIsMobile()
@@ -117,14 +153,15 @@ function StatusRow({
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const dirty = label.trim() !== row.label || color.toLowerCase() !== row.color.toLowerCase()
-  const refusal = deleteReason(row, lang)
+  const refusal = deleteReason(row, lang, kind)
+  const api = API[kind]
 
   const save = async () => {
     const nextLabel = label.trim()
     if (!nextLabel) { setLabel(row.label); return }
     if (!dirty) return
     setBusy(true)
-    const ok = await editTaskStatus(row.id, { label: nextLabel, color })
+    const ok = await api.edit(row.id, { label: nextLabel, color })
     setBusy(false)
     if (ok) onSaved({ ...row, label: nextLabel, color })
     else { setLabel(row.label); setColor(row.color) }
@@ -160,7 +197,7 @@ function StatusRow({
                 // does (there is no "half-typed colour" the way there is a half-typed word), and
                 // waiting for a blur the picker itself never causes would leave the swatch looking
                 // changed while the server still held the old value.
-                void editTaskStatus(row.id, { color: c }).then(ok => { if (ok) onSaved({ ...row, color: c }) })
+                void api.edit(row.id, { color: c }).then(ok => { if (ok) onSaved({ ...row, color: c }) })
               }}
             />
           </div>
@@ -199,7 +236,7 @@ function StatusRow({
             <button
               type="button" onClick={() => void (async () => {
                 setBusy(true)
-                const out = await deleteTaskStatus(row.id)
+                const out = await api.remove(row.id)
                 setBusy(false)
                 setConfirmDelete(false)
                 if (out.ok) onDeleted()
@@ -217,7 +254,7 @@ function StatusRow({
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={refusal !== null}
-            title={refusal ?? (lang === 'pt' ? 'Excluir status' : 'Delete status')}
+            title={refusal ?? (kind === 'type' ? boardCopy(lang).types.deleteTitle : lang === 'pt' ? 'Excluir status' : 'Delete status')}
             className="ag-tap-icon"
             style={{
               width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -236,33 +273,37 @@ function StatusRow({
 export interface ManageStatusesModalProps {
   lang: Lang
   onClose: () => void
+  /** Which vocabulary this edits. Default `status`. */
+  kind?: VocabKind
 }
 
-export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps) {
+export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageStatusesModalProps) {
+  const api = API[kind]
+  const T = boardCopy(lang).types
   const isMobile = useIsMobile()
   const dismiss = useDismissOverlay(onClose)
-  const [rows, setRows] = useState<TaskStatusRow[] | null>(null)
+  const [rows, setRows] = useState<VocabRow[] | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const [newColor, setNewColor] = useState(SWATCHES[0]!)
   const [pickingNewColor, setPickingNewColor] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const reload = async () => setRows(await fetchTaskStatuses())
-  useEffect(() => { void reload() }, [])
+  const reload = async () => setRows(await api.fetch())
+  useEffect(() => { void reload() }, [kind])
 
   const onCreate = async () => {
     const label = newLabel.trim()
     if (!label) return
     setCreating(true)
     setCreateError(null)
-    const out = await createTaskStatus(label, newColor)
+    const out = await api.create(label, newColor)
     setCreating(false)
     if (out.ok) {
-      setRows(r => [...(r ?? []), out.status])
+      setRows(r => [...(r ?? []), out.row])
       setNewLabel('')
     } else {
-      setCreateError(lang === 'pt'
+      setCreateError(kind === 'type' ? T.createError : lang === 'pt'
         ? 'Não foi possível criar o status. Tente novamente.'
         : 'Could not create the status. Try again.')
     }
@@ -294,7 +335,7 @@ export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps)
             background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
           }}><Settings2 size={17} /></span>
           <span style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>
-            {lang === 'pt' ? 'Gerenciar status' : 'Manage statuses'}
+            {kind === 'type' ? T.manage : lang === 'pt' ? 'Gerenciar status' : 'Manage statuses'}
           </span>
           <button
             onClick={onClose}
@@ -308,7 +349,7 @@ export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps)
         </div>
 
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-          {lang === 'pt' ? (
+          {kind === 'type' ? T.intro : lang === 'pt' ? (
             <>
               <strong style={{ color: 'var(--text-secondary)' }}>A fazer</strong>,{' '}
               <strong style={{ color: 'var(--text-secondary)' }}>Em andamento</strong>,{' '}
@@ -340,6 +381,7 @@ export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps)
               key={row.id}
               row={row}
               lang={lang}
+              kind={kind}
               onSaved={next => setRows(r => (r ?? []).map(x => (x.id === next.id ? next : x)))}
               onDeleted={() => setRows(r => (r ?? []).filter(x => x.id !== row.id))}
             />
@@ -348,7 +390,7 @@ export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps)
 
         <div style={{ display: 'grid', gap: 6 }}>
           <span style={{ ...microLabel, fontSize: 9 }}>
-            {lang === 'pt' ? 'Novo status' : 'New status'}
+            {kind === 'type' ? T.newLabel : lang === 'pt' ? 'Novo status' : 'New status'}
           </span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>
@@ -375,7 +417,7 @@ export function ManageStatusesModal({ lang, onClose }: ManageStatusesModalProps)
               value={newLabel}
               onChange={e => setNewLabel(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void onCreate() }}
-              placeholder={lang === 'pt' ? 'ex.: Aguardando cliente' : 'e.g. Waiting on client'}
+              placeholder={kind === 'type' ? T.placeholder : lang === 'pt' ? 'ex.: Aguardando cliente' : 'e.g. Waiting on client'}
               style={{ ...field(isMobile), flex: 1, minWidth: 0 }}
             />
             <button

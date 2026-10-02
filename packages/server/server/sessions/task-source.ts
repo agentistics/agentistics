@@ -14,7 +14,7 @@ import { createTaskStore, type TaskStore } from './task-store'
 import { migrateLegacyTasks, type TaskBook } from './task-model'
 import { historicalRows } from './task-historical'
 import type { ManagedSession } from './types'
-import { planStatusMigration, type SessionMeta } from '@agentistics/core'
+import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
 
 /**
  * THE BOARD'S TWO ROW SETS, and why there is no field called plain `rows`.
@@ -97,6 +97,23 @@ async function ensureStatusesSeeded(store: TaskStore): Promise<void> {
   if (plan) await store.seedStatuses(plan)
 }
 
+/** Seed the TYPE list once (CORE) and run the one-time core-status → type migration. Same shape as above. */
+async function ensureTypesSeeded(store: TaskStore): Promise<void> {
+  const book = await store.read()
+  // The one-time migration: the old `core` STATUS becomes type=core + status in_progress. It
+  // matches nothing once rewritten, so it is idempotent and runs on every load for free.
+  for (const t of book.tasks) {
+    const m = coreStatusMigration(t)
+    if (m) await store.patchTask(t.id, m)
+  }
+  if (book.typesSeeded || book.types.length > 0) return
+  const plan = planTypeMigration({
+    existing: book.types,
+    usedTypeIds: [...book.tasks.map(t => t.type ?? ''), ...(book.tasks.some(t => t.status === CORE_TYPE_ID) ? [CORE_TYPE_ID] : [])],
+  })
+  if (plan) await store.seedTypes(plan)
+}
+
 /**
  * The board and the fleet, WITHOUT the consolidate store.
  *
@@ -115,6 +132,7 @@ export async function loadTaskBoard(): Promise<{
   const registryRows = await readRegistry()
   await ensureLegacyTasks(store, registryRows)
   await ensureStatusesSeeded(store)
+  await ensureTypesSeeded(store)
   const book = await store.read()
   // No metas here (see this function's note): the rows carry the FILING, which is all the sharing
   // path reads — the conversation id it ships is the conversation's own, subject to the same
@@ -127,6 +145,7 @@ export async function loadTaskWorld(): Promise<TaskWorld> {
   const registryRows = await readRegistry()
   await ensureLegacyTasks(store, registryRows)
   await ensureStatusesSeeded(store)
+  await ensureTypesSeeded(store)
   const [book, metas] = await Promise.all([
     store.read(),
     // The store is an enrichment, never a prerequisite: one that cannot be read costs the money
