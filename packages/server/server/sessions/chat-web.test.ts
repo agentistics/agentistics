@@ -42,7 +42,8 @@ test('a working session is treated the same — it has simply not spoken yet', a
 test('a session that is NOT running keeps the refusal — there the transcript is genuinely gone', async () => {
   const out = await readSessionChat(hostWith('exited'), 'en', 'sess1')
   expect(out.live).toBe(false)
-  expect(out.unavailable).toContain('was not found')
+  expect(out.unavailable).toContain('no longer on this machine')
+  expect(out.transcript?.state).toBe('deleted')
 })
 
 test('an unknown id still reports that the session left this machine, never an empty chat', async () => {
@@ -129,4 +130,41 @@ test('a successful read carries the server\'s REAL attachments directory — the
   })
   const out = await readSessionChat(hostWith('waiting'), 'en', 'sess1', okReader as never)
   expect(out.attachmentsDir).toBe(ATTACHMENT_DIR)
+})
+
+/** A row with the fields the availability rule reads, for the cases `hostWith` cannot express. */
+function hostWithRow(over: Record<string, unknown>) {
+  const row = {
+    id: 'sess1', harness: 'claude', cwd: NO_PROJECT,
+    conversationId: '00000000-0000-4000-8000-000000000001', state: 'exited', ...over,
+  }
+  return { sessions: async () => ({ sessions: [row] }) } as never
+}
+
+test('a Claude conversation past its retention says it EXPIRED, with the date, instead of "not found"', async () => {
+  const out = await readSessionChat(hostWithRow({ endedAt: Date.now() - 45 * 86_400_000 }), 'en', 'sess1')
+  expect(out.transcript?.state).toBe('expired')
+  expect(out.transcript?.retentionDays).toBeGreaterThan(0)
+  expect(out.transcript?.expiredAt).toBeTruthy()
+  expect(out.unavailable).toContain('has expired')
+  expect(out.unavailable).toContain('Claude Code deletes transcripts')
+})
+
+test('a recent Claude conversation with no file is deleted, never expired — the period has not passed', async () => {
+  const out = await readSessionChat(hostWithRow({ endedAt: Date.now() - 2 * 86_400_000 }), 'en', 'sess1')
+  expect(out.transcript?.state).toBe('deleted')
+  expect(out.unavailable).not.toContain('expired')
+})
+
+test('an old conversation of a harness with no retention rule is never called expired', async () => {
+  const out = await readSessionChat(hostWithRow({ harness: 'antigravity', endedAt: Date.now() - 200 * 86_400_000 }), 'pt', 'sess1')
+  expect(out.transcript?.state).toBe('deleted')
+})
+
+test('a session waiting on a dialog before it has a conversation says so, not "no linked conversation"', async () => {
+  const out = await readSessionChat(
+    hostWithRow({ harness: 'antigravity', state: 'waiting-approval', conversationId: undefined }), 'en', 'sess1',
+  )
+  expect(out.unavailable).toContain('waiting for your answer')
+  expect(out.live).toBe(true)
 })

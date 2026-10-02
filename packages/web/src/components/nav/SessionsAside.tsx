@@ -2341,11 +2341,6 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         selected={selected}
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
-        {...(onFile
-          // Anchored where the click landed, like the menu's own picker — the gesture stays where
-          // the reader's eye already is.
-          ? { onFile: () => onFile(lastPoint.current.x, lastPoint.current.y) }
-          : {})}
       />
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}
