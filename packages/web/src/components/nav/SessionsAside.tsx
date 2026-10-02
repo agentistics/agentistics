@@ -1094,7 +1094,8 @@ export function SessionsAside({
                         }}
                         style={{
                           boxShadow: groupRowDragOver === key ? 'inset 0 2px 0 var(--anthropic-orange)' : undefined,
-                          ...(tap ? { touchAction: 'none' as const } : {}),
+                          // No touch-action opt-out here: it made a swipe that STARTS on a row a no-op, so
+                          // the list would not scroll from a session. Native drag starts on long-press.
                         }}
                       >
                         <SessionRow
@@ -1525,7 +1526,6 @@ export function SessionsAside({
                       ? 'inset 0 2px 0 var(--anthropic-orange)'
                       : undefined,
                     opacity: dragFrom === key ? 0.45 : 1,
-                    ...(tap ? { touchAction: 'none' as const } : {}),
                   }}
                 >
                   <SessionRow
