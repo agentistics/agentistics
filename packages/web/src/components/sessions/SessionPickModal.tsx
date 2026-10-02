@@ -229,7 +229,7 @@ export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClo
     comment: pt ? 'Comentário (opcional)' : 'Comment (optional)',
     commentPlaceholder: pt ? 'Uma linha antes do conteúdo encaminhado…' : 'A line above the forwarded content…',
     forwarded: pt ? 'O que vai ser encaminhado' : 'What will be forwarded',
-    delivery: pt ? 'Entrega' : 'Delivery',
+    delivery: pt ? 'Tarefa' : 'Task',
     toDraft: pt ? 'Colocar no rascunho' : 'Put in the draft',
     toDraftHint: pt
       ? 'Nada é enviado. Você abre a sessão, completa a instrução e envia.'

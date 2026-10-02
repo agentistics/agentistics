@@ -232,7 +232,7 @@ The members panel (`TeamMembers.tsx`, central Settings → Team) can **mint**, *
 
 `packages/web/src/lib/notifications.ts` is a small external store rendered by `NotificationToasts.tsx` (auto-dismiss, animated) and `NotificationBell.tsx` (history + unread badge). Notifications carry a `code` (+ `meta`) and are localized **at render time** (`NOTIFICATION_TEXT`, pt/en) so they follow the language toggle. The server emits them via `broadcastNotification()` (SSE). Fired on member auth/connection errors, "removed from central", "machine connected", and "update available".
 
-### The delivery board on a central — opted in one delivery at a time
+### Agentask on a central — opted in one task at a time
 
 The board (`/tasks`) is per machine. A delivery reaches a central only when its owner opts it in —
 `Task.shared`, **absent reading as NOT shared**, the strict opt-in reading and deliberately not the

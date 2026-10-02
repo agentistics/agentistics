@@ -407,8 +407,8 @@ function SubtaskRows({
           {/* The leading "checkbox" slot every row above this one uses for batch-select — a subtask
               is never batch-selectable, so it was always blank here. It now carries the ONE gear
               menu instead (`SubtaskActionsMenu`'s own doc comment): group actions, the
-              staged-session lifecycle (the same one the delivery page offers — the rocket lives
-              HERE, on the subtask, never on the delivery row) and remove. The inset left bar
+              staged-session lifecycle (the same one the task page offers — the rocket lives
+              HERE, on the subtask, never on the task row) and remove. The inset left bar
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
           <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
@@ -483,7 +483,7 @@ function SubtaskRows({
                 </span>
               </div>
             )}
-            {/* "Ready to fire" stays glanceable, exactly as on the delivery page — the verbs behind
+            {/* "Ready to fire" stays glanceable, exactly as on the task page — the verbs behind
                 it are in the gear. */}
             {!isMember && t.stagedSession && (
               <div style={{ marginTop: 3 }}>
@@ -807,7 +807,7 @@ export function TaskTable(p: TaskTableProps) {
       {/* ONE toolbar row: what to look for (search, injected by the page), how it is ordered (the
           sort chip, only when it is not the default), then the three things that shape the table —
           filter, groups, columns — and Select. The subtask grid's filter and columns live INSIDE
-          those same controls (the filter is subtask-only and says so; "Columns" has a Deliveries and
+          those same controls (the filter is subtask-only and says so; "Columns" has a Tasks and
           a Subtasks tab), rather than on a second row of bare, unlabeled selects. Every menu is the
           app's portal popover — a menu opened inside a scrolling table is clipped by it. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -987,7 +987,7 @@ export function TaskTable(p: TaskTableProps) {
                           <tr style={{ background: 'var(--bg-surface)' }}>
                             <td style={{ padding: '5px 10px' }} />
                             {/* The title column is always shown — never in the "Subtask columns"
-                                picker, exactly like the delivery table's own leading name column. */}
+                                picker, exactly like the task table's own leading name column. */}
                             <SortTh
                               label={copy.subtasks} sortKey="title"
                               current={effectiveSubtaskSort(sort, subSort[row.task.id] ?? null)}

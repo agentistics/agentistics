@@ -138,7 +138,7 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
   if (!e || e.empty) {
     // A delivery with no commit is still a delivery. Saying so beats an empty block that reads as
     // a failed read.
-    console.log('No commits found in this window — the delivery stands on its own.')
+    console.log('No commits found in this window — the task stands on its own.')
     return 0
   }
   console.log(`${e.commits.length} commit(s) in the window`
@@ -173,7 +173,7 @@ async function runShare(ref: string, on: boolean, json: boolean): Promise<number
 }
 
 function printHelp(): void {
-  console.log(`agentop task — the deliveries your sessions are filed under.
+  console.log(`agentop task — the tasks your sessions are filed under.
 
   agentop task                 list every task with its rollup
   agentop task show <id|name>  one task, its attempts side by side

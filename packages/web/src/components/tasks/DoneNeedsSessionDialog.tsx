@@ -101,12 +101,12 @@ export function DoneNeedsSessionDialog(p: DoneNeedsSessionDialogProps) {
             : (pt
               ? <>
                   “<strong style={{ color: 'var(--text-primary)' }}>{p.title}</strong>” precisa de
-                  uma sessão filiada — direto na entrega, ou em uma de suas subtarefas — antes de
+                  uma sessão filiada — direto na tarefa, ou em uma de suas subtarefas — antes de
                   ser marcada como entregue.
                 </>
               : <>
                   “<strong style={{ color: 'var(--text-primary)' }}>{p.title}</strong>” needs a
-                  session filed — directly on the delivery, or under one of its subtasks — before
+                  session filed — directly on the task, or under one of its subtasks — before
                   it can be marked delivered.
                 </>)}
         </p>

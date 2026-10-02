@@ -69,12 +69,12 @@ describe('asideGroups — task', () => {
       row({ id: 'a', task: 'ALM board' }),
       row({ id: 'b' }),
     ], 'task', 'en')
-    expect(out.map(g => g.label).sort()).toEqual(['ALM board', 'No delivery'])
+    expect(out.map(g => g.label).sort()).toEqual(['ALM board', 'No task'])
   })
 
   test('PT names the same unfiled bucket "sem entrega"', () => {
     const out = asideGroups([row({ id: 'a' })], 'task', 'pt')
-    expect(out[0]!.label).toBe('Sem entrega')
+    expect(out[0]!.label).toBe('Sem tarefa')
   })
 })
 

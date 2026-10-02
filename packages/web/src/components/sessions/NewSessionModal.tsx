@@ -439,7 +439,7 @@ export function NewSessionModal({
           choice nobody was allowed to make. */}
       <ReviewRow label={pt ? 'Título' : 'Title'} value={label || null} />
       <ReviewRow label={pt ? 'Onde' : 'Where'} value={cwd || null} mono />
-      <ReviewRow label={pt ? 'Entrega' : 'Delivery'} value={task || null}
+      <ReviewRow label={pt ? 'Tarefa' : 'Task'} value={task || null}
         muted={task === '' ? (pt ? 'Nenhuma' : 'None') : undefined} />
       <ReviewRow label={pt ? 'Primeira mensagem' : 'First message'} value={prompt || null}
         muted={prompt === '' ? (pt ? 'Nenhuma — a sessão abre esperando você' : 'None — the session opens waiting for you') : undefined} />
@@ -752,7 +752,7 @@ export function NewSessionModal({
           </Field>
           </>)}
 
-          {/* STEP 2 — WHERE. The directory, and the delivery that files this session with its
+          {/* STEP 2 — WHERE. The directory, and the task that files this session with its
               siblings. Both are about the WORK rather than about the assistant. */}
           {step === 'where' && (<>
           <Field label={pt ? 'Onde' : 'Where'}>
@@ -778,7 +778,7 @@ export function NewSessionModal({
             * metrics split between the two and nothing on screen saying so. The row menu had
             * already been fixed this way; the form that files most sessions had not.
             */}
-          <Field label={pt ? 'Entrega (opcional)' : 'Delivery (optional)'} hint={pt
+          <Field label={pt ? 'Tarefa (opcional)' : 'Task (optional)'} hint={pt
             ? 'Agrupa várias sessões como um trabalho só, e é o que permite reabrir todas de uma vez.'
             : 'Groups several sessions as one piece of work, and is what lets you reopen them all at once.'}>
             <button
@@ -818,7 +818,7 @@ export function NewSessionModal({
                 <ClipboardList size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {pt
-                    ? `Usar "${hint.title}" — ${hint.sameFolder} ${hint.sameFolder === 1 ? 'sessão desta pasta está' : 'sessões desta pasta estão'} nesta entrega`
+                    ? `Usar "${hint.title}" — ${hint.sameFolder} ${hint.sameFolder === 1 ? 'sessão desta pasta está' : 'sessões desta pasta estão'} nesta tarefa`
                     : `Use "${hint.title}" — ${hint.sameFolder} session${hint.sameFolder === 1 ? '' : 's'} in this folder ${hint.sameFolder === 1 ? 'is' : 'are'} filed here`}
                 </span>
               </button>

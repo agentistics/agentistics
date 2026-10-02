@@ -75,7 +75,7 @@ function EmptyNotice({ error }: { error: TasksError }) {
     ? 'The task board is a local store, and this instance does not host one.'
     : error === 'down'
       ? 'The server did not answer. Nothing is claimed about your tasks either way.'
-      : 'No deliveries yet. Create one above, or file sessions under one with agentop session batch.'
+      : 'No tasks yet. Create one above, or file sessions under one with agentop session batch.'
   return (
     <div style={{ ...surface, padding: 16, color: 'var(--text-tertiary)', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
       <ClipboardList size={16} /> {text}
@@ -104,13 +104,13 @@ function CentralBoard() {
     }}>
       <div>
         <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
-          {lang === 'pt' ? 'Entregas' : 'Deliveries'}
-          <BetaTag what="The delivery board" />
+          Agentask
+          <BetaTag what="Agentask" />
         </h1>
         <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
           {lang === 'pt'
-            ? 'O que cada máquina escolheu compartilhar. Uma entrega só viaja quando o dono dela liga o compartilhamento, e as sessões dela continuam seguindo as regras da conexão.'
-            : 'What each machine chose to share. A delivery travels only when its owner turns sharing on, and its sessions still follow the connection’s rules.'}
+            ? 'O que cada máquina escolheu compartilhar. Uma tarefa só viaja quando o dono dela liga o compartilhamento, e as sessões dela continuam seguindo as regras da conexão.'
+            : 'What each machine chose to share. A task travels only when its owner turns sharing on, and its sessions still follow the connection’s rules.'}
         </p>
       </div>
 
@@ -122,8 +122,8 @@ function CentralBoard() {
         <div style={{ ...surface, padding: 16, color: 'var(--text-tertiary)', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
           <ClipboardList size={16} />
           {lang === 'pt'
-            ? 'Nenhuma máquina conectada a esta central ainda. Uma máquina aparece aqui assim que se conecta, mesmo sem compartilhar entrega nenhuma.'
-            : 'No machine is connected to this central yet. A machine appears here as soon as it connects, even when it shares no delivery at all.'}
+            ? 'Nenhuma máquina conectada a esta central ainda. Uma máquina aparece aqui assim que se conecta, mesmo sem compartilhar tarefa nenhuma.'
+            : 'No machine is connected to this central yet. A machine appears here as soon as it connects, even when it shares no task at all.'}
         </div>
       )}
       {machines !== null && !error && machines.length > 0 && (
@@ -243,8 +243,8 @@ function TaskList() {
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Deliveries
-            <BetaTag what="The delivery board" />
+            Agentask
+            <BetaTag what="Agentask" />
           </h1>
           <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
             What each piece of work cost, in how many rounds and across how many sessions.
@@ -489,7 +489,7 @@ function TaskDetailView({ id }: { id: string }) {
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail.task.title}</span>
             {/* A task page is reachable from a link with no nav on screen — the caveat has to
                 travel with the page, not only with the way in. */}
-            <BetaTag what="The delivery board" />
+            <BetaTag what="Agentask" />
           </h1>
           {/* The headline number for a broken-up task: how much of it is closed. Same arithmetic
               and same rounding as the card and the table — one bar, four places. */}

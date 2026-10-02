@@ -98,7 +98,7 @@ export default function RepoDetailPage() {
     { id: 'compare', label: pt ? 'Comparar' : 'Compare', icon: <GitCompare size={13} />, show: isCentral && (scoped.repoStats[0]?.members.length ?? 0) > 1 },
     { id: 'actions', label: 'Actions', icon: <Zap size={13} />, show: ciSessions.length > 0, badge: ciSessions.length || undefined },
     { id: 'sessions', label: pt ? 'Sessões' : 'Sessions', icon: <Clock size={13} />, show: true },
-    { id: 'tasks', label: pt ? 'Entregas' : 'Tasks', icon: <ClipboardList size={13} />, show: repoTasks.length > 0, badge: repoTasks.length || undefined, beta: true },
+    { id: 'tasks', label: pt ? 'Tarefas' : 'Tasks', icon: <ClipboardList size={13} />, show: repoTasks.length > 0, badge: repoTasks.length || undefined, beta: true },
     { id: 'workflows', label: 'Dynamic Workflows', icon: <WorkflowIcon size={13} />, show: workflows.length > 0 && workflows.some(w => capable(harnessOf(w), 'dynamicWorkflows')), badge: workflows.length },
   ]
 
@@ -284,29 +284,29 @@ export default function RepoDetailPage() {
       )}
 
       {tab === 'tasks' && (
-        <Section title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ClipboardList size={14} /> {pt ? 'Entregas neste repositório' : 'Tasks in this repository'} <BetaTag what={pt ? 'O board de entregas' : 'The delivery board'} /></span>}>
+        <Section title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ClipboardList size={14} /> {pt ? 'Tarefas neste repositório' : 'Tasks in this repository'} <BetaTag what={pt ? 'O board de tarefas' : 'The task board'} /></span>}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 14 }}>
-            <StatTile label={pt ? 'Entregas' : 'Tasks'} value={String(taskTotals.tasks)} />
+            <StatTile label={pt ? 'Tarefas' : 'Tasks'} value={String(taskTotals.tasks)} />
             <StatTile label={pt ? 'Em andamento' : 'In flight'} value={String(taskTotals.inFlight)} />
             <StatTile label={pt ? 'Entregues' : 'Delivered'} value={String(taskTotals.delivered)} />
             {taskTotals.abandoned > 0 && (
               <StatTile label={pt ? 'Abandonadas' : 'Abandoned'} value={String(taskTotals.abandoned)} />
             )}
             <StatTile label={pt ? 'Sessões' : 'Sessions'} value={String(taskTotals.sessions)} />
-            {/* `N/A`, never a `0`: a repository whose deliveries nobody could price has not
+            {/* `N/A`, never a `0`: a repository whose tasks nobody could price has not
                 delivered for free. */}
             <StatTile label={pt ? 'Custo' : 'Cost'} value={taskTotals.costUSD === null ? 'N/A' : fmtCost(taskTotals.costUSD, currency, brlRate)} accent />
           </div>
           <MetricNote style={{ marginTop: 0, marginBottom: 12 }}>
             {pt
-              ? 'Uma entrega pertence a este repositório pelo `git_remote` das sessões filiadas a ela — nunca por um campo digitado —, então uma que atravessa dois repositórios aparece nos dois, e aqui conta só o que gastou neste. Só as sessões que este repositório viu são contadas: uma sessão sem conversa vinculada não entra em nenhum número. Os filtros do topo da página valem aqui.'
-              : 'A delivery belongs to this repository through its sessions\u2019 `git_remote` \u2014 never through a field somebody typed \u2014 so one spanning two repositories appears under both, and counts here only what it spent in this one. Only the sessions this repository could see are counted: one with no linked conversation contributes to no figure. The filters at the top of the page apply here too.'}
+              ? 'Uma tarefa pertence a este repositório pelo `git_remote` das sessões filiadas a ela — nunca por um campo digitado —, então uma que atravessa dois repositórios aparece nos dois, e aqui conta só o que gastou neste. Só as sessões que este repositório viu são contadas: uma sessão sem conversa vinculada não entra em nenhum número. Os filtros do topo da página valem aqui.'
+              : 'A task belongs to this repository through its sessions\u2019 `git_remote` \u2014 never through a field somebody typed \u2014 so one spanning two repositories appears under both, and counts here only what it spent in this one. Only the sessions this repository could see are counted: one with no linked conversation contributes to no figure. The filters at the top of the page apply here too.'}
           </MetricNote>
           {taskTotals.creditTasks > 0 && (
             <MetricNote style={{ marginTop: 0, marginBottom: 12 }}>
               {pt
-                ? `${taskTotals.creditTasks} ${taskTotals.creditTasks === 1 ? 'entrega também gastou' : 'entregas também gastaram'} créditos do Copilot. Créditos não são dólares e não entram no custo acima.`
-                : `${taskTotals.creditTasks} ${taskTotals.creditTasks === 1 ? 'delivery also spent' : 'deliveries also spent'} Copilot credits. Credits are not dollars and are not in the cost above.`}
+                ? `${taskTotals.creditTasks} ${taskTotals.creditTasks === 1 ? 'tarefa também gastou' : 'tarefas também gastaram'} créditos do Copilot. Créditos não são dólares e não entram no custo acima.`
+                : `${taskTotals.creditTasks} ${taskTotals.creditTasks === 1 ? 'task also spent' : 'tasks also spent'} Copilot credits. Credits are not dollars and are not in the cost above.`}
             </MetricNote>
           )}
           <RepoTasksTab

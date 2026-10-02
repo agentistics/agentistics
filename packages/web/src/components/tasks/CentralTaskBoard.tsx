@@ -67,7 +67,7 @@ const asSortable = (r: CentralTaskRow): SortableRow => ({
 const STATUS_ORDER = liveStatusOrder(null)
 
 const SORT_OPTIONS = (pt: boolean): Array<{ key: SortKey; label: string }> => [
-  { key: 'title', label: pt ? 'Entrega' : 'Delivery' },
+  { key: 'title', label: pt ? 'Tarefa' : 'Task' },
   { key: 'status', label: 'Status' },
   { key: 'progress', label: pt ? 'Progresso' : 'Progress' },
   { key: 'sessions', label: pt ? 'Sessões' : 'Sessions' },
@@ -127,8 +127,8 @@ export function CentralTaskBoard(p: CentralTaskBoardProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
           {pt
-            ? `${total} entrega${total === 1 ? '' : 's'} compartilhada${total === 1 ? '' : 's'} por ${p.machines.length} máquina${p.machines.length === 1 ? '' : 's'}`
-            : `${total} shared deliver${total === 1 ? 'y' : 'ies'} across ${p.machines.length} machine${p.machines.length === 1 ? '' : 's'}`}
+            ? `${total} tarefa${total === 1 ? '' : 's'} compartilhada${total === 1 ? '' : 's'} por ${p.machines.length} máquina${p.machines.length === 1 ? '' : 's'}`
+            : `${total} shared task${total === 1 ? '' : 's'} across ${p.machines.length} machine${p.machines.length === 1 ? '' : 's'}`}
         </span>
         <div style={{ ...surface, display: 'flex', padding: 3, gap: 2, marginLeft: 'auto' }}>
           <button style={seg(!flat)} onClick={() => setFlat(false)}>
@@ -170,8 +170,8 @@ export function CentralTaskBoard(p: CentralTaskBoardProps) {
               ? (
                 <div style={{ ...surface, padding: 12, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
                   {pt
-                    ? 'Esta máquina não compartilha nenhuma entrega com esta central.'
-                    : 'This machine shares no delivery with this central.'}
+                    ? 'Esta máquina não compartilha nenhuma tarefa com esta central.'
+                    : 'This machine shares no task with this central.'}
                 </div>
               )
               : <RowList rows={order(m.rows)} lang={p.lang} cost={cost} isMobile={isMobile} sort={sort} onSort={setSort} />}
@@ -193,7 +193,7 @@ function RowList({ rows, showMachine, lang, cost, isMobile, sort, onSort }: {
   const pt = lang === 'pt'
   const L = boardCopy(lang).list
   const columns: Array<{ key: SortKey; label: string; numeric?: boolean }> = [
-    { key: 'title', label: pt ? 'Entrega' : 'Delivery' },
+    { key: 'title', label: pt ? 'Tarefa' : 'Task' },
     { key: 'status', label: 'Status' },
     { key: 'progress', label: pt ? 'Progresso' : 'Progress' },
     { key: 'sessions', label: pt ? 'Sessões' : 'Sessions', numeric: true },
@@ -256,7 +256,7 @@ function RowList({ rows, showMachine, lang, cost, isMobile, sort, onSort }: {
                   style={{ ...th, textAlign: c.numeric ? 'right' : 'left' }}
                 />
                 {/* The machine is a column of its own only in the flat list. It is not a sort key
-                    (`SortKey` orders deliveries, and a machine is where one lives), so it is plain. */}
+                    (`SortKey` orders tasks, and a machine is where one lives), so it is plain. */}
                 {c.key === 'title' && showMachine && <th style={th}>{pt ? 'Máquina' : 'Machine'}</th>}
               </Fragment>
             ))}
