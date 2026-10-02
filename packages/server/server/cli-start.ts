@@ -139,7 +139,7 @@ import { attemptReopenRow } from './sessions/reopen-attempt'
 import {
   admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusalBody, type AdmissionRefusal,
 } from './sessions/spawn-admission'
-import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, readsMarkerSelect } from './sessions/approval-spec'
+import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, markerReadOptions } from './sessions/approval-spec'
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
 import { renameInHarness, renameMessage } from './sessions/rename'
@@ -3816,7 +3816,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
 
       // What is on the screen RIGHT NOW, not what was drawn up to a poll ago.
-      const read = readDialog(frame, { marker: readsMarkerSelect(managed.harness) })
+      const read = readDialog(frame, markerReadOptions(managed.harness))
       const options = read.options
 
       /*
@@ -3853,7 +3853,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const out = await backend.sendMoveChoice(id, keys, spec.key, after => {
           // The look, and it is deliberately about the LABEL rather than the position: a redraw
           // that added or removed a row would leave the right index pointing at the wrong option.
-          const now = readDialog(after)
+          // Read with the SAME options as the first read: without them a numberless menu is `none`
+          // here, and every answer to one was refused as "the question changed".
+          const now = readDialog(after, markerReadOptions(managed.harness))
           return now.select === 'marker' && now.options.find(o => o.selected)?.label === picked.label
         })
         if (out === 'wrong-row') return { ok: false, message: s.sessChoiceGone }
