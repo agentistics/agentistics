@@ -42,6 +42,7 @@ import {
   pm2StartArgs,
   systemdUnit,
   migrateUnitKillMode,
+  migrateUnitOOMPolicy,
   migrateUnitPath,
   type RestartVerdict,
   type ServingObservation,
@@ -857,6 +858,8 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   let next = unitText
   const killMode = migrateUnitKillMode(next)
   if (killMode) { next = killMode; done.push('a restart no longer stops your sessions') }
+  const oom = migrateUnitOOMPolicy(next)
+  if (oom) { next = oom; done.push('a session running out of memory no longer stops the server') }
   const pathFixed = process.env.INVOCATION_ID ? null : migrateUnitPath(next, process.env.PATH)
   if (pathFixed) { next = pathFixed; done.push('sessions it starts can find the coding assistants on your PATH') }
   if (next !== unitText) {
