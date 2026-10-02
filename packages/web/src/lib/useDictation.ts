@@ -57,7 +57,7 @@ export function useDictation(lang: 'en' | 'pt', onText: (settled: string) => voi
       }
       const done = () => { setListening(false); setHeard(''); ref.current = null }
       rec.onend = done
-      rec.onerror = e => { done(); setError(dictationError(e?.error ?? 'unknown', lang)) }
+      rec.onerror = e => { done(); const why = dictationError(e?.error ?? 'unknown', lang); if (why) setError(why) }
       setError(null)
       rec.start()
       ref.current = rec
