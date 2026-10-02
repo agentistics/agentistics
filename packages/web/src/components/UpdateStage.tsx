@@ -43,7 +43,17 @@ export function VersionTitle({ lang, k, from, to }: { lang: Lang; k: 'loader.tit
 export const titleText = (lang: Lang, k: 'loader.title' | 'finale.updated', from: string, to: string) =>
   ut(lang, k, { pair: versionPair(from, to) })
 
-const SHADOW = '0 1px 2px rgba(0,0,0,.9), 0 0 18px rgba(10,10,15,.95)'
+/**
+ * The text's own crispness. The hive makes room around the text (no scrim, no overlay), so all it
+ * needs is a hair of shadow — the prototype's 1 px. The core keeps its heavier halo: its streams
+ * run straight through the type.
+ */
+export const TEXT_SHADOW = UPDATE_ANIMATION === 'hive' ? '0 1px 1px rgba(0,0,0,.55)' : '0 1px 2px rgba(0,0,0,.9), 0 0 18px rgba(10,10,15,.95)'
+const SHADOW = TEXT_SHADOW
+
+/** AA contrast on the stage background: step labels not yet reached, the second line of figures, the note. */
+export const INK_DIM = 'rgba(255,255,255,.62)'
+export const INK_SOFT = 'rgba(255,255,255,.76)'
 
 const hudStyle: CSSProperties = {
   position: 'fixed', left: 0, right: 0, top: 'calc(env(safe-area-inset-top, 0px) + 8vh)', display: 'flex', flexDirection: 'column',
@@ -74,30 +84,30 @@ export function StageText({ lang, isMobile, refs, from, to, phrase, title, note,
   return (
     <>
       <div ref={refs.hud} style={hudStyle} data-testid="update-hud">
-        <div style={{ font: '600 11px/1 inherit', fontSize: 11, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#94a3b8' }}>Agentistics</div>
-        <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 600, lineHeight: 1.2, color: 'rgba(255,255,255,.95)' }}>
+        <div data-ink style={{ font: '600 11px/1 inherit', fontSize: 11, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#94a3b8' }}>Agentistics</div>
+        <h2 data-ink style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 600, lineHeight: 1.2, color: 'rgba(255,255,255,.95)' }}>
           <VersionTitle lang={lang} k={title} from={from} to={to} />
         </h2>
       </div>
       <div ref={refs.foot} style={footStyle} data-testid="update-foot">
-        <div aria-live="polite" style={{ minHeight: '1.3em', fontSize: isMobile ? 15 : 17, fontWeight: 600, color: 'rgba(255,255,255,.95)' }}>{phrase}</div>
-        <div ref={refs.sub} style={{ fontSize: 12, fontWeight: 500, fontFamily: 'ui-monospace, monospace', color: 'rgba(255,255,255,.66)', fontVariantNumeric: 'tabular-nums' }}>&nbsp;</div>
-        <ol aria-label={ut(lang, 'loader.stage_label', { n: 1, total: UPDATE_STEPS.length })} style={{
+        <div aria-live="polite" data-ink style={{ minHeight: '1.3em', fontSize: isMobile ? 15 : 17, fontWeight: 600, color: 'rgba(255,255,255,.95)' }}>{phrase}</div>
+        <div ref={refs.sub} data-ink style={{ fontSize: 12, fontWeight: 500, fontFamily: 'ui-monospace, monospace', color: INK_SOFT, fontVariantNumeric: 'tabular-nums' }}>&nbsp;</div>
+        <ol data-ink aria-label={ut(lang, 'loader.stage_label', { n: 1, total: UPDATE_STEPS.length })} style={{
           listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: `repeat(${UPDATE_STEPS.length}, minmax(0, 1fr))`,
           gap: 8, width: 'min(460px, 100%)',
         }}>
           {UPDATE_STEPS.map((s, i) => (
             <li key={s} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-              <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,.12)', overflow: 'hidden', position: 'relative' }}>
+              <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,.16)', overflow: 'hidden', position: 'relative' }}>
                 <div ref={el => { refs.fills.current[i] = el }} style={{ position: 'absolute', inset: '0 auto 0 0', width: allDone ? '100%' : '0%', background: allDone ? TO_COLOR : '#F59E0B', borderRadius: 2 }} />
               </div>
-              <span ref={el => { refs.labels.current[i] = el }} style={{ fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: allDone ? TO_COLOR : 'rgba(255,255,255,.42)' }}>
+              <span ref={el => { refs.labels.current[i] = el }} style={{ fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: allDone ? TO_COLOR : INK_DIM }}>
                 {ut(lang, STEP_LABEL[s])}
               </span>
             </li>
           ))}
         </ol>
-        {note && <p style={{ margin: 0, fontSize: 12, lineHeight: 1.4, color: 'rgba(255,255,255,.66)', maxWidth: '46ch' }}>{ut(lang, 'loader.keep_open')}</p>}
+        {note && <p data-ink style={{ margin: 0, fontSize: 12, lineHeight: 1.4, color: INK_SOFT, maxWidth: '46ch' }}>{ut(lang, 'loader.keep_open')}</p>}
       </div>
     </>
   )
@@ -128,7 +138,9 @@ export function useRunScene(opts: {
     if (!enabled || !cv || !logo) return
     const scene: Scene = createScene(cv, UPDATE_ANIMATION, logo, reduced)
     scene.resize()
-    scene.setScrim([refs.hud.current, refs.foot.current])
+    // the hive leaves every LINE of text clear (no scrim): hand it the elements that carry ink
+    const ink = (root: HTMLElement | null): HTMLElement[] => (root ? Array.from(root.querySelectorAll<HTMLElement>('[data-ink]')) : [])
+    scene.setInk([...ink(refs.hud.current), ...ink(refs.foot.current)])
     const onResize = () => scene.resize()
     window.addEventListener('resize', onResize)
     let raf = 0, last = performance.now(), lastDrawn = -1e9, pShown = 0
@@ -168,7 +180,7 @@ export function useRunScene(opts: {
           el.style.animation = indet && !reduced ? 'ag-upd-indet 1.4s ease-in-out infinite' : 'none'
           if (!indet) el.style.left = '0'
         }
-        if (lab) lab.style.color = n < tg.i ? '#10b981' : n === tg.i ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.42)'
+        if (lab) lab.style.color = n < tg.i ? '#10b981' : n === tg.i ? 'rgba(255,255,255,.95)' : INK_DIM
       }
     }
     raf = requestAnimationFrame(loop)

@@ -23,7 +23,7 @@ import { createScene } from '../lib/updateScene'
 import { UPDATE_ANIMATION } from '../lib/upgradeSteps'
 import { brandAsset } from '../lib/brand'
 import { prefersReducedMotion } from '../lib/nayNotifyAnim'
-import { StageText, VersionTitle, canvasStyle, titleText, useStageRefs } from './UpdateStage'
+import { INK_SOFT, StageText, TEXT_SHADOW, VersionTitle, canvasStyle, titleText, useStageRefs } from './UpdateStage'
 
 export const FINALE_MS = 5600
 
@@ -49,6 +49,9 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
     logo.src = brandAsset('/minimalistLogo.png')
     const scene = createScene(cv, UPDATE_ANIMATION, logo, reduced)
     scene.resize()
+    // the hive keeps every line of the step text clear until the burst takes it away
+    const ink = (root: HTMLElement | null): HTMLElement[] => (root ? Array.from(root.querySelectorAll<HTMLElement>('[data-ink]')) : [])
+    scene.setInk([...ink(refs.hud.current), ...ink(refs.foot.current)])
     const onResize = () => { scene.resize(); draw(performance.now(), 16) }
     window.addEventListener('resize', onResize)
     const t0 = performance.now()
@@ -87,11 +90,11 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
       <div ref={result} style={{
         position: 'fixed', left: 0, right: 0, top: 'calc(47% + 20vmin)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
         textAlign: 'center', padding: '0 16px', opacity: 0, transition: 'opacity .6s ease', pointerEvents: 'none',
-        textShadow: '0 1px 2px rgba(0,0,0,.9), 0 0 18px rgba(10,10,15,.95)',
+        textShadow: TEXT_SHADOW,
       }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textTransform: 'uppercase', color: '#10b981' }}>{ut(lang, 'finale.ok')}</span>
         <b style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.01em' }}><VersionTitle lang={lang} k="finale.updated" from={from} to={version} /></b>
-        <small style={{ fontSize: 13, color: 'rgba(255,255,255,.66)' }}>{ut(lang, 'finale.sub')}</small>
+        <small style={{ fontSize: 13, color: INK_SOFT }}>{ut(lang, 'finale.sub')}</small>
       </div>
     </div>
   )

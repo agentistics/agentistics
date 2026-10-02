@@ -29,10 +29,11 @@ import type { UpdateAnimation } from './updateAnim'
 /**
  * WHICH update animation plays. Both ship (`core` = "Núcleo", `hive` = "Colmeia"); there is NO
  * user-facing choice (owner, 2026-10-02) — this one constant picks, and the owner switches it on
- * request. `updateAnim.test.ts` pins the default to `core` and renders both paths so the other
- * never rots.
+ * request. The owner chose the HIVE, treatment A ("a colmeia abre espaço": the cells draw back from
+ * the text, no scrim), on 2026-10-02. `updateAnim.test.ts` pins the default to `hive` and renders
+ * both paths so the core never rots.
  */
-export const UPDATE_ANIMATION: UpdateAnimation = 'core'
+export const UPDATE_ANIMATION: UpdateAnimation = 'hive'
 
 export type ServerStage = 'checking' | 'downloading' | 'verifying' | 'swapping' | 'restarting' | 'done' | 'failed'
 

@@ -5,7 +5,7 @@ import {
 } from './updateAnim'
 import { UPDATE_ANIMATION } from './upgradeSteps'
 
-test('the default animation is the Core', () => { expect(UPDATE_ANIMATION).toBe('core') })
+test('the default animation is the Hive (treatment A, the owner\'s choice)', () => { expect(UPDATE_ANIMATION).toBe('hive') })
 
 describe('easing', () => {
   test('never overshoots and never jumps', () => {
