@@ -107,8 +107,9 @@ describe('the fleet hub — confirmed transitions only', () => {
 })
 
 describe('the host speaks 1.4', () => {
-  test('ENGINE_API_VERSION is 1.4.0, and a 1.3 engine still loads on it', () => {
-    expect(ENGINE_API_VERSION).toBe('1.4.0')
+  test('ENGINE_API_VERSION speaks 1.4 or later, and a 1.3 engine still loads on it', () => {
+    // A 1.4 engine (fleet, apiVersion, live) must load on this host, whatever later minor it speaks.
+    expect(apiCompatible(ENGINE_API_VERSION, '1.4.0')).toBe(true)
     expect(apiCompatible(ENGINE_API_VERSION, '1.3.0')).toBe(true)
   })
 
