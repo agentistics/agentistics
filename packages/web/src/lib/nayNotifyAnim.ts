@@ -21,6 +21,9 @@ export function prefersReducedMotion(): boolean {
 
 type Running = { cancel(): void }
 
+/** What `playEnter` hands back: `()` ends the entrance outright; `dropFx()` only removes its effects. */
+export type EnterHandle = (() => void) & { dropFx(): void }
+
 function fxLayer(): HTMLElement {
   let el = document.getElementById('ag-nay-fx')
   if (!el) {
@@ -59,10 +62,16 @@ function rise(card: HTMLElement, delay: number, out: Running[]): void {
  * when the button is not on screen (the card then simply fades up where the button would be).
  * Returns a cancel for a card that is replaced mid-entrance.
  */
-export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElement | null, p: CardPlacement, reduced: boolean): () => void {
+export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElement | null, p: CardPlacement, reduced: boolean): EnterHandle {
   const run: Running[] = []
   const cleanup: (() => void)[] = []
-  const cancel = () => { run.forEach(a => { try { a.cancel() } catch { /* already gone */ } }); cleanup.forEach(f => f()) }
+  /** Every element this entrance put in the fx layer — nothing there may outlive the card. */
+  const temps: Element[] = []
+  const dropFx = () => { temps.forEach(e => e.remove()); temps.length = 0 }
+  const cancel = Object.assign(
+    () => { run.forEach(a => { try { a.cancel() } catch { /* already gone */ } }); cleanup.forEach(f => f()); dropFx() },
+    { dropFx },
+  )
   if (reduced || typeof card.animate !== 'function') {
     run.push(card.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 160 }) ?? { cancel() {} })
     return cancel
@@ -92,7 +101,7 @@ export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElemen
       border: '1.5px solid var(--anthropic-orange)', background: 'var(--bg-surface)', borderRadius: '16px',
       boxShadow: '0 14px 36px rgba(0,0,0,.34)',
     })
-    cleanup.push(() => m.remove())
+    temps.push(m)
     run.push(fab!.animate([{ scale: '1' }, { scale: '.92' }, { scale: '1' }], { duration: 500 }))
     const grow = m.animate([
       { left: `${fr.left}px`, top: `${fr.top}px`, width: `${fr.width}px`, height: `${fr.height}px`, borderRadius: '16px' },
@@ -121,7 +130,7 @@ export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElemen
       svg.appendChild(path)
     }
     fxLayer().appendChild(svg)
-    cleanup.push(() => svg.remove())
+    temps.push(svg)
     const waves = Array.from(svg.querySelectorAll('path')).map((path, i) =>
       path.animate([{ opacity: 0 }, { opacity: 1, offset: 0.3 }, { opacity: 0 }], { duration: 520, delay: i * 110, iterations: 2 }))
     run.push(...waves)
@@ -165,7 +174,7 @@ export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElemen
     left: '0', top: '0', width: '14px', height: '14px', marginLeft: '-7px', marginTop: '-7px', borderRadius: '50%',
     background: 'var(--anthropic-orange-light)', boxShadow: '0 0 14px var(--anthropic-orange)',
   })
-  cleanup.push(() => dot.remove())
+  temps.push(dot)
   const kf: Keyframe[] = []
   for (let k = 0; k <= 16; k++) {
     const t = k / 16, u = 1 - t
@@ -184,7 +193,7 @@ export function playEnter(kind: NayAnimation, card: HTMLElement, fab: HTMLElemen
     left: `${tx - 28}px`, top: `${ty - 28}px`, width: '56px', height: '56px', borderRadius: '50%',
     border: '2px solid var(--anthropic-orange)', opacity: '0',
   })
-  cleanup.push(() => ring.remove())
+  temps.push(ring)
   const burst = ring.animate([{ opacity: 0.8, transform: 'scale(.2)' }, { opacity: 0, transform: 'scale(1.6)' }], { duration: 420, delay: 410, easing: 'ease-out' })
   run.push(burst)
   after(burst, () => ring.remove())

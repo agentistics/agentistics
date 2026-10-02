@@ -42,7 +42,7 @@ import type { AnchorRect, Size } from '../../lib/nayDock'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
 import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/nayNotifyStore'
-import { playEnter, playExit, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
+import { playEnter, playExit, type EnterHandle, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
 import { NayEndSession } from './NayEndSession'
 
@@ -151,7 +151,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const cardRef = useRef<HTMLDivElement>(null)
-  const cancelRef = useRef<(() => void) | null>(null)
+  const cancelRef = useRef<EnterHandle | null>(null)
   const [drawer, setDrawer] = useState<Drawer>(null)
   const [snoozeText, setSnoozeText] = useState('')
   const [snoozeErr, setSnoozeErr] = useState<string | null>(null)
@@ -266,6 +266,9 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     const p = frameToPlacement(fr, st, btn), b = cardBase.current, w = written.current
     const dx = fr.left - b.left, dy = fr.top - b.top
     card.style.translate = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? '' : `${dx}px ${dy}px`
+    // The card is moving (the button was dragged): the entrance's effects were drawn for the
+    // place it started from, so they go now rather than trail it.
+    if (card.style.translate) cancelRef.current?.dropFx()
     // Only while it moves: `will-change` left on makes the card the containing block of the folder
     // Select's fixed popover (see `frameStyle` in nayDockFollow.ts).
     card.style.willChange = card.style.translate ? 'translate, transform' : ''
@@ -383,6 +386,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     setLeaving(true)
     leavingRef.current = true
     hideEchoes()
+    // Leaving ends the entrance: its border / waves / spark must not outlive the card.
+    cancelRef.current?.(); cancelRef.current = null
     if (cardRef.current) await playExit(cardRef.current, fabEl(), reduced)
     after()
   }
