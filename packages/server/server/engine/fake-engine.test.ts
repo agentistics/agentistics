@@ -14,6 +14,7 @@ import {
   type Engine,
   type EngineAuditEvent,
   type EngineHostServices,
+  type EngineSpawnBudget,
   type EngineStatus,
   type ReplayCursor,
 } from '@agentistics/engine-api'
@@ -23,10 +24,15 @@ import { safeError } from '../errors'
 import { routeCapability } from '../capability-guard'
 import { FAKE_EVENTS, createEngine, makeFakeEngine, type FakeEngine } from './fixtures/fake-engine'
 import { buildReuseSurface } from './reuse-surface'
-import { hostServices as realHostServices } from './load'
-import { OPENCODE_DB_PATH } from '../config'
+import { engineSpawnBudget, hostFloor, hostServices as realHostServices } from './load'
+import { HOME_DIR, OPENCODE_DB_PATH } from '../config'
+import { omittedSecrets } from '../backup/backup-plan'
+import { admitSpawn } from '../sessions/spawn-admission'
+import { memoryBudget } from '../sessions/memory-budget'
 import { commandSummary } from '../sessions/shell-writes'
-import { REUSE_SURFACE_MEMBERS, missingReuseMembers } from '@agentistics/engine-api'
+import { REUSE_SURFACE_MEMBERS, floored, missingReuseMembers } from '@agentistics/engine-api'
+
+const GiB = 1024 * 1024 * 1024
 
 /** The host's REAL reuse surface — what `hostServices()` hands an engine. */
 const READERS = await buildReuseSurface()
@@ -37,6 +43,8 @@ function hostServices(opts: {
   readers?: EngineHostServices['readers']
   origins?: string[]
   dev?: boolean
+  globs?: readonly string[]
+  budget?: EngineSpawnBudget
 } = {}): EngineHostServices {
   return {
     paths: {
@@ -44,6 +52,7 @@ function hostServices(opts: {
       opencodeDbPath: '/tmp/elsewhere/opencode.db',
     },
     journal: { sink: async () => null, status: () => ({ state: 'disabled', reason: 'no-integrations' }) },
+    protectedGlobs: opts.globs ?? [],
     protectedPaths: [],
     caps: CAPS,
     isCentral: () => opts.central ?? false,
@@ -51,7 +60,7 @@ function hostServices(opts: {
     audit: e => { opts.audit?.push(e) },
     readJsonLimited,
     safeError,
-    spawnBudget: async () => ({ budget: { max: 1, used: 0, left: 1, percent: 0 } }),
+    spawnBudget: async () => opts.budget ?? { budget: { max: 1, used: 0, left: 1, percent: 0 }, unmeasured: false },
     notify: () => {},
     lang: () => 'en',
     tasks: {
@@ -243,5 +252,92 @@ describe('the real host services (1.2)', () => {
     const p = h.originPolicy()
     expect(Array.isArray(p.allowedOrigins)).toBe(true)
     expect(p.dev).toBe(process.env.SERVE_STATIC !== '1')
+  })
+})
+
+describe('1.3: the floor arrives as globs, the budget carries its alarm and whether it was measured', () => {
+  const HOME = '/home/u'
+  const real = hostFloor(omittedSecrets(), HOME)
+  const at = (p: string) => new Request(`http://localhost/api/provider/floor?path=${encodeURIComponent(p)}`)
+
+  it('an engine reading protectedGlobs floors a .key file under a harness home, flat and nested', async () => {
+    const h = { ...hostServices({ globs: real.globs }), paths: { ...hostServices().paths, home: HOME } }
+    const { engine } = await load(makeFakeEngine(), h)
+    const ask = async (p: string) => (await (await dispatch(engine!, at(p)))!.json()).floored
+    expect(await ask(`${HOME}/.claude/x.key`)).toBe(true)
+    expect(await ask(`${HOME}/.claude/sessions/1.abc/creds.key.json`)).toBe(true)
+    expect(await ask(`${HOME}/.claude/.credentials.json`)).toBe(true)
+    expect(await ask(`${HOME}/work/repo/src/hotkey.keymap.ts`)).toBe(false)
+  })
+
+  it('every backup-plan secret row outside the data dir lands on the floor', () => {
+    const rows = omittedSecrets().filter(r => !r.pattern.startsWith('.agentistics'))
+    expect(rows.length).toBeGreaterThan(5)
+    for (const r of rows) {
+      const p = r.pattern.split('#')[0]!
+      const sample = r.match === 'contains' && !p.includes('/') ? `${HOME}/.claude/sessions/1${p}` : `${HOME}/${p}`
+      expect({ row: r.pattern, floored: floored(real.globs, sample, HOME) }).toEqual({ row: r.pattern, floored: true })
+    }
+  })
+
+  it('the 1.2 protectedPaths withdraws nothing it carried, and now carries the contains globs too', () => {
+    for (const r of omittedSecrets()) expect(real.paths).toContain(`${HOME}/${r.pattern}`)
+    expect(real.paths.some(p => p.startsWith(`${HOME}/.claude/`) && p.endsWith('*.key*'))).toBe(true)
+  })
+
+  it('unmeasured admits and says so; a measured max 0 refuses; the swap alarm refuses whatever left says', async () => {
+    const admission = async (budget: EngineSpawnBudget) => {
+      const { engine } = await load(makeFakeEngine(), hostServices({ budget }))
+      return (await (await dispatch(engine!, new Request('http://localhost/api/provider/admission?n=1')))!.json())
+    }
+    expect(await admission(engineSpawnBudget(null))).toEqual({ admit: true, unmeasured: true })
+    expect(await admission({ budget: { max: 0, used: 0, left: 0, percent: 99 }, unmeasured: false }))
+      .toEqual({ admit: false, reason: 'no-room', fits: 0 })
+    expect(await admission({ budget: { max: 9, used: 1, left: 8, percent: 90, alarm: 'swap' }, unmeasured: false }))
+      .toEqual({ admit: false, reason: 'swap', fits: 0 })
+  })
+})
+
+describe('engineSpawnBudget — the same measurement admitSpawn decides from', () => {
+  const sample = (swapUsed: number) => ({ total: 16 * GiB, available: 8 * GiB, swapTotal: 4 * GiB, swapUsed })
+  const measured = (swapUsed: number, sessions = 2) => ({
+    sample: sample(swapUsed),
+    budget: memoryBudget({ sample: sample(swapUsed), sessionBytes: sessions * 500 * 1024 * 1024, sessions }),
+  })
+
+  it('null is unmeasured, never a zero budget read as "no room"', () => {
+    expect(engineSpawnBudget(null).unmeasured).toBe(true)
+    expect(admitSpawn(null, 1)).toMatchObject({ admit: true, unmeasured: true })
+  })
+
+  it('a tripped swap alarm is carried, and admitSpawn refuses on the very same read', () => {
+    const read = measured(Math.round(3.9 * GiB))
+    const e = engineSpawnBudget(read)
+    expect(e).toMatchObject({ unmeasured: false, budget: { alarm: 'swap' } })
+    expect(e.budget.left).toBeGreaterThan(0)
+    expect(admitSpawn(read, 1)).toMatchObject({ admit: false, refusal: { reason: 'swap' } })
+  })
+
+  it('a calm machine carries no alarm and the same numbers admitSpawn reads', () => {
+    const read = measured(0)
+    const e = engineSpawnBudget(read)
+    expect(e.unmeasured).toBe(false)
+    expect(e.budget.alarm).toBeUndefined()
+    expect(e.budget).toMatchObject({ max: read.budget.max, used: read.budget.used, left: read.budget.left })
+  })
+})
+
+describe('the real host services (1.3)', () => {
+  it('hand over the floor derived from the backup plan, as globs and as 1.2 paths', async () => {
+    const h = await realHostServices()
+    const expected = hostFloor(omittedSecrets(), HOME_DIR)
+    expect([...h.protectedGlobs]).toEqual([...expected.globs])
+    expect([...h.protectedPaths]).toEqual([...expected.paths])
+    expect(h.protectedGlobs.some(g => g.endsWith('/**/*.key*'))).toBe(true)
+  })
+
+  it('answer the spawn budget with an explicit unmeasured flag', async () => {
+    const b = await (await realHostServices()).spawnBudget()
+    expect(typeof b.unmeasured).toBe('boolean')
   })
 })

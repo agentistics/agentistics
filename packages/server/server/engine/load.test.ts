@@ -29,6 +29,7 @@ function host(): EngineHostServices<AgentisticsEvent> {
   return {
     paths: { dataDir: '/tmp/x', defaultDataDir: '/tmp/x', contentDir: '/tmp/x/c', home: '/tmp', harnessRoots: {}, opencodeDbPath: '/tmp/x/opencode.db' },
     journal: { sink: async () => null, status: () => ({ state: 'disabled', reason: 'flag-off' }) },
+    protectedGlobs: [],
     protectedPaths: [],
     caps: CAPS,
     isCentral: () => false,
@@ -36,7 +37,7 @@ function host(): EngineHostServices<AgentisticsEvent> {
     audit: () => {},
     readJsonLimited,
     safeError,
-    spawnBudget: async () => ({ budget: { max: 1, used: 0, left: 1, percent: 0 } }),
+    spawnBudget: async () => ({ budget: { max: 1, used: 0, left: 1, percent: 0 }, unmeasured: false }),
     notify: () => {},
     lang: () => 'en',
     tasks: { fileNative: async () => ({ ok: false, reason: 'test' }), unfileNative: async () => {} },

@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { HARNESS_ORDER } from '@agentistics/core'
@@ -249,4 +249,18 @@ test('config files holding credential keys are excluded from the raw layer', () 
     expect(rule?.restoreWith ?? '', `${rel} needs a restore command`).not.toBe('')
     expect(rule?.why ?? '', `${rel} must say which key it holds`).toContain(key)
   }
+})
+
+// The engine writes `~/.agentistics/runtime`, so `backup-coverage.lint.test.ts` (a grep over THIS
+// tree's source) cannot see it — this pins the decision instead.
+describe('the native session store (.agentistics/runtime)', () => {
+  test('is decided: runtime, never carried and never a silent omission', () => {
+    for (const rel of ['.agentistics/runtime', '.agentistics/runtime/sessions.db', '.agentistics/runtime/sessions.db-wal']) {
+      expect({ rel, reason: excludeFor(rel)?.reason }).toEqual({ rel, reason: 'runtime' })
+    }
+  })
+
+  test('is not a secret row, so it is not part of the policy floor an engine receives', () => {
+    expect(omittedSecrets().some(r => r.pattern.startsWith('.agentistics/runtime'))).toBe(false)
+  })
 })
