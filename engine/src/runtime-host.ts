@@ -1,26 +1,24 @@
 /**
- * runtime-host.ts — THE HOST SEAM for native sessions (B4). `@agentistics/runtime` may know no path,
- * no credential and no environment of this machine (D23), so everything it needs is decided here and
- * handed in: where the session store lives, the content store, the journal, the credential resolver,
- * the environment a tool's process sees, the workspace root, and the policy's floor.
+ * runtime-host.ts — THE HOST SEAM for native sessions (B4, moved into the engine by ES.6a). The
+ * runtime may know no path, no credential and no environment of this machine (D23), and neither may
+ * the engine (spec §3): where the session store lives, the content store, the journal, the policy's
+ * floor and the data dir all come from the installed `EngineHostServices` (`host.ts`). The credential
+ * resolver is the engine's own (`cli-provider.ts`, which reads the key store the host locates).
  *
- * Nothing else in `packages/server` builds a session runtime. `agentop code` (cli-code.ts) and the
- * `/api/runtime/*` routes (runtime-sessions-web.ts) both come through `createRuntimeHost`, so the
- * CLI and the web cannot drift into two policies for one session.
+ * Nothing else in the engine builds a session runtime. `agentop code` (cli-code.ts) and the
+ * `/api/runtime/sessions` routes (runtime-sessions-web.ts) both come through `createRuntimeHost`, so
+ * the CLI and the web cannot drift into two policies for one session.
  *
- * ## The floor depends on this module (B3-SEC F1)
+ * ## The floor depends on the host (B3-SEC F1)
  *
  * The runtime's policy floors `~/.agentistics/**` by itself, but it may not SPELL any harness's
- * credential file (`provider-secrets.lint`). Those are this machine's to pass as `protectedPaths`,
- * and the list is DERIVED from the backup plan's `secret` rows — the one table in this repo that
- * already had to decide, per harness, which files are live credentials. A harness added there is
- * floored here without anybody remembering a second list. `agentisticsDir` is passed whenever
- * `AGENTISTICS_DIR` relocates the data dir, or the floor would guard the default location while the
- * real key store sat unguarded somewhere else.
+ * credential file (`provider-secrets.lint`). Those are this machine's: the host hands them over as
+ * `protectedPaths`, DERIVED from the backup plan's `secret` rows (spec §3). `policyFloor` turns that
+ * list into the policy's globs. `agentisticsDir` is passed whenever the data dir is relocated, or the
+ * floor would guard the default location while the real key store sat unguarded somewhere else.
  */
-import { spawnSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname, join, relative, isAbsolute } from 'node:path'
 import {
   createAnthropicClient,
   createFileContentStore,
@@ -45,60 +43,43 @@ import {
   type ToolEnv,
 } from '@agentistics/runtime'
 import type { ProviderId } from '@agentistics/core'
-import { omittedSecrets, type ExcludeRule } from './backup/backup-plan'
-import { AGENTISTICS_DATA_DIR, CONTENT_DIR, DEFAULT_AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { hostAnthropicClientDeps } from './cli-provider'
+import { host } from './host'
 
-/** The native session store. Excluded from backups with a reason (`backup-plan.ts`). */
-export const RUNTIME_DIR = join(AGENTISTICS_DATA_DIR, 'runtime')
-export const RUNTIME_SESSIONS_DB = join(RUNTIME_DIR, 'sessions.db')
-
-/** The directory a `contains` rule's pattern is searched under: every harness home the table names. */
-function harnessHomes(rules: readonly ExcludeRule[]): string[] {
-  const homes = new Set<string>()
-  for (const r of rules) {
-    if (r.match !== 'prefix') continue
-    const first = r.pattern.split('/')[0]
-    if (first && first.startsWith('.') && first !== '.agentistics' && r.pattern.includes('/')) homes.add(first)
-  }
-  return [...homes].sort()
-}
+/** The native session store, under the HOST's data dir. (The public backup plan must exclude it.) */
+export const runtimeDir = (): string => join(host().paths.dataDir, 'runtime')
+export const runtimeSessionsDb = (): string => join(runtimeDir(), 'sessions.db')
 
 /**
- * The policy globs for a list of backup exclusion rules (`$HOME`-relative, no leading slash).
- *
- * - `prefix` is a STRING prefix in the backup table (it matches a filename stem: `cache.db` catches
- *   `cache.db-wal`), so it becomes `~/<p>` + `~/<p>*` + `~/<p>*\/**` — the file, its stem siblings and
- *   anything below a directory of that name.
- * - `contains` with a `/` (`.copilot/token`) becomes `~/**\/<p>*` and its subtree.
- * - `contains` with no `/` (`.key`) is anchored under every harness home the table names — as a
- *   bare `**\/*.key*` it would floor any workspace file that merely has `.key` in its name.
- * - A `#field` suffix names a FIELD inside a file (`preferences.json#team.token`); the whole file is
- *   floored, which is the over-protective direction.
- *
- * `.agentistics/...` rows are skipped: the runtime floors that whole directory itself (F1).
+ * PURE. The policy globs for the host's `protectedPaths` — absolute paths, one per backup-plan
+ * `secret` row (spec §3). A row is a STRING prefix in the backup table (`cache.db` catches
+ * `cache.db-wal`), so each path becomes `<p>`, `<p>*` and `<p>*\/**` — the file, its stem siblings and
+ * anything below a directory of that name. A `#field` suffix names a field inside a file; the whole
+ * file is floored, which is the over-protective direction. Paths under `home` are written `~/…`, the
+ * form the policy's globs are matched in. Paths under the data dir — the one in use or the default
+ * one — are skipped: the runtime floors that whole directory itself (F1).
  */
-export function protectedPathsFromSecrets(rules: readonly ExcludeRule[]): string[] {
+export function policyFloor(protectedPaths: readonly string[], home: string, dataDirs: readonly string[]): string[] {
   const out = new Set<string>()
-  const homes = harnessHomes(rules)
-  for (const r of rules) {
-    if (r.reason !== 'secret') continue
-    const p = r.pattern.split('#')[0]!.replace(/\/+$/, '')
-    if (!p || p.startsWith('.agentistics/') || p === '.agentistics') continue
-    if (r.match === 'prefix') {
-      out.add(`~/${p}`); out.add(`~/${p}*`); out.add(`~/${p}*/**`)
-    } else if (p.includes('/')) {
-      out.add(`~/**/${p}*`); out.add(`~/**/${p}*/**`)
-    } else {
-      for (const h of homes) out.add(`~/${h}/**/*${p}*`)
-    }
+  const under = (root: string, p: string) => {
+    const r = relative(root, p)
+    return r === '' || (!r.startsWith('..') && !isAbsolute(r))
+  }
+  for (const raw of protectedPaths) {
+    const abs = raw.split('#')[0]!.replace(/\/+$/, '')
+    if (!abs || !isAbsolute(abs)) continue
+    if (dataDirs.some(d => under(d, abs))) continue
+    const inHome = relative(home, abs)
+    const p = inHome !== '' && !inHome.startsWith('..') && !isAbsolute(inHome) ? `~/${inHome}` : abs
+    out.add(p); out.add(`${p}*`); out.add(`${p}*/**`)
   }
   return [...out].sort()
 }
 
-/** This machine's harness credential globs — the policy's `protectedPaths`. */
+/** This machine's harness credential globs — the policy's `protectedPaths`, from the host. */
 export function hostProtectedPaths(): string[] {
-  return protectedPathsFromSecrets(omittedSecrets())
+  const h = host()
+  return policyFloor(h.protectedPaths, h.paths.home, [h.paths.dataDir, h.paths.defaultDataDir])
 }
 
 export interface HostPolicyOptions {
@@ -115,26 +96,32 @@ export interface HostPolicyOptions {
  * answers do not survive a restart (B4 contract §4, the safer direction).
  */
 export function hostPolicy(opts: HostPolicyOptions = {}): SessionPolicy {
-  const dataDir = opts.dataDir ?? AGENTISTICS_DATA_DIR
-  const relocated = dataDir !== (opts.defaultDataDir ?? DEFAULT_AGENTISTICS_DATA_DIR)
+  const paths = host().paths
+  const dataDir = opts.dataDir ?? paths.dataDir
+  const relocated = dataDir !== (opts.defaultDataDir ?? paths.defaultDataDir)
   return createPolicy({
     layers: [],
-    home: opts.home ?? HOME_DIR,
+    home: opts.home ?? paths.home,
     protectedPaths: opts.protectedPaths ?? hostProtectedPaths(),
     ...(relocated ? { agentisticsDir: dataDir } : {}),
   })
 }
 
 /**
- * The workspace a session acts on: the git toplevel of `cwd`, or `cwd` itself outside a repository.
- * Asked with a scrubbed git environment so a caller's `GIT_DIR` cannot name a different repository.
+ * The workspace a session acts on: the nearest directory at or above `cwd` holding a `.git` (a
+ * directory, or the FILE a worktree or submodule has) — what `git rev-parse --show-toplevel` answers
+ * — or `cwd` itself outside a repository. Read off the filesystem rather than asked of `git`: a
+ * spawned git would inherit the caller's `GIT_DIR` and could name a different repository, and the
+ * engine reads no environment to scrub it with.
  */
 export function workspaceRootFor(cwd: string): string {
-  const env: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('GIT_')) env[k] = v
-  const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf-8', env, timeout: 5000 })
-  const top = r.status === 0 ? r.stdout.trim() : ''
-  return top || cwd
+  let dir = cwd
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) return dir
+    const up = dirname(dir)
+    if (up === dir) return cwd
+    dir = up
+  }
 }
 
 // ── The host ────────────────────────────────────────────────────────────────────────────────────
@@ -145,11 +132,11 @@ export const NATIVE_RUN_CEILING = 4
 export const LEASE_TTL_MS = 60_000
 
 export interface RuntimeHostOptions {
-  /** Default `RUNTIME_SESSIONS_DB`. */
+  /** Default `runtimeSessionsDb()`. */
   dbPath?: string
-  /** Default `CONTENT_DIR`. */
+  /** Default the host's content dir. */
   contentDir?: string
-  /** The journal. `undefined` = the machine's (`openJournal()`); `null` = none. */
+  /** The journal. `undefined` = the host's (`host().journal.sink()`); `null` = none. */
   journal?: ProviderJournalSink | null
   /** A test's scripted model. Default: the Anthropic client over the key store. */
   clientFor?: (provider: ProviderId) => ProviderClient
@@ -201,20 +188,17 @@ export interface RuntimeHost {
  * number of surfaces watch (§24.2).
  */
 export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<RuntimeHost> {
-  const dbPath = opts.dbPath ?? RUNTIME_SESSIONS_DB
+  const dbPath = opts.dbPath ?? runtimeSessionsDb()
   mkdirSync(join(dbPath, '..'), { recursive: true, mode: 0o700 })
   // The store's own default treats every holder as alive, which would leave a session whose driver
   // was killed un-resumable until its lease expired. Here the host can ask the OS.
   const store = openSqliteSessionStore(dbPath, { isAlive: opts.isAlive ?? pidAlive })
-  const content = createFileContentStore(opts.contentDir ?? CONTENT_DIR)
+  const content = createFileContentStore(opts.contentDir ?? host().paths.contentDir)
+  // The HOST owns the journal and its lifetime: the engine appends and never closes it.
   let journal: ProviderJournalSink | null
-  let closeJournal: (() => void) | null = null
   if (opts.journal === undefined) {
     try {
-      const { openJournal } = await import('./journal/journal')
-      const j = await openJournal()
-      journal = j
-      closeJournal = () => j.close()
+      journal = (await host().journal.sink()) as ProviderJournalSink | null
     } catch {
       journal = null
     }
@@ -306,7 +290,6 @@ export async function createRuntimeHost(opts: RuntimeHostOptions = {}): Promise<
     async dispose() {
       for (const id of [...refreshers.keys()]) stopRefresh(id)
       await tools.dispose()
-      closeJournal?.()
       const closable = store as SessionStore & { close?: () => void }
       closable.close?.()
     },

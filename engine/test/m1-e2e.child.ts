@@ -5,13 +5,24 @@
  * (no provider call, no key), and the journal is a JSONL file the parent can read. Test support only —
  * never imported by the product.
  *
- * Env: AGT_M1_DIR (state dir), AGT_M1_PHASE ('1' | '2'). argv: the `agentop code` arguments.
+ * THE ENGINE IS LOADED BY THE PUBLIC HOST (ES.6a). Before anything runs, the PUBLIC `loadEngine()`
+ * creates this engine with the public `hostServices()` and judges it with `checkEngine` against the
+ * public guard table — through the generated slot when it names an engine (`AGENTISTICS_ENGINE_DIR`,
+ * the official build's path), and otherwise with this checkout's `createEngine` handed in. Either way
+ * every machine fact the session reads (the data dir, the BETA flag, "is this a central", the policy
+ * floor) is the real host's answer, and a slot naming some OTHER checkout is caught: this checkout's
+ * host would then never be installed, and the child says so and exits.
+ *
+ * Env: AGT_M1_DIR (state dir), AGT_M1_PHASE ('1' | '2'). argv: the `agentop code` arguments. Writes
+ * `loaded-via-<phase>` with `slot` or `direct`.
  * Phase 2 attaches a SECOND watcher to the resumed session before `runCode` drives it, and writes
  * every frame it sees to `watcher2.jsonl` — the "second surface" of §24.3.
  */
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fromAnthropicStopReason, fromAnthropicUsage, type AgentisticsEvent } from '@agentistics/core'
+import { engine, loadEngine } from '@agentistics/server/server/engine/load'
+import { engineSlot } from '@agentistics/server/server/engine-slot.generated'
 import {
   createSessionHub,
   type InvocationResult,
@@ -20,11 +31,25 @@ import {
   type ProviderRequest,
   type ProviderStreamEvent,
 } from '@agentistics/runtime'
-import { runCode } from './cli-code.ts'
-import { createRuntimeHost } from './runtime-host.ts'
+import { runCode } from '../src/cli-code.ts'
+import { createRuntimeHost } from '../src/runtime-host.ts'
+import { hostInstalled } from '../src/host.ts'
+import { createEngine } from '../src/index.ts'
 
 const dir = process.env.AGT_M1_DIR!
 const phase = process.env.AGT_M1_PHASE!
+
+const via = engineSlot === 'null' ? 'direct' : 'slot'
+const status = await loadEngine(via === 'slot' ? {} : { create: createEngine })
+if (!status.present || !engine()?.manifest.provides.nativeRuntime) {
+  console.error(`the public host did not load this engine: ${JSON.stringify(status)}`)
+  process.exit(3)
+}
+if (!hostInstalled()) {
+  console.error('the public slot names a different engine checkout — this one was never given a host')
+  process.exit(3)
+}
+writeFileSync(join(dir, `loaded-via-${phase}`), via)
 const use = (id: string, name: string, input: unknown): ProviderContent => ({ type: 'tool_use', id, name, input })
 
 const PATCH = [

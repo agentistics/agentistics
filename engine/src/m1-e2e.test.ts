@@ -10,6 +10,11 @@
  *      the interrupted call is resolved to a terminal event (never left dangling), the run is ended
  *      `lost`, and the model's next request carries a tool_result saying what happened;
  *   4. a SECOND WATCHER on that session sees exactly the event stream the journal received.
+ *
+ * Both processes get this engine from the PUBLIC host's loader (`engine/test/m1-e2e.child.ts`): through the
+ * generated slot when it names an engine (`AGENTISTICS_ENGINE_DIR` — run
+ * `bun packages/server/scripts/engine-slot.ts` in the public checkout first), otherwise by handing the
+ * loader this checkout's `createEngine`. The run says which (`loaded-via-*`).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
@@ -18,7 +23,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 
-const CHILD = join(import.meta.dir, 'm1-e2e.child.ts')
+const CHILD = join(import.meta.dir, '..', 'test', 'm1-e2e.child.ts')
 
 let root: string
 let ws: string
@@ -28,7 +33,7 @@ beforeAll(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'agt-m1-')))
   ws = join(root, 'repo')
   state = join(root, 'state')
-  await mkdir(ws); await mkdir(state)
+  await mkdir(ws); await mkdir(state); await mkdir(join(root, 'home'))
   await writeFile(join(ws, 'hello.ts'), "export const greeting = 'hello'\n")
   const git = (...a: string[]) => Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: ws, env: gitTestEnv() })
   git('init', '-q'); git('add', '.'); git('commit', '-qm', 'init')
@@ -44,6 +49,7 @@ function start(phase: '1' | '2', args: string[]): Child {
   env.AGT_M1_DIR = state
   env.AGT_M1_PHASE = phase
   env.AGENTISTICS_DIR = join(root, 'agentistics-home')
+  env.HOME = join(root, 'home') // the public host reads $HOME for every path it hands the engine
   env.AGENTISTICS_PROVIDER = '1' // the BETA flag, exactly as the owner turns it on
   const proc = Bun.spawn([process.execPath, CHILD, ...args], { cwd: ws, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
   let buf = ''
@@ -124,5 +130,10 @@ describe('M1 — a native session outlives the process that drove it', () => {
     const journaled = after.filter(e => e.sessionId === sessionId).map(e => e.eventId)
     expect(seen).toEqual(journaled)
     expect(seen.length).toBeGreaterThan(3)
+
+    // Both processes ran this engine as the PUBLIC host loaded it, and by the same route.
+    const via = ['1', '2'].map(ph => readFileSync(join(state, `loaded-via-${ph}`), 'utf8'))
+    expect(via[0]).toBe(via[1]!)
+    console.log(`M1: the engine was loaded by the public host via ${via[0]}`)
   }, 60_000)
 })

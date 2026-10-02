@@ -50,7 +50,8 @@ import {
   type SessionContentStore,
   type SessionWatcher,
 } from '@agentistics/runtime'
-import { PROVIDER_FLAG_ENV, providerFlagOn } from './config.ts'
+import type { CodeHost } from '@agentistics/engine-api'
+import { PROVIDER_FLAG_ENV, providerFlagOn } from './provider/provider-config.ts'
 import { createRuntimeHost, workspaceRootFor, type RuntimeHost } from './runtime-host.ts'
 
 // ── The host seam this module needs beyond `RuntimeHost` (module doc) ──────────────────────────
@@ -61,10 +62,9 @@ export interface CodeRuntimeHost {
   /** `null` when no journal could be opened — repairs/runs are then counted lost, never thrown. */
   journal: ProviderJournalSink | null
   runtimeVersion: string
-  /** Closes whatever this factory opened beyond what `host.dispose()` already closes — a journal
-   *  `createRuntimeHost` did not open itself never gets closed by its own `dispose()` (it only
-   *  closes a journal it opened via its own `opts.journal === undefined` branch). Absent: nothing
-   *  extra to close (the default case for a test's in-memory recorder). */
+  /** Closes whatever this factory opened beyond what `host.dispose()` already closes. The HOST's
+   *  journal is never closed here — the host owns it (`EngineHostServices.journal`). Absent: nothing
+   *  extra to close. */
   close?: () => void
 }
 
@@ -73,6 +73,28 @@ export type CodeHostFactory = (askerFor: (sessionId: string) => PersonAsker) => 
 async function defaultHost(askerFor: (sessionId: string) => PersonAsker): Promise<CodeRuntimeHost> {
   const host = await createRuntimeHost({ askerFor })
   return { host, content: host.content, journal: host.journal, runtimeVersion: host.runtimeVersion }
+}
+
+/**
+ * The engine's `codeHost` (engine-api `Engine.codeHost`): the SAME session host `agentop code` drives,
+ * with every policy ask routed to the asker the control center passes in. The contract's `CodeHost` is
+ * opaque in this version — the host only hands it back to the renderer it came with — so what the
+ * `code` tab will read is carried beside the two contract fields, and nothing else here reaches for it.
+ */
+export interface EngineCodeHost extends CodeHost {
+  readonly runtime: CodeRuntimeHost
+}
+
+export async function createCodeHost(askerFor: (sessionId: string) => PersonAsker): Promise<EngineCodeHost> {
+  const runtime = await defaultHost(askerFor)
+  return {
+    kind: 'code-host',
+    runtime,
+    async dispose() {
+      runtime.close?.()
+      await runtime.host.dispose()
+    },
+  }
 }
 
 // ── CLI deps (every side effect injectable — offline tests drive the whole surface) ────────────

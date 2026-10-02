@@ -9,13 +9,15 @@
  *  3. builds the integration registry — TOTAL over `HarnessId` (spec §9) — and derives the
  *     manifest's `replay` from it rather than restating it;
  *  4. offers the provider route and the `provider` verb, exactly as the public tree's
- *     `engine/in-tree.ts` packaged them before the move.
+ *     `engine/in-tree.ts` packaged them before the move;
+ *  5. offers the native sessions (B4, replayed by ES.6a): the `/api/runtime/sessions` route — every
+ *     B4 resource nested under that ONE reserved prefix (leader decision Q-4) — and the `code` verb.
  *
- * What it does NOT offer yet, and why: `code` (the native harness cockpit) and `ingest` (live
- * ingestion, A5) are not on the public `main` this engine was cut from — they live on
- * `held/feat/harness-tui-p2` and `feat/a5-live-ingestion`, and arrive by the step-6 replay. Absent
- * from `commands`, the host answers them with its own "not provided yet" sentence, which is the
- * behaviour the official build has today.
+ * What it does NOT offer yet, and why: `ingest` (live ingestion, A5) lives on
+ * `feat/a5-live-ingestion` and arrives by its own step-6 replay. Absent from `commands`, the host
+ * answers `agentop ingest` with its own "not provided yet" sentence. `codeHost` is offered (the session
+ * host the `code` tab will drive), but the control center's `code` TAB that renders it arrives with
+ * `held/feat/harness-tui-p2` — until then the public host does not read it.
  *
  * Everything heavy is imported inside a handler: the host imports the slot for every command, and
  * `agentop --version` must not pay for the AI SDK.
@@ -85,6 +87,42 @@ export const createEngine: CreateEngine<AgentisticsEvent> = async host => {
     },
   }
 
+  const sessionsRoute: EngineRoute = {
+    prefix: '/api/runtime/sessions',
+    capability: 'localShell',
+    async handle(req, url) {
+      const { handleRuntimeSessionsRequest } = await import('./runtime-sessions-web')
+      try {
+        const out = await handleRuntimeSessionsRequest(req, url)
+        if (out === null) return null
+        if (out.kind === 'stream') {
+          return new Response(out.stream, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' },
+          })
+        }
+        return Response.json(out.body, { status: out.status })
+      } catch (err) {
+        // A message body is a person's prompt: an unexpected failure is rendered NON-verbose.
+        const safe = host.safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return Response.json(safe.body, { status: 500 })
+      }
+    },
+  }
+
+  const codeCommand: EngineCommand = {
+    verb: 'code',
+    summary: {
+      en: "BETA — the terminal front door onto a native session: runs a conversation against your stored Anthropic key, asking you here for anything not allowlisted ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')",
+      pt: "BETA — a porta de entrada no terminal para uma sessão nativa: conduz uma conversa com a sua chave Anthropic guardada, perguntando aqui por tudo que não está na lista permitida ('code [--model <id>] [prompt]'; 'code --resume <id>'; 'code ls')",
+    },
+    async run(args, io) {
+      const { runCode } = await import('./cli-code')
+      return runCode(args, { stdout: line => io.out(line), stderr: line => io.err(line) })
+    },
+  }
+
   const integrations = createIntegrations()
   const replay: HarnessId[] = HARNESS_ORDER.filter(h => hasReplay(integrations[h]))
 
@@ -93,11 +131,15 @@ export const createEngine: CreateEngine<AgentisticsEvent> = async host => {
       name: ENGINE_NAME,
       version: ENGINE_VERSION,
       apiVersion: BUILT_AGAINST_API,
-      provides: { nativeRuntime: false, replay, live: [], providers: [...PROVIDERS] },
+      provides: { nativeRuntime: true, replay, live: [], providers: [...PROVIDERS] },
     },
     integrations,
-    routes: [providerRoute],
-    commands: [providerCommand],
+    routes: [providerRoute, sessionsRoute],
+    commands: [providerCommand, codeCommand],
+    async codeHost(askerFor) {
+      const { createCodeHost } = await import('./cli-code')
+      return createCodeHost(askerFor)
+    },
     async dispose() {},
   }
   return engine

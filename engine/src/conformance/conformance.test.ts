@@ -87,7 +87,7 @@ describe('the kit is not vacuous — each broken engine fails by name', () => {
     ['integration.replay-xor-absent', e => { e.integrations.codex = { ...e.integrations.codex!, replayAbsent: 'both at once' } as never }],
     ['manifest.replay', e => { e.manifest.provides.replay = ['claude'] }],
     ['replay.discover', e => { e.integrations.gemini = { ...e.integrations.gemini!, replay: { discover: async () => { throw new Error('unreadable') }, replay: async () => ({ events: [], cursor: null }) } } as never }],
-    ['codeHost', e => { e.manifest.provides.nativeRuntime = true }],
+    ['codeHost', e => { e.manifest.provides.nativeRuntime = true; delete (e as { codeHost?: unknown }).codeHost }],
     ['dispose', e => { e.dispose = async () => { throw new Error('stuck') } }],
   ]
   for (const [check, mutate] of cases) {

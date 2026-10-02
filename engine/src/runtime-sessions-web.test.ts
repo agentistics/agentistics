@@ -206,8 +206,15 @@ describe('matchRuntimeSessionsRoute', () => {
     expect(matchRuntimeSessionsRoute('/api/runtime/sessions/ses_1')).toEqual({ kind: 'session', id: 'ses_1' })
     expect(matchRuntimeSessionsRoute('/api/runtime/sessions/ses_1/messages')).toEqual({ kind: 'messages', id: 'ses_1' })
     expect(matchRuntimeSessionsRoute('/api/runtime/sessions/ses_1/stream')).toEqual({ kind: 'stream', id: 'ses_1' })
-    expect(matchRuntimeSessionsRoute('/api/runtime/tools/tx_1/approve')).toEqual({ kind: 'approve', execId: 'tx_1' })
-    expect(matchRuntimeSessionsRoute('/api/runtime/runs/run_1/cancel')).toEqual({ kind: 'cancel', id: 'run_1' })
+    expect(matchRuntimeSessionsRoute('/api/runtime/sessions/ses_1/tools/tx_1/approve')).toEqual({ kind: 'approve', id: 'ses_1', execId: 'tx_1' })
+    expect(matchRuntimeSessionsRoute('/api/runtime/sessions/ses_1/runs/run_1/cancel')).toEqual({ kind: 'cancel', id: 'ses_1', runId: 'run_1' })
+  })
+  test('Q-4: nothing outside the one reserved prefix is matched — B4\'s old top-level paths included', () => {
+    expect(matchRuntimeSessionsRoute('/api/runtime/tools/tx_1/approve')).toBeNull()
+    expect(matchRuntimeSessionsRoute('/api/runtime/runs/run_1/cancel')).toBeNull()
+  })
+  test('a segment that is not valid percent-encoding names nothing', () => {
+    expect(matchRuntimeSessionsRoute('/api/runtime/sessions/%E0%A4%A')).toBeNull()
   })
   test('a session id can never be read as a sub-resource word', () => {
     expect(matchRuntimeSessionsRoute('/api/runtime/sessions/messages')).toEqual({ kind: 'session', id: 'messages' })
@@ -247,9 +254,11 @@ describe('parseSendMessageBody', () => {
 })
 
 describe('parseApproveBody', () => {
-  test('requires sessionId and questionId', () => {
+  test('requires questionId; sessionId is the path\'s and optional in the body', () => {
     expect(parseApproveBody({}).ok).toBe(false)
     expect(parseApproveBody({ sessionId: 's' }).ok).toBe(false)
+    expect(parseApproveBody({ questionId: 'q', sessionId: '' }).ok).toBe(false)
+    expect(parseApproveBody({ questionId: 'q' })).toEqual({ ok: true, body: { questionId: 'q' } })
   })
   test('accepts an optional choice/text', () => {
     expect(parseApproveBody({ sessionId: 's', questionId: 'q', choice: 0 })).toEqual({ ok: true, body: { sessionId: 's', questionId: 'q', choice: 0 } })
@@ -406,15 +415,23 @@ describe('the shared session: two watchers, one run, an ask both can see', () =>
     const execId = questionId.replace(/:permission$/, '')
     expect(questionId.startsWith(execId)).toBe(true)
 
+    const approvePath = `/api/runtime/sessions/${sessionId}/tools/${execId}/approve`
+    const mismatched = await jsonOf(await handleRuntimeSessionsRequest(
+      jsonReq(approvePath, { sessionId: 'ses_other', questionId, choice: 0 }),
+      new URL(`http://localhost${approvePath}`), d,
+    ))
+    expect(mismatched.status).toBe(400)
+    expect((mismatched.body as { code: string }).code).toBe('session_id_mismatch')
+
     const approved = await jsonOf(await handleRuntimeSessionsRequest(
-      jsonReq(`/api/runtime/tools/${execId}/approve`, { sessionId, questionId, choice: 0 }),
-      new URL(`http://localhost/api/runtime/tools/${execId}/approve`), d,
+      jsonReq(approvePath, { questionId, choice: 0 }),
+      new URL(`http://localhost${approvePath}`), d,
     ))
     expect(approved).toEqual({ status: 200, body: { accepted: true } })
 
     const approvedAgain = await jsonOf(await handleRuntimeSessionsRequest(
-      jsonReq(`/api/runtime/tools/${execId}/approve`, { sessionId, questionId, choice: 0 }),
-      new URL(`http://localhost/api/runtime/tools/${execId}/approve`), d,
+      jsonReq(approvePath, { sessionId, questionId, choice: 0 }),
+      new URL(`http://localhost${approvePath}`), d,
     ))
     expect(approvedAgain.status).toBe(409)
     expect((approvedAgain.body as { accepted: boolean }).accepted).toBe(false)
@@ -467,7 +484,7 @@ describe('POST /api/runtime/sessions/:id/messages — the lease', () => {
   })
 })
 
-describe('POST /api/runtime/runs/:id/cancel', () => {
+describe('POST /api/runtime/sessions/:id/runs/:runId/cancel', () => {
   test('ends a running run as abandoned', async () => {
     const root = await tempRoot()
     const bundle = await makeBundle({
@@ -492,9 +509,22 @@ describe('POST /api/runtime/runs/:id/cancel', () => {
     const run = await waitFor(() => bundle.host.store.latestRun(sessionId))
     expect(run.status).toBe('running')
 
+    const cancelPath = `/api/runtime/sessions/${sessionId}/runs/${run.runId}/cancel`
+    // A run is cancelled only in the session that owns it.
+    const otherSession = await jsonOf(await handleRuntimeSessionsRequest(
+      jsonReq('/api/runtime/sessions', { cwd: root, model: 'claude-x' }),
+      new URL('http://localhost/api/runtime/sessions'), d,
+    ))
+    const otherId = (otherSession.body as { session: { sessionId: string } }).session.sessionId
+    const wrongPath = `/api/runtime/sessions/${otherId}/runs/${run.runId}/cancel`
+    const wrong = await jsonOf(await handleRuntimeSessionsRequest(
+      req(wrongPath, { method: 'POST' }), new URL(`http://localhost${wrongPath}`), d,
+    ))
+    expect(wrong.status).toBe(404)
+
     const cancelled = await jsonOf(await handleRuntimeSessionsRequest(
-      req(`/api/runtime/runs/${run.runId}/cancel`, { method: 'POST' }),
-      new URL(`http://localhost/api/runtime/runs/${run.runId}/cancel`), d,
+      req(cancelPath, { method: 'POST' }),
+      new URL(`http://localhost${cancelPath}`), d,
     ))
     expect(cancelled).toEqual({ status: 200, body: { cancelled: true } })
 
@@ -505,8 +535,8 @@ describe('POST /api/runtime/runs/:id/cancel', () => {
     expect(settled.status).toBe('abandoned')
 
     const cancelledAgain = await jsonOf(await handleRuntimeSessionsRequest(
-      req(`/api/runtime/runs/${run.runId}/cancel`, { method: 'POST' }),
-      new URL(`http://localhost/api/runtime/runs/${run.runId}/cancel`), d,
+      req(cancelPath, { method: 'POST' }),
+      new URL(`http://localhost${cancelPath}`), d,
     ))
     expect(cancelledAgain).toEqual({ status: 200, body: { cancelled: false } })
   })

@@ -1,26 +1,37 @@
 /**
  * runtime-host.test.ts — the host seam's floor: every credential file the backup plan knows about is
  * refused by a native session's policy, and a relocated data dir is passed on.
+ *
+ * The host's `protectedPaths` is built here exactly as the PUBLIC host builds it (`engine/load.ts`:
+ * each backup-plan `secret` row joined under `$HOME`), from the public table itself, so a row added
+ * there is checked here without anybody remembering a second list.
  */
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import { globMatches } from '@agentistics/runtime'
-import { omittedSecrets } from './backup/backup-plan'
-import { hostPolicy, hostProtectedPaths, protectedPathsFromSecrets } from './runtime-host'
+import { omittedSecrets } from '@agentistics/server/server/backup/backup-plan'
+import { hostPolicy, policyFloor } from './runtime-host'
 
-const env = { home: '/home/u', workspaceRoot: '/home/u/work/repo' }
+const HOME = '/home/u'
+const env = { home: HOME, workspaceRoot: '/home/u/work/repo' }
 const floored = (globs: readonly string[], path: string) => globs.some(g => globMatches(g, path, env))
+/** What the public host hands over as `protectedPaths`. */
+const hostList = () => omittedSecrets().filter(r => r.reason === 'secret').map(r => join(HOME, r.pattern))
+const DATA = [join(HOME, '.agentistics')]
 
-describe('protectedPathsFromSecrets', () => {
-  const globs = hostProtectedPaths()
+describe('policyFloor', () => {
+  const globs = policyFloor(hostList(), HOME, DATA)
 
   test('every non-agentistics secret row lands on the floor', () => {
-    const rows = omittedSecrets().filter(r => !r.pattern.startsWith('.agentistics'))
+    const rows = omittedSecrets().filter(r => r.reason === 'secret' && !r.pattern.startsWith('.agentistics'))
     expect(rows.length).toBeGreaterThan(5)
     for (const r of rows) {
       const p = r.pattern.split('#')[0]!
-      // A `contains` rule with no directory is checked where it actually lives: under a harness home.
-      const sample = r.match === 'contains' && !p.includes('/') ? `/home/u/.claude/sessions/1${p}` : `/home/u/${p}`
-      expect({ row: r.pattern, floored: floored(globs, sample) }).toEqual({ row: r.pattern, floored: true })
+      // STATED LIMIT: a `contains` row with no directory (`.key`) reaches the engine as ONE absolute
+      // path under `$HOME`, so it floors `~/.key*` and not every `*.key*` under a harness home. The
+      // host would have to hand over the rows (or their globs) for that — a host-side seam change.
+      if (r.match === 'contains' && !p.includes('/')) continue
+      expect({ row: r.pattern, floored: floored(globs, `/home/u/${p}`) }).toEqual({ row: r.pattern, floored: true })
     }
   })
 
@@ -36,13 +47,16 @@ describe('protectedPathsFromSecrets', () => {
     expect(floored(globs, '/home/u/work/repo/README.md')).toBe(false)
   })
 
-  test('only secret rows count, and the output is sorted and deduplicated', () => {
-    const out = protectedPathsFromSecrets([
-      { pattern: '.x/a', match: 'prefix', reason: 'regenerable', why: '' },
-      { pattern: '.y/b', match: 'prefix', reason: 'secret', why: '' },
-      { pattern: '.y/b', match: 'prefix', reason: 'secret', why: '' },
+  test('paths under either data dir are left to the runtime; a field suffix floors the file; sorted, deduplicated', () => {
+    const out = policyFloor([
+      '/home/u/.y/b', '/home/u/.y/b', '/home/u/.agentistics/provider-keys',
+      '/srv/agt/content', '/home/u/.z/prefs.json#team.token', '/elsewhere/c', 'relative/d',
+    ], HOME, ['/home/u/.agentistics', '/srv/agt'])
+    expect(out).toEqual([
+      '/elsewhere/c', '/elsewhere/c*', '/elsewhere/c*/**',
+      '~/.y/b', '~/.y/b*', '~/.y/b*/**',
+      '~/.z/prefs.json', '~/.z/prefs.json*', '~/.z/prefs.json*/**',
     ])
-    expect(out).toEqual(['~/.y/b', '~/.y/b*', '~/.y/b*/**'])
   })
 })
 

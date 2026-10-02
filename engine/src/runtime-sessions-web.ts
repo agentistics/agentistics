@@ -1,8 +1,16 @@
 /**
  * runtime-sessions-web.ts — `/api/runtime/sessions`, `/api/runtime/sessions/:id/messages`,
- * `/api/runtime/sessions/:id/stream`, `/api/runtime/tools/:execId/approve` and
- * `/api/runtime/runs/:id/cancel` (B4.3, §28 subset — spec docs/superpowers/specs/
- * 2026-09-27-runtime-b4-sessions.md §5, §7). The door onto the shared-session hub (`hub.ts`) and the
+ * `/api/runtime/sessions/:id/stream`, `/api/runtime/sessions/:id/tools/:execId/approve` and
+ * `/api/runtime/sessions/:id/runs/:runId/cancel` (B4.3, §28 subset — spec docs/superpowers/specs/
+ * 2026-09-27-runtime-b4-sessions.md §5, §7).
+ *
+ * ## One prefix (ES.6a, leader decision Q-4)
+ *
+ * B4 spread these over three prefixes (`/api/runtime/sessions`, `/api/runtime/tools`,
+ * `/api/runtime/runs`). An engine route may only live under a RESERVED prefix (engine-api
+ * `RESERVED_PREFIXES`), and that list is not widened, so the approve and cancel resources are nested
+ * under the session they act on. The nesting also makes both checkable: a question or a run is
+ * answered only in the session the path names. The door onto the shared-session hub (`hub.ts`) and the
  * B4.1/B4.2 runtime (`runtime.ts`, `resume.ts`) over ONE `RuntimeHost` per server process
  * (`runtime-host.ts`).
  *
@@ -15,15 +23,15 @@
  *
  * ## Order of refusals
  *
- * 1. `isCentral()` → 403 `central` — the native runtime does not run on a central (no host to spawn
+ * 1. `host.isCentral()` → 403 `central` — the native runtime does not run on a central (no host to spawn
  *    a session on, no visibility into a member's).
  * 2. A route-specific validation (a bad `cwd`, a missing body field) → 400/413.
- * 3. A capability ceiling this machine cannot honour right now (`admitSpawn`) → 503.
+ * 3. A capability ceiling this machine cannot honour right now (`admitNativeSession`, over `host.spawnBudget()`) → 503.
  * 4. Not found → 404.
  *
- * `capability-guard.ts` has already required `localShell` on every one of these paths before this
- * runs (`/api/runtime/sessions`, `/api/runtime/runs`, `/api/runtime/tools`, all three PREFIXES); the
- * auth gate has already required a session wherever there is one. An unexpected failure past this
+ * The host's `capability-guard.ts` has already required `localShell` on `/api/runtime/sessions` before
+ * this runs (the engine route declares that same capability and the host refuses it at load if it
+ * ever differs); the auth gate has already required a session wherever there is one. An unexpected failure past this
  * point is the caller's `safeError`, same as `/api/provider`.
  *
  * ## The driver — "first send" is per PROCESS, tracked here
@@ -39,16 +47,9 @@
 
 import { isAbsolute } from 'node:path'
 import { stat } from 'node:fs/promises'
-import {
-  admitSpawn,
-  admissionRefusalBody,
-  type AdmissionLang,
-  type SpawnBudget,
-} from './sessions/spawn-admission'
-import { readSpawnBudget } from './sessions/memory-probe'
 import { createRuntimeHost, workspaceRootFor, type RuntimeHost } from './runtime-host'
-import { readJsonLimited } from './limits'
-import { PROVIDER_FLAG_ENV, providerFlagOn } from './config'
+import { host } from './host'
+import { PROVIDER_FLAG_ENV } from './provider/provider-config'
 import {
   encodeOutboundFrame,
   MAX_CLIENT_REF_LEN,
@@ -62,6 +63,7 @@ import {
   type ResumeDeps,
   type SessionWatcher,
 } from '@agentistics/runtime'
+import type { EngineSpawnBudget } from '@agentistics/engine-api'
 
 /**
  * A route REFUSAL code (HTTP answer to the caller), never a notification code. Spelled through this
@@ -86,36 +88,24 @@ async function buildLiveBundle(): Promise<RuntimeSessionsBundle> {
 let liveBundle: Promise<RuntimeSessionsBundle> | null = null
 const liveDriven = new Set<string>()
 
-async function defaultIsCentral(): Promise<boolean> {
-  const { TEAM_CENTRAL } = await import('./config')
-  if (TEAM_CENTRAL) return true
-  try {
-    const { readPreferences } = await import('./preferences.ts')
-    const prefs = await readPreferences()
-    const mode: string | undefined = prefs.team?.mode
-    return mode === 'central'
-  } catch {
-    return false
-  }
-}
-
 export interface RuntimeSessionsWebDeps {
   isCentral: () => Promise<boolean>
-  /** `providerFlagOn()` — the native runtime's BETA flag. Absent reads OFF, as `/api/provider` does. */
+  /** The native runtime's BETA flag, as the host reads it. Absent reads OFF, as `/api/provider` does. */
   flagOn: () => boolean
   /** Lazily built, ONE per process — see file header. */
   host: () => Promise<RuntimeSessionsBundle>
-  readSpawnBudget: () => Promise<SpawnBudget | null>
+  /** The host's admission-control budget (`host.spawnBudget()`). */
+  readSpawnBudget: () => Promise<EngineSpawnBudget | null>
   /** Sessions this process has already taken the lease and attached a driver for — see file header. */
   driven: Set<string>
 }
 
 export function defaultRuntimeSessionsWebDeps(): RuntimeSessionsWebDeps {
   return {
-    isCentral: defaultIsCentral,
-    flagOn: () => providerFlagOn(),
+    isCentral: async () => host().isCentral(),
+    flagOn: () => host().flag('provider'),
     host: () => (liveBundle ??= buildLiveBundle()),
-    readSpawnBudget,
+    readSpawnBudget: () => host().spawnBudget(),
     driven: liveDriven,
   }
 }
@@ -133,30 +123,36 @@ export type RuntimeSessionsRoute =
   | { kind: 'session'; id: string }
   | { kind: 'messages'; id: string }
   | { kind: 'stream'; id: string }
-  | { kind: 'approve'; execId: string }
-  | { kind: 'cancel'; id: string }
+  | { kind: 'approve'; id: string; execId: string }
+  | { kind: 'cancel'; id: string; runId: string }
+
+/** The one prefix every route here lives under — a RESERVED engine prefix (engine-api). */
+export const RUNTIME_SESSIONS_PREFIX = '/api/runtime/sessions'
+
+const SEG = '([^/]+)'
+const ROUTES: { re: RegExp; make: (m: string[]) => RuntimeSessionsRoute }[] = [
+  { re: new RegExp(`^/api/runtime/sessions/${SEG}/messages/?$`), make: m => ({ kind: 'messages', id: m[0]! }) },
+  { re: new RegExp(`^/api/runtime/sessions/${SEG}/stream/?$`), make: m => ({ kind: 'stream', id: m[0]! }) },
+  { re: new RegExp(`^/api/runtime/sessions/${SEG}/tools/${SEG}/approve/?$`), make: m => ({ kind: 'approve', id: m[0]!, execId: m[1]! }) },
+  { re: new RegExp(`^/api/runtime/sessions/${SEG}/runs/${SEG}/cancel/?$`), make: m => ({ kind: 'cancel', id: m[0]!, runId: m[1]! }) },
+  { re: new RegExp(`^/api/runtime/sessions/${SEG}/?$`), make: m => ({ kind: 'session', id: m[0]! }) },
+]
 
 /** PURE: which of the five §28 resources a path names, or `null` when it is none of them. The
- *  sub-resources (`/messages`, `/stream`, `/approve`, `/cancel`) are matched explicitly so a session
- *  id can never itself be read as one of those words. */
+ *  sub-resources (`/messages`, `/stream`, `/tools/:execId/approve`, `/runs/:runId/cancel`) are matched
+ *  explicitly and anchored, so a session id can never itself be read as one of those words. A path
+ *  segment that is not valid percent-encoding names nothing. */
 export function matchRuntimeSessionsRoute(pathname: string): RuntimeSessionsRoute | null {
-  if (pathname === '/api/runtime/sessions' || pathname === '/api/runtime/sessions/') return { kind: 'sessions' }
-
-  let m = /^\/api\/runtime\/sessions\/([^/]+)\/messages\/?$/.exec(pathname)
-  if (m) return { kind: 'messages', id: decodeURIComponent(m[1]!) }
-
-  m = /^\/api\/runtime\/sessions\/([^/]+)\/stream\/?$/.exec(pathname)
-  if (m) return { kind: 'stream', id: decodeURIComponent(m[1]!) }
-
-  m = /^\/api\/runtime\/sessions\/([^/]+)\/?$/.exec(pathname)
-  if (m) return { kind: 'session', id: decodeURIComponent(m[1]!) }
-
-  m = /^\/api\/runtime\/tools\/([^/]+)\/approve\/?$/.exec(pathname)
-  if (m) return { kind: 'approve', execId: decodeURIComponent(m[1]!) }
-
-  m = /^\/api\/runtime\/runs\/([^/]+)\/cancel\/?$/.exec(pathname)
-  if (m) return { kind: 'cancel', id: decodeURIComponent(m[1]!) }
-
+  if (pathname === RUNTIME_SESSIONS_PREFIX || pathname === `${RUNTIME_SESSIONS_PREFIX}/`) return { kind: 'sessions' }
+  for (const r of ROUTES) {
+    const m = r.re.exec(pathname)
+    if (!m) continue
+    try {
+      return r.make(m.slice(1).map(x => decodeURIComponent(x)))
+    } catch {
+      return null
+    }
+  }
   return null
 }
 
@@ -206,17 +202,20 @@ export function parseSendMessageBody(raw: unknown): { ok: true; body: SendMessag
   return { ok: true, body: { clientRef: raw.clientRef, text: raw.text } }
 }
 
-export interface ApproveBody { sessionId: string; questionId: string; choice?: number; text?: string }
+/** `sessionId` is the PATH's (Q-4). A body may still carry one — B4's clients sent it — and then it
+ *  must name the same session, or the request is refused rather than one of the two believed. */
+export interface ApproveBody { questionId: string; sessionId?: string; choice?: number; text?: string }
 
 export function parseApproveBody(raw: unknown): { ok: true; body: ApproveBody } | Refused {
   if (!isPlainRecord(raw)) return bad('bad_request', 'the request body is not a JSON object.')
-  if (typeof raw.sessionId !== 'string' || raw.sessionId.length === 0) {
-    return bad('session_id_required', '"sessionId" is required and must be a non-empty string.')
+  if (raw.sessionId !== undefined && (typeof raw.sessionId !== 'string' || raw.sessionId.length === 0)) {
+    return bad('bad_request', '"sessionId", when given, must be a non-empty string.')
   }
   if (typeof raw.questionId !== 'string' || raw.questionId.length === 0) {
     return bad('question_id_required', '"questionId" is required and must be a non-empty string.')
   }
-  const body: ApproveBody = { sessionId: raw.sessionId, questionId: raw.questionId }
+  const body: ApproveBody = { questionId: raw.questionId }
+  if (typeof raw.sessionId === 'string') body.sessionId = raw.sessionId
   if (raw.choice !== undefined) {
     if (typeof raw.choice !== 'number' || !Number.isInteger(raw.choice) || raw.choice < 0) {
       return bad('bad_choice', '"choice" must be a non-negative integer.')
@@ -248,12 +247,33 @@ function methodNotAllowed(): RuntimeSessionsResult {
   return j(405, { code: rc('method_not_allowed'), sentence: 'this method is not supported on this path.' })
 }
 
-const ADMISSION_LANG: AdmissionLang = 'en'
+/**
+ * The admission rule this engine can apply with what the host hands over (`EngineSpawnBudget`):
+ * refuse when the host MEASURED a budget and it has no room left. A budget of all zeros is the host
+ * saying it could not measure (its own convention), and an unmeasured machine is admitted, as the
+ * public `admitSpawn` admits it. STATED LIMIT: the contract's budget carries neither the swap alarm
+ * nor the raw memory figures, so the public rule's swap refusal cannot be applied here — a host-side
+ * contract change (the budget's `alarm`, or an `admit()` service) closes that gap.
+ */
+export function admitNativeSession(b: EngineSpawnBudget | null): { admit: true } | { admit: false; body: unknown } {
+  if (!b) return { admit: true }
+  const { max, used, left } = b.budget
+  if (max === 0 && used === 0 && left === 0) return { admit: true }
+  if (left >= 1) return { admit: true }
+  return {
+    admit: false,
+    body: {
+      code: rc('memory_budget'),
+      refusal: { reason: 'no-room', requested: 1, fits: 0, used, max },
+      sentence: `this machine has no room for another session right now (${used} of ${max} running).`,
+    },
+  }
+}
 
 // ── handlers ────────────────────────────────────────────────────────────────────────────────────
 
 async function readBody(req: Request): Promise<{ ok: true; value: unknown } | RuntimeSessionsResult> {
-  const read = await readJsonLimited<unknown>(req, MAX_INBOUND_FRAME_BYTES)
+  const read = await host().readJsonLimited<unknown>(req, MAX_INBOUND_FRAME_BYTES)
   if (read.ok) return { ok: true, value: read.value }
   return read.error === 'too_large'
     ? j(413, { code: rc('too_large'), sentence: 'the request body is too large.' })
@@ -273,8 +293,8 @@ async function handleCreate(req: Request, d: RuntimeSessionsWebDeps): Promise<Ru
     return j(400, { code: rc('cwd_missing'), sentence: `"cwd" does not exist: ${parsed.body.cwd}` })
   }
 
-  const admission = admitSpawn(await d.readSpawnBudget(), 1)
-  if (!admission.admit) return j(503, admissionRefusalBody(admission.refusal, ADMISSION_LANG))
+  const admission = admitNativeSession(await d.readSpawnBudget())
+  if (!admission.admit) return j(503, admission.body)
 
   const bundle = await d.host()
   const workspaceRoot = workspaceRootFor(parsed.body.cwd)
@@ -415,7 +435,7 @@ async function handleStream(id: string, url: URL, signal: AbortSignal, d: Runtim
   return { kind: 'stream', stream: openSessionStream(bundle.host, id, fromSeq, signal) }
 }
 
-async function handleApprove(req: Request, execId: string, d: RuntimeSessionsWebDeps): Promise<RuntimeSessionsResult> {
+async function handleApprove(req: Request, sessionId: string, execId: string, d: RuntimeSessionsWebDeps): Promise<RuntimeSessionsResult> {
   const read = await readBody(req)
   if (!('ok' in read) || !read.ok) return read as RuntimeSessionsResult
   const parsed = parseApproveBody(read.value)
@@ -423,19 +443,28 @@ async function handleApprove(req: Request, execId: string, d: RuntimeSessionsWeb
   if (!parsed.body.questionId.startsWith(execId)) {
     return j(400, { code: rc('question_id_mismatch'), sentence: `"questionId" must start with ${execId}.` })
   }
+  if (parsed.body.sessionId !== undefined && parsed.body.sessionId !== sessionId) {
+    return j(400, { code: rc('session_id_mismatch'), sentence: `"sessionId" must be the session the path names: ${sessionId}.` })
+  }
 
   const bundle = await d.host()
   const ans: { choice?: number; text?: string } = {}
   if (parsed.body.choice !== undefined) ans.choice = parsed.body.choice
   if (parsed.body.text !== undefined) ans.text = parsed.body.text
-  const accepted = bundle.host.hub.answer(parsed.body.sessionId, parsed.body.questionId, ans)
+  const accepted = bundle.host.hub.answer(sessionId, parsed.body.questionId, ans)
   return accepted
     ? j(200, { accepted: true })
     : j(409, { accepted: false, code: rc('no_such_question'), sentence: 'no question with that id is pending in this session.' })
 }
 
-async function handleCancel(runId: string, d: RuntimeSessionsWebDeps): Promise<RuntimeSessionsResult> {
+async function handleCancel(sessionId: string, runId: string, d: RuntimeSessionsWebDeps): Promise<RuntimeSessionsResult> {
   const bundle = await d.host()
+  const session = await bundle.host.runtime.get(sessionId)
+  if (!session) return notFound(sessionId)
+  const run = await bundle.host.store.getRun(runId)
+  if (!run || run.sessionId !== sessionId) {
+    return j(404, { code: rc('not_found'), sentence: `No such run in session ${sessionId}: ${runId}.` })
+  }
   const cancelled = bundle.host.runtime.cancel(runId)
   return j(200, { cancelled })
 }
@@ -443,8 +472,8 @@ async function handleCancel(runId: string, d: RuntimeSessionsWebDeps): Promise<R
 // ── the door ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The one entry point `index.ts` calls. Returns `null` when `url.pathname` names none of these
- * routes, so the caller can fall through to whatever comes next — same convention as
+ * The one entry point the engine's `/api/runtime/sessions` route calls (`index.ts`). Returns `null`
+ * when `url.pathname` names none of these routes, so the host answers 404 — same convention as
  * `handleProviderRequest`.
  */
 export async function handleRuntimeSessionsRequest(
@@ -481,9 +510,9 @@ export async function handleRuntimeSessionsRequest(
       return handleStream(route.id, url, req.signal, d)
     case 'approve':
       if (method !== 'POST') return methodNotAllowed()
-      return handleApprove(req, route.execId, d)
+      return handleApprove(req, route.id, route.execId, d)
     case 'cancel':
       if (method !== 'POST') return methodNotAllowed()
-      return handleCancel(route.id, d)
+      return handleCancel(route.id, route.runId, d)
   }
 }
