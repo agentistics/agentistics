@@ -726,6 +726,12 @@ if (command === 'autostart') {
   const modeArg = args[0]
   const actionArg = args[1]
 
+  // The unit's ExecCondition — see autostart-plan.ts `portHeldVerdict`.
+  if (modeArg === 'guard' && actionArg === 'server') {
+    const { guardServerStart } = await import('../server/autostart.ts')
+    process.exit(await guardServerStart())
+  }
+
   // `agentop autostart status` (no mode) lists every service.
   if (modeArg === 'status' && !actionArg) {
     const res = await autostartStatus()
