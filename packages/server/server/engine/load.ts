@@ -22,14 +22,17 @@
 import {
   ENGINE_API_VERSION,
   checkEngine,
+  protectedGlobs,
   type CreateEngine,
   type Engine,
   type EngineHostServices,
   type EngineRefusal,
+  type EngineSpawnBudget,
   type EngineStatus,
   type IntegrationRegistry,
 } from '@agentistics/engine-api'
 import type { AgentisticsEvent } from '@agentistics/core'
+import type { SpawnBudget } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 
 export type HostEngine = Engine<AgentisticsEvent>
@@ -155,18 +158,51 @@ export function resetEngineForTests(): void {
 }
 
 /**
+ * PURE. The policy floor handed to an engine, from the backup plan's `secret` rows.
+ *
+ * `globs` is the floor (1.3) — `protectedGlobs()` from the contract, so the host and every engine
+ * derive it ONE way. `paths` is the 1.2 member, kept for an engine built against 1.2: the old
+ * `$HOME`-joined rows (so nothing it used to receive is withdrawn) plus the absolute form of every
+ * glob, which is how a `contains` row such as `.key` reaches an engine that only reads paths.
+ */
+export function hostFloor(
+  secrets: readonly { pattern: string; match: 'prefix' | 'contains' }[],
+  home: string,
+): { globs: readonly string[]; paths: readonly string[] } {
+  const globs = protectedGlobs(secrets)
+  const root = home.replace(/\/+$/, '')
+  const paths = new Set<string>(secrets.map(r => `${root}/${r.pattern}`))
+  for (const g of globs) paths.add(g.startsWith('~/') ? `${root}/${g.slice(2)}` : g)
+  return { globs: Object.freeze(globs), paths: Object.freeze([...paths].sort()) }
+}
+
+/**
+ * PURE. The admission measurement as an engine reads it — from the SAME `readSpawnBudget()` result
+ * `admitSpawn` decides from. `null` (no `/proc/meminfo`) is `unmeasured: true` with a zero budget
+ * that carries no meaning; a measured budget carries its swap alarm, which refuses first.
+ */
+export function engineSpawnBudget(read: SpawnBudget | null): EngineSpawnBudget {
+  if (!read) return { budget: { max: 0, used: 0, left: 0, percent: 0 }, unmeasured: true }
+  const b = read.budget
+  return {
+    budget: { max: b.max, used: b.used, left: b.left, percent: b.percent, ...(b.alarm ? { alarm: b.alarm } : {}) },
+    unmeasured: false,
+  }
+}
+
+/**
  * The real host services. Everything machine-specific an engine may use arrives here; each member
  * reads the host's own module rather than re-deriving it, and the heavy ones are imported lazily.
  */
 export async function hostServices(): Promise<EngineHostServices<AgentisticsEvent>> {
-  const [config, { CAPS }, { readJsonLimited }, { safeError }, { EXCLUDE_RULES }] = await Promise.all([
+  const [config, { CAPS }, { readJsonLimited }, { safeError }, { omittedSecrets }] = await Promise.all([
     import('../config'),
     import('../exposure'),
     import('../limits'),
     import('../errors'),
     import('../backup/backup-plan'),
   ])
-  const { join } = await import('node:path')
+  const floor = hostFloor(omittedSecrets(), config.HOME_DIR)
 
   // The mode a machine was CONFIGURED in, read once: a central never runs an engine's runtime, and
   // the host's own `TEAM_CENTRAL` is only half of that answer.
@@ -219,7 +255,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     },
     // The policy floor is DERIVED from the backup plan's `secret` rows — the one table that already
     // names every credential path on this machine — never restated.
-    protectedPaths: Object.freeze(EXCLUDE_RULES.filter(r => r.reason === 'secret').map(r => join(config.HOME_DIR, r.pattern))),
+    protectedGlobs: floor.globs,
+    protectedPaths: floor.paths,
     caps: CAPS,
     isCentral: () => config.TEAM_CENTRAL || centralPref,
     flag: name => (name === 'provider' ? config.providerFlagOn() : process.env.AGENTISTICS_INGEST === '1'),
@@ -230,10 +267,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     safeError,
     spawnBudget: async () => {
       const { readSpawnBudget } = await import('../sessions/memory-probe')
-      const read = await readSpawnBudget()
-      if (!read) return { budget: { max: 0, used: 0, left: 0, percent: 0 } }
-      const b = read.budget
-      return { budget: { max: b.max, used: b.used, left: b.left, percent: b.percent } }
+      return engineSpawnBudget(await readSpawnBudget())
     },
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})

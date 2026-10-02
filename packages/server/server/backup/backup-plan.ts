@@ -371,6 +371,17 @@ const RUNTIME: ExcludeRule[] = [
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },
+  // Written by the ENGINE, not by this tree, so `backup-coverage.lint.test.ts` (a grep over the
+  // server's own source) cannot see it — `backup-plan.test.ts` pins this row instead.
+  {
+    pattern: '.agentistics/runtime', match: 'prefix', reason: 'runtime',
+    why: 'The native session store (`runtime/sessions.db` and its -wal/-shm). Not `secret`: a session '
+      + 'names its credential by ID, never by key, and a message row is only a sha256 + byte count '
+      + 'referring into `.agentistics/content`. Not carried either: that content is itself a `secret` '
+      + 'row and never travels, so every restored message would point at nothing, and each `leases` '
+      + 'row names a pid (and its token) on THIS machine. Session approvals ("allow for this session") '
+      + 'are not stored here at all — they live in a policy object and end with the process.',
+  },
   {
     pattern: '.agentistics/journal.db.status.json', match: 'prefix', reason: 'runtime',
     why: 'A live process\'s counters since its boot, read by `agentop journal status` from another '

@@ -16,6 +16,7 @@ import {
   type EngineEvent,
   type EngineHostServices,
   type ReplaySource,
+  floored,
   missingReuseMembers,
 } from '@agentistics/engine-api'
 
@@ -90,6 +91,21 @@ export function makeFakeEngine(opts: FakeEngineOptions = {}): (host: EngineHostS
                 dev: policy.dev,
                 opencodeDbPath: host.paths.opencodeDbPath,
               })
+            }
+            if (url.pathname === '/api/provider/floor') {
+              // 1.3: the floor is the host's GLOBS, read in the contract's own dialect.
+              const path = url.searchParams.get('path') ?? ''
+              return Response.json({ floored: floored(host.protectedGlobs, path, host.paths.home) })
+            }
+            if (url.pathname === '/api/provider/admission') {
+              // 1.3: the host's admission rule, in its order — unmeasured admits and says so, the
+              // swap alarm refuses whatever `left` says, then room.
+              const requested = Number(url.searchParams.get('n') ?? '1')
+              const b = await host.spawnBudget()
+              if (b.unmeasured) return Response.json({ admit: true, unmeasured: true })
+              if (b.budget.alarm === 'swap') return Response.json({ admit: false, reason: 'swap', fits: 0 })
+              if (requested > b.budget.left) return Response.json({ admit: false, reason: 'no-room', fits: b.budget.left })
+              return Response.json({ admit: true, unmeasured: false })
             }
             if (url.pathname !== '/api/provider/echo') return null
             const body = await host.readJsonLimited<{ say?: unknown }>(req, 1024)

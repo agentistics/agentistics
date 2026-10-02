@@ -16,7 +16,13 @@
  * and `EngineAuditEvent.action` is the host's `AuditAction` union instead of `string`. An engine
  * built against 1.1 still loads: it reads none of the new members.
  */
-export const ENGINE_API_VERSION = '1.2.0'
+/**
+ * 1.3.0 — the policy floor arrives as GLOBS (`protectedGlobs`, derived by the pure `protectedGlobs()`
+ * in `floor.ts`), because an absolute path cannot express a backup-plan `contains` row (`.key`); and
+ * `EngineSpawnBudget` carries the swap `alarm` and an explicit `unmeasured` flag. An engine built
+ * against 1.2 still loads: `protectedPaths` is kept, and now also carries the globs in absolute form.
+ */
+export const ENGINE_API_VERSION = '1.3.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
