@@ -20,7 +20,7 @@
 
 import { SUCK_S, easeFactor, finaleBeat, finaleLogoPose, runningLogoPose, REDUCED_FINALE_BEAT, type LogoPose } from './updateAnim'
 import {
-  C30, PULSE_MS, approach, clamp01, clearing, corridorOf, frameFactor, hiveGeometry, hnorm, inksFrom, lerp, pulseFactor, restingAlpha, smooth,
+  C30, PULSE_MS, SPREAD, approach, clamp01, clearing, frameFactor, hiveGeometry, hnorm, inksFrom, lerp, pulseFactor, restingAlpha, smooth,
   staggerMs, stepOn, touchesFrame, type HiveGeometry, type Ink,
 } from './updateHive'
 
@@ -29,7 +29,6 @@ const SLATE: RGB = [148, 163, 184], SLATE_HI: RGB = [203, 213, 225], OR: RGB = [
 const rgb = (c: RGB, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${a})`
 const easeOut = (x: number) => 1 - Math.pow(1 - clamp01(x), 3)
 const easeIn = (x: number) => Math.pow(clamp01(x), 2.2)
-const SPREAD = 0.55
 const UX: number[] = [], UY: number[] = []
 for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; UX.push(Math.cos(a)); UY.push(Math.sin(a)) }
 
@@ -190,9 +189,8 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     inksAt = now
     const sr = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { left: 0, top: 0 }
     inks = inksFrom(inkEls.filter((e): e is HTMLElement => !!e).map(e => e.getBoundingClientRect()), sr)
-    const hull = corridorOf(inks, g)
     for (const c of cells) {
-      const r = clearing(c.x, c.y, c.seed, inks, g, hull)
+      const r = clearing(c.x, c.y, c.seed, inks, g)
       c.rmT = r.f; if (!c.rmSet) { c.rm = r.f; c.rmSet = true }
       c.px = r.px; c.py = r.py
     }

@@ -98,81 +98,35 @@ export function pillDistance(x: number, y: number, k: Ink): { d: number; nx: num
 /** A pill lies inside its rectangle; the gap is at most (√2 − 1)·rr, at the four corners. */
 export const PILL_CORNER_GAP = Math.SQRT2 - 1
 
-/** Width of the soft falloff: wider than the prototype's fixed 84 on a big stage, narrower on a phone. */
-export function inkFade(S: number): number { return Math.max(56, S * 2.4) }
+/** Width of the soft falloff — TIGHT (the owner: the clearing was far too big): about one cell, never under 26 px. */
+export function inkFade(S: number): number { return Math.max(26, S * 0.9) }
 
-// ── the corridor: frame + foot text read as ONE calm zone ───────────────────────────────────────
+/** Per-cell jitter of the clearing's edge, in cells (it only ever clears more). */
+export const JITTER = 0.45
 
-export type Pt = readonly [number, number]
-
-/** Convex hull (monotone chain), counter-clockwise in y-up coordinates. */
-export function hullOf(points: readonly Pt[]): Pt[] {
-  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1])
-  const cr = (o: Pt, a: Pt, b: Pt) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-  const lo: Pt[] = [], up: Pt[] = []
-  for (const q of p) { while (lo.length > 1 && cr(lo[lo.length - 2]!, lo[lo.length - 1]!, q) <= 0) lo.pop(); lo.push(q) }
-  for (const q of p.slice().reverse()) { while (up.length > 1 && cr(up[up.length - 2]!, up[up.length - 1]!, q) <= 0) up.pop(); up.push(q) }
-  lo.pop(); up.pop()
-  return lo.concat(up)
-}
-
-/** Signed distance to a convex polygon (< 0 inside) and the unit direction away from it. */
-export function hullDistance(x: number, y: number, poly: readonly Pt[]): { d: number; nx: number; ny: number } {
-  let d = Infinity, nx = 0, ny = 0, allPos = true, allNeg = true
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i]!, b = poly[(i + 1) % poly.length]!, ex = b[0] - a[0], ey = b[1] - a[1], l2 = ex * ex + ey * ey || 1
-    const t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (y - a[1]) * ey) / l2)), qx = a[0] + ex * t, qy = a[1] + ey * t, dd = Math.hypot(x - qx, y - qy)
-    if (dd < d) { d = dd; nx = x - qx; ny = y - qy }
-    const side = (x - a[0]) * ey - (y - a[1]) * ex
-    if (side < 0) allPos = false
-    if (side > 0) allNeg = false
-  }
-  const inside = allPos || allNeg // inside a convex polygon = on the same side of every edge
-  const m = Math.hypot(nx, ny) || 1
-  return { d: inside ? -d : d, nx: nx / m, ny: ny / m }
-}
-
-/**
- * The corridor: the convex hull of the frame's LOWER half (the frame's real extent, glow included)
- * and the foot block — every line of ink that sits below the frame. Null when there is no foot text.
- * Whatever lies between the frame and that text is part of the same calm zone, so no cell may.
- */
-export function corridorOf(inks: readonly Ink[], g: HiveGeometry): Pt[] | null {
-  const foot = inks.filter(k => (k.t + k.b) / 2 > g.cy + g.FR)
-  if (!foot.length) return null
-  const l = Math.min(...foot.map(k => k.l)), r = Math.max(...foot.map(k => k.r)), t = Math.min(...foot.map(k => k.t)), b = Math.max(...foot.map(k => k.b))
-  const fr = g.A_CLIP / C30 // circumradius of the clip: frame + stroke + glow
-  return hullOf([[g.cx - fr * C30, g.cy + fr / 2], [g.cx, g.cy + fr], [g.cx + fr * C30, g.cy + fr / 2], [l, t], [r, t], [l, b], [r, b]])
-}
-
-/** The corridor's falloff is a little tighter than a line's: it is a zone, not an edge. */
-export const CORRIDOR_FADE = 0.8
+/** How far a cell that is making room is nudged away from the text, in cells. */
+export const SPREAD = 0.2
 
 /**
  * How much of a cell survives next to the text, and which way it yields.
  *
- * Distance is measured to each LINE's own pill (never to one big box) AND to the corridor joining the
- * frame to the foot text, each reduced by a per-cell jitter from the cell's seed so the edge follows
- * the lattice irregularly — cells that drew back, not a contour. The jitter only ever REDUCES the
- * distance, so it can clear more, never less: the zero points (`RC + corner gap + 2` for a line,
- * `RC + 2` for the corridor) are hard guarantees that a visible cell's circle touches neither the
- * rectangle of any line nor the corridor.
+ * Distance is measured to each LINE's own pill (never to one big box, and to nothing joining the
+ * lines to the frame), reduced by a small per-cell jitter from the cell's seed so the edge follows
+ * the lattice irregularly — cells that drew back a hair, not a contour. The clearing is TIGHT: cells
+ * come right up to the text, so the space between the frame and the foot text reads as the rest of
+ * the hive. The jitter only ever REDUCES the distance, so it can clear more, never less: the zero
+ * point (`RC + corner gap + 2`) is a hard guarantee that a visible cell's circle does not touch the
+ * rectangle of any line.
  */
-export function clearing(
-  x: number, y: number, seed: number, inks: readonly Ink[], g: HiveGeometry, hull: readonly Pt[] | null = corridorOf(inks, g),
-): { f: number; px: number; py: number } {
+export function clearing(x: number, y: number, seed: number, inks: readonly Ink[], g: HiveGeometry): { f: number; px: number; py: number } {
   if (!inks.length) return { f: 1, px: 0, py: 0 }
-  const fade = inkFade(g.S), jit = seed * g.S * 0.9
+  const fade = inkFade(g.S), jit = seed * g.S * JITTER
   let best = Infinity, px = 0, py = 0
   for (const k of inks) {
     const p = pillDistance(x, y, k)
     const zero = g.RC + PILL_CORNER_GAP * p.rr + 2
     const v = (p.d - jit - zero) / fade
     if (v < best) { best = v; px = p.nx; py = p.ny }
-  }
-  if (hull) {
-    const h = hullDistance(x, y, hull), v = (h.d - jit - (g.RC + 2)) / (fade * CORRIDOR_FADE)
-    if (v < best) { best = v; px = h.nx; py = h.ny }
   }
   return { f: smooth(best), px, py }
 }

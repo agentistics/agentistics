@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  ENTRY_MS, EXIT_MS, VISIBLE, clearing, corridorOf, frameFactor, hiveGeometry, hnorm, hullDistance, hullOf, inkFade, inksFrom, pillDistance, pulseFactor, rectDistance,
+  ENTRY_MS, EXIT_MS, VISIBLE, clearing, frameFactor, hiveGeometry, hnorm, inkFade, inksFrom, pillDistance, pulseFactor, rectDistance,
   restingAlpha, staggerMs, stepOn, touchesFrame, type Ink,
 } from './updateHive'
 
-const C30_ = Math.sqrt(3) / 2
 const SIZES: [number, number][] = [[1920, 1080], [1366, 768], [390, 844]]
 
 /** The prototype's real layout: a header block over the hive and a foot block under it — one Ink per line. */
@@ -97,9 +96,22 @@ describe('the organic clearing: cells draw back from the TEXT, never from a box'
     expect(fs.size).toBeGreaterThan(1)
   })
 
-  test('the falloff is wider than the old fixed 84 on a big stage and never collapses on a phone', () => {
-    expect(inkFade(hiveGeometry(1920, 1080).S)).toBeGreaterThan(84)
-    expect(inkFade(hiveGeometry(390, 844).S)).toBeGreaterThanOrEqual(56)
+  test('the clearing is TIGHT: about a cell wide, never under 26 px, far narrower than before', () => {
+    for (const [W, H] of SIZES) { const S = hiveGeometry(W, H).S; expect(inkFade(S)).toBeLessThan(60); expect(inkFade(S)).toBeGreaterThanOrEqual(26); expect(inkFade(S)).toBeLessThanOrEqual(Math.max(26, S)) }
+  })
+
+  test('the hive FILLS the space between the frame and the foot text — nothing joins them', () => {
+    for (const [W, H] of SIZES) {
+      const { g, cells } = lattice(W, H), inks = lines(W, H)
+      const foot = inks.filter(k => (k.t + k.b) / 2 > g.cy + g.FR), footTop = Math.min(...foot.map(k => k.t)), fade = inkFade(g.S)
+      // cells in the band under the frame (clear of the frame's own exclusion), a falloff above the text: at full strength
+      const band = cells.filter(c => c.y > g.cy + g.FR - 20 && c.y < footTop - (g.RC + 10 + fade + g.S * 0.45) && hnorm(c.x - g.cx, c.y - g.cy) - g.AC > g.A_CLIP + 20)
+      if (W === 1920) expect(band.length).toBeGreaterThan(3)               // the roomy stage: a real band of cells under the frame
+      for (const c of band) expect(clearing(c.x, c.y, c.seed, inks, g).f).toBeGreaterThan(0.99)
+      // …and a cell right beside the middle of a line still keeps clear of it
+      const l = inks[inks.length - 1]!
+      expect(clearing((l.l + l.r) / 2, l.b + g.RC + 3, 1, inks, g).f).toBeLessThanOrEqual(VISIBLE)
+    }
   })
 
   test('a cell yields AWAY from the nearest line, and with no text nothing yields', () => {
@@ -112,49 +124,6 @@ describe('the organic clearing: cells draw back from the TEXT, never from a box'
   test('inksFrom keeps real lines only and re-origins them on the stage', () => {
     const r = (l: number, t: number, w: number, h: number) => ({ left: l, top: t, right: l + w, bottom: t + h, width: w, height: h })
     expect(inksFrom([r(110, 220, 50, 10), r(0, 0, 0, 0)], { left: 100, top: 200 })).toEqual([{ l: 10, t: 20, r: 60, b: 30 }])
-  })
-})
-
-describe('the corridor: no cell between the frame and the foot text', () => {
-  for (const [W, H] of SIZES) {
-    test(`${W}x${H}: no visible cell's centre lies inside the corridor, and none sits in the strip between them`, () => {
-      const { g, cells } = lattice(W, H), inks = lines(W, H), hull = corridorOf(inks, g)!
-      expect(hull).not.toBeNull()
-      const footTop = Math.min(...inks.filter(k => (k.t + k.b) / 2 > g.cy + g.FR).map(k => k.t))
-      let inStrip = 0, visible = 0
-      for (const c of cells) for (const seed of [0, 0.5, 1, c.seed]) {
-        const { f } = clearing(c.x, c.y, seed, inks, g, hull)
-        if (f > VISIBLE) {
-          visible++
-          expect(hullDistance(c.x, c.y, hull).d).toBeGreaterThanOrEqual(g.RC)           // not in it, and not touching it
-        }
-      }
-      // the strip straight under the frame, down to the text: every lattice cell there is cleared
-      for (const c of cells) if (Math.abs(c.x - g.cx) < g.FR * C30_ && c.y > g.cy + g.FR && c.y < footTop) { inStrip++; expect(clearing(c.x, c.y, c.seed, inks, g, hull).f).toBeLessThanOrEqual(VISIBLE) }
-      expect(inStrip).toBeGreaterThan(0)
-      expect(visible).toBeGreaterThan(100)                                                // …while the sides still show the hive
-    })
-  }
-  test('the sides are untouched: cells well to the left and right of the frame keep full strength', () => {
-    const { g, cells } = lattice(1920, 1080), inks = lines(1920, 1080), hull = corridorOf(inks, g)
-    const far = cells.filter(c => Math.abs(c.x - g.cx) > 700 && c.y > g.cy && c.y < g.H * 0.8)
-    expect(far.length).toBeGreaterThan(10)
-    for (const c of far) expect(clearing(c.x, c.y, c.seed, inks, g, hull).f).toBeGreaterThan(0.9)
-  })
-  test('no foot text, no corridor; the hull and its distance behave like a convex polygon', () => {
-    const g = hiveGeometry(1366, 768)
-    expect(corridorOf([{ l: 600, r: 760, t: 40, b: 60 }], g)).toBeNull()
-    const sq = hullOf([[0, 0], [10, 0], [10, 10], [0, 10], [5, 5]])
-    expect(sq).toHaveLength(4)
-    expect(hullDistance(5, 5, sq).d).toBeLessThan(0)
-    expect(hullDistance(20, 5, sq).d).toBeCloseTo(10)
-    expect(hullDistance(20, 5, sq).nx).toBeCloseTo(1)
-  })
-  test('the corridor widens from the frame to the text block (a hull, not a bar), and the old behaviour without it is unchanged', () => {
-    const g = hiveGeometry(1920, 1080), inks = lines(1920, 1080), hull = corridorOf(inks, g)!
-    const xs = (y: number) => { let lo = 0, hi = 0; for (let x = 0; x < 1920; x++) if (hullDistance(x, y, hull).d < 0) { if (!lo) lo = x; hi = x } return hi - lo }
-    expect(xs(g.cy + g.FR + 40)).toBeLessThan(xs(Math.min(...inks.filter(k => k.t > g.cy + g.FR).map(k => k.t)) + 4))
-    expect(clearing(100, 100, 0.2, inks, g, null).f).toBeGreaterThan(0)
   })
 })
 
