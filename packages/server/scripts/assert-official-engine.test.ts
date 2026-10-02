@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ENGINE_API_VERSION } from '@agentistics/engine-api'
 import { checkEngineLine, findLeakedMarkers, parseEnginePin } from './assert-official-engine'
 
 const sat = (v: string, r: string) => Bun.semver.satisfies(v, r)
@@ -41,7 +42,9 @@ describe('parseEnginePin', () => {
   test('the committed engine.pin is valid', () => {
     const pin = parseEnginePin(readFileSync(join(import.meta.dir, '..', '..', '..', 'engine.pin'), 'utf8'))
     expect(pin.ref).toMatch(/^[0-9a-f]{40}$/)
-    expect(Bun.semver.satisfies('1.2.0', pin.api)).toBe(true)
+    // The pin's range must admit the contract THIS tree speaks, not a version frozen in the test:
+    // a hardcoded '1.2.0' rejected the very pin bump that engine-api 1.3.0 required.
+    expect(Bun.semver.satisfies(ENGINE_API_VERSION, pin.api)).toBe(true)
   })
 
   test('refuses a short SHA and a missing range', () => {
