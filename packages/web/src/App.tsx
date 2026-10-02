@@ -1623,7 +1623,15 @@ export default function AppLayout() {
   const isCentral = teamSession?.central === true
   useEffect(() => { if (isCentral) setLiveUpdates(true) }, [isCentral, setLiveUpdates])
 
-  const setLang = useCallback((l: Lang) => setLangState(l), [])
+  /**
+   * Set the language AND remember it — the same defect `setTheme`/`setCurrency` below had. It only
+   * set state, so the header's PT/EN toggle held for as long as the tab lived and a reload came back
+   * in whatever was last saved from Settings. A person's choice: `/api/user-prefs`.
+   */
+  const setLang = useCallback((l: Lang) => {
+    setLangState(l)
+    putPersonal({ lang: l })
+  }, [])
   /**
    * Set the theme AND remember it.
    *
@@ -3496,7 +3504,6 @@ export default function AppLayout() {
         onChoose={chooseArchive}
         onLangChange={(l) => {
           setLang(l)
-          putPersonal({ lang: l })
         }}
       />
     )
