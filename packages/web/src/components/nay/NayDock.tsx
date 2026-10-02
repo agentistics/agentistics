@@ -810,7 +810,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
                       border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderRadius: 9,
                       color: 'var(--text-secondary)',
                     }}>
-                    <SessionFacts session={s} lang={pt ? 'pt' : 'en'} withEffort withDelivery={false}
+                    <SessionFacts session={s} lang={pt ? 'pt' : 'en'} withEffort
                       {...(card.stateTextColor ? { metaColor: card.stateTextColor } : {})} />
                     {inWindow && (
                       <span title={pt ? 'Aberta numa janela' : 'Open in a window'}
