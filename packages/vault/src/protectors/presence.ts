@@ -38,19 +38,57 @@ export function presenceCode(reason: string): PresenceCode | null {
 }
 
 /**
- * The bridge's stderr contract: `PRESENCE-ERROR <cancelled|timeout|unavailable|lost|no-hmac-secret> [detail]`.
- * Anything else (interop, a profile that would not load) is `unavailable` and carries its first line.
+ * What a Windows bridge may say about WHY, as a closed list of keys. A bridge's own words (a .NET
+ * exception type, a WinRT status, PowerShell's localized error text) are a fact for the LOG and never
+ * part of a sentence: found on the owner's machine, the screen read
+ * `presence-unavailable: System.Management.Automation.PSInvalidCastException`.
  */
-export function parseBridgeError(stderr: string): { code: PresenceCode | 'no-hmac-secret'; detail: string } {
+export const PRESENCE_DETAILS = [
+  'bridge-failed', 'hello-not-set-up', 'credential-exists', 'credential-deleted', 'hello-status', 'bad-request',
+] as const
+export type PresenceDetail = typeof PRESENCE_DETAILS[number]
+
+const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
+  'bridge-failed': { en: 'the Windows bridge failed; the details are in the agentop log', pt: 'a ponte do Windows falhou; os detalhes estão no log do agentop' },
+  'hello-not-set-up': { en: 'Windows Hello is not set up on this device', pt: 'o Windows Hello não está configurado neste dispositivo' },
+  'credential-exists': { en: 'a credential with this name already exists', pt: 'já existe uma credencial com este nome' },
+  'credential-deleted': { en: 'the credential was deleted', pt: 'a credencial foi apagada' },
+  'hello-status': { en: 'Windows Hello gave an unexpected answer; the details are in the agentop log', pt: 'o Windows Hello deu uma resposta inesperada; os detalhes estão no log do agentop' },
+  'bad-request': { en: 'the Windows bridge did not understand the request', pt: 'a ponte do Windows não entendeu o pedido' },
+}
+
+function isDetail(s: string): s is PresenceDetail { return (PRESENCE_DETAILS as readonly string[]).includes(s) }
+
+/**
+ * The bridge's stderr contract: `PRESENCE-ERROR <cancelled|timeout|unavailable|lost|no-hmac-secret> [<detail-key> [raw…]]`.
+ * Only a KEY from `PRESENCE_DETAILS` is passed on as `detail`; everything after it, and any line that
+ * does not follow the contract (interop, a profile that would not load), is `raw` — for the log.
+ */
+export function parseBridgeError(stderr: string): { code: PresenceCode | 'no-hmac-secret'; detail: PresenceDetail | ''; raw: string } {
   const line = firstLine(stderr)
-  const m = /^PRESENCE-ERROR (cancelled|timeout|unavailable|lost|no-hmac-secret)\b\s*(.*)$/.exec(line)
-  if (!m) return { code: 'presence-unavailable', detail: line || 'the Windows bridge failed' }
+  const m = /^PRESENCE-ERROR (cancelled|timeout|unavailable|lost|no-hmac-secret)\b\s*(\S*)\s*(.*)$/.exec(line)
+  if (!m) return { code: 'presence-unavailable', detail: 'bridge-failed', raw: line || 'the Windows bridge failed with no output' }
   const k = m[1]!
-  return { code: k === 'no-hmac-secret' ? 'no-hmac-secret' : (`presence-${k}` as PresenceCode), detail: m[2] ?? '' }
+  const code = k === 'no-hmac-secret' ? 'no-hmac-secret' : (`presence-${k}` as PresenceCode)
+  const key = m[2] ?? ''
+  if (key === '' && !m[3]) return { code, detail: '', raw: '' }
+  return isDetail(key) ? { code, detail: key, raw: m[3] ?? '' } : { code, detail: 'bridge-failed', raw: `${key} ${m[3] ?? ''}`.trim() }
+}
+
+/** Where a bridge's raw words go: the service's own log (stderr → journal). Never a reply, never a UI. */
+export function logBridge(line: string): void {
+  try { process.stderr.write(`agentop: presence bridge: ${line.replace(/[\r\n]+/g, ' ').slice(0, 300)}\n`) } catch { /* a log line never breaks the vault */ }
+}
+
+/** The detail part of a reason, as words: a key is translated; a raw .NET type is never repeated. */
+function detailWords(r: string, lang: Lang): string {
+  if (isDetail(r)) return DETAIL_TEXT[r][lang]
+  if (/\bSystem\.[A-Za-z]/.test(r) || /\b0x[0-9A-Fa-f]{8}\b/.test(r)) return DETAIL_TEXT['bridge-failed'][lang]
+  return r
 }
 
 export function presenceSentence(code: PresenceCode, lang: Lang, presence: string, reason = ''): string {
-  const r = reason.replace(/^presence-[a-z]+:\s*/, '')
+  const r = detailWords(reason.replace(/^presence-[a-z]+:\s*/, ''), lang)
   if (lang === 'pt') {
     switch (code) {
       case 'presence-cancelled': return `${presence} foi cancelado, então o cofre continuou trancado. Nada foi aberto.`

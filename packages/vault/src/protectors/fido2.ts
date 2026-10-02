@@ -18,7 +18,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
 import {
-  deriveKek, describeThrown, kindOf, openDek, parseBridgeError, presenceReason, sealDek, zero,
+  deriveKek, describeThrown, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
   type PresenceCode,
 } from './presence'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
@@ -192,7 +192,8 @@ export function fido2Protector(o: Fido2Options): Protector {
     if ('threw' in r) return { ok: false, code: r.threw, reason: 'powershell.exe did not answer' }
     if (r.code !== 0) {
       const e = parseBridgeError(r.err)
-      return { ok: false, code: e.code, reason: e.code === 'no-hmac-secret' ? NO_HMAC : e.detail || `powershell.exe exited ${r.code}` }
+      if (e.raw) logBridge(`webauthn ${verb}: ${e.raw}`)
+      return { ok: false, code: e.code, reason: e.code === 'no-hmac-secret' ? NO_HMAC : e.detail }
     }
     return { ok: true, out: r.out.trim() }
   }
