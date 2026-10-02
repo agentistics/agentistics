@@ -7,7 +7,7 @@
  * lets the whole surface be rewritten without changing a single behaviour.
  */
 
-import type { Baseline, HarnessId, ProjectKind } from '@agentistics/core'
+import type { Baseline, HarnessId, ProjectKind, SessionConversationLink } from '@agentistics/core'
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
@@ -698,6 +698,8 @@ export interface ControlSession {
    * every row of a harness that cannot report one — see `conversationBlind`.
    */
   conversationId?: string
+  /** WHERE the link came from (LIVE.1); `null` = not linked yet. Computed from legacy facts. */
+  link?: SessionConversationLink | null
   /**
    * Already-localized: this harness can never report which conversation a session it started is
    * writing, so no link can be recorded for this row and anything offered to reopen is inferred.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { transcriptAvailability, transcriptSentence } from './transcript-availability'
+import { transcriptAvailability } from './transcript'
+import { transcriptSentence } from '../transcriptSentence'
 
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 9, 1, 12, 0, 0)

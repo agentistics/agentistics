@@ -157,6 +157,8 @@ export const EVENT_TYPES = [
   'context.compacted', 'context.window.observed',
   // policy
   'policy.requested', 'policy.approved', 'policy.denied',
+  // attention (LIVE.1): a person is asked something and the session is blocked on it
+  'attention.raised', 'attention.cleared',
   // ALM
   'alm.task.created', 'alm.task.updated', 'alm.task.completed', 'alm.evidence.attached',
   // side processes (§13.4)
@@ -353,6 +355,26 @@ export interface ToolRequestedData extends ToolRef {
 export interface ToolApprovedData extends ToolRef {
   /** Who granted it: automatically, a person, or a policy. A record of a decision already made. */
   by: Exclude<ToolApproval, 'denied'>
+}
+
+/**
+ * A person is being asked something and the session is blocked on it. NO TEXT: option labels are
+ * model-written and D5 forbids storing them for external harnesses — only the shape is recorded.
+ */
+export interface AttentionRaisedData {
+  kind: 'approval' | 'question' | 'select' | 'confirm' | 'unknown'
+  /** Only when the screen names a tool the journal already knows. */
+  toolExecutionId?: Id
+  optionCount?: number
+  hasFreeText?: boolean
+  via: 'screen'
+}
+
+export interface AttentionClearedData {
+  how: 'answered-here' | 'answered-elsewhere' | 'session-ended' | 'unknown'
+  /** The 1-based option index, only when agentop sent it. An index, never a label. */
+  choice?: number
+  blockedMs?: number
 }
 
 export interface ToolDeniedData extends ToolRef {
@@ -583,6 +605,8 @@ export interface EventData {
   'policy.requested': PolicyRequestedData
   'policy.approved': PolicyDecidedData
   'policy.denied': PolicyDecidedData
+  'attention.raised': AttentionRaisedData
+  'attention.cleared': AttentionClearedData
   'alm.task.created': AlmTaskCreatedData
   'alm.task.updated': AlmTaskUpdatedData
   'alm.task.completed': NoData

@@ -13,7 +13,7 @@
  * `CliStrings`, so this module owns no copy of any sentence.
  */
 
-import { contextFraction, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
+import { contextFraction, conversationLinkOf, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
 import type { CliStrings } from '../cli-i18n'
 import { approvalFor, canPick, isFreeTextOption } from './approval-spec'
@@ -21,7 +21,8 @@ import { needsChoice } from './dialog-choice'
 import { pickTitle } from './harness-session-file'
 import type { ResolvedRepoFacts } from './repo-facts'
 import type { SessionView } from './session-view'
-import { conversationLinkGoneForever, conversationLinkable } from './spawn-spec'
+import { conversationLinkGoneForever, conversationLinkable, SPAWN_SPECS } from './spawn-spec'
+import { HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 
 /** The state word each session wears, and the machine-readable state beside it. */
 export function sessionState(v: SessionView): SessionState {
@@ -124,6 +125,21 @@ export function toControlSession(
   // `v.status === 'running'` with unread activity is deliberately excluded: that row's process may
   // still be alive, so it stays quiet rather than claim a link is gone that may arrive on the very
   // next poll.
+  // WHERE the link came from (LIVE.1), computed from legacy facts only — shipped to every build and
+  // NOT relayed to a central (`reduceMachineFleetRow` is an allowlist and does not name it).
+  const link = harness
+    ? conversationLinkOf({
+        harness: v.harness!,
+        ...(v.conversationId ? { conversationId: v.conversationId } : {}),
+        ...(v.conversationLinkVia ? { linkVia: v.conversationLinkVia } : {}),
+        ...(v.conversationLink ? { conversationLink: v.conversationLink } : {}),
+        external: v.status === 'external',
+        platform: process.platform,
+        noIdRoute: !conversationLinkable(v.harness!),
+        needsProc: HARNESS_PROCESS_LOGS[v.harness!] != null && SPAWN_SPECS[v.harness!]?.assignId === undefined
+          && HARNESS_SESSION_SOURCES[v.harness!] === null,
+      })
+    : undefined
   const conversationBlind = v.status === 'external' || v.status === 'closed' || v.conversationId || !harness
     ? undefined
     : !conversationLinkable(v.harness!)
@@ -190,6 +206,7 @@ export function toControlSession(
     // The conversation this row is KNOWN to be writing — what `--resume` takes, and the only exact
     // answer to "where does it continue from". Never filled from the harness+directory guess.
     ...(v.conversationId ? { conversationId: v.conversationId } : {}),
+    ...(link !== undefined ? { link } : {}),
     // …and where no answer can ever exist, that is stated instead. Only on a row we HOST and only
     // while it has no id: an `external` or `closed` row was never ours to record, and a claude row
     // that has not been polled yet is about to have one. Same shape as `approvalBlind`.
