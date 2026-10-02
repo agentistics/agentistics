@@ -4102,7 +4102,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
  * It is the SAME poller `sessions()` uses, so the server still holds exactly one.
  */
 export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
-  return (await ensureSessionsPoller()).poll()
+  const snap = await (await ensureSessionsPoller()).poll()
+  // The engine's view of the fleet (engine-api 1.4 `fleet`): only a FRESH reading says anything new —
+  // an `unavailable` snapshot is the previous one answered again. The hub plans nothing while no
+  // engine listens.
+  if (!snap.unavailable) {
+    const { fleetHub } = await import('./engine/fleet-hub')
+    fleetHub.observe(snap.sessions, snap.polledAtMs)
+  }
+  return snap
 }
 
 export async function runStart(): Promise<StartResult> {

@@ -84,3 +84,27 @@ describe('registration', () => {
     expect(at).toBeGreaterThan(src.indexOf('!AUTH_PUBLIC.has(url.pathname)'))
   })
 })
+
+describe('LIVE C5 — the projection catch-up is single-flight, coalesced and bounded', () => {
+  it('due requests while a pass runs set ONE dirty bit: exactly one more pass, never a queue', async () => {
+    const { maybeCatchUp, catchUpStateForTests, closeRuntimeMetricsStore, CATCH_UP_EVERY_MS, CATCH_UP_MAX_PAGES } = await import('./runtime-metrics-web')
+    closeRuntimeMetricsStore()
+    let passes = 0
+    let release: () => void = () => {}
+    const store = {
+      reader: {} as never,
+      close() {},
+      catchUp: () => { passes++; return passes === 1 ? new Promise<unknown>(r => { release = () => r({ state: 'done' }) }) : Promise.resolve({ state: 'done' }) },
+    }
+    const t0 = 1_000_000
+    maybeCatchUp(store, t0)
+    for (let i = 1; i <= 4; i++) maybeCatchUp(store, t0 + i * CATCH_UP_EVERY_MS) // each one due
+    expect(catchUpStateForTests()).toEqual({ running: true, dirty: true })
+    release()
+    await new Promise(r => setTimeout(r, 10))
+    expect(passes).toBe(2)
+    expect(catchUpStateForTests()).toEqual({ running: false, dirty: false })
+    expect(CATCH_UP_MAX_PAGES).toBeGreaterThan(0)
+    closeRuntimeMetricsStore()
+  })
+})

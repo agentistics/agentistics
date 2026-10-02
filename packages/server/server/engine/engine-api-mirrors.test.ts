@@ -36,7 +36,9 @@ import type {
   TranscriptReadPlan as ApiTranscriptReadPlan,
   CursorUse as ApiCursorUse,
   ReuseSurface,
+  EngineSessionActivity,
 } from '@agentistics/engine-api'
+import type { SessionActivity } from '../sessions/types'
 import type { HealthIssue } from '@agentistics/core'
 import type { Capabilities } from '../exposure'
 import type { readJsonLimited } from '../limits'
@@ -95,6 +97,9 @@ ok<Equal<CursorUse, ApiCursorUse>>()
 // …and the value the host builds IS the contract's surface (`reuse-surface.ts` is typed by it; this
 // keeps the claim from depending on that annotation staying there).
 ok<Assignable<Awaited<ReturnType<typeof buildReuseSurface>>, ReuseSurface>>()
+
+// 1.4 — a fleet transition's activities are the host's own, word for word.
+ok<Equal<SessionActivity, EngineSessionActivity>>()
 
 describe('engine-api mirrors', () => {
   it('lists the same harnesses the host orders', () => {
