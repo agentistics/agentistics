@@ -17,6 +17,7 @@ import {
 } from './tmux-cli'
 import { dependencyCommandLine } from './dependency-plan'
 import { probeDependency } from './dependency-probe'
+import { sessionEnv } from './login-env'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
 import { writeToPane } from './pane-writer'
@@ -440,10 +441,13 @@ export const tmuxBackend: SessionBackend = {
     // Applied as SEPARATE pre-flight calls they were lost on a cold socket, because `set-option`
     // does not start a server — see `spawnArgs`.
     const profile = await terminalProfile()
+    // Re-resolved from the login shell (60 s memo) so a tool installed a minute ago is found with
+    // no restart. See `login-env.ts`.
+    const env = await sessionEnv()
     // The first session of a cold socket also starts the tmux SERVER — in a scope of its own, so the
     // fleet does not live and die with this service's cgroup. See `coldStartArgv`.
     const { code, out } = await tmuxStartingServer(
-      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: process.env.PATH }),
+      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: env.PATH ?? process.env.PATH, env }),
     )
     if (code !== 0) throw new Error(out.trim() || `tmux new-session failed (code ${code})`)
     if (req.initialPrompt) {

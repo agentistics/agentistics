@@ -276,6 +276,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + '(idempotent upserts), which is exactly the state a restored machine is in.',
   },
   {
+    pattern: '.agentistics/login-env.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the next session spawn re-resolves it from the login shell',
+    why: 'The last good login-shell PATH and toolchain locations (sessions/login-env.ts). They '
+      + 'describe THIS machine\'s directories, so restoring them onto another one would be wrong.',
+  },
+  {
     pattern: '.agentistics/team-sync.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — reconciled on the next push',
     why: 'See team-sent.json.',
