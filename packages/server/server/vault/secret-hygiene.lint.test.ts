@@ -39,6 +39,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _opened: 'THE one place the human DEK lives — in the service process only (role holder), zeroed by lockVault; §5.2 makes this the rule, not a breach',
     _last: 'the last open state; its DEK (if any) is the same buffer as _opened, zeroed with it',
     _lastAttemptMs: 'a time', _inflight: 'a pending open', _lastChecked: 'detection reasons in words', _initFailure: 'a reason in words',
+    _hardening: 'the §5.3 hardening report (states and reasons)', _hardeningRun: 'a pending hardening report',
     _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook',
   },
   'server/server/vault/socket.ts': { _handler: 'the op dispatcher', _server: 'the listening socket' },

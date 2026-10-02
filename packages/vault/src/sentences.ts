@@ -32,6 +32,8 @@ export type VaultRefusal =
   | 'service-only'
   /** SECRETS.4 §5.2: the vault opens only inside the service, and no service answers. */
   | 'service-down'
+  /** SECRETS.4 §5.3: the service could not make its memory private, so it opens nothing. */
+  | 'hardening-failed'
 
 export interface SentenceArgs {
   /** The file the refusal is about, as the user would find it (`~/.agentistics/…`). */
@@ -77,6 +79,8 @@ const EN: Record<VaultRefusal, (a: SentenceArgs) => string> = {
     'This secret is used only inside the agentop service and is never handed to another program. Do this from the dashboard, or let the running service do it.',
   'service-down': () =>
     'The vault opens only inside the agentop service, and the service is not running. Start it (`agentop server`, or `agentop` → Services) and try again. Nothing was stored in plain text.',
+  'hardening-failed': (a) =>
+    `Agentistics could not make its own memory private (${a.reason ?? 'no reason given'}), so it will not open the vault in this process. Nothing was opened.`,
 }
 
 const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
@@ -106,6 +110,8 @@ const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
     'Este segredo só é usado dentro do serviço do agentop e nunca é entregue a outro programa. Faça isto pelo painel, ou deixe o serviço em execução fazer.',
   'service-down': () =>
     'O cofre só abre dentro do serviço do agentop, e o serviço não está rodando. Inicie-o (`agentop server`, ou `agentop` → Serviços) e tente de novo. Nada foi guardado em texto puro.',
+  'hardening-failed': (a) =>
+    `O Agentistics não conseguiu tornar a própria memória privada (${a.reason ?? 'sem motivo informado'}), então não vai abrir o cofre neste processo. Nada foi aberto.`,
 }
 
 /** PURE. The sentence for a refusal. */

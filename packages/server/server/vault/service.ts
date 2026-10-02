@@ -35,6 +35,7 @@ import {
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
 import { realProtectorIo, realSecretFs } from './io'
+import { applyHardening, loadLibc, readYamaFile, type HardeningPlatform, type HardeningReport } from './hardening'
 import { omittedSecrets } from '../backup/backup-plan'
 
 // ── where ─────────────────────────────────────────────────────────────────────────────────────
@@ -92,6 +93,32 @@ let _role: VaultRole = underTest(process.env) ? 'holder' : 'client'
 export function vaultRole(): VaultRole { return _role }
 /** Called by the agentop SERVICE only, before anything reads a secret. Idempotent. */
 export function becomeVaultHolder(): void { _role = 'holder' }
+
+// ── process hardening (SECRETS.4 §5.3) ───────────────────────────────────────────────────────────
+//
+// Applied ONCE, before the first unwrap — `ensureVaultOpen` and `openRunnerVault` both wait for it,
+// so no entry path can reach a DEK first. A `failed` report keeps BOTH scopes closed in this process
+// (`hardening-failed`); `limited` (Windows, other OSes) is stated and does not block. Under `bun test`
+// the test process is NOT hardened (it would make the runner itself non-dumpable) unless the smoke
+// asks for it; tests drive the gate through `__setHardeningForTests`.
+
+let _hardening: HardeningReport | null = null
+let _hardeningRun: Promise<HardeningReport> | null = null
+
+export async function hardenThisProcess(): Promise<HardeningReport> {
+  if (_hardening) return _hardening
+  _hardeningRun ??= (async () => {
+    if (!realMode()) return { state: 'ok', private: null, coreDumps: null, yama: null, reason: 'not applied under test' } as HardeningReport
+    const p = platform() as HardeningPlatform
+    return applyHardening(p, await loadLibc(p), readYamaFile)
+  })()
+  _hardening = await _hardeningRun
+  return _hardening
+}
+
+export function hardeningReport(): HardeningReport | null { return _hardening }
+
+function hardened(): boolean { return _hardening !== null && _hardening.state !== 'failed' }
 
 // ── language ──────────────────────────────────────────────────────────────────────────────────
 
@@ -414,6 +441,8 @@ export async function ensureVaultOpen(opts: { create?: boolean; migrate?: boolea
   if (_opened) return _opened
   // A client never opens the vault (§5.2): no DEK outside the service, not even for a moment.
   if (_role !== 'holder') return null
+  // §5.3: memory private BEFORE the first unwrap, or nothing opens here.
+  if (!hardened() && (await hardenThisProcess()).state === 'failed') return null
   if (_inflight) return _inflight
   const create = opts.create ?? true
   _inflight = (async () => {
@@ -469,6 +498,7 @@ export function adoptCreated(s: Extract<OpenState, { state: 'open' }>): void {
 export async function unlockVault(passphrase: string): Promise<{ ok: true } | { ok: false; code: VaultRefusal; sentence: string }> {
   if (_opened) return { ok: true }
   if (_role !== 'holder') return refused('service-only', sentence('service-only'))
+  if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
   const s = await tryOpen(passphrase)
   if (s.state === 'open') {
     adopt(s)
@@ -506,10 +536,17 @@ export interface VaultStatus {
   pending: number
   /** What detection checked when no protector answered (empty otherwise). */
   checked: string | null
+  /** §5.3 / §7.1 "Hardening" line: null until the service has applied it (or in a client). */
+  hardening?: HardeningReport | null
 }
 
 /** Never throws, never opens the vault. */
 export async function vaultStatus(): Promise<VaultStatus> {
+  const s = await vaultStatusInner()
+  return { ...s, hardening: _hardening }
+}
+
+async function vaultStatusInner(): Promise<VaultStatus> {
   const pending = await pendingPlaintext()
   if (_opened) {
     const primary = _opened.vault.wrappers.find(w => w.type !== 'passphrase')?.type ?? _opened.via
@@ -549,6 +586,7 @@ export async function vaultStatus(): Promise<VaultStatus> {
 /** The sentence for "this process could not open the vault", by why. */
 export async function notOpenRefusal(): Promise<VaultRefusalError> {
   if (_role !== 'holder') return refusal('service-only')
+  if (_hardening?.state === 'failed') return refusal('hardening-failed', { reason: _hardening.reason ?? '' })
   const s = _last
   if (s?.state === 'protector-lost') return new VaultRefusalError('protector-lost', lostSentence(s))
   if (s?.state === 'locked') return refusal('locked')
@@ -695,6 +733,8 @@ export async function initRunnerVault(protector: Protector, machineId: string): 
 
 /** Open the runner vault. The DEK goes into the handle and the local copy is zeroed. */
 export async function openRunnerVault(): Promise<RunnerOpen> {
+  // §5.3: the runner scope follows the same rule — no hardening, no open.
+  if ((await hardenThisProcess()).state === 'failed') return { ok: false, state: 'locked' }
   const dir = runnerVaultDir()
   const raw = await io().readFile(join(dir, 'vault.json'))
   const v = parseVaultJson(raw)
@@ -724,11 +764,19 @@ export function __resetVaultForTests(opts: {
   _override = opts.protectors ?? null
   _autoInit = opts.autoInit ?? null
   _migratedThisOpen = false
+  _hardening = null
+  _hardeningRun = null
   if (opts.dir) _vaultDir = opts.dir
   _io = opts.io ?? null
   _fs = opts.fs ?? realSecretFs
   _scryptForTests = opts.scrypt
   if (opts.lang) { const l = opts.lang; _lang = () => l }
+}
+
+/** Test seam: pretend this process's hardening came out as `r` (null = not yet applied). */
+export function __setHardeningForTests(r: HardeningReport | null): void {
+  _hardening = r
+  _hardeningRun = r ? Promise.resolve(r) : null
 }
 
 /** Does a vault exist on disk (without opening it)? */
