@@ -1925,11 +1925,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             : await mod.editComment(body.id, String(body.body ?? ''))
           return json({ ok }, ok ? 200 : 400)
         }
-        const ok = await mod.addComment(ref, {
+        // `subtaskId` (optional) names the subtask or GROUP the comment is left on; absent = the
+        // task. A target that names nothing is refused with a sentence, never filed on the task.
+        const res = await mod.addComment(ref, {
           author: String(body.author ?? 'unknown'),
           body: String(body.body ?? ''),
+          ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
+          ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
         })
-        return json({ ok }, ok ? 200 : 400)
+        if (res.ok) return json({ ok: true, id: res.id })
+        const status = res.reason === 'no_such_task' ? 404 : res.reason === 'empty' ? 400 : 422
+        return json({ ok: false, reason: res.reason, message: res.message }, status)
       }
       if (verb === 'sessions') {
         if (typeof body.detach === 'string') {

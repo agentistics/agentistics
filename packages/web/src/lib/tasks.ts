@@ -12,6 +12,7 @@ import {
   sortTaskStatuses, type Filters, type StagedSessionDraft, type TaskPriorityId, type TaskProgress,
 } from '@agentistics/core'
 import { getDateRangeFilter } from '../hooks/useData'
+import type { ChatAttachmentRef, CommentTarget } from '@agentistics/core'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
 /**
@@ -175,7 +176,12 @@ export interface TaskListRow {
   task: TaskRecord
   attempts: number
   rollup: AttemptRollup
-  counts: { comments: number; subtasks: number; subtasksDone: number; files: number }
+  /** `commentsBySubtask` is each subtask's/group's THREAD size (a group includes its members');
+   *  optional because an older server does not send it — read it as "no per-row count known". */
+  counts: {
+    comments: number; subtasks: number; subtasksDone: number; files: number
+    commentsBySubtask?: Record<string, number>
+  }
   harnesses: string[]
   /**
    * The repositories this task's sessions touched — normalized remotes, `''` for the "no linked
@@ -230,6 +236,12 @@ export interface TaskSessionRow {
 
 export interface TaskComment {
   id: string; taskId: string; author: string; body: string; createdAt: string
+  /** The subtask or GROUP it was left on; absent = the task (and every pre-thread comment). See
+   *  `@agentistics/core`'s `commentThreads.ts` for which thread shows it. */
+  subtaskId?: string
+  /** Files left with the comment — references into the chat's attachment store (`url` is added by
+   *  the detail reply for assistants; the UI builds its own from `path`). */
+  attachments?: ChatAttachmentRef[]
 }
 export interface Subtask {
   id: string
@@ -321,6 +333,9 @@ export interface TaskDetail {
   stats: TaskStats
   sessions: TaskSessionRow[]
   comments: TaskComment[]
+  /** The same comments grouped by their own target — the API's shape for assistants. The UI reads
+   *  threads through `commentThread` instead, which also aggregates a group's members. */
+  commentThreads?: { target: CommentTarget; comments: TaskComment[] }[]
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
@@ -566,8 +581,32 @@ export interface TaskFieldPatch {
 export const editTask = (ref: string, patch: TaskFieldPatch) =>
   post(`/api/tasks/${encodeURIComponent(ref)}`, patch)
 
-export const addComment = (ref: string, author: string, body: string) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { author, body })
+/**
+ * Leave a comment on the task, or — with `subtaskId` — on one of its subtasks or GROUPS. A refusal
+ * carries the server's own sentence (an unknown or deleted subtask is refused in words, never filed
+ * on the task), which the composer shows as it is.
+ */
+export async function addComment(
+  ref: string, author: string, body: string, subtaskId?: string | null,
+  attachments?: readonly ChatAttachmentRef[],
+): Promise<{ ok: true } | { ok: false; message: string | null }> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        author, body,
+        ...(subtaskId ? { subtaskId } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      }),
+    })
+    if (res.ok) return { ok: true }
+    const refused = await res.json().catch(() => null) as { message?: string } | null
+    return { ok: false, message: typeof refused?.message === 'string' ? refused.message : null }
+  } catch {
+    return { ok: false, message: null }
+  }
+}
 
 /**
  * Add a subtask — loose by default, or a GROUP (§F.1) when `isGroup` is true — and return its new

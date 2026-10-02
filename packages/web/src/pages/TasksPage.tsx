@@ -396,6 +396,7 @@ function TaskList() {
             setDetails(m => new Map(m).set(id, body.task))
           }}
           onRefreshDetail={refreshDetail}
+          onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
           toolbarStart={searchBox}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
           onPatchSubtask={async (ref, sid, patch) => {
