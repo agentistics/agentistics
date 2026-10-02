@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { PHRASE_KEYS, PHRASE_ROTATE_MS, UPDATE_STEPS, UPDATE_STRINGS, pickPhrase, ut, versionSeed, type UpdateKey } from './updateI18n'
+import { PHRASE_KEYS, PHRASE_ROTATE_MS, UPDATE_STEPS, UPDATE_STRINGS, pickPhrase, splitPair, ut, versionPair, versionSeed, type UpdateKey } from './updateI18n'
 
 describe('every update string exists in both languages', () => {
   const pt = UPDATE_STRINGS.pt, en = UPDATE_STRINGS.en
@@ -45,7 +45,20 @@ describe('the phrase pools', () => {
 })
 
 test('ut fills placeholders and leaves unknown ones visible', () => {
-  expect(ut('pt', 'finale.updated_to', { version: '2.31.0' })).toBe('Atualizado para v2.31.0')
-  expect(ut('en', 'finale.updated_to', { version: '2.31.0' })).toBe('Updated to v2.31.0')
-  expect(ut('en', 'finale.updated_to')).toBe('Updated to v{version}')
+  expect(ut('pt', 'finale.updated', { pair: versionPair('2.30.0', '2.31.0') })).toBe('Atualizado v2.30.0 → v2.31.0')
+  expect(ut('en', 'loader.title', { pair: versionPair('2.30.0', '2.31.0') })).toBe('Updating v2.30.0 → v2.31.0')
+  expect(ut('en', 'finale.updated')).toBe('Updated {pair}')
+})
+
+test('the pair falls back to the target alone when the origin is unknown, and splits around itself', () => {
+  expect(versionPair('', '2.31.0')).toBe('v2.31.0')
+  expect(splitPair('pt', 'loader.title')).toEqual(['Atualizando ', ''])
+  expect(splitPair('en', 'finale.updated')).toEqual(['Updated ', ''])
+})
+
+test('phrase pools have the same size in both languages (parity)', () => {
+  for (const step of UPDATE_STEPS) {
+    const n = PHRASE_KEYS[step].length
+    expect(PHRASE_KEYS[step].filter(k => UPDATE_STRINGS.en[k]).length).toBe(n)
+  }
 })

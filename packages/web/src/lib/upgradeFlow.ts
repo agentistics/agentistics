@@ -22,6 +22,7 @@
 import { useSyncExternalStore } from 'react'
 import { createSharedPref } from './sharedPref'
 import { UPGRADE_POLL_MS, UPGRADE_WAIT_MS, browserReloadEnv, clearAppCaches, upgradeArrived } from './appReload'
+import { measureRate, type ByteSample } from './updateAnim'
 import { advance, rawStep, type ServerProgress, type StepView } from './upgradeSteps'
 import {
   RESTORE_KEY, decodeRestore, encodeRestore, parseSnooze, snapshotRestore, snoozeFor, type RestoreState, type Snooze,
@@ -48,13 +49,18 @@ export type FlowPhase = 'idle' | 'running' | 'arrived' | 'failed' | 'timeout'
 export interface FlowState {
   phase: FlowPhase
   target: string
+  /** The version this page was on when install was pressed (the title's origin); '' when unknown. */
+  from: string
   startedAt: number
   view: StepView | null
+  /** The last REAL byte count and the measured rate — what the scene estimates between polls from. */
+  bytes: ByteSample | null
+  rate: number | null
   /** The server's own refusal sentence, when it refused the press. */
   message: string | null
 }
 
-const IDLE: FlowState = { phase: 'idle', target: '', startedAt: 0, view: null, message: null }
+const IDLE: FlowState = { phase: 'idle', target: '', from: '', startedAt: 0, view: null, bytes: null, rate: null, message: null }
 let state: FlowState = IDLE
 const listeners = new Set<() => void>()
 const set = (next: Partial<FlowState>) => { state = { ...state, ...next }; for (const fn of listeners) fn() }
@@ -90,9 +96,9 @@ async function getJson<T>(url: string): Promise<T | null> {
   } catch { return null }
 }
 
-function rememberWhereIAm(target: string): void {
+function rememberWhereIAm(target: string, from: string): void {
   try {
-    const snap = snapshotRestore(window.location, window.scrollY, target, Date.now())
+    const snap = snapshotRestore(window.location, window.scrollY, target, Date.now(), from)
     sessionStorage.setItem(RESTORE_KEY, encodeRestore(snap))
   } catch { /* storage blocked: the reload keeps the URL anyway, only the scroll is lost */ }
 }
@@ -105,8 +111,10 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
   if (state.phase === 'running' || state.phase === 'arrived') return
   const id = ++runId
   const startedAt = Date.now()
-  set({ phase: 'running', target, startedAt, view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), message: null })
-  rememberWhereIAm(target)
+  const before = await getJson<{ current?: string }>('/api/version')
+  const from = typeof before?.current === 'string' ? before.current : ''
+  set({ phase: 'running', target, from, startedAt, view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null })
+  rememberWhereIAm(target, from)
 
   try {
     const res = await fetch(`/api/upgrade?lang=${lang}`, { method: 'POST' })
@@ -132,7 +140,12 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
     const arrived = upgradeArrived(info, target)
     const view = advance(state.view, rawStep({ startedAt, progress, quietPolls: quiet, arrived }))
     if (view.failed) { set({ phase: 'failed', view, message: null }); return }
-    set({ view })
+    let bytes = state.bytes, rate = state.rate
+    if (progress?.stage === 'downloading' && progress.total && progress.received !== undefined) {
+      const next: ByteSample = { received: progress.received, total: progress.total, at: Date.now() }
+      if (!bytes || next.received !== bytes.received) { rate = measureRate(bytes, next, rate); bytes = next }
+    }
+    set({ view, bytes, rate })
     if (arrived) {
       set({ phase: 'arrived' })
       await sleep(ARRIVAL_HOLD_MS)

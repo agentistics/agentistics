@@ -1058,6 +1058,7 @@ button:focus-within .ag-row-pin,
    never its geometry. `updateSurfaces.test.ts` reads these blocks and fails on anything else. */
 @keyframes ag-upd-phrase-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .ag-upd-phrase { animation: ag-upd-phrase-in 420ms ease both; display: inline-block; }
+@keyframes ag-upd-indet { 0% { left: -35%; } 100% { left: 100%; } }
 @keyframes ag-upd-shimmer { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .ag-upd-shimmer { animation: ag-upd-shimmer 1.4s ease-in-out infinite; }
 @keyframes ag-upd-logo {
