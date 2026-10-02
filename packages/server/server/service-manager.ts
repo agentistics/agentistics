@@ -114,6 +114,12 @@ export interface ServiceSpec {
   command: string
   /** True when the command stays in the foreground for as long as the service runs. */
   keepsRunning: boolean
+  /**
+   * A command that decides whether the unit should start at all (`ExecCondition=`). Exit 0 starts
+   * it, 1–254 SKIPS it without marking the unit failed — which is what stops `Restart=on-failure`
+   * looping when the port is already held. Absent = always start.
+   */
+  condition?: string
 }
 
 /**
@@ -145,6 +151,7 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
     lines.push(systemdPathLine(path))
   }
   if (spec.keepsRunning) {
+    if (spec.condition) lines.push(`ExecCondition=${spec.condition}`)
     lines.push('Type=simple', `ExecStart=${spec.command}`)
     // THE SESSIONS MUST SURVIVE THE SERVICE. A tmux client started by the server starts the tmux
     // SERVER as its own child when none is running, so the whole fleet lands in this unit's
