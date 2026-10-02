@@ -27,7 +27,7 @@ export interface SessionRowMenuProps {
  * `openTask` and `finishTask` were here and are gone with the verbs — a delivery is finished when
  * its session is STOPPED, which is where the question is asked now. Filing is what remains.
  */
-const TASK_ENTRIES = new Set<string>(['link-task'])
+const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
 export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -64,14 +64,14 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
       }}
     >
-      {entries.map(e => (
+      {entries.map((e, i) => (
         <button
-          key={e.action}
+          key={`${e.action}:${i}`}
           role="menuitem"
           disabled={!e.enabled}
           // The reason is on the entry itself, so a disabled row explains itself on hover instead
           // of leaving the reader to guess.
-          title={e.reason}
+          title={e.reason ?? e.label}
           onClick={() => { if (e.enabled) { onPick(e.action); onClose() } }}
           style={{
             display: 'flex', alignItems: 'center', width: '100%', gap: 8,
@@ -84,10 +84,10 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
-          {e.label}
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
           {/* Same rule as the three-dot menu: where the delivery board reaches into a session
               surface, it says it is in beta. `link-task` is the entry that opens the picker. */}
-          {TASK_ENTRIES.has(e.action) && <BetaTag what="Tasks" style={{ marginLeft: 'auto' }} />}
+          {TASK_ENTRIES.has(e.action) && i === entries.findIndex(x => TASK_ENTRIES.has(x.action)) && <BetaTag what="Tasks" style={{ marginLeft: 'auto', flexShrink: 0 }} />}
         </button>
       ))}
       {/* A row with a refused verb says why here too, not only on hover: a tooltip is a fact only

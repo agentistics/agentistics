@@ -47,7 +47,7 @@ import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
 import { buildPickRows } from '../../lib/sessionPick'
-import { rowMenuEntries, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
+import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
 import { SessionFiling } from '../tasks/SessionFiling'
@@ -584,7 +584,12 @@ export function SessionsAside({
       setMenu(null)
       return
     }
-    if (action === 'link-task') {
+    if (action === UNLINK_TASK) {
+      setMenu(null)
+      void detachSession(id, id).then(() => setNotice(boardCopy(lang).unfiled))
+      return
+    }
+    if (action === LINK_TASK) {
       // The picker is anchored where the menu was, so the gesture stays in one place on screen.
       setLinking({ id, x: menu.x, y: menu.y })
       setMenu(null)
@@ -1666,6 +1671,7 @@ export function SessionsAside({
                 enabled: menu.id !== routeSessionId,
                 ...(menu.id === routeSessionId ? { reason: pt ? 'Já está aberta à esquerda.' : 'Already open on the left.' } : {}),
               }] : []),
+              ...taskMenuEntries(rows.find(r => r.id === menu.id)?.task, pt),
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
             ],
           )}

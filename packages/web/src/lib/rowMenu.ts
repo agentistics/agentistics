@@ -45,6 +45,31 @@ export function rowMenuEntries(
   return [...fleet, ...extra]
 }
 
+/** Opens the filing dialog (`SessionFiling`) — both to file a session and to move a filed one. */
+export const LINK_TASK = 'link-task'
+/** Unfiles a session from its task directly, without opening the dialog. */
+export const UNLINK_TASK = 'unlink-task'
+
+/**
+ * The row menu's task entries — CLIENT-SIDE, like the group ones: they open `SessionFiling` (the
+ * one dialog that files, moves and unfiles) or call its own `detachSession`, so there is no server
+ * verb to have resolved. `task` is the delivery NAME the fleet row carries.
+ *
+ * Unfiled: one entry, "File under a task…". Filed: the current task is NAMED in the menu (an
+ * entry that opens it), then Move and Unfile — a menu that said only "File under a task…" over a
+ * session that already has one would hide where it is.
+ */
+export function taskMenuEntries(task: string | undefined, pt: boolean): MenuEntry[] {
+  if (!task) {
+    return [{ action: LINK_TASK, label: pt ? 'Vincular a uma tarefa…' : 'File under a task…', enabled: true }]
+  }
+  return [
+    { action: LINK_TASK, label: pt ? `Tarefa: ${task}` : `Task: ${task}`, enabled: true },
+    { action: LINK_TASK, label: pt ? 'Mover…' : 'Move…', enabled: true },
+    { action: UNLINK_TASK, label: pt ? 'Desvincular' : 'Unlink', enabled: true },
+  ]
+}
+
 /** The client-side entries of the Nay dock's row menu. */
 export const NAY_GO_TO = '__nay_go_to__'
 export const NAY_COPY_ID = '__nay_copy_id__'
@@ -63,13 +88,14 @@ export const NAY_COPY_ID = '__nay_copy_id__'
  */
 export function nayRowMenuEntries(
   verbs: readonly RowVerb[],
-  o: { running: boolean; conversationId: string | undefined; pt: boolean },
+  o: { running: boolean; conversationId: string | undefined; pt: boolean; task?: string | undefined },
 ): MenuEntry[] {
   const find = (a: string) => verbs.find(v => v.action === a)
   const session = [find('rename'), o.running ? find('kill') : find('resume')]
     .filter((v): v is RowVerb => v !== undefined)
   return [
     ...session,
+    ...taskMenuEntries(o.task, o.pt),
     { action: NAY_GO_TO, label: o.pt ? 'Ir para a sessão' : 'Go to session', enabled: true },
     o.conversationId
       ? { action: NAY_COPY_ID, label: o.pt ? 'Copiar id da conversa' : 'Copy conversation id', enabled: true }

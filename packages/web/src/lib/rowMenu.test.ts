@@ -47,7 +47,7 @@ describe('nayRowMenuEntries', () => {
   ]
   test('a running conversation: rename, END (never interrupt), go to, copy id', () => {
     const e = nayRowMenuEntries(verbs, { running: true, conversationId: 'c1', pt: true })
-    expect(e.map(x => x.action)).toEqual(['rename', 'kill', NAY_GO_TO, NAY_COPY_ID])
+    expect(e.map(x => x.action)).toEqual(['rename', 'kill', 'link-task', NAY_GO_TO, NAY_COPY_ID])
   })
   test('an ended conversation offers Reopen, with the server verb untouched', () => {
     const e = nayRowMenuEntries(verbs, { running: false, conversationId: 'c1', pt: true })
@@ -55,12 +55,27 @@ describe('nayRowMenuEntries', () => {
   })
   test('no delete, and a verb the server did not send is not invented', () => {
     const e = nayRowMenuEntries([], { running: true, conversationId: 'c1', pt: false })
-    expect(e.map(x => x.action)).toEqual([NAY_GO_TO, NAY_COPY_ID])
+    expect(e.map(x => x.action)).toEqual(['link-task', NAY_GO_TO, NAY_COPY_ID])
   })
   test('copy id is refused in words when there is no conversation link', () => {
     const e = nayRowMenuEntries(verbs, { running: true, conversationId: undefined, pt: false })
     const copy = e.find(x => x.action === NAY_COPY_ID)!
     expect(copy.enabled).toBe(false)
     expect(copy.reason).toBeTruthy()
+  })
+})
+
+describe('taskMenuEntries', () => {
+  test('unfiled: a single entry that opens the filing dialog', async () => {
+    const { taskMenuEntries } = await import('./rowMenu')
+    expect(taskMenuEntries(undefined, true).map(e => [e.action, e.label])).toEqual([['link-task', 'Vincular a uma tarefa…']])
+    expect(taskMenuEntries(undefined, false)[0]!.label).toBe('File under a task…')
+  })
+  test('filed: names the task, then Move and Unlink', async () => {
+    const { taskMenuEntries } = await import('./rowMenu')
+    const e = taskMenuEntries('Minha tarefa', true)
+    expect(e.map(x => x.label)).toEqual(['Tarefa: Minha tarefa', 'Mover…', 'Desvincular'])
+    expect(e.map(x => x.action)).toEqual(['link-task', 'link-task', 'unlink-task'])
+    expect(e.every(x => x.enabled)).toBe(true)
   })
 })
