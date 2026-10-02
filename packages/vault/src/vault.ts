@@ -18,18 +18,26 @@
  */
 import type { Lang } from './sentences'
 import { newDataKey } from './seal'
-import { isKid } from './format'
+import { isKid, type VaultScope } from './format'
 import type { ProbeResult, Protector, ProtectorId, ProtectorIo, WrapperRecord } from './protectors/types'
 import { bytes, text } from './protectors/types'
 
 export const VAULT_FILE = 'vault.json'
 export const VAULT_VERSION = 1
+/** SECRETS.4 §1.1: v2 names the vault's scope. A v1 file is the HUMAN scope with SECRETS.2's wrappers. */
+export const VAULT_VERSION_SCOPED = 2
+/** The runner scope lives beside the human vault, never inside it (SECRETS.4 §1.1). */
+export const RUNNER_VAULT_DIR = 'vault-runner'
 
 export interface VaultJson {
-  v: typeof VAULT_VERSION
+  v: typeof VAULT_VERSION | typeof VAULT_VERSION_SCOPED
+  /** Absent in a v1 file, which is read as `'human'`. */
+  scope: VaultScope
   kid: string
   createdAt: string
   wrappers: WrapperRecord[]
+  /** The paired machine (runner scope only, P1.4). */
+  machineId?: string
 }
 
 const PROTECTOR_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase', 'memory']
@@ -41,7 +49,11 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
   try { o = JSON.parse(typeof raw === 'string' ? raw : text(raw)) } catch { return null }
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null
   const r = o as Record<string, unknown>
-  if (r.v !== VAULT_VERSION || !isKid(r.kid) || typeof r.createdAt !== 'string' || !Array.isArray(r.wrappers)) return null
+  if ((r.v !== VAULT_VERSION && r.v !== VAULT_VERSION_SCOPED) || !isKid(r.kid) || typeof r.createdAt !== 'string' || !Array.isArray(r.wrappers)) return null
+  // v1 has no scope and is the human vault; v2 must name a scope this build knows.
+  const scope: VaultScope | null = r.v === VAULT_VERSION ? 'human' : r.scope === 'human' || r.scope === 'cloud-runner' ? r.scope : null
+  if (!scope) return null
+  if (r.machineId !== undefined && (typeof r.machineId !== 'string' || !r.machineId)) return null
   const wrappers: WrapperRecord[] = []
   for (const w of r.wrappers) {
     if (!w || typeof w !== 'object') return null
@@ -51,11 +63,19 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     wrappers.push({ type: x.type as ProtectorId, createdAt: x.createdAt, ...(params ? { params } : {}) })
   }
   if (wrappers.length === 0) return null
-  return { v: VAULT_VERSION, kid: r.kid, createdAt: r.createdAt, wrappers }
+  return { v: r.v as VaultJson['v'], scope, kid: r.kid, createdAt: r.createdAt, wrappers, ...(typeof r.machineId === 'string' ? { machineId: r.machineId } : {}) }
 }
 
+/**
+ * A human vault with nothing v2-only stays a v1 FILE: an older agentop that reads it back after a
+ * downgrade must still recognise its own vault (an unreadable `vault.json` would read as "no vault").
+ * The enrolment flow (SECRETS.4 §7.3) is what writes the human scope as v2.
+ */
 export function serializeVaultJson(v: VaultJson): Uint8Array {
-  return bytes(JSON.stringify(v, null, 2) + '\n')
+  const out = v.scope === 'human' && v.v === VAULT_VERSION && !v.machineId
+    ? { v: VAULT_VERSION, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers }
+    : { v: VAULT_VERSION_SCOPED, scope: v.scope, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers, ...(v.machineId ? { machineId: v.machineId } : {}) }
+  return bytes(JSON.stringify(out, null, 2) + '\n')
 }
 
 export type Platform = 'darwin' | 'win32' | 'linux' | 'other'

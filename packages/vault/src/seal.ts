@@ -12,7 +12,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
 import {
   HKDF_INFO_PREFIX, KEY_BYTES, NONCE_BYTES, SEALED_ALG, SEALED_VERSION, TAG_BYTES,
-  b64, parseSealed, sealedAad, serializeSealed, unb64, type SealedFile,
+  b64, parseSealed, scopeOfPurpose, sealedAad, serializeSealed, unb64, type SealedFile, type VaultScope,
 } from './format'
 
 /** PURE. The per-purpose subkey. */
@@ -45,6 +45,8 @@ export function aeadOpen(key: Uint8Array, nonce: Uint8Array, aad: Uint8Array, se
 export interface SealInput {
   dek: Uint8Array
   kid: string
+  /** The scope of the vault whose DEK this is — from the vault HANDLE, never from a caller. */
+  scope?: VaultScope
   purpose: string
   name: string
   plaintext: Uint8Array
@@ -55,6 +57,8 @@ export interface SealInput {
 
 /** Seal one value into the on-disk record. */
 export function sealRecord(i: SealInput): SealedFile {
+  // A purpose of the OTHER scope is refused before any crypto (SECRETS.4 §1.1).
+  if (scopeOfPurpose(i.purpose) !== (i.scope ?? 'human')) throw new Error(`vault: purpose "${i.purpose}" is not sealed under the ${i.scope ?? 'human'} scope`)
   const nonce = i.nonce ?? new Uint8Array(randomBytes(NONCE_BYTES))
   if (nonce.length !== NONCE_BYTES) throw new Error('vault: nonce has the wrong length')
   const ct = aeadSeal(subkey(i.dek, i.kid, i.purpose), nonce, sealedAad(i.purpose, i.name, i.kid), i.plaintext)
@@ -69,11 +73,13 @@ export function sealToBytes(i: SealInput): Uint8Array {
   return new TextEncoder().encode(serializeSealed(sealRecord(i)))
 }
 
-export type OpenFailure = 'tampered' | 'wrong-machine'
+export type OpenFailure = 'tampered' | 'wrong-machine' | 'purpose'
 export type OpenOutcome = { ok: true; plaintext: Uint8Array } | { ok: false; code: OpenFailure; kid?: string }
 
 export interface OpenInput {
   dek: Uint8Array
+  /** The scope of the OPEN vault — from the vault handle. A purpose of the other scope is `purpose`. */
+  scope?: VaultScope
   /** The OPEN vault's kid. */
   kid: string
   /** What the caller expects this file to be — bound into the AAD, never read from the file. */
@@ -91,6 +97,7 @@ export interface OpenInput {
  *     purpose, name and kid
  */
 export function openRecord(i: OpenInput): OpenOutcome {
+  if (scopeOfPurpose(i.purpose) !== (i.scope ?? 'human')) return { ok: false, code: 'purpose' }
   const text = typeof i.bytes === 'string' ? i.bytes : new TextDecoder('utf-8', { fatal: false }).decode(i.bytes)
   const f = parseSealed(text)
   if (!f) return { ok: false, code: 'tampered' }
