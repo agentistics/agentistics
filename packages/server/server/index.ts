@@ -1034,6 +1034,29 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // Settings → Vault. `capability-guard.ts` (`/api/vault`, localShell) has already refused these on
+    // an exposed profile; a central holds no per-machine vault of its own to show, so it answers 404.
+    // READ-ONLY metadata plus one action (lock now, behind `requireVaultStepUp`). No value ever.
+    if (url.pathname === '/api/vault' || url.pathname.startsWith('/api/vault/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+      try {
+        const { readVaultView, lockVaultNow } = await import('./vault/inventory')
+        if (url.pathname === '/api/vault' && req.method === 'GET') {
+          return new Response(JSON.stringify(await readVaultView()), { headers: json })
+        }
+        if (url.pathname === '/api/vault/lock' && req.method === 'POST') {
+          const r = await lockVaultNow()
+          return new Response(JSON.stringify(r.ok ? { ok: true, vault: await readVaultView() } : { error: r.error }), { status: r.ok ? 200 : 403, headers: json })
+        }
+        return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), { status: 500, headers: json })
+      }
+    }
+
     if (url.pathname === '/api/backup/status' && req.method === 'GET') {
       // A central aggregates other machines and has no local harness directories of its own to
       // back up — the same reason Settings hides the `billing` and `live` sections there. The

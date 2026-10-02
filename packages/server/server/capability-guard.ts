@@ -96,6 +96,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // (`~/.claude`, `~/.codex`, …) into an archive on disk — the same shell-and-filesystem power
   // `/api/exec` carries, so it rides the same capability rather than a softer one.
   ['/api/backup', 'localShell'],
+  // Settings → Vault: which secrets are sealed on this machine (metadata only, never a value) and the
+  // "lock now" action. It is about THIS host's key material, so it rides the host-power gate and is
+  // refused on a central by `index.ts` as well.
+  ['/api/vault', 'localShell'],
   // The running server's experimental-feature state (read-only; the switch is CLI-only). It reports
   // which host features this machine booted with, so it rides the same capability.
   ['/api/experimental', 'localShell'],

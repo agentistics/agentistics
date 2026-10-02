@@ -1,0 +1,113 @@
+/**
+ * vault/inventory.ts — what Settings → Vault shows: the vault's state, and WHICH secrets are
+ * registered in it. METADATA ONLY.
+ *
+ * It never decrypts anything. A sealed file carries its own plain header (`kid`, `purpose`, `name`,
+ * `sealedAt`), which is enough to say what it is, when it was sealed and whether it belongs to this
+ * vault — so this module never holds a secret value, and the response cannot leak one by accident.
+ * The shape is a closed list of named fields rather than a spread of anything read from disk.
+ */
+import { basename } from 'node:path'
+import { isKid, parseSealed, parseVaultJson } from '@agentistics/vault'
+import { sealedFiles } from './boot'
+import {
+  displayPath, lockVault, pendingPlaintextFiles, restoreWithFor, secretFs, vaultDir, vaultStatus,
+  type VaultState,
+} from './service'
+
+export type VaultItemState = 'sealed' | 'pending' | 'unreadable'
+/** Why an item is not plainly "sealed". Codes, rendered by the web in the user's language. */
+export type VaultItemReason = 'plaintext' | 'wrong-machine' | 'unparseable' | 'mode-open'
+
+export interface VaultItem {
+  /** What the secret IS — a stable code the web maps to words. */
+  kind: 'github-backup' | 'central-token' | 'envelope-key' | 'central-env' | 'other'
+  state: VaultItemState
+  reason?: VaultItemReason
+  /** ISO instant the file was sealed (from its own header). Absent for a pending item. */
+  sealedAt?: string
+  /** A path under the data dir, for display. Never a value. */
+  file: string
+  /** How to enter it again — present for an unreadable item only. */
+  restoreWith?: string
+}
+
+export interface VaultView {
+  state: VaultState
+  protector: string | null
+  protectorLabel: string | null
+  kid: string | null
+  createdAt: string | null
+  /** The vault's own sentence for any state but `open` (already localized). */
+  sentence: string | null
+  pending: number
+  canLock: boolean
+  items: VaultItem[]
+}
+
+const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
+  'github-backup': 'github-backup', 'central-token': 'central-token',
+  'envelope-key': 'envelope-key', 'central-env': 'central-env',
+}
+
+/** PURE. Which secret a plaintext file still holds, from its name. */
+export function kindOfPendingFile(file: string): VaultItem['kind'] {
+  const b = basename(file)
+  if (b.startsWith('github-backup')) return 'github-backup'
+  if (b === 'preferences.json' || b === '.claude.json') return 'central-token'
+  if (b.startsWith('machine-key') || b.startsWith('envelope-key')) return 'envelope-key'
+  if (b.endsWith('.env')) return 'central-env'
+  return 'other'
+}
+
+/** `files` / `pendingFiles` are seams for tests; production reads the host's own lists. */
+export async function readVaultView(files: string[] = sealedFiles(), pendingFiles?: () => Promise<string[]>): Promise<VaultView> {
+  const s = await vaultStatus()
+  let createdAt: string | null = null
+  let kid = s.kid
+  try {
+    const raw = await secretFs().readFile(`${vaultDir()}/vault.json`)
+    const v = parseVaultJson(raw ? new TextDecoder().decode(raw) : null)
+    if (v) { createdAt = v.createdAt; kid = kid ?? v.kid }
+  } catch { /* the view says "unknown" rather than failing */ }
+  const items: VaultItem[] = []
+  for (const f of files) {
+    const st = await secretFs().lstat(f)
+    const bytes = st ? await secretFs().readFile(f) : null
+    const head = bytes ? parseSealed(new TextDecoder().decode(bytes)) : null
+    if (!head) {
+      items.push({ kind: 'other', state: 'unreadable', reason: 'unparseable', file: displayPath(f), restoreWith: restoreWithFor('') })
+      continue
+    }
+    const kind = KIND_OF_PURPOSE[head.purpose] ?? 'other'
+    const base: VaultItem = { kind, state: 'sealed', sealedAt: head.sealedAt, file: displayPath(f) }
+    if (kid && isKid(kid) && head.kid !== kid) {
+      items.push({ ...base, state: 'unreadable', reason: 'wrong-machine', restoreWith: restoreWithFor(head.purpose) })
+    } else if (st && (st.mode & 0o077) !== 0) {
+      items.push({ ...base, state: 'unreadable', reason: 'mode-open', restoreWith: restoreWithFor(head.purpose) })
+    } else items.push(base)
+  }
+  for (const f of await (pendingFiles ?? pendingPlaintextFiles)()) {
+    items.push({ kind: kindOfPendingFile(f), state: 'pending', reason: 'plaintext', file: displayPath(f) })
+  }
+  return {
+    state: s.state, protector: s.protector, protectorLabel: s.protectorLabel, kid, createdAt,
+    sentence: s.sentence, pending: s.pending, canLock: s.state === 'open', items,
+  }
+}
+
+/**
+ * THE gate every vault ACTION goes through. Today it allows: the one action is "lock now", which
+ * only ever REDUCES what is open. SECRETS.4 plugs the authenticator / Windows Hello presence in
+ * HERE and nowhere else, so a new action cannot forget to ask.
+ */
+export async function requireVaultStepUp(_action: 'lock'): Promise<{ ok: true } | { ok: false; error: string }> {
+  return { ok: true }
+}
+
+export async function lockVaultNow(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const gate = await requireVaultStepUp('lock')
+  if (!gate.ok) return gate
+  lockVault()
+  return { ok: true }
+}

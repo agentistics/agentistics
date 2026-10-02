@@ -339,6 +339,17 @@ in-product half of this limit.
   atomically (tmp + fsync + rename + chmod + fsync of the directory), and a reader refuses a sealed
   file that is group- or world-readable, as evidence something else is wrong.
 
+### Seeing it: Settings → Vault
+
+`GET /api/vault` (guarded as `localShell` in `capability-guard.ts`, 404 on a central) returns metadata
+only: the vault's state, its protector in plain words, the key id and creation time, and one row per
+sealed file — what it is, when it was sealed (read from the file's own plain header), and whether it is
+`sealed`, `pending` (plaintext still waiting) or `unreadable` (another machine's vault, not a sealed
+file, or a file open to other users) with how to enter it again. It never decrypts anything, so it never
+holds a value, a fragment or a fingerprint; `inventory.test.ts` plants known values and asserts their
+absence. The one action, `POST /api/vault/lock`, goes through `requireVaultStepUp` (`vault/inventory.ts`),
+the single place a stronger gate (authenticator, Windows Hello presence) plugs in.
+
 ### The passphrase, and a locked service
 
 With no protector, `agentop vault init` asks for a passphrase (≥ 12 characters, not one of the
