@@ -155,3 +155,61 @@ describe('M1 — CSRF: /api/vault POSTs need a same-origin proof AND a JSON body
     expect((await stepUpState()).failures).toBe(1)
   })
 })
+
+// ── M2: recovery mode hands out a NEW root key — only to the local terminal ──────────────────
+
+import { recoverWithWords } from './gate'
+import { vaultStatus } from './service'
+
+describe('M2 — in recovery mode the re-enrolment steps answer the local socket (TTY), never HTTP', () => {
+  async function inRecovery(): Promise<void> {
+    const { words } = await enrolledVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    restart()
+    expect((await vaultStatus()).state).toBe('locked')
+    const r = await recoverWithWords(words.join(' '))
+    expect(r.ok).toBe(true)
+  }
+  const WEB = { session: 'local' }
+  test('HTTP cannot get the new 24 words', async () => {
+    await inRecovery()
+    const r = await beginRecoveryKey(WEB)
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.code).toBe('recovery-tty-only')
+    expect(JSON.stringify(r)).not.toMatch(/"words"/)
+  })
+  test('HTTP cannot get a new authenticator seed', async () => {
+    await inRecovery()
+    const r = await beginAuthenticator(WEB, 'box')
+    expect(!r.ok && r.code).toBe('recovery-tty-only')
+  })
+  test('HTTP cannot enrol a presence credential', async () => {
+    await inRecovery()
+    const g = hello.gestures
+    const r = await enrolPresence('hello', WEB)
+    expect(!r.ok && r.code).toBe('recovery-tty-only')
+    expect(hello.gestures).toBe(g)
+  })
+  test('the local terminal (vault.sock) still completes all three steps without the lost factors', async () => {
+    await inRecovery()
+    const a = await beginAuthenticator(S, 'box')
+    expect(a.ok).toBe(true)
+    const r = await beginRecoveryKey(S)
+    expect(r.ok).toBe(true)
+    expect((await enrolPresence('hello', S)).ok).toBe(true)
+  })
+  test('the refusal is a sentence naming the terminal command, in PT too', async () => {
+    await inRecovery()
+    const r = await beginRecoveryKey(WEB)
+    expect(!r.ok && r.sentence).toContain('agentop vault enroll')
+  })
+  test('an HTTP request whose session cookie is literally "socket" is still HTTP', async () => {
+    await inRecovery()
+    const req = new Request('http://127.0.0.1:47291/api/vault/recovery/begin', { method: 'POST', headers: SAME, body: '{}' })
+    const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'socket' })
+    const j = JSON.parse(await res!.text())
+    expect(j.code).toBe('recovery-tty-only')
+    expect(j.words).toBeUndefined()
+  })
+})

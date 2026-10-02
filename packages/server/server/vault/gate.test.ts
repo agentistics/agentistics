@@ -239,14 +239,16 @@ describe('§4.3 / §12.4 recovery', () => {
     for (const a of ['list', 'reset', 'rekey', 'set-auto-lock', 'disable-presence'] as VaultAction[]) {
       expect(await requireVaultStepUp(a, { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'recovery-mode' })
     }
-    // (a) presence, (b) authenticator, (c) a NEW recovery key — none needs the lost factors
-    expect((await enrolPresence('hello', S)).ok).toBe(true)
-    const a = await beginAuthenticator(S, 'test-box')
+    // (a) presence, (b) authenticator, (c) a NEW recovery key — none needs the lost factors, and all
+    // three answer the local terminal's channel only (review M2: never an HTTP session)
+    const SOCK = { session: 'socket' }
+    expect((await enrolPresence('hello', SOCK)).ok).toBe(true)
+    const a = await beginAuthenticator(SOCK, 'test-box')
     if (!a.ok) throw new Error(a.sentence)
     seed = base32Decode(a.secret)
     expect((await confirmAuthenticator(codeAt(0))).ok).toBe(true)
     next()
-    const k = await beginRecoveryKey(S)
+    const k = await beginRecoveryKey(SOCK)
     if (!k.ok) throw new Error(k.sentence)
     expect((await confirmRecoveryKey(k.positions.map(p => k.words[p - 1]!))).ok).toBe(true)
     expect((await vaultStatus()).recoveryTodo).toBeNull()

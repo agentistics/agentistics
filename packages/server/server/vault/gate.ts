@@ -65,6 +65,26 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'add-passphrase': { code: true, gesture: true, grant: null },
 }
 
+/**
+ * The local CLI's channel (vault.sock, 0600). An HTTP session is always namespaced `http:<…>` by
+ * http.ts, so no cookie value can claim this one.
+ */
+export const SOCKET_SESSION = 'socket'
+function fromSocket(ctx: { session: string }): boolean { return ctx.session === SOCKET_SESSION }
+
+/**
+ * Review M2: recovery mode lets the three re-enrolment steps through WITHOUT the lost code and gesture
+ * — and two of them hand out a NEW root secret (the 24 words, the authenticator seed). Without a proof
+ * of its own, that is "one XSS (or any reader of an HTTP reply) from the root key" (§9.8). The proof is
+ * the channel: the words were typed on a terminal (`agentop vault recover`, TTY only), so the steps
+ * that follow answer that same local socket — `agentop vault enroll` — and never an HTTP route.
+ */
+function recoveryTtyOnly(): Refusal {
+  return refused('recovery-tty-only', vaultLang() === 'pt'
+    ? 'O cofre está em modo de recuperação. Termine a configuração no terminal desta máquina: rode `agentop vault enroll`. Uma página não recebe uma chave nova.'
+    : 'The vault is in recovery mode. Finish setting it up on this machine\'s terminal: run `agentop vault enroll`. A page is never handed a new key.')
+}
+
 /** §4.3: what RECOVERY mode still lets through (without the lost code / gesture). */
 const RECOVERY_ALLOWED: ReadonlySet<VaultAction> = new Set(['enroll-presence', 'enroll-authenticator', 'rotate-recovery', 'lock-local', 'lock'])
 
@@ -191,6 +211,7 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   const todo = recoveryTodo()
   if (todo) {
     if (!RECOVERY_ALLOWED.has(action)) return refused('recovery-mode', sentence('recovery-mode'))
+    if (action !== 'lock' && action !== 'lock-local' && !fromSocket(ctx)) return recoveryTtyOnly()
     return { ok: true }
   }
   const state = await loadState()
@@ -433,6 +454,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
+  if (recoveryTodo() && !fromSocket(ctx)) return recoveryTtyOnly()
   if (!recoveryTodo()) {
     if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
     if (!o.vault.wrappers.some(w => w.type === 'recovery')) return refused('needs-recovery', lang === 'pt' ? 'Crie a chave de recuperação antes da presença (`agentop vault enroll --recovery`).' : 'Create the recovery key before presence (`agentop vault enroll --recovery`).')

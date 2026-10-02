@@ -62,7 +62,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   const json = { ...env.cors, 'Content-Type': 'application/json' }
   const noStore = { ...json, 'Cache-Control': 'no-store' }
   const grant = req.headers.get('x-vault-grant')
-  const session = env.session
+  // Namespaced so no cookie value can ever read as the local CLI's channel ('socket', gate.ts).
+  const session = `http:${env.session}`
   const path = url.pathname
   if (!path.startsWith('/api/vault')) return null
   const allowed = vaultRequestAllowed(req, url.host, env.origins)
