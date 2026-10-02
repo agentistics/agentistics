@@ -22,7 +22,15 @@
  * `EngineSpawnBudget` carries the swap `alarm` and an explicit `unmeasured` flag. An engine built
  * against 1.2 still loads: `protectedPaths` is kept, and now also carries the globs in absolute form.
  */
-export const ENGINE_API_VERSION = '1.3.0'
+/**
+ * 1.4.0 — LIVE.3: the host's CONFIRMED fleet transitions (`EngineHostServices.fleet`, the event
+ * channel's two-consecutive-polls rule already applied), the contract version the host speaks
+ * (`apiVersion`, so an engine can tell a 1.4 host from an older one before asking it a 1.4 question),
+ * and the `live` flag (`AGENTISTICS_JOURNAL` + `AGENTISTICS_JOURNAL_LIVE`). All optional, so an
+ * engine built against 1.3 still loads and an engine built against 1.4 still runs on a host that
+ * offers none of them.
+ */
+export const ENGINE_API_VERSION = '1.4.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

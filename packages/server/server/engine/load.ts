@@ -218,6 +218,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
 
   const { buildReuseSurface } = await import('./reuse-surface')
   const readers = await buildReuseSurface()
+  const { fleetHub } = await import('./fleet-hub')
 
   let journal: import('../journal/types').Journal | null = null
   return {
@@ -259,7 +260,11 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     protectedPaths: floor.paths,
     caps: CAPS,
     isCentral: () => config.TEAM_CENTRAL || centralPref,
-    flag: name => (name === 'provider' ? config.providerFlagOn() : process.env.AGENTISTICS_INGEST === '1'),
+    flag: name => (
+      name === 'provider' ? config.providerFlagOn()
+        : name === 'live' ? config.JOURNAL_LIVE_ENABLED
+          : process.env.AGENTISTICS_INGEST === '1'
+    ),
     audit: e => {
       void import('../audit').then(m => m.writeAudit(e)).catch(() => {})
     },
@@ -284,5 +289,9 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     // the embedded dashboard for every engine load.
     originPolicy: () => ({ allowedOrigins: [...config.ALLOWED_ORIGINS], dev: process.env.SERVE_STATIC !== '1' }),
     now: () => new Date(),
+    // 1.4: which contract this host speaks, and the fleet's confirmed transitions. The hub is fed by
+    // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.
+    apiVersion: ENGINE_API_VERSION,
+    fleet: { subscribe: cb => fleetHub.subscribe(cb) },
   }
 }
