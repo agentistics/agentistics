@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { sessionTime } from '../../lib/sessionTime'
+import { sessionOpened, sessionTime } from '../../lib/sessionTime'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { Activity, BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, PanelRight, X } from 'lucide-react'
 import { fmt, fmtCost, type CostBasis, type HarnessId, type SessionMeta } from '@agentistics/core'
@@ -561,15 +561,21 @@ export function SessionStatsMenu({
               minutes. Absent rather than zero when the record has no timing at all — a conversation
               the store has not seen yet is not one that took no time. */}
           <Block title={pt ? 'Tempo' : 'Time'}>
-            {meta && (meta.duration_minutes ?? 0) > 0 ? (() => {
-              const t = sessionTime(meta, lang)
+            {/* WHEN IT WAS OPENED comes first and stands on its own: it is a fact about the record
+                (`start_time`), true the moment the conversation exists, and it must not wait for
+                a duration the way the two figures below do. */}
+            {(() => {
+              const opened = sessionOpened(meta?.start_time, lang)
+              const timed = meta && (meta.duration_minutes ?? 0) > 0 ? sessionTime(meta, lang) : null
+              if (!opened && !timed) return <Absent text={pt ? 'ainda não registrado' : 'not recorded yet'} />
               return (
                 <>
-                  {t.active !== null && <Line k={pt ? 'Ativo' : 'Active'} v={t.active} />}
-                  <Line k={pt ? 'Decorrido' : 'Elapsed'} v={t.elapsed} />
+                  {opened && <Line k={pt ? 'Aberta em' : 'Opened'} v={opened} />}
+                  {timed && timed.active !== null && <Line k={pt ? 'Ativo' : 'Active'} v={timed.active} />}
+                  {timed && <Line k={pt ? 'Decorrido' : 'Elapsed'} v={timed.elapsed} />}
                 </>
               )
-            })() : <Absent text={pt ? 'ainda não registrado' : 'not recorded yet'} />}
+            })()}
           </Block>
 
           <Block title={pt ? 'Mensagens' : 'Messages'}>
