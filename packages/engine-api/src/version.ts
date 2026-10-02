@@ -39,7 +39,14 @@
  * engine is that file's ONLY owner; the host never touches `provider-keys/`) through `host.audit`,
  * which writes them to the machine's `vault/audit.jsonl`.
  */
-export const ENGINE_API_VERSION = '1.5.0'
+/**
+ * 1.6.0 — SECRETS.4: `EngineSecrets.status()` may carry `lockedBy` and `autoLockInMs`, and
+ * `EngineSecrets.onStateChange` (all optional) lets an engine wait for an unlock instead of polling.
+ * `VaultRefusal` is NOT widened (a wider returned union breaks an exhaustive switch — a major): the
+ * new causes arrive as `code: 'locked'` with the sentence and `lockedBy`. An engine built against 1.5
+ * still loads; a 1.6 engine on a 1.5 host sees `undefined` for each new member and must cope.
+ */
+export const ENGINE_API_VERSION = '1.6.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

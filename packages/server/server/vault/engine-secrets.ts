@@ -6,7 +6,7 @@
  * as by type, because an engine is code this host did not compile, and a per-purpose subkey makes the
  * same boundary cryptographic: `engine/provider-key` and the host's `github-backup` are different keys.
  */
-import type { EngineSecrets, OpenResult, SealResult, VaultRefusal } from '@agentistics/engine-api'
+import type { EngineSecrets, EngineSecretsStatus, OpenResult, SealResult, VaultRefusal } from '@agentistics/engine-api'
 import { VaultRefusalError, isEnginePurpose } from '@agentistics/vault'
 import type { EngineAuditEvent } from '@agentistics/engine-api'
 import { openBytes, refused, sealBytes, sentence, vaultAudit, vaultStatusSync } from './service'
@@ -23,9 +23,49 @@ function refusePurpose(): ReturnType<typeof refused<'purpose'>> {
   return refused('purpose', sentence('purpose'))
 }
 
+type LockedBy = NonNullable<EngineSecretsStatus['lockedBy']>
+
+/** Status bookkeeping only (callbacks, a flag, a reason code) — never a secret. Built by a function so it is one named object, not loose module-level bindings. */
+function newBook() {
+  return { subscribers: new Set<(s: EngineSecretsStatus) => void>(), everOpen: false, lockedBy: undefined as LockedBy | undefined, lastState: null as EngineSecretsStatus['state'] | null }
+}
+const book = newBook()
+
+/**
+ * engine-api 1.6 `status()`. `lockedBy` is stated ONLY when this module knows it: the reason an
+ * auto-lock / user lock / frozen step-up / lost presence happened is reported by the vault through
+ * `notifyEngineSecretsChange` (S4.7), and `start` is the one cause known without it — a vault that
+ * has not been open in this process since it started. Anything else stays absent, which a 1.6 engine
+ * treats as "locked, reason unknown" and says so — never a guessed reason.
+ */
+export function engineSecretsStatus(): EngineSecretsStatus {
+  const s: EngineSecretsStatus = vaultStatusSync()
+  if (s.state === 'open') { book.everOpen = true; book.lockedBy = undefined; s.autoLockInMs = null; return s }
+  if (s.state === 'locked') {
+    const by = book.lockedBy ?? (book.everOpen ? undefined : 'start')
+    if (by) s.lockedBy = by
+  }
+  return s
+}
+
+/** Called by the vault when its state changes (S4.7 wires auto-lock/user lock/step-up freeze here). */
+export function notifyEngineSecretsChange(lockedBy?: LockedBy): void {
+  book.lockedBy = lockedBy
+  const s = engineSecretsStatus()
+  if (s.state === book.lastState && lockedBy === undefined) return
+  book.lastState = s.state
+  for (const cb of [...book.subscribers]) { try { cb(s) } catch { /* a subscriber never breaks the vault */ } }
+}
+
+export function __resetEngineSecretsForTests(): void { Object.assign(book, newBook()) }
+
 export function engineSecrets(): EngineSecrets {
   return {
-    status: () => vaultStatusSync(),
+    status: () => engineSecretsStatus(),
+    onStateChange(cb) {
+      book.subscribers.add(cb)
+      return () => { book.subscribers.delete(cb) }
+    },
     async seal(purpose, name, plaintext): Promise<SealResult> {
       if (!isEnginePurpose(purpose) || typeof name !== 'string' || name === '') return refusePurpose()
       try {
