@@ -46,7 +46,13 @@
  * new causes arrive as `code: 'locked'` with the sentence and `lockedBy`. An engine built against 1.5
  * still loads; a 1.6 engine on a 1.5 host sees `undefined` for each new member and must cope.
  */
-export const ENGINE_API_VERSION = '1.6.0'
+/**
+ * 1.7.0 — B6.5: `tasks.board` (optional), the task board's own operations in process — list, get,
+ * next, activity, create, subtask, comment, status, claim and attach — so a native session's board
+ * tools reach the board without an HTTP loopback or a second auth path. An engine built against 1.6
+ * still loads; a 1.7 engine on an older host finds `board` absent and offers no board tools.
+ */
+export const ENGINE_API_VERSION = '1.7.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

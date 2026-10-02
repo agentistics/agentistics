@@ -35,6 +35,7 @@ import type { AgentisticsEvent } from '@agentistics/core'
 import type { SpawnBudget } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
+import { hostEngineBoard } from './engine-board'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -286,6 +287,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     tasks: {
       fileNative: async () => ({ ok: false, reason: 'this build has no native sessions to file' }),
       unfileNative: async () => {},
+      // 1.7 (B6.5): the board's own operations in process for a native session's board tools.
+      board: hostEngineBoard(() => lang),
     },
     readers,
     // `SERVE_STATIC` is `sse.ts`'s own reading of the same variable; importing `sse` here would load

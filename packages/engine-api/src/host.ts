@@ -178,6 +178,36 @@ export interface EngineSpawnBudget {
   unmeasured: boolean
 }
 
+/**
+ * One answer of the board (1.7). `body` is what the matching `/api/tasks` route answers with; a
+ * refusal carries the route's own `reason` and its HTTP-equivalent `status` (404 for a thing that
+ * does not exist, 409 for a claim someone else holds, 422/400 for a request the board will not do).
+ * Never thrown.
+ */
+export type EngineBoardAnswer =
+  | { ok: true; body: unknown }
+  | { ok: false; status: number; reason: string; body?: unknown }
+
+/** The board's operations an engine may call (1.7). Every write names its actor and session. */
+export interface EngineBoard {
+  list(): Promise<EngineBoardAnswer>
+  get(ref: string): Promise<EngineBoardAnswer>
+  next(q: { actor?: string; limit?: number }): Promise<EngineBoardAnswer>
+  activity(q: { ref?: string; limit?: number }): Promise<EngineBoardAnswer>
+  create(t: { title: string; detail?: string; actor: string; sessionId: string }): Promise<EngineBoardAnswer>
+  /** Add (`title`, `isGroup`) or edit (`id` + columns) a subtask — the `/subtasks` route's body. */
+  subtask(ref: string, payload: Record<string, unknown>, by: { actor: string; sessionId: string }): Promise<EngineBoardAnswer>
+  comment(ref: string, c: { body: string; author: string; sessionId: string; subtaskId?: string }): Promise<EngineBoardAnswer>
+  status(ref: string, s: { status: string; actor: string; sessionId: string; reason?: string; blockedBy?: string[] }): Promise<EngineBoardAnswer>
+  claim(ref: string, c: { by: string; sessionId: string; leaseMs?: number; note?: string; takeover?: boolean; release?: boolean }): Promise<EngineBoardAnswer>
+  /**
+   * Files the session produced (verification screenshots, EVID.1), stored in the host's attachment
+   * store and posted as ONE comment. The engine has read the bytes under its own policy; the host
+   * checks kind and size again and never reads a path.
+   */
+  attach(ref: string, a: { files: Array<{ name: string; bytes: Uint8Array }>; author: string; sessionId: string; subtaskId?: string; note?: string }): Promise<EngineBoardAnswer>
+}
+
 /** A native session filed on the task board. */
 export interface NativeSessionLink {
   id: string
@@ -299,6 +329,14 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   tasks: {
     fileNative(link: Omit<NativeSessionLink, 'id' | 'linkedAt'>): Promise<FileResult>
     unfileNative(sessionId: string): Promise<void>
+    /**
+     * The task board's own operations, in process (1.7, B6.5): what a native session's `board.*`
+     * tools call. OPTIONAL: absent on an older host, and a 1.7 engine then offers no board tools.
+     * The host runs each operation through the SAME functions its `/api/tasks` routes use, so a
+     * refusal is the route's own `reason`; the engine's policy has already judged the call (reads
+     * free, writes under the session's grant), and every write lands in the board's own activity log under its actor.
+     */
+    board?: EngineBoard
   }
   /**
    * The public functions an engine reuses (1.2: the full `ReuseSurface`). A 1.1 host passed `{}`;
