@@ -34,6 +34,9 @@ import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
 import { pendingFor, type PendingPrompt } from './pending-prompts'
+import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
+import { CLAUDE_DIR } from '../config'
+import { safeReadJson } from '../utils'
 
 export interface ChatPayload {
   /** The turns, oldest first. Empty with no `unavailable` means a conversation with nothing in it. */
@@ -57,6 +60,13 @@ export interface ChatPayload {
    * conversation has not said anything yet" are different facts, and the second is temporary.
    */
   unavailable?: string
+  /**
+   * WHY there is no transcript, as a state the UI can branch on (`present` / `not-yet-written` /
+   * `expired` / `deleted` / `unreadable`). `unavailable` is the sentence for it; this is the fact,
+   * so a surface that wants more than a sentence — a date, a different control — never has to parse
+   * words. See `transcript-availability.ts`.
+   */
+  transcript?: TranscriptAvailability
   /** True while the session is running, so the view knows whether to expect more. */
   live: boolean
   /**
@@ -92,6 +102,18 @@ export interface ChatPayload {
 
 /** The most turns one read returns. A conversation of thousands must not arrive as one response. */
 const MAX_TURNS = 400
+
+/**
+ * The user's own retention setting for a harness, when one is recorded — Claude Code's
+ * `cleanupPeriodDays` in `settings.json`. `undefined` for everything else, and for a file that is
+ * absent or does not say: the default then lives in `TRANSCRIPT_RETENTION`, in one place.
+ */
+async function retentionSetting(harness: string): Promise<number | undefined> {
+  if (harness !== 'claude') return undefined
+  const settings = await safeReadJson<{ cleanupPeriodDays?: unknown }>(`${CLAUDE_DIR}/settings.json`)
+  const n = settings?.cleanupPeriodDays
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined
+}
 
 export async function readSessionChat(
   host: StartHost,
@@ -130,6 +152,18 @@ export async function readSessionChat(
   // precisely to read one. `conversationOfRow` is the single place both shapes are known.
   const conversationId = conversationOfRow(row)
   if (!conversationId) {
+    // A session sitting on a question (agy's "do you trust this folder?") has not CREATED its
+    // conversation yet — the harness makes it only after the answer. Saying "no linked
+    // conversation" there reads as a fault; the session is simply waiting for a person.
+    if (row.state === 'waiting-approval') {
+      return {
+        turns: [],
+        unavailable: lang === 'pt'
+          ? 'Esta sessão está esperando uma resposta sua antes de criar a conversa (por exemplo, confiar na pasta). Responda no cartão da sessão e a transcrição aparece em seguida.'
+          : 'This session is waiting for your answer before it creates the conversation (for example, trusting the folder). Answer it on the session card and the transcript follows.',
+        live,
+      }
+    }
     return {
       turns: [],
       unavailable: row.conversationBlind ?? (lang === 'pt'
@@ -194,11 +228,19 @@ export async function readSessionChat(
       const queued = pendingFor(conversationId, [])
       return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}) }
     }
+    // `endedAt` is when it stopped; a session that never recorded one was last heard from when the
+    // person last wrote to it, or failing that when it began.
+    const lastActivityMs = row.endedAt ?? row.lastUserMessageAt ?? row.startedAt
+    const retentionDays = await retentionSetting(row.harness)
+    const availability = transcriptAvailability({
+      harness: row.harness, resolved: false, live, nowMs: Date.now(),
+      ...(lastActivityMs !== undefined ? { lastActivityMs } : {}),
+      ...(retentionDays !== undefined ? { retentionDays } : {}),
+    })
     return {
       turns: [],
-      unavailable: lang === 'pt'
-        ? 'A transcrição desta conversa não foi encontrada nesta máquina.'
-        : 'This conversation’s transcript was not found on this machine.',
+      unavailable: transcriptSentence(availability, lang, row.harness, lastActivityMs) ?? '',
+      transcript: availability,
       live,
     }
   }
@@ -216,11 +258,13 @@ export async function readSessionChat(
   // says something instead of drawing a blank pane.
   const read = await reader.read(path, MAX_TURNS).catch(() => null)
   if (read === null) {
+    const availability = transcriptAvailability({
+      harness: row.harness, resolved: true, readFailed: true, live, nowMs: Date.now(),
+    })
     return {
       turns: [],
-      unavailable: lang === 'pt'
-        ? 'A transcrição desta conversa foi encontrada nesta máquina, mas não pôde ser lida.'
-        : 'This conversation’s transcript was found on this machine, but could not be read.',
+      unavailable: transcriptSentence(availability, lang, row.harness) ?? '',
+      transcript: availability,
       live,
     }
   }

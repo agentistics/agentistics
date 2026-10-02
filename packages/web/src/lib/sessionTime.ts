@@ -11,6 +11,7 @@
  * deleted, or a harness that records no timing) it says so instead of quietly falling back.
  */
 
+import { format, isValid, parseISO } from 'date-fns'
 import { fmtDuration, type SessionMeta } from '@agentistics/core'
 
 export interface SessionTimeDisplay {
@@ -85,4 +86,22 @@ export function sessionTime(
     active, elapsed, combined, tooltip,
     activeLabel, elapsedLabel, activeExplain, elapsedExplain,
   }
+}
+
+/**
+ * When the session was OPENED, in the reader's own clock, or `null` when the record carries no
+ * usable start. `null` and not a dash: the caller decides whether a row with nothing to say is
+ * drawn at all, and an unparseable value must never reach `format`, which throws on one.
+ *
+ * It is the `start_time` the drilldown already prints — the first turn the harness recorded — so
+ * the two surfaces cannot name different moments for one conversation.
+ */
+export function sessionOpened(
+  startTime: string | null | undefined,
+  lang: 'pt' | 'en',
+): string | null {
+  if (!startTime) return null
+  const d = parseISO(startTime)
+  if (!isValid(d)) return null
+  return format(d, lang === 'pt' ? 'dd/MM/yyyy HH:mm' : 'MMM d, yyyy HH:mm')
 }

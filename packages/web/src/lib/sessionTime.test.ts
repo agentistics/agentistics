@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { sessionTime } from './sessionTime'
+import { sessionOpened, sessionTime } from './sessionTime'
 
 const s = (wall: number, active?: number) => ({ duration_minutes: wall, active_minutes: active })
 
@@ -38,5 +38,18 @@ describe('sessionTime', () => {
   test('the tooltip discloses that a turn spent waiting on the user still counts', () => {
     const t = sessionTime(s(6345, 5253), 'pt')
     expect(t.tooltip).toContain('esperando você')
+  })
+})
+
+describe('sessionOpened', () => {
+  test('formats the first turn the harness recorded, in each language', () => {
+    expect(sessionOpened('2026-10-01T15:31:59.963', 'pt')).toBe('01/10/2026 15:31')
+    expect(sessionOpened('2026-10-01T15:31:59.963', 'en')).toBe('Oct 1, 2026 15:31')
+  })
+
+  test('is null — not a dash, not a throw — for a record with no usable start', () => {
+    expect(sessionOpened(undefined, 'pt')).toBeNull()
+    expect(sessionOpened('', 'pt')).toBeNull()
+    expect(sessionOpened('not a date', 'en')).toBeNull()
   })
 })
