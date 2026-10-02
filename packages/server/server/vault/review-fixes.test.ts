@@ -3,7 +3,7 @@
  * one test per finding, each written to FAIL on the code as reviewed and pass once fixed. Fakes as in
  * gate.test.ts — a silent "dpapi", a "hello" that counts gestures — and a fake clock; nothing spawned.
  */
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -73,6 +73,9 @@ export async function enrolledVault(): Promise<{ words: string[] }> {
 }
 
 beforeEach(() => { STORE.clear() })
+// Leave the process the way every other vault test file expects it (central-env.test.ts reads the
+// default test vault without resetting it — a locked fake left here would fail it).
+afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-review-done', 'vault') }); __resetGateForTests() })
 
 describe('step 0 — a presence enrolment failure reaches the UI as a sentence, never a reason code', () => {
   test('the bridge failure is said in words (EN), with no code and no .NET name', async () => {
@@ -316,5 +319,28 @@ describe('S2 — first enrolment from a page needs a proof from this machine', (
     const r = await probePresence('hello', S)
     expect(!r.ok && r.sentence).not.toContain('bridge-failed')
     expect(!r.ok && r.code).toBe('presence-unavailable')
+  })
+})
+
+// ── S3: reset of a vault that cannot open ──────────────────────────────────────────────────────
+
+describe('S3 — reset when the vault cannot open: allowed from the terminal, with its own sentence', () => {
+  test('a SECRETS.2 vault whose protector key is gone can be reset over the socket', async () => {
+    await silentVault()
+    STORE.clear() // the DPAPI blob is gone: protector-lost, no code can be checked
+    restart(); installVaultOps()
+    const r = await op({ op: 'vault-reset' })
+    expect(r.reply.ok).toBe(true)
+  })
+  test('a vault that is merely LOCKED behind presence is not reset that way — the sentence says unlock first', async () => {
+    const { } = await enrolledVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    restart(); installVaultOps()
+    const r = await op({ op: 'vault-reset' })
+    expect(r.reply.ok).toBe(false)
+    expect(!r.reply.ok && r.reply.code).toBe('reset-needs-unlock')
+    expect(!r.reply.ok && r.reply.sentence).toContain('agentop vault unlock')
+    expect(!r.reply.ok && r.reply.sentence).not.toContain('passphrase')
   })
 })

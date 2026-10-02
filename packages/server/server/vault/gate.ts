@@ -33,7 +33,7 @@ import {
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
-  presenceWord, presenceCandidates, chooseAutoProtector,
+  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus,
 } from './service'
 import { realProtectorIo } from './io'
 
@@ -225,6 +225,7 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   if (!o) {
     // A locked vault: only what reduces exposure needs no proof — everything else needs the vault open.
     if (action === 'lock') return { ok: true }
+    if (action === 'reset') return resetUnopenable(ctx)
     return refused('locked', sentence('locked'))
   }
   if (row.code && enrolled(o.vault)) {
@@ -246,6 +247,21 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   }
   noteVaultActivity()
   return { ok: true }
+}
+
+/**
+ * Review S3: reset of a vault that CANNOT open. Its sentence (protector-lost) tells the user to run
+ * `agentop vault reset`, and the gate then refused it as "locked" — there is no code to check when the
+ * seed is sealed inside the vault that will not open. A reset reveals nothing (it deletes), so when the
+ * key is provably GONE (protector-lost, corrupt) the local terminal may reset with its own confirmation;
+ * a vault that is merely locked must be unlocked first, so the code and gesture are still asked.
+ */
+async function resetUnopenable(ctx: GateContext): Promise<GateResult> {
+  const st = (await vaultStatus()).state
+  if ((st === 'protector-lost' || st === 'corrupt') && fromSocket(ctx)) return { ok: true }
+  return refused('reset-needs-unlock', vaultLang() === 'pt'
+    ? 'O cofre está trancado. Destranque-o primeiro (`agentop vault unlock`): apagar o cofre pede o seu código e a confirmação de presença. Se a chave dele sumiu de vez, o terminal pode apagá-lo sem isso.'
+    : 'The vault is locked. Unlock it first (`agentop vault unlock`): resetting it asks for your code and your presence. If its key is gone for good, the terminal can reset it without them.')
 }
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */
