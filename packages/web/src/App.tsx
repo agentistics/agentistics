@@ -12,8 +12,9 @@ import {
   PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
   SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
   TrendingUp, Trophy, Users, Wrench, X, Zap,
-  ZoomIn, ClipboardList,
+  ZoomIn, ClipboardList, BellOff,
 } from 'lucide-react'
+import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
@@ -2315,6 +2316,7 @@ export default function AppLayout() {
   const splitActive = inSessionsWorkspace && !isMobile && splitIdOf(splitSearch, selectedSessionId) !== null
   const headerSession = splitActive ? undefined : selectedFleetSession
   const headerSessionRow = splitActive ? undefined : selectedSessionRow
+  const headerMuted = useSessionMuted(headerSession)
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -3624,6 +3626,12 @@ export default function AppLayout() {
           }}>
             {headerSession.title}
           </span>
+          {headerMuted && (
+            <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
+              style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>
+              <BellOff size={13} />
+            </span>
+          )}
           {/* THE TASK CONTROL MOVED DOWN, THEN AWAY (design item 3, then owner 2026-09-21) — it
               first moved from this header into the bottom bar's own left end
               (`SessionPanel.tsx`'s `taskControl`, now gone), then was removed from there entirely

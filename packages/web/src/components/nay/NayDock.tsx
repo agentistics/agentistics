@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
-import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
+import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { AppContext } from '../../lib/app-context'
@@ -34,6 +34,8 @@ import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { detachSession as unfileSession } from '../../lib/tasks'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
+import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
@@ -739,6 +741,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   picker: ReactNode
 }) {
   const pt = lang === 'pt'
+  const mutedKeys = useMutedKeys()
   const [confirming, setConfirming] = useState<string | null>(null)
   const [ending, setEnding] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -752,6 +755,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
     if (action === 'kill') { setConfirming(id); return }
     if (action === 'rename') { setRenaming({ id, title: menuRow.title }); return }
     if (action === NAY_GO_TO) { onGoTo(id); return }
+    if (action === NOTIFY_TOGGLE) { toggleSessionMuted(sessionIdentityKey(menuRow)); setMenu(null); return }
     if (action === LINK_TASK) { setFiling(id); return }
     if (action === UNLINK_TASK) {
       void unfileSession(id, id).then(() => onNotice(boardCopy(lang).unfiled))
@@ -893,10 +897,13 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
       {menu && menuRow && (
         <SessionRowMenu
           x={Math.max(4, menu.x)} y={menu.y}
-          entries={nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
-            running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
-            task: menuRow.task,
-          })}
+          entries={[
+            ...nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
+              running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
+              task: menuRow.task,
+            }),
+            ...notifyMenuExtras(menuRow, mutedKeys, pt),
+          ]}
           onPick={pickMenu}
           onClose={() => setMenu(null)}
         />

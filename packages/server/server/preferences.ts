@@ -126,6 +126,10 @@ export interface Preferences {
    *  showed three different pinned bands — one application, three answers. The browser copy stays
    *  as the first paint (see `pinnedSessions.ts`); this is the one that is true. */
   pinnedSessions?: string[]
+  /** Sessions whose notifications are muted, as `sessionIdentityKey`s (conversationId ?? id) so a
+   *  mute survives a reopen. Absent reads as ON for every session. Mutes DELIVERY only — never the
+   *  fleet's "waiting" state. */
+  mutedSessions?: string[]
   /**
    * User-made session groups ("Saved to later", …) — see `web/src/lib/sessionUserGroups.ts` for
    * the rules (create/rename/delete, exclusive membership, survives any session state). SERVER-SIDE

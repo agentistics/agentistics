@@ -1756,6 +1756,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(engineStatus())
     }
 
+    // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).
+    if (url.pathname === '/api/session-notify' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; notify?: unknown }
+      const { notifyOp, notifyStatus } = await import('./sessions/session-notify-web')
+      const out = await notifyOp({
+        ref: String(body.ref ?? ''),
+        ...(body.notify !== undefined ? { notify: body.notify as 'on' | 'off' } : {}),
+      })
+      return json(out, notifyStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

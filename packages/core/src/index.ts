@@ -59,6 +59,7 @@ export * from './stagedSession'
 export * from './pasteSanitize'
 export * from './sessionShape'
 export * from './sessionGroups'
+export * from './mutedSessions'
 export * from './idleSessions'
 // The canonical runtime model (A1.1): entities, the event envelope and the projection contract.
 // A contract with no consumer yet. `Confidence` (D17's one vocabulary) is defined once, in event.ts.

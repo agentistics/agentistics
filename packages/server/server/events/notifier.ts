@@ -20,6 +20,19 @@ import { desktopText, peerMessage } from './notify-text'
 import { sendToPeer } from './peer-client'
 import { subscribersOf, type Subscription } from './subscriptions'
 import type { SessionEvent } from './event-types'
+import { readPreferences } from '../preferences'
+
+/** The key a session's mute is stored under — the web's `sessionIdentityKey`, so one mute holds
+ *  across the dashboard, the CLI and this producer (and survives a reopen). */
+export function eventMuteKey(e: Pick<SessionEvent, 'id' | 'conversationId'>): string {
+  return e.conversationId ?? e.id
+}
+
+/** The muted keys, read fresh (a mute made a second ago must apply to the next batch). A failed
+ *  read means NOTHING is muted: failing toward silence would hide a session that needs someone. */
+export async function readMutedKeys(): Promise<ReadonlySet<string>> {
+  try { return new Set((await readPreferences()).mutedSessions ?? []) } catch { return new Set() }
+}
 
 /** How many toasts one batch may raise. Beyond this the last one says how many were folded in. */
 const MAX_TOASTS_PER_BATCH = 3
@@ -47,6 +60,9 @@ export async function deliver(o: {
   events: readonly SessionEvent[]
   subscriptions: readonly Subscription[]
   desktop?: DesktopSetup
+  /** Sessions whose notifications are muted (`eventMuteKey`). A mute removes the INTERRUPTION — the
+   *  toast and the peer message — and nothing else: the event is already in the inbox by now. */
+  muted?: ReadonlySet<string>
 }): Promise<DeliveryReport> {
   const report: DeliveryReport = { ...EMPTY_REPORT, lines: [] }
   if (o.events.length === 0 || o.subscriptions.length === 0) return report
@@ -55,6 +71,7 @@ export async function deliver(o: {
   const wanted = new Map<string, SessionEvent[]>()
   for (const sub of o.subscriptions) wanted.set(sub.id, [])
   for (const e of o.events) {
+    if (o.muted?.has(eventMuteKey(e))) continue
     for (const sub of subscribersOf(o.subscriptions, e)) wanted.get(sub.id)!.push(e)
   }
 

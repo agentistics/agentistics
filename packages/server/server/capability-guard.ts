@@ -81,6 +81,8 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // resolve a session reference against THIS machine's fleet, so they read host state the same way
   // `/api/fleet` does, and they are refused on a central for the same reason.
   ['/api/session-groups', 'localShell'],
+  // Per-session notification switch: resolves a ref against THIS machine's fleet, same as above.
+  ['/api/session-notify', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],

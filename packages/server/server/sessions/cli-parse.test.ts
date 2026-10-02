@@ -231,3 +231,34 @@ describe('batch --attempt', () => {
     expect(cmd.kind).toBe('error')
   })
 })
+
+describe('--notify', () => {
+  it('reads on|off on a start', () => {
+    const off = parseSessionArgs(['claude', '--bg', '--notify', 'off'])
+    expect(off.kind === 'start' && off.notify).toBe('off')
+    const on = parseSessionArgs(['claude', '--notify', 'on'])
+    expect(on.kind === 'start' && on.notify).toBe('on')
+    const none = parseSessionArgs(['claude'])
+    expect(none.kind === 'start' && none.notify).toBeUndefined()
+  })
+  it('refuses any other value, and a missing one', () => {
+    expect(parseSessionArgs(['claude', '--notify', 'maybe']).kind).toBe('error')
+    expect(parseSessionArgs(['claude', '--notify']).kind).toBe('error')
+    expect(parseSessionArgs(['claude', '--notify', '--bg']).kind).toBe('error')
+  })
+  it('is a positional default on batch, like --model', () => {
+    const c = parseSessionArgs([
+      'batch', '--task', 't',
+      '--session', 'claude: lead',
+      '--notify', 'off',
+      '--session', 'claude: worker',
+    ])
+    expect(c.kind).toBe('batch')
+    if (c.kind !== 'batch') return
+    expect(c.specs[0]!.notify).toBeUndefined()
+    expect(c.specs[1]!.notify).toBe('off')
+  })
+  it('refuses a bad value on batch', () => {
+    expect(parseSessionArgs(['batch', '--task', 't', '--notify', 'x', '--session', 'claude: a']).kind).toBe('error')
+  })
+})

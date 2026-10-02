@@ -22,7 +22,7 @@ import { EMPTY_CURSOR, type EventCursor } from './events/event-rotate'
 import { EVENT_VERSION, type EventKind, type SessionEvent } from './events/event-types'
 import { parseEventsArgs, type EventsCommand, type TailOptions, type WatchOptions } from './events/events-parse'
 import { desktopSetup } from './events/desktop'
-import { deliver } from './events/notifier'
+import { deliver, readMutedKeys } from './events/notifier'
 import { desktopText, eventHeadline, peerMessage } from './events/notify-text'
 import { listLivePeers, resolvePeer, sendToPeer } from './events/peer-client'
 import { createHeartbeatWriter, producerState } from './events/producer-status'
@@ -412,7 +412,7 @@ async function emit(): Promise<number> {
 
     const written = await createEventStore().append([event])
     const subs = (await readSubscriptionStore()).subscriptions
-    if (subs.length > 0) await deliver({ events: written, subscriptions: subs })
+    if (subs.length > 0) await deliver({ events: written, subscriptions: subs, muted: await readMutedKeys() })
   } catch {
     // Deliberately silent — see above.
   }

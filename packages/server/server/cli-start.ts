@@ -29,6 +29,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
@@ -1554,7 +1555,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // though the CLI had been handed that conversation, which is the one thing the field exists to
     // keep apart — see `ManagedSession.conversationLink`.
     recordConversation: (id, conversationId, conversationLink, conversationLinkVia) =>
-      patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) }),
+      patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) })
+        // A mute made at spawn is keyed by the managed id until the conversation is known.
+        .then(async r => { await rekeyMutedSession(id, conversationId).catch(() => {}); return r }),
     // The per-process log link — antigravity's only exact answer, and the reason its chat view was
     // permanently empty while its terminal worked. Wired HERE and deliberately not on
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
@@ -1726,7 +1729,8 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
         knownLog: logByPid.get(pid),
         readProcessConversation,
         recordConversation: (sid, conversationId, link, via) =>
-          patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) }),
+          patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
+            .then(async r => { await rekeyMutedSession(sid, conversationId).catch(() => {}); return r }),
       }).catch(() => false)
       if (linked) return
     }
@@ -1862,6 +1866,12 @@ async function spawnManaged(req: {
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession(await spawnRow({ id, spawnedAt, req, model, effort, bornLink }))
+  // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
+  // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
+  // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
+  if (req.inherit && !req.inherit.conversationId && !bornLink?.conversationId) {
+    await rekeyMutedSession(req.inherit.id, id).catch(() => {})
+  }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})
   try {

@@ -20,6 +20,7 @@ import { parseSessionArgs, LS_DEFAULT, type SessionCommand } from './cli-parse'
 import { cliStrings } from '../cli-i18n'
 import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
+import { muteAtSpawn } from './session-notify-web'
 import {
   admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusalBody, type Admission,
 } from './spawn-admission'
@@ -68,7 +69,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -84,6 +85,10 @@ const USAGE = `Usage:
   \`--force\` starts anyway when this machine cannot hold another assistant session (see the
   memory gate below) — every verb that starts or reopens a process takes it, and it never fails
   silently: the check that was overridden is printed regardless.
+
+  \`--notify off\` starts the session with its notifications muted: no bell, card, sound or desktop
+  toast for it, while it still shows as waiting and its events are still recorded. Absent = on. On
+  \`batch\` it is a default for the \`--session\`s that follow it, like \`--model\`.
 
 Orchestrating several at once — the form an assistant should use:
 
@@ -288,6 +293,9 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
+  // poller links the conversation). Delivery only — the session still reads as waiting.
+  if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
 
   const liveBackend = await backend.list().catch(() => [])
   const backendIds = new Set(liveBackend.map(b => b.id))
@@ -479,6 +487,7 @@ async function batch(
         : {}),
       ...(await recordedRepo(cwd)),
     })
+    if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     const liveBackend = await backend.list().catch(() => [])
     const backendIds = new Set(liveBackend.map(b => b.id))
     await retireFallenSessions({

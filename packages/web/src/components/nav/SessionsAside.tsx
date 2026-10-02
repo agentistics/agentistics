@@ -20,7 +20,7 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  BellOff, ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
   Loader, PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
@@ -48,6 +48,8 @@ import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
 import { reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
 import { buildPickRows } from '../../lib/sessionPick'
+import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
@@ -227,12 +229,17 @@ function groupMenuExtras(
   return extras
 }
 
+/** The row menu's notification entry — see `notifyMenuExtras`. Kept beside `groupMenuExtras`, which it
+ *  is modelled on: both are client-side entries `rowMenuEntries` takes as `extra`. */
+const notifyExtras = notifyMenuExtras
+
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
+  const mutedKeys = useMutedKeys()
   const navigate = useNavigate()
   // 44px is the MOBILE figure. Applying it on desktop turns a compact list into a row of buttons.
   const isMobile = useIsMobile()
@@ -604,6 +611,12 @@ export function SessionsAside({
     if (action === 'move-to-group') {
       // Anchored where the menu was, same as `link-task` — the gesture stays in one place.
       setGroupPicker({ id, x: menu.x, y: menu.y })
+      setMenu(null)
+      return
+    }
+    if (action === NOTIFY_TOGGLE) {
+      const target = rows.find(r => r.id === id)
+      if (target) toggleSessionMuted(pinKeyOf(target))
       setMenu(null)
       return
     }
@@ -1676,6 +1689,7 @@ export function SessionsAside({
               }] : []),
               ...taskMenuEntries(rows.find(r => r.id === menu.id)?.task, pt),
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+              ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
           )}
           onPick={pickMenuAction}
@@ -2293,6 +2307,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   /** How this card shows its state — see `sessionCardStyle.ts`. */
   cardColor: AsideCardColor
 }) {
+  const mutedKeys = useMutedKeys()
   const wants = sessionNotify(session)
   const reopening = useReopening().has(session.id)
   const goTo = useContext(GoToSessionContext)
@@ -2406,6 +2421,18 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
           </span>
         )
       })()}
+      {mutedKeys.includes(pinKeyOf(session)) && (
+        // Not a control: the toggle lives in the row menu. It states a fact about this row, so it
+        // carries a tooltip and a label, and never changes the row's own state colour.
+        <span
+          role="img"
+          aria-label={mutedTooltip(lang !== 'en')}
+          title={mutedTooltip(lang !== 'en')}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}
+        >
+          <BellOff size={12} />
+        </span>
+      )}
       {onPin && (
         <span
           role="button"

@@ -30,8 +30,10 @@
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
+import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
-import { AlertTriangle, ArrowDown, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
@@ -74,7 +76,7 @@ import {
   locateExcerpt, quotesInOrder, removeQuote, snapCaret, stripQuotes, syncQuotes, QUOTE_CLOSE,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { pendingEchoes } from '@agentistics/core'
+import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 
 import {
@@ -362,6 +364,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const [moreOpen, setMoreOpen] = useState(false)
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  /** This session's notification switch — the mute follows the conversation (`sessionIdentityKey`). */
+  const notifyKey = sessionIdentityKey(session)
+  const notifyMuted = useMutedKeys().includes(notifyKey)
 
   /**
    * Start or stop dictation.
@@ -3429,6 +3434,26 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                           </p>
                         </>
                       )}
+
+                      {/* NOTIFICATIONS for THIS session. Delivery only — the session still reads as
+                          waiting. Styled as the model buttons above; the divider is the same 1px
+                          rule the model block opens with. */}
+                      <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
+                      <button
+                        onClick={() => { setMoreOpen(false); toggleSessionMuted(notifyKey) }}
+                        title={notifyMuted ? mutedTooltip(pt) : undefined}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                          minHeight: 36, padding: '6px 8px', borderRadius: 7, border: 'none',
+                          background: 'transparent', color: 'var(--text-primary)',
+                          fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+                        }}
+                      >
+                        {notifyMuted ? <Bell size={14} /> : <BellOff size={14} />}
+                        {notifyMuted
+                          ? (pt ? 'Reativar notificações' : 'Unmute notifications')
+                          : (pt ? 'Silenciar notificações' : 'Mute notifications')}
+                      </button>
 
                       {/* THE SKILLS LIST LIVED HERE AND IS GONE. It was the only place to see
                           them; there is a dedicated view now, and two lists of one thing are two

@@ -499,6 +499,19 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_session_notify",
+    description:
+      "Switch a session's notifications on or off, or read the switch. `ref` is a managed id, a conversation id, an exact title or a unique id prefix. With `notify` ('on' | 'off') it sets the switch; with `ref` alone it reads it. Muting removes the INTERRUPTION only (bell, Nay card, sound, desktop toast, peer message): the session still shows as waiting and its events are still recorded in the inbox. The mute follows the conversation, so it survives a reopen. 404 for a ref that matches nothing, 409 for an ambiguous one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference." },
+        notify: { type: "string", enum: ["on", "off"], description: "Set the switch. Omit to read it." },
+      },
+      required: ["ref"],
+    },
+  },
+  {
     name: "agentistics_summary",
     description:
       "Get an overview of AI coding usage metrics (across all tracked harnesses — Claude Code, Codex, Gemini, Copilot, Antigravity — or scoped to one): total tokens, estimated cost, sessions, streak, most used model, and top project. Good starting point for any metrics question.",
@@ -978,6 +991,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           default:
             throw new Error("agentistics_session_group_edit: `action` must be add, remove, rename or delete");
         }
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_notify": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-notify", {
+          ref: a?.ref,
+          ...(a?.notify !== undefined ? { notify: a.notify } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_summary": {

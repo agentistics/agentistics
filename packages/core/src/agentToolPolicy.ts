@@ -75,6 +75,8 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_groups',
   'agentistics_session_group_create',
   'agentistics_session_group_edit',
+  // Session notifications (1)
+  'agentistics_session_notify',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -154,6 +156,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
       'DELETE /api/session-groups/:group',
     ],
     reason: 'folders are labels: deleting one ungroups its sessions and touches no session (§5 defect 3: W, not D)',
+  },
+  // ------------------------------------------------------------------ Session notifications
+  agentistics_session_notify: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/session-notify'],
+    reason: 'a per-session on/off switch for delivery; reversible, and the session state is untouched',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, risk: 'R', routes: ['GET /api/data'], reason: 'reads computed metrics' },
