@@ -1016,6 +1016,24 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    if (url.pathname === '/api/experimental' && req.method === 'GET') {
+      // Read-only: `agentop experimental status` and the post-restart confirmation ask the RUNNING
+      // server what it booted with. There is deliberately no write route and no Settings switch.
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      try {
+        const { readExperimentalReport } = await import('./experimental-web')
+        return new Response(JSON.stringify(await readExperimentalReport()), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), {
+          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     if (url.pathname === '/api/backup/status' && req.method === 'GET') {
       // A central aggregates other machines and has no local harness directories of its own to
       // back up — the same reason Settings hides the `billing` and `live` sections there. The

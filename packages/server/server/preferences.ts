@@ -99,6 +99,10 @@ export interface Preferences {
    *  only ever narrow `CAPS.localShell`; see sessions/shell-gate.ts. Separate from `chatEnabled`
    *  because they are different powers: the chat runs a named assistant CLI, this runs anything. */
   shellEnabled?: boolean
+  /** Turns on every experimental feature (`EXPERIMENTAL_FEATURES`, @agentistics/core) at server
+   *  start. Absent reads as OFF. An explicit `AGENTISTICS_*` variable still wins either way. Read
+   *  by `experimental-boot.ts` BEFORE config.ts loads, so it must stay a plain boolean key. */
+  experimental?: boolean
   /** Opt-in for the repository explorer's read+write routes (`/api/fleet/tree*`). Absent reads as
    *  OFF, and it can only ever narrow `CAPS.localShell` — the same capability the utility shell
    *  rides; see `sessions/editor-gate.ts`. Separate from `shellEnabled`: wanting a shell is not

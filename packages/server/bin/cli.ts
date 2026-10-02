@@ -21,6 +21,14 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
+// `preferences.experimental` → the feature variables, BEFORE any module that reads one loads
+// (`JOURNAL_ENABLED` is fixed at import). Only the commands that RUN the product need it; with the
+// preference off or absent this touches nothing. See server/experimental-boot.ts.
+if (command === undefined || command === 'start' || command === 'server' || command === 'watch') {
+  const { applyExperimentalFromDisk } = await import('../server/experimental-boot.ts')
+  applyExperimentalFromDisk()
+}
+
 /**
  * `agentop mcp` — the agentistics MCP server over stdio, served from inside the binary.
  *
@@ -97,6 +105,7 @@ Commands:
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
+  experimental  Turn every experimental feature on or off ('experimental enable|disable|status')
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
 __ENGINE_VERBS__
@@ -487,6 +496,11 @@ if (command === 'events') {
   const { runEvents } = await import('../server/cli-events.ts')
   const code = await runEvents(args)
   process.exit(code)
+}
+
+if (command === 'experimental') {
+  const { runExperimental } = await import('../server/cli-experimental.ts')
+  process.exit(await runExperimental(args))
 }
 
 if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
