@@ -58,6 +58,7 @@ import {
   type BandOverflowEntry,
 } from './bandControls'
 import { PanelGapDots } from './PanelGap'
+import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
 export type SessionView = 'chat' | 'terminal'
 
@@ -75,7 +76,7 @@ export type SessionView = 'chat' | 'terminal'
  * the one bar it most needed to cover looks like. `320` clears the header with room to spare while
  * staying under the first ordinary dialog tier (`SessionDrilldownModal` and friends start at 350).
  */
-export const PANEL_FULLSCREEN_Z = 320
+export { PANEL_FULLSCREEN_Z }
 
 export interface SessionPanelProps {
   session: ControlSession

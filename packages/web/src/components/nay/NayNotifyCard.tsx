@@ -38,6 +38,7 @@ import {
   cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
 import { echoOpacities, followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
+import { NAY_NOTIFY_CARD_Z } from '../../lib/zLayers'
 import type { AnchorRect, Size } from '../../lib/nayDock'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
@@ -482,7 +483,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       style={{
         // left / top / transform-origin / max-height are written by the placement and the follow
         // loop, never by React: a re-render mid-drag must not snap the card back for a frame.
-        position: 'fixed', zIndex: 305, width, maxWidth: 'calc(100vw - 24px)',
+        position: 'fixed', zIndex: NAY_NOTIFY_CARD_Z, width, maxWidth: 'calc(100vw - 24px)',
         background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
         fontSize: 13, color: 'var(--text-primary)', overflowY: 'auto', overscrollBehavior: 'contain',

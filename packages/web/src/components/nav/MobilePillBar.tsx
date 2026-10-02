@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { followOffset, isDrag, restOffset, slotAt } from '../../lib/bottomNavDrag'
+import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 
 /**
  * THE MOBILE BOTTOM BAR — a floating pill in our dark tone, slightly see-through, with an
@@ -111,7 +112,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
         position: 'fixed',
         left: 12,
         right: 12,
-        zIndex: 330,
+        zIndex: MOBILE_PILL_BAR_Z,
         borderRadius: 999,
         background: 'rgba(17, 17, 24, 0.84)',
         border: '1px solid rgba(255, 255, 255, 0.08)',
