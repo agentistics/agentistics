@@ -89,7 +89,7 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
         textAlign: 'center', padding: '0 16px', opacity: 0, transition: 'opacity .6s ease', pointerEvents: 'none',
         textShadow: '0 1px 2px rgba(0,0,0,.9), 0 0 18px rgba(10,10,15,.95)',
       }}>
-        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textTransform: 'uppercase', color: '#10b981' }}>✓</span>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textTransform: 'uppercase', color: '#10b981' }}>{ut(lang, 'finale.ok')}</span>
         <b style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.01em' }}><VersionTitle lang={lang} k="finale.updated" from={from} to={version} /></b>
         <small style={{ fontSize: 13, color: 'rgba(255,255,255,.66)' }}>{ut(lang, 'finale.sub')}</small>
       </div>

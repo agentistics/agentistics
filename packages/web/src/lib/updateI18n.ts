@@ -51,6 +51,7 @@ const PT = {
   'loader.mb': '{a} de {b} MB',
   'loader.waiting': 'esperando o servidor voltar',
   // the finale
+  'finale.ok': '✓ Atualizado',
   'finale.updated': 'Atualizado {pair}',
   'finale.sub': 'Tudo ligado. Você está de volta onde estava.',
   // the narration pools
@@ -109,6 +110,7 @@ const EN: Record<UpdateKey, string> = {
   'loader.percent': '{pct}%',
   'loader.mb': '{a} of {b} MB',
   'loader.waiting': 'waiting for the server to come back',
+  'finale.ok': '✓ Updated',
   'finale.updated': 'Updated {pair}',
   'finale.sub': 'All systems on. You are right back where you were.',
   'phrase.data.1': 'Fetching data from futuristic technology',
