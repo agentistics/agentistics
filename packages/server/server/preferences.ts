@@ -90,6 +90,8 @@ export interface Preferences {
   /** The reasoning effort a new Nay conversation starts with, one the harness's CLI prints. */
   chatEffort?: string
   chatSoundEnabled?: boolean
+  /** Which synthesized sound the chat plays (`web/src/lib/chatSounds.ts`). */
+  chatSoundId?: string
   /** Whether this machine serves the chat at all. ABSENT READS AS ON (owner decision, 2026-09-29);
    *  an explicit false turns it off. It can only ever narrow `CAPS.localChat`; see chat-gate.ts. */
   chatEnabled?: boolean
@@ -151,10 +153,12 @@ export interface Preferences {
   /** Magnifier lenses and their settings, for a MACHINE. On a central the same object lives per
    *  account in the `userPrefs` collection instead — see a11y-prefs.ts, which owns that choice. */
   accessibility?: AccessibilityPrefs
-  /** A person's own interface arrangement (the task board's view, columns, groups…), for a
-   *  MACHINE. On a central the same keys live per account in `userPrefs.ui` — see
-   *  user-ui-prefs.ts, which owns the closed list of keys, and `/api/user-prefs`. */
-  ui?: Record<string, Record<string, unknown>>
+  /** A person's own interface choices that are NEW to the server (the task board's arrangement,
+   *  the sessions aside, the panel layout…), for a MACHINE. Legacy choices that were already
+   *  top-level fields (theme, lang, pins, chat defaults…) stay top-level. On a central EVERY such
+   *  key lives per account in `userPrefs.ui` — see user-ui-prefs.ts, which owns the closed list
+   *  and each key's machine home, and `/api/user-prefs`. */
+  ui?: Record<string, unknown>
   /** How this machine is actually billed — a timeline of periods per harness, plus the display
    *  basis. Drives the "plan" cost basis; see `billing.ts` in @agentistics/core.
    *

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { createSharedPref, loadSharedPrefs, PERSONAL_PREFS, resetSharedPrefs, sameValue } from './sharedPref'
+import { createSharedPref, loadSharedPrefs, migrateLocalOnce, PERSONAL_PREFS, putPersonal, resetSharedPrefs, sameValue } from './sharedPref'
 
 test('equal values compare equal even as different objects', () => {
   expect(sameValue(['a', 'b'], ['a', 'b'])).toBe(true)
@@ -162,5 +162,110 @@ describe('a PERSONAL store (per account on a central, the machine file on a mach
     await new Promise(r => setTimeout(r, 0))
     await new Promise(r => setTimeout(r, 0))
     expect(store.get()).toEqual({ cols: ['late'] })
+  })
+})
+
+describe('2026-10-01: read-only sessions, the once-per-browser migration, legacy formats', () => {
+  const originalFetch = globalThis.fetch
+  const g = globalThis as unknown as { localStorage?: unknown }
+  let savedLS: unknown
+  const ls = new Map<string, string>()
+  let puts: Record<string, unknown>[] = []
+
+  const serve = (doc: Record<string, unknown>, writable = true) => {
+    globalThis.fetch = ((url: string, init?: RequestInit) => {
+      expect(url).toBe(PERSONAL_PREFS)
+      if (init?.method === 'PUT') {
+        puts.push(JSON.parse(String(init.body)))
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(doc), {
+        status: 200, headers: { 'X-Prefs-Writable': writable ? 'true' : 'false' },
+      }))
+    }) as never
+  }
+  const pins = () => createSharedPref<string[]>({
+    key: 'k-pins', prefKey: 'pinnedSessions', fallback: [], adoptLocalWhenAbsent: true,
+    parse: raw => (Array.isArray(raw) ? raw as string[] : null),
+  })
+
+  beforeEach(() => {
+    puts = []
+    ls.clear()
+    savedLS = g.localStorage
+    g.localStorage = { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => { ls.set(k, v) } }
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    g.localStorage = savedLS
+    resetSharedPrefs()
+  })
+
+  test('every store defaults to the personal endpoint', async () => {
+    const s = createSharedPref<string>({ key: 'k-x', prefKey: 'theme', fallback: 'dark', parse: r => (typeof r === 'string' ? r : null) })
+    serve({ theme: 'light' })
+    await loadSharedPrefs()
+    expect(s.get()).toBe('light')
+  })
+
+  test('the migration runs ONCE per browser — a second account on a shared browser does not inherit it', async () => {
+    ls.set('k-pins', JSON.stringify(['a']))
+    pins()
+    serve({})
+    await loadSharedPrefs()
+    expect(puts).toEqual([{ pinnedSessions: ['a'] }])
+    resetSharedPrefs()
+    puts = []
+    const s = pins()            // next page load, another account, nothing stored for it
+    serve({})
+    await loadSharedPrefs()
+    expect(puts).toEqual([])
+    expect(s.get()).toEqual([])
+  })
+
+  test('a read-only session adopts the defaults in memory, writes nothing, keeps the browser copy', async () => {
+    ls.set('k-pins', JSON.stringify(['mine']))
+    const s = pins()
+    serve({}, false)
+    await loadSharedPrefs()
+    expect(s.get()).toEqual([])
+    expect(JSON.parse(ls.get('k-pins')!)).toEqual(['mine'])
+    s.set(['x'])
+    putPersonal({ theme: 'light' })
+    expect(puts).toEqual([])
+  })
+
+  test('a legacy non-JSON key keeps its own format through encode/decode', async () => {
+    ls.set('k-flag', '1')
+    const s = createSharedPref<boolean>({
+      key: 'k-flag', prefKey: 'fleetOpen', fallback: false,
+      parse: raw => (typeof raw === 'boolean' ? raw : null),
+      decode: raw => raw === '1', encode: v => (v ? '1' : '0'),
+    })
+    expect(s.get()).toBe(true)
+    serve({ fleetOpen: false })
+    await loadSharedPrefs()
+    expect(ls.get('k-flag')).toBe('0')
+  })
+
+  test('a seeded store migrates its legacy value up', async () => {
+    const s = createSharedPref<{ main: string } | null>({
+      key: 'k-new', prefKey: 'panelSlots', fallback: null, adoptLocalWhenAbsent: true,
+      parse: raw => (raw && typeof raw === 'object' ? raw as { main: string } : null),
+      seed: () => ({ main: 'legacy' }),
+    })
+    serve({})
+    await loadSharedPrefs()
+    expect(s.get()).toEqual({ main: 'legacy' })
+    expect(puts).toEqual([{ panelSlots: { main: 'legacy' } }])
+  })
+
+  test('migrateLocalOnce uploads a value held outside a store, once', async () => {
+    serve({})
+    await loadSharedPrefs()
+    expect(migrateLocalOnce('theme', false, 'light')).toBe(true)
+    expect(migrateLocalOnce('theme', false, 'light')).toBe(false)
+    expect(migrateLocalOnce('lang', true, 'pt')).toBe(false)
+    expect(puts).toEqual([{ theme: 'light' }])
   })
 })

@@ -93,6 +93,7 @@
  * `lib/unsavedLeave.ts`) still resets without a question.
  */
 
+import { createSharedPref } from '../../lib/sharedPref'
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, Check, ChevronDown, ChevronLeft, ChevronRight, FilePlus,
@@ -419,11 +420,10 @@ export const SPLIT_MIN = TREE_MIN + DIVIDER_W + EDITOR_MIN
 /**
  * Where the dragged width is remembered.
  *
- * `localStorage`, NOT `/api/preferences`, and for the reason `boardPrefs.ts` already records: on a
- * central that file is shared by everyone signed in, so one reader's column width would be
- * everyone's. This is a per-viewer layout convenience — exactly the kind that belongs in the
- * browser — and every read and write is guarded, because a private window makes the accessor itself
- * throw.
+ * `localStorage`, per DEVICE — a width depends on the SCREEN, and a phone and a desktop must not
+ * fight over one value (the line `user-ui-prefs.ts` on the server draws: choices go to
+ * `/api/user-prefs`, screen facts stay here). Every read and write is guarded, because a private
+ * window makes the accessor itself throw.
  */
 export const TREE_WIDTH_KEY = 'agentistics:studio-tree-w'
 
@@ -588,12 +588,20 @@ export function resolveTreeSide(stored: string | null): TreeSide {
   return stored === 'right' ? 'right' : 'left'
 }
 
+/** Which side the tree sits on is a CHOICE (unlike its width), so it lives on the server
+ *  (`/api/user-prefs`, `studioTreeSide`); the browser copy keeps its bare-string format. */
+const treeSideStore = createSharedPref<TreeSide>({
+  key: TREE_SIDE_KEY, prefKey: 'studioTreeSide', fallback: 'left', adoptLocalWhenAbsent: true,
+  parse: raw => (raw === 'left' || raw === 'right' ? raw : null),
+  decode: raw => resolveTreeSide(raw), encode: v => v,
+})
+
 function readTreeSide(): TreeSide {
-  try { return resolveTreeSide(localStorage.getItem(TREE_SIDE_KEY)) } catch { return 'left' }
+  return treeSideStore.get()
 }
 
 function storeTreeSide(side: TreeSide): void {
-  try { localStorage.setItem(TREE_SIDE_KEY, side) } catch { /* private mode */ }
+  treeSideStore.set(side)
 }
 
 // --- the toolbar's own fit (owner, 2026-09-19, follow-up) -----------------------------------------
@@ -999,6 +1007,7 @@ export function Studio({
   }, [])
   // Persisted per browser (item 10 — "move side bar right").
   const [treeSide, setTreeSideState] = useState<TreeSide>(readTreeSide)
+  useEffect(() => treeSideStore.subscribe(() => setTreeSideState(treeSideStore.get())), [])
   const setTreeSide = useCallback((next: TreeSide) => {
     setTreeSideState(next)
     storeTreeSide(next)

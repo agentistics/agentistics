@@ -14,7 +14,7 @@ export interface UserPrefsDoc {
   _id: string
   accessibility?: AccessibilityPrefs
   /** A person's own interface arrangement, by key — see user-ui-prefs.ts for the closed list. */
-  ui?: Record<string, Record<string, unknown>>
+  ui?: Record<string, unknown>
   /** BSON Date — see mongo-dates.ts. */
   updatedAt: Date
 }
@@ -43,7 +43,7 @@ export async function readUserUi(accountId: string): Promise<unknown> {
 }
 
 /** Each named key is replaced whole (`$set` on `ui.<key>`); keys not named are left as they are. */
-export async function writeUserUi(accountId: string, patch: Record<string, Record<string, unknown>>): Promise<void> {
+export async function writeUserUi(accountId: string, patch: Record<string, unknown>): Promise<void> {
   const set: Record<string, unknown> = { updatedAt: new Date() }
   for (const [k, v] of Object.entries(patch)) set[`ui.${k}`] = v
   await (await collection()).updateOne({ _id: accountId }, { $set: set }, { upsert: true })

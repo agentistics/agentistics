@@ -20,6 +20,7 @@
  * two screens show one value and nothing already saved moves.
  */
 
+import { putPersonal } from '../../lib/sharedPref'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Play, RotateCcw, Sparkles } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
@@ -70,10 +71,10 @@ const CARD_EVENTS: { key: 'nay' | 'waiting' | 'waiting-approval' | 'stale'; pt: 
   { key: 'stale', pt: 'Sem abrir', en: 'Not opened', hintPt: 'Lembrete de uma sessão que espera há tempo e ninguém abriu.', hintEn: 'A reminder about a session that has waited a while unopened.' },
 ]
 
+/** A chat sound is a person's CHOICE, so it goes through `/api/user-prefs` (per account on a
+ *  central) — never the machine file. */
 function putPreference(body: Record<string, unknown>): void {
-  void fetch('/api/preferences', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  }).catch(() => {})
+  putPersonal(body)
 }
 
 export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = true }: NaySettingsPanelProps) {

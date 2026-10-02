@@ -64,7 +64,7 @@ import { useTerminalWrite } from '../../hooks/useTerminalWrite'
 import {
   BAND_MIN_PX, bandPanelFull, readBandPrefs, resolveBandDrag, resolveBandHeight, seedBandOpen,
   shellApiUrl, shellErrorText, shellWatching, bandGeometry, shellWhere, withBandPanelFull,
-  writeBandGeometry, writeBandPrefs, type BandPrefs,
+  writeBandGeometry, writeBandPrefs, sharedBand, type BandPrefs,
 } from '../../lib/shellBand'
 import {
   INITIAL_SHELL_BAND, shellBandReducer, shellResolveWanted, type OpenShell,
@@ -394,6 +394,13 @@ export function ShellBand({
   const [storedTarget, setTarget] = useState<TerminalTarget>(
     () => fixedTarget ?? resolveDockedTarget(bottomOccupant, readBandPrefs(undefined, bandPane).target, shellEnabled),
   )
+  // The choice is server-side and lands after mount (or arrives from another device): follow it.
+  useEffect(() => {
+    if (fixedTarget) return
+    return sharedBand().subscribe(() => {
+      setTarget(resolveDockedTarget(bottomOccupant, readBandPrefs(undefined, bandPane).target, shellEnabled))
+    })
+  }, [fixedTarget, bottomOccupant, shellEnabled, bandPane])
   const target: TerminalTarget = fixedTarget ?? storedTarget
   const scope = targetScope(target)
   /**

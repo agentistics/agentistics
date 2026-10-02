@@ -8,32 +8,29 @@
  * session fell, or one of these was reopened on its own and the rest are still down), the banner is
  * describing a new fact and is shown again.
  *
- * Stored per BROWSER (`localStorage`), never sent to the server — same reasoning `boardPrefs.ts`
- * gives for the task board's own arrangement: this is a per-viewer convenience the fleet has no
- * business knowing about. Every accessor is guarded, because a private window or blocked storage
- * must not stop the banner from working — it would just stop remembering the dismissal.
+ * A CHOICE, so it is stored on the SERVER (`/api/user-prefs`, `fellDismissed`; per ACCOUNT on a
+ * central) and a banner dismissed on the desktop stays dismissed on the phone. The browser copy
+ * under the old key is the first paint and the one-time migration source; every accessor is
+ * guarded, because a private window or blocked storage must not stop the banner from working.
  */
 
-const KEY = 'agentistics-fell-dismissed-v1'
+import { createSharedPref } from './sharedPref'
+
+const store = createSharedPref<string[] | null>({
+  key: 'agentistics-fell-dismissed-v1', prefKey: 'fellDismissed', fallback: null, adoptLocalWhenAbsent: true,
+  parse: raw => (Array.isArray(raw) && raw.every(id => typeof id === 'string') ? raw as string[] : null),
+})
+
+/** Fires when the dismissal changes — here or, after a load, on another device. */
+export const subscribeDismissedFell = (fn: () => void): (() => void) => store.subscribe(fn)
 
 /** The dismissed group, as the exact set of ids it covered — order does not matter. */
 export function readDismissedFell(): string[] | null {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) && parsed.every(id => typeof id === 'string') ? parsed : null
-  } catch {
-    return null
-  }
+  return store.get()
 }
 
 export function writeDismissedFell(ids: readonly string[]): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify([...ids]))
-  } catch {
-    /* per-viewer convenience only — a browser that cannot store it just asks again next time */
-  }
+  store.set([...ids])
 }
 
 /**

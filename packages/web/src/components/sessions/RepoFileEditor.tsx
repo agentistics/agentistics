@@ -83,6 +83,7 @@
  * test would notice.
  */
 
+import { createSharedPref } from '../../lib/sharedPref'
 import {
   useEffect, useReducer, useRef, useState,
   type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
@@ -776,23 +777,35 @@ export type PreviewMode = 'code' | 'preview'
 
 const PREVIEW_PREF_KEY = 'agentistics.editor.previewMode'
 
+/** A CHOICE, so it lives on the server (`/api/user-prefs`, `editorPreviewMode`) and every device
+ *  opens a markdown file the same way; the browser copy under the old key is the first paint. */
+const previewStore = createSharedPref<Partial<Record<DocKind, PreviewMode>>>({
+  key: PREVIEW_PREF_KEY, prefKey: 'editorPreviewMode', fallback: {}, adoptLocalWhenAbsent: true,
+  parse: raw => parsePreviewPrefs(raw),
+})
+
+function parsePreviewPrefs(v: unknown): Partial<Record<DocKind, PreviewMode>> | null {
+  if (typeof v !== 'object' || v === null) return null
+  const r = v as Record<string, unknown>
+  const out: Partial<Record<DocKind, PreviewMode>> = {}
+  for (const kind of ['markdown', 'mermaid'] as const) {
+    if (r[kind] === 'code' || r[kind] === 'preview') out[kind] = r[kind]
+  }
+  return out
+}
+
 /**
  * Remembered PER DOC KIND, guarded exactly like `readBandPrefs`/`writeBandPrefs`
  * (`lib/shellBand.ts`): a browser that blocks site data, or a value nothing wrote, costs the memory
- * and never the toggle — it still works, just starting from `'code'` again.
+ * and never the toggle — it still works, just starting from `'code'` again. An injected `storage`
+ * (tests) bypasses the server-backed store.
  */
 function readPreviewPrefs(storage?: Storage): Partial<Record<DocKind, PreviewMode>> {
+  if (!storage) return previewStore.get()
   try {
-    const raw = (storage ?? globalThis.localStorage)?.getItem(PREVIEW_PREF_KEY)
+    const raw = storage.getItem(PREVIEW_PREF_KEY)
     if (!raw) return {}
-    const v = JSON.parse(raw) as unknown
-    if (typeof v !== 'object' || v === null) return {}
-    const r = v as Record<string, unknown>
-    const out: Partial<Record<DocKind, PreviewMode>> = {}
-    for (const kind of ['markdown', 'mermaid'] as const) {
-      if (r[kind] === 'code' || r[kind] === 'preview') out[kind] = r[kind]
-    }
-    return out
+    return parsePreviewPrefs(JSON.parse(raw) as unknown) ?? {}
   } catch {
     return {}
   }
@@ -803,9 +816,9 @@ export function readPreviewMode(kind: DocKind, storage?: Storage): PreviewMode {
 }
 
 export function writePreviewMode(kind: DocKind, mode: PreviewMode, storage?: Storage): void {
+  if (!storage) { previewStore.set({ ...previewStore.get(), [kind]: mode }); return }
   try {
-    const s = storage ?? globalThis.localStorage
-    s?.setItem(PREVIEW_PREF_KEY, JSON.stringify({ ...readPreviewPrefs(s), [kind]: mode }))
+    storage.setItem(PREVIEW_PREF_KEY, JSON.stringify({ ...readPreviewPrefs(storage), [kind]: mode }))
   } catch { /* the memory is a convenience; the toggle works without it */ }
 }
 
