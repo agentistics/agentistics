@@ -30,8 +30,11 @@ import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/session
 import { SessionFacts } from '../sessions/SessionFacts'
 import { TabStrip } from '../sessions/formBits'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
+import { SessionFiling } from '../tasks/SessionFiling'
+import { boardCopy } from '../tasks/copy'
+import { detachSession as unfileSession } from '../../lib/tasks'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
-import { NAY_COPY_ID, NAY_GO_TO, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
+import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
   placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, windowZIndex, type DockState, type NayWindow, type Size,
@@ -729,6 +732,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   const [ending, setEnding] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
+  const [filing, setFiling] = useState<string | null>(null)
   const all = NAY_SECTION_ORDER.flatMap(id => sections[id])
   const menuRow = menu ? all.find(r => r.id === menu.id) : undefined
   const pickMenu = (action: string) => {
@@ -737,6 +741,11 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
     if (action === 'kill') { setConfirming(id); return }
     if (action === 'rename') { setRenaming({ id, title: menuRow.title }); return }
     if (action === NAY_GO_TO) { onGoTo(id); return }
+    if (action === LINK_TASK) { setFiling(id); return }
+    if (action === UNLINK_TASK) {
+      void unfileSession(id, id).then(() => onNotice(boardCopy(lang).unfiled))
+      return
+    }
     if (action === NAY_COPY_ID) {
       const conv = menuRow.conversationId
       if (conv) void navigator.clipboard?.writeText(conv).then(
@@ -875,11 +884,23 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
           x={Math.max(4, menu.x)} y={menu.y}
           entries={nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
             running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
+            task: menuRow.task,
           })}
           onPick={pickMenu}
           onClose={() => setMenu(null)}
         />
       )}
+      {filing && (() => {
+        const r = all.find(x => x.id === filing)
+        return (
+          <SessionFiling
+            session={{ id: filing, title: r?.title ?? filing, ...(r?.harness ? { harness: r.harness } : {}), ...(r?.task ? { task: r.task } : {}) }}
+            lang={lang}
+            onChanged={() => onNotice(boardCopy(lang).filed)}
+            onClose={() => setFiling(null)}
+          />
+        )
+      })()}
       {renaming && (
         <RenameSessionDialog
           lang={pt ? 'pt' : 'en'}
