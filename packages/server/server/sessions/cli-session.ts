@@ -32,6 +32,7 @@ import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
+import { inheritedIdentity } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { conversationForProcess, loadConversations } from './conversations'
 import { resolveBackend } from './index'
@@ -576,12 +577,10 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     }
     await addSession({
       id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
-      label: row.label,
-      ...(m.note ? { note: m.note } : {}),
       // INHERITED from the row being replaced, never taken from the request: a reopened session is
-      // the same piece of work, and the attribution is what says so. See `ManagedSession.taskId`.
-      ...(m.taskId ? { taskId: m.taskId } : {}),
-      ...(m.attemptId ? { attemptId: m.attemptId } : {}),
+      // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
+      ...inheritedIdentity(m),
+      label: row.label,
       // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
       // reopen verb has recorded it since it was written; this path had not, so the same gesture
       // left a row that knew which conversation it drove or one that did not, depending on where it
@@ -919,8 +918,14 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const died = await spawnFailure(backend, id, planned.plan.argv[0])
   if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
 
+  // The newest row of this conversation is the one being continued: its filing and name come
+  // along, and the live harness name (if any) still wins for the label.
+  const previous = (await readRegistry())
+    .filter(m => m.conversationId === plan.conversationId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   const record: ManagedSession = {
     id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
+    ...inheritedIdentity(previous),
     ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
     conversationId: plan.conversationId,
     ...(await recordedRepo(plan.cwd)),
@@ -932,6 +937,8 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   // session it lost was the one the user was about to sit in: running, unregistered, and beyond
   // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
   // it is SAID rather than left for the user to discover when a rename stops working.
+  // Retired like every other reopen: it stops standing beside its own continuation.
+  if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
   if (!await addVerified(record)) {
     console.error(
       `${id} is running but its registry record could not be kept — another agentop process is `
