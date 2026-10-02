@@ -29,6 +29,7 @@ const FILES = [
 
 /** file (relative to packages/) → binding → why it is not a secret held at module level. */
 const ALLOWED: Record<string, Record<string, string>> = {
+  'vault/src/recovery.ts': { INDEX: 'the public BIP-39 word → index table', BY_PREFIX: 'the public 4-letter prefix → index table' },
   'vault/src/protectors/memory.ts': { store: 'the TEST-ONLY in-memory protector; the host never offers it outside `bun test`' },
   'server/server/vault/central-env.ts': { SECRET_SET: 'the NAMES of the secret keys, not values' },
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },

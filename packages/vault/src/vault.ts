@@ -45,9 +45,15 @@ export interface VaultJson {
    * never leave a silent copy of the DEK behind for good, nor delete one before presence is recorded.
    */
   retired?: WrapperRecord[]
+  /** SECRETS.4 §2.5: the authenticator is enrolled (its seed is sealed as `vault/totp-seed`). v2 only. */
+  stepup?: { enrolledAt: string; digits: 6; period: 30 }
+  /** SECRETS.4 §5.1: the human scope's idle lock, in minutes (5–480). Absent = the default 30. v2 only. */
+  autoLock?: { minutes: number }
+  /** SECRETS.4 §7.4: the owner's machine — presence cannot be turned off without the recovery key. */
+  requirePresence?: true
 }
 
-const PROTECTOR_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase', 'memory', 'hello', 'fido2']
+const PROTECTOR_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase', 'memory', 'hello', 'fido2', 'recovery']
 
 /** SECRETS.4 §1.2: the wrappers that open only after a human gesture. */
 export const PRESENCE_IDS: readonly ProtectorId[] = ['hello', 'fido2']
@@ -86,8 +92,21 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     wrappers.push(p)
   }
   if (wrappers.length === 0) return null
-  // A presence wrapper (or a retirement in flight) exists only in a v2 file.
-  if (r.v === VAULT_VERSION && wrappers.some(w => isPresenceId(w.type))) return null
+  // A presence or recovery wrapper (or a retirement in flight) exists only in a v2 file.
+  if (r.v === VAULT_VERSION && wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery')) return null
+  let stepup: VaultJson['stepup']
+  if (r.stepup !== undefined) {
+    const x = r.stepup as Record<string, unknown> | null
+    if (r.v !== VAULT_VERSION_SCOPED || !x || typeof x.enrolledAt !== 'string' || x.digits !== 6 || x.period !== 30) return null
+    stepup = { enrolledAt: x.enrolledAt, digits: 6, period: 30 }
+  }
+  let autoLock: VaultJson['autoLock']
+  if (r.autoLock !== undefined) {
+    const x = r.autoLock as Record<string, unknown> | null
+    if (r.v !== VAULT_VERSION_SCOPED || !x || typeof x.minutes !== 'number' || !Number.isInteger(x.minutes) || x.minutes < 5 || x.minutes > 480) return null
+    autoLock = { minutes: x.minutes }
+  }
+  if (r.requirePresence !== undefined && (r.v !== VAULT_VERSION_SCOPED || r.requirePresence !== true)) return null
   let retired: WrapperRecord[] | undefined
   if (r.retired !== undefined) {
     if (r.v !== VAULT_VERSION_SCOPED || !Array.isArray(r.retired)) return null
@@ -98,6 +117,9 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     v: r.v as VaultJson['v'], scope, kid: r.kid, createdAt: r.createdAt, wrappers,
     ...(typeof r.machineId === 'string' ? { machineId: r.machineId } : {}),
     ...(retired && retired.length ? { retired } : {}),
+    ...(stepup ? { stepup } : {}),
+    ...(autoLock ? { autoLock } : {}),
+    ...(r.requirePresence === true ? { requirePresence: true as const } : {}),
   }
 }
 
@@ -108,13 +130,16 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
  */
 export function serializeVaultJson(v: VaultJson): Uint8Array {
   const plainV1 = v.scope === 'human' && v.v === VAULT_VERSION && !v.machineId && !v.retired?.length
-    && !v.wrappers.some(w => isPresenceId(w.type))
+    && !v.wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery') && !v.stepup && !v.autoLock && !v.requirePresence
   const out = plainV1
     ? { v: VAULT_VERSION, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers }
     : {
         v: VAULT_VERSION_SCOPED, scope: v.scope, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers,
         ...(v.machineId ? { machineId: v.machineId } : {}),
         ...(v.retired?.length ? { retired: v.retired } : {}),
+        ...(v.stepup ? { stepup: v.stepup } : {}),
+        ...(v.autoLock ? { autoLock: v.autoLock } : {}),
+        ...(v.requirePresence ? { requirePresence: true } : {}),
       }
   return bytes(JSON.stringify(out, null, 2) + '\n')
 }
@@ -268,7 +293,7 @@ export async function openVault(io: ProtectorIo, dir: string, protectors: readon
 }
 
 /** Wrappers that are never the day-to-day way in: typed secrets the user supplies on purpose. */
-const NOT_PRIMARY: readonly ProtectorId[] = ['passphrase']
+const NOT_PRIMARY: readonly ProtectorId[] = ['passphrase', 'recovery']
 
 /**
  * Re-wrap the OPEN key under another primary protector — the only way a vault changes protector.

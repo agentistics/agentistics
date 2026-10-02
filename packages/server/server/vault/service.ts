@@ -30,7 +30,7 @@ import {
   type Lang, type OpenState, type Platform, type Protector, type ProtectorId, type ProtectorIo,
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
-  helloProtector, fido2Protector, finishRetirement,
+  helloProtector, fido2Protector, finishRetirement, recoveryProtector,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
@@ -189,6 +189,8 @@ export function protectorById(id: ProtectorId, passphrase?: string, dir: string 
     case 'memory': return realMode() ? null : memoryProtector()
     case 'hello': return platform() === 'win32' || isWsl() ? helloProtector({ io: io(), vaultDir: dir, wsl: isWsl() }) : null
     case 'fido2': return fido2Protector({ io: io(), vaultDir: dir, transport: platform() === 'win32' || isWsl() ? 'webauthn' : 'cli', wsl: isWsl() })
+    // Without the words in hand it can only be REMOVED (rotation); opening goes through `recover`.
+    case 'recovery': return recoveryProtector({ io: io(), vaultDir: dir })
   }
 }
 
