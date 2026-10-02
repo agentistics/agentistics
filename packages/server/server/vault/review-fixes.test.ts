@@ -341,7 +341,7 @@ describe('S2 — first enrolment from a page needs a proof from this machine', (
   })
   test('a failed device check is said in words, never as a reason code', async () => {
     await silentVault()
-    hello.wrapFails = 'presence-unavailable: bridge-failed'
+    hello.probe = async () => ({ ok: false as const, reason: 'presence-unavailable: bridge-failed' })
     const r = await probePresence('hello', S)
     expect(!r.ok && r.sentence).not.toContain('bridge-failed')
     expect(!r.ok && r.code).toBe('presence-unavailable')
@@ -696,36 +696,39 @@ describe('the command reaches THIS service, and the refusal says where a termina
 import { PRESENCE_GESTURES, gestureDone } from '@agentistics/vault'
 import { gestureProgress } from './gate'
 
-describe('the device check: wrap only, with live "confirmation i of n" for the page', () => {
-  test('it raises the probe count, never a third verifying unwrap', async () => {
+describe('the device check asks nothing; the enrolment reports live "confirmation i of n" (owner 2026-10-02)', () => {
+  test('the device check raises no gesture and writes nothing', async () => {
     await silentVault()
     await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
-    const before = hello.gestures // the fake counts UNWRAPS
+    const before = hello.gestures
+    let wraps = 0
+    const wrap = hello.wrap.bind(hello)
+    hello.wrap = async (dek, kid) => { wraps++; return wrap(dek, kid) }
     expect((await probePresence('hello', SWEB)).ok).toBe(true)
     expect(hello.gestures).toBe(before)
+    expect(wraps).toBe(0)
   })
-  test('progress is visible to the asking session while the dialogs are up, to nobody else, and gone after', async () => {
-    await silentVault()
-    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+  test('enrolment progress is visible to the asking session while the dialogs are up, to nobody else, and gone after', async () => {
+    await authVault()
     const seen: unknown[] = []
     const wrap = hello.wrap.bind(hello)
     hello.wrap = async (dek, kid) => {
-      seen.push(gestureProgress(SWEB)); gestureDone()
-      seen.push(gestureProgress(SWEB)); seen.push(gestureProgress(OTHER)); gestureDone(); gestureDone()
-      seen.push(gestureProgress(SWEB))
+      seen.push(gestureProgress(S)); gestureDone()
+      seen.push(gestureProgress(S)); seen.push(gestureProgress(OTHER)); gestureDone(); gestureDone()
+      seen.push(gestureProgress(S))
       return wrap(dek, kid)
     }
-    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
     expect(seen).toEqual([
-      { kind: 'hello', done: 0, total: PRESENCE_GESTURES.probe },
-      { kind: 'hello', done: 1, total: PRESENCE_GESTURES.probe },
+      { kind: 'hello', done: 0, total: PRESENCE_GESTURES.enroll },
+      { kind: 'hello', done: 1, total: PRESENCE_GESTURES.enroll },
       null,
-      { kind: 'hello', done: PRESENCE_GESTURES.probe, total: PRESENCE_GESTURES.probe }, // capped at n
+      { kind: 'hello', done: PRESENCE_GESTURES.enroll, total: PRESENCE_GESTURES.enroll }, // capped at n
     ])
-    expect(gestureProgress(SWEB)).toBeNull()
+    expect(gestureProgress(S)).toBeNull()
   })
   test('the view states the counts the page prints', async () => {
     await silentVault()
-    expect((await readVaultView([], async () => [], SWEB.session)).gestures).toEqual({ probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll })
+    expect((await readVaultView([], async () => [], SWEB.session)).gestures).toEqual({ probe: 0, enroll: 2 })
   })
 })

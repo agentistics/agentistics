@@ -15,7 +15,8 @@
  *                crash → the old vault is untouched; the `.rekey` files are leftovers, removed by
  *                `finishRekeyIfPending` (the journal says they were never committed).
  *   2. WRAP      the caller wraps the NEW DEK under the presence credential and the recovery key
- *                (staged — see recovery.ts), both verified by a real unwrap.
+ *                (staged — see recovery.ts); the recovery one verified by an unwrap, the presence one
+ *                by its own in-memory seal check (no second gesture; the first unlock re-checks it).
  *   3. COMMIT    ONE write of vault.json naming the new kid and the new wrappers (the silent ones go
  *                to `retired`, each carrying the OLD kid it must be removed under). Journal: `committed`.
  *   4. FINISH    rename every `<file>.rekey` over `<file>`, then drop the journal.

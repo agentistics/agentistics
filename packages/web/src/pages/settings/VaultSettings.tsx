@@ -715,8 +715,8 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     const id = setInterval(() => { void tick() }, 500)
     return () => { alive = false; clearInterval(id) }
   }, [gestureTotal])
-  const probeGestures = view.gestures?.probe ?? 2
-  const enrolGestures = view.gestures?.enroll ?? 3
+  const probeGestures = view.gestures?.probe ?? 0
+  const enrolGestures = view.gestures?.enroll ?? 2
   const gestureLine = gestureNow && (
     <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
       <Loader2 size={14} className="ag-spin" /> {vtf('wiz_gesture_progress', lang, { i: gestureNow.i, n: gestureNow.n })}
@@ -862,20 +862,20 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_probe_title')}</div>
             {gestureLine}
             <Note>{vtf('wiz_probe_intro', lang, { presence: vt(presenceKey([kind]), lang) })}</Note>
-            <Note>{vtf(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey', lang, { n: probeGestures })}</Note>
+            <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
             {error && <Err text={error} />}
             <button type="button" style={cta} disabled={busy} onClick={() => { void probe() }}>{busy ? t('unlocking') : t('wiz_probe_go')}</button>
           </div>
         )}
         {phase === 'intro' && step === 'authenticator' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !(needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) && !(needSetup && !setupCodeComplete(setupCode))) void showQr() }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_auth_title')}</div>
             <Note>{t('wiz_auth_intro')}</Note>
             {needCodeFor('enroll-authenticator') && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showQr() }}>{busy ? t('working') : t('wiz_auth_show')}</button>
-          </div>
+            <button type="submit" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_auth_show')}</button>
+          </form>
         )}
         {phase === 'qr' && uri && (
           <form onSubmit={e => { e.preventDefault(); void confirmAuth() }}>
@@ -894,7 +894,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         )}
 
         {phase === 'intro' && step === 'recovery' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !((((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode))) && !(needSetup && !setupCodeComplete(setupCode))) void showWords() }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_rec_title')}</div>
             <Note>{t('wiz_rec_intro')}</Note>
             {rotating && <Note tone="warn">{t('wiz_rec_rotate')}</Note>}
@@ -902,8 +902,8 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {rotating && gateOf('rotate-recovery').gesture && <Note>{vtf('gate_dialog_presence', lang, { presence: vt(presenceKey(view.wrappers), lang) })}</Note>}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showWords() }}>{busy ? t('working') : t('wiz_rec_show')}</button>
-          </div>
+            <button type="submit" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_rec_show')}</button>
+          </form>
         )}
         {phase === 'words' && words && (
           <div>
@@ -948,7 +948,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         )}
 
         {phase === 'intro' && step === 'presence' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !(presenceCodeNeeded && !codeComplete(presCode))) void enrolPresence(needWords) }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_pres_title')}</div>
             {gestureLine}
             <Note>{t('wiz_pres_intro')}</Note>
@@ -966,19 +966,19 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
             {!needWords && (
-              <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
+              <button type="submit" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))}>
                 {busy ? t('unlocking') : t('wiz_pres_go')}
               </button>
             )}
             {needWords && (
               <>
                 <Note tone="warn">{t('wiz_pres_newWords_warn')}</Note>
-                <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence(true) }}>
+                <button type="submit" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))}>
                   {busy ? t('unlocking') : t('wiz_pres_newWords')}
                 </button>
               </>
             )}
-          </div>
+          </form>
         )}
 
         {phase === 'done' && finished && (

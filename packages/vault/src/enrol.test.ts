@@ -1,6 +1,6 @@
 /**
  * SECRETS.4 §12.3 (the enrolment half): presence becomes the primary and the silent OS wrapper is
- * removed ONLY after the presence unwrap succeeded — and a crash at every step leaves the DEK
+ * removed ONLY after the presence wrap succeeded (its seal checked in memory by the protector) — and a crash at every step leaves the DEK
  * recoverable. Fake protectors over an in-memory io; nothing is spawned.
  */
 import { describe, expect, it } from 'bun:test'
@@ -62,41 +62,33 @@ async function setup(crashAtWrite = -1) {
 }
 
 describe('enrollPresence', () => {
-  it('makes presence primary, verifies with a real unwrap, then removes the silent wrapper', async () => {
+  it('makes presence primary with NO verifying gesture, then removes the silent wrapper (owner decision 2026-10-02)', async () => {
     const { io, files, dpapi, open, dek } = await setup()
     const hello = fileProtector('hello', io)
     const r = await enrollPresence(io, '/v', open, hello, [dpapi, hello])
     expect(r.ok).toBe(true)
-    expect(hello.gestures).toBe(1) // the verification unwrap
+    expect(hello.gestures).toBe(0) // the enrolment is wrap only (create + ONE sign); no unwrap
     const v = parseVaultJson(files.get('/v/vault.json')!)!
     expect(v.v).toBe(2)
     expect(v.wrappers.map(w => w.type)).toEqual(['hello'])
     expect(v.retired).toBeUndefined()
     expect(hasPresence(v)).toBe(true)
     expect(files.has('/v/dek.dpapi')).toBe(false)
-    // Only a gesture opens it now; the silent protector has nothing to open.
+    // The FIRST real unlock is the reproducibility check — one gesture.
     const o = await openVault(io, '/v', [dpapi, hello])
     expect(o.state === 'open' && o.via).toBe('hello')
+    expect(hello.gestures).toBe(1)
     if (o.state === 'open') expect([...o.dek]).toEqual([...dek])
   })
 
-  it('a presence wrapper that does not give back the same key is removed and nothing else changes', async () => {
+  it('a wrap that fails leaves the silent wrapper and the vault file exactly as they were', async () => {
     const { io, files, dpapi, open } = await setup()
     const before = files.get('/v/vault.json')
-    const bad = fileProtector('hello', io, { unwrapGives: 'other' })
+    const bad = { ...fileProtector('hello', io), async wrap() { return { ok: false as const, reason: 'presence-cancelled' } } }
     const r = await enrollPresence(io, '/v', open, bad, [dpapi, bad])
-    expect(r).toMatchObject({ ok: false, step: 'verify' })
+    expect(r).toMatchObject({ ok: false, step: 'wrap' })
     expect(files.get('/v/vault.json')).toEqual(before)
-    expect(files.has('/v/dek.hello')).toBe(false)
     expect(files.has('/v/dek.dpapi')).toBe(true)
-  })
-
-  it('a cancelled verification gesture leaves the silent wrapper in place', async () => {
-    const { io, files, dpapi, open } = await setup()
-    const hello = fileProtector('hello', io, { unwrapGives: 'cancel' })
-    expect((await enrollPresence(io, '/v', open, hello, [dpapi, hello])).ok).toBe(false)
-    expect(files.has('/v/dek.dpapi')).toBe(true)
-    expect(parseVaultJson(files.get('/v/vault.json')!)!.wrappers.map(w => w.type)).toEqual(['dpapi'])
   })
 
   // Writes during enrolment: 0 = dek.hello, 1 = vault.json (presence + retired), 2 = vault.json (retired cleared).

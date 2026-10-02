@@ -12,9 +12,13 @@
  * stdout and never leaves the service/child pipe), absolute path first, WSL interop checked first. The
  * DEK never crosses into Windows.
  *
- * Foreground: the script brings its console window to the front before it asks (a dialog requested from
- * a WSL `systemd --user` unit can open behind other windows). UNVERIFIED on a real desktop — that is the
- * owner's smoke (create → sign ×2 equal → delete); the fallback is the `…ForWindowAsync` interop calls.
+ * Foreground (owner, 2026-10-02 — the dialog opened minimized/behind every time): the script creates a
+ * tiny topmost owner window, takes the foreground with AttachThreadInput (measured on the owner's
+ * machine, Windows 10.0.26200, from WSL: the window becomes GetForegroundWindow(); a simulated ALT press
+ * did not), and passes it as the WindowId of `RequestCreateForWindowAsync` / `RequestSignForWindowAsync`
+ * so the credential dialog is OWNED by a window that is in front. Builds without the ForWindow
+ * methods use the plain calls with the owner window still in front. Gestures (owner decision
+ * 2026-10-02): enrolment = create + ONE sign; unlock = ONE sign; the device check = IsSupportedAsync.
  */
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
@@ -36,7 +40,6 @@ export const HELLO_SCRIPT =
   '$ErrorActionPreference="Stop"; ' +
   'function Fail($c,$d,$r){ [Console]::Error.Write("PRESENCE-ERROR $c $d $r"); exit 3 } ' +
   'try { ' +
-  'try { Add-Type -Namespace Ag -Name W -MemberDefinition \'[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);\'; [void][Ag.W]::SetForegroundWindow([Ag.W]::GetConsoleWindow()) } catch {} ' +
   'Add-Type -AssemblyName System.Runtime.WindowsRuntime; ' +
   '$null=[Windows.Security.Credentials.KeyCredentialManager,Windows.Security.Credentials,ContentType=WindowsRuntime]; ' +
   // IBuffer: PowerShell 5.1 cannot cast a WinRT IBuffer (a bare System.__ComObject) to the interface —
@@ -48,7 +51,22 @@ export const HELLO_SCRIPT =
   '$ops=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 }; ' +
   '$asOp=$ops | Where-Object { $_.GetParameters()[0].ParameterType.Name -match "^IAsyncOperation.1$" } | Select-Object -First 1; ' +
   '$asAct=$ops | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq "IAsyncAction" } | Select-Object -First 1; ' +
-  'function Wait($t){ if (-not $t.Wait(60000)) { Fail "timeout" "" "" } } ' +
+  // FOREGROUND (owner, 2026-10-02: the Hello dialog opened minimized/behind every time). A console-less
+  // powershell.exe started from WSL owns no window, so the credential UI had nothing to come to the
+  // front with. Front makes a 1x1, nearly transparent, topmost owner window, joins the input queue of
+  // whatever window is in front (AttachThreadInput — the one way a background process may take the
+  // foreground; a simulated ALT press was measured NOT to work here) and hands that window to the
+  // ...ForWindowAsync calls as the dialog's owner. Never fatal: on any failure the call goes ahead unowned.
+  'function Front(){ try { ' +
+  'Add-Type -AssemblyName System.Windows.Forms; ' +
+  'Add-Type -Namespace Ag -Name W -MemberDefinition \'[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, System.IntPtr p); [System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool BringWindowToTop(System.IntPtr h);\'; ' +
+  '$script:F=New-Object System.Windows.Forms.Form; $F.FormBorderStyle="None"; $F.ShowInTaskbar=$false; $F.TopMost=$true; $F.StartPosition="CenterScreen"; $F.Size=New-Object System.Drawing.Size(1,1); $F.Opacity=0.01; $F.Show(); [System.Windows.Forms.Application]::DoEvents(); ' +
+  '$fg=[Ag.W]::GetForegroundWindow(); $ft=[Ag.W]::GetWindowThreadProcessId($fg,[IntPtr]::Zero); $me=[Ag.W]::GetCurrentThreadId(); ' +
+  '$att=($ft -ne 0 -and $ft -ne $me -and [Ag.W]::AttachThreadInput($me,$ft,$true)); [void][Ag.W]::BringWindowToTop($F.Handle); [void][Ag.W]::SetForegroundWindow($F.Handle); $F.Activate(); if ($att) { [void][Ag.W]::AttachThreadInput($me,$ft,$false) }; [System.Windows.Forms.Application]::DoEvents(); ' +
+  '$wt=[Windows.Security.Credentials.KeyCredentialManager].GetMethod("RequestCreateForWindowAsync"); if (-not $wt) { return $null }; $w=[Activator]::CreateInstance($wt.GetParameters()[0].ParameterType); $w.Value=[uint64]$F.Handle.ToInt64(); return $w ' +
+  '} catch { return $null } } ' +
+  // The owner window's thread must keep pumping while the dialog is up, or it reads as not responding.
+  'function Wait($t){ $sw=[Diagnostics.Stopwatch]::StartNew(); while (-not $t.IsCompleted) { if ($script:F) { [System.Windows.Forms.Application]::DoEvents() }; Start-Sleep -Milliseconds 30; if ($sw.ElapsedMilliseconds -gt 60000) { Fail "timeout" "" "" } } } ' +
   'function AwaitOp($op,$type){ $t=$asOp.MakeGenericMethod($type).Invoke($null,@($op)); Wait $t; $t.Result } ' +
   '$l=[Console]::In.ReadToEnd() -split "`n" | ForEach-Object { $_.Trim() }; ' +
   '$verb=$l[0]; $name=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($l[1])); ' +
@@ -57,14 +75,15 @@ export const HELLO_SCRIPT =
   // NTE_NO_KEY (0x8009000D): the credential is already gone — a delete is done, not failed.
   'if ($verb -eq "delete") { try { $t=$asAct.Invoke($null,@($KCM::DeleteAsync($name))); Wait $t } catch { $x=$_.Exception; while ($x.InnerException) { $x=$x.InnerException }; if ($x.HResult -ne 0x8009000D) { throw } }; [Console]::Out.Write("ok"); exit 0 } ' +
   'if ($verb -eq "create") { ' +
-  '$r=AwaitOp ($KCM::RequestCreateAsync($name,[Windows.Security.Credentials.KeyCredentialCreationOption]::FailIfExists)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]); ' +
+  '$wid=Front; $opt=[Windows.Security.Credentials.KeyCredentialCreationOption]::FailIfExists; ' +
+  'if ($wid) { $r=AwaitOp ($KCM::RequestCreateForWindowAsync($wid,$name,$opt)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]) } else { $r=AwaitOp ($KCM::RequestCreateAsync($name,$opt)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]) }; ' +
   'switch ([string]$r.Status) { "Success" { [Console]::Out.Write("ok"); exit 0 } "UserCanceled" { Fail "cancelled" "" "" } "CredentialAlreadyExists" { Fail "unavailable" "credential-exists" "" } default { Fail "unavailable" "hello-status" ([string]$r.Status) } } } ' +
   'if ($verb -eq "sign") { ' +
   '$o=AwaitOp ($KCM::OpenAsync($name)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]); ' +
   'if ([string]$o.Status -eq "NotFound") { Fail "lost" "credential-deleted" "" } ' +
   'if ([string]$o.Status -ne "Success") { Fail "unavailable" "hello-status" ([string]$o.Status) } ' +
   '$buf=[System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]::AsBuffer([Convert]::FromBase64String($l[2])); ' +
-  '$s=AwaitOp ($o.Credential.RequestSignAsync($buf)) ([Windows.Security.Credentials.KeyCredentialOperationResult]); ' +
+  '$wid=Front; if ($wid) { $s=AwaitOp ($o.Credential.RequestSignForWindowAsync($wid,$buf)) ([Windows.Security.Credentials.KeyCredentialOperationResult]) } else { $s=AwaitOp ($o.Credential.RequestSignAsync($buf)) ([Windows.Security.Credentials.KeyCredentialOperationResult]) }; ' +
   'switch ([string]$s.Status) { "Success" { $b=[byte[]]$toArr.Invoke($null,[object[]]@($s.Result)); [Console]::Out.Write([Convert]::ToBase64String($b)); exit 0 } ' +
   '"UserCanceled" { Fail "cancelled" "" "" } "UserPrefersPassword" { Fail "cancelled" "" "" } "NotFound" { Fail "lost" "credential-deleted" "" } default { Fail "unavailable" "hello-status" ([string]$s.Status) } } } ' +
   'Fail "unavailable" "bad-request" "" } ' +
@@ -143,26 +162,15 @@ export function helloProtector(o: HelloOptions): Protector {
       if (lang === 'pt') return o.wsl ? 'o Windows Hello (acessado a partir do WSL): cada abertura pede o seu PIN, rosto ou digital' : 'o Windows Hello: cada abertura pede o seu PIN, rosto ou digital'
       return o.wsl ? 'Windows Hello (reached from WSL): every open asks for your PIN, face or fingerprint' : 'Windows Hello: every open asks for your PIN, face or fingerprint'
     },
-    /** Costs gestures (create + two signatures): run ONLY at enrolment. Proves the signature is deterministic. */
+    /**
+     * NO gesture (owner decision 2026-10-02: the whole setup asks Windows Hello the minimum the API
+     * allows — create + ONE sign — and every unlock exactly one). `IsSupportedAsync` says Hello is set
+     * up here; the enrolment proves it works; the FIRST real unlock proves the signature reproduces
+     * (a mismatch is `presence-lost: not-reproducible`, sent to the recovery key — never a silent loss).
+     */
     async probe(): Promise<ProbeResult> {
-      const kid = 'probe' + Math.random().toString(16).slice(2, 10)
-      const challenge = probeValue()
-      const sup = await call('check', kid)
-      if (!sup.ok) return { ok: false, reason: presenceReason(sup.code, sup.reason) }
-      const c = await call('create', kid)
-      if (!c.ok) return { ok: false, reason: presenceReason(c.code, c.reason) }
-      try {
-        const a = await signature(kid, challenge)
-        if (!a.ok) return { ok: false, reason: presenceReason(a.code, a.reason) }
-        const b = await signature(kid, challenge)
-        if (!b.ok) return { ok: false, reason: presenceReason(b.code, b.reason) }
-        if (Buffer.compare(Buffer.from(a.sig), Buffer.from(b.sig)) !== 0) {
-          return { ok: false, reason: presenceReason('presence-unavailable', 'this Windows build signs differently each time, so Hello cannot derive a key') }
-        }
-        return { ok: true }
-      } finally {
-        await call('delete', kid)
-      }
+      const sup = await call('check', 'probe')
+      return sup.ok ? { ok: true } : { ok: false, reason: presenceReason(sup.code, sup.reason) }
     },
     async wrap(dek, kid) {
       const c = await call('create', kid)
@@ -175,7 +183,15 @@ export function helloProtector(o: HelloOptions): Protector {
       }
       const kek = deriveKek(s.sig, kid, 'hello')
       const wrapped = sealDek(kek, dek, 'hello', kid)
+      // The seal is checked here, in memory, with the key just derived — never with a second gesture.
+      const back = openDek(kek, wrapped, 'hello', kid)
+      const same = back !== null && Buffer.compare(Buffer.from(back), Buffer.from(dek)) === 0
+      if (back) zero(back)
       zero(kek); zero(s.sig)
+      if (!same) {
+        await call('delete', kid)
+        return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
+      }
       const f: HelloFile = { v: 1, challenge: Buffer.from(challenge).toString('base64'), wrapped: Buffer.from(wrapped).toString('base64') }
       await o.io.writeFile(file, bytes(JSON.stringify(f) + '\n'))
       return { ok: true, record: { type: 'hello', createdAt: new Date().toISOString(), params: { file: HELLO_FILE, credential: helloCredentialName(kid) } } }
@@ -198,7 +214,7 @@ export function helloProtector(o: HelloOptions): Protector {
       // A signature that opens nothing means the credential was recreated (a different key): lost.
       return dek
         ? { ok: true, dek }
-        : { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'the Hello credential is not the one that sealed this key') }
+        : { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'not-reproducible') }
     },
     async remove(_record, kid) {
       await call('delete', kid).catch(() => {})

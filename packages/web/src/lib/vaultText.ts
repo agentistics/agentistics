@@ -204,20 +204,20 @@ export const VAULT_TEXT = {
   wiz_word: { en: 'Word #{n}', pt: 'Palavra nº {n}' },
   wiz_pres_title: { en: 'Turn on presence', pt: 'Ligue a presença' },
   wiz_pres_checkHello: {
-    en: 'Agentistics is checking that Windows Hello can protect your vault — Windows Hello will ask you {n} times.',
-    pt: 'O Agentistics está verificando se o Windows Hello pode proteger o seu cofre — o Windows Hello vai pedir {n} vezes.',
+    en: 'Agentistics checks that Windows Hello is set up on this computer. This check asks you nothing.',
+    pt: 'O Agentistics confere se o Windows Hello está configurado neste computador. Este teste não pede nada a você.',
   },
   wiz_pres_checkKey: {
-    en: 'Agentistics is checking that your security key can protect your vault — touch it {n} times.',
-    pt: 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela {n} vezes.',
+    en: 'Agentistics checks that your security key is plugged in and can protect the vault. This check asks for no touch.',
+    pt: 'O Agentistics confere se a sua chave de segurança está conectada e pode proteger o cofre. Este teste não pede toque.',
   },
   wiz_pres_enrolHello: {
-    en: 'Windows Hello will ask you {n} times: once to create the key, once to use it, once more to check it opens the vault.',
-    pt: 'O Windows Hello vai pedir {n} vezes: uma para criar a chave, uma para usá-la e mais uma para conferir que ela abre o cofre.',
+    en: 'Windows Hello will ask you {n} times: once to create the vault\'s key, once to use it. After that, each unlock asks once.',
+    pt: 'O Windows Hello vai pedir {n} vezes: uma para criar a chave do cofre e uma para usá-la. Depois disso, cada abertura pede uma vez.',
   },
   wiz_pres_enrolKey: {
-    en: 'Touch your key {n} times: once to register it, once to use it, once more to check it opens the vault.',
-    pt: 'Toque na chave {n} vezes: uma para registrá-la, uma para usá-la e mais uma para conferir que ela abre o cofre.',
+    en: 'Touch your key {n} times: once to register it, once to use it. After that, each unlock asks once.',
+    pt: 'Toque na chave {n} vezes: uma para registrá-la e uma para usá-la. Depois disso, cada abertura pede uma vez.',
   },
   wiz_gesture_progress: { en: 'Confirmation {i} of {n}', pt: 'Confirmação {i} de {n}' },
   wiz_pres_go: { en: 'Turn on presence', pt: 'Ligar a presença' },

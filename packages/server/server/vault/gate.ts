@@ -448,9 +448,9 @@ export async function confirmAuthenticator(code: string, ctx: { session: string 
 }
 
 /**
- * §7.3 step 1, BEFORE anything is changed: does this presence device complete a real round trip
- * (wrap + unwrap, two gestures) with a throwaway key? Nothing is written to the vault and the
- * throwaway key is removed. Gated like the enrolment it precedes, unless it is part of the first
+ * §7.3 step 1, BEFORE anything is changed: is this presence device here and usable? NO gesture
+ * (owner decision 2026-10-02): `IsSupportedAsync` for Hello, "plugged in and offers hmac-secret" for a
+ * key. Nothing is written and nothing is created. Gated like the enrolment it precedes, unless it is part of the first
  * enrolment (no authenticator yet).
  */
 export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true } | Refusal> {
@@ -471,17 +471,12 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
   }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
   if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
-  const dek = new Uint8Array(randomBytes(32))
-  const kid = randomBytes(8).toString('hex')
-  try {
-    // Wrap only (PRESENCE_GESTURES.probe = 2): it proves the bridge answers and the person can confirm.
-    // Owner, 2026-10-02: the old wrap + unwrap raised a THIRD dialog under "confirm twice". That the key
-    // is REPRODUCIBLE is proved by the enrolment's own verifying unwrap, which changes nothing until it has.
-    const w = await countGestures(ctx, id, PRESENCE_GESTURES.probe, () => presence.wrap(dek, kid))
-    if (!w.ok) return enrolFailure(id, w.reason)
-    await presence.remove(w.record, kid).catch(() => {})
-    return { ok: true }
-  } finally { dek.fill(0) }
+  // NO gesture (PRESENCE_GESTURES.probe = 0, owner decision 2026-10-02): the presence protector's own
+  // probe is `IsSupportedAsync` / "the key is here and offers hmac-secret". The enrolment proves it
+  // works; the first real unlock proves it reproduces.
+  const r = await presence.probe().catch(() => ({ ok: false as const, reason: 'presence-unavailable: bridge-failed' }))
+  if (!r.ok) return enrolFailure(id, r.reason)
+  return { ok: true }
 }
 
 // ── live gesture progress (owner, 2026-10-02): "confirmation i of n" while the dialogs are up ────
@@ -594,7 +589,8 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
 /**
  * Presence becomes the primary and the silent OS wrapper is retired — only after the authenticator and
  * a recovery key exist (otherwise a lost device would lose the vault), and through `enrollPresence`,
- * which verifies the new wrapper by a real unwrap before anything is removed.
+ * whose wrap checks its own seal in memory before anything is removed (no verifying gesture — the first
+ * real unlock is the reproducibility check, owner decision 2026-10-02).
  */
 export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean } | Refusal> {
   const lang = vaultLang()
@@ -654,7 +650,7 @@ function needsRecoveryWords(): Refusal {
 /**
  * Review S7 — the first presence enrolment, under a NEW data key (rekey.ts has the phases):
  * prepare (every record re-sealed and verified beside the old one) → wrap the new key under presence
- * (verified by a real unwrap) and under the recovery key (staged, verified) → ONE vault.json write naming
+ * (create + ONE sign, its seal checked in memory) and under the recovery key (staged, verified) → ONE vault.json write naming
  * the new kid (the silent wrappers retired with their OLD kid) → finish (staged records replace the
  * old) → the old key leaves memory. Any failure before the vault.json write leaves the vault exactly
  * as it was; any crash after it is finished on the next open.
@@ -697,13 +693,11 @@ async function enrolWithNewKey(
     if (!prep.ok) return enrolFailure(id, 'vault-write-failed')
     const files = entropy ? [...prep.files, recFile] : prep.files
     const abandon = async () => { await abandonRekey(files) }
-    // Presence under the NEW key, verified by a real unwrap (the second gesture).
+    // Presence under the NEW key: create/make + ONE sign/assert, the seal checked in memory by the
+    // protector itself (owner decision 2026-10-02 — no verifying gesture; the first real unlock is
+    // the reproducibility check, and its failure is sent to the recovery key in words).
     const w = await presence.wrap(next.dek, next.kid)
     if (!w.ok) { await abandon(); return enrolFailure(id, w.reason) }
-    const back = await presence.unwrap(w.record, next.kid)
-    const same = back.ok && back.dek.length === next.dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(next.dek))
-    if (back.ok) back.dek.fill(0)
-    if (!same) { await presence.remove(w.record, next.kid).catch(() => {}); await abandon(); return enrolFailure(id, back.ok ? 'presence-unavailable: bridge-failed' : back.reason) }
     // Recovery under the NEW key, staged as `dek.recovery.rekey` (FINISH renames it over the old one).
     let recRecord: VaultJson['wrappers'][number] | null = null
     if (entropy) {

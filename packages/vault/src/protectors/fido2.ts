@@ -273,17 +273,17 @@ export function fido2Protector(o: Fido2Options): Protector {
       if (lang === 'pt') return web ? 'uma chave de segurança FIDO2 (pelo Windows): cada abertura pede o toque na chave' : 'uma chave de segurança FIDO2: cada abertura pede o toque na chave'
       return web ? 'a FIDO2 security key (through Windows): every open asks you to touch the key' : 'a FIDO2 security key: every open asks you to touch the key'
     },
-    /** Costs gestures (a make + a get, twice): enrolment only. Refuses a key without hmac-secret. */
+    /**
+     * NO touch (owner decision 2026-10-02: the whole setup asks the minimum): the key is present and
+     * offers hmac-secret. That it really works is proved by the enrolment itself (make + one assert);
+     * that it answers the same way again is proved by the first real unlock.
+     */
     async probe(): Promise<ProbeResult> {
-      if (web) { const c = await bridge('check'); if (!c.ok) return fail(c) }
-      const m = await counted(make())
-      if (!m.ok) return fail(m)
-      const salt = probeValue()
-      const a = await counted(secret(m.out, salt))
-      if (!a.ok) return fail(a)
-      const b = await counted(secret(m.out, salt))
-      if (!b.ok) return fail(b)
-      if (a.out !== b.out) return { ok: false, reason: presenceReason('presence-unavailable', 'the key answered differently for the same salt') }
+      if (web) { const c = await bridge('check'); return c.ok ? { ok: true } : fail(c) }
+      const d = await device()
+      if (!d.ok) return fail(d)
+      const k = await info(d)
+      if (!k.hmac) return fail({ code: 'no-hmac-secret', reason: NO_HMAC })
       return { ok: true }
     },
     async wrap(dek, kid) {
@@ -295,7 +295,12 @@ export function fido2Protector(o: Fido2Options): Protector {
       const key = new Uint8Array(Buffer.from(s.out, 'base64'))
       const kek = deriveKek(key, kid, 'fido2')
       const wrapped = sealDek(kek, dek, 'fido2', kid)
+      // The seal is checked here, in memory, with the key just derived — never with a second touch.
+      const back = openDek(kek, wrapped, 'fido2', kid)
+      const same = back !== null && Buffer.compare(Buffer.from(back), Buffer.from(dek)) === 0
+      if (back) zero(back)
       zero(kek); zero(key)
+      if (!same) return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
       const f: Fido2File = { v: 1, credential: m.out, salt: Buffer.from(salt).toString('base64'), wrapped: Buffer.from(wrapped).toString('base64') }
       await o.io.writeFile(file, bytes(JSON.stringify(f) + '\n'))
       return { ok: true, record: { type: 'fido2', createdAt: new Date().toISOString(), params: { file: FIDO2_FILE, transport: o.transport } } }

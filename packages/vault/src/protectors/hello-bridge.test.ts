@@ -113,23 +113,27 @@ describe('the gesture count the page states is the count the bridge raises (owne
       async which() { return null },
     }
   }
-  it('the device check (wrap) raises PRESENCE_GESTURES.probe; the enrolment round trip PRESENCE_GESTURES.enroll', async () => {
+  it('device check 0, enrolment 2 (create + ONE sign), unlock 1 — the minimum the API allows (owner decision 2026-10-02)', async () => {
+    expect(PRESENCE_GESTURES).toEqual({ probe: 0, enroll: 2, unlock: 1 })
     const calls: string[] = []
     let ticks = 0
     setGestureListener(() => { ticks++ })
     try {
       const p = helloProtector({ io: okIo(calls), vaultDir: '/v', wsl: true })
+      expect((await p.probe()).ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.probe)
+      expect(calls).toEqual(['check'])
       const w = await p.wrap(new Uint8Array(32).fill(1), 'k1')
       expect(w.ok).toBe(true)
-      expect(ticks).toBe(PRESENCE_GESTURES.probe)
-      expect(calls.filter(c => c === 'create' || c === 'sign').length).toBe(PRESENCE_GESTURES.probe)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+      expect(calls.filter(c => c === 'create' || c === 'sign')).toEqual(['create', 'sign'])
       if (!w.ok) return
       const u = await p.unwrap(w.record, 'k1')
       expect(u.ok).toBe(true)
-      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll + PRESENCE_GESTURES.unlock)
       // delete/check raise no dialog and tick nothing
       await p.remove(w.record, 'k1')
-      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll + PRESENCE_GESTURES.unlock)
     } finally { setGestureListener(null) }
   })
   it('a failed or cancelled prompt does not count as one answered', async () => {
@@ -140,5 +144,30 @@ describe('the gesture count the page states is the count the bridge raises (owne
       expect((await helloProtector({ io, vaultDir: '/v', wsl: true }).wrap(new Uint8Array(32), 'k1')).ok).toBe(false)
       expect(ticks).toBe(0)
     } finally { setGestureListener(null) }
+  })
+})
+
+describe('the Hello dialog opens IN FRONT (owner 2026-10-02: it opened minimized/behind every time)', () => {
+  it('a topmost owner window takes the foreground through AttachThreadInput, never an ALT-key trick', () => {
+    expect(HELLO_SCRIPT).toContain('function Front(){')
+    expect(HELLO_SCRIPT).toContain('$F.TopMost=$true')
+    expect(HELLO_SCRIPT).toContain('[Ag.W]::AttachThreadInput($me,$ft,$true)')
+    expect(HELLO_SCRIPT).toContain('[void][Ag.W]::SetForegroundWindow($F.Handle)')
+    expect(HELLO_SCRIPT).toContain('[void][Ag.W]::AttachThreadInput($me,$ft,$false)') // detached again
+    expect(HELLO_SCRIPT).not.toContain('keybd_event')
+    expect(HELLO_SCRIPT).not.toContain('GetConsoleWindow') // a WSL-started powershell has no console window to bring up
+  })
+  it('the owner window is the dialog\'s owner: ForWindow calls with its WindowId, plain calls only as the fallback', () => {
+    expect(HELLO_SCRIPT).toContain('$w.Value=[uint64]$F.Handle.ToInt64()')
+    expect(HELLO_SCRIPT).toContain('$KCM::RequestCreateForWindowAsync($wid,$name,$opt)')
+    expect(HELLO_SCRIPT).toContain('$o.Credential.RequestSignForWindowAsync($wid,$buf)')
+    expect(HELLO_SCRIPT).toContain('} else { $r=AwaitOp ($KCM::RequestCreateAsync($name,$opt))')
+    expect(HELLO_SCRIPT).toContain('} else { $s=AwaitOp ($o.Credential.RequestSignAsync($buf))')
+  })
+  it('the foreground is never fatal, is raised only for the verbs that show a dialog, and the window keeps pumping', () => {
+    expect(HELLO_SCRIPT).toMatch(/function Front\(\)\{ try \{ .* \} catch \{ return \$null \} \}/)
+    expect(HELLO_SCRIPT.match(/\$wid=Front/g)?.length).toBe(2) // create + sign; check/delete raise nothing
+    expect(HELLO_SCRIPT).toContain('[System.Windows.Forms.Application]::DoEvents() }; Start-Sleep -Milliseconds 30')
+    expect(HELLO_SCRIPT).toContain('if ($sw.ElapsedMilliseconds -gt 60000) { Fail "timeout" "" "" }')
   })
 })

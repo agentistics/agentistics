@@ -45,6 +45,7 @@ export function presenceCode(reason: string): PresenceCode | null {
  */
 export const PRESENCE_DETAILS = [
   'bridge-failed', 'hello-not-set-up', 'credential-exists', 'credential-deleted', 'hello-status', 'bad-request',
+  'not-reproducible',
 ] as const
 export type PresenceDetail = typeof PRESENCE_DETAILS[number]
 
@@ -55,6 +56,7 @@ const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
   'credential-deleted': { en: 'the credential was deleted', pt: 'a credencial foi apagada' },
   'hello-status': { en: 'Windows Hello gave an unexpected answer; the details are in the agentop log', pt: 'o Windows Hello deu uma resposta inesperada; os detalhes estão no log do agentop' },
   'bad-request': { en: 'the Windows bridge did not understand the request', pt: 'a ponte do Windows não entendeu o pedido' },
+  'not-reproducible': { en: 'it answered, but not with the key it gave when the vault was set up', pt: 'respondeu, mas não com a chave que deu quando o cofre foi configurado' },
 }
 
 function isDetail(s: string): s is PresenceDetail { return (PRESENCE_DETAILS as readonly string[]).includes(s) }
@@ -89,6 +91,13 @@ function detailWords(r: string, lang: Lang): string {
 
 export function presenceSentence(code: PresenceCode, lang: Lang, presence: string, reason = ''): string {
   const r = detailWords(reason.replace(/^presence-[a-z]+:\s*/, ''), lang)
+  // The reproducibility check runs at the FIRST real unlock (owner decision 2026-10-02), so its failure
+  // is its own sentence: the credential exists, it simply did not give back the setup's key.
+  if (code === 'presence-lost' && /^presence-lost:\s*not-reproducible$/.test(reason)) {
+    return lang === 'pt'
+      ? `${presence} respondeu, mas não com a mesma chave da configuração — então não abre este cofre. Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`; depois ligue a presença de novo.`
+      : `${presence} answered, but not with the key it gave at setup — so it cannot open this vault. Your secrets are intact. Open the vault with your 24-word recovery key: \`agentop vault recover\`, then turn presence on again.`
+  }
   if (lang === 'pt') {
     switch (code) {
       case 'presence-cancelled': return `${presence} foi cancelado, então o cofre continuou trancado. Nada foi aberto.`
@@ -165,10 +174,9 @@ export function setGestureListener(fn: (() => void) | null): void { _gestureList
 export function gestureDone(): void { try { _gestureListener?.() } catch { /* progress is advisory */ } }
 
 /**
- * How many prompts each operation raises, per presence kind — the ONE place the page's counts come
- * from. A round trip (enrolment) is create/make + sign/assert + a verifying sign/assert = 3: the third
- * proves the KEK is reproducible before anything is retired. The device check is wrap only = 2: it
- * proves the bridge and the gesture work; reproducibility is proved by the enrolment that follows,
- * which changes nothing until it has.
+ * How many prompts each operation raises — the ONE place the page's counts come from. Owner decision
+ * 2026-10-02: the minimum the API allows. The device check asks nothing (`IsSupportedAsync` / the key
+ * is present); the enrolment is create/make + ONE sign/assert, its seal checked in memory with the key
+ * just derived; every unlock is ONE. That the key REPRODUCES is proved by the first real unlock.
  */
-export const PRESENCE_GESTURES = { probe: 2, enroll: 3, unlock: 1 } as const
+export const PRESENCE_GESTURES = { probe: 0, enroll: 2, unlock: 1 } as const

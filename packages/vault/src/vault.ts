@@ -331,18 +331,19 @@ export type EnrolPresenceResult =
 
 /**
  * SECRETS.4 §1.2 / §7.3 step 4: make `presence` the PRIMARY of the human scope and RETIRE every silent
- * OS wrapper — only after the presence wrapper has been written AND verified by a real unwrap (a
- * second gesture) that yields this very DEK. The order is what keeps every crash recoverable:
+ * OS wrapper — only after the presence wrapper has been written, its seal checked IN MEMORY by the
+ * protector with the key it just derived (owner decision 2026-10-02: no second gesture; the FIRST real
+ * unlock proves the gesture reproduces that key, and a mismatch is sent to the recovery key in words).
+ * The order is what keeps every crash recoverable:
  *
- *   1. presence.wrap(DEK)                        crash → vault.json unchanged, silent wrapper still opens
- *   2. presence.unwrap → must equal DEK          mismatch → presence wrapper removed, nothing else touched
- *   3. ONE write of vault.json v2: presence first, silent wrappers moved to `retired`
+ *   1. presence.wrap(DEK)                        crash / failure → vault.json unchanged, silent wrapper still opens
+ *   2. ONE write of vault.json v2: presence first, silent wrappers moved to `retired`
  *                                                crash before → as 1; after → presence opens, retirement pending
- *   4. each retired key removed through its protector, then vault.json rewritten without `retired`
+ *   3. each retired key removed through its protector, then vault.json rewritten without `retired`
  *                                                crash → finished by `finishRetirement` on the next open
  *
- * The silent stored key is NEVER deleted before step 3 is on disk, and step 3 is never written before
- * step 2 proved the presence wrapper opens the same key. A second presence credential (Hello + a key)
+ * The silent stored key is NEVER deleted before step 2 is on disk, and step 2 is never written before
+ * step 1's wrap (and its in-memory seal check) succeeded. A second presence credential (Hello + a key)
  * is added the same way and keeps the existing one. The recovery and passphrase wrappers are kept.
  */
 export async function enrollPresence(
@@ -350,15 +351,11 @@ export async function enrollPresence(
 ): Promise<EnrolPresenceResult> {
   if (!isPresenceId(presence.id)) return { ok: false, step: 'wrap', reason: `${presence.id} is not a presence protector` }
   if (open.vault.scope !== 'human') return { ok: false, step: 'wrap', reason: 'presence protects the human scope only' }
+  // Create/make + ONE sign/assert; the protector checks its own seal in memory with the key it just
+  // derived (owner decision 2026-10-02: no verifying gesture). Whether the gesture REPRODUCES that key
+  // is proved by the first real unlock, whose failure names the recovery key.
   const w = await presence.wrap(open.dek, open.kid)
   if (!w.ok) return { ok: false, step: 'wrap', reason: w.reason }
-  const back = await presence.unwrap(w.record, open.kid)
-  const same = back.ok && back.dek.length === open.dek.length && back.dek.every((b, i) => b === open.dek[i])
-  if (back.ok) back.dek.fill(0)
-  if (!same) {
-    await presence.remove(w.record, open.kid)
-    return { ok: false, step: 'verify', reason: back.ok ? 'the presence wrapper did not give back the same key' : back.reason }
-  }
   const silent = open.vault.wrappers.filter(x => isSilentId(x.type))
   const kept = open.vault.wrappers.filter(x => !isSilentId(x.type) && x.type !== presence.id)
   const vault: VaultJson = {
