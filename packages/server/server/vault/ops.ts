@@ -52,9 +52,15 @@ type Reply = OpResult['reply']
 const bad = (): OpResult => ({ reply: refused('bad-request', 'bad request') })
 const str = (v: unknown, max = 4096): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
 
-/** Gate hook for S4.7 (`requireVaultStepUp` over the socket). Allows everything until installed. */
+/** Gate hook for S4.7 (`requireVaultStepUp` over the socket). */
 export type SocketGate = (action: string, header: Record<string, unknown>) => Promise<{ ok: true } | { ok: false; code: string; sentence: string }>
-let _gate: SocketGate = async () => ({ ok: true })
+/**
+ * Review N1: until `installVaultOps` installs the real gate, every gated op is REFUSED. Every real
+ * path installs it (holder.ts, startVaultSocket), but an allow-all default is one refactor away from
+ * a bypass, and failing closed costs nothing when the wiring is right.
+ */
+export const DEFAULT_SOCKET_GATE: SocketGate = async () => refused('not-ready', 'the vault service is still starting; try again')
+let _gate: SocketGate = DEFAULT_SOCKET_GATE
 export function setSocketGate(g: SocketGate): void { _gate = g }
 
 async function gated(action: string, h: Record<string, unknown>, run: () => Promise<OpResult>): Promise<OpResult> {
@@ -94,8 +100,11 @@ async function opUnlockCode(h: Record<string, unknown>): Promise<OpResult> {
 async function opSeal(ctx: OpContext): Promise<OpResult> {
   const { purpose, name } = ctx.header
   if (!str(purpose, 128) || !str(name, 256) || !ctx.body) return bad()
-  // Only the human scope's purposes; the runner scope has its own process path (§6.3).
-  if (scopeOfPurpose(purpose) !== 'human') return { reply: refused('purpose', sentence('purpose')) }
+  // Only the human scope's purposes; the runner scope has its own process path (§6.3). And never a
+  // RESERVED `vault/*` purpose (review S1): the service is the only writer of its own records — a
+  // same-user process that could seal `vault/totp-seed` would choose the seed, and so every future
+  // authenticator code.
+  if (scopeOfPurpose(purpose) !== 'human' || purpose.startsWith('vault/')) return { reply: refused('purpose', sentence('purpose')) }
   try {
     const sealed = await sealBytes(purpose, name, ctx.body)
     return { reply: { ok: true }, body: sealed }

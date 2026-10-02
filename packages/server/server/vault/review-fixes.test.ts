@@ -213,3 +213,37 @@ describe('M2 — in recovery mode the re-enrolment steps answer the local socket
     expect(j.words).toBeUndefined()
   })
 })
+
+// ── S1 / N1: the socket ──────────────────────────────────────────────────────────────────────
+
+import { DEFAULT_SOCKET_GATE, handleVaultOp, installVaultOps } from './ops'
+
+function op(header: Record<string, unknown>, body: Uint8Array | null = null) {
+  return handleVaultOp({ header, body, emit() {}, closed: new Promise(() => {}) })
+}
+
+describe('S1 — the socket never seals a reserved vault/* purpose (the gate\'s own seed)', () => {
+  test('seal of vault/totp-seed is refused before any crypto', async () => {
+    await enrolledVault()
+    installVaultOps()
+    const r = await op({ op: 'seal', purpose: 'vault/totp-seed', name: 'totp-seed' }, new Uint8Array(20))
+    expect(r.reply.ok).toBe(false)
+    expect(!r.reply.ok && r.reply.code).toBe('purpose')
+    expect(r.body).toBeUndefined()
+  })
+  test('an ordinary human purpose still seals', async () => {
+    await enrolledVault()
+    installVaultOps()
+    const r = await op({ op: 'seal', purpose: 'github-backup', name: 'github-backup' }, new TextEncoder().encode('x'))
+    expect(r.reply.ok).toBe(true)
+  })
+})
+
+describe('N1 — the socket gate fails CLOSED until the real one is installed', () => {
+  test('the default gate refuses every action', async () => {
+    for (const a of ['lock-local', 'rekey', 'reset', 'add-passphrase']) {
+      const g = await DEFAULT_SOCKET_GATE(a, {})
+      expect(g.ok).toBe(false)
+    }
+  })
+})
