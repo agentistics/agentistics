@@ -237,6 +237,27 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "agentistics_task_types",
+    description:
+      "BETA — Agentask (the task board) is new and still changing. List the task TYPE vocabulary (id, label, color, order, usageCount). A type is a second classification beside the status (e.g. CORE); a task may carry one or none. Call this before setting `type` through agentistics_task_edit.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "agentistics_task_type_edit",
+    description:
+      "BETA — Agentask (the task board) is new and still changing. Add, rename/recolor, or delete a task type. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a type — its id is derived from the label. Pass `id` with `label` and/or `color` to EDIT. Pass `id` with `remove: true` to DELETE: refused (422, `in_use`, with `usageCount`) while any task still carries it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Required to edit or delete; omit to create." },
+        label: { type: "string" },
+        color: { type: "string", description: "#rrggbb" },
+        remove: { type: "boolean" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_task_status_edit",
     description:
       "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Add, rename/recolor, or delete a status. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a new, non-protected status — its id is derived from the label and returned. Pass `id` with `label` and/or `color` to EDIT an existing status's label/color — works on a protected one too, only its id can never change. Pass `id` with `remove: true` to DELETE it: refused (422, `protected`) for todo/in_progress/blocked/done regardless of usage, and refused (422, `in_use`, with `usageCount`) for any other status still referenced by at least one task or subtask.",
@@ -385,14 +406,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low | none), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `none`, which means 'nobody has said' and is not the same as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string" },
         title: { type: "string" },
         detail: { type: "string" },
-        priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
+        type: { type: "string", description: "A task type id (see agentistics_task_types); empty string clears it." },
         dueDate: { type: "string" },
         startDate: { type: "string" },
         labels: { type: "array", items: { type: "string" } },
@@ -761,6 +783,26 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiGet("/api/tasks/statuses");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_task_types": {
+        const body = await apiGet("/api/tasks/types");
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_type_edit": {
+        const a = args as any;
+        const id = typeof a?.id === "string" && a.id ? a.id : null;
+        if (id && a?.remove === true) {
+          const body = await apiSend("DELETE", `/api/tasks/types/${encodeURIComponent(id)}`);
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        const payload = {
+          ...(typeof a?.label === "string" ? { label: a.label } : {}),
+          ...(typeof a?.color === "string" ? { color: a.color } : {}),
+        };
+        const body = id
+          ? await apiSend("POST", `/api/tasks/types/${encodeURIComponent(id)}`, payload)
+          : await apiSend("POST", "/api/tasks/types", payload);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_task_status_edit": {
         const a = args as any;
         const id = typeof a?.id === "string" && a.id ? a.id : null;
@@ -865,7 +907,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
         const patch: Record<string, unknown> = {};
-        for (const f of ["title", "detail", "priority", "dueDate", "startDate", "actor"]) {
+        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "actor"]) {
           if (typeof a?.[f] === "string") patch[f] = a[f];
         }
         if (Array.isArray(a?.labels)) patch.labels = a.labels;

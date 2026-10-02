@@ -161,7 +161,7 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
         <div style={{ flex: '1 1 120px', display: 'grid', gap: 5, minWidth: 0 }}>
           <span style={{ ...microLabel, fontSize: 9 }}>{copy.priority}</span>
           <ChipSelect
-            value={task.priority ?? 'none'}
+            value={!task.priority || task.priority === 'none' ? 'low' : task.priority}
             disabled={busy}
             options={PRIORITY_ORDER.map(id => ({
               value: id, label: PRIORITY[id]!.label, color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,

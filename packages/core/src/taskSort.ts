@@ -28,11 +28,18 @@
 /** Most urgent first. The one place the order is stated; every sort and every picker reads it. */
 export type TaskPriorityId = 'urgent' | 'high' | 'medium' | 'low' | 'none'
 
+/**
+ * The CHOICES, most urgent first. `none` is gone from them: there is no "Unset" priority — a task
+ * nobody triaged is `low` (see `DEFAULT_PRIORITY`). `'none'` stays in `TaskPriorityId` only so a
+ * record or an old client that still says it type-checks; it is read as `low` everywhere.
+ */
 export const PRIORITY_ORDER: readonly TaskPriorityId[] =
-  ['urgent', 'high', 'medium', 'low', 'none'] as const
+  ['urgent', 'high', 'medium', 'low'] as const
+
+export const DEFAULT_PRIORITY: TaskPriorityId = 'low'
 
 export type SortKey =
-  | 'manual' | 'priority' | 'title' | 'status' | 'created' | 'updated' | 'due'
+  | 'manual' | 'priority' | 'title' | 'status' | 'type' | 'created' | 'updated' | 'due'
   | 'started' | 'cost' | 'tokens' | 'rounds' | 'sessions' | 'attempts' | 'comments'
   | 'subtasks' | 'progress' | 'harnesses' | 'delivered'
 
@@ -53,6 +60,7 @@ export interface SortableRow {
     createdAt: string
     updatedAt: string
     priority?: TaskPriorityId | string
+    type?: string
     dueDate?: string
     deliveredAt?: string
     /**
@@ -86,6 +94,8 @@ export const DEFAULT_SORT: SortSpec = { key: 'manual', dir: 'asc' }
  */
 export interface SortContext {
   statusOrder?: readonly string[]
+  /** The type vocabulary's order; an untyped task sorts LAST (`null`), a deleted type after the known ones. */
+  typeOrder?: readonly string[]
 }
 
 /** The rank of a status in `order`, or one past the end when it is not in it. */
@@ -95,9 +105,9 @@ export function statusRank(order: readonly string[], status: string): number {
 }
 
 const priorityIndex = (p: string | undefined): number => {
-  const i = PRIORITY_ORDER.indexOf((p ?? 'none') as TaskPriorityId)
-  // An unknown word ranks with "nobody has said" rather than at the top: a typo in a stored
-  // priority must not promote a task above every triaged one.
+  const i = PRIORITY_ORDER.indexOf((p ?? DEFAULT_PRIORITY) as TaskPriorityId)
+  // Absent, legacy `none` and an unknown word all rank as `low`: a typo in a stored priority must
+  // not promote a task above every triaged one.
   return i === -1 ? PRIORITY_ORDER.length - 1 : i
 }
 
@@ -114,6 +124,7 @@ function valueOf(row: SortableRow, key: SortKey, ctx?: SortContext): number | st
     case 'priority': return priorityIndex(t.priority)
     case 'title': return t.title.toLowerCase()
     case 'status': return ctx?.statusOrder ? statusRank(ctx.statusOrder, t.status) : t.status
+    case 'type': return t.type ? (ctx?.typeOrder ? statusRank(ctx.typeOrder, t.type) : t.type) : null
     case 'created': return t.createdAt || null
     case 'updated': return t.updatedAt || null
     case 'due': return t.dueDate || null

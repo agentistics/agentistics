@@ -1854,6 +1854,35 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // missing. `no_such_status` stays 404: the id named nothing.
       return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : 422))
     }
+    // The TYPE vocabulary — same door and ordering rule as the status routes above: matched before
+    // the generic `<ref>` routes, or `types` resolves as a task reference.
+    if (url.pathname === '/api/tasks/types' && req.method === 'GET') {
+      const { listTypes } = await import('./sessions/task-web')
+      return json({ types: await listTypes() })
+    }
+    if (url.pathname === '/api/tasks/types' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const { createType } = await import('./sessions/task-web')
+      const out = await createType({ label: String(body.label ?? ''), color: String(body.color ?? '') })
+      return json(out, out.ok ? 200 : 400)
+    }
+    if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'POST') {
+      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const { editType } = await import('./sessions/task-web')
+      const out = await editType(id, {
+        ...(typeof body.label === 'string' ? { label: body.label } : {}),
+        ...(typeof body.color === 'string' ? { color: body.color } : {}),
+      })
+      return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 400))
+    }
+    if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'DELETE') {
+      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const { deleteType } = await import('./sessions/task-web')
+      const out = await deleteType(id)
+      // `in_use` is 422 like the status routes; `no_such_type` stays 404.
+      return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 422))
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -1862,9 +1891,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string }
       const { createTask } = await import('./sessions/task-web')
-      const made = await createTask({ title: body.title ?? '', ...(body.detail !== undefined ? { detail: body.detail } : {}) })
+      const made = await createTask({
+        title: body.title ?? '',
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(typeof body.type === 'string' ? { type: body.type } : {}),
+      })
       if (!made) return json({ error: 'title_required' }, 400)
       return json({ task: made })
     }
@@ -2130,7 +2163,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         })
         return json(out, out.ok ? 200 : 404)
       }
-      const FIELDS = ['title', 'detail', 'priority', 'dueDate', 'startDate'] as const
+      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate'] as const
       // `shared` is a BOOLEAN and is therefore tested separately: it is the one field of this patch
       // whose `false` is a decision rather than an absence, and a truthiness test would make
       // turning sharing OFF indistinguishable from not asking.

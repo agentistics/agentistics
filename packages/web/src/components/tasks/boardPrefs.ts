@@ -29,6 +29,10 @@ const KEY = 'agentistics-task-board-v1'
 
 export type BoardView = 'overview' | 'board' | 'table'
 
+/** What the TABLE is grouped by — one or the other, per person. */
+export type GroupBy = 'status' | 'type'
+const isGroupBy = (v: unknown): v is GroupBy => v === 'status' || v === 'type'
+
 export interface BoardPrefs {
   view: BoardView
   /** How the rows are ordered — the table's headers and the kanban's picker write the same field. */
@@ -55,6 +59,10 @@ export interface BoardPrefs {
   subtaskColumns: SubtaskColumnId[] | null
   /** Which status groups the table renders at all. `null` = every one of them. */
   groups: BoardStatus[] | null
+  /** What the table's bands are: the status columns or the task type. Default `status`. */
+  groupBy: GroupBy
+  /** Which TYPE bands the table renders when `groupBy` is `type` (ids, or `__none__`). `null` = all. */
+  typeGroups: string[] | null
   /** Groups the user folded shut. */
   collapsed: BoardStatus[]
   /** Which sections of the task detail's right rail are OPEN, by their stable id. */
@@ -63,8 +71,8 @@ export interface BoardPrefs {
 
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
-  view: 'overview', sort: DEFAULT_SORT, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, subtaskColumns: null, groups: null, collapsed: [], rail: {},
+  view: 'overview', sort: { key: 'priority', dir: 'asc' }, columnSort: {}, lanes: 'none', wip: {},
+  columns: null, subtaskColumns: null, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], rail: {},
 }
 
 /**
@@ -133,7 +141,7 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
   const p = raw as Record<string, unknown>
   return {
     view: isView(p.view) ? p.view : DEFAULT_PREFS.view,
-    sort: readSort(p.sort),
+    sort: p.sort === undefined ? DEFAULT_PREFS.sort : readSort(p.sort),
     columnSort: readColumnSort(p.columnSort),
     lanes: isLane(p.lanes) ? p.lanes : 'none',
     // A WIP limit is a number per column; anything else in the stored object is dropped rather
@@ -147,6 +155,8 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
     columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
     subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
     groups: statuses(p.groups),
+    groupBy: isGroupBy(p.groupBy) ? p.groupBy : 'status',
+    typeGroups: Array.isArray(p.typeGroups) ? p.typeGroups.filter((x): x is string => typeof x === 'string') : null,
     collapsed: statuses(p.collapsed) ?? [],
     rail: p.rail && typeof p.rail === 'object'
       ? Object.fromEntries(Object.entries(p.rail as Record<string, unknown>)

@@ -256,6 +256,25 @@ export interface BoardCopy {
    * toggle. Everything else a `PickerMenu` draws (the item labels, the hint counts) is supplied by
    * the caller from elsewhere in this file, never from here.
    */
+  /**
+   * The task TYPE vocabulary (CORE, …) — the column, the table's group-by switch and the "Manage
+   * types" screen. `inUse` carries `{n}`.
+   */
+  types: {
+    column: string
+    none: string
+    groupBy: string
+    groupByStatus: string
+    groupByType: string
+    manage: string
+    intro: string
+    newLabel: string
+    placeholder: string
+    createError: string
+    deleteTitle: string
+    inUse: string
+    groupsNote: string
+  }
   pickers: {
     moveUp: string
     moveDown: string
@@ -370,6 +389,7 @@ const EN: BoardCopy = {
   showLessDescription: 'Show less',
   columns: {
     status: 'Status',
+    type: 'Type',
     priority: 'Priority',
     due: 'Due',
     claim: 'Working on it',
@@ -469,9 +489,24 @@ const EN: BoardCopy = {
       manual: 'Hand order', priority: 'Priority', title: 'Title', status: 'Status',
       created: 'Newest', updated: 'Last touched', due: 'Due date',
       cost: 'Cost', tokens: 'Tokens', rounds: 'Your prompts', sessions: 'Sessions',
-      attempts: 'Attempts', comments: 'Comments', subtasks: 'Subtasks', progress: 'Progress', harnesses: 'Harnesses',
+      attempts: 'Attempts', comments: 'Comments', subtasks: 'Subtasks', progress: 'Progress', harnesses: 'Harnesses', type: 'Type',
       delivered: 'Delivered', started: 'Started',
     },
+  },
+  types: {
+    column: 'Type',
+    none: 'No type',
+    groupBy: 'Group by',
+    groupByStatus: 'Status',
+    groupByType: 'Type',
+    manage: 'Manage types',
+    intro: 'A type says what kind of work a task is (for example CORE). Any type can be renamed or recoloured; one that no task carries can be deleted. A task may have one type or none.',
+    newLabel: 'New type',
+    placeholder: 'e.g. Experiment',
+    createError: 'Could not create the type. Try again.',
+    deleteTitle: 'Delete type',
+    inUse: 'In use by {n} task(s) — clear it there first.',
+    groupsNote: 'Drag a ticked type, or use ▲▼, to reorder the bands. A hidden type’s tasks are still there.',
   },
   pickers: {
     moveUp: 'Move up',
@@ -585,6 +620,7 @@ const PT: BoardCopy = {
   showLessDescription: 'Mostrar menos',
   columns: {
     status: 'Status',
+    type: 'Tipo',
     priority: 'Prioridade',
     due: 'Prazo',
     claim: 'Trabalhando',
@@ -684,9 +720,24 @@ const PT: BoardCopy = {
       manual: 'Ordem manual', priority: 'Prioridade', title: 'Título', status: 'Status',
       created: 'Mais recentes', updated: 'Última alteração', due: 'Prazo',
       cost: 'Custo', tokens: 'Tokens', rounds: 'Seus prompts', sessions: 'Sessões',
-      attempts: 'Tentativas', comments: 'Comentários', subtasks: 'Subtarefas', progress: 'Progresso', harnesses: 'Harnesses',
+      attempts: 'Tentativas', comments: 'Comentários', subtasks: 'Subtarefas', progress: 'Progresso', harnesses: 'Harnesses', type: 'Tipo',
       delivered: 'Entregue em', started: 'Início',
     },
+  },
+  types: {
+    column: 'Tipo',
+    none: 'Sem tipo',
+    groupBy: 'Agrupar por',
+    groupByStatus: 'Status',
+    groupByType: 'Tipo',
+    manage: 'Gerenciar tipos',
+    intro: 'O tipo diz que espécie de trabalho é a tarefa (por exemplo CORE). Qualquer tipo pode ser renomeado ou receber outra cor; um que nenhuma tarefa usa pode ser excluído. Uma tarefa tem um tipo ou nenhum.',
+    newLabel: 'Novo tipo',
+    placeholder: 'ex.: Experimento',
+    createError: 'Não foi possível criar o tipo. Tente novamente.',
+    deleteTitle: 'Excluir tipo',
+    inUse: 'Em uso por {n} tarefa(s) — remova-o de lá primeiro.',
+    groupsNote: 'Arraste um tipo marcado, ou use ▲▼, para reordenar as faixas. As tarefas de um tipo oculto continuam lá.',
   },
   pickers: {
     moveUp: 'Mover para cima',
