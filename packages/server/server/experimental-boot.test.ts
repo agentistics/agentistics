@@ -25,6 +25,35 @@ describe('experimental-boot', () => {
     expect(applyExperimentalFromDisk(off)).toEqual([])
     expect(JSON.stringify(off)).toBe(before)
   })
+  test('CLI: preference ON + no env turns the feature on; explicit =0 stays off; preference OFF changes nothing', () => {
+    const on: Record<string, string | undefined> = { AGENTISTICS_DIR: dirWith('{"experimental":true}') }
+    applyExperimentalFromDisk(on)
+    expect(on.AGENTISTICS_PROVIDER).toBe('1')
+    const off0: Record<string, string | undefined> = { AGENTISTICS_DIR: dirWith('{"experimental":true}'), AGENTISTICS_PROVIDER: '0' }
+    applyExperimentalFromDisk(off0)
+    expect(off0.AGENTISTICS_PROVIDER).toBe('0')
+    const pref: Record<string, string | undefined> = { AGENTISTICS_DIR: dirWith('{"experimental":false}') }
+    applyExperimentalFromDisk(pref)
+    expect(pref.AGENTISTICS_PROVIDER).toBeUndefined()
+  })
+  test('bin/cli.ts applies the preference for every subcommand, before the first dispatch', async () => {
+    const src = await Bun.file(join(import.meta.dir, '../bin/cli.ts')).text()
+    const apply = src.indexOf('applyExperimentalFromDisk()')
+    expect(apply).toBeGreaterThan(-1)
+    expect(src.slice(src.lastIndexOf('\n', apply - 200), apply)).not.toMatch(/if \(command ===/)
+    expect(apply).toBeLessThan(src.indexOf("command === 'mcp'") === -1 ? Infinity : src.indexOf("command === 'mcp'"))
+  })
+  test('the preference reaches JOURNAL_ENABLED in a fresh CLI-shaped process (journal sink on); explicit =0 wins', async () => {
+    const run = async (env: Record<string, string>) => {
+      const code = `const b = await import('./experimental-boot.ts'); b.applyExperimentalFromDisk(); const c = await import('./config.ts'); console.log(c.JOURNAL_ENABLED)`
+      const p = Bun.spawn([process.execPath, '-e', code], { cwd: import.meta.dir, env: { PATH: process.env.PATH ?? '', ...env }, stdout: 'pipe' })
+      return (await new Response(p.stdout).text()).trim()
+    }
+    const home = dirWith('{"experimental":true}')
+    expect(await run({ AGENTISTICS_DIR: home, HOME: home })).toBe('true')
+    expect(await run({ AGENTISTICS_DIR: home, HOME: home, AGENTISTICS_JOURNAL: '0' })).toBe('false')
+    expect(await run({ AGENTISTICS_DIR: dirWith('{"experimental":false}'), HOME: home })).toBe('false')
+  })
   test('does not import config or preferences (they load JOURNAL_ENABLED)', async () => {
     const src = await Bun.file(join(import.meta.dir, 'experimental-boot.ts')).text()
     expect(src).not.toMatch(/from '\.\/(config|preferences)'/)
