@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Refuses a push that adds/modifies engine code (see packages/server/scripts/push-guard.ts).
+exec bun packages/server/scripts/push-guard-check.ts
