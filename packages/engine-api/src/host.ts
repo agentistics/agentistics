@@ -87,10 +87,54 @@ export interface FleetTransition {
   answeredHere?: { choice: number }
 }
 
-/** The host's fleet, as an engine may follow it (1.4). */
+/** A session of another harness an engine asks the host to start for one of its agents (1.7, B6.2). */
+export interface EngineDelegateSpawn {
+  harness: HarnessId
+  /** Absolute. */
+  cwd: string
+  /** The whole brief: the session sees nothing else. */
+  prompt: string
+  /** Always explicit: an agent never inherits its parent's model. */
+  model: string
+  effort?: 'low' | 'medium' | 'high'
+  /** The session's name in the fleet. */
+  label: string
+  /** File it on the board at start (R1: no unfiled session). A filing that fails stops the session. */
+  taskId?: string
+  subtaskId?: string
+  /** The native session asking — recorded on the start, never used to widen anything. */
+  requestedBy: string
+}
+
+/**
+ * - `not_allowed`: the person has not allowed agents to start this harness (superskill R2 — the
+ *   HOST decides, default deny); the sentence says where to allow it.
+ * - `unavailable`: this machine cannot start it (not installed, no fleet backend, a central).
+ * - `memory_budget`: the machine's admission refused it.
+ * - `filing_failed`: it started but could not be filed, so it was stopped.
+ * - `refused`: any other refusal of the start (bad cwd, model unsupported), in the sentence.
+ */
+export type EngineDelegateRefusal = 'not_allowed' | 'unavailable' | 'memory_budget' | 'filing_failed' | 'refused'
+
+export type EngineDelegateSpawnResult =
+  | { ok: true; managedId: string }
+  | { ok: false; code: EngineDelegateRefusal; sentence: string }
+
+/** The host's fleet, as an engine may follow it (1.4) — and, from 1.7, delegate to (B6.2). */
 export interface EngineFleet {
   /** Confirmed transitions only. Returns unsubscribe. A callback that throws is logged, never fatal. */
   subscribe(cb: (t: FleetTransition) => void): () => void
+  /**
+   * 1.7 — the harnesses an agent may start here: installed AND allowed by the person. OPTIONAL
+   * (with `spawn`, `lastReply`, `stop`): a host before 1.7 offers no delegation.
+   */
+  delegateHarnesses?(): Promise<readonly HarnessId[]>
+  /** 1.7 — starts a managed session for an engine's agent; consent and admission are the host's. */
+  delegateSpawn?(req: EngineDelegateSpawn): Promise<EngineDelegateSpawnResult>
+  /** 1.7 — the session's latest assistant reply (its handback), and whether it is still live. */
+  lastReply?(managedId: string): Promise<{ ok: true; text: string; live: boolean } | { ok: false; reason: string }>
+  /** 1.7 — ends a session this engine started. */
+  stop?(managedId: string): Promise<void>
 }
 
 /**

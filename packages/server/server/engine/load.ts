@@ -36,6 +36,7 @@ import type { SpawnBudget } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 import { hostEngineBoard } from './engine-board'
+import { hostDelegateMembers } from './engine-delegate'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -300,6 +301,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     // 1.4: which contract this host speaks, and the fleet's confirmed transitions. The hub is fed by
     // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.
     apiVersion: ENGINE_API_VERSION,
-    fleet: { subscribe: cb => fleetHub.subscribe(cb) },
+    // 1.7 (B6.2): delegation to another harness — consent (default deny), admission and filing are the host's.
+    fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
   }
 }

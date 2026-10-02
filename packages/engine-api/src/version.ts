@@ -51,6 +51,9 @@
  * next, activity, create, subtask, comment, status, claim and attach — so a native session's board
  * tools reach the board without an HTTP loopback or a second auth path. An engine built against 1.6
  * still loads; a 1.7 engine on an older host finds `board` absent and offers no board tools.
+ * Also (B6.2): `fleet.delegateHarnesses / delegateSpawn / lastReply / stop` (optional) — an engine's
+ * agent may run as a session of another harness, started by the HOST, which alone decides whether the
+ * person allowed that harness (default deny) and files the session on the board.
  */
 export const ENGINE_API_VERSION = '1.7.0'
 
