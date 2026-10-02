@@ -32,6 +32,7 @@ packages/
   mcp/      (@agentistics/mcp)    — MCP server, publishable to npm standalone
   tui/      (@agentistics/tui)    — Ink (React) terminal dashboard + the `agentop` control center
   vscode/   (agentistics-vscode)  — the VS Code extension: a CLIENT of the local server, no more
+  vault/    (@agentistics/vault)  — secrets at rest: sealed format, AEAD, HKDF, protector adapters, migration (pure; NOT in core, the web bundle imports core)
   desktop/                        — Tauri v2 Windows installer (spawns agentop as sidecar)
 ```
 
@@ -2025,6 +2026,16 @@ absence was a real finding.
   they clear without reading, and every other prompt pays for it. `stepup.test.ts` asserts the
   table EXACTLY, so adding an entry is a product decision, not a drive-by. Those three call
   `stepUpFetch` on the web side, never bare `fetch`; everything else, reads included, uses `fetch`.
+- **Every secret agentop writes is SEALED by the vault — never plain text, `0600` is only a second
+  layer** (`packages/vault` + `packages/server/server/vault/`, docs/security.md §7a). A new secret
+  goes through `sealToFile`/`openFromFile` (`vault/service.ts`) with a purpose from the closed
+  `HostPurpose` set, gets a `secret` row in `backup-plan.ts` whose prefix covers its `.sealed` name,
+  and registers a migrator (`registerVaultMigrator`) if an older version wrote it in plain text. A
+  write that cannot seal THROWS the vault's sentence (`VaultRefusalError`); there is no fallback.
+  Central tokens live in `connections/tokens.sealed`, not `preferences.json` (`vault/prefs-tokens.ts`
+  strips/injects them at the file's two choke points). `ensureVaultOpen` SCHEDULES the migration pass
+  and never awaits it — a caller inside the preferences write chain would deadlock. Under `bun test`
+  the only protector is the in-memory one; never probe a real keychain from a test.
 - **`agentop doctor --exposed` must pass before exposing anything.** A check that could not be
   verified reports `fail`, never a reassuring `pass`.
 ## Terminal UI (`packages/tui`)

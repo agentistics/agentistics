@@ -588,10 +588,9 @@ async function runRestoreJob(
 export async function disconnectGithub(
   file?: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const { GITHUB_BACKUP_CONFIG_FILE } = await import('./backup/github-store')
-  const { rm } = await import('fs/promises')
+  const { removeGithubConfig } = await import('./backup/github-store')
   try {
-    await rm(file ?? GITHUB_BACKUP_CONFIG_FILE, { force: true })
+    await removeGithubConfig(file)
     return { ok: true }
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) }

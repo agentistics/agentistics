@@ -107,6 +107,10 @@
         "ink-testing-library": "^4.0.0",
       },
     },
+    "packages/vault": {
+      "name": "@agentistics/vault",
+      "version": "1.0.0",
+    },
     "packages/vscode": {
       "name": "agentistics-vscode",
       "version": "1.1.0",
@@ -167,6 +171,8 @@
     "@agentistics/server": ["@agentistics/server@workspace:packages/server"],
 
     "@agentistics/tui": ["@agentistics/tui@workspace:packages/tui"],
+
+    "@agentistics/vault": ["@agentistics/vault@workspace:packages/vault"],
 
     "@agentistics/web": ["@agentistics/web@workspace:packages/web"],
 

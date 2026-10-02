@@ -1,0 +1,33 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`§2.8 refusal sentences — snapshot, EN and PT English 1`] = `
+{
+  "conflict": "~/.agentistics/github-backup.sealed is still in plain text and differs from its encrypted copy (an older agentop re-entered it after it was encrypted). Both were kept and nothing was deleted. Keep the one you want: re-enter it with agentop backup github setup <url>, or delete the plain-text file to keep the encrypted one.",
+  "locked": "The vault is locked: the agentop service started without its passphrase. Run \`agentop vault unlock\`. Until then provider keys, the GitHub backup token and central tokens cannot be read, and only what needs them is paused.",
+  "migration-failed": "~/.agentistics/github-backup.sealed could not be encrypted (DPAPI refused). The original was left untouched and will be retried at the next start.",
+  "no-protector": "This machine has no system keychain Agentistics can use (checked: libsecret — no Secret Service answered; systemd-creds — no TPM2). Secrets are never stored in plain text, so they will be protected by a passphrase you choose. You will type it once each time the agentop service starts.",
+  "plaintext-pending": "3 secret(s) are still stored in plain text from an earlier version. They are encrypted as soon as the vault is open — run \`agentop vault unlock\` (or \`agentop vault init\`).",
+  "protector-lost": "The vault key is protected by Windows (DPAPI), and Windows (DPAPI) no longer opens it (DPAPI refused). The secrets in ~/.agentistics cannot be read on this machine any more. Nothing was deleted. Re-enter them with: agentop backup github setup <url>.",
+  "protector-unavailable": "Windows (DPAPI) did not answer (DPAPI refused), so no vault was created and nothing was stored — Agentistics never writes a secret in plain text and never falls back to a weaker protector on its own. It is retried automatically; to choose another protector, run \`agentop vault init --protector libsecret|systemd-creds|passphrase\`.",
+  "purpose": "An engine may only seal and open its own secrets (a purpose starting with \`engine/\`); this request named another and was refused.",
+  "tampered": "~/.agentistics/github-backup.sealed failed its integrity check (it was modified, or moved from another file). It was not used. Re-enter it with: agentop backup github setup <url>.",
+  "uninitialized": "There is no vault on this machine yet, so this secret cannot be stored — Agentistics never writes one in plain text. Run \`agentop vault init\`.",
+  "wrong-machine": "~/.agentistics/github-backup.sealed was sealed by another machine's vault (key 0123456789abcdef) — copied from a backup or another computer. It cannot be opened here, by design. Re-enter it with: agentop backup github setup <url>.",
+}
+`;
+
+exports[`§2.8 refusal sentences — snapshot, EN and PT Português 1`] = `
+{
+  "conflict": "~/.agentistics/github-backup.sealed ainda está em texto puro e difere da cópia cifrada (um agentop antigo o recadastrou depois de cifrado). Os dois foram mantidos e nada foi apagado. Fique com o que você quer: cadastre-o de novo com agentop backup github setup <url>, ou apague o arquivo em texto puro para ficar com o cifrado.",
+  "locked": "O cofre está trancado: o serviço do agentop iniciou sem a frase-senha. Rode \`agentop vault unlock\`. Até lá as chaves de provedor, o token do backup no GitHub e os tokens de central não podem ser lidos, e só o que depende deles fica pausado.",
+  "migration-failed": "~/.agentistics/github-backup.sealed não pôde ser cifrado (DPAPI refused). O original foi mantido intacto e será tentado de novo no próximo início.",
+  "no-protector": "Esta máquina não tem um chaveiro do sistema que o Agentistics possa usar (verificado: libsecret — no Secret Service answered; systemd-creds — no TPM2). Segredos nunca são guardados em texto puro, então serão protegidos por uma frase-senha que você escolhe. Você vai digitá-la uma vez a cada início do serviço do agentop.",
+  "plaintext-pending": "3 segredo(s) ainda estão guardados em texto puro, de uma versão anterior. Eles são cifrados assim que o cofre estiver aberto — rode \`agentop vault unlock\` (ou \`agentop vault init\`).",
+  "protector-lost": "A chave do cofre é protegida por Windows (DPAPI), e Windows (DPAPI) não a abre mais (DPAPI refused). Os segredos em ~/.agentistics não podem mais ser lidos nesta máquina. Nada foi apagado. Cadastre-os de novo com: agentop backup github setup <url>.",
+  "protector-unavailable": "Windows (DPAPI) não respondeu (DPAPI refused), então nenhum cofre foi criado e nada foi guardado — o Agentistics nunca grava um segredo em texto puro e nunca recorre sozinho a um protetor mais fraco. Isso é tentado de novo automaticamente; para escolher outro protetor, rode \`agentop vault init --protector libsecret|systemd-creds|passphrase\`.",
+  "purpose": "Um motor só pode selar e abrir os próprios segredos (um propósito que começa com \`engine/\`); este pedido nomeou outro e foi recusado.",
+  "tampered": "~/.agentistics/github-backup.sealed falhou na verificação de integridade (foi modificado, ou movido de outro arquivo). Ele não foi usado. Cadastre-o de novo com: agentop backup github setup <url>.",
+  "uninitialized": "Ainda não existe um cofre nesta máquina, então este segredo não pode ser guardado — o Agentistics nunca grava um em texto puro. Rode \`agentop vault init\`.",
+  "wrong-machine": "~/.agentistics/github-backup.sealed foi selado pelo cofre de outra máquina (chave 0123456789abcdef) — copiado de um backup ou de outro computador. Ele não pode ser aberto aqui, por projeto. Cadastre-o de novo com: agentop backup github setup <url>.",
+}
+`;

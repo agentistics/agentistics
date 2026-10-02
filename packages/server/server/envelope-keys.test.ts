@@ -7,6 +7,8 @@ import {
   loadOrCreateKeypair, publicKeyOnly, pinPeerKey, pinnedKeyFor, pinnedPeers,
   __resetEnvelopeKeysForTests,
 } from './envelope-keys'
+import { sealedPathFor } from './vault/whole-file'
+import { existsSync } from 'node:fs'
 
 // Every test runs against a throwaway directory — nothing here may touch ~/.agentistics.
 const dirs: string[] = []
@@ -32,10 +34,23 @@ describe('loadOrCreateKeypair', () => {
     expect(await loadOrCreateKeypair()).toEqual(first)
   })
 
-  it('stores the key file 0600 — the private half is never world-readable', async () => {
-    await loadOrCreateKeypair()
-    const mode = (await stat(envelopeKeyFile())).mode & 0o777
+  it('stores the key SEALED, 0600 — the private half is never on disk in plain text', async () => {
+    const kp = await loadOrCreateKeypair()
+    const sealed = sealedPathFor(envelopeKeyFile())
+    const mode = (await stat(sealed)).mode & 0o777
     expect(mode & 0o077).toBe(0)
+    expect(await readFile(sealed, 'utf-8')).not.toContain(kp.privateKey)
+    expect(existsSync(envelopeKeyFile())).toBe(false)
+  })
+
+  it('migrates a legacy plaintext key file: same keypair, plaintext gone', async () => {
+    const { writeFile } = await import('node:fs/promises')
+    const legacy = { publicKey: 'TEST-NOT-A-SECRET-pub', privateKey: 'TEST-NOT-A-SECRET-priv' }
+    await writeFile(envelopeKeyFile(), JSON.stringify(legacy), { mode: 0o644 })
+    __resetEnvelopeKeysForTests()
+    expect(await loadOrCreateKeypair()).toEqual(legacy)
+    expect(existsSync(envelopeKeyFile())).toBe(false)
+    expect(await readFile(sealedPathFor(envelopeKeyFile()), 'utf-8')).not.toContain(legacy.privateKey)
   })
 
   it('regenerates rather than throwing when the stored file is junk', async () => {

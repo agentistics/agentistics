@@ -7,7 +7,8 @@
  * value.
  *
  * **Nothing in this object is a secret.** A provider key belongs to the engine's own store; the host
- * passes only the floor that protects such stores (`protectedGlobs`).
+ * passes only the floor that protects such stores (`protectedGlobs`) and — since 1.5 — the vault that
+ * SEALS it (`secrets`), which takes and returns bytes and never hands over the key.
  */
 import type { CapabilityName, EngineEvent, HarnessId } from './mirrors'
 import type { ReuseSurface } from './reuse'
@@ -81,6 +82,10 @@ export type EngineAuditAction =
   | 'shell.override.enabled'
   | 'upgrade.started' | 'upgrade.denied'
   | 'provider.set' | 'provider.remove'
+  // The vault (engine-api 1.5): a plaintext secret sealed, one still waiting because the vault could
+  // not open, and one whose migration failed. meta names the purpose and the logical name ONLY —
+  // never a value, a length or a fragment. Written to the machine's own `vault/audit.jsonl`.
+  | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
 
 /** Mirrors the host's audit input. The host's builder still redacts secret-shaped fields. */
 export interface EngineAuditEvent {
@@ -169,6 +174,29 @@ export interface EngineOriginPolicy {
   dev: boolean
 }
 
+/**
+ * Why the vault would not seal or open. `purpose` — the engine asked for a purpose outside
+ * `engine/…`; the others are the vault's own states (docs/security.md § "Secrets at rest").
+ */
+export type VaultRefusal = 'uninitialized' | 'locked' | 'protector-lost' | 'wrong-machine' | 'tampered' | 'purpose'
+
+export type SealResult = { ok: true; sealed: Uint8Array } | { ok: false; code: VaultRefusal; sentence: string }
+export type OpenResult = { ok: true; plaintext: Uint8Array } | { ok: false; code: VaultRefusal; sentence: string }
+
+/**
+ * 1.5 — the machine's vault, as an engine may use it. The engine keeps owning its file layout (names,
+ * atomic writes, the mode check); the host owns the key. AES-256-GCM under a per-purpose HKDF subkey
+ * of the machine's data key, so a blob sealed for `engine/provider-key` cannot be opened as the
+ * host's GitHub token even before the AAD check.
+ */
+export interface EngineSecrets {
+  /** Never throws. `sentence` is the refusal for any state but `open`. */
+  status(): { state: 'open' | 'locked' | 'uninitialized' | 'unavailable'; protector: string | null; sentence: string | null }
+  /** `purpose` MUST start with `engine/` — the host refuses any other (`code: 'purpose'`). */
+  seal(purpose: `engine/${string}`, name: string, plaintext: Uint8Array): Promise<SealResult>
+  open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
+}
+
 export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** Where things live. The engine reads no config of its own. */
   paths: {
@@ -223,5 +251,12 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   readers: ReuseSurface
   /** The host's browser-provenance policy (1.2). */
   originPolicy(): EngineOriginPolicy
+  /**
+   * The machine's vault (1.5). OPTIONAL: a host before 1.5 has none, and an engine that finds it
+   * absent REFUSES to store a secret ("This agentop is too old to store keys encrypted — update it
+   * (agentop upgrade).") and may only read a legacy plaintext one it already has, read-only. It never
+   * writes a new plaintext secret.
+   */
+  secrets?: EngineSecrets
   now(): Date
 }

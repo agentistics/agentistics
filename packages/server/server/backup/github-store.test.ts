@@ -6,6 +6,8 @@ import { join } from 'path'
 import {
   readGithubConfig, writeGithubConfig, toStatus, type GithubBackupConfig,
 } from './github-store'
+import { sealedPathFor } from '../vault/whole-file'
+import { readFileSync, existsSync } from 'fs'
 
 const CONFIG: GithubBackupConfig = {
   url: 'https://github.com/someone/agentistics-backups',
@@ -54,8 +56,11 @@ describe('writeGithubConfig / readGithubConfig round-trip', () => {
   test('writes at mode 0600 and reads back identically', async () => {
     await withTempFile(async (file) => {
       await writeGithubConfig(CONFIG, file)
-      const mode = statSync(file).mode & 0o777
+      const mode = statSync(sealedPathFor(file)).mode & 0o777
       expect(mode).toBe(0o600)
+      // Sealed, never plain text: the token is nowhere on disk and no .json was written.
+      expect(readFileSync(sealedPathFor(file), 'utf-8')).not.toContain(CONFIG.token)
+      expect(existsSync(file)).toBe(false)
       expect(await readGithubConfig(file)).toEqual(CONFIG)
     })
   })
@@ -64,7 +69,7 @@ describe('writeGithubConfig / readGithubConfig round-trip', () => {
     await withTempFile(async (file) => {
       await writeGithubConfig(CONFIG, file)
       await writeGithubConfig({ ...CONFIG, token: 'a-rotated-token' }, file)
-      const mode = statSync(file).mode & 0o777
+      const mode = statSync(sealedPathFor(file)).mode & 0o777
       expect(mode).toBe(0o600)
       expect((await readGithubConfig(file))?.token).toBe('a-rotated-token')
     })
@@ -94,5 +99,18 @@ describe('toStatus — the ONLY shape a route may return, and it never carries t
       configured: true, url: CONFIG.url, owner: CONFIG.owner, repo: CONFIG.repo,
     })
     expect(JSON.stringify(status)).not.toContain(CONFIG.token)
+  })
+})
+
+describe('a legacy plaintext config is migrated on first read', () => {
+  test('sealed, verified, the plaintext scrubbed — and it reads back identically', async () => {
+    await withTempFile(async (file) => {
+      const { writeFile } = await import('fs/promises')
+      await writeFile(file, JSON.stringify(CONFIG), { mode: 0o664 })
+      expect(await readGithubConfig(file)).toEqual(CONFIG)
+      expect(existsSync(file)).toBe(false)
+      expect(readFileSync(sealedPathFor(file), 'utf-8')).not.toContain(CONFIG.token)
+      expect(await readGithubConfig(file)).toEqual(CONFIG)
+    })
   })
 })
