@@ -7,7 +7,7 @@
  * value.
  *
  * **Nothing in this object is a secret.** A provider key belongs to the engine's own store; the host
- * passes only the floor that protects such stores (`protectedPaths`).
+ * passes only the floor that protects such stores (`protectedGlobs`).
  */
 import type { CapabilityName, EngineEvent, HarnessId } from './mirrors'
 import type { ReuseSurface } from './reuse'
@@ -100,9 +100,39 @@ export interface EngineNotification {
   message?: string
 }
 
-/** The part of the host's admission-control budget an engine reads. */
+/**
+ * The part of the host's admission-control budget an engine reads — the SAME measurement the host's
+ * own spawn gate (`admitSpawn`) decides from, so an engine and the host can never disagree about
+ * whether this machine has room.
+ *
+ * 1.3: `unmeasured` and `budget.alarm`. Up to 1.2 an unmeasurable machine was reported as
+ * `{ max: 0, used: 0, left: 0, percent: 0 }` — indistinguishable from a MEASURED machine with no
+ * room — and the swap alarm was not carried at all, although it is the rule that refuses first: the
+ * freeze admission control exists for happened with RAM reading free and swap at 97%.
+ *
+ * An engine starting a session applies the host's rule, in this order:
+ * 1. `unmeasured: true` → admit, and SAY memory could not be checked (never a silent pass, never a
+ *    refusal: `/proc` is Linux-only). `budget` is all zeros then and carries no meaning.
+ * 2. `budget.alarm === 'swap'` → refuse, whatever `left` says.
+ * 3. more sessions asked for than `left` → refuse, and say how many would fit.
+ */
 export interface EngineSpawnBudget {
-  budget: { max: number; used: number; left: number; percent: number }
+  budget: {
+    max: number
+    used: number
+    left: number
+    percent: number
+    /**
+     * Why the budget is alarming, absent when it is not (1.3). `swap` — the machine is already
+     * thrashing, and refuses a spawn regardless of `left`; `sessions` — `left` is nearly spent.
+     */
+    alarm?: 'sessions' | 'swap'
+  }
+  /**
+   * `true` when this machine could not be measured (1.3). Explicit, because a measured `max: 0` is a
+   * real answer ("nothing fits") and must never read as "not measured".
+   */
+  unmeasured: boolean
 }
 
 /** A native session filed on the task board. */
@@ -156,7 +186,18 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   }
   /** The public journal. `null` = journal off or unwritable — the engine must cope. */
   journal: { sink(): Promise<ProviderJournalSink<E> | null>; status(): JournalStatus }
-  /** The machine's policy floor: paths no engine tool may touch. */
+  /**
+   * The machine's policy floor as GLOBS (1.3): `protectedGlobs(rules)` over the backup plan's
+   * `secret` rows, in the dialect `floor.ts` defines (`~/`, `*`, `**`). This is the floor an engine
+   * must enforce — a `contains` row (`.key`) has no single path, only a glob.
+   */
+  protectedGlobs: readonly string[]
+  /**
+   * 1.2 — DEPRECATED, kept for an engine built against 1.2: the same floor as ABSOLUTE paths
+   * (`$HOME` joined with each row), plus, since 1.3, the absolute form of every glob in
+   * `protectedGlobs` — so an engine that widens each entry into `<p>`, `<p>*`, `<p>*\/**` globs gets
+   * the `contains` rows too. An engine built against 1.3 reads `protectedGlobs` instead.
+   */
   protectedPaths: readonly string[]
   /** The host's exposure capabilities, read — never re-derived. */
   caps: Readonly<Record<CapabilityName, boolean>>
