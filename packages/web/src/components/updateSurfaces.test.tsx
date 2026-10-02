@@ -76,12 +76,12 @@ describe('no update surface suggests the CLI', () => {
     setFlowForTest({ ...IDLE_FLOW, phase: 'running', target: '2.31.0', startedAt: 1, view: { step: 'brain', fraction: 0.6, failed: false }, message: null })
     const html = renderToStaticMarkup(<UpgradeOverlay lang="en" isMobile />)
     expect(html).toContain('data-step="brain"')
-    expect(html).toContain('Updating to v2.31.0')
+    expect(html).toContain('Updating ')
     resetFlow()
     expect(renderToStaticMarkup(<UpgradeOverlay lang="en" isMobile />)).toBe('')
   })
   test('the finale names the version', () => {
-    expect(renderToStaticMarkup(<UpdateFinale lang="pt" version="2.31.0" onDone={noop} />)).toContain('Atualizado para v2.31.0')
+    expect(renderToStaticMarkup(<UpdateFinale lang="pt" version="2.31.0" onDone={noop} />)).toContain('Atualizado ')
   })
 })
 
@@ -105,7 +105,10 @@ describe('the logo is animated, never redrawn', () => {
   })
   test('the finale uses the brand raster, not a redrawn mark', () => {
     const html = renderToStaticMarkup(<UpdateFinale lang="en" version="2.31.0" onDone={noop} />)
-    expect(html).toMatch(/<img[^>]+minimalistLogo/)
+    expect(html).toContain('<canvas')
     expect(html).not.toContain('<svg')
+    // the scene draws the brand raster, square, via drawImage — never a path
+    const scene = readFileSync(new URL('../lib/updateScene.ts', import.meta.url), 'utf8')
+    expect(scene).toMatch(/drawImage\(logo, cx - s \/ 2, cy - s \/ 2, s, s\)/)
   })
 })

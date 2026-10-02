@@ -24,6 +24,15 @@
  */
 
 import { UPDATE_STEPS, type UpdateStep } from './updateI18n'
+import type { UpdateAnimation } from './updateAnim'
+
+/**
+ * WHICH update animation plays. Both ship (`core` = "Núcleo", `hive` = "Colmeia"); there is NO
+ * user-facing choice (owner, 2026-10-02) — this one constant picks, and the owner switches it on
+ * request. `updateAnim.test.ts` pins the default to `core` and renders both paths so the other
+ * never rots.
+ */
+export const UPDATE_ANIMATION: UpdateAnimation = 'core'
 
 export type ServerStage = 'checking' | 'downloading' | 'verifying' | 'swapping' | 'restarting' | 'done' | 'failed'
 

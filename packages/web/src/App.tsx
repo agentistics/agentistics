@@ -2460,6 +2460,7 @@ export default function AppLayout() {
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   const [finaleVersion, setFinaleVersion] = useState<string | null>(null)
+  const [finaleFrom, setFinaleFrom] = useState('')
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
   // not yet chosen (blocks the app), ArchiveMode = chosen.
   const [archiveChoice, setArchiveChoice] = useState<ArchiveMode | null | undefined>(undefined)
@@ -2692,6 +2693,7 @@ export default function AppLayout() {
         const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
         if (back.url !== here) navigate(back.url, { replace: true })
         if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
+        setFinaleFrom(back.from ?? '')
         setFinaleVersion(info.current)
       })
       .catch(() => {})
@@ -4794,7 +4796,7 @@ export default function AppLayout() {
 
       {/* The one install flow's loader, and the finale on the bundle that arrived. */}
       <UpgradeOverlay lang={lang} isMobile={isMobile} />
-      {finaleVersion && <UpdateFinale lang={lang} version={finaleVersion} onDone={() => setFinaleVersion(null)} />}
+      {finaleVersion && <UpdateFinale lang={lang} isMobile={isMobile} version={finaleVersion} from={finaleFrom} onDone={() => setFinaleVersion(null)} />}
 
       {/* Info Modal */}
       {infoModalIndex !== null && (

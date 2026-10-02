@@ -33,7 +33,7 @@ const PT = {
   'prompt.from_to': 'v{from} → v{to}',
   'prompt.release_notes': 'Ver o que mudou',
   // the loader
-  'loader.title': 'Atualizando para v{version}',
+  'loader.title': 'Atualizando {pair}',
   'loader.stage_label': 'Etapa {n} de {total}',
   'loader.step.data': 'Download',
   'loader.step.brain': 'Troca do binário',
@@ -48,8 +48,10 @@ const PT = {
   'loader.reload': 'Recarregar',
   'loader.dismiss': 'Fechar',
   'loader.percent': '{pct}%',
+  'loader.mb': '{a} de {b} MB',
+  'loader.waiting': 'esperando o servidor voltar',
   // the finale
-  'finale.updated_to': 'Atualizado para v{version}',
+  'finale.updated': 'Atualizado {pair}',
   'finale.sub': 'Tudo ligado. Você está de volta onde estava.',
   // the narration pools
   'phrase.data.1': 'Obtendo dados da tecnologia futurística',
@@ -90,7 +92,7 @@ const EN: Record<UpdateKey, string> = {
   'prompt.close': 'Close',
   'prompt.from_to': 'v{from} → v{to}',
   'prompt.release_notes': 'See what changed',
-  'loader.title': 'Updating to v{version}',
+  'loader.title': 'Updating {pair}',
   'loader.stage_label': 'Step {n} of {total}',
   'loader.step.data': 'Download',
   'loader.step.brain': 'Binary swap',
@@ -105,7 +107,9 @@ const EN: Record<UpdateKey, string> = {
   'loader.reload': 'Reload',
   'loader.dismiss': 'Close',
   'loader.percent': '{pct}%',
-  'finale.updated_to': 'Updated to v{version}',
+  'loader.mb': '{a} of {b} MB',
+  'loader.waiting': 'waiting for the server to come back',
+  'finale.updated': 'Updated {pair}',
   'finale.sub': 'All systems on. You are right back where you were.',
   'phrase.data.1': 'Fetching data from futuristic technology',
   'phrase.data.2': 'Pulling data streams down from the cloud',
@@ -165,4 +169,19 @@ export function pickPhrase(step: UpdateStep, seed: number, tick: number): Update
   const pool = PHRASE_KEYS[step]
   const i = (seed + UPDATE_STEPS.indexOf(step) * 7 + Math.max(0, Math.floor(tick))) % pool.length
   return pool[i]!
+}
+
+/**
+ * The two versions as one phrase, `v<from> → v<to>`. The surfaces colour the halves (from in orange,
+ * to in green), so a string that carries `{pair}` is SPLIT around it by `splitPair` and the pair is
+ * rendered between the parts; `ut` fills it as plain text for an aria-label.
+ */
+export function versionPair(from: string, to: string): string {
+  return from ? `v${from} → v${to}` : `v${to}`
+}
+
+/** The text before and after `{pair}` in a key — what a surface renders around its coloured pair. */
+export function splitPair(lang: Lang, key: UpdateKey): [string, string] {
+  const [a = '', b = ''] = UPDATE_STRINGS[lang === 'pt' ? 'pt' : 'en'][key].split('{pair}')
+  return [a, b]
 }

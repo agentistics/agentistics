@@ -95,6 +95,8 @@ export interface RestoreState {
   scrollY: number
   /** The version the upgrade was for, so a restore only fires on the bundle that arrived. */
   target: string
+  /** The version the page was on when the upgrade was pressed — the finale's "from". Optional: older snapshots lack it. */
+  from?: string
   savedAt: number
 }
 
@@ -121,12 +123,13 @@ export function decodeRestore(raw: string | null, now: number, currentVersion: s
   // Restore only on the bundle the upgrade was for (or a newer one).
   if (isNewer(r.target, currentVersion)) return null
   const scrollY = typeof r.scrollY === 'number' && Number.isFinite(r.scrollY) && r.scrollY > 0 ? r.scrollY : 0
-  return { url, scrollY, target: r.target, savedAt: r.savedAt }
+  const from = typeof r.from === 'string' && /^[\w.+-]{1,32}$/.test(r.from) ? r.from : undefined
+  return { url, scrollY, target: r.target, ...(from ? { from } : {}), savedAt: r.savedAt }
 }
 
 /** Where the page is now, as a `RestoreState` (the pure half; the caller reads `location`). */
-export function snapshotRestore(loc: { pathname: string; search: string; hash: string }, scrollY: number, target: string, now: number): RestoreState {
-  return { url: `${loc.pathname}${loc.search}${loc.hash}`, scrollY, target, savedAt: now }
+export function snapshotRestore(loc: { pathname: string; search: string; hash: string }, scrollY: number, target: string, now: number, from?: string): RestoreState {
+  return { url: `${loc.pathname}${loc.search}${loc.hash}`, scrollY, target, ...(from ? { from } : {}), savedAt: now }
 }
 
 // ---- the popup's exit, and the bell ------------------------------------------------------------
