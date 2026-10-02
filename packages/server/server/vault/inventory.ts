@@ -10,7 +10,7 @@
 import { basename } from 'node:path'
 import { isKid, isPresenceId, parseSealed, parseVaultJson } from '@agentistics/vault'
 import { sealedFiles } from './boot'
-import { requireVaultStepUp, stepUpState, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, requireVaultStepUp, stepUpState, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
   displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
@@ -60,6 +60,8 @@ export interface VaultView {
   lockedBy: LockedBy | null
   recoveryTodo: RecoveryStep[] | null
   /** §5.3 / §7.1 "Hardening": the report plus its already-localized lines (empty = nothing to say). */
+  /** The server's own §2.4 table, so the screen draws 🔑 / 👆 from the rule instead of a second copy of it. */
+  gates: Record<string, { code: boolean; gesture: boolean; grant: boolean }>
   hardening: { state: 'ok' | 'limited' | 'failed'; private: boolean | null; coreDumps: 'off' | 'on' | null; yama: string | null; lines: string[] } | null
 }
 
@@ -125,6 +127,7 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     autoLockMinutes: stored?.autoLock?.minutes ?? 30,
     autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
     recoveryTodo: s.recoveryTodo ?? null,
+    gates: Object.fromEntries(Object.entries(VAULT_ACTION_ROWS).map(([k, r]) => [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }])),
     hardening: s.hardening ? { state: s.hardening.state, private: s.hardening.private, coreDumps: s.hardening.coreDumps, yama: s.hardening.yama, lines: hardeningLines(s.hardening, vaultLang()) } : null,
   }
 }

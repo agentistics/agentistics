@@ -1,0 +1,170 @@
+/**
+ * The browser's door onto `/api/vault/*` (SECRETS.4 §7.1) and the few pure rules the screen needs.
+ *
+ * What is NOT here: any decision about what an action asks. The server sends its own table
+ * (`gates`, from `VAULT_ACTION_ROWS`) and every route enforces it again — this module only reads it to
+ * draw the 🔑 / 👆 icons and to know whether a code field has to appear BEFORE the request rather than
+ * after a 401. It is deliberately not `lib/stepup.ts`: that is the IAM step-up (a different grant, a
+ * different route set); the vault's grant is bound to the vault service and travels in its own header.
+ *
+ * The 5-minute 'read' grant lives in MEMORY only — never localStorage, never a cookie — so closing the
+ * tab ends it, and a script on another origin cannot read it.
+ */
+export type VaultLang = 'en' | 'pt'
+
+export interface GateRow { code: boolean; gesture: boolean; grant: boolean }
+export interface VaultItem {
+  kind: string; state: 'sealed' | 'pending' | 'unreadable'; reason?: string; sealedAt?: string; file: string; restoreWith?: string
+}
+export interface Hardening { state: 'ok' | 'limited' | 'failed'; private: boolean | null; coreDumps: 'off' | 'on' | null; yama: string | null; lines: string[] }
+export interface VaultView {
+  state: string
+  protector: string | null
+  protectorLabel: string | null
+  kid: string | null
+  createdAt: string | null
+  sentence: string | null
+  pending: number
+  canLock: boolean
+  items: VaultItem[]
+  locked?: boolean
+  wrappers: string[]
+  presence: boolean
+  presenceAvailable: string[]
+  authenticator: { enrolledAt: string; lastUsedAt: string | null; failures: number; pausedUntil: string | null; frozen: boolean } | null
+  recoveryCreatedAt: string | null
+  requirePresence: boolean
+  autoLockMinutes: number
+  autoLockInMs: number | null
+  pendingStepup: boolean
+  lockedBy: string | null
+  recoveryTodo: string[] | null
+  hardening: Hardening | null
+  gates: Record<string, GateRow>
+}
+
+/** A refusal, exactly as the server words it (already in the user's language). */
+export interface Refusal { ok: false; code: string; sentence: string; status: number }
+export type Reply<T = Record<string, never>> = ({ ok: true } & T) | Refusal
+
+export type LoadResult =
+  | { kind: 'view'; view: VaultView }
+  | { kind: 'needs-stepup'; view: VaultView; sentence: string; code: string }
+  | { kind: 'failed' }
+
+// ── the grant (memory only) ──────────────────────────────────────────────────────────────────
+
+const GRANT_MARGIN_MS = 5_000
+let _grant: { token: string; until: number } | null = null
+
+export function rememberGrant(token: string | undefined, now = Date.now()): void {
+  _grant = token ? { token, until: now + 5 * 60_000 - GRANT_MARGIN_MS } : _grant
+}
+export function forgetGrant(): void { _grant = null }
+export function grantAlive(now = Date.now()): boolean { return _grant !== null && now < _grant.until }
+
+async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> } | null> {
+  try {
+    const headers: Record<string, string> = {}
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    if (grantAlive()) headers['x-vault-grant'] = _grant!.token
+    const r = await fetch(path, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+    const json = await r.json().catch(() => ({})) as Record<string, unknown>
+    if (typeof json.grant === 'string') rememberGrant(json.grant)
+    if (r.status === 401 && json.code === 'stepup-required') forgetGrant()
+    return { status: r.status, json }
+  } catch { return null }
+}
+
+const reply = <T,>(r: { status: number; json: Record<string, unknown> } | null): Reply<T> => {
+  if (!r) return { ok: false, code: 'network', sentence: '', status: 0 }
+  if (r.json.ok === true) return r.json as unknown as Reply<T>
+  return { ok: false, code: String(r.json.code ?? 'failed'), sentence: String(r.json.sentence ?? r.json.error ?? ''), status: r.status }
+}
+
+// ── the calls ────────────────────────────────────────────────────────────────────────────────
+
+export async function loadVault(): Promise<LoadResult> {
+  const r = await call('GET', '/api/vault')
+  if (!r) return { kind: 'failed' }
+  if (r.status === 401 || r.status === 403) {
+    if (r.json.needsStepUp === true && r.json.view) return { kind: 'needs-stepup', view: r.json.view as VaultView, sentence: String(r.json.sentence ?? ''), code: String(r.json.code ?? '') }
+    return { kind: 'failed' }
+  }
+  return r.status === 200 && typeof r.json.state === 'string' ? { kind: 'view', view: r.json as unknown as VaultView } : { kind: 'failed' }
+}
+
+export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code }).then(r => reply<{ grant: string }>(r))
+export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
+/** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
+export const unlockGesture = () => call('POST', '/api/vault/unlock').then(r => reply<{ state: string }>(r))
+export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
+export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
+export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
+
+export const authenticatorBegin = (code?: string) => call('POST', '/api/vault/authenticator/begin', code ? { code } : {}).then(r => reply<{ uri: string; secret: string }>(r))
+export const authenticatorConfirm = (code1: string, code2: string) => call('POST', '/api/vault/authenticator/confirm', { code1, code2 }).then(r => reply(r))
+export const recoveryBegin = (code?: string) => call('POST', '/api/vault/recovery/begin', code ? { code } : {}).then(r => reply<{ words: string[]; positions: number[] }>(r))
+export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
+export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}) }).then(r => reply<{ removed: string[] }>(r))
+export const presenceDisable = (code?: string) => call('POST', '/api/vault/presence/disable', code ? { code } : {}).then(r => reply(r))
+export interface Credential { type: string; label: string; createdAt: string }
+export const credentials = () => call('GET', '/api/vault/credentials').then(r => reply<{ credentials: Credential[]; recoveryCreatedAt: string | null; requirePresence: boolean }>(r))
+
+// ── pure rules ───────────────────────────────────────────────────────────────────────────────
+
+export const AUTO_LOCK_MIN = 5
+export const AUTO_LOCK_MAX = 480
+
+/** PURE. The idle period as typed: whole minutes only; anything else is "not a number yet" (null). */
+export function parseAutoLockInput(s: string): number | null {
+  const t = s.trim()
+  return /^\d{1,4}$/.test(t) ? Number(t) : null
+}
+/** PURE. 5–480, never "never" (§5.1). */
+export function clampAutoLock(n: number): number {
+  return Number.isFinite(n) ? Math.min(AUTO_LOCK_MAX, Math.max(AUTO_LOCK_MIN, Math.round(n))) : 30
+}
+
+/** PURE. Milliseconds left on the idle clock, counted from when the server reported it. */
+export function remainingMs(reportedInMs: number | null, reportedAt: number, now: number): number | null {
+  return reportedInMs === null ? null : Math.max(0, reportedInMs - (now - reportedAt))
+}
+/** PURE. Whole minutes for a countdown, rounded UP so "0 min" never shows while it is still open. */
+export function minutesLeft(ms: number): number { return Math.max(0, Math.ceil(ms / 60_000)) }
+
+/**
+ * PURE. Which of the two proofs an action asks of THIS vault right now: the code only once an
+ * authenticator is enrolled, the gesture only once a presence wrapper exists (the server's own rule —
+ * `requireVaultStepUp`). Used to draw the icons and to decide whether to ask for a code up front.
+ */
+export function gateFor(view: Pick<VaultView, 'gates' | 'authenticator' | 'presence'>, action: string): { code: boolean; gesture: boolean; grant: boolean } {
+  const row = view.gates[action]
+  if (!row) return { code: false, gesture: false, grant: false }
+  return { code: row.code && view.authenticator !== null, gesture: row.gesture && view.presence, grant: row.grant }
+}
+/** PURE. Does the request need a typed code, or can a live grant stand in for it? */
+export function needsTypedCode(g: { code: boolean; grant: boolean }, grantIsAlive: boolean): boolean {
+  return g.code && !(g.grant && grantIsAlive)
+}
+
+export type WizardStep = 'authenticator' | 'recovery' | 'presence'
+/** PURE. What an "ultra secure" setup still lacks, in the one safe order (presence last — it retires the silent wrapper). */
+export function missingSteps(v: Pick<VaultView, 'authenticator' | 'recoveryCreatedAt' | 'presence' | 'presenceAvailable'>): WizardStep[] {
+  const out: WizardStep[] = []
+  if (!v.authenticator) out.push('authenticator')
+  if (!v.recoveryCreatedAt) out.push('recovery')
+  if (!v.presence && v.presenceAvailable.length > 0) out.push('presence')
+  return out
+}
+
+/** PURE. The 24 words as 6 rows × 4 columns, numbered (the order a person copies them onto paper). */
+export function wordRows(words: readonly string[], perRow = 4): { n: number; word: string }[][] {
+  const rows: { n: number; word: string }[][] = []
+  for (let i = 0; i < words.length; i += perRow) rows.push(words.slice(i, i + perRow).map((word, j) => ({ n: i + j + 1, word })))
+  return rows
+}
+
+/** PURE. Digits only, at most 6 — what a code field holds. */
+export function cleanCode(s: string): string { return s.replace(/\D/g, '').slice(0, 6) }
+export const codeComplete = (s: string): boolean => /^\d{6}$/.test(s)

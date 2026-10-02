@@ -102,6 +102,8 @@ describe('GET /api/vault — the payload the sections read', () => {
     })
     expect(typeof r.json.autoLockInMs).toBe('number')
     expect(Array.isArray(r.json.items)).toBe(true)
+    // the §2.4 table travels with the view, so the screen never keeps a second copy of it
+    expect(r.json.gates).toMatchObject({ list: { code: true, gesture: false, grant: true }, 'disable-presence': { code: true, gesture: true, grant: false }, 'lock-local': { code: false, gesture: false, grant: false } })
   })
 
   test('carries the hardening report as lines, and no secret-shaped field', async () => {
