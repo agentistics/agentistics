@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, askWords, sectionBadge, howNow, howConfirms, primarySection,
+  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, howStep2, parseUnlockHours, askWords, sectionBadge, howNow, howConfirms, primarySection,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -261,5 +261,31 @@ describe('live gesture progress (owner 2026-10-02)', () => {
     expect(vtf('wiz_gesture_progress', 'pt', { i: 1, n: 2 })).toBe('Confirmação 1 de 2')
     expect(vtf('wiz_gesture_progress', 'en', { i: 2, n: 3 })).toBe('Confirmation 2 of 3')
     expect(vt('wiz_pres_checkHello', 'pt')).not.toContain('duas vezes')
+  })
+})
+
+describe('the unlock policy on the page (owner decision 2026-10-02)', () => {
+  const both = { authenticator: auth, presence: true }
+  test('step 2 of "how your vault works" states the CURRENT mode', () => {
+    expect(howStep2({ ...both })).toEqual({ key: 'how2_daily', hours: 12 }) // absent = the default
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'daily', hours: 8, chosen: true, codeNextUnlock: true, windowEndsAt: null } })).toEqual({ key: 'how2_daily', hours: 8 })
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'always', hours: 12, chosen: true, codeNextUnlock: true, windowEndsAt: null } }).key).toBe('how2_always')
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'hello-only', hours: 12, chosen: true, codeNextUnlock: false, windowEndsAt: null } }).key).toBe('how2_helloOnly')
+    expect(howStep2({ authenticator: auth, presence: false }).key).toBe('how2_code')
+    expect(howStep2({ authenticator: null, presence: false }).key).toBe('how2_nothing')
+  })
+  test('the copy names the mode in both languages', () => {
+    expect(vtf('how2_daily', 'pt', { presence: 'o Windows Hello', hours: 12 })).toBe('o Windows Hello e o código na primeira abertura do dia; depois disso, por 12 h, só o Windows Hello.')
+    expect(vtf('how2_always', 'en', { presence: 'Windows Hello' })).toContain('every time')
+    expect(vtf('how2_helloOnly', 'pt', { presence: 'o Windows Hello' })).toContain('O código ainda é pedido')
+    for (const k of ['sec_unlock', 'unlock_daily', 'unlock_daily_d', 'unlock_always', 'unlock_always_d', 'unlock_helloOnly', 'unlock_helloOnly_d', 'unlock_hours', 'unlock_reset'] as const) {
+      expect(vt(k, 'en').length).toBeGreaterThan(0); expect(vt(k, 'pt').length).toBeGreaterThan(0)
+    }
+  })
+  test('the window is 1–24 whole hours', () => {
+    expect(parseUnlockHours('12')).toBe(12)
+    expect(parseUnlockHours('1')).toBe(1)
+    expect(parseUnlockHours('24')).toBe(24)
+    for (const bad of ['0', '25', '', 'x', '1.5', '100']) expect(parseUnlockHours(bad)).toBeNull()
   })
 })

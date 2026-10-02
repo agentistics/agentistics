@@ -11,7 +11,7 @@ import { basename } from 'node:path'
 import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, stepUpState, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, stepUpState, unlockPolicyView, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
   displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
@@ -73,6 +73,8 @@ export interface VaultView {
   setupCode: { owed: boolean; command: string; where: string }
   /** How many prompts the device check / the enrolment raise (presence.ts `PRESENCE_GESTURES`) — the page states these numbers, never its own. */
   gestures: { probe: number; enroll: number }
+  /** Owner decision 2026-10-02: what an unlock asks besides the gesture, and whether the NEXT one owes the code. */
+  unlockPolicy: { mode: 'always' | 'hello-only' | 'daily'; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
@@ -139,6 +141,7 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     recoveryTodo: s.recoveryTodo ?? null,
     gates: Object.fromEntries(Object.entries(VAULT_ACTION_ROWS).map(([k, r]) => [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }])),
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
+    unlockPolicy: unlockPolicyView(stored),
     setupCode: {
       owed: setupCodeOwed(Boolean(stored?.stepup), { session }),
       command: setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR),

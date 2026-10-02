@@ -36,6 +36,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
+    _unlockWindowAnchorMs: 'a timestamp (ms) of the last gesture+code unlock — the per-day window; no key material',
     _vaultDir: 'a path', _role: 'holder|client', _lang: 'a language reader', _io: 'the IO adapter', _fs: 'the fs adapter',
     _scryptForTests: 'KDF cost parameters', _override: 'test protectors', _autoInit: 'test init policy',
     _opened: 'THE one place the human DEK lives — in the service process only (role holder), zeroed by lockVault; §5.2 makes this the rule, not a breach',

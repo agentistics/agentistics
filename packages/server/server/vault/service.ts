@@ -30,7 +30,7 @@ import {
   type Lang, type OpenState, type Platform, type Protector, type ProtectorId, type ProtectorIo,
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
-  helloProtector, fido2Protector, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
+  helloProtector, fido2Protector, effectiveUnlockPolicy, unlockNeedsCode, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
   presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
@@ -459,6 +459,19 @@ function announce(lockedBy?: LockedBy): void { try { _onState(lockedBy) } catch 
  * zeroed. A wrong code zeroes it at once.
  */
 export const PENDING_STEPUP_MS = 120_000
+
+/**
+ * The per-day unlock window (owner decision 2026-10-02, unlock-policy.ts): when the last gesture+code
+ * unlock happened. MEMORY ONLY — a restart or reboot starts with none — and dropped on recovery, reset,
+ * a protector change and any failed code. Holds a timestamp, never key material.
+ */
+let _unlockWindowAnchorMs: number | null = null
+/** A gesture+code unlock just completed: the window starts now. */
+export function noteCodeUnlock(): void { _unlockWindowAnchorMs = _now() }
+/** Recovery, reset, a protector change, a failed code: the next unlock owes the code again. */
+export function dropUnlockWindow(): void { _unlockWindowAnchorMs = null }
+export function unlockWindowAnchor(): number | null { return _unlockWindowAnchorMs }
+
 let _pending: { opened: Opened; expiresMs: number; timer: ReturnType<typeof setTimeout> | null } | null = null
 
 /** §4.3: opened with the 24 words; until these three are re-done, every other gated action refuses. */
@@ -547,7 +560,7 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
   abandonPending()
   const s = await tryOpen(passphrase, { presence: true })
   if (s.state === 'open') {
-    if (hasPresence(s.vault) && s.vault.stepup) {
+    if (hasPresence(s.vault) && s.vault.stepup && unlockNeedsCode(effectiveUnlockPolicy(s.vault.unlockPolicy), _unlockWindowAnchorMs, _now())) {
       const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
       const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
       ;(timer as { unref?: () => void }).unref?.()
@@ -558,6 +571,8 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
     _lockedBy = 'start'
     await finishPendingRekey(s.kid)
     void runMigrations()
+    // The gesture alone opened it under the unlock policy ("Hello only", or inside the per-day window).
+    if (hasPresence(s.vault) && s.vault.stepup) vaultAudit({ type: 'vault.unlock' })
     return { ok: true, state: 'open' }
   }
   _last = s
@@ -614,6 +629,7 @@ export async function openWithRecovery(entropy: Uint8Array): Promise<{ ok: true 
   if (_opened) lockVault('user')
   adopt({ state: 'open', kid: vault.kid, dek: u.dek, vault, via: 'recovery' })
   await finishPendingRekey(vault.kid)
+  dropUnlockWindow()
   _recoveryTodo = new Set<RecoveryStep>([...(hasPresence(vault) || vault.requirePresence ? ['presence' as const] : []), 'authenticator', 'recovery'])
   vaultAudit({ type: 'vault.recovered' })
   return { ok: true }
@@ -910,7 +926,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.unlock'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {
@@ -981,6 +997,7 @@ export function __resetVaultForTests(opts: {
   protectors?: Protector[]; autoInit?: { strict: Protector; delaysMs: number[] } | { candidates: Protector[] }
 } = {}): void {
   lockVault()
+  _unlockWindowAnchorMs = null // a fresh service: no per-day window survives a restart
   _last = null
   _lastAttemptMs = 0
   _lastChecked = []

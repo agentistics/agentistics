@@ -18,7 +18,7 @@ import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from 
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
   authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanCode, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
-  loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
+  loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, UNLOCK_MODES, type UnlockMode, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   askWords, howConfirms, howNow, presenceProbe, primarySection, sectionBadge, wizardPlan,
   type BadgeKey, type SectionId, type Tone,
@@ -48,7 +48,7 @@ export default function VaultSettings() {
   const [now, setNow] = useState(() => Date.now())
   const [creds, setCreds] = useState<{ credentials: Credential[]; recoveryCreatedAt: string | null } | null>(null)
   const [wizard, setWizard] = useState<WizardStep[] | null>(null)
-  const [dialog, setDialog] = useState<null | { kind: 'lock' | 'autolock' | 'presence-off'; minutes?: number }>(null)
+  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number } }>(null)
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(UPGRADE_DISMISS_KEY) === '1' } catch { return false } })
   const busyUi = wizard !== null || dialog !== null
 
@@ -134,8 +134,9 @@ export default function VaultSettings() {
   }
 
   // An action's proofs: the icons say what it asks; a dialog collects the code (and warns about the gesture).
-  const ask = (kind: 'lock' | 'autolock' | 'presence-off', minutes?: number) => {
-    const action = kind === 'lock' ? 'lock' : kind === 'autolock' ? 'set-auto-lock' : 'disable-presence'
+  const ask = (kind: GateKind, minutes?: number, policy?: { mode: UnlockMode; hours: number }) => {
+    const action = gateActionOf(kind)
+    if (kind === 'unlock-policy') { setDialog({ kind, policy }); return } // always the code AND the gesture
     const gate = g(action)
     if (!needsTypedCode(gate, grantAlive()) && !gate.gesture) {
       // A live grant covers the code and there is no gesture to raise: just do it; if the server
@@ -290,6 +291,12 @@ export default function VaultSettings() {
             <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} tipText={tip('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
           </Sec>
 
+          {view.presence && view.authenticator && (
+            <Sec icon={FingerprintPattern} title={t('sec_unlock')} desc={vtf('sec_unlock_d', lang, { presence: presWordOf(view, lang) })} badge={{ tone: 'ok', text: vt(unlockModeKey(view.unlockPolicy?.mode ?? 'daily'), lang).replace('{presence}', presWordOf(view, lang)) }}>
+              <UnlockPolicyRow view={view} lang={lang} isMobile={isMobile} gate={g('set-unlock-policy')} btn={btn} onSave={p => ask('unlock-policy', undefined, p)} />
+            </Sec>
+          )}
+
           <Sec icon={ShieldCheck} title={t('sec_hardening')} desc={t('sec_memory_d')} badge={badgeOf('memory')}>
             <HardeningBlock view={view} lang={lang} />
           </Sec>
@@ -352,7 +359,7 @@ export default function VaultSettings() {
 
       {dialog && (
         <GateDialog
-          lang={lang} view={view} isMobile={isMobile} kind={dialog.kind} minutes={dialog.minutes}
+          lang={lang} view={view} isMobile={isMobile} kind={dialog.kind} minutes={dialog.minutes} policy={dialog.policy}
           onCancel={() => setDialog(null)} onDone={() => { setDialog(null); void load() }}
         />
       )}
@@ -408,7 +415,8 @@ function Sec({ icon: Icon, title, desc, badge, children, last }: {
 function HowStrip({ view, lang, isMobile, minutes, presWord }: { view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; minutes: number; presWord: string }) {
   const now = howNow(view)
   const how = howConfirms(view)
-  const confirmBody = how === 'both' ? vtf('how2_both', lang, { presence: presWord }) : how === 'code' ? vt('how2_code', lang) : vt('how2_nothing', lang)
+  const s2 = howStep2(view)
+  const confirmBody = vtf(s2.key, lang, { presence: presWord, hours: s2.hours ?? 12 })
   const steps: { icons: React.ReactNode; title: string; body: string }[] = [
     { icons: <Lock size={16} />, title: vt('how1_t', lang), body: vt('how1_b', lang) },
     {
@@ -611,22 +619,74 @@ function HardeningBlock({ view, lang }: { view: VaultView; lang: 'en' | 'pt' }) 
 
 // ── a gated action: the dialog collects the code and warns about the gesture ─────────────────────
 
-function GateDialog({ lang, view, isMobile, kind, minutes, onCancel, onDone }: {
-  lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: 'lock' | 'autolock' | 'presence-off'; minutes?: number
+type GateKind = 'lock' | 'autolock' | 'presence-off' | 'unlock-policy'
+const gateActionOf = (k: GateKind): string => k === 'lock' ? 'lock' : k === 'autolock' ? 'set-auto-lock' : k === 'unlock-policy' ? 'set-unlock-policy' : 'disable-presence'
+const presWordOf = (v: VaultView, lang: 'en' | 'pt') => vt(presenceKey(v.wrappers), lang)
+const unlockModeKey = (m: UnlockMode): VaultKey => m === 'always' ? 'unlock_always' : m === 'hello-only' ? 'unlock_helloOnly' : 'unlock_daily'
+
+/** Owner decision 2026-10-02: the three unlock modes, the per-day window's hours, and what the NEXT unlock asks. */
+function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
+  view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties
+  onSave: (p: { mode: UnlockMode; hours: number }) => void
+}) {
+  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 12, chosen: false, codeNextUnlock: true, windowEndsAt: null }
+  const pres = presWordOf(view, lang)
+  const [mode, setMode] = useState<UnlockMode>(cur.mode)
+  const [hoursText, setHoursText] = useState(String(cur.hours))
+  useEffect(() => { setMode(cur.mode); setHoursText(String(cur.hours)) }, [cur.mode, cur.hours])
+  const hours = parseUnlockHours(hoursText)
+  const valid = mode !== 'daily' || hours !== null
+  const changed = mode !== cur.mode || (mode === 'daily' && hours !== cur.hours)
+  const save = () => { if (valid && changed) onSave({ mode, hours: mode === 'daily' ? hours! : cur.hours }) }
+  const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleTimeString(lang === 'pt' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) } catch { return iso } }
+  return (
+    <form onSubmit={e => { e.preventDefault(); save() }}>
+      <div role="radiogroup" aria-label={vt('sec_unlock', lang)} style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+        {UNLOCK_MODES.map(m => (
+          <label key={m} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: isMobile ? '10px 12px' : '8px 10px', minHeight: isMobile ? 44 : undefined, border: '1px solid ' + (mode === m ? 'var(--anthropic-orange)' : 'var(--border)'), borderRadius: 10 }}>
+            <input type="radio" name="unlock-mode" checked={mode === m} onChange={() => setMode(m)} style={{ marginTop: 3 }} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{vt(unlockModeKey(m), lang).replace('{presence}', pres)}</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{vt(`${unlockModeKey(m)}_d` as VaultKey, lang).replace(/\{presence\}/g, pres)}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {mode === 'daily' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          <span>{vt('unlock_hours', lang)}</span>
+          <input value={hoursText} onChange={e => setHoursText(e.target.value.replace(/\D/g, '').slice(0, 2))} inputMode="numeric"
+            style={{ ...input, width: 64, marginBottom: 0, letterSpacing: 'normal', textAlign: 'right', minHeight: isMobile ? 44 : undefined }} />
+        </label>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+        <button type="submit" style={btn} disabled={!valid || !changed}>{vt('unlock_save', lang)} <Gate code={gate.code} gesture={gate.gesture} lang={lang} /></button>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+          {cur.windowEndsAt && !cur.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(cur.windowEndsAt), presence: pres }) : cur.codeNextUnlock && cur.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''}
+        </span>
+      </div>
+      {cur.mode === 'daily' && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 6 }}>{vt('unlock_reset', lang)}</div>}
+    </form>
+  )
+}
+
+function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onDone }: {
+  lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }
   onCancel: () => void; onDone: () => void
 }) {
-  const action = kind === 'lock' ? 'lock' : kind === 'autolock' ? 'set-auto-lock' : 'disable-presence'
+  const action = gateActionOf(kind)
   const gate = gateFor(view, action)
   const wantsCode = needsTypedCode(gate, grantAlive())
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : vt('pres_offConfirm', lang)
+  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : kind === 'unlock-policy' ? vt('sec_unlock', lang) : vt('pres_offConfirm', lang)
   const submit = async () => {
     if (busy || (wantsCode && !codeComplete(code))) return
     setBusy(true); setError(null)
     const c = wantsCode ? code : undefined
-    const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c) : await presenceDisable(c)
+    const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c)
+      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c) : await presenceDisable(c)
     setBusy(false)
     if (r.ok) { onDone(); return }
     setError(r.sentence || vt('network', lang)); setCode('')

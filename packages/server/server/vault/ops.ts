@@ -37,7 +37,7 @@ import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import {
   adoptCreated, chooseAutoProtector, createVault, ensureVaultOpen, lockVault, protectorById, protectorLabel,
   refused, runMigrations, sealBytes, sentence, unlockWithGesture, vaultAudit, vaultDir, vaultExists, vaultLang,
-  vaultRole, vaultStatus, withSecret, noteVaultActivity,
+  vaultRole, vaultStatus, withSecret, noteVaultActivity, dropUnlockWindow,
 } from './service'
 import {
   addPassphraseAllowed, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
@@ -379,6 +379,7 @@ async function opRekey(h: Record<string, unknown>): Promise<OpResult> {
     if (!k.ok) return { reply: refused('rekey-failed', k.reason) }
     r.o.vault = k.vault
     vaultAudit({ type: 'vault.rekey', protector: id })
+    dropUnlockWindow() // a protector change
     return { reply: { ok: true, protectorLabel: protectorLabel(id) } }
   })
 }
@@ -406,6 +407,7 @@ async function opReset(h: Record<string, unknown>): Promise<OpResult> {
     lockVault()
     await destroyVault(realProtectorIo(), vaultDir(), protectors)
     vaultAudit({ type: 'vault.reset' })
+    dropUnlockWindow()
     return { reply: { ok: true } }
   })
 }

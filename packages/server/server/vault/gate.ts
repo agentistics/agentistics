@@ -7,8 +7,13 @@
  * choosing a row for the new action:
  *
  *   action                                    code  gesture  grant reuse
- *   unlock                                    yes   yes      —            (two-phase, completeUnlock)
+ *   unlock                                    *     yes      —            (two-phase, completeUnlock)
+ *     * per the UNLOCK POLICY (unlock-policy.ts, owner decision 2026-10-02): 'always' asks the code every
+ *       time; 'hello-only' never at unlock (every other row below still asks it); 'daily' (the default)
+ *       asks it on the first unlock after the service starts and once the N-hour window, anchored to the
+ *       last gesture+code unlock and held in memory only, has expired.
  *   list / lock (HTTP) / set-auto-lock        yes   no       5-min 'read' grant
+ *   set-unlock-policy                         yes   yes      none — fresh each time
  *   lock-local (TTY, auto-lock, SIGTERM)      no    no       —            (reducing exposure is never gated)
  *   change-protector / rekey / enroll-presence / disable-presence / reset / rotate-recovery /
  *   enroll-runner / rotate-runner / enroll-authenticator / add-passphrase
@@ -27,13 +32,13 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
   type Protector, type ProtectorId, type StepUpState, type VaultJson,
 } from '@agentistics/vault'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
-  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus,
+  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -42,7 +47,7 @@ import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markComm
 // ── the table ────────────────────────────────────────────────────────────────────────────────
 
 export type VaultAction =
-  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock'
+  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock' | 'set-unlock-policy'
   | 'change-protector' | 'rekey' | 'enroll-presence' | 'disable-presence' | 'reset' | 'rotate-recovery'
   | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase' | 'create-recovery'
 
@@ -54,6 +59,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   list: { code: true, gesture: false, grant: 'read' },
   lock: { code: true, gesture: false, grant: 'read' },
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
+  // Owner decision 2026-10-02: loosening what an unlock asks is an escalation — code AND gesture, fresh.
+  'set-unlock-policy': { code: true, gesture: true, grant: null },
   'lock-local': { code: false, gesture: false, grant: null },
   'change-protector': { code: true, gesture: true, grant: null },
   rekey: { code: true, gesture: true, grant: null },
@@ -168,7 +175,10 @@ async function checkCodeWith(dek: Uint8Array, kid: string, code: string): Promis
   try { v = judgeCode(o.plaintext, code, _now(), before) } finally { o.plaintext.fill(0) }
   await saveState(v.state)
   if (v.ok) return { ok: true }
-  if (v.code !== 'stepup-paused') vaultAudit({ type: v.state.frozen ? 'vault.stepup-frozen' : 'vault.stepup-failed' })
+  if (v.code !== 'stepup-paused') {
+    vaultAudit({ type: v.state.frozen ? 'vault.stepup-frozen' : 'vault.stepup-failed' })
+    dropUnlockWindow() // any failed code: the next unlock owes the code again (unlock policy)
+  }
   if (v.state.frozen) lockVault('stepup-frozen')
   return stepupRefusal(v)
 }
@@ -293,6 +303,7 @@ export async function completeUnlock(code: string): Promise<{ ok: true } | Refus
     return c
   }
   adoptPending()
+  noteCodeUnlock() // the per-day window is anchored HERE, to a gesture+code unlock
   vaultAudit({ type: 'vault.unlock' })
   return { ok: true }
 }
@@ -620,6 +631,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
     if (!k.ok) return k
     recoveryStepDone('presence')
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
+    dropUnlockWindow() // a protector change
     vaultAudit({ type: 'vault.rekey', protector: id })
     return { ok: true, removed: k.removed, recoveryOwed: afterPresence(o.vault) }
   }
@@ -830,6 +842,7 @@ export async function disablePresence(ctx: GateContext, words?: string): Promise
   o.vault = next
   for (const r of gone) await protectorById(r.type)?.remove(r, o.kid).catch(() => {})
   vaultAudit({ type: 'vault.disable-presence', protector: c.protector.id })
+  dropUnlockWindow() // a protector change
   return { ok: true, replacedBy: c.protector.id }
 }
 
@@ -860,6 +873,37 @@ export async function setAutoLockMinutes(minutes: unknown, ctx: GateContext): Pr
   setAutoLockPeriod(m)
   vaultAudit({ type: 'vault.set-auto-lock' })
   return g
+}
+
+/**
+ * Owner decision 2026-10-02: choose what an unlock asks besides the gesture (unlock-policy.ts). Gated
+ * by the code AND the gesture. The per-day window already running is kept: it is anchored to a real
+ * gesture+code unlock, and a shorter `hours` applies to it at once.
+ */
+export async function setUnlockPolicy(policy: unknown, ctx: GateContext): Promise<GateResult> {
+  const p = parseUnlockPolicy(policy)
+  if (p === null) return refused('bad-request', vaultLang() === 'pt' ? 'Escolha um dos três modos; a janela diária vai de 1 a 24 horas.' : 'Pick one of the three modes; the daily window is 1 to 24 hours.')
+  const g = await requireVaultStepUp('set-unlock-policy', ctx)
+  if (!g.ok) return g
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const vault: VaultJson = { ...o.vault, v: 2, unlockPolicy: p }
+  await writeVaultJson(vault)
+  o.vault = vault
+  vaultAudit({ type: 'vault.set-unlock-policy' })
+  return g
+}
+
+/** What the screen states about the policy in force: the mode, the hours, and whether the NEXT unlock owes the code. */
+export function unlockPolicyView(v: VaultJson | null): { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null } {
+  const p = effectiveUnlockPolicy(v?.unlockPolicy)
+  const anchor = unlockWindowAnchor()
+  const ends = unlockWindowEndsMs(p, anchor)
+  return {
+    mode: p.mode, hours: p.hours, chosen: Boolean(v?.unlockPolicy),
+    codeNextUnlock: unlockNeedsCode(p, anchor, _now()),
+    windowEndsAt: ends !== null && ends > _now() ? new Date(ends).toISOString() : null,
+  }
 }
 
 /** §4.3: a passphrase wrapper only where the vault has no protector of its own. */

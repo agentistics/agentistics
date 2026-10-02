@@ -123,6 +123,11 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, code: codeOf(b) }))
   }
+  if (path === '/api/vault/unlock-policy' && req.method === 'POST') {
+    // Owner decision 2026-10-02: changing what an unlock asks costs the code AND the gesture, fresh.
+    const b = await body()
+    return reply(await gate.setUnlockPolicy({ mode: b.mode, hours: b.hours }, { grant, session, code: codeOf(b) }))
+  }
   if (path === '/api/vault/activity' && req.method === 'POST') {
     // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
     noteVaultActivity()

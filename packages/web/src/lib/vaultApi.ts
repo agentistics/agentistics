@@ -45,7 +45,14 @@ export interface VaultView {
   setupCode?: { owed: boolean; command: string; where: string }
   /** How many prompts the device check / the enrolment raise — stated by the server. Absent on an older one. */
   gestures?: { probe: number; enroll: number }
+  /** Owner decision 2026-10-02: what an unlock asks besides the gesture. Absent on an older server. */
+  unlockPolicy?: UnlockPolicyView
 }
+export type UnlockMode = 'always' | 'hello-only' | 'daily'
+export interface UnlockPolicyView { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
+export const UNLOCK_MODES: readonly UnlockMode[] = ['daily', 'always', 'hello-only']
+export const UNLOCK_HOURS_MIN = 1
+export const UNLOCK_HOURS_MAX = 24
 
 /** A refusal, exactly as the server words it (already in the user's language). */
 export interface Refusal { ok: false; code: string; sentence: string; status: number }
@@ -106,6 +113,27 @@ export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ?
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock').then(r => reply<{ state: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
+/** Changing what an unlock asks: the code AND the gesture, fresh (the server's `set-unlock-policy` row). */
+export const setUnlockPolicy = (mode: UnlockMode, hours: number, code?: string) => call('POST', '/api/vault/unlock-policy', { mode, hours, ...(code ? { code } : {}) }).then(r => reply(r))
+/** PURE. The hours as typed: whole, 1–24, else null. */
+export function parseUnlockHours(s: string): number | null {
+  const t = s.trim()
+  if (!/^\d{1,2}$/.test(t)) return null
+  const n = Number(t)
+  return n >= UNLOCK_HOURS_MIN && n <= UNLOCK_HOURS_MAX ? n : null
+}
+/**
+ * PURE. The words for step 2 of "how your vault works" — the CURRENT unlock mode, when presence and
+ * the authenticator are both on (otherwise the old three answers stand).
+ */
+export function howStep2(v: Pick<VaultView, 'authenticator' | 'presence' | 'unlockPolicy'>): { key: 'how2_both' | 'how2_code' | 'how2_nothing' | 'how2_always' | 'how2_helloOnly' | 'how2_daily'; hours?: number } {
+  const how = howConfirms(v)
+  if (how !== 'both' || !v.authenticator || !v.presence) return { key: how === 'both' ? 'how2_both' : how === 'code' ? 'how2_code' : 'how2_nothing' }
+  const p = v.unlockPolicy ?? { mode: 'daily' as const, hours: 12 }
+  if (p.mode === 'always') return { key: 'how2_always' }
+  if (p.mode === 'hello-only') return { key: 'how2_helloOnly' }
+  return { key: 'how2_daily', hours: p.hours }
+}
 export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
 export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
 
