@@ -19,7 +19,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
 import {
-  deriveKek, describeThrown, kindOf, openDek, parseBridgeError, presenceReason, sealDek, zero,
+  deriveKek, describeThrown, kindOf, logBridge, openDek, parseBridgeError, presenceReason, sealDek, zero,
   type PresenceCode,
 } from './presence'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
@@ -34,35 +34,41 @@ export const HELLO_TIMEOUT_MS = 60_000
 /** The fixed script. Carries no payload; exported so a test can assert it. */
 export const HELLO_SCRIPT =
   '$ErrorActionPreference="Stop"; ' +
-  'function Fail($c,$d){ [Console]::Error.Write("PRESENCE-ERROR $c $d"); exit 3 } ' +
+  'function Fail($c,$d,$r){ [Console]::Error.Write("PRESENCE-ERROR $c $d $r"); exit 3 } ' +
   'try { ' +
   'try { Add-Type -Namespace Ag -Name W -MemberDefinition \'[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);\'; [void][Ag.W]::SetForegroundWindow([Ag.W]::GetConsoleWindow()) } catch {} ' +
   'Add-Type -AssemblyName System.Runtime.WindowsRuntime; ' +
   '$null=[Windows.Security.Credentials.KeyCredentialManager,Windows.Security.Credentials,ContentType=WindowsRuntime]; ' +
-  '$null=[Windows.Security.Cryptography.CryptographicBuffer,Windows.Security.Cryptography,ContentType=WindowsRuntime]; ' +
+  // IBuffer: PowerShell 5.1 cannot cast a WinRT IBuffer (a bare System.__ComObject) to the interface —
+  // that was the PSInvalidCastException. So no WinRT-made buffer is ever handed to the PS binder: the
+  // challenge goes IN as a managed WindowsRuntimeBuffer (AsBuffer), and the signature comes OUT through
+  // a REFLECTED ToArray(IBuffer), where the CLR performs the QueryInterface itself.
+  '$IB=[Windows.Storage.Streams.IBuffer,Windows.Storage.Streams,ContentType=WindowsRuntime]; ' +
+  '$toArr=[System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions].GetMethod("ToArray",[type[]]@($IB)); ' +
   '$ops=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 }; ' +
   '$asOp=$ops | Where-Object { $_.GetParameters()[0].ParameterType.Name -match "^IAsyncOperation.1$" } | Select-Object -First 1; ' +
   '$asAct=$ops | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq "IAsyncAction" } | Select-Object -First 1; ' +
-  'function Wait($t){ if (-not $t.Wait(60000)) { Fail "timeout" "" } } ' +
+  'function Wait($t){ if (-not $t.Wait(60000)) { Fail "timeout" "" "" } } ' +
   'function AwaitOp($op,$type){ $t=$asOp.MakeGenericMethod($type).Invoke($null,@($op)); Wait $t; $t.Result } ' +
   '$l=[Console]::In.ReadToEnd() -split "`n" | ForEach-Object { $_.Trim() }; ' +
   '$verb=$l[0]; $name=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($l[1])); ' +
   '$KCM=[Windows.Security.Credentials.KeyCredentialManager]; ' +
-  'if ($verb -eq "check") { if (AwaitOp ($KCM::IsSupportedAsync()) ([bool])) { [Console]::Out.Write("ok"); exit 0 } else { Fail "unavailable" "Windows Hello is not set up on this device" } } ' +
-  'if ($verb -eq "delete") { $t=$asAct.Invoke($null,@($KCM::DeleteAsync($name))); Wait $t; [Console]::Out.Write("ok"); exit 0 } ' +
+  'if ($verb -eq "check") { if (AwaitOp ($KCM::IsSupportedAsync()) ([bool])) { [Console]::Out.Write("ok"); exit 0 } else { Fail "unavailable" "hello-not-set-up" "" } } ' +
+  // NTE_NO_KEY (0x8009000D): the credential is already gone — a delete is done, not failed.
+  'if ($verb -eq "delete") { try { $t=$asAct.Invoke($null,@($KCM::DeleteAsync($name))); Wait $t } catch { $x=$_.Exception; while ($x.InnerException) { $x=$x.InnerException }; if ($x.HResult -ne 0x8009000D) { throw } }; [Console]::Out.Write("ok"); exit 0 } ' +
   'if ($verb -eq "create") { ' +
   '$r=AwaitOp ($KCM::RequestCreateAsync($name,[Windows.Security.Credentials.KeyCredentialCreationOption]::FailIfExists)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]); ' +
-  'switch ([string]$r.Status) { "Success" { [Console]::Out.Write("ok"); exit 0 } "UserCanceled" { Fail "cancelled" "" } "CredentialAlreadyExists" { Fail "unavailable" "a credential with this name already exists" } default { Fail "unavailable" ("Windows Hello answered " + $r.Status) } } } ' +
+  'switch ([string]$r.Status) { "Success" { [Console]::Out.Write("ok"); exit 0 } "UserCanceled" { Fail "cancelled" "" "" } "CredentialAlreadyExists" { Fail "unavailable" "credential-exists" "" } default { Fail "unavailable" "hello-status" ([string]$r.Status) } } } ' +
   'if ($verb -eq "sign") { ' +
   '$o=AwaitOp ($KCM::OpenAsync($name)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]); ' +
-  'if ([string]$o.Status -eq "NotFound") { Fail "lost" "the credential was deleted" } ' +
-  'if ([string]$o.Status -ne "Success") { Fail "unavailable" ("Windows Hello answered " + $o.Status) } ' +
-  '$buf=[Windows.Security.Cryptography.CryptographicBuffer]::CreateFromByteArray([Convert]::FromBase64String($l[2])); ' +
+  'if ([string]$o.Status -eq "NotFound") { Fail "lost" "credential-deleted" "" } ' +
+  'if ([string]$o.Status -ne "Success") { Fail "unavailable" "hello-status" ([string]$o.Status) } ' +
+  '$buf=[System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]::AsBuffer([Convert]::FromBase64String($l[2])); ' +
   '$s=AwaitOp ($o.Credential.RequestSignAsync($buf)) ([Windows.Security.Credentials.KeyCredentialOperationResult]); ' +
-  'switch ([string]$s.Status) { "Success" { $b=$null; [Windows.Security.Cryptography.CryptographicBuffer]::CopyToByteArray($s.Result,[ref]$b); [Console]::Out.Write([Convert]::ToBase64String($b)); exit 0 } ' +
-  '"UserCanceled" { Fail "cancelled" "" } "UserPrefersPassword" { Fail "cancelled" "" } "NotFound" { Fail "lost" "the credential was deleted" } default { Fail "unavailable" ("Windows Hello answered " + $s.Status) } } } ' +
-  'Fail "unavailable" "unknown verb" } ' +
-  'catch { $x=$_.Exception; if ($x.InnerException) { $x=$x.InnerException }; Fail "unavailable" $x.GetType().FullName }'
+  'switch ([string]$s.Status) { "Success" { $b=[byte[]]$toArr.Invoke($null,[object[]]@($s.Result)); [Console]::Out.Write([Convert]::ToBase64String($b)); exit 0 } ' +
+  '"UserCanceled" { Fail "cancelled" "" "" } "UserPrefersPassword" { Fail "cancelled" "" "" } "NotFound" { Fail "lost" "credential-deleted" "" } default { Fail "unavailable" "hello-status" ([string]$s.Status) } } } ' +
+  'Fail "unavailable" "bad-request" "" } ' +
+  'catch { $x=$_.Exception; while ($x.InnerException) { $x=$x.InnerException }; Fail "unavailable" "bridge-failed" ($x.GetType().FullName + " 0x" + $x.HResult.ToString("X8")) }'
 
 export const HELLO_ARGS = ['-NoProfile', '-NonInteractive', '-Command', HELLO_SCRIPT] as const
 
@@ -71,6 +77,8 @@ export interface HelloOptions {
   vaultDir: string
   wsl: boolean
   systemRoot?: string
+  /** Where the bridge's RAW words go (a .NET type, a WinRT status): the log, never a sentence. */
+  log?: (line: string) => void
 }
 
 export type HelloVerb = 'check' | 'create' | 'sign' | 'delete'
@@ -113,8 +121,9 @@ export function helloProtector(o: HelloOptions): Protector {
     }
     if (r.code !== 0) {
       const e = parseBridgeError(r.stderr)
+      if (e.raw) (o.log ?? logBridge)(`hello ${verb}: ${e.raw}`)
       const code: PresenceCode = e.code === 'no-hmac-secret' ? 'presence-unavailable' : e.code
-      return { ok: false, code, reason: e.detail || `powershell.exe exited ${r.code}` }
+      return { ok: false, code, reason: e.detail }
     }
     return { ok: true, out: text(r.stdout).trim() }
   }
