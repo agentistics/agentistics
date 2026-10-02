@@ -70,8 +70,9 @@ describe('vault inventory — metadata only', () => {
 
   test('lock now drops the key, through the one gate', async () => {
     await setup()
-    expect((await requireVaultStepUp('lock')).ok).toBe(true)
-    const r = await lockVaultNow()
+    // No authenticator enrolled yet: the gate has nothing to ask (SECRETS.2 behaviour until enrolment).
+    expect((await requireVaultStepUp('lock', { session: 't' })).ok).toBe(true)
+    const r = await lockVaultNow({ session: 't' })
     expect(r.ok).toBe(true)
     lockVault()
   })

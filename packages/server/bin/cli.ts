@@ -121,7 +121,7 @@ __ENGINE_VERBS__
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
-  vault         Secrets at rest: status / init / unlock / lock / rekey / add-passphrase / reset
+  vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset
                 (every secret agentop stores is encrypted — never plain text)
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)
@@ -871,6 +871,12 @@ if (command === 'server' || command === 'start' || !command) {
   // MONGO_URL + secrets. Unlike the Docker central there is NO bundled Mongo, so an external
   // MONGO_URL (Atlas or your own mongod) is required.
   const central = args.includes('--central')
+  // This process is the agentop SERVICE — the vault's only holder (SECRETS.4 §5.2) — and claims it
+  // before anything below reads a secret (a native central's sealed env included).
+  {
+    const { becomeVaultHolder } = await import('../server/vault/service.ts')
+    becomeVaultHolder()
+  }
   if (central) {
     const envFile = await loadCentralEnv()
     process.env.AGENTISTICS_TEAM_CENTRAL = '1'

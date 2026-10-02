@@ -21,9 +21,11 @@ import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { scrubFile } from '@agentistics/vault'
 import {
-  openFromFile, pendingPlaintext, registerVaultMigrator, sealToFile, secretFs, sentence,
+  openFromFile, pendingPlaintext, registerVaultMigrator, sealToFile, secretFs, sentence, vaultRole,
 } from '../vault/service'
 import { migrateWholeFile, sealedPathFor, wholeFileMigrator } from '../vault/whole-file'
+import { SERVICE_HELD_TOKEN } from './github-api'
+export { SERVICE_HELD_TOKEN }
 
 /** The LEGACY plaintext location — only ever read to migrate it. */
 export const GITHUB_BACKUP_CONFIG_FILE = join(AGENTISTICS_DATA_DIR, 'github-backup.json')
@@ -101,6 +103,12 @@ export type GithubConfigRead =
  * answer is the vault's refusal, not the token.
  */
 export async function readGithubConfigDetailed(file = GITHUB_BACKUP_CONFIG_FILE): Promise<GithubConfigRead> {
+  if (vaultRole() !== 'holder' && file === GITHUB_BACKUP_CONFIG_FILE) {
+    const r = await (await import('../vault/client')).remoteGithubConfig()
+    if (r.state !== 'ok') return r
+    const config = parseConfig(JSON.stringify({ ...r.config, token: r.hasToken ? SERVICE_HELD_TOKEN : '' }))
+    return config ? { state: 'ok', config } : { state: 'absent' }
+  }
   const sealed = sealedPathFor(file)
   let r = await openFromFile(sealed, PURPOSE, NAME)
   if (!r.ok && r.absent && existsSync(file)) {

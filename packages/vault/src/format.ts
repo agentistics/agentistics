@@ -33,15 +33,40 @@ export type HostPurpose =
   | 'envelope-key'
   | 'central-env'
 export type EnginePurpose = `engine/${string}`
-export type Purpose = HostPurpose | EnginePurpose
+/** SECRETS.4 §1.1 — the Cloud runner's own secrets, sealed ONLY under the runner scope's DEK. */
+export type RunnerPurpose = `cloud-runner/${string}`
+/** Human-scope purposes added by SECRETS.4 beside the host and engine ones. */
+export type HumanExtraPurpose = 'attachment' | 'vault/totp-seed'
+export type Purpose = HostPurpose | EnginePurpose | HumanExtraPurpose | RunnerPurpose
+
+/** SECRETS.4 §1.1: two scopes, each with its OWN data key — the separation is cryptographic. */
+export type VaultScope = 'human' | 'cloud-runner'
+export const HUMAN_EXTRA_PURPOSES: readonly HumanExtraPurpose[] = ['attachment', 'vault/totp-seed']
 
 export const HOST_PURPOSES: readonly HostPurpose[] = ['github-backup', 'central-token', 'envelope-key', 'central-env']
 
 /** PURE. Is `p` a purpose this format accepts at all? */
 export function isPurpose(p: unknown): p is Purpose {
-  if (typeof p !== 'string') return false
-  if ((HOST_PURPOSES as readonly string[]).includes(p)) return true
-  return isEnginePurpose(p)
+  return scopeOfPurpose(p) !== null
+}
+
+/** PURE. `cloud-runner/` plus a non-empty, path-free remainder. */
+export function isRunnerPurpose(p: unknown): p is RunnerPurpose {
+  return typeof p === 'string' && /^cloud-runner\/[a-z0-9][a-z0-9._-]{0,63}$/.test(p)
+}
+
+/**
+ * PURE. The CLOSED purpose → scope map (SECRETS.4 §1.1). The scope is derived from the purpose and
+ * never taken from a caller: no `cloud-runner/*` purpose exists on the human DEK and no human purpose
+ * on the runner's, so the runner can never read the human scope. `null` for an unknown purpose.
+ */
+export function scopeOfPurpose(p: unknown): VaultScope | null {
+  if (typeof p !== 'string') return null
+  if ((HOST_PURPOSES as readonly string[]).includes(p)) return 'human'
+  if ((HUMAN_EXTRA_PURPOSES as readonly string[]).includes(p)) return 'human'
+  if (isEnginePurpose(p)) return 'human'
+  if (isRunnerPurpose(p)) return 'cloud-runner'
+  return null
 }
 
 /** PURE. `engine/` plus a non-empty, path-free remainder. */

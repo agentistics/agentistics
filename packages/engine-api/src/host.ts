@@ -226,10 +226,29 @@ export type OpenResult = { ok: true; plaintext: Uint8Array } | { ok: false; code
  * atomic writes, the mode check); the host owns the key. AES-256-GCM under a per-purpose HKDF subkey
  * of the machine's data key, so a blob sealed for `engine/provider-key` cannot be opened as the
  * host's GitHub token even before the AAD check.
+ *
+ * 1.6 — `open()` returns a fresh `Uint8Array` per call and the engine MUST `fill(0)` it after use and
+ * never cache it (per-use decrypt, SECRETS.4 §5.2). The new locked causes come back as
+ * `code: 'locked'` + `lockedBy`; `VaultRefusal` is deliberately NOT widened.
  */
+export interface EngineSecretsStatus {
+  state: 'open' | 'locked' | 'uninitialized' | 'unavailable'
+  protector: string | null
+  sentence: string | null
+  /** 1.6 — why it is locked (only while `state === 'locked'`). Absent on a 1.5 host. */
+  lockedBy?: 'start' | 'auto-lock' | 'user' | 'stepup-frozen' | 'presence-lost'
+  /** 1.6 — ms until auto-lock while open; `null` when there is no auto-lock. Absent on a 1.5 host. */
+  autoLockInMs?: number | null
+}
+
 export interface EngineSecrets {
   /** Never throws. `sentence` is the refusal for any state but `open`. */
-  status(): { state: 'open' | 'locked' | 'uninitialized' | 'unavailable'; protector: string | null; sentence: string | null }
+  status(): EngineSecretsStatus
+  /**
+   * 1.6 — called on every state change; returns an unsubscribe. Absent on a 1.5 host: an engine that
+   * wants to wait for an unlock then falls back to asking `status()` when it next needs a secret.
+   */
+  onStateChange?(cb: (state: EngineSecretsStatus) => void): () => void
   /** `purpose` MUST start with `engine/` — the host refuses any other (`code: 'purpose'`). */
   seal(purpose: `engine/${string}`, name: string, plaintext: Uint8Array): Promise<SealResult>
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>

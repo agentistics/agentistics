@@ -25,7 +25,7 @@
 import { join, dirname } from 'node:path'
 import { bytesEqual } from '@agentistics/vault'
 import {
-  ensureVaultOpen, notOpenRefusal, openFromFile, refusal, sealToFile, secretFs, vaultIsOpen,
+  ensureVaultOpen, notOpenRefusal, openFromFile, refusal, sealToFile, secretFs, vaultIsOpen, vaultRole,
 } from './service'
 
 export const TOKENS_PURPOSE = 'central-token'
@@ -171,9 +171,19 @@ export async function stripAndSealTokens(prefsFile: string, next: Raw, previous:
   for (const id of Object.keys(desired)) tombstones.delete(id)
   const needsWrite = Object.keys(desired).length > 0 || mapExists
 
+  // SECRETS.4 §5.2: a process that is not the service never opens the vault to read the old map
+  // back — the whole token half of this write is done BY the service (`prefs-tokens` op), which
+  // seals, verifies and returns the object with every token removed.
+  let serviceDown = false
+  if (needsWrite && vaultRole() !== 'holder') {
+    const remote = await (await import('./client')).remotePrefsTokens(prefsFile, next, previous)
+    if (remote) return remote
+    serviceDown = true
+  }
+
   if (needsWrite) {
     // A vault is CREATED here only to seal a token; merely keeping an existing map never creates one.
-    const opened = vaultIsOpen() ? true : (await ensureVaultOpen({ create: Object.keys(desired).length > 0, migrate: false })) !== null
+    const opened = serviceDown ? false : vaultIsOpen() ? true : (await ensureVaultOpen({ create: Object.keys(desired).length > 0, migrate: false })) !== null
     if (!opened) {
       // Tokens an EARLIER version already left on disk in plain text are not new: refusing every
       // preferences write over them would break the language toggle on a machine with no protector.
@@ -181,7 +191,7 @@ export async function stripAndSealTokens(prefsFile: string, next: Raw, previous:
       // only a NEW or CHANGED token is refused — Agentistics never writes a new plaintext secret.
       const onDisk = plaintextValues(previous)
       const fresh = Object.values(desired).filter(v => !onDisk.has(v))
-      if (fresh.length > 0) throw await notOpenRefusal()
+      if (fresh.length > 0) throw serviceDown ? refusal('service-down') : await notOpenRefusal()
       if (Object.keys(desired).length > 0) {
         const out: Raw = { ...next }
         if (tombstones.size > 0) out[TOMBSTONES_KEY] = [...tombstones].sort()

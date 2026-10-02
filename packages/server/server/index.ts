@@ -1,5 +1,7 @@
 // embeddedDist is loaded inside server/sse.ts (conditional on SERVE_STATIC=1)
 
+// FIRST: this process is the vault's holder (SECRETS.4 §5.2) before any module below reads a secret.
+import './vault/holder'
 import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
@@ -1038,20 +1040,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     // Settings → Vault. `capability-guard.ts` (`/api/vault`, localShell) has already refused these on
     // an exposed profile; a central holds no per-machine vault of its own to show, so it answers 404.
-    // READ-ONLY metadata plus one action (lock now, behind `requireVaultStepUp`). No value ever.
+    // The routes live in `vault/http.ts`; each is a door onto `vault/gate.ts`, which decides what an
+    // action asks (code / gesture / grant). No value ever leaves — only metadata, and the two
+    // show-once secrets of an enrolment (`no-store`).
     if (url.pathname === '/api/vault' || url.pathname.startsWith('/api/vault/')) {
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       try {
-        const { readVaultView, lockVaultNow } = await import('./vault/inventory')
-        if (url.pathname === '/api/vault' && req.method === 'GET') {
-          return new Response(JSON.stringify(await readVaultView()), { headers: json })
-        }
-        if (url.pathname === '/api/vault/lock' && req.method === 'POST') {
-          const r = await lockVaultNow()
-          return new Response(JSON.stringify(r.ok ? { ok: true, vault: await readVaultView() } : { error: r.error }), { status: r.ok ? 200 : 403, headers: json })
-        }
-        return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+        const { handleVaultHttp } = await import('./vault/http')
+        const { readSessionCookie } = await import('./auth')
+        // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
+        // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
+        // along on a forged request.
+        const res = await handleVaultHttp(req, url, { cors: CORS_HEADERS, session: readSessionCookie(req) ?? 'local', origins: { allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC } })
+        return res ?? new Response('Not found', { status: 404, headers: CORS_HEADERS })
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)

@@ -23,14 +23,14 @@
  * `decideMigration` is the table, PURE. `migrateFile` runs it over `SecretFs`.
  */
 import { bytesEqual } from './format'
-import type { OpenOutcome } from './seal'
+import type { OpenFailure, OpenOutcome } from './seal'
 import { SCRUB_SUFFIX, TMP_MARK, baseOf, dirOf, finishScrub, scrubFile, writePrivateAtomic, type SecretFs } from './atomic'
 
 export type SealedFinding =
   | { state: 'absent' }
   | { state: 'equal' }
   | { state: 'differs' }
-  | { state: 'fails'; code: 'tampered' | 'wrong-machine'; kid?: string }
+  | { state: 'fails'; code: OpenFailure; kid?: string }
 
 export type MigrationPlan =
   | { kind: 'nothing' }
@@ -41,7 +41,7 @@ export type MigrationPlan =
   /** the two copies differ: keep both, scrub nothing, say so */
   | { kind: 'conflict' }
   /** leave both untouched and use neither */
-  | { kind: 'refuse'; code: 'tampered' | 'wrong-machine'; kid?: string }
+  | { kind: 'refuse'; code: OpenFailure; kid?: string }
 
 /** PURE. The recovery table. */
 export function decideMigration(plainExists: boolean, sealed: SealedFinding): MigrationPlan {
@@ -80,7 +80,7 @@ export type MigrationOutcome =
   | { status: 'finished' }
   /** the two copies differ; both were kept, nothing scrubbed, still pending */
   | { status: 'conflict' }
-  | { status: 'refused'; code: 'tampered' | 'wrong-machine'; kid?: string }
+  | { status: 'refused'; code: OpenFailure; kid?: string }
   /** steps 1–2 failed; the original is untouched and retried next start */
   | { status: 'failed'; reason: string }
 
