@@ -3,15 +3,17 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apiCompatible, ENGINE_API_VERSION } from '@agentistics/engine-api'
-import { engineSecrets } from './engine-secrets'
+import { engineSecrets, notifyEngineSecretsChange, __resetEngineSecretsForTests } from './engine-secrets'
 import { __resetVaultForTests, sealBytes } from './service'
 
 const fresh = async () => join(await mkdtemp(join(tmpdir(), 'agentistics-engine-secrets-')), 'vault')
 afterAll(async () => { __resetVaultForTests({ dir: await fresh() }) })
 
 describe('engine-api 1.5 secrets', () => {
-  test('is a minor, optional bump: a 1.5 engine loads on a 1.5 host, a 1.3 engine too, not the reverse', () => {
-    expect(ENGINE_API_VERSION).toBe('1.5.0')
+  test('is a minor, optional bump: a 1.5 engine loads on a 1.6 host, a 1.3 engine too, not the reverse', () => {
+    expect(ENGINE_API_VERSION).toBe('1.6.0')
+    expect(apiCompatible('1.6.0', '1.5.0')).toBe(true)
+    expect(apiCompatible('1.5.0', '1.6.0')).toBe(false)
     expect(apiCompatible('1.5.0', '1.3.0')).toBe(true)
     expect(apiCompatible('1.4.0', '1.5.0')).toBe(false)
   })
@@ -43,5 +45,30 @@ describe('engine-api 1.5 secrets', () => {
     // And opening the host's blob under an engine purpose fails cryptographically.
     const crafted = await s.open('engine/github-backup', 'github-backup', hostBlob)
     expect(!crafted.ok && crafted.code).toBe('tampered')
+  })
+})
+
+describe('engine-api 1.6 secrets status', () => {
+  test('a locked vault says lockedBy "start" until it has been open; subscribers get notified and can unsubscribe', async () => {
+    __resetVaultForTests({ dir: await fresh() })
+    __resetEngineSecretsForTests()
+    const s = engineSecrets()
+    const seen: string[] = []
+    const off = s.onStateChange!(st => seen.push(`${st.state}:${st.lockedBy ?? ''}`))
+    notifyEngineSecretsChange('auto-lock')
+    expect(seen.length).toBe(1)
+    off()
+    notifyEngineSecretsChange('user')
+    expect(seen.length).toBe(1)
+  })
+  test('an open vault reports autoLockInMs null and no lockedBy', async () => {
+    __resetVaultForTests({ dir: await fresh() })
+    __resetEngineSecretsForTests()
+    const s = engineSecrets()
+    await s.seal('engine/provider-key', 'x', new Uint8Array([1]))
+    const st = s.status()
+    expect(st.state).toBe('open')
+    expect(st.lockedBy).toBeUndefined()
+    expect(st.autoLockInMs).toBeNull()
   })
 })
