@@ -61,7 +61,7 @@ describe('engine-api 1.6 secrets status', () => {
     notifyEngineSecretsChange('user')
     expect(seen.length).toBe(1)
   })
-  test('an open vault reports autoLockInMs null and no lockedBy', async () => {
+  test('an open vault reports its auto-lock countdown and no lockedBy (review S5: not null — the human scope always auto-locks)', async () => {
     __resetVaultForTests({ dir: await fresh() })
     __resetEngineSecretsForTests()
     const s = engineSecrets()
@@ -69,6 +69,7 @@ describe('engine-api 1.6 secrets status', () => {
     const st = s.status()
     expect(st.state).toBe('open')
     expect(st.lockedBy).toBeUndefined()
-    expect(st.autoLockInMs).toBeNull()
+    expect(typeof st.autoLockInMs).toBe('number')
+    expect(st.autoLockInMs!).toBeGreaterThan(0)
   })
 })

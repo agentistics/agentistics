@@ -9,7 +9,7 @@
 import type { EngineSecrets, EngineSecretsStatus, OpenResult, SealResult, VaultRefusal } from '@agentistics/engine-api'
 import { VaultRefusalError, isEnginePurpose } from '@agentistics/vault'
 import type { EngineAuditEvent } from '@agentistics/engine-api'
-import { openBytes, refused, sealBytes, sentence, vaultAudit, vaultStatusSync } from './service'
+import { autoLockRemainingMs, openBytes, refused, sealBytes, sentence, setVaultStateListener, vaultAudit, vaultStatusSync } from './service'
 
 const ENGINE_CODES = new Set<VaultRefusal>(['uninitialized', 'locked', 'protector-lost', 'wrong-machine', 'tampered', 'purpose'])
 
@@ -40,7 +40,7 @@ const book = newBook()
  */
 export function engineSecretsStatus(): EngineSecretsStatus {
   const s: EngineSecretsStatus = vaultStatusSync()
-  if (s.state === 'open') { book.everOpen = true; book.lockedBy = undefined; s.autoLockInMs = null; return s }
+  if (s.state === 'open') { book.everOpen = true; book.lockedBy = undefined; s.autoLockInMs = autoLockRemainingMs(); return s }
   if (s.state === 'locked') {
     const by = book.lockedBy ?? (book.everOpen ? undefined : 'start')
     if (by) s.lockedBy = by
@@ -58,6 +58,10 @@ export function notifyEngineSecretsChange(lockedBy?: LockedBy): void {
 }
 
 export function __resetEngineSecretsForTests(): void { Object.assign(book, newBook()) }
+
+// Review S5: the vault tells this module on every open and lock (with the reason). Registered on
+// import — the engine host imports this module before an engine can subscribe.
+setVaultStateListener(by => notifyEngineSecretsChange(by))
 
 export function engineSecrets(): EngineSecrets {
   return {

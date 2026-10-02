@@ -347,3 +347,49 @@ describe('S3 — reset when the vault cannot open: allowed from the terminal, wi
     expect(!r.reply.ok && r.reply.sentence).not.toContain('passphrase')
   })
 })
+
+// ── S5: engine-api 1.6 — the engine hears every state change, with the reason ──────────────────
+
+import { engineSecrets, __resetEngineSecretsForTests } from './engine-secrets'
+import { autoLockTick, lockVault, ensureVaultOpen } from './service'
+import { requireVaultStepUp } from './gate'
+import type { EngineSecretsStatus } from '@agentistics/engine-api'
+
+describe('S5 — onStateChange / lockedBy / autoLockInMs are fed by the vault', () => {
+  async function watching(): Promise<EngineSecretsStatus[]> {
+    await enrolledVault()
+    __resetEngineSecretsForTests()
+    const seen: EngineSecretsStatus[] = []
+    engineSecrets().onStateChange!(s => { seen.push(s) })
+    return seen
+  }
+  test('while open, autoLockInMs is the real countdown (not null)', async () => {
+    await watching()
+    const s = engineSecrets().status()
+    expect(s.state).toBe('open')
+    expect(s.autoLockInMs).toBeGreaterThan(29 * 60_000)
+  })
+  test('an auto-lock reaches the subscriber as locked / auto-lock', async () => {
+    const seen = await watching()
+    T += 31 * 60_000
+    expect(autoLockTick(T)).toBe(true)
+    expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'auto-lock' })
+    expect(engineSecrets().status().lockedBy).toBe('auto-lock')
+  })
+  test('a user lock, then a re-open, are both heard', async () => {
+    const seen = await watching()
+    lockVault('user')
+    expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'user' })
+    restart() // keeps the files; the silent wrapper opens again on demand
+    __resetEngineSecretsForTests()
+    const again: EngineSecretsStatus[] = []
+    engineSecrets().onStateChange!(s => { again.push(s) })
+    expect(await ensureVaultOpen({ create: false, migrate: false })).not.toBeNull()
+    expect(again.at(-1)?.state).toBe('open')
+  })
+  test('a frozen step-up is heard as stepup-frozen', async () => {
+    const seen = await watching()
+    for (let i = 0; i < 20; i++) { T += 16 * 60_000; await requireVaultStepUp('list', { session: 'socket', code: '000000' }) }
+    expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'stepup-frozen' })
+  })
+})

@@ -440,6 +440,15 @@ let _lockedBy: LockedBy = 'start'
 export function lockedBy(): LockedBy { return _lockedBy }
 
 /**
+ * Review S5: who hears the vault change state (engine-api 1.6 `onStateChange`). Called with the REASON
+ * on every lock and with nothing on every open, so an engine waits for an unlock instead of polling and
+ * says why it is locked. A listener never breaks the vault.
+ */
+let _onState: (lockedBy?: LockedBy) => void = () => {}
+export function setVaultStateListener(fn: (lockedBy?: LockedBy) => void): void { _onState = fn }
+function announce(lockedBy?: LockedBy): void { try { _onState(lockedBy) } catch { /* never breaks the vault */ } }
+
+/**
  * §2.2: after a gesture opened the DEK, and before the authenticator code was checked, the key sits
  * HERE — not in `_opened` — so no purpose can be opened and nothing is served. At most 120 s, then
  * zeroed. A wrong code zeroes it at once.
@@ -505,6 +514,7 @@ function adopt(s: OpenState): Opened | null {
   _opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
   _migratedThisOpen = false
   startAutoLock(_opened)
+  announce()
   return _opened
 }
 
@@ -683,12 +693,14 @@ export async function unlockVault(passphrase: string): Promise<{ ok: true } | { 
 
 /** Drop the key from this process — the open one AND any pending one. */
 export function lockVault(reason: LockedBy = 'user'): void {
+  const was = _opened !== null
   if (_opened) _opened.dek.fill(0)
   _opened = null
   _last = null
   _autoClock = null
   _lockedBy = reason
   abandonPending()
+  if (was || reason === 'stepup-frozen') announce(reason)
 }
 
 function lostSentence(s: Extract<OpenState, { state: 'protector-lost' }>): string {

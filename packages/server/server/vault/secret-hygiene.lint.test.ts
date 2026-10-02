@@ -41,7 +41,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _last: 'the last open state; its DEK (if any) is the same buffer as _opened, zeroed with it',
     _lastAttemptMs: 'a time', _inflight: 'a pending open', _lastChecked: 'detection reasons in words', _initFailure: 'a reason in words',
     _hardening: 'the §5.3 hardening report (states and reasons)', _hardeningRun: 'a pending hardening report',
-    _lockedBy: 'why it is locked (a word)', _recoveryTodo: 'the re-enrolment steps owed (words)', _now: 'a clock',
+    _lockedBy: 'why it is locked (a word)', _onState: 'the state-change listener (engine-api 1.6 onStateChange; carries a reason word, never a key)', _recoveryTodo: 'the re-enrolment steps owed (words)', _now: 'a clock',
     _autoClock: 'the idle clock (times)', _autoTimer: 'a timer', _onAutoLock: 'a notifier',
     _pending: 'THE DEK between a gesture and its code (§2.2): service-only, at most 120 s, zeroed on a wrong code, on expiry and by lockVault',
     _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook',
