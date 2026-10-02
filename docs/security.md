@@ -426,13 +426,13 @@ database-at-rest question, out of scope here.
 ## 7b. Ultra secure vault — presence, an authenticator code, a recovery key
 
 §7a closes a copy of `~/.agentistics` read elsewhere. Its stated limit is that **a process running as
-you, on this machine, while the vault is open, can ask the protector for the key in silence.** The
-ultra secure vault attacks that limit. It is opt-in (a banner recommends it; `agentop vault enroll`
-turns it on) and a vault set up under §7a keeps working unchanged until you do.
+you, on this machine, can ask the protector for the key in silence.** The ultra secure vault attacks
+that limit. It is opt-in: a banner recommends it, and `agentop vault enroll` (or Settings → Vault) turns
+it on. A vault set up under §7a keeps working unchanged until you do.
 
 > ### ⚠ Keep your 24-word recovery key. There is no second copy.
-> The vault opens with **a presence device** (Windows Hello or a FIDO2 security key) **or the 24 words**.
-> **If you lose both — a reset Windows profile or a lost key, and the paper — the secrets are gone.**
+> The vault opens with **a presence device** or **the 24 words**.
+> **If you lose both (a reset Windows profile or a lost key, and the paper), the secrets are gone.**
 > Nobody can recover them: not Agentistics, not support, not a "forgot password" flow. You would
 > re-enter them (provider keys, tokens) from their original sources. The words are shown **once**.
 > Write them on paper and keep them offline. Anyone holding the words **and** this computer's disk can
@@ -442,22 +442,42 @@ turns it on) and a vault set up under §7a keeps working unchanged until you do.
 
 | Layer | What it changes |
 |---|---|
-| **Presence** (Windows Hello, or a FIDO2 security key) | The data key opens only after a human gesture. The silent OS wrapper is **removed** when you enrol, so a same-user process gets a blob, not a key. The vault is locked at every service start until you confirm. |
-| **Authenticator code** (TOTP, RFC 6238) | A gate on sensitive vault actions — unlocking, listing, locking from the dashboard, changing the protector, resetting, rotating the recovery key. A stolen dashboard session, CSRF or exposed port cannot drive them without your phone. It is a gate, never key material: nothing is derived from the code or the seed. Replayed codes are refused; 5 wrong codes pause for 30 s (doubling, capped at 15 min); 20 freeze the gate until you use the recovery key. |
-| **24-word recovery key** | Losing the phone or the presence credential is not losing the vault: `agentop vault recover` opens it, then you re-enrol and receive a **new** key (the words you just typed are treated as exposed). |
-| **Auto-lock** | The vault locks itself after 30 minutes idle (configurable 5–480; there is no "never"), on sleep where the OS reports it, and on shutdown, and the key leaves memory. A running agent turn counts as use, so a long run is not killed at minute 30. Locking from a terminal on this machine never asks for a code. |
-| **Process hardening** | Only the agentop service holds the key, and no vault socket or HTTP route returns a plaintext secret to another process: the service uses a secret on your behalf and zeroes it. On Linux/WSL the process is made non-dumpable and core dumps are disabled; on macOS ptrace-attach is denied. If that cannot be done, the vault refuses to open rather than opening unprotected. |
+| **Presence** (see *Platforms* for what is available where) | The data key opens only after a human gesture. When you enrol, the silent OS wrapper is **removed** and the vault gets a **new data key**: every sealed secret is re-sealed under it, so an earlier copy of the silent wrapper (a backup, a snapshot, a synced folder) opens nothing. After that the vault is locked at every service start until you confirm with your device **and** type your code. |
+| **Authenticator code** (TOTP, RFC 6238) | A gate on the vault's own actions, never key material: nothing is derived from the code or the seed. It applies **once you have enrolled an authenticator**. Before that, no action asks for a code. **Gated actions:** see the next table. **Replay:** a code already used is refused. **Wrong codes:** 5 pause for 30 s (doubling, capped at 15 min) and 20 freeze the gate until you use the recovery key. **The count survives a restart.** |
+| **24-word recovery key** | Losing the phone or the presence device is not losing the vault. `agentop vault recover` opens it from a terminal, and then you re-enrol and receive a **new** key (the words you just typed are treated as exposed). |
+| **Auto-lock** | The vault locks itself after 30 minutes without use (configurable 5–480; there is no "never"). Use means input on the Settings → Vault page, any `agentop vault` command, or any use of a secret, so a long agent run is not cut off at minute 30. Locking from a terminal on this machine never asks for a code. With presence **off**, auto-lock only drops the key from memory: the next use opens it again in silence. |
+| **Process hardening** | Only the agentop service holds the key, and no vault socket or HTTP route returns a stored secret to another process: the service uses a secret on your behalf and zeroes it. On Linux/WSL the service is made non-dumpable with core dumps off; on macOS ptrace-attach is denied and core dumps are off. If that cannot be done, the vault refuses to open rather than opening unprotected. |
+
+| Action | Code | Presence | Reuse |
+|---|---|---|---|
+| unlock | yes | yes (the gesture opens it; the code must follow within 120 s, and a wrong code drops the key) | — |
+| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. |
+| rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
+| lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 
 Metrics, the board and the dashboard keep working while the vault is locked; only what needs a secret
 is paused.
 
+### What a page can and cannot do
+
+- **Only the agentop dashboard on this machine can drive the vault.** Every vault request that changes
+  something must be a same-origin JSON request. A web page you happen to have open cannot send one: it
+  cannot unlock, cannot keep the vault from auto-locking, and cannot use up your wrong-code allowance.
+- **The first setup from a page needs a code from this machine.** Before any authenticator exists there
+  is nothing to ask, so Settings → Vault asks for a one-time **setup code**: 8 digits, 10 minutes, one
+  use. `agentop vault setup-code` prints it, and it is also written to the agentop log. A terminal on
+  this machine needs no setup code.
+- **The 24 words are never typed into a page.** Recovery is `agentop vault recover`, in a terminal.
+  While a recovered vault is being set up again, the steps that hand out a new key (new words, a new
+  authenticator, presence) answer **only** the terminal (`agentop vault enroll`), never the dashboard.
+
 ### What it does NOT stop
 
 **In these words:** malware running as you that can modify the agentop install (its JS, its binary,
-its systemd unit) can wait for your next legitimate gesture and take the key then — presence proves a
-human said "yes", not to *what*. A same-user process can also read a secret at the moment the service
-uses it if the OS lets it read the service's memory; the hardening closes that on Linux and macOS and
-states below where it cannot. Kernel, root and administrator compromise is out of scope.
+its systemd unit) can wait for your next legitimate gesture and take the key then. Presence proves a
+human said "yes", not *what* they said yes to. A same-user process can also read a secret at the moment
+the service uses it, if the OS lets it read the service's memory. The hardening closes that on Linux and
+macOS; the list below says where it cannot. Kernel, root and administrator compromise is out of scope.
 
 - Root or administrator, a debugger run as root, the kernel; on WSL, Windows-side administrators reading
   the VM's memory.
@@ -466,43 +486,57 @@ states below where it cannot. Kernel, root and administrator compromise is out o
   (`PROCESS_VM_READ`). Presence keeps the key **out of memory while the vault is locked**; while it is
   **open**, a same-user reader of the service's memory gets it. Auto-lock shortens that window; it does
   not remove it. Under WSL the hardening applies to the Linux side as above.
-- A gesture you approve that malware triggered, and a modified agentop install (above).
-- JavaScript strings cannot be zeroed and the garbage collector may copy them: zeroing is best-effort,
-  applied to every buffer the vault owns; a secret becomes a string only at the last boundary that
-  demands one.
-- Losing the presence device **and** the 24 words (see the warning above).
+- **A gesture you approve that malware triggered.** For Windows Hello this is lasting: the key that
+  protects the vault comes from a signature Hello gives over a fixed challenge. One approved gesture
+  gives malware that key for good, not only for that moment.
+- **A modified agentop install** (above).
+- **Strings in memory:** JavaScript strings cannot be zeroed and the garbage collector may copy them.
+  Zeroing is best-effort: every buffer the vault owns is zeroed, and a secret becomes a string only at
+  the last boundary that demands one. A just-confirmed recovery key is kept in the service's memory for
+  at most 10 minutes, for the setup that confirmed it, so the new data key of the presence step can be
+  wrapped under the same words. It is zeroed as soon as that step uses it.
+- **Losing both** the presence device **and** the 24 words (see the warning above).
+- **No way back after enrolment:** an agentop older than this feature cannot read the vault.
 
 ### Platforms
 
 | Platform | Presence |
 |---|---|
-| Windows and WSL | Windows Hello, or a FIDO2 key |
-| Linux desktop | a FIDO2 security key (`hmac-secret`, e.g. YubiKey 5) |
-| macOS | **Touch ID is coming later.** Until then macOS stays on the Keychain wrapper of §7a (no presence — the §7a limit still applies); the authenticator code, recovery key, auto-lock and hardening do apply, and a FIDO2 key is an opt-in presence option today |
-| Headless / container | none — the vault stays on its OS protector, or a passphrase where none exists; presence is reported as "not available here" |
+| Windows and WSL | **Windows Hello.** Built and tested against a simulated bridge; the check on real hardware (create, sign twice, delete) is pending. **A FIDO2 security key is not available here yet:** the Windows security-key bridge is not verified, so it is refused in words. |
+| Linux desktop | **A FIDO2 security key** with `hmac-secret` (e.g. YubiKey 5), through libfido2's tools (`apt install fido2-tools`). Every open asks you to touch the key, and asks for its PIN when one is set. Not yet verified on real hardware. |
+| macOS | **No presence by default yet** (Touch ID is deferred): macOS stays on the Keychain wrapper of §7a, so the §7a limit still applies there. The authenticator code, recovery key, auto-lock and hardening do apply. A FIDO2 key (`brew install libfido2`) is an opt-in presence option. |
+| Headless / container | None. The vault stays on its OS protector, or a passphrase where none exists; presence is reported as "not available here". |
 
-Two presence credentials are allowed (e.g. Hello plus a security key); either opens the vault.
+The vault keeps one presence credential **per kind**; when it holds two kinds, either opens it. No
+platform offers two kinds today, because a security key is not available on Windows/WSL yet. A vault
+that also opens with a passphrase cannot turn presence on, because the new data key would leave the
+passphrase behind. It is refused in words, and nothing changes.
+
+Sleep and screen lock lock the vault **only on Linux desktops** (logind, through `gdbus`). On WSL,
+Windows and macOS this is not wired yet, and the 30-minute auto-lock is what closes a forgotten vault.
 
 ### Commands
 
 | Command | What it does |
 |---|---|
-| `agentop vault status` | scopes, presence, authenticator state (enrolled, failures, paused/frozen), auto-lock countdown, hardening |
-| `agentop vault enroll` | first-time flow: presence check, authenticator QR + two codes, recovery key shown once with a 3-word confirmation, then the silent wrapper is removed. `--authenticator`, `--presence <hello\|fido2>`, `--recovery` run a single step |
-| `agentop vault unlock` | asks the service to raise the presence prompt, then asks for your code in the terminal |
+| `agentop vault status` | presence, authenticator state (enrolled, failures, paused/frozen), auto-lock countdown, hardening |
+| `agentop vault enroll` | runs what is still missing, in order: the authenticator (QR, then one code), the recovery key (shown once; three of its words typed back), a device check, then presence. Presence removes the silent wrapper and replaces the data key. If the recovery key was made in an earlier session, it asks for your 24 words, typed in this terminal. `--authenticator`, `--recovery` and `--presence <hello\|fido2>` run a single step. |
+| `agentop vault setup-code` | prints the one-time code the dashboard asks for during its first setup |
+| `agentop vault unlock` | asks the service to raise the presence prompt, then asks for your code here |
 | `agentop vault lock` | locks immediately (no code needed from a local terminal) |
-| `agentop vault recover` | opens with the 24 words (terminal only — never a web form), then forces re-enrolment and a new key |
-| `agentop vault rekey`, `agentop vault reset` | change the protector / wipe the vault; need the code and a gesture |
-| `agentop vault add-passphrase` | refused where an OS protector or presence device exists; the recovery key replaces it |
-| `agentop vault runner status\|rotate` | only on a machine paired as a runner |
+| `agentop vault recover` | opens with the 24 words (terminal only), then the setup steps above are owed before anything else |
+| `agentop vault disable-presence` | puts the system wrapper back first, then removes the presence key. Needs your code and your gesture; on a machine marked as the owner's, also your 24 words. |
+| `agentop vault rekey`, `agentop vault reset` | change the protector / wipe the vault; need your code and your gesture. If the vault's key is gone for good (the protector lost it), the terminal can reset without them. With the agentop service stopped, `reset` deletes the files directly, with only its own confirmation, because deleting needs no key. |
+| `agentop vault add-passphrase` | refused where an OS protector or presence exists; the recovery key replaces it |
 
-All of these talk to the running service; none opens the vault in its own process.
+Every command except `reset` with the service stopped talks to the running service. None opens the
+vault in its own process.
 
 ### Runner machines
 
-A machine paired as an unattended runner keeps its runner credentials in a **separate vault** with its
-own key, which can never read your personal secrets, and which opens at service start without a
-presence prompt so a headless server keeps working. Pairing and rotating it require presence and a code.
+A machine paired as an unattended runner will keep its runner credentials in a **separate vault**,
+with its own key, that can never read your personal secrets. The storage for it exists. Pairing, the
+unattended open at service start, and the `agentop vault runner` commands are **not built yet**.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 
