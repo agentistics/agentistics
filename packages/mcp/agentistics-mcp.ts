@@ -18,6 +18,8 @@ import {
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
+import { attachCommentPayload, attachKindOf, checkAttachSize, planTaskAttach } from "./task-attach-args.js";
+import { readFile, stat } from "node:fs/promises";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
@@ -292,6 +294,22 @@ const TOOLS: Tool[] = [
         },
       },
       required: ["ref"],
+    },
+  },
+  {
+    name: "agentistics_task_attach",
+    description:
+      "BETA — Agentask (the task board) is new and still changing. Put verification screenshots (or short videos / PDFs) a session produced ON the task, so the person sees them in the task's Evidence card and in the gallery next to the session that took them. Pass local file paths (max 10, image/video/PDF, 20 MB each); this tool reads them as the user, uploads them through the chat's own attachment store and leaves ONE comment carrying them and your `sessionId`. Use it for the screenshots Playwright / previews take — attach verification screenshots with agentistics_task_attach instead of describing them. `subtaskId` files them on a subtask or group; `note` is the comment text.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "The task (id or reference)." },
+        sessionId: { type: "string", description: "The session that produced the files (your own session id / handle)." },
+        files: { type: "array", items: { type: "string" }, description: "Local file paths, at most 10." },
+        subtaskId: { type: "string", description: "Optional subtask or subtask GROUP of this task." },
+        note: { type: "string", description: "Optional comment text." },
+      },
+      required: ["ref", "sessionId", "files"],
     },
   },
   {
@@ -837,6 +855,30 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String((args as any)?.ref))}/comments`,
           taskCommentRequest(args).payload);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_attach": {
+        // The routes stay LITERAL (agentToolPolicy.lint reads them off this source): upload through the
+        // chat's own door, then ONE comment through the comments door. No server route takes a path.
+        const plan = planTaskAttach(args);
+        if (!plan.ok) return { content: [{ type: "text", text: plan.message }], isError: true };
+        const uploaded: { name: string; path: string }[] = [];
+        for (const file of plan.files) {
+          const info = await stat(file).catch(() => null);
+          if (!info || !info.isFile()) return { content: [{ type: "text", text: `"${file}" is not a readable file.` }], isError: true };
+          const tooBig = checkAttachSize(file, info.size);
+          if (tooBig) return { content: [{ type: "text", text: tooBig }], isError: true };
+          const form = new FormData();
+          form.set("file", new File([await readFile(file)], file.split(/[\\/]/).pop() ?? "file"));
+          form.set("session", plan.sessionId);
+          const up = await fetch(`${API}/api/fleet/attach`, { method: "POST", body: form });
+          const out = (await up.json().catch(() => ({}))) as { ok?: boolean; path?: string; name?: string; message?: string };
+          if (!up.ok || !out.ok || !out.path) {
+            return { content: [{ type: "text", text: `Upload of "${file}" failed: ${out.message ?? `HTTP ${up.status}`}` }], isError: true };
+          }
+          uploaded.push({ name: out.name ?? (attachKindOf(file) ? file.split(/[\\/]/).pop()! : file), path: out.path });
+        }
+        const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(plan.ref)}/comments`, attachCommentPayload(plan, uploaded));
+        return { content: [{ type: "text", text: JSON.stringify({ ...body, attached: uploaded.length }, null, 2) }] };
       }
       case "agentistics_task_subtask": {
         const a = args as any;

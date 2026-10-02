@@ -8,9 +8,10 @@
 
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
-  canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
+  canDeleteStatus, sanitizeCommentSessionId, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
+import { buildEvidence, type EvidenceItem } from './task-evidence-gallery'
 import { historicalLinkId, type HistoricalSession } from './task-model'
 import { planConversationFiling } from './task-historical'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
@@ -28,7 +29,7 @@ import {
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
 import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
 import { planMove } from './task-rank'
-import { resolveAttachmentRead } from './attachment-web'
+import { readAllAttachmentMessages, resolveAttachmentRead } from './attachment-web'
 import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
@@ -85,6 +86,30 @@ export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
 export function withAttachmentRefs<C extends { attachments?: ChatAttachmentRef[] }>(c: C): C {
   if (!c.attachments || c.attachments.length === 0) return c
   return { ...c, attachments: c.attachments.map(chatAttachmentRef) }
+}
+
+/**
+ * The Evidence feed: files sessions left on tasks (comments carrying a `sessionId`) and images the
+ * person sent through the chat. A read over the book and the attachment log — it opens no file and
+ * takes no path, so it is not a way to read the disk (the bytes are served by the chat's own door).
+ */
+export async function taskEvidence(o: { task?: string; origin?: string }): Promise<
+  { ok: true; items: Array<EvidenceItem & { taskTitle: string | null }> } | { ok: false; reason: 'no_such_task' }
+> {
+  const w = await loadTaskWorld()
+  const task = o.task ? findTask(o.task, w.book.tasks) : undefined
+  if (o.task && !task) return { ok: false, reason: 'no_such_task' }
+  const taskOfConversation = new Map<string, string>()
+  for (const t of w.book.tasks) {
+    for (const r of rowsOfTask(t, w.rollupRows)) if (r.conversationId) taskOfConversation.set(r.conversationId, t.id)
+  }
+  const origin = o.origin === 'mine' || o.origin === 'sessions' ? o.origin : 'all'
+  const items = buildEvidence({
+    comments: w.book.comments, messages: await readAllAttachmentMessages(), taskOfConversation, origin,
+    ...(task ? { taskId: task.id } : {}),
+  })
+  const titles = new Map(w.book.tasks.map(t => [t.id, t.title]))
+  return { ok: true, items: items.map(e => ({ ...e, taskTitle: e.taskId ? titles.get(e.taskId) ?? null : null })) }
 }
 
 export async function showTask(
@@ -368,7 +393,7 @@ export async function deleteTask(ref: string): Promise<boolean> {
  */
 export async function addComment(
   ref: string,
-  o: { author: string; body: string; subtaskId?: string; attachments?: unknown },
+  o: { author: string; body: string; subtaskId?: string; attachments?: unknown; sessionId?: unknown },
 ): Promise<
   | { ok: true; id: string }
   | { ok: false; reason: 'empty' | 'no_such_task' | CommentTargetRefusal; message: string }
@@ -386,9 +411,11 @@ export async function addComment(
   if (!plan.ok) return plan
   const author = o.author.trim() || 'unknown'
   const id = newCommentId()
+  const sessionId = sanitizeCommentSessionId(o.sessionId)
   await w.store.addComment({
     id,
     taskId: task.id,
+    ...(sessionId ? { sessionId } : {}),
     ...(plan.subtaskId ? { subtaskId: plan.subtaskId } : {}),
     author,
     body,

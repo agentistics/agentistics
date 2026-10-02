@@ -62,6 +62,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_task_types',
   'agentistics_task_type_edit',
   'agentistics_task_comment',
+  'agentistics_task_attach',
   'agentistics_task_subtask',
   'agentistics_task_link',
   'agentistics_task_blocked_by',
@@ -129,6 +130,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     reason: 'type vocabulary is configuration; the server refuses to remove a type still in use',
   },
   agentistics_task_comment: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/comments'], reason: 'appends a note; additive, destroys nothing' },
+  agentistics_task_attach: {
+    ...TASKS, risk: 'W', routes: ['POST /api/fleet/attach', 'POST /api/tasks/:ref/comments'],
+    reason: 'uploads the files the session names into the chat store, then appends one comment; additive, destroys nothing',
+  },
   agentistics_task_subtask: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/subtasks'], reason: 'adds or edits a subtask; reversible by another edit' },
   agentistics_task_link: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/links'], reason: 'adds or removes a link; reversible by the inverse call' },
   agentistics_task_blocked_by: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref'], reason: 'sets a blocker; cleared by the same call' },
@@ -221,7 +226,11 @@ export const NEVER_ROUTES: readonly NeverRoute[] = [
   { prefix: '/api/chat-tty', reason: 'spawns a model on the host; Nay spawning Nay is a loop with a wallet' },
   { prefix: '/api/claude-chat', reason: 'deleted in P0.1; must never come back through the MCP' },
   { prefix: '/api/fleet/input', reason: 'raw keyboard into a session is unbounded' },
-  { prefix: '/api/fleet/attach', reason: 'a raw terminal on a session is unbounded' },
+  // `/api/fleet/attach` WAS listed here, described as a raw terminal. It is the chat's UPLOAD door (it writes
+  // one file, 0600, into agentop's own attachments directory and types nothing into any pane), and
+  // `agentistics_task_attach` is built on it by the leader's decision (EVID.1): the MCP process reads the
+  // local file as the user and uploads it here, so the server needs no route that reads a path.
+  // Delivering a file to a session is `/api/fleet/input`, which stays below.
   { prefix: '/api/shell', reason: 'a raw shell on the host is unbounded' },
   { prefix: '/api/fleet/tree', methods: WRITES, reason: 'writing files bypasses the target session\'s own permission prompts' },
   { prefix: '/api/provider', methods: ['PUT', 'DELETE'], reason: 'provider credentials' },

@@ -244,6 +244,8 @@ export interface TaskComment {
   /** Files left with the comment — references into the chat's attachment store (`url` is added by
    *  the detail reply for assistants; the UI builds its own from `path`). */
   attachments?: ChatAttachmentRef[]
+  /** The session that produced the attachments (a worker's screenshot); absent on a person's comment. */
+  sessionId?: string
 }
 export interface Subtask {
   id: string

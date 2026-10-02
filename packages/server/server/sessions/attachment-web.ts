@@ -146,6 +146,24 @@ export function parseAttachmentLog(
   return { sends, messages }
 }
 
+/** Every delivered message's attachments, all conversations — the evidence gallery's "mine" source. */
+export async function readAllAttachmentMessages(): Promise<AttachmentMessage[]> {
+  const raw = await readFile(ATTACHMENT_LOG, 'utf-8').catch(() => '')
+  const out: AttachmentMessage[] = []
+  for (const line of raw.split('\n')) {
+    if (line.trim() === '') continue
+    try {
+      const d = JSON.parse(line) as Partial<AttachmentMessage>
+      if (typeof d.atMs === 'number' && typeof d.conversationId === 'string' && d.conversationId !== ''
+        && Array.isArray(d.paths) && typeof d.images === 'number') {
+        out.push({ conversationId: d.conversationId, atMs: d.atMs, images: d.images,
+          paths: d.paths.filter((p): p is string => typeof p === 'string' && resolveAttachmentRead(p) !== null) })
+      }
+    } catch { /* one bad line is not a reason to lose the rest */ }
+  }
+  return out
+}
+
 /**
  * Is `requested` actually inside `ATTACHMENT_DIR` — PURE, and the only thing standing between
  * "show this attachment back" and an arbitrary local file read.

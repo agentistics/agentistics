@@ -417,6 +417,12 @@ export interface TaskComment {
   body: string
   /** Files left with the comment — references into the chat's own attachment store. Absent = none. */
   attachments?: ChatAttachmentRef[]
+  /**
+   * The session that PRODUCED the attachments — set by `agentistics_task_attach` (a screenshot a
+   * worker took), absent on a person's own comment. Validated by `sanitizeCommentSessionId`. Never
+   * shared: `shareComment` names its fields and does not carry it.
+   */
+  sessionId?: string
   createdAt: string
 }
 

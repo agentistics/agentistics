@@ -20,7 +20,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
+import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, sanitizeCommentSessionId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { historicalLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -321,8 +321,10 @@ function sanitizeComment(raw: unknown): TaskComment | null {
   // Words, files or both — a comment with neither says nothing.
   if (!id || !taskId || (!body && attachments.length === 0)) return null
   const subtaskId = str(c.subtaskId)
+  const sessionId = sanitizeCommentSessionId(c.sessionId)
   return {
     id, taskId, body,
+    ...(sessionId ? { sessionId } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     // Absent on every comment written before threads existed — read as the task's own.
     ...(subtaskId ? { subtaskId } : {}),

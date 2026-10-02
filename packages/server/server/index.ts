@@ -1822,6 +1822,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
       }))
     }
+    if (url.pathname === '/api/tasks/evidence' && req.method === 'GET') {
+      const { taskEvidence } = await import('./sessions/task-web')
+      const res = await taskEvidence({
+        ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
+        ...(url.searchParams.get('origin') ? { origin: url.searchParams.get('origin')! } : {}),
+      })
+      return res.ok ? json({ items: res.items }) : json({ ok: false, reason: res.reason }, 404)
+    }
     if (url.pathname === '/api/tasks/activity' && req.method === 'GET') {
       const { taskActivity } = await import('./sessions/task-web')
       const limit = Number(url.searchParams.get('limit'))
@@ -2000,6 +2008,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           body: String(body.body ?? ''),
           ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
+          ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
         })
         if (res.ok) return json({ ok: true, id: res.id })
         const status = res.reason === 'no_such_task' ? 404 : res.reason === 'empty' ? 400 : 422
