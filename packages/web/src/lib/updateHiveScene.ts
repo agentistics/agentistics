@@ -8,6 +8,14 @@
  * near a line of text fade and draw back (`clearing`, `updateHive.ts`), so the type needs no overlay
  * at all. What may and may not be drawn is decided by pure, tested rules; this file only paints them.
  *
+ * THE RENDER MODEL (the prototype's, measured at 60 fps). Three layers, each only as big and as busy
+ * as it must be: the CELL FIELD is its own full-stage canvas beneath the one the caller hands in,
+ * redrawn at full rate only while something moves and ~30 Hz when settled (its only change is a slow
+ * twinkle); the background is a CSS gradient on that canvas, not a canvas redraw; and the caller's
+ * canvas becomes the small FX layer — frame, logo and glow while running (a few hundred px), the
+ * whole stage only in the finale, when rings and sparks leave the frame. A full-viewport layer is a
+ * full-viewport layer to composite, every frame.
+ *
  * WHY IT IS FAST. Cells are BATCHED: one path + one stroke per (colour, opacity bucket) instead of
  * a save/translate/stroke/restore per cell, and the settled bulk is blitted from small pre-rendered
  * SPRITES (a blit is a copy, a stroke is a scan-conversion). The few cells touching the frame's edge
@@ -122,16 +130,34 @@ export interface HiveRenderer {
 }
 
 export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, reduced: boolean): HiveRenderer {
-  const ctx = canvas.getContext('2d')!
+  // `canvas` is the FX layer (frame, logo, burst); the cell field is a sibling canvas created here, beneath it
+  const fx = canvas, ctx = fx.getContext('2d')!
+  const cv = document.createElement('canvas'), cctx = cv.getContext('2d')!
+  if (cv.style) Object.assign(cv.style, { position: 'fixed', inset: '0', width: '100%', height: '100%', display: 'block' })
+  cv.setAttribute?.('aria-hidden', 'true')
+  fx.parentNode?.insertBefore(cv, fx)
   let g: HiveGeometry = hiveGeometry(0, 0), DPR = 1
   let cells: Cell[] = []
-  let bgLayer: HTMLCanvasElement | null = null, glowSprite: HTMLCanvasElement | null = null, edgeClip: Path2D | null = null
+  let glowSprite: HTMLCanvasElement | null = null, edgeClip: Path2D | null = null
   let inkEls: (HTMLElement | null)[] = [], inks: Ink[] = [], inksAt = -1e9
   let sparks: Spark[] = [], burstAt = -1, inFinale = false
-  let pulseAmt = 0, frameA = 1
+  let pulseAmt = 0, frameA = 1, lastCells = -1e9, busyPrev = true
+  // the fx canvas is only as big as it must be: while running the frame + glow, in the finale the whole stage
+  let fxBig: boolean | null = null, fxX = 0, fxY = 0, fxW = 0, fxH = 0
   const pose: LogoPose = { scale: 1, alpha: 1, glow: 0 }
   const main = new Batch(12, 0.85, 6, 0.25), edge = new Batch(12, 0.85, 6, 0.25), rest = new Batch(4, 0.07)
   const small = () => g.W < 640
+
+  function setFx(big: boolean) {
+    if (big === fxBig) return
+    fxBig = big
+    const half = big ? 0 : g.R * 2.35
+    fxX = big ? 0 : Math.max(0, g.cx - half); fxY = big ? 0 : Math.max(0, g.cy - half)
+    fxW = big ? g.W : Math.min(g.W - fxX, 2 * half); fxH = big ? g.H : Math.min(g.H - fxY, 2 * half)
+    if (fx.style) Object.assign(fx.style, { inset: 'auto', left: `${fxX}px`, top: `${fxY}px`, width: `${fxW}px`, height: `${fxH}px` })
+    fx.width = Math.round(fxW * DPR); fx.height = Math.round(fxH * DPR)
+    ctx.setTransform(DPR, 0, 0, DPR, -fxX * DPR, -fxY * DPR)
+  }
 
   function buildCells() {
     const s = g.S, w = Math.sqrt(3) * s, h = 1.5 * s
@@ -146,27 +172,16 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     for (const c of cells) { c.order = (c.d / md) * 0.88 + c.seed * 0.12; c.dn = c.d / md }
   }
 
-  function layer(draw: (b: CanvasRenderingContext2D) => void): HTMLCanvasElement {
-    const c = document.createElement('canvas')
-    c.width = Math.round(g.W * DPR); c.height = Math.round(g.H * DPR)
-    const b = c.getContext('2d')!
-    b.setTransform(DPR, 0, 0, DPR, 0, 0)
-    draw(b)
-    return c
-  }
-
   function resize() {
-    const W = canvas.clientWidth || window.innerWidth, H = canvas.clientHeight || window.innerHeight
+    const W = cv.clientWidth || window.innerWidth, H = cv.clientHeight || window.innerHeight
     if (cells.length && W === g.W && H === g.H) return // same size: keep the hive standing
     DPR = Math.min(window.devicePixelRatio || 1, 1.5)
     g = hiveGeometry(W, H)
-    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR)
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
-    bgLayer = layer(b => {
-      const gr = b.createRadialGradient(g.cx, g.cy, 0, g.cx, g.cy, Math.max(W, H) * 0.7)
-      gr.addColorStop(0, '#111118'); gr.addColorStop(1, '#0a0a0f')
-      b.fillStyle = gr; b.fillRect(0, 0, W, H)
-    })
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR)
+    cctx.setTransform(DPR, 0, 0, DPR, 0, 0)
+    lastCells = -1e9; fxBig = null
+    // the background is a CSS gradient on the cell canvas — composited, never redrawn
+    if (cv.style) cv.style.background = `radial-gradient(circle ${Math.max(W, H) * 0.7}px at ${g.cx}px ${g.cy}px, #111118, #0a0a0f)`
     buildCells(); inksAt = -1e9
     // the clip for cells that touch the frame: the whole stage MINUS the frame's hexagon (even-odd)
     const circ = g.A_CLIP / C30, pad = g.S * 3 + 8
@@ -187,7 +202,7 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
   function measureInk(now: number) {
     if (now - inksAt < 500) return
     inksAt = now
-    const sr = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { left: 0, top: 0 }
+    const sr = cv.getBoundingClientRect ? cv.getBoundingClientRect() : { left: 0, top: 0 }
     inks = inksFrom(inkEls.filter((e): e is HTMLElement => !!e).map(e => e.getBoundingClientRect()), sr)
     for (const c of cells) {
       const r = clearing(c.x, c.y, c.seed, inks, g)
@@ -283,12 +298,18 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     pulseAmt = approach(pulseAmt, indet && !reduced ? 1 : 0, dt / PULSE_MS)
     if (fin && !inFinale) { inFinale = true; burstAt = -1; sparks = [] }
     if (!fin && inFinale) { inFinale = false; burstAt = -1; sparks = []; for (const c of cells) { c.on = 0; c.want = 0; c.wait = 0 } }
-    main.reset(); edge.reset(); rest.reset()
+
+    // the cell field is redrawn every frame while anything moves; settled, its only change is a slow twinkle,
+    // so ~30 Hz is indistinguishable (and halves the work)
+    const due = reduced || !!fin || busyPrev || now - lastCells >= 33
+    let busy = (pulseAmt > 0 && pulseAmt < 1) || !!fin
+    if (due) { main.reset(); edge.reset(); rest.reset() }
     const ft = fin ? fin.t : 0
     for (const c of cells) {
       c.rm += (c.rmT - c.rm) * (reduced ? 1 : k * 0.5)
+      if (Math.abs(c.rmT - c.rm) > 0.01) busy = true
       // the faint resting grid, per cell so it can make room too
-      if (!fin && c.rm > 0.01) {
+      if (due && !fin && c.rm > 0.01) {
         const sp = (1 - c.rm) * g.S * SPREAD, x = c.x + c.px * sp, y = c.y + c.py * sp
         if (hnorm(x - g.cx, y - g.cy) - g.AC >= g.A_CLIP + 2) rest.add(x, y, g.RC, 0, 0.07 * c.rm, 0)
       }
@@ -307,7 +328,9 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
       const want: 0 | 1 = c.order < p * 1.02 ? 1 : 0
       if (want !== c.want) { c.want = want; c.wait = staggerMs(want, c.dn, reduced) }
       if (c.wait > 0) c.wait -= dt; else c.on = stepOn(c.on, want, dt, reduced)
+      if (c.wait > 0 || c.on !== want) busy = true
       if (c.on < 0.004) continue
+      if (!due) continue
       const ev = c.want ? easeOut(c.on) : smooth(c.on)
       const grow = reduced ? 1 : 0.6 + 0.4 * ev, away = reduced || c.want ? 0 : (1 - ev) * g.S * 0.35, pl = c.on * pull
       let x = c.x + (g.cx - c.x) * pl, y = c.y + (g.cy - c.y) * pl
@@ -319,9 +342,14 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
       const sp = (1 - c.rm) * g.S * SPREAD
       place(x + c.px * sp, y + c.py * sp, grow, a, c)
     }
-    ctx.drawImage(bgLayer!, 0, 0, g.W, g.H)
-    rest.flushSprites(ctx, g.RC, DPR); main.flushSprites(ctx, g.RC, DPR)
-    if (edge.n || edge.hasFill()) { ctx.save(); ctx.clip(edgeClip!, 'evenodd'); edge.flush(ctx); ctx.restore() }
+    busyPrev = busy
+    if (due) {
+      lastCells = now; cctx.clearRect(0, 0, g.W, g.H)
+      rest.flushSprites(cctx, g.RC, DPR); main.flushSprites(cctx, g.RC, DPR)
+      if (edge.n || edge.hasFill()) { cctx.save(); cctx.clip(edgeClip!, 'evenodd'); edge.flush(cctx); cctx.restore() }
+    }
+    setFx(!!fin)
+    ctx.clearRect(fxX, fxY, fxW, fxH)
 
     if (!fin) {
       frameA = approach(frameA, 1, dt / 600)
@@ -344,6 +372,6 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     setInk(els) { inkEls = els; inksAt = -1e9 },
     drawRunning({ p, indet, now, dt }) { draw(p, indet, now, dt, null) },
     drawFinale({ t, now, dt }) { draw(1, false, now, dt, { t }) },
-    dispose() { cells = []; sparks = []; bgLayer = null; glowSprite = null; edgeClip = null },
+    dispose() { cells = []; sparks = []; glowSprite = null; edgeClip = null; cv.remove?.() },
   }
 }

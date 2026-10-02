@@ -99,7 +99,7 @@ export function StageText({ lang, isMobile, refs, from, to, phrase, title, note,
           {UPDATE_STEPS.map((s, i) => (
             <li key={s} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
               <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,.16)', overflow: 'hidden', position: 'relative' }}>
-                <div ref={el => { refs.fills.current[i] = el }} style={{ position: 'absolute', inset: '0 auto 0 0', width: allDone ? '100%' : '0%', background: allDone ? TO_COLOR : '#F59E0B', borderRadius: 2 }} />
+                <div ref={el => { refs.fills.current[i] = el }} style={{ position: 'absolute', inset: '0 auto 0 0', width: '100%', transformOrigin: 'left center', transform: `scaleX(${allDone ? 1 : 0})`, willChange: 'transform', background: allDone ? TO_COLOR : '#F59E0B', borderRadius: 2 }} />
               </div>
               <span ref={el => { refs.labels.current[i] = el }} style={{ fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: allDone ? TO_COLOR : INK_DIM }}>
                 {ut(lang, STEP_LABEL[s])}
@@ -117,6 +117,21 @@ function useLogo(): HTMLImageElement | null {
   const ref = useRef<HTMLImageElement | null>(null)
   if (!ref.current && typeof Image !== 'undefined') { ref.current = new Image(); ref.current.src = brandAsset('/minimalistLogo.png') }
   return ref.current
+}
+
+/**
+ * Writes a style/text only when it changed: the loop runs every frame and most frames change nothing,
+ * and a style write that changes nothing still costs a recalculation.
+ */
+const memo = new WeakMap<object, Record<string, string>>()
+export function setStyle(el: HTMLElement, prop: 'width' | 'background' | 'animation' | 'transform' | 'color', val: string): void {
+  let m = memo.get(el)
+  if (!m) memo.set(el, m = {})
+  if (m[prop] !== val) { m[prop] = val; el.style[prop] = val }
+}
+export function setText(el: HTMLElement, v: string): void {
+  const m = memo.get(el) ?? {}; memo.set(el, m)
+  if (m.text !== v) { m.text = v; el.textContent = v }
 }
 
 /** The fixed full-screen canvas. */
@@ -165,9 +180,9 @@ export function useRunScene(opts: {
       const sub = refs.sub.current
       if (sub) {
         const at = ut(lang, 'loader.stage_label', { n: tg.i + 1, total: UPDATE_STEPS.length })
-        sub.textContent = step === 'data' && total > 0 && dl !== undefined
+        setText(sub, step === 'data' && total > 0 && dl !== undefined
           ? `${at} · ${ut(lang, 'loader.mb', { a: (dl * total / 1048576).toFixed(1), b: (total / 1048576).toFixed(1) })}`
-          : tg.indet ? `${at} · ${ut(lang, 'loader.waiting')}` : at
+          : tg.indet ? `${at} · ${ut(lang, 'loader.waiting')}` : at)
       }
       for (let n = 0; n < UPDATE_STEPS.length; n++) {
         const goal = n < tg.i ? 1 : n === tg.i ? tg.frac : 0
@@ -175,12 +190,13 @@ export function useRunScene(opts: {
         const el = refs.fills.current[n], lab = refs.labels.current[n]
         if (el) {
           const indet = n === tg.i && tg.indet
-          el.style.width = indet ? '35%' : `${(bars[n]! * 100).toFixed(2)}%`
-          el.style.background = n < tg.i ? '#10b981' : '#F59E0B'
-          el.style.animation = indet && !reduced ? 'ag-upd-indet 1.4s ease-in-out infinite' : 'none'
-          if (!indet) el.style.left = '0'
+          // the fill is a compositor transform, not a width: nothing here touches layout
+          setStyle(el, 'width', indet ? '35%' : '100%')
+          setStyle(el, 'background', n < tg.i ? '#10b981' : '#F59E0B')
+          setStyle(el, 'animation', indet && !reduced ? 'ag-upd-indet 1.4s ease-in-out infinite' : 'none')
+          setStyle(el, 'transform', indet && !reduced ? '' : `scaleX(${indet ? 1 : bars[n]!.toFixed(3)})`)
         }
-        if (lab) lab.style.color = n < tg.i ? '#10b981' : n === tg.i ? 'rgba(255,255,255,.95)' : INK_DIM
+        if (lab) setStyle(lab, 'color', n < tg.i ? '#10b981' : n === tg.i ? 'rgba(255,255,255,.95)' : INK_DIM)
       }
     }
     raf = requestAnimationFrame(loop)
