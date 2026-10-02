@@ -23,7 +23,7 @@ import type { ChatTurn } from './chat-turn'
 import { transcriptReaderFor } from './harness-transcript'
 import { markFleetPhase } from './fleet-profile'
 import { readDialog, type DialogOption, type DialogUnreadable } from './dialog-choice'
-import { readsMarkerSelect } from './approval-spec'
+import { markerReadOptions } from './approval-spec'
 // Taking a running session back when its registry record is gone. See `session-adopt.ts`.
 import { planAdoptions } from './session-adopt'
 // The claim for harnesses that cannot be handed a conversation id. See `task-attribution.ts`.
@@ -428,7 +428,7 @@ export function createSessionsPoller(o: {
           // Read from the SAME frame that decided the state, so what is offered and what the state
           // says can never describe different moments. Empty when the screen cannot be parsed with
           // confidence, which the UI reports rather than papering over.
-          const dialog = readDialog(frame, { marker: readsMarkerSelect(harness) })
+          const dialog = readDialog(frame, markerReadOptions(harness))
           if (dialog.options.length > 0) dialogOptions.set(r.id, dialog.options)
           // From the SAME read as the options: how they are picked is a fact about this frame, and
           // deriving it again downstream is how a numberless dialog gets offered a digit.

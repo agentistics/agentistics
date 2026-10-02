@@ -188,7 +188,7 @@ export function readDialog(
    * is what turns it on, per harness and only where the shape has been measured — see that field
    * for the kimi frame that makes this a gate rather than a flag.
    */
-  opts: { marker?: boolean } = {},
+  opts: MarkerOpts = {},
 ): DialogRead {
   const found: DialogOption[] = []
   let top = -1
@@ -215,7 +215,7 @@ export function readDialog(
   // Nothing numbered at the bottom at all. It may still be a menu — claude's trust prompt prints
   // none — so the marker shape gets its turn. This is the ONLY place it runs: a frame whose numbers
   // were found and then refused keeps that refusal, or a `gap` would be re-read as two loose rows.
-  if (found.length === 0) return opts.marker ? readMarkerSelect(frame) : { kind: 'none', options: [], select: null, top: -1 }
+  if (found.length === 0) return opts.marker ? readMarkerSelect(frame, opts) : { kind: 'none', options: [], select: null, top: -1 }
   // Rows were found and `1.` never was. The block is real and its top is out of reach.
   if (!anchored) return { kind: 'unreadable', reason: 'no-anchor', options: [], select: null, top }
 
@@ -252,6 +252,29 @@ export function readDialog(
 const MARKER = /^(\s*)❯ (\S.*?)\s*$/
 
 /**
+ * How a harness whose select does NOT draw `❯` is read.
+ *
+ * antigravity's trust prompt draws its cursor as a plain `>` (captured from agy 1.2.14, 2026-10-01:
+ * `> Yes, I trust this folder` / `  No, exit` over `↑/↓ Navigate · enter Confirm`), and `>` is also
+ * the prompt of its chat — `> only say ok` is somebody's message — so the glyph alone proves
+ * nothing. A harness that uses a glyph other than `❯` therefore MUST name the footer its dialogs
+ * carry, and the menu is read only when that footer is among the last lines of the frame: the
+ * footer is what says "a select is open", the glyph only says which row.
+ */
+export interface MarkerOpts {
+  marker?: boolean
+  /** The cursor glyph, when it is not `❯`. Requires `footer`. */
+  glyph?: string
+  /** The footer the harness's select draws; matched in the last lines only. */
+  footer?: RegExp
+}
+
+/** The footer of a select is among the last few lines of content, never in the scrollback. */
+const FOOTER_TAIL_LINES = 4
+
+const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
  * A sibling row: its text STARTS at the cursor's label column, exactly.
  *
  * Both halves are load-bearing. Nothing before the column (or the row belongs to some other block),
@@ -283,11 +306,34 @@ const siblingAt = (line: string, col: number): string | null => {
  * and the idle composer in `dialog-marker.test.ts` were captured the same day from claude 2.1.x
  * driven under tmux, which is what pins that this scan leaves them alone.
  */
-function readMarkerSelect(frame: readonly string[]): DialogRead {
+function readMarkerSelect(frame: readonly string[], opts: MarkerOpts = {}): DialogRead {
+  let MARK = MARKER
+  // In footer mode the FOOTER is the anchor: it says a select is open, and everything the harness
+  // draws under it (agy pins its model line to the bottom row of the pane) is chrome, not a turn
+  // that happened after the dialog.
+  let footerAt = -1
+  if (opts.glyph && opts.glyph !== '❯') {
+    // A glyph that prose also uses is read only under a footer that says a select is open.
+    if (!opts.footer) return { kind: 'none', options: [], select: null, top: -1 }
+    let seen = 0
+    for (let i = frame.length - 1; i >= 0 && seen < FOOTER_TAIL_LINES; i--) {
+      if ((frame[i] ?? '').trim() === '') continue
+      seen++
+      if (opts.footer.test(frame[i]!)) { footerAt = i; break }
+    }
+    if (footerAt < 0) return { kind: 'none', options: [], select: null, top: -1 }
+    MARK = new RegExp(`^(\\s*)${escapeRe(opts.glyph)} (\\S.*?)\\s*$`)
+  }
   const cursors: number[] = []
-  for (let i = frame.length - 1; i >= 0; i--) {
-    if (frame.length - 1 - i > LAST_OPTION_LINES) break
-    if (MARKER.test(frame[i] ?? '')) cursors.push(i)
+  // Distance is counted from the last line with CONTENT, not from the bottom of the pane: a tall
+  // pane under a short dialog (agy's trust prompt sits at the top of a 50-row pane, measured 41
+  // rows above the pane's end) has nothing but blank rows below it, and those are not the
+  // scrollback this bound exists to keep out.
+  let last = footerAt >= 0 ? footerAt : frame.length - 1
+  while (last > 0 && (frame[last] ?? '').trim() === '') last--
+  for (let i = last; i >= 0; i--) {
+    if (last - i > LAST_OPTION_LINES) break
+    if (MARK.test(frame[i] ?? '')) cursors.push(i)
   }
   if (cursors.length === 0) return { kind: 'none', options: [], select: null, top: -1 }
   // Two highlighted rows is the same fact the numbered path refuses under this name: a frame this
@@ -296,7 +342,7 @@ function readMarkerSelect(frame: readonly string[]): DialogRead {
   if (cursors.length > 1) return { kind: 'unreadable', reason: 'two-cursors', options: [], select: null, top: cursors[cursors.length - 1]! }
 
   const at = cursors[0]!
-  const m = MARKER.exec(frame[at] ?? '')!
+  const m = MARK.exec(frame[at] ?? '')!
   // The label's own column — the cursor glyph plus its space. A sibling is a row that starts its
   // text exactly there; anything else belongs to some other block.
   const col = m[1]!.length + 2
@@ -304,12 +350,12 @@ function readMarkerSelect(frame: readonly string[]): DialogRead {
 
   for (let i = at - 1; i >= 0; i--) {
     const label = siblingAt(frame[i] ?? '', col)
-    if (label === null || MARKER.test(frame[i] ?? '')) break
+    if (label === null || MARK.test(frame[i] ?? '')) break
     rows.unshift({ i, label })
   }
   for (let i = at + 1; i < frame.length; i++) {
     const label = siblingAt(frame[i] ?? '', col)
-    if (label === null || MARKER.test(frame[i] ?? '')) break
+    if (label === null || MARK.test(frame[i] ?? '')) break
     rows.push({ i, label })
   }
 
@@ -321,7 +367,7 @@ function readMarkerSelect(frame: readonly string[]): DialogRead {
   // the trust-prompt shape, which is exactly the kind of dialog that sits unscrolled on a short,
   // quiet session long after somebody already answered it. See `MAX_TRAILING_GAP`.
   const bottomRow = rows[rows.length - 1]!.i
-  let contentEnd = frame.length
+  let contentEnd = footerAt >= 0 ? footerAt + 1 : frame.length
   while (contentEnd > bottomRow + 1 && (frame[contentEnd - 1] ?? '').trim() === '') contentEnd--
   if (contentEnd - 1 - bottomRow > MAX_TRAILING_GAP) {
     return { kind: 'none', options: [], select: null, top: -1 }
