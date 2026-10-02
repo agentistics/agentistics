@@ -6,7 +6,7 @@
  * planner emits an argv, the backend hosts an argv, and that is the only thing they share.
  */
 
-import type { HarnessId, SendNowOutcome } from '@agentistics/core'
+import type { ConversationLinkReason, HarnessId, SendNowOutcome } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
 
 /**
@@ -304,6 +304,8 @@ export interface ManagedSession {
    * was one.
    */
   conversationLink?: 'assigned' | 'observed'
+  /** WHERE the link came from (LIVE.1). Absent reads by `conversationLink` — see `conversationLinkOf`. */
+  conversationLinkVia?: ConversationLinkReason
   /**
    * The repository this session's directory belonged to WHEN IT STARTED.
    *

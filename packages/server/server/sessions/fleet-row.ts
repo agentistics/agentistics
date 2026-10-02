@@ -14,6 +14,7 @@
  * carries the command that does it instead of a button that cannot.
  */
 
+import type { SessionConversationLink } from '@agentistics/core'
 import { actionWords, sessionActions, type SessionAction } from '@agentistics/tui/control/session-verbs'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { ControlStrings } from '@agentistics/tui/control/i18n'
@@ -164,6 +165,8 @@ export interface FleetRow {
   /** The harness mode, in the harness's own words — see `mode-spec.ts`. */
   mode?: { id: string; label: string }
   conversationId?: string
+  /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
+  link?: SessionConversationLink | null
   /** The dialog this session is blocked on, verbatim, and the options read off it. */
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
@@ -244,6 +247,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.effort ? { effort: row.effort } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
+    ...(row.link !== undefined ? { link: row.link } : {}),
     ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
     ...(row.dialogOptions?.length ? { dialogOptions: [...row.dialogOptions] } : {}),
     ...(row.approvalBlind ? { approvalBlind: row.approvalBlind } : {}),

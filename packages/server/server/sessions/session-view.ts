@@ -8,7 +8,7 @@
  * no frame to read and no backend to ask. Rendering a state for them would be inventing one.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import type { ConversationLinkReason, HarnessId } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
 import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
@@ -160,6 +160,9 @@ export interface SessionView {
    * event channel deduplicates on. Absent is absent.
    */
   conversationId?: string
+  /** How `conversationId` was recorded (LIVE.1) — read by `conversationLinkOf`; absent keeps the legacy meaning. */
+  conversationLink?: 'assigned' | 'observed'
+  conversationLinkVia?: ConversationLinkReason
   /** The OS process ID for a managed running session, where known. */
   pid?: number
   /** Process CPU percentage sampled over poller interval (null if unmeasurable/unavailable). */
@@ -629,6 +632,8 @@ export function buildSessionViews(o: {
       ...(r.managed?.task ? { task: r.managed.task } : {}),
       ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
+      ...(r.managed?.conversationLink ? { conversationLink: r.managed.conversationLink } : {}),
+      ...(r.managed?.conversationLinkVia ? { conversationLinkVia: r.managed.conversationLinkVia } : {}),
       ...(r.managed?.repo ? { recordedRepo: r.managed.repo } : {}),
       // The backend's clock when there is a backend, the REGISTRY's when there is not. A row the
       // machine lost has no tmux session left to ask, so it reported no start time at all — and a
