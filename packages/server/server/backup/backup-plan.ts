@@ -187,9 +187,11 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'The central tokens inside preferences.json. The file itself travels, redacted — see backup-plan.ts ALWAYS.',
   },
   {
-    pattern: '.agentistics/github-backup.json', match: 'prefix', reason: 'secret',
+    // The trailing dot is deliberate: it covers the sealed file (`github-backup.sealed`), the legacy
+    // plaintext one (`github-backup.json`) and either one's crash leftovers, and nothing else.
+    pattern: '.agentistics/github-backup.', match: 'prefix', reason: 'secret',
     restoreWith: 'agentop backup github setup <url>',
-    why: 'The GitHub PAT used to upload versioned backups (github-store.ts, 0600). A backup-'
+    why: 'The GitHub PAT used to upload versioned backups (github-store.ts, sealed by the vault). A backup-'
       + 'configuration file holding a key and living where the backups live is exactly what this '
       + 'table exists to keep out of an archive.',
   },
@@ -217,6 +219,14 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
   // file is not in the archive, nothing says so, and the loss is found on the machine that no
   // longer has the original. `backup-coverage.lint.test.ts` now fails on any new one.
   {
+    pattern: '.agentistics/vault', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop vault init (runs on first use)',
+    why: 'The wrapped data key that opens every sealed secret on this machine (vault/service.ts). '
+      + 'Useless off this machine except the passphrase wrapper, which is an offline brute-force '
+      + 'target beside the files it opens — so it never travels. A restore creates a new vault on '
+      + 'first use, and the secrets are re-entered with the commands this list prints.',
+  },
+  {
     pattern: '.agentistics/central', match: 'prefix', reason: 'secret',
     restoreWith: 'agentop central up',
     why: 'central.env holds AGENTISTICS_TEAM_PASSWORD, the session secret, the ingest token and '
@@ -228,6 +238,11 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     restoreWith: 'agentop central up (a central rebuilds it) — nothing on a member or solo machine',
     why: 'A central\'s own server state (TEAM_DIR). It belongs to the central this machine IS, not '
       + 'to the metrics it collected, and it sits beside credentials.',
+  },
+  {
+    pattern: '.agentistics/run', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing — the running service recreates it',
+    why: 'The vault\'s unlock socket (`run/vault.sock`), live only while an agentop service runs.',
   },
   {
     pattern: '.agentistics/backups', match: 'prefix', reason: 'runtime',

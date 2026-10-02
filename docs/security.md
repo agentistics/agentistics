@@ -20,6 +20,17 @@ conversation transcripts**.
 Members never push chat. Raw transcripts are fetched on demand over the reverse WebSocket and
 are never stored centrally.
 
+Every machine — solo, member or central — also holds credentials of its own, and those are
+**encrypted at rest, never plain text** ([§7a](#7a-secrets-at-rest--every-secret-is-sealed-never-plain-text-under-0600)):
+
+| Secret | Where (under `~/.agentistics`) | Purpose |
+|---|---|---|
+| GitHub PAT for versioned backups | `github-backup.sealed` | `github-backup` |
+| Member tokens for each central (`team.connections[].token`) | `connections/tokens.sealed` — no longer in `preferences.json` | `central-token` |
+| X25519 private key of the sealed envelope channel | `connections/envelope-key.sealed` | `envelope-key` |
+| A central's password, session secret, ingest token, `MONGO_URL` | `central/secrets.sealed` — `central.env` keeps only the non-secret variables | `central-env` |
+| Provider API keys of the native runtime | `provider-keys/<id>.sealed` (the engine, through engine-api 1.5 `secrets`) | `engine/provider-key` |
+
 ## 2. Threat model
 
 Defended against:
@@ -263,10 +274,143 @@ test asserting exactly that (`auth-principal.test.ts`, `stepup.test.ts`).
 - **A public repository does not weaken any of this** — every secret is operator-supplied at
   runtime and none is committed — but it does mean the defaults are read by attackers too, which
   is why they are the conservative ones. See [SECURITY.md](../SECURITY.md).
+- **The vault does not stop malware running as you.** It closes copies of `~/.agentistics` read
+  elsewhere; a process with your account, while the vault is open, can ask the protector for the key
+  ([§7a](#7a-secrets-at-rest--every-secret-is-sealed-never-plain-text-under-0600)).
 - **Configuration is the weakest link.** Most of these controls are switched on by an
   environment variable, and OWASP ranks security misconfiguration second among current risks.
   That is the entire reason `agentop doctor --exposed` exists and refuses to declare readiness
   on a check it could not verify.
+
+## 7a. Secrets at rest — every secret is sealed, never plain text under 0600
+
+**The rule:** every secret Agentistics writes is encrypted. A secret in plain text protected only by
+mode `0600` is not acceptable — `0600` protects against other non-root users of the same machine
+and nothing else.
+
+**What this buys.** The threat the vault closes is **a copy of `~/.agentistics` read somewhere
+else**: a backup tarball, a cloud-sync folder that swept the home directory, a pendrive, a disk
+image, a stolen laptop's disk read from another OS, the Windows side of a WSL disk, a support
+bundle, an agent that `cat`s the file into a transcript that is later shared. Before this, every one
+of those was a live credential. Now each is a blob that opens only on this machine, under this OS
+account, through its protector.
+
+**What it does not close, in these words: a process running as you, on this machine, while the
+vault is open, can ask the protector for the key** — DPAPI, an unlocked login keyring and the
+Keychain all serve the same user. Malware with your account is out of scope, as it is for every
+credential store on a desktop OS. The policy floor (`protectedGlobs`, and the engine's floor over the
+whole data directory) keeps the native runtime's own agent away from the vault; that is the
+in-product half of this limit.
+
+### How it works
+
+- **Envelope encryption** (`packages/vault`, public so the claim is verifiable). One 32-byte data key
+  (DEK) per machine, with a random key id. It exists in plain form only in the memory of a process
+  that opened the vault — never on disk, in a log, an audit event, a response or an error.
+- **Per-purpose subkeys**: `HKDF-SHA256(DEK, salt = kid, info = "agentistics/vault/v1/" + purpose)`.
+  A blob sealed for one purpose cannot be opened as another, which is what makes engine-api 1.5
+  `secrets` safe to hand an engine: it is served `engine/…` purposes only.
+- **AES-256-GCM**, a random 96-bit nonce per seal, AAD binding the blob to its purpose, its logical
+  name and the vault's kid (length-prefixed, so no two tuples encode alike). Copying
+  `anthropic.sealed` over `openai.sealed` fails the tag (`tampered`); a file from another machine's
+  vault says so (`wrong-machine`) — "copied" and "modified" are different sentences.
+- **The DEK is stored only wrapped**, in `~/.agentistics/vault/`, by the protector detection found —
+  each accepted only after a real round trip, never a presence check:
+
+| Platform | Protector |
+|---|---|
+| macOS | the login Keychain (`security -i`, the key on stdin) |
+| Windows | DPAPI, CurrentUser (`powershell.exe`, payload on stdin; blob in `vault/dek.dpapi`) |
+| WSL | Windows DPAPI through interop — verified to work from the agentop service — then libsecret, then a TPM |
+| Linux | libsecret (Secret Service) first, then `systemd-creds` **with a TPM2 only** |
+| none of these | a passphrase you choose — said in words, naming what was checked |
+
+  A secret never appears in a command line (`ps` shows every argv to every user): every protector
+  CLI gets it on stdin. `systemd-creds --with-key=host` is never used — a key file on the same disk is
+  the rejected option below.
+- **Detection runs once.** The protector is recorded in `vault.json` and never switched silently: if
+  it stops answering the vault is `locked` or `protector-lost`, never quietly re-keyed (a new key
+  would orphan every sealed file). `agentop vault rekey --protector <p>` is the explicit move.
+- **Rejected, and recorded so it is not re-proposed:** a key derived from the machine and stored
+  beside the data (machine-id, hostname, a key file in `~/.agentistics`) — everything needed to
+  decrypt travels in the same tarball, so it is obfuscation; `0600` as the end state; a
+  passphrase-less fallback; Windows Credential Manager; a native keychain addon.
+- `0600` stays as a **second layer**: sealed files are still written `0600` in `0700` directories,
+  atomically (tmp + fsync + rename + chmod + fsync of the directory), and a reader refuses a sealed
+  file that is group- or world-readable, as evidence something else is wrong.
+
+### The passphrase, and a locked service
+
+With no protector, `agentop vault init` asks for a passphrase (≥ 12 characters, not one of the
+secrets it protects): `scrypt(N = 2^17, r = 8, p = 1)` → a key-encryption key → AES-256-GCM over the
+DEK, parameters stored so they can be raised. Such a vault — or any vault whose protector the
+service cannot reach — makes the service start **locked**: whatever needs a secret refuses with the
+`locked` sentence, and nothing else is affected (metrics, the board and the dashboard keep working).
+`agentop vault unlock` reads the passphrase on the terminal with no echo and hands it to the running
+service over `~/.agentistics/run/vault.sock` (directory `0700`, socket `0600` — Bun has no
+peer-credential call, so the uid check is the filesystem's), **never over the HTTP server**, which
+binds every interface. `agentop vault lock` drops the key.
+
+A passphrase wrapper beside the system one is optional (`agentop vault add-passphrase`); it is how a
+**Docker machine** opens the vault (a container has no DPAPI or Keychain), and it is an offline
+brute-force target beside the files it opens, which is why it is never the default.
+
+### Migration, and what "securely deleted" honestly means
+
+Every plaintext secret an earlier version wrote is migrated automatically at the first open: sealed
+to a NEW file name, re-read from disk and verified, then the original is moved aside, overwritten
+with random bytes, fsynced and unlinked. Each step is correct at every crash point (the state
+machine is in `packages/vault/src/migrate.ts`, and a test crashes it after every single syscall).
+The preferences tokens move to their sealed map FIRST and only then leave `preferences.json`, which
+is now also written `0600` (it was the umask's — `0664` on the reference machine). Removing a
+connection deletes its token from the sealed map in the same write; if the vault cannot open at that
+moment, the id is tombstoned in `preferences.json` (`sealedTokenTombstones`, no secret) so a token
+never comes back with a re-added id, and the next write with the vault open deletes it. With no protector
+and no terminal, the plaintext files are left **exactly as they are** — destroying them would lose
+the credentials — the service says `plaintext-pending`, and from that moment no new plaintext is
+ever written: every write refuses.
+
+**Overwrite-then-unlink is best-effort.** On SSDs (wear levelling), copy-on-write filesystems (btrfs,
+APFS, ZFS), WSL's ext4-in-VHDX and anything with snapshots, the old blocks may survive. The guarantee
+is "nothing is written in plain text from now on", not "the past is erased" — so the migration says,
+once, that copies made before (backups, snapshots, synced folders) may still hold the secrets, and
+that rotating them closes it.
+
+A rollback to an agentop older than the vault does not know `.sealed` files: it sees no key and, if
+the user re-enters one, writes plain text again. The next upgrade migrates it again. There is no
+"decrypt everything back" verb; leaving the vault is `agentop vault reset` (it deletes the vault and
+every sealed file after naming each) and re-entering the secrets.
+
+**One owner per file.** The host migrates and writes S2–S6; the engine alone owns
+`provider-keys/` (its layout, its writes and the migration of its legacy plaintext), and the host
+never lists, migrates, scrubs or deletes anything there — `agentop vault reset` says so and leaves it.
+Every migration event — `vault.migrated`, `vault.plaintext-pending`, `vault.migration-failed`, from
+the host or from the engine through `host.audit` — is one line in `~/.agentistics/vault/audit.jsonl`
+(0600), naming the purpose and the logical name and never a value, a length or a fragment.
+
+### Backups
+
+**A backup never carries the data key, wrapped or not** (`.agentistics/vault` is a `secret` row). A
+restore produces a machine with no vault; the first use creates a new one, and the restore's
+"omitted secrets" list is the re-entry checklist. A sealed file that travelled by other means reads
+`wrong-machine`.
+
+### A Docker central — the limit this leaves
+
+`agentop central up` opens `central/secrets.sealed` on the HOST and passes the values to
+`docker compose` through the child's **environment** (the compose file interpolates `${VAR:-}`), so
+Agentistics writes no plaintext copy of its own. **But Docker persists a container's environment in
+its own root-only state (`/var/lib/docker/containers/*/config.v2.json`), so on the Docker host the
+central's secrets are at rest in Docker's store, readable by root and by the `docker` group (which is
+root-equivalent).** Avoiding even that takes Docker/Swarm secrets or a KMS (the cloud track). A
+central run without Docker under systemd should load its secrets with `LoadCredentialEncrypted=` and
+a TPM2. A central started from a **repository checkout** through `central.sh` keeps its `central.env`
+beside the script, where bash reads it — a developer's checkout file outside `~/.agentistics`, not
+split. `agentop ci-push` reads `AGENTISTICS_CI_TOKEN` from the runner's environment and writes no
+file (a test pins it).
+
+Central-side database secrets (the persisted session secret, password hashes, TOTP seeds) are a
+database-at-rest question, out of scope here.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 

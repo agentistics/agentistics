@@ -39,8 +39,11 @@ export async function runDoctor(argv: string[]): Promise<never> {
   const exposed = argv.includes('--exposed')
 
   const envPath = findEnvFile()
+  // A split central.env keeps its secrets in the vault (vault/central-env.ts); the checks below
+  // need to know they are SET, so they are read back in memory — never printed.
+  const { centralEnvTextWithSecrets } = await import('./vault/central-env')
   const cfg = resolveDeploymentConfig(
-    envPath ? readFileSync(envPath, 'utf8') : null,
+    envPath ? await centralEnvTextWithSecrets(envPath, readFileSync(envPath, 'utf8')) : null,
     process.env as Record<string, string | undefined>,
   )
 

@@ -34,6 +34,7 @@ import {
 import type { AgentisticsEvent } from '@agentistics/core'
 import type { SpawnBudget } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
+import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -266,6 +267,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
           : process.env.AGENTISTICS_INGEST === '1'
     ),
     audit: e => {
+      // 1.5: `vault.*` events go to the machine's own vault/audit.jsonl, never to Mongo.
+      if (routeEngineVaultAudit(e)) return
       void import('../audit').then(m => m.writeAudit(e)).catch(() => {})
     },
     readJsonLimited,
@@ -288,6 +291,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     // `SERVE_STATIC` is `sse.ts`'s own reading of the same variable; importing `sse` here would load
     // the embedded dashboard for every engine load.
     originPolicy: () => ({ allowedOrigins: [...config.ALLOWED_ORIGINS], dev: process.env.SERVE_STATIC !== '1' }),
+    // 1.5 — the vault, restricted to `engine/…` purposes (vault/engine-secrets.ts).
+    secrets: engineSecrets(),
     now: () => new Date(),
     // 1.4: which contract this host speaks, and the fleet's confirmed transitions. The hub is fed by
     // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.

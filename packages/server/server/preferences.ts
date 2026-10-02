@@ -1,8 +1,10 @@
 import { join, dirname } from 'path'
-import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes } from 'node:fs/promises'
+import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes, chmod } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from './config'
 import type { AccessibilityPrefs, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import { migrateTeamConfig } from '@agentistics/core'
+import { injectSealedTokens, plaintextTokenCount, stripAndSealTokens, withoutTokenFields } from './vault/prefs-tokens'
+import { registerVaultMigrator, sentence as vaultSentence, type MigrationReport } from './vault/service'
 // TYPE-only, and the allowed direction: `server -> tui`. The arrangements are declared once, in
 // `session-dimensions.ts`, and this file stores whichever one was chosen.
 import type { SessionGroupingId } from '@agentistics/tui/control'
@@ -366,16 +368,25 @@ export function resolveSessionSearchScopes(p: Preferences): SearchScope[] {
  *  - absent or blank  → null  (a legitimate "nothing here")
  *  - present but corrupt → THROWS. Falling through to defaults here presents the machine as
  *    solo and silently discards every connection, denylist, archiveMode and layout. */
-async function readJsonPrefs(path: string): Promise<Preferences | null> {
+/** The file's JSON exactly as it is on disk — tokens NOT re-injected. `null` when absent/empty. */
+async function readRawPrefs(path: string): Promise<Record<string, unknown> | null> {
   const file = Bun.file(path)
   if (!(await file.exists())) return null
   const text = await file.text()
   if (!text.trim()) return null
   try {
-    return JSON.parse(text) as Preferences
+    return JSON.parse(text) as Record<string, unknown>
   } catch (err) {
     throw new Error(`preferences file at ${path} is present but unparseable: ${err instanceof Error ? err.message : String(err)}`)
   }
+}
+
+/** Parse a preferences file and put its SEALED tokens back (see vault/prefs-tokens.ts): every
+ *  reader keeps seeing `connections[].token`, while the file itself holds none. */
+async function readJsonPrefs(path: string): Promise<Preferences | null> {
+  const raw = await readRawPrefs(path)
+  if (!raw) return null
+  return injectSealedTokens(path, raw as Preferences)
 }
 
 /** A FRESH defaults object every call — never a shared const. `team` in particular is spread
@@ -440,7 +451,7 @@ export async function readPreferencesFrom(primary: string, legacy: string | null
       if (p2) return withMigratedTeam(p2)
       // The legacy dir may be read-only (Docker), so a failed migration write is expected and
       // ignored — the caller still gets the migrated-in-memory result.
-      try { await writeFileAtomic(primary, JSON.stringify(prefs, null, 2)) } catch { /* read-only legacy dir */ }
+      try { await writePrefsFile(primary, prefs) } catch { /* read-only legacy dir, or a vault that cannot seal yet */ }
       return prefs
     } finally {
       await release()
@@ -486,12 +497,29 @@ let _tmpSeq = 0
 
 /** tmp + rename. `Bun.write` truncates in place, so a concurrent reader can observe a
  *  half-written file; rename on the same filesystem is atomic. The tmp name is unique per
- *  CALL (pid + monotonic counter + random suffix), not just per process. */
+ *  CALL (pid + monotonic counter + random suffix), not just per process.
+ *
+ *  Mode 0600, set on the tmp file at creation AND re-applied after the rename: this file used to be
+ *  written with no mode at all, so it took the umask's — 0664 on the reference machine, readable by
+ *  every account on it, while it carried live central tokens. It no longer carries any (they are
+ *  sealed, see `writePrefsFile`), and it is still private. */
 async function writeFileAtomic(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp-${process.pid}-${++_tmpSeq}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmp, text, 'utf-8')
+  await writeFile(tmp, text, { encoding: 'utf-8', mode: 0o600 })
   await rename(tmp, path)
+  await chmod(path, 0o600).catch(() => { /* a filesystem that refuses chmod (DrvFs) keeps its own mode */ })
+}
+
+/**
+ * The ONE way the preferences file is written: the central tokens are taken OUT and sealed into
+ * `connections/tokens.sealed` (verified from disk first), then the file is written without them.
+ * Throws the vault's sentence when a token must be sealed and cannot be — never plain text.
+ */
+async function writePrefsFile(primary: string, prefs: Preferences): Promise<void> {
+  const previous = await readRawPrefs(primary).catch(() => null)
+  const toWrite = await stripAndSealTokens(primary, prefs as unknown as Record<string, unknown>, previous)
+  await writeFileAtomic(primary, JSON.stringify(toWrite, null, 2))
 }
 
 // ---------------------------------------------------------------------------
@@ -861,7 +889,7 @@ export async function writePreferencesTo(primary: string, legacy: string | null,
       const { prefs: current } = await readEffective(primary, legacy)
       const merged = { ...current, ...prefs }
       if (prefs.team) merged.team = mergeTeamPayload(current.team, prefs.team)
-      await writeFileAtomic(primary, JSON.stringify(merged, null, 2))
+      await writePrefsFile(primary, merged)
     } finally {
       await release()
     }
@@ -904,7 +932,7 @@ export async function updateTeamConfigAt(primary: string, legacy: string | null,
       const nextTeam = mutate(currentTeam)
       if (nextTeam === undefined) return currentTeam
       const merged = { ...current, team: mergeTeamPayload(current.team, nextTeam) }
-      await writeFileAtomic(primary, JSON.stringify(merged, null, 2))
+      await writePrefsFile(primary, merged)
       return merged.team as TeamConfig
     } finally {
       await release()
@@ -936,7 +964,7 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
       const patch = mutate(current)
       if (patch === undefined) return current
       const merged = { ...current, ...patch }
-      await writeFileAtomic(primary, JSON.stringify(merged, null, 2))
+      await writePrefsFile(primary, merged)
       return merged
     } finally {
       await release()
@@ -947,6 +975,69 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
 export async function updatePreferences(mutate: PreferencesMutator): Promise<Preferences> {
   return updatePreferencesAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE, mutate)
 }
+
+/**
+ * S3/S4 — move plaintext central tokens out of the preferences files (spec §3.3). Order:
+ *  1. rewrite the PRIMARY through the normal locked write path — which seals the tokens into
+ *     `connections/tokens.sealed`, verifies them from disk, and only then writes the file without
+ *     them (now 0600);
+ *  2. THEN scrub the token fields of the LEGACY copy under `~/.claude` in place, leaving the rest of
+ *     that file alone. It is only ever read when the primary is absent, and after step 1 it is not.
+ * A crash between any two steps leaves tokens in a place the next pass finds and finishes.
+ */
+export async function migratePreferencesTokensAt(primary: string, legacy: string | null): Promise<MigrationReport> {
+  const report: MigrationReport = { migrated: 0, lines: [] }
+  const rawPrimary = await readRawPrefs(primary).catch(() => null)
+  const rawLegacy = legacy ? await readRawPrefs(legacy).catch(() => null) : null
+  const inPrimary = plaintextTokenCount(rawPrimary)
+  const legacyFeedsPrimary = !rawPrimary && plaintextTokenCount(rawLegacy) > 0
+  if (inPrimary > 0 || legacyFeedsPrimary) {
+    try {
+      await enqueueWrite(async () => {
+        const release = await acquireFileLock(primary)
+        try {
+          const { prefs } = await readEffective(primary, legacy)
+          await writePrefsFile(primary, prefs)
+        } finally {
+          await release()
+        }
+      })
+      report.migrated += inPrimary
+    } catch (err) {
+      report.lines.push(vaultSentence('migration-failed', { file: primary, reason: err instanceof Error ? err.message : 'write failed' }))
+      return report
+    }
+  }
+  const legacyCount = plaintextTokenCount(rawLegacy)
+  if (legacy && rawLegacy && legacyCount > 0) {
+    try {
+      await writeFileAtomic(legacy, JSON.stringify(withoutTokenFields(rawLegacy), null, 2))
+      if (inPrimary === 0) report.migrated += legacyCount
+    } catch (err) {
+      report.lines.push(vaultSentence('migration-failed', { file: legacy, reason: (err as NodeJS.ErrnoException)?.code ?? 'write failed' }))
+    }
+  }
+  return report
+}
+
+/** How many plaintext tokens the two preference files still hold. Never opens the vault. */
+export async function pendingPreferencesTokensAt(primary: string, legacy: string | null): Promise<number> {
+  const a = plaintextTokenCount(await readRawPrefs(primary).catch(() => null))
+  const b = legacy ? plaintextTokenCount(await readRawPrefs(legacy).catch(() => null)) : 0
+  return a + b
+}
+
+registerVaultMigrator({
+  id: 'preferences-tokens',
+  pending: () => pendingPreferencesTokensAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE),
+  async pendingFiles() {
+    const out: string[] = []
+    if (plaintextTokenCount(await readRawPrefs(PREFERENCES_FILE).catch(() => null)) > 0) out.push(PREFERENCES_FILE)
+    if (LEGACY_PREFERENCES_FILE && plaintextTokenCount(await readRawPrefs(LEGACY_PREFERENCES_FILE).catch(() => null)) > 0) out.push(LEGACY_PREFERENCES_FILE)
+    return out
+  },
+  run: () => migratePreferencesTokensAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE),
+})
 
 /**
  * Strip every secret from a preferences object before it leaves the process.

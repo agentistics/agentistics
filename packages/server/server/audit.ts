@@ -53,6 +53,10 @@ export type AuditAction =
   // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
   // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
   | 'provider.set' | 'provider.remove'
+  // The vault (engine-api 1.5): a plaintext secret sealed, one still waiting because the vault could
+  // not open, and one whose migration failed. meta names the purpose and the logical name ONLY —
+  // never a value, a length or a fragment. Written to the machine's own `vault/audit.jsonl`.
+  | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
 
 export interface AuditEvent {
   action: AuditAction

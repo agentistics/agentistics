@@ -1,22 +1,43 @@
 /**
  * github-store.ts — where the GitHub backup token lives.
  *
- * `~/.agentistics/github-backup.json`, mode **0600**, because it holds a live personal access
- * token: `token` is never logged, never returned by a route, and never included in a backup — it
- * is listed in `backup-plan.ts`'s `EXCLUDE_RULES` as a `secret` for exactly that reason. A route
- * that wants to show the connection may read this file but must strip `token` before answering —
- * see `GithubBackupStatus` below, the one shape a route may return.
+ * `~/.agentistics/github-backup.sealed` — the whole config SEALED by the machine's vault (purpose
+ * `github-backup`), because it holds a live personal access token. It is never written in plain text:
+ * with no vault able to seal, `writeGithubConfig` REFUSES with the vault's sentence. The legacy
+ * plaintext `github-backup.json` an earlier version wrote is migrated (sealed, verified, scrubbed) the
+ * first time the vault is open — see docs/security.md § "Secrets at rest".
  *
- * The read/write shape mirrors `backup-store.ts`: pure decisions would have nothing to decide here
- * (there is one record, not a history), so this module is the I/O edge itself, with an optional
- * `file` parameter on every function — the same test-injection point `readBackups`/`recordBackup`
- * use, so a test never has to touch the real `~/.agentistics`.
+ * `token` is never logged, never returned by a route, and never included in a backup — it is listed
+ * in `backup-plan.ts`'s `EXCLUDE_RULES` as a `secret` for exactly that reason. A route that wants to
+ * show the connection must strip `token` before answering — see `GithubBackupStatus` below, the one
+ * shape a route may return.
+ *
+ * Every function takes an optional `file` — the LEGACY plaintext path; the sealed file is its
+ * sibling (`.json` → `.sealed`). That is the test-injection point, so a test never touches the real
+ * `~/.agentistics`.
  */
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { scrubFile } from '@agentistics/vault'
+import {
+  openFromFile, pendingPlaintext, registerVaultMigrator, sealToFile, secretFs, sentence,
+} from '../vault/service'
+import { migrateWholeFile, sealedPathFor, wholeFileMigrator } from '../vault/whole-file'
 
+/** The LEGACY plaintext location — only ever read to migrate it. */
 export const GITHUB_BACKUP_CONFIG_FILE = join(AGENTISTICS_DATA_DIR, 'github-backup.json')
+/** Where the config lives now. */
+export const GITHUB_BACKUP_SEALED_FILE = sealedPathFor(GITHUB_BACKUP_CONFIG_FILE)
+
+const PURPOSE = 'github-backup'
+const NAME = 'github-backup'
+
+function itemFor(file: string) {
+  return { purpose: PURPOSE, name: NAME, plainPath: file, sealedPath: sealedPathFor(file) }
+}
+
+registerVaultMigrator(wholeFileMigrator('github-backup', () => itemFor(GITHUB_BACKUP_CONFIG_FILE)))
 
 export interface GithubBackupConfig {
   /** `https://github.com/<owner>/<repo>` (or whichever form the user pasted) — display only. */
@@ -68,14 +89,43 @@ function isValidConfig(v: unknown): v is GithubBackupConfig {
     && typeof o.repo === 'string' && typeof o.token === 'string'
 }
 
-/** Reads the config, or `null` if it is absent, unreadable, or malformed. Never throws. */
+/** What reading the config found. `refused` carries the vault's sentence (locked, tampered, …). */
+export type GithubConfigRead =
+  | { state: 'absent' }
+  | { state: 'ok'; config: GithubBackupConfig }
+  | { state: 'refused'; sentence: string }
+
+/**
+ * Read the config: the sealed file, migrating a legacy plaintext one first when that is all there
+ * is. A plaintext file is never USED — only handed to the migration; if it cannot be sealed yet the
+ * answer is the vault's refusal, not the token.
+ */
+export async function readGithubConfigDetailed(file = GITHUB_BACKUP_CONFIG_FILE): Promise<GithubConfigRead> {
+  const sealed = sealedPathFor(file)
+  let r = await openFromFile(sealed, PURPOSE, NAME)
+  if (!r.ok && r.absent && existsSync(file)) {
+    const m = await migrateWholeFile(itemFor(file))
+    r = await openFromFile(sealed, PURPOSE, NAME)
+    if (!r.ok && r.absent) {
+      return { state: 'refused', sentence: m.lines[0] ?? sentence('plaintext-pending', { n: Math.max(1, await pendingPlaintext()) }) }
+    }
+  }
+  if (!r.ok) return r.absent ? { state: 'absent' } : { state: 'refused', sentence: r.sentence }
+  const config = parseConfig(new TextDecoder().decode(r.plaintext))
+  return config ? { state: 'ok', config } : { state: 'absent' }
+}
+
+/** Reads the config, or `null` if it is absent, unreadable, malformed or cannot be opened. Never throws. */
 export async function readGithubConfig(file = GITHUB_BACKUP_CONFIG_FILE): Promise<GithubBackupConfig | null> {
-  let raw: string
   try {
-    raw = await readFile(file, 'utf-8')
+    const r = await readGithubConfigDetailed(file)
+    return r.state === 'ok' ? r.config : null
   } catch {
     return null
   }
+}
+
+function parseConfig(raw: string): GithubBackupConfig | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -104,15 +154,20 @@ export async function readGithubConfig(file = GITHUB_BACKUP_CONFIG_FILE): Promis
 }
 
 /**
- * Writes the config at mode 0600. `writeFile`'s own `mode` option only applies when the file is
- * CREATED (the syscall's mode argument is ignored on an existing file), so a config being
- * overwritten — a token rotation, a re-run of setup — is followed by an explicit `chmod` rather
- * than trusting the create-time mode to still be the one in force.
+ * Seal and write the config (tmp + fsync + rename + chmod 0600 + fsync dir, via the vault's one
+ * writer). THROWS the vault's `VaultRefusalError` when it cannot seal — never writes plain text. A
+ * legacy plaintext file beside it is scrubbed afterwards: the sealed one supersedes it.
  */
 export async function writeGithubConfig(
   config: GithubBackupConfig, file = GITHUB_BACKUP_CONFIG_FILE,
 ): Promise<void> {
-  await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 })
-  await chmod(file, 0o600)
+  await sealToFile(sealedPathFor(file), PURPOSE, NAME, new TextEncoder().encode(JSON.stringify(config, null, 2)))
+  if (existsSync(file)) await scrubFile(secretFs(), file)
+}
+
+/** Remove the config, sealed and legacy alike. Idempotent. */
+export async function removeGithubConfig(file = GITHUB_BACKUP_CONFIG_FILE): Promise<void> {
+  const fs = secretFs()
+  await fs.unlink(sealedPathFor(file))
+  if (existsSync(file)) await scrubFile(fs, file)
 }

@@ -30,7 +30,16 @@
  * engine built against 1.3 still loads and an engine built against 1.4 still runs on a host that
  * offers none of them.
  */
-export const ENGINE_API_VERSION = '1.4.0'
+/**
+ * 1.5.0 — the machine's vault: `EngineHostServices.secrets` (optional), through which an engine
+ * seals and opens ITS OWN secrets (purposes `engine/…`) without ever holding the data key. Optional,
+ * so a 1.5 engine still loads on an older host — and refuses to STORE a provider key there rather
+ * than write it in plain text. `EngineAuditAction` gains `vault.migrated`, `vault.plaintext-pending`
+ * and `vault.migration-failed`, so the engine reports its own migration (S1, provider keys — the
+ * engine is that file's ONLY owner; the host never touches `provider-keys/`) through `host.audit`,
+ * which writes them to the machine's `vault/audit.jsonl`.
+ */
+export const ENGINE_API_VERSION = '1.5.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
