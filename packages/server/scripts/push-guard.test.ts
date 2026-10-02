@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { parseFrozenList, parseNameStatus } from './frozen-paths'
-import { capReport, checkPush, checkRemotes, engineOnlyCommits, evaluatePush, issueBody, issueTitle, MAX_REPORT_LINES, parsePushLines, planRange, type GitRun, type PushRef } from './push-guard'
+import { capReport, checkPush, checkRemotes, engineOnlyCommits, evaluatePush, issueBody, issueTitle, MAX_REPORT_LINES, offenceCount, parsePushLines, planRange, type GitRun, type PushRef } from './push-guard'
 
 const LIST = parseFrozenList(readFileSync(join(import.meta.dir, '../../../.github/frozen-engine-paths.txt'), 'utf8'))
 const Z = '0'.repeat(40)
@@ -66,11 +66,17 @@ describe('the wider check', () => {
     expect(out).toHaveLength(MAX_REPORT_LINES)
     expect(out.at(-1)).toBe('… and 31 more.')
   })
-  test('issue body lists paths+commits and says detection, not prevention', () => {
-    const b = issueBody('feat/x', 'a'.repeat(40), [{ path: 'engine/src/a.ts', commit: 'abc1234', ref: 'refs/heads/feat/x' }])
-    expect(b).toContain('`engine/src/a.ts` (commit abc1234)')
-    expect(b).toContain('detection, not prevention')
+  test('the PUBLIC issue body names the branch and run, and never a path or a sha', () => {
+    const url = 'https://github.com/o/r/actions/runs/42'
+    const b = issueBody('feat/x', url)
+    expect(b).toContain('`feat/x`')
+    expect(b).toContain('engine-path check failed')
+    expect(b).toContain(url)
+    expect(b).toContain('Delete the branch, then run leak-check.')
+    expect(b).not.toMatch(/engine\/src|runtime\/src|\.ts|[0-9a-f]{7,40}/)
     expect(issueTitle('feat/x')).toBe('Engine paths on public branch feat/x')
+    expect(offenceCount(1)).toBe('1 offending path')
+    expect(offenceCount(3)).toBe('3 offending paths')
   })
 })
 

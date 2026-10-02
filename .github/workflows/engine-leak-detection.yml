@@ -34,6 +34,7 @@ jobs:
           SHA: ${{ github.sha }}
           REF: ${{ github.ref }}
           ISSUE_BODY_FILE: ${{ runner.temp }}/issue-body.md
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main || true
           bun packages/server/scripts/push-guard-action.ts
@@ -46,7 +47,7 @@ jobs:
           BODY: ${{ runner.temp }}/issue-body.md
         run: |
           title="Engine paths on public branch ${BRANCH}"
-          existing=$(gh issue list --state open --label security --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          existing=$(gh issue list --state open --label security --json number,title | jq -r --arg t "$title" 'map(select(.title == $t)) | .[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body-file "$BODY"
           else

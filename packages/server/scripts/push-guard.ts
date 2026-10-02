@@ -140,15 +140,18 @@ export function evaluatePush(refs: readonly PushRef[], opts: EvaluateOpts, parse
 
 export const issueTitle = (branch: string) => `Engine paths on public branch ${branch}`
 
-/** Detection, not prevention: the body names what landed where. */
-export function issueBody(branch: string, sha: string, hits: readonly Hit[]): string {
-  const rows = hits.slice(0, MAX_REPORT_LINES).map(h => `- \`${h.path}\` (commit ${h.commit || sha.slice(0, 8)})`)
-  if (hits.length > MAX_REPORT_LINES) rows.push(`- … and ${hits.length - MAX_REPORT_LINES} more.`)
+/** PUBLIC text (issue + run log): names the branch and the run, never what leaked. */
+export function issueBody(branch: string, runUrl: string): string {
   return [
-    `Push \`${sha.slice(0, 8)}\` to branch \`${branch}\` added or modified paths owned by the engine repo.`,
+    `Branch \`${branch}\`: engine-path check failed.`,
     '',
-    ...rows,
+    `Run: ${runUrl}`,
     '',
-    'This is **detection, not prevention**: GitHub does not allow push rules on a public repository, so the code is already on the remote. Delete the branch (or force-push it clean); the fix belongs in `agentistics/agentistics-engine`.',
+    'Delete the branch, then run leak-check.',
+    '',
+    '_Detection, not prevention: GitHub allows no push rules on a public repository._',
   ].join('\n')
 }
+
+/** The only thing the public run log may say about a hit. */
+export const offenceCount = (n: number) => `${n} offending path${n === 1 ? '' : 's'}`

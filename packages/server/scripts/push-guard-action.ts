@@ -2,10 +2,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseFrozenList, parseNameStatus } from './frozen-paths'
-import { evaluatePush, issueBody } from './push-guard'
+import { evaluatePush, issueBody, offenceCount } from './push-guard'
 
 const root = join(import.meta.dir, '..', '..', '..')
-const { BEFORE = '', SHA = '', REF = '', ISSUE_BODY_FILE } = process.env
+const { BEFORE = '', SHA = '', REF = '', ISSUE_BODY_FILE, RUN_URL = '' } = process.env
 const git = (args: string[]) => {
   const r = Bun.spawnSync(['git', ...args], { cwd: root })
   return { code: r.exitCode, out: r.stdout.toString() }
@@ -16,6 +16,7 @@ const ev = evaluatePush([{ localRef: REF, localSha: SHA, remoteRef: REF, remoteS
   mainRef: 'origin/main',
 }, parseNameStatus)
 if (ev.ok) { console.log('No engine paths in this push.'); process.exit(0) }
-console.error(ev.lines.join('\n'))
-if (ISSUE_BODY_FILE) writeFileSync(ISSUE_BODY_FILE, issueBody(REF.replace(/^refs\/heads\//, ''), SHA, ev.hits))
+// The run log is public: a count, never a path or a commit.
+console.error(`engine-path check failed: ${offenceCount(ev.hits.length)}`)
+if (ISSUE_BODY_FILE) writeFileSync(ISSUE_BODY_FILE, issueBody(REF.replace(/^refs\/heads\//, ''), RUN_URL))
 process.exit(1)
