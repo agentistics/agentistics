@@ -86,7 +86,7 @@ export function sessionReferences(input: ReferencesInput): SessionReference[] {
   if (link.kind !== 'none') {
     rows.push({
       id: 'task',
-      label: pt ? 'Entrega' : 'Delivery',
+      label: pt ? 'Tarefa' : 'Task',
       detail: link.title,
       action: link.kind === 'link' ? { type: 'task', ref: link.title } : null,
     })

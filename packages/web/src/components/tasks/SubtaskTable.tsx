@@ -477,7 +477,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   </div>
                 )}
                 {/* A GROUP's own progress, from its members' `status` (§F.1's `groupProgress`) —
-                    the same round-down bar the header above draws for the whole delivery, one
+                    the same round-down bar the header above draws for the whole task, one
                     hierarchy level down. Absent when the group has no members yet. Kept visible
                     whether the group is open or closed — completion is worth seeing at a glance. */}
                 {isGroup && view?.groupProgress && (

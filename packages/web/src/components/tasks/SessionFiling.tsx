@@ -351,7 +351,7 @@ export function SessionFiling(p: SessionFilingProps) {
       }} />
       <CornerDownRight size={11} style={{ opacity: 0.6, flexShrink: 0 }} />
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {pt ? '— direto na entrega —' : '— directly on the delivery —'}
+        {pt ? '— direto na tarefa —' : '— directly on the task —'}
       </span>
     </button>
   )
@@ -374,8 +374,8 @@ export function SessionFiling(p: SessionFilingProps) {
 
         <span style={{ ...microLabel, fontSize: 9 }}>
           {pt
-            ? 'Onde a sessão fica — direto na entrega, ou em UMA subtarefa'
-            : 'Where the session sits — directly on the delivery, or under ONE subtask'}
+            ? 'Onde a sessão fica — direto na tarefa, ou em UMA subtarefa'
+            : 'Where the session sits — directly on the task, or under ONE subtask'}
         </span>
 
         {fileError && (
@@ -423,8 +423,8 @@ export function SessionFiling(p: SessionFilingProps) {
               {filingRows.length === 0 && !adding && (
                 <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
                   {pt
-                    ? 'Esta entrega ainda não tem subtarefas. Filie aqui direto, ou quebre a entrega em subtarefas abaixo.'
-                    : 'This delivery has no subtasks yet. File it here directly, or break the delivery into subtasks below.'}
+                    ? 'Esta tarefa ainda não tem subtarefas. Filie aqui direto, ou quebre a tarefa em subtarefas abaixo.'
+                    : 'This task has no subtasks yet. File it here directly, or break the task into subtasks below.'}
                 </p>
               )}
             </>
@@ -456,16 +456,16 @@ export function SessionFiling(p: SessionFilingProps) {
             </button>
           )}
 
-        {/* The verbs, and only the ones that act on THIS delivery. */}
+        {/* The verbs, and only the ones that act on THIS task. */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
           {p.onOpenTask && (
             <button style={button(isMobile)} onClick={() => { p.onOpenTask?.(target.task.id); p.onClose() }}>
-              <ExternalLink size={13} /> {pt ? 'Abrir a entrega' : 'Open the delivery'}
+              <ExternalLink size={13} /> {pt ? 'Abrir a tarefa' : 'Open the task'}
             </button>
           )}
           {filed && !moving && (
             <button style={button(isMobile)} disabled={busy} onClick={() => { setMoving(true); setChosen(null) }}>
-              {pt ? 'Trocar de entrega' : 'Move to another delivery'}
+              {pt ? 'Trocar de tarefa' : 'Move to another task'}
             </button>
           )}
           {filed && (
@@ -502,7 +502,7 @@ export function SessionFiling(p: SessionFilingProps) {
             Either row is absent when its own dimension has at most one value, since a tab that
             filters nothing is not a filter. The "create" check below and the Enter-to-create
             shortcut both test against `searched` (text search only), never `shown` (also narrowed
-            by these tabs) — a delivery that exists somewhere but sits outside the current tab must
+            by these tabs) — a task that exists somewhere but sits outside the current tab must
             never be offered as a new one to create. */}
         {repoOptions.length > 1 && (
           <TabStrip

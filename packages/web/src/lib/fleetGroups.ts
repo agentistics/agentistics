@@ -62,7 +62,7 @@ function wordBook(lang: Lang): DimensionWordBook {
       // The same word `SessionFacts.tsx` already prints on a row's own delivery chip — a group
       // heading calling this "no task" while the row underneath it says "no delivery" is one
       // feature disagreeing with itself about its own vocabulary.
-      task: pt ? 'Sem entrega' : 'No delivery',
+      task: pt ? 'Sem tarefa' : 'No task',
       marked: pt ? 'Não marcadas' : 'Not marked',
     },
     states: {},

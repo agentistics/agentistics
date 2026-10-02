@@ -88,7 +88,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
   const cost = (n: number | null) => (n === null ? NA : fmtCost(n, p.currency, p.brlRate))
 
   const columns: Array<{ key: SortKey; label: string; numeric?: boolean }> = [
-    { key: 'title', label: pt ? 'Entrega' : 'Delivery' },
+    { key: 'title', label: pt ? 'Tarefa' : 'Task' },
     { key: 'status', label: 'Status' },
     { key: 'progress', label: pt ? 'Progresso' : 'Progress' },
     { key: 'sessions', label: pt ? 'Sessões' : 'Sessions', numeric: true },
@@ -103,8 +103,8 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
     return (
       <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: 20, textAlign: 'center', lineHeight: 1.6 }}>
         {pt
-          ? 'Nenhuma entrega tocou este repositório na janela selecionada. Uma task pertence a um repositório pelas sessões filiadas a ela.'
-          : 'No delivery touched this repository in the selected window. A task belongs to a repository through the sessions filed under it.'}
+          ? 'Nenhuma tarefa tocou este repositório na janela selecionada. Uma task pertence a um repositório pelas sessões filiadas a ela.'
+          : 'No task touched this repository in the selected window. A task belongs to a repository through the sessions filed under it.'}
       </div>
     )
   }
@@ -220,7 +220,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
                 <td style={tdNum}>{fmtTokens(r.rollup.tokens)}</td>
                 <td style={{ ...tdNum, color: 'var(--anthropic-orange)' }}>{cost(r.rollup.costUSD)}</td>
                 <td style={td}><HarnessBadges harnesses={r.harnesses} fontSize={10} /></td>
-                {/* An open task has no delivery date — "still running" is not a date, and a
+                {/* An open task has no task date — "still running" is not a date, and a
                     duration "so far" beside a delivered one reads as the same measurement. */}
                 <td style={{ ...td, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                   {delivered ?? <span style={{ color: 'var(--text-tertiary)' }}>—</span>}

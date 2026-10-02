@@ -73,11 +73,11 @@ export function SessionTitleFlag({ session, lang, onLinked, size = 22 }: Session
           if (linked) openArtifacts('tasks'); else setCreating(true)
         }}
         title={linked
-          ? (pt ? `Entrega: ${session.task} — abrir` : `Delivery: ${session.task} — open`)
-          : (pt ? 'Sem entrega — criar uma para esta sessão' : 'No delivery — create one for this session')}
+          ? (pt ? `Tarefa: ${session.task} — abrir` : `Task: ${session.task} — open`)
+          : (pt ? 'Sem tarefa — criar uma para esta sessão' : 'No task — create one for this session')}
         aria-label={linked
-          ? (pt ? 'Abrir a entrega desta sessão' : "Open this session's delivery")
-          : (pt ? 'Criar uma entrega para esta sessão' : 'Create a delivery for this session')}
+          ? (pt ? 'Abrir a tarefa desta sessão' : "Open this session's task")
+          : (pt ? 'Criar uma tarefa para esta sessão' : 'Create a task for this session')}
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: size, height: size, flexShrink: 0, padding: 0,

@@ -267,7 +267,7 @@ export function TaskComposer(p: TaskComposerProps) {
           <div style={{ display: 'grid', gap: 4 }}>
             <span style={{ ...microLabel, fontSize: 9 }}>Link the sessions already running</span>
             <span style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-              A session is filed under a PART of the delivery, never under the delivery itself — so
+              A session is filed under a PART of the task, never under the task itself — so
               each one you pick names the part it belongs to. Their repository and project come with
               them, and several parts can run at once.
             </span>
@@ -281,7 +281,7 @@ export function TaskComposer(p: TaskComposerProps) {
               background: 'var(--bg-elevated)',
             }}>
               <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                This delivery has no parts yet. Name the first one and the sessions below can be
+                This task has no parts yet. Name the first one and the sessions below can be
                 filed under it.
               </span>
               <input
@@ -371,7 +371,7 @@ export function TaskComposer(p: TaskComposerProps) {
             // Said rather than implied: an unattached task is a note until something is filed under
             // it, and every metric on it reads N/A.
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-              A delivery with no session has no cost, no rounds and no harness — it will read N/A
+              A task with no session has no cost, no rounds and no harness — it will read N/A
               until work is filed under one of its parts.
             </div>
           )}
