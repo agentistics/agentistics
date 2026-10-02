@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Lang } from '../sentences'
 
-export type ProtectorId = 'keychain' | 'dpapi' | 'libsecret' | 'systemd-creds' | 'passphrase' | 'memory'
+export type ProtectorId = 'keychain' | 'dpapi' | 'hello' | 'fido2' | 'libsecret' | 'systemd-creds' | 'passphrase' | 'memory'
 
 export interface RunResult {
   code: number

@@ -30,6 +30,7 @@ import {
   type Lang, type OpenState, type Platform, type Protector, type ProtectorId, type ProtectorIo,
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
+  helloProtector, fido2Protector, finishRetirement,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
@@ -143,7 +144,20 @@ export function protectorById(id: ProtectorId, passphrase?: string, dir: string 
     case 'systemd-creds': return systemdCredsProtector(io(), dir)
     case 'passphrase': return passphraseProtector({ io: io(), vaultDir: dir, passphrase, params: _scryptForTests })
     case 'memory': return realMode() ? null : memoryProtector()
+    case 'hello': return platform() === 'win32' || isWsl() ? helloProtector({ io: io(), vaultDir: dir, wsl: isWsl() }) : null
+    case 'fido2': return fido2Protector({ io: io(), vaultDir: dir, transport: platform() === 'win32' || isWsl() ? 'webauthn' : 'cli', wsl: isWsl() })
   }
+}
+
+/**
+ * SECRETS.4 §3.4: the presence protectors to offer at ENROLMENT, in order. Never probed at service
+ * start — a probe costs the user gestures. macOS gets FIDO2 only (Secure Enclave is deferred, Q1); a
+ * headless box or a container gets none and stays on its OS protector (or passphrase).
+ */
+export function presenceCandidates(): Protector[] {
+  if (!realMode()) return _override?.filter(p => p.id === 'hello' || p.id === 'fido2') ?? []
+  const ids: ProtectorId[] = platform() === 'win32' || isWsl() ? ['hello', 'fido2'] : platform() === 'linux' || platform() === 'darwin' ? ['fido2'] : []
+  return ids.map(id => protectorById(id)).filter((p): p is Protector => p !== null)
 }
 
 /** The candidates detection probes on this machine, in order. */
@@ -363,6 +377,13 @@ async function tryOpen(passphrase?: string): Promise<OpenState> {
 function adopt(s: OpenState): Opened | null {
   _last = s
   if (s.state !== 'open') return null
+  // An enrolment that crashed after recording presence left a silent key to delete: finish it now.
+  if (s.vault.retired?.length) {
+    const vault = s.vault
+    void finishRetirement(io(), vaultDir(), vault, vault.retired!.map(w => protectorById(w.type)).filter((p): p is Protector => p !== null))
+      .then(r => { if (_opened && _opened.kid === vault.kid) _opened.vault = r.vault })
+      .catch(() => { /* retried at the next open */ })
+  }
   _opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
   _migratedThisOpen = false
   return _opened
