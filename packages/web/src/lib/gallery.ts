@@ -51,6 +51,9 @@ export interface GalleryFile {
   format: string
   /** Where the bytes come from — see `GalleryOrigin`. Absent reads as `sent` (every older group). */
   origin?: GalleryOrigin
+  /** A URL of its own, when the file is served by none of the three routes `galleryFileUrl` knows —
+   *  the task evidence feed, whose files are attachment-store paths of ANY kind (video, PDF). */
+  url?: string
 }
 
 /** One message, and the files it carried. */
@@ -94,6 +97,8 @@ export interface GalleryGroup {
    * default. EN/PT so `GroupHeading` never has to know which language it is in.
    */
   label?: { en: string; pt: string }
+  /** The task this group belongs to — the task gallery's heading (`GroupHeading`). */
+  taskTitle?: string
 }
 
 /** The extension, uppercased. `''` when there is none — never invented from the bytes. */

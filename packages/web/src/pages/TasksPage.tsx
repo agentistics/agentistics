@@ -20,6 +20,7 @@ import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import {
   ArrowLeft, BarChart3, ClipboardList, ExternalLink, FileText, Link2,
   Filter, LayoutGrid, MessageSquare, Pencil, Plus, Rows3, Search, Settings2, Trash2, X, XCircle,
+  Images,
 } from 'lucide-react'
 import { PRIORITY_ORDER, type SortSpec, type TaskPriorityId } from '@agentistics/core'
 import { ChevronDown } from 'lucide-react'
@@ -33,6 +34,7 @@ import {
 } from '../lib/commentBody'
 import { BoardView } from '../components/tasks/TaskBoard'
 import { TaskTable } from '../components/tasks/TaskTable'
+import { EvidenceGallery } from '../components/tasks/EvidenceGallery'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
   useBoardPref,
@@ -263,6 +265,9 @@ function TaskList() {
           <button style={seg(view === 'table')} onClick={() => setView('table')}>
             <Rows3 size={14} /> Table
           </button>
+          <button style={seg(view === 'gallery')} onClick={() => setView('gallery')}>
+            <Images size={14} /> {lang === 'pt' ? 'Galeria' : 'Gallery'}
+          </button>
         </div>
         <button
           style={{ ...button(isMobile), padding: '0 9px' }}
@@ -352,9 +357,10 @@ function TaskList() {
         </div>
       )}
 
+      {view === 'gallery' && <EvidenceGallery lang={lang} />}
       {view === 'overview' && overview && <BoardOverviewView o={overview} statuses={statuses} />}
 
-      {view !== 'overview' && rows !== null && shown.length === 0 && (
+      {view !== 'overview' && view !== 'gallery' && rows !== null && shown.length === 0 && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
       {view === 'board' && shown.length > 0 && (

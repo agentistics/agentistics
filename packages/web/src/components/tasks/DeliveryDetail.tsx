@@ -53,6 +53,7 @@ import { SubtaskTable } from './SubtaskTable'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
 import { useStagedFire } from './useStagedFire'
 import { TaskFiles } from './TaskFiles'
+import { EvidenceCard } from './EvidenceCard'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
 import { CommentThreadDialog } from './CommentThreadDialog'
@@ -1301,6 +1302,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
                 <div style={{ ...microLabel, marginBottom: 9 }}>{copy.wholeDelivery}</div>
                 <Rollup r={detail.rollup} lang={lang} />
               </div>
+              <EvidenceCard taskId={detail.task.id} lang={lang} />
               {/*
                * The evidence that used to live in the rail's "ENTREGA"/"TOKENS" sections — moved
                * here rather than removed. A product owner asked for that duplicate, harder-to-scan

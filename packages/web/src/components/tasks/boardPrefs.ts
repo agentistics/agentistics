@@ -27,7 +27,7 @@ import { createSharedPref, PERSONAL_PREFS } from '../../lib/sharedPref'
 
 const KEY = 'agentistics-task-board-v1'
 
-export type BoardView = 'overview' | 'board' | 'table'
+export type BoardView = 'overview' | 'board' | 'table' | 'gallery'
 
 /** What the TABLE is grouped by — one or the other, per person. */
 export type GroupBy = 'status' | 'type'
@@ -121,7 +121,7 @@ function readColumnSort(v: unknown): Record<string, SortSpec> {
 // localStorage) falls back to the default rather than naming a view this build no longer has —
 // the same rule `readSort` and `statuses` already apply to a stale key.
 const isView = (v: unknown): v is BoardView =>
-  v === 'overview' || v === 'board' || v === 'table'
+  v === 'overview' || v === 'board' || v === 'table' || v === 'gallery'
 
 // The status vocabulary is an editable LIST now (`@agentistics/core`'s `taskStatus.ts`), so a
 // stored group/collapsed id can be any status a person has created — no longer just one of the

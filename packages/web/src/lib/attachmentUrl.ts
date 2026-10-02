@@ -82,9 +82,10 @@ export function repoMediaUrl(sessionId: string, path: string): string {
 
 /** The URL for one gallery row, whichever side it came from. ONE place, so no caller guesses. */
 export function galleryFileUrl(
-  file: { path: string; name: string; origin?: 'sent' | 'produced' | 'viewed' },
+  file: { path: string; name: string; origin?: 'sent' | 'produced' | 'viewed'; url?: string },
   sessionId: string,
 ): string {
+  if (file.url) return file.url
   if (file.origin === 'produced') return sessionMediaUrl(sessionId, file.path)
   if (file.origin === 'viewed') {
     // A VIEWED file was never sent and never (necessarily) written, so neither existing route's

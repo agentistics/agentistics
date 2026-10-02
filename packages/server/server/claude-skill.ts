@@ -128,7 +128,9 @@ question, and cannot see what the others are doing. So each one needs: what to c
 "done" looks like, and what NOT to touch (name the files the other sessions own, so two assistants
 do not edit the same file). Prefer one paragraph of plain instruction over a checklist of
 one-liners. Keep the sessions in different directories — or at least different files — wherever the
-work allows it.
+work allows it. Tell each session to attach its verification screenshots to the task with
+\`agentistics_task_attach\` (its own session id, the task ref, the file paths), so the person sees them
+on the task instead of reading a description of them.
 
 ## After starting
 

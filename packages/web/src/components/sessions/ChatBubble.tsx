@@ -886,7 +886,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
 })
 
 /** One attachment, as a small square. Falls back to a plain chip when the image fails to load. */
-function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void }) {
+export function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void }) {
   const [broken, setBroken] = useState(false)
   const name = path.split('/').pop() ?? path
 

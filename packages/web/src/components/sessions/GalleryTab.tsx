@@ -372,7 +372,7 @@ export function GalleryTab({
  * files" says nothing when the files were neither sent nor written, and would read as one of those
  * two by default.
  */
-function GroupHeading({ group, pt, now }: { group: GalleryGroup; pt: boolean; now: number }) {
+export function GroupHeading({ group, pt, now }: { group: GalleryGroup; pt: boolean; now: number }) {
   const when = agoLabel(group.at, now, pt)
   const n = group.files.length
   return (
@@ -383,7 +383,11 @@ function GroupHeading({ group, pt, now }: { group: GalleryGroup; pt: boolean; no
         color: 'var(--text-tertiary)',
       }}>
         {group.label ? <Eye size={10} style={{ flexShrink: 0 }} /> : <Paperclip size={10} style={{ flexShrink: 0 }} />}
-        {group.label ? `${pt ? group.label.pt : group.label.en} · ${n}` : (
+        {group.taskTitle !== undefined ? (
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+            {group.taskTitle} · {n}
+          </span>
+        ) : group.label ? `${pt ? group.label.pt : group.label.en} · ${n}` : (
           <>{n} {pt ? (n === 1 ? 'arquivo' : 'arquivos') : (n === 1 ? 'file' : 'files')}</>
         )}
         {/* WHEN it was sent. Absent when the transcript carried no timestamp — nothing invented,
@@ -458,7 +462,7 @@ function FileFacts({ file, size, pt }: { file: GalleryFile; size: number | undef
   )
 }
 
-function RowItem({ file, size, pt, isMobile, focused, onOpen, onMenu }: {
+export function RowItem({ file, size, pt, isMobile, focused, onOpen, onMenu }: {
   file: GalleryFile
   size: number | undefined
   pt: boolean
@@ -503,7 +507,7 @@ function RowItem({ file, size, pt, isMobile, focused, onOpen, onMenu }: {
   )
 }
 
-function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, focused, onOpen, onMenu }: {
+export function Tile({ file, sessionId, size, pt, isMobile, broken, onBroken, focused, onOpen, onMenu }: {
   file: GalleryFile
   sessionId: string
   size: number | undefined
