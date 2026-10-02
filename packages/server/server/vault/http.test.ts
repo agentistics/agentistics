@@ -53,10 +53,9 @@ function restart(): void {
 
 type J = Record<string, any>
 async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string): Promise<{ status: number; json: J; headers: Headers }> {
-  const req = new Request(`http://local${path}`, {
-    method, ...(body !== undefined ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}),
-    ...(grant ? { headers: { 'x-vault-grant': grant, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) } } : {}),
-  })
+  // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
+  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
+  const req = new Request(`http://local${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A' })
   if (!res) return { status: 404, json: {}, headers: new Headers() }
   const text = await res.text()

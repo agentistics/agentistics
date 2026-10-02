@@ -66,9 +66,12 @@ export function grantAlive(now = Date.now()): boolean { return _grant !== null &
 async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> } | null> {
   try {
     const headers: Record<string, string> = {}
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    // Every POST is JSON, even an empty one: the server refuses a vault POST of any other type (a
+    // cross-site page could send text/plain without a preflight — review M1).
+    const sent = method === 'POST' ? (body ?? {}) : body
+    if (sent !== undefined) headers['Content-Type'] = 'application/json'
     if (grantAlive()) headers['x-vault-grant'] = _grant!.token
-    const r = await fetch(path, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+    const r = await fetch(path, { method, headers, ...(sent !== undefined ? { body: JSON.stringify(sent) } : {}) })
     const json = await r.json().catch(() => ({})) as Record<string, unknown>
     if (typeof json.grant === 'string') rememberGrant(json.grant)
     if (r.status === 401 && json.code === 'stepup-required') forgetGrant()

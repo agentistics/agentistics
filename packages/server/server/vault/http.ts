@@ -13,6 +13,7 @@
  */
 import { hostname } from 'node:os'
 import { readJsonLimited } from '../limits'
+import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
 import { noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
@@ -22,6 +23,36 @@ export interface VaultHttpEnv {
   cors: Record<string, string>
   /** What a 'read' grant is bound to: the HTTP session, or one fixed value on a local profile. */
   session: string
+  /** The extra origins this server accepts (AGENTISTICS_ALLOWED_ORIGINS) and whether it is the dev server. */
+  origins?: { allowlist: string[]; dev: boolean }
+}
+
+/**
+ * PURE. May this request drive a vault action? (review M1)
+ *
+ * The host's CSRF check (csrf.ts) is a cookie-riding defence and waves through any request WITHOUT a
+ * cookie — which is every request on the `local` profile, the default. A web page the user has open
+ * could then send "simple" POSTs (text/plain, no preflight) to 127.0.0.1 and, blind, freeze the
+ * authenticator gate (20 wrong codes), keep the vault from auto-locking, or raise Hello prompts nobody
+ * asked for. So every non-GET here, cookie or not, needs BOTH:
+ *  - `Content-Type: application/json` — a cross-origin page cannot send it without a CORS preflight,
+ *    which this server answers with no Allow-Origin for a foreign origin;
+ *  - same-origin provenance: `Sec-Fetch-Site: same-origin` (every current browser sends it), or, from a
+ *    browser too old to, an `Origin` that IS this host (or an allowlisted / dev origin, as in cors.ts).
+ * A request with neither header is not a page of ours (the CLI speaks over vault.sock) and is refused.
+ */
+export function vaultRequestAllowed(
+  req: { method: string; headers: Headers }, host: string, origins: { allowlist: string[]; dev: boolean } = { allowlist: [], dev: false },
+): { ok: true } | { ok: false; code: 'not-json' | 'not-same-origin' } {
+  const m = req.method.toUpperCase()
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return { ok: true }
+  const ct = (req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+  if (ct !== 'application/json') return { ok: false, code: 'not-json' }
+  const site = req.headers.get('sec-fetch-site')
+  if (site !== null) return site === 'same-origin' ? { ok: true } : { ok: false, code: 'not-same-origin' }
+  const origin = req.headers.get('origin')
+  if (origin && (origin === `http://${host}` || origin === `https://${host}` || originAllowed(origin, origins.allowlist, origins.dev))) return { ok: true }
+  return { ok: false, code: 'not-same-origin' }
 }
 
 const statusOf = (code: unknown): number => (code === 'stepup-required' ? 401 : code === 'bad-request' ? 400 : 403)
@@ -33,6 +64,16 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   const grant = req.headers.get('x-vault-grant')
   const session = env.session
   const path = url.pathname
+  if (!path.startsWith('/api/vault')) return null
+  const allowed = vaultRequestAllowed(req, url.host, env.origins)
+  if (!allowed.ok) {
+    await req.body?.cancel().catch(() => {})
+    const pt = vaultLang() === 'pt'
+    return new Response(JSON.stringify({
+      ok: false, code: allowed.code,
+      sentence: pt ? 'Esta ação do cofre só pode vir do painel do agentop nesta máquina.' : 'This vault action can only come from the agentop dashboard on this machine.',
+    }), { status: 403, headers: noStore })
+  }
   const body = async (): Promise<Record<string, unknown>> => {
     const r = await readJsonLimited<Record<string, unknown>>(req, 4096)
     return r.ok && r.value && typeof r.value === 'object' ? r.value : {}
