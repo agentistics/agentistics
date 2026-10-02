@@ -118,7 +118,7 @@ import { awaitReplacement, type RestartVerdict, type ServingObservation } from '
 import { resolveLang } from './cli-lang'
 import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
-import { inheritedIdentity } from './sessions/reopen-inherit'
+import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -168,7 +168,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession, touchSessions,
+  addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, type SessionsPoller, type SessionSnapshot,
@@ -1733,6 +1733,42 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
   })()
 }
 
+
+/** The registry row for a session about to be spawned — everything known before the process exists. */
+async function spawnRow(a: {
+  id: string
+  spawnedAt: string
+  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; inherit?: ManagedSession }
+  model?: string
+  effort?: string
+  bornLink: Partial<ManagedSession> | null | undefined
+}): Promise<ManagedSession> {
+  const { id, spawnedAt, req, model, effort, bornLink } = a
+  return {
+    id,
+    harness: req.harness,
+    cwd: req.cwd,
+    createdAt: spawnedAt,
+    // Stamped at birth, not left to the first heartbeat: a session started and lost inside the same
+    // minute would otherwise carry no evidence it was ever alive, and would sit out the very crash
+    // it was part of. See `crash-group.ts`.
+    lastSeenMs: Date.now(),
+    // The replaced row's identity first, so anything the request states explicitly wins below.
+    ...inheritedIdentity(req.inherit),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(req.label ? { label: req.label } : {}),
+    ...(req.task ? { task: req.task } : {}),
+    // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
+    ...(req.taskId ? { taskId: req.taskId } : {}),
+    ...(req.attemptId ? { attemptId: req.attemptId } : {}),
+    // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
+    // it to reopen this conversation.
+    ...(bornLink ?? {}),
+    // Which repository this directory is in, while the directory is provably there.
+    ...(await recordedRepo(req.cwd)),
+  }
+}
 async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
@@ -1785,13 +1821,19 @@ async function spawnManaged(req: {
     admittedWith = admissionOverrideNote(admission, lang)
   }
 
+  // A REOPEN keeps the model and effort the replaced row was started with — `claude --resume <id>`
+  // otherwise comes back on the global default, so a Sonnet worker returned as Opus. Anything the
+  // request states explicitly wins.
+  const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
+  const model = req.model ?? launch.model
+  const effort = req.effort ?? launch.effort
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     ...(req.prompt ? { prompt: req.prompt } : {}),
-    ...(req.model ? { model: req.model } : {}),
-    ...(req.effort ? { effort: req.effort } : {}),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: randomUUID(),
@@ -1813,6 +1855,15 @@ async function spawnManaged(req: {
   // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and a timestamp
   // taken once the call has returned can already be later than the conversation the child opened.
   const spawnedAt = new Date().toISOString()
+  // THE ROW IS WRITTEN BEFORE THE SESSION EXISTS. The backend hosts the pane the moment `spawn`
+  // returns and the fleet poll lists whatever it hosts, so a row written after the launch settle
+  // window (`spawnDeath`) left a hosted-but-unregistered session on screen as "unregistered session
+  // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
+  // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
+  const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
+  await addSession(await spawnRow({ id, spawnedAt, req, model, effort, bornLink }))
+  // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
+  const abandon = () => removeSession(id).catch(() => {})
   try {
     await backend.spawn({
       id,
@@ -1825,57 +1876,23 @@ async function spawnManaged(req: {
         : {}),
     })
   } catch (e) {
+    await abandon()
     return { ok: false, message: s.sessSpawnFailed(e instanceof Error ? e.message : String(e)) }
   }
 
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
-  // session". The CLI's spawn sites have always checked; this one, which the browser, the cockpit
-  // and the VS Code extension all use, did not, and so wrote a row for a pane that was already
-  // dead: `off` under Inactive, "transcript not found", no Reopen, and the dialog reporting success.
-  // A dead pane is killed and NO row is written, so the failure is the answer the caller gets.
-  //
-  // The window is `LAUNCH_SETTLE_MS`, not the CLI's `SETTLE_MS`: an exec that fails dies at once,
-  // and every healthy session pays the whole window — five seconds on every "new session" in the
-  // browser, and per row in the serial `reopenEntries` loop, was the wrong price for it.
+  // session". A dead pane is killed and its row removed, so the failure is the answer the caller
+  // gets. The window is `LAUNCH_SETTLE_MS`, not the CLI's `SETTLE_MS`: an exec that fails dies at
+  // once, and every healthy session pays the whole window.
   const died = await spawnDeath(backend, id, LAUNCH_SETTLE_MS)
   if (died) {
     await backend.kill(id).catch(() => {})
+    await abandon()
     const message = bin && execFailed(died, bin)
       ? s.sessNotOnPath(bin, process.env.PATH ?? '')
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
-
-  // Born linked — see `born-link.ts` for the window a patch-afterwards left open.
-  const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession({
-    id,
-    harness: req.harness,
-    cwd: req.cwd,
-    createdAt: spawnedAt,
-    // Stamped at birth, not left to the first heartbeat: a session started and lost inside the same
-    // minute would otherwise carry no evidence it was ever alive, and would sit out the very crash
-    // it was part of. See `crash-group.ts`.
-    lastSeenMs: Date.now(),
-    // The replaced row's identity first, so anything the request states explicitly wins below.
-    ...inheritedIdentity(req.inherit),
-    ...(req.model ? { model: req.model } : {}),
-    ...(req.effort ? { effort: req.effort } : {}),
-    ...(req.label ? { label: req.label } : {}),
-    ...(req.task ? { task: req.task } : {}),
-    // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
-    ...(req.taskId ? { taskId: req.taskId } : {}),
-    ...(req.attemptId ? { attemptId: req.attemptId } : {}),
-    // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
-    // it to reopen this conversation. Without it a fresh session's link exists only while the
-    // harness's own record does (`harness-sessions.ts`, claude alone), so a session started with
-    // the cockpit closed had nothing to fall back on but the harness-and-directory guess.
-    ...(bornLink ?? {}),
-    // Which repository this directory is in, while the directory is provably there. See
-    // `ManagedSession.repo`: a worktree removed later leaves a path that names nothing, and the
-    // grouping fell through to its last path segment as though it were a project.
-    ...(await recordedRepo(req.cwd)),
-  })
 
   // Give this harness's one exact-link chance its own several seconds, independent of whichever
   // client happens to be polling — see the header above `linkProcessConversationSoon`.

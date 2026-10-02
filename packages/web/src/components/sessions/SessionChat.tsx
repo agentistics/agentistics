@@ -27,6 +27,7 @@
  * session's name — a confident wrong answer the reader has no way to detect.
  */
 
+import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
 import { AlertTriangle, ArrowDown, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
@@ -1783,7 +1784,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   async function reopenNow() {
     if (!reopen?.enabled || reopening) return
     setReopening(true)
-    const out = await act({ id: session.id, action: 'resume' })
+    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume' }))
     setReopening(false)
     setNotice(out.message)
     // THE NEW ID IS REPORTED UP. The server hands it back precisely so a caller does not stay on
@@ -2642,7 +2643,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     }}
                   >
                     {reopening ? <Loader size={14} className="ag-working-spin" /> : <RotateCcw size={14} />}
-                    {reopen.label}
+                    {reopening ? reopeningLabel(pt) : reopen.label}
                   </button>
                   {/* Why it cannot be reopened, in the row's own words. */}
                   {!reopen.enabled && reopen.reason && (
