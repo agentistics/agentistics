@@ -29,11 +29,12 @@ import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pen
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ChatTurn } from './chat-turn'
-import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
 import { pendingFor, type PendingPrompt } from './pending-prompts'
+import { HARNESS_PROCESS_LOGS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
@@ -163,6 +164,16 @@ export async function readSessionChat(
           : 'This session is waiting for your answer before it creates the conversation (for example, trusting the folder). Answer it on the session card and the transcript follows.',
         live,
       }
+    }
+    // A RUNNING session of a harness that creates its conversation on the FIRST MESSAGE (agy: its
+    // process log says `Created conversation` only once something is sent) is an EMPTY
+    // conversation, not an unlinkable one. Answering `unavailable` here replaced the composer with a
+    // refusal, so the one act that creates the conversation — sending the first message — was the
+    // one act the chat withheld, and the person had to open the terminal. Same "not yet" against
+    // "never" rule as the missing-transcript branch below; the link lands on the poll after the
+    // message does (measured: under 6s).
+    if (live && !row.conversationBlind && HARNESS_PROCESS_LOGS[row.harness as HarnessId]) {
+      return { turns: [], live }
     }
     return {
       turns: [],
