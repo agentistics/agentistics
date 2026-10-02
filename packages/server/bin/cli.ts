@@ -22,9 +22,11 @@ const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
 // `preferences.experimental` → the feature variables, BEFORE any module that reads one loads
-// (`JOURNAL_ENABLED` is fixed at import). Only the commands that RUN the product need it; with the
-// preference off or absent this touches nothing. See server/experimental-boot.ts.
-if (command === undefined || command === 'start' || command === 'server' || command === 'watch') {
+// (`JOURNAL_ENABLED` is fixed at import). EVERY subcommand needs it — `agentop provider` reads the
+// same variable the server does, and answered "set AGENTISTICS_PROVIDER=1" with the preference on.
+// An explicit variable keeps precedence; with the preference off or absent this touches nothing.
+// See server/experimental-boot.ts.
+{
   const { applyExperimentalFromDisk } = await import('../server/experimental-boot.ts')
   applyExperimentalFromDisk()
 }
