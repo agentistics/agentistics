@@ -24,12 +24,15 @@
 
 import { basename } from 'node:path'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { CAPS } from './exposure'
 import { TEAM_CENTRAL, IN_CONTAINER } from './config'
 import { getVersionInfo } from './version'
 import { upgradeFromUiDecision, UPGRADE_REFUSALS, type UpgradeRefusal } from './upgrade-gate'
 import { writeAudit } from './audit'
 import type { CliLang } from './cli-lang'
+import { UPGRADE_PROGRESS_FILE } from './upgrade'
+import { parseUpgradeProgress, progressForWire } from './upgrade-progress'
 
 /** Set while a detached upgrade is in flight, so a second press is refused rather than racing. */
 let running: { version: string; startedMs: number } | null = null
@@ -57,6 +60,21 @@ export function upgradeBinary(execPath: string): string | null {
   return basename(execPath).startsWith('agentop') ? execPath : null
 }
 
+/**
+ * What `GET /api/version` says about pressing "install now" HERE: `null` when it would work, else
+ * the refusal code. The same gate and the same binary check the route applies (minus `busy`, which
+ * is a moment and not a property of the machine), so a surface can hide itself where the route
+ * would only refuse.
+ */
+export function upgradableHint(info: { hasUpdate: boolean; latest: string } | null): UpgradeRefusal | null {
+  const d = upgradeFromUiDecision({
+    capable: CAPS.localShell, central: TEAM_CENTRAL, container: IN_CONTAINER,
+    hasUpdate: info?.hasUpdate === true, latest: info?.latest ?? null,
+  })
+  if (!d.ok) return d.reason
+  return upgradeBinary(process.execPath) ? null : 'not-a-binary'
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -75,6 +93,14 @@ export async function handleUpgradeRoute(
   lang: CliLang,
   ip: string,
 ): Promise<Response | null> {
+  // What the detached upgrade has said about itself so far (`upgrade-progress.ts`). Read-only, and
+  // under the same `/api/upgrade` capability entry as the POST. `progress: null` is "nothing is
+  // running" — the page then relies on `/api/version` alone, which is always the final word.
+  if (url.pathname === '/api/upgrade/status' && req.method === 'GET') {
+    let raw: string | null = null
+    try { raw = readFileSync(UPGRADE_PROGRESS_FILE, 'utf8') } catch { /* no upgrade has run */ }
+    return json({ progress: progressForWire(parseUpgradeProgress(raw), Date.now()) })
+  }
   if (url.pathname !== '/api/upgrade' || req.method !== 'POST') return null
 
   // FORCE. `getVersionInfo` caches for hours, and somebody pressing this button is acting on an

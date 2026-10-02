@@ -283,6 +283,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'A cache of the latest published version.',
   },
   {
+    pattern: '.agentistics/upgrade-progress.json', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing',
+    why: 'What an upgrade running on THIS machine says about itself, read by the page that started '
+      + 'it. It describes a process and a binary the new machine does not have.',
+  },
+  {
     pattern: '.agentistics/upgrade-failure.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'Why the last upgrade on THIS machine failed. It describes a binary the new machine does '

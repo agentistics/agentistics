@@ -160,8 +160,8 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Session acted on from the central', message: 'The central performed "{verb}" on a session of this machine.' },
   },
   'app.update_available': {
-    pt: { title: 'Atualização disponível', message: 'Uma nova versão do agentistics ({version}) está disponível.' },
-    en: { title: 'Update available', message: 'A new version of agentistics ({version}) is available.' },
+    pt: { title: 'Atualização disponível', message: 'A versão {version} do Agentistics está pronta. Toque para instalar.' },
+    en: { title: 'Update available', message: 'Agentistics {version} is ready. Tap to install.' },
   },
   // The rail's own Hardware icon turning red (right-icon-rail spec, addendum item 6) — client-
   // originated, from `useHardwarePressureWatch`, on the crossing into critical only (never once per

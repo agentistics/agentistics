@@ -6,7 +6,7 @@ import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
-import { handleUpgradeRoute } from './upgrade-web'
+import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
 import { buildApiResponse, buildApiResponseStream, invalidateCache } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -718,7 +718,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/version' && req.method === 'GET') {
       try {
         const info = await getVersionInfo()
-        return new Response(JSON.stringify(info), {
+        // `upgradable`: whether THIS machine could press "install now" — the very gate the route
+        // applies, so the update toast is never offered where the route would refuse. Additive.
+        return new Response(JSON.stringify({ ...info, upgradable: upgradableHint(info) }), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
