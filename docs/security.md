@@ -719,6 +719,29 @@ machine itself — an action invisible on the machine it happened to is the fail
 to avoid. The session id is recorded and the text never is: a rename or a note is the user's own
 words about their own work.
 
+## Keeping engine code off the public repository
+
+The engine (`agentistics/agentistics-engine`) is the source of truth for the paths in
+`.github/frozen-engine-paths.txt` plus the engine layout (`engine/src/`, `runtime/src/`,
+`engine/test/`, `public.pin`; `engine.pin` is allowed). Three layers, only the first of which
+*prevents* anything:
+
+1. **Local `pre-push` hook** (`.husky/pre-push` → `packages/server/scripts/push-guard.ts`). Refuses a
+   push whose range adds or modifies those paths, whose clone has a remote pointing at the engine repo,
+   or that carries a commit present on the engine's `origin/main` but not on the public `main` (skipped
+   when `~/agentistics-engine` is absent, e.g. a contributor). Quiet on success; on failure it prints the
+   offending paths/commits, capped at 20 lines. `--no-verify` bypasses it.
+2. **The CI `frozen-paths` job** guards pull requests (the `[ES.4]` delete-only exception applies there).
+3. **`engine-leak-detection.yml`** runs on a push to *any* branch: the job goes red and ONE issue per branch
+   (label `security`, assigned to the owner) is opened or commented on. This is **detection, not
+   prevention**: the code is already on the remote when it fires.
+
+**Limitation, stated rather than papered over.** GitHub push rulesets ("restrict file paths") cannot be used
+here: creating one on `agentistics/agentistics` fails with `422 Source public repos cannot have push rules`
+(the org is on the free plan, and the API refuses push rules on a public repository). `main` and `dev` keep
+branch protection; new branches are covered only by the layers above. `scripts/check-public-branches.sh`
+audits every remote branch after the fact.
+
 ## 9. Verifying it yourself
 
 Each control has tests next to it; these are the ones worth reading first:
