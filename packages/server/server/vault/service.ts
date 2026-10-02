@@ -77,6 +77,22 @@ export function allRestoreWith(): string {
   return [...new Set(Object.keys(RESTORE_ROW).map(restoreWithFor))].join('; ')
 }
 
+// ── who may hold the key (SECRETS.4 §5.2) ───────────────────────────────────────────────────────
+//
+// ONE process holds a human data key: the agentop service. Every other process — each `agentop …`
+// CLI call, the control center — is a CLIENT: it never opens the vault, never unwraps the DEK, and
+// never receives a human-scope plaintext. It SEALS through the service (`vault.sock` `seal`: the
+// plaintext goes in, only ciphertext comes back), and anything that needs a secret's VALUE is done
+// BY the service on its behalf (socket.ts). The default is `client`; the service claims `holder`
+// at boot (`becomeVaultHolder`, from cli.ts's `server` branch and from index.ts), before anything
+// reads a secret. A test process is the holder (it plays the service).
+
+export type VaultRole = 'holder' | 'client'
+let _role: VaultRole = underTest(process.env) ? 'holder' : 'client'
+export function vaultRole(): VaultRole { return _role }
+/** Called by the agentop SERVICE only, before anything reads a secret. Idempotent. */
+export function becomeVaultHolder(): void { _role = 'holder' }
+
 // ── language ──────────────────────────────────────────────────────────────────────────────────
 
 let _lang: () => Lang = () => {
@@ -396,6 +412,8 @@ function adopt(s: OpenState): Opened | null {
  */
 export async function ensureVaultOpen(opts: { create?: boolean; migrate?: boolean } = {}): Promise<Opened | null> {
   if (_opened) return _opened
+  // A client never opens the vault (§5.2): no DEK outside the service, not even for a moment.
+  if (_role !== 'holder') return null
   if (_inflight) return _inflight
   const create = opts.create ?? true
   _inflight = (async () => {
@@ -450,6 +468,7 @@ export function adoptCreated(s: Extract<OpenState, { state: 'open' }>): void {
 /** Unlock with a passphrase (the per-service unlock). */
 export async function unlockVault(passphrase: string): Promise<{ ok: true } | { ok: false; code: VaultRefusal; sentence: string }> {
   if (_opened) return { ok: true }
+  if (_role !== 'holder') return refused('service-only', sentence('service-only'))
   const s = await tryOpen(passphrase)
   if (s.state === 'open') {
     adopt(s)
@@ -529,6 +548,7 @@ export async function vaultStatus(): Promise<VaultStatus> {
 
 /** The sentence for "this process could not open the vault", by why. */
 export async function notOpenRefusal(): Promise<VaultRefusalError> {
+  if (_role !== 'holder') return refusal('service-only')
   const s = _last
   if (s?.state === 'protector-lost') return new VaultRefusalError('protector-lost', lostSentence(s))
   if (s?.state === 'locked') return refusal('locked')
@@ -542,6 +562,8 @@ export async function notOpenRefusal(): Promise<VaultRefusalError> {
 
 /** Seal bytes with the open vault (for a caller that stores them itself, e.g. engine-api `secrets`). */
 export async function sealBytes(purpose: string, name: string, plaintext: Uint8Array): Promise<Uint8Array> {
+  // A client seals THROUGH the service: the plaintext goes in, only the sealed bytes come back.
+  if (_role !== 'holder') return (await import('./client')).remoteSeal(purpose, name, plaintext)
   const o = await ensureVaultOpen()
   if (!o) throw await notOpenRefusal()
   return sealToBytes({ dek: o.dek, kid: o.kid, purpose, name, plaintext })
@@ -557,10 +579,34 @@ export async function openBytes(purpose: string, name: string, sealed: Uint8Arra
     return { ok: false, code: e.code, sentence: e.message }
   }
   const r = openRecord({ dek: o.dek, kid: o.kid, purpose, name, bytes: sealed })
-  if (r.ok) return r
+  if (r.ok) { noteVaultUse(); return r }
   const args = { file: file ?? name, kid: r.kid, restoreWith: restoreWithFor(purpose) }
   return { ok: false, code: r.code, sentence: sentence(r.code, args) }
 }
+
+/**
+ * SECRETS.4 §5.2 — PER-USE decrypt. Opens the sealed bytes, hands the plaintext to `use`, and ZEROES
+ * it when `use` returns or throws. There is no cache: the next use opens again. `use` must not keep
+ * the buffer (or a copy) past its return; a value that has to become a string (an HTTP header) is
+ * made one inside `use` and dropped there — JS strings cannot be zeroed, which docs/security.md
+ * states as best-effort.
+ */
+export async function withSecret<T>(
+  purpose: string, name: string, sealedPath: string, use: (plaintext: Uint8Array) => Promise<T> | T,
+): Promise<{ ok: true; value: T } | { ok: false; absent: boolean; code?: VaultRefusal; sentence?: string }> {
+  const r = await openFromFile(sealedPath, purpose, name)
+  if (!r.ok) return r.absent ? { ok: false, absent: true } : { ok: false, absent: false, code: r.code, sentence: r.sentence }
+  try {
+    return { ok: true, value: await use(r.plaintext) }
+  } finally {
+    r.plaintext.fill(0)
+  }
+}
+
+/** Activity hook for auto-lock (S4.7): every human-scope open counts as use. */
+let _onUse: () => void = () => {}
+export function setVaultUseListener(fn: () => void): void { _onUse = fn }
+function noteVaultUse(): void { try { _onUse() } catch { /* never breaks an open */ } }
 
 /**
  * Seal `plaintext` into `path` (tmp + fsync + rename + chmod 0600 + fsync dir). THROWS a

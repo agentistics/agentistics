@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
-import { openFromFile, registerVaultMigrator, sealToFile, secretFs, sentence, displayPath, type MigrationReport } from './service'
+import { openFromFile, registerVaultMigrator, sealToFile, secretFs, sentence, displayPath, vaultRole, refusal, type MigrationReport } from './service'
 import { SCRUB_SUFFIX, VaultRefusalError, bytesEqual, finishScrub, scrubFile, writePrivateAtomic } from '@agentistics/vault'
 
 export const CENTRAL_SECRET_KEYS = [
@@ -111,6 +111,15 @@ export async function writeCentralEnv(envFile: string, text: string): Promise<vo
     await writePrivateAtomic(secretFs(), envFile, new TextEncoder().encode(text))
     return
   }
+  // §5.2: the merge with the sealed values and the read-back both need the vault OPEN, which only the
+  // service may do — so outside it the whole write is the service's (`central-env-write`).
+  if (vaultRole() !== 'holder') {
+    const { askVault } = await import('./socket')
+    const r = await askVault({ op: 'central-env-write', envFile }, { body: new TextEncoder().encode(text) })
+    if (!r) throw refusal('service-down')
+    if (!r.reply.ok) throw new VaultRefusalError(((r.reply as { code?: string }).code ?? 'locked') as never, String((r.reply as { sentence?: string }).sentence ?? ''))
+    return
+  }
   const { publicText, secrets } = splitCentralEnv(text)
   // Keep a sealed secret the new text does not mention (an `init` that left a value blank keeps it).
   const prev = await loadCentralSecrets(envFile)
@@ -159,7 +168,7 @@ export async function recoverCentralEnv(envFile: string): Promise<void> {
 }
 
 /** The whole env — the file's public lines plus the opened secrets. Memory only. */
-export async function loadCentralEnv(envFile: string): Promise<{ env: Record<string, string>; refusal: string | null }> {
+export async function loadCentralEnv(envFile: string, opts: { secrets?: boolean } = {}): Promise<{ env: Record<string, string>; refusal: string | null }> {
   const env: Record<string, string> = {}
   const text = await readText(envFile)
   if (text !== null) {
@@ -170,6 +179,7 @@ export async function loadCentralEnv(envFile: string): Promise<{ env: Record<str
       env[line.slice(0, eq).trim()] = line.slice(eq + 1)
     }
   }
+  if (opts.secrets === false) return { env, refusal: null }
   const s = await loadCentralSecrets(envFile)
   if (!s.ok) return { env, refusal: s.sentence }
   return { env: { ...env, ...s.env }, refusal: null }

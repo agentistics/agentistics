@@ -23,12 +23,15 @@ import { safeReadJson } from './utils'
 import { generateMachineKeypair, fingerprintOf, type MachineKeypair } from './envelope-crypto'
 import { decidePin, type PinDecision } from './envelope-message'
 
-/** Cached so a push cycle does not re-read (and possibly re-generate) the key file every time. */
-let _cached: MachineKeypair | null = null
+/**
+ * Only the PUBLIC half is cached (SECRETS.4 §5.2: no module-level variable holds a secret). The
+ * private key is opened from the vault at each use — a cheap AES open — and not kept.
+ */
+let _cachedPublic: string | null = null
 
 /** Test-only: drop the in-process cache. */
 export function __resetEnvelopeKeysForTests(): void {
-  _cached = null
+  _cachedPublic = null
 }
 
 /** The pins (public keys — integrity, not confidentiality) go through the same atomic writer. */
@@ -63,7 +66,6 @@ function parseKeypair(raw: string): MachineKeypair | null {
  * sibling at every start.
  */
 export async function loadOrCreateKeypair(): Promise<MachineKeypair> {
-  if (_cached) return _cached
   const item = keyItem()
   let r = await openFromFile(item.sealedPath, PURPOSE, NAME)
   if (!r.ok && r.absent && (await secretFs().lstat(item.plainPath))) {
@@ -73,20 +75,22 @@ export async function loadOrCreateKeypair(): Promise<MachineKeypair> {
   }
   if (r.ok) {
     const kp = parseKeypair(new TextDecoder().decode(r.plaintext))
-    if (kp) { _cached = kp; return kp }
+    r.plaintext.fill(0)
+    if (kp) { _cachedPublic = kp.publicKey; return kp }
     throw refusal('tampered', { file: item.sealedPath, restoreWith: 'nothing — siblings re-pin this machine on its next announcement' })
   }
   if (!r.absent) throw new VaultRefusalError(r.code, r.sentence)
   const fresh = generateMachineKeypair()
-  await sealToFile(item.sealedPath, PURPOSE, NAME, new TextEncoder().encode(JSON.stringify(fresh)))
-  _cached = fresh
+  const body = new TextEncoder().encode(JSON.stringify(fresh))
+  try { await sealToFile(item.sealedPath, PURPOSE, NAME, body) } finally { body.fill(0) }
+  _cachedPublic = fresh.publicKey
   return fresh
 }
 
 /** The public half plus its human-comparable fingerprint. The ONLY shape any route may return. */
 export async function publicKeyOnly(): Promise<{ publicKey: string; fingerprint: string }> {
-  const kp = await loadOrCreateKeypair()
-  return { publicKey: kp.publicKey, fingerprint: fingerprintOf(kp.publicKey) }
+  const publicKey = _cachedPublic ?? (await loadOrCreateKeypair()).publicKey
+  return { publicKey, fingerprint: fingerprintOf(publicKey) }
 }
 
 /** What is pinned for one peer. The NAME is display only and carries no authority — it is stored

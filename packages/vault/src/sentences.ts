@@ -28,6 +28,10 @@ export type VaultRefusal =
   | 'protector-unavailable'
   /** A plaintext copy and its sealed copy disagree; both kept. */
   | 'conflict'
+  /** SECRETS.4 §5.2: a process other than the agentop service asked to READ a secret. */
+  | 'service-only'
+  /** SECRETS.4 §5.2: the vault opens only inside the service, and no service answers. */
+  | 'service-down'
 
 export interface SentenceArgs {
   /** The file the refusal is about, as the user would find it (`~/.agentistics/…`). */
@@ -69,6 +73,10 @@ const EN: Record<VaultRefusal, (a: SentenceArgs) => string> = {
     `${a.protector ?? 'The system keychain'} did not answer (${a.reason ?? 'no reason given'}), so no vault was created and nothing was stored — Agentistics never writes a secret in plain text and never falls back to a weaker protector on its own. It is retried automatically; to choose another protector, run \`agentop vault init --protector libsecret|systemd-creds|passphrase\`.`,
   conflict: (a) =>
     `${a.file ?? 'A secret file'} is still in plain text and differs from its encrypted copy (an older agentop re-entered it after it was encrypted). Both were kept and nothing was deleted. Keep the one you want: re-enter it with ${a.restoreWith ?? 'the command that set it'}, or delete the plain-text file to keep the encrypted one.`,
+  'service-only': () =>
+    'This secret is used only inside the agentop service and is never handed to another program. Do this from the dashboard, or let the running service do it.',
+  'service-down': () =>
+    'The vault opens only inside the agentop service, and the service is not running. Start it (`agentop server`, or `agentop` → Services) and try again. Nothing was stored in plain text.',
 }
 
 const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
@@ -94,6 +102,10 @@ const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
     `${a.protector ?? 'O chaveiro do sistema'} não respondeu (${a.reason ?? 'sem motivo informado'}), então nenhum cofre foi criado e nada foi guardado — o Agentistics nunca grava um segredo em texto puro e nunca recorre sozinho a um protetor mais fraco. Isso é tentado de novo automaticamente; para escolher outro protetor, rode \`agentop vault init --protector libsecret|systemd-creds|passphrase\`.`,
   conflict: (a) =>
     `${a.file ?? 'Um arquivo de segredo'} ainda está em texto puro e difere da cópia cifrada (um agentop antigo o recadastrou depois de cifrado). Os dois foram mantidos e nada foi apagado. Fique com o que você quer: cadastre-o de novo com ${a.restoreWith ?? 'o comando que o definiu'}, ou apague o arquivo em texto puro para ficar com o cifrado.`,
+  'service-only': () =>
+    'Este segredo só é usado dentro do serviço do agentop e nunca é entregue a outro programa. Faça isto pelo painel, ou deixe o serviço em execução fazer.',
+  'service-down': () =>
+    'O cofre só abre dentro do serviço do agentop, e o serviço não está rodando. Inicie-o (`agentop server`, ou `agentop` → Serviços) e tente de novo. Nada foi guardado em texto puro.',
 }
 
 /** PURE. The sentence for a refusal. */

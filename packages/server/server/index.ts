@@ -1,5 +1,7 @@
 // embeddedDist is loaded inside server/sse.ts (conditional on SERVE_STATIC=1)
 
+// FIRST: this process is the vault's holder (SECRETS.4 §5.2) before any module below reads a secret.
+import './vault/holder'
 import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'

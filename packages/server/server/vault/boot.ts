@@ -14,9 +14,10 @@ import { join } from 'node:path'
 import { migratedSentence } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, envelopeKeyFile } from '../config'
 import {
-  allRestoreWith, displayPath, ensureVaultOpen, pendingPlaintext, runMigrations, vaultExists, vaultLang,
+  allRestoreWith, becomeVaultHolder, displayPath, ensureVaultOpen, pendingPlaintext, runMigrations, vaultExists, vaultLang,
   vaultStatus,
 } from './service'
+import { installVaultOps } from './ops'
 import { startVaultSocket } from './socket'
 import { sealedPathFor } from './whole-file'
 import { tokensFileFor } from './prefs-tokens'
@@ -74,6 +75,9 @@ export type Say = (line: string) => void
 
 /** Service start. Never throws. */
 export async function bootVault(say: Say = (l) => process.stderr.write(`agentop: ${l}\n`), opts: { socket?: boolean } = {}): Promise<void> {
+  // This process IS the service: the one place a human data key may live (SECRETS.4 §5.2).
+  becomeVaultHolder()
+  installVaultOps()
   try {
     await loadVaultConsumers()
     const pending = await pendingPlaintext()

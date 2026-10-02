@@ -871,6 +871,12 @@ if (command === 'server' || command === 'start' || !command) {
   // MONGO_URL + secrets. Unlike the Docker central there is NO bundled Mongo, so an external
   // MONGO_URL (Atlas or your own mongod) is required.
   const central = args.includes('--central')
+  // This process is the agentop SERVICE — the vault's only holder (SECRETS.4 §5.2) — and claims it
+  // before anything below reads a secret (a native central's sealed env included).
+  {
+    const { becomeVaultHolder } = await import('../server/vault/service.ts')
+    becomeVaultHolder()
+  }
   if (central) {
     const envFile = await loadCentralEnv()
     process.env.AGENTISTICS_TEAM_CENTRAL = '1'

@@ -1,10 +1,10 @@
 /**
  * cli-vault.ts — `agentop vault init|status|unlock|lock|rekey|add-passphrase|reset`.
  *
- * The verbs over the machine's vault (docs/security.md § "Secrets at rest"). What a verb can ask the
- * RUNNING service it asks over the unlock socket (`status`, `unlock`, `lock`), so it neither pays
- * ~0.7 s for `powershell.exe` nor opens a second copy of the key; what changes the vault itself
- * (`init`, `rekey`, `add-passphrase`, `reset`) runs here.
+ * The verbs over the machine's vault (docs/security.md § "Secrets at rest"). SECRETS.4 §5.2: every
+ * verb is ASKED of the running service over `vault.sock`, which is the only process that holds the
+ * key — `init`, `rekey` and `add-passphrase` included. A passphrase is typed here (never echoed) and
+ * handed over on the socket; nothing the service answers carries a secret.
  *
  * There is deliberately NO verb that decrypts everything back to plain text: it would be a supported
  * path to the forbidden state. Leaving the vault is `reset` (which deletes it and every sealed file,
@@ -12,17 +12,15 @@
  */
 import { existsSync, rmSync } from 'node:fs'
 import {
-  addPassphraseWrapper, checkPassphrase, destroyVault, initSentence,
-  migratedSentence, passphraseCheckSentence, rekeyVault, refusalSentence, checkedList,
-  type Protector, type ProtectorId,
+  checkPassphrase, destroyVault, migratedSentence, passphraseCheckSentence, refusalSentence,
+  type ProtectorId,
 } from '@agentistics/vault'
 import { realProtectorIo } from './vault/io'
 import {
-  adoptCreated, allRestoreWith, chooseAutoProtector, createVault, displayPath, pendingPlaintextFiles, ensureVaultOpen, protectorById, protectorLabel,
-  runMigrations, unlockVault, vaultAudit, vaultDir, vaultExists, vaultLang, vaultStatus, lockVault,
-  setVaultInitReporter, type VaultStatus,
+  allRestoreWith, displayPath, pendingPlaintextFiles, protectorById, vaultDir, vaultExists, vaultLang, vaultStatus,
+  type VaultStatus,
 } from './vault/service'
-import { askVaultSocket } from './vault/socket'
+import { askVault, askVaultSocket, type SocketReply } from './vault/socket'
 import { loadVaultConsumers, pendingSecretValues, sealedFiles } from './vault/boot'
 import { confirm, maskedInput } from './cli-ui'
 
@@ -76,11 +74,30 @@ async function askPassphrase(confirmIt: boolean): Promise<string | null> {
   return null
 }
 
+/**
+ * SECRETS.4 §5.2: every verb goes through the running service over `vault.sock`. This process never
+ * opens the vault — no data key in a CLI, not even for one command. With no service, the verb says so
+ * (`service-down`) instead of opening it here; only `status` (which reads no secret) and `reset`
+ * (which deletes, and needs no key) still work without one.
+ */
+async function ask(req: Parameters<typeof askVault>[0], opts: { body?: Uint8Array; timeoutMs?: number } = {}): Promise<SocketReply | null> {
+  const r = await askVault(req, { timeoutMs: opts.timeoutMs ?? 120_000, ...(opts.body ? { body: opts.body } : {}) })
+  return r ? r.reply : null
+}
+
+function down(): number {
+  process.stderr.write(refusalSentence('service-down', vaultLang()) + '\n')
+  return 1
+}
+
+function said(r: SocketReply): number {
+  if (r.ok) return 0
+  process.stderr.write(String(r.sentence) + '\n')
+  return 1
+}
+
 async function cmdStatus(json: boolean): Promise<number> {
   const viaService = await askVaultSocket({ op: 'status' })
-  // No service to ask: try to open it HERE (never creating one), so "locked" means the protector
-  // really did not open it rather than "this process did not try".
-  if (!viaService && vaultExists()) await ensureVaultOpen({ create: false, migrate: false })
   const s = viaService && viaService.ok && viaService.status ? viaService.status : await vaultStatus()
   const sealed = sealedFiles()
   const pendingFiles = await pendingPlaintextFiles()
@@ -88,11 +105,18 @@ async function cmdStatus(json: boolean): Promise<number> {
     process.stdout.write(JSON.stringify({ ...s, sealedFiles: sealed.map(displayPath), pendingFiles: pendingFiles.map(displayPath), service: Boolean(viaService) }, null, 2) + '\n')
   } else {
     printStatus(s, sealed, pendingFiles)
+    if (!viaService && vaultExists()) process.stdout.write('\n' + refusalSentence('service-down', vaultLang()) + '\n')
   }
   return 0
 }
 
 const PROTECTOR_IDS: ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase']
+
+function report(r: Record<string, unknown>): void {
+  for (const l of Array.isArray(r.lines) ? r.lines : []) process.stdout.write(String(l) + '\n')
+  const n = typeof r.migrated === 'number' ? r.migrated : 0
+  if (n > 0) process.stdout.write(migratedSentence(n, allRestoreWith(), vaultLang()) + '\n')
+}
 
 async function cmdInit(args: string[]): Promise<number> {
   const i = args.indexOf('--protector')
@@ -101,135 +125,78 @@ async function cmdInit(args: string[]): Promise<number> {
     process.stderr.write(`usage: agentop vault init [--protector ${PROTECTOR_IDS.join('|')}]\n`)
     return 2
   }
-  if (vaultExists()) {
-    process.stdout.write(t('This machine already has a vault.\n\n', 'Esta máquina já tem um cofre.\n\n'))
-    const o = await ensureVaultOpen({ create: false, migrate: false })
-    if (o) await report(await runMigrations(true))
-    return cmdStatus(false)
-  }
-  setVaultInitReporter(() => { /* said below */ })
-  let protector: Protector
   let pass: string | undefined
-  if (asked) {
-    // An EXPLICIT choice — the only way a protector other than the platform's own is used.
-    if (asked === 'passphrase') {
-      const p = await askPassphrase(true)
-      if (!p) return 1
-      pass = p
-    }
-    protector = protectorById(asked, pass)!
-    const probe = await protector.probe()
-    if (!probe.ok) { process.stderr.write(`agentop: ${asked} — ${probe.reason}\n`); return 1 }
-  } else {
-    const choice = await chooseAutoProtector()
-    if (choice.ok) {
-      protector = choice.protector
-    } else if (choice.kind === 'unavailable') {
-      process.stderr.write(refusalSentence('protector-unavailable', vaultLang(), { protector: choice.protector.label(vaultLang()), reason: choice.reason }) + '\n')
-      return 1
-    } else {
-      process.stdout.write(refusalSentence('no-protector', vaultLang(), { checked: checkedList(choice.checked, vaultLang()) }) + '\n\n')
-      const p = await askPassphrase(true)
-      if (!p) return 1
-      pass = p
-      protector = protectorById('passphrase', pass)!
-    }
+  if (asked === 'passphrase') {
+    const p = await askPassphrase(true)
+    if (!p) return 1
+    pass = p
   }
-  const made = await createVault(protector, pass)
-  if (!made.ok) {
-    if (made.reason === 'exists') return cmdInit([])
-    process.stderr.write(`agentop: ${made.reason}\n`)
-    return 1
+  let r = await ask({ op: 'vault-init', ...(asked ? { protector: asked } : {}), ...(pass ? { passphrase: pass } : {}) })
+  if (!r) return down()
+  if (!r.ok && r.code === 'no-protector') {
+    // No system keychain answered in the service: the passphrase is typed HERE and handed over.
+    process.stdout.write(String(r.sentence) + '\n\n')
+    const p = await askPassphrase(true)
+    if (!p) return 1
+    r = await ask({ op: 'vault-init', passphrase: p })
+    if (!r) return down()
   }
-  adoptCreated(made.state)
-  vaultAudit({ type: 'vault.init', protector: protector.id })
-  process.stdout.write(initSentence(protector.label(vaultLang()), vaultLang()) + '\n')
-  await report(await runMigrations(true))
-  const svc = await askVaultSocket({ op: 'status' })
-  if (svc && svc.ok && svc.status?.state === 'locked') {
-    process.stdout.write(t('\nThe running agentop service started before this vault existed — restart it, or run `agentop vault unlock`.\n',
-      '\nO serviço do agentop em execução iniciou antes deste cofre existir — reinicie-o, ou rode `agentop vault unlock`.\n'))
-  }
-  return 0
-}
-
-async function report(r: { migrated: number; lines: string[] }): Promise<void> {
-  for (const l of r.lines) process.stdout.write(l + '\n')
-  if (r.migrated > 0) process.stdout.write(migratedSentence(r.migrated, allRestoreWith(), vaultLang()) + '\n')
+  if (!r.ok) return said(r)
+  if (r.existed) process.stdout.write(t('This machine already has a vault.\n\n', 'Esta máquina já tem um cofre.\n\n'))
+  else if (typeof r.said === 'string') process.stdout.write(r.said + '\n')
+  report(r)
+  return r.existed ? cmdStatus(false) : 0
 }
 
 async function cmdUnlock(): Promise<number> {
-  const pass = await askPassphrase(false)
-  if (!pass) return 1
-  const svc = await askVaultSocket({ op: 'unlock', passphrase: pass })
-  if (svc) {
-    if (!svc.ok) { process.stderr.write(svc.sentence + '\n'); return 1 }
-    process.stdout.write(t('The agentop service unlocked its vault.\n', 'O serviço do agentop destrancou o cofre.\n'))
-    return 0
-  }
-  // No service to hand it to: unlock HERE, so this command at least migrates what is waiting.
-  const u = await unlockVault(pass)
-  if (!u.ok) { process.stderr.write(u.sentence + '\n'); return 1 }
-  await report(await runMigrations(true))
-  process.stdout.write(t('No agentop service is running; the vault was opened for this command only.\n',
-    'Nenhum serviço do agentop está rodando; o cofre foi aberto só para este comando.\n'))
+  const st = await askVaultSocket({ op: 'status' })
+  if (!st) return down()
+  if (st.ok && st.status?.state === 'open') { process.stdout.write(t('The vault is already open in the agentop service.\n', 'O cofre já está aberto no serviço do agentop.\n')); return 0 }
+  const needsPass = st.ok && (st.status?.wrappers ?? []).includes('passphrase') && st.status?.state === 'locked'
+  const pass = needsPass ? await askPassphrase(false) : undefined
+  if (needsPass && !pass) return 1
+  const svc = await ask({ op: 'unlock', ...(pass ? { passphrase: pass } : {}) })
+  if (!svc) return down()
+  if (!svc.ok) return said(svc)
+  process.stdout.write(t('The agentop service unlocked its vault.\n', 'O serviço do agentop destrancou o cofre.\n'))
   return 0
 }
 
 async function cmdLock(): Promise<number> {
   const svc = await askVaultSocket({ op: 'lock' })
   if (!svc) { process.stdout.write(t('No agentop service is running — nothing holds the key.\n', 'Nenhum serviço do agentop está rodando — nada guarda a chave.\n')); return 0 }
+  if (!svc.ok) return said(svc)
   process.stdout.write(t('The agentop service dropped the vault key.\n', 'O serviço do agentop descartou a chave do cofre.\n'))
   return 0
-}
-
-async function openHere(): Promise<Awaited<ReturnType<typeof ensureVaultOpen>>> {
-  let o = await ensureVaultOpen({ create: false, migrate: false })
-  if (!o) {
-    const s = await vaultStatus()
-    if (s.state === 'locked' && s.wrappers.includes('passphrase')) {
-      const pass = await askPassphrase(false)
-      if (pass && (await unlockVault(pass)).ok) o = await ensureVaultOpen({ create: false, migrate: false })
-    }
-    if (!o) process.stderr.write((s.sentence ?? refusalSentence('uninitialized', vaultLang())) + '\n')
-  }
-  return o
 }
 
 async function cmdRekey(args: string[]): Promise<number> {
   const i = args.indexOf('--protector')
   const id = (i !== -1 ? args[i + 1] : undefined) as ProtectorId | undefined
-  if (!id || !['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase'].includes(id)) {
+  if (!id || !PROTECTOR_IDS.includes(id)) {
     process.stderr.write('usage: agentop vault rekey --protector keychain|dpapi|libsecret|systemd-creds|passphrase\n')
     return 2
   }
-  const o = await openHere()
-  if (!o) return 1
+  if (!(await askVaultSocket({ op: 'status' }))) return down()
   const pass = id === 'passphrase' ? await askPassphrase(true) : undefined
   if (id === 'passphrase' && !pass) return 1
-  const next = protectorById(id, pass ?? undefined)
-  if (!next) return 1
-  const probe = await next.probe()
-  if (!probe.ok) { process.stderr.write(`agentop: ${id} — ${probe.reason}\n`); return 1 }
-  const old = o.vault.wrappers.map(w => protectorById(w.type)).filter((p): p is NonNullable<typeof p> => p !== null)
-  const r = await rekeyVault(realProtectorIo(), vaultDir(), { state: 'open', ...o }, next, old)
-  if (!r.ok) { process.stderr.write(`agentop: ${r.reason}\n`); return 1 }
-  vaultAudit({ type: 'vault.rekey', protector: id })
-  process.stdout.write(t(`The vault key is now kept by ${protectorLabel(id)}.\n`, `A chave do cofre agora é guardada por ${protectorLabel(id)}.\n`))
+  const r = await ask({ op: 'vault-rekey', protector: id, ...(pass ? { passphrase: pass } : {}) })
+  if (!r) return down()
+  if (!r.ok) return said(r)
+  process.stdout.write(t(`The vault key is now kept by ${String(r.protectorLabel ?? id)}.\n`, `A chave do cofre agora é guardada por ${String(r.protectorLabel ?? id)}.\n`))
   return 0
 }
 
 async function cmdAddPassphrase(): Promise<number> {
-  const o = await openHere()
-  if (!o) return 1
+  if (!(await askVaultSocket({ op: 'status' }))) return down()
   process.stdout.write(t(
     'A passphrase wrapper is an OFFLINE brute-force target beside the files it opens: choose a long one.\n',
     'Um invólucro de frase-senha é um alvo de força bruta OFFLINE ao lado dos arquivos que ele abre: escolha uma longa.\n'))
   const pass = await askPassphrase(true)
   if (!pass) return 1
-  const r = await addPassphraseWrapper(realProtectorIo(), vaultDir(), { state: 'open', ...o }, protectorById('passphrase', pass)!)
-  if (!r.ok) { process.stderr.write(`agentop: ${r.reason}\n`); return 1 }
-  vaultAudit({ type: 'vault.add-passphrase' })
+  const r = await ask({ op: 'vault-add-passphrase', passphrase: pass })
+  if (!r) return down()
+  if (!r.ok) return said(r)
   process.stdout.write(t('Added. A container mounting ~/.agentistics opens this vault with `agentop vault unlock`.\n',
     'Adicionado. Um contêiner que monta ~/.agentistics abre este cofre com `agentop vault unlock`.\n'))
   return 0
@@ -249,11 +216,14 @@ async function cmdReset(args: string[]): Promise<number> {
     if (!process.stdin.isTTY) { process.stderr.write(t('Refusing without a terminal; pass --yes.\n', 'Recusado sem terminal; passe --yes.\n')); return 1 }
     if (!(await confirm(t('Delete them?', 'Apagar?'), false))) return 1
   }
-  const s = await vaultStatus()
-  const protectors = s.wrappers.map(w => protectorById(w)).filter((p): p is NonNullable<typeof p> => p !== null)
-  lockVault()
-  await askVaultSocket({ op: 'lock' })
-  await destroyVault(realProtectorIo(), vaultDir(), protectors)
+  const svc = await ask({ op: 'vault-reset' })
+  if (svc && !svc.ok) return said(svc)
+  if (!svc) {
+    // No service holds the key: deleting the wrapped keys needs no key at all, so it is done here.
+    const s = await vaultStatus()
+    const protectors = s.wrappers.map(w => protectorById(w)).filter((p): p is NonNullable<typeof p> => p !== null)
+    await destroyVault(realProtectorIo(), vaultDir(), protectors)
+  }
   for (const f of files) rmSync(f, { force: true })
   if (existsSync(vaultDir())) rmSync(vaultDir(), { recursive: true, force: true })
   process.stdout.write(t('The vault and its sealed secrets were deleted.\n', 'O cofre e os segredos selados foram apagados.\n'))
