@@ -60,6 +60,16 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     'vault-rekey': { req: { op: 'vault-rekey', protector: 'nope' } },
     'vault-add-passphrase': { req: { op: 'vault-add-passphrase' } },
     'vault-reset': { req: { op: 'vault-reset' } },
+    'unlock-code': { req: { op: 'unlock-code', code: '000000' } },
+    recover: { req: { op: 'recover', words: 'abandon '.repeat(23) + 'art' } },
+    'authenticator-confirm': { req: { op: 'authenticator-confirm', code1: '000000', code2: '000001' } },
+    'recovery-confirm': { req: { op: 'recovery-confirm', typed: ['a', 'b', 'c'] } },
+    'presence-enroll': { req: { op: 'presence-enroll', protector: 'hello' } },
+    'set-auto-lock': { req: { op: 'set-auto-lock', minutes: 45 } },
+    activity: { req: { op: 'activity' } },
+    // These two hand out a NEW secret once, by design (asserted separately below): never a held one.
+    'authenticator-begin': { req: { op: 'authenticator-begin' } },
+    'recovery-begin': { req: { op: 'recovery-begin' } },
   }
 
   for (const op of VAULT_OPS) {

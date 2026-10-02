@@ -1046,12 +1046,57 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       try {
         const { readVaultView, lockVaultNow } = await import('./vault/inventory')
+        const gate = await import('./vault/gate')
+        const { unlockWithGesture, noteVaultActivity, vaultStatus } = await import('./vault/service')
+        const { readSessionCookie } = await import('./auth')
+        // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
+        // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
+        // along on a forged request.
+        const session = readSessionCookie(req) ?? 'local'
+        const grant = req.headers.get('x-vault-grant')
+        const noStore = { ...json, 'Cache-Control': 'no-store' }
+        const body = async (): Promise<Record<string, unknown>> => {
+          const r = await readJsonLimited<Record<string, unknown>>(req, 4096)
+          return r.ok && r.value && typeof r.value === 'object' ? r.value : {}
+        }
+        const reply = (r: { ok: boolean } & Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+          new Response(JSON.stringify({ ...r, ...extra }), { status: r.ok ? 200 : (r.code === 'stepup-required' ? 401 : 403), headers: noStore })
         if (url.pathname === '/api/vault' && req.method === 'GET') {
-          return new Response(JSON.stringify(await readVaultView()), { headers: json })
+          // The inventory only after a step-up (`list`); the state alone is always readable.
+          const s = await vaultStatus()
+          if (s.state !== 'open') return new Response(JSON.stringify({ ...(await readVaultView([], async () => [])), locked: true }), { headers: noStore })
+          const g = await gate.requireVaultStepUp('list', { grant, session })
+          if (!g.ok) return new Response(JSON.stringify({ needsStepUp: true, code: g.code, sentence: g.sentence, state: s.state, lockedBy: s.lockedBy ?? null }), { status: g.code === 'stepup-required' ? 401 : 403, headers: noStore })
+          return new Response(JSON.stringify(await readVaultView()), { headers: noStore })
+        }
+        if (url.pathname === '/api/vault/stepup' && req.method === 'POST') {
+          const b = await body()
+          if (typeof b.code !== 'string') return reply({ ok: false, code: 'bad-request', sentence: 'bad request' })
+          return reply(await gate.stepUpForRead(b.code, session))
         }
         if (url.pathname === '/api/vault/lock' && req.method === 'POST') {
-          const r = await lockVaultNow()
-          return new Response(JSON.stringify(r.ok ? { ok: true, vault: await readVaultView() } : { error: r.error }), { status: r.ok ? 200 : 403, headers: json })
+          const b = await body()
+          const r = await lockVaultNow({ grant, session, code: typeof b.code === 'string' ? b.code : undefined })
+          return new Response(JSON.stringify(r.ok ? { ok: true, vault: await readVaultView([], async () => []) } : { error: r.error, code: r.code }), { status: r.ok ? 200 : (r.code === 'stepup-required' ? 401 : 403), headers: noStore })
+        }
+        if (url.pathname === '/api/vault/unlock' && req.method === 'POST') {
+          // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2).
+          const u = await unlockWithGesture()
+          return reply(u.ok ? { ok: true, state: u.state } : u)
+        }
+        if (url.pathname === '/api/vault/unlock/code' && req.method === 'POST') {
+          const b = await body()
+          if (typeof b.code !== 'string') return reply({ ok: false, code: 'bad-request', sentence: 'bad request' })
+          return reply(await gate.completeUnlock(b.code))
+        }
+        if (url.pathname === '/api/vault/auto-lock' && req.method === 'POST') {
+          const b = await body()
+          return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, code: typeof b.code === 'string' ? b.code : undefined }))
+        }
+        if (url.pathname === '/api/vault/activity' && req.method === 'POST') {
+          // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
+          noteVaultActivity()
+          return new Response(JSON.stringify({ ok: true }), { headers: noStore })
         }
         return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       } catch (err) {

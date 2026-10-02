@@ -33,6 +33,7 @@ const HELP = `Usage: agentop vault <command>
   rekey --protector <id>   move the vault to another protector (keychain|dpapi|libsecret|systemd-creds|passphrase)
   add-passphrase           add a passphrase wrapper beside the system one (how a Docker machine opens it)
   reset [--yes]            delete the vault and every sealed file — the secrets are then re-entered
+  recover                  open the vault with your 24-word recovery key (terminal only)
 
 There is no command that decrypts secrets back to plain text.`
 
@@ -81,13 +82,33 @@ async function askPassphrase(confirmIt: boolean): Promise<string | null> {
  * (which deletes, and needs no key) still work without one.
  */
 async function ask(req: Parameters<typeof askVault>[0], opts: { body?: Uint8Array; timeoutMs?: number } = {}): Promise<SocketReply | null> {
-  const r = await askVault(req, { timeoutMs: opts.timeoutMs ?? 120_000, ...(opts.body ? { body: opts.body } : {}) })
+  // 3 min by default: a gated verb may raise a presence gesture in the service, and a person answers it.
+  const r = await askVault(req, { timeoutMs: opts.timeoutMs ?? 180_000, ...(opts.body ? { body: opts.body } : {}) })
   return r ? r.reply : null
 }
 
 function down(): number {
   process.stderr.write(refusalSentence('service-down', vaultLang()) + '\n')
   return 1
+}
+
+/** A 6-digit authenticator code, typed on the TTY (never echoed, never on argv). */
+async function askCode(): Promise<string | null> {
+  if (!process.stdin.isTTY) { process.stderr.write(refusalSentence('stepup-required', vaultLang()) + t(' (a terminal is needed to type it)\n', ' (é preciso um terminal para digitá-lo)\n')); return null }
+  const c = (await maskedInput(t('Authenticator code', 'Código do autenticador'))).replace(/\s/g, '')
+  return c || null
+}
+
+/** Ask a gated op; when the service says a code is needed, ask for it on the TTY and ask again. */
+async function askGated(req: Record<string, unknown> & { op: string }): Promise<SocketReply | null> {
+  let r = await ask(req)
+  for (let i = 0; r && !r.ok && (r.code === 'stepup-required' || r.code === 'stepup-wrong' || r.code === 'stepup-replayed') && i < 3; i++) {
+    if (r.code !== 'stepup-required') process.stderr.write(String(r.sentence) + '\n')
+    const code = await askCode()
+    if (!code) return r
+    r = await ask({ ...req, code })
+  }
+  return r
 }
 
 function said(r: SocketReply): number {
@@ -155,9 +176,21 @@ async function cmdUnlock(): Promise<number> {
   const needsPass = st.ok && (st.status?.wrappers ?? []).includes('passphrase') && st.status?.state === 'locked'
   const pass = needsPass ? await askPassphrase(false) : undefined
   if (needsPass && !pass) return 1
-  const svc = await ask({ op: 'unlock', ...(pass ? { passphrase: pass } : {}) })
+  // §2.2: the SERVICE raises the gesture (Windows Hello, the security key); the code follows here.
+  if (st.ok && (st.status?.wrappers ?? []).some(w => w === 'hello' || w === 'fido2')) {
+    process.stdout.write(t('Confirm on the presence prompt the service is raising…\n', 'Confirme no pedido de presença que o serviço está abrindo…\n'))
+  }
+  const svc = await ask({ op: 'unlock', ...(pass ? { passphrase: pass } : {}) }, { timeoutMs: 180_000 })
   if (!svc) return down()
   if (!svc.ok) return said(svc)
+  if (svc.unlock === 'pending-stepup') {
+    // ONE attempt per gesture: a wrong code zeroes the key in the service (§2.2).
+    const code = await askCode()
+    if (!code) return 1
+    const r = await ask({ op: 'unlock-code', code })
+    if (!r) return down()
+    if (!r.ok) return said(r)
+  }
   process.stdout.write(t('The agentop service unlocked its vault.\n', 'O serviço do agentop destrancou o cofre.\n'))
   return 0
 }
@@ -180,7 +213,7 @@ async function cmdRekey(args: string[]): Promise<number> {
   if (!(await askVaultSocket({ op: 'status' }))) return down()
   const pass = id === 'passphrase' ? await askPassphrase(true) : undefined
   if (id === 'passphrase' && !pass) return 1
-  const r = await ask({ op: 'vault-rekey', protector: id, ...(pass ? { passphrase: pass } : {}) })
+  const r = await askGated({ op: 'vault-rekey', protector: id, ...(pass ? { passphrase: pass } : {}) })
   if (!r) return down()
   if (!r.ok) return said(r)
   process.stdout.write(t(`The vault key is now kept by ${String(r.protectorLabel ?? id)}.\n`, `A chave do cofre agora é guardada por ${String(r.protectorLabel ?? id)}.\n`))
@@ -194,7 +227,7 @@ async function cmdAddPassphrase(): Promise<number> {
     'Um invólucro de frase-senha é um alvo de força bruta OFFLINE ao lado dos arquivos que ele abre: escolha uma longa.\n'))
   const pass = await askPassphrase(true)
   if (!pass) return 1
-  const r = await ask({ op: 'vault-add-passphrase', passphrase: pass })
+  const r = await askGated({ op: 'vault-add-passphrase', passphrase: pass })
   if (!r) return down()
   if (!r.ok) return said(r)
   process.stdout.write(t('Added. A container mounting ~/.agentistics opens this vault with `agentop vault unlock`.\n',
@@ -216,7 +249,7 @@ async function cmdReset(args: string[]): Promise<number> {
     if (!process.stdin.isTTY) { process.stderr.write(t('Refusing without a terminal; pass --yes.\n', 'Recusado sem terminal; passe --yes.\n')); return 1 }
     if (!(await confirm(t('Delete them?', 'Apagar?'), false))) return 1
   }
-  const svc = await ask({ op: 'vault-reset' })
+  const svc = await askGated({ op: 'vault-reset' })
   if (svc && !svc.ok) return said(svc)
   if (!svc) {
     // No service holds the key: deleting the wrapped keys needs no key at all, so it is done here.
@@ -227,6 +260,28 @@ async function cmdReset(args: string[]): Promise<number> {
   for (const f of files) rmSync(f, { force: true })
   if (existsSync(vaultDir())) rmSync(vaultDir(), { recursive: true, force: true })
   process.stdout.write(t('The vault and its sealed secrets were deleted.\n', 'O cofre e os segredos selados foram apagados.\n'))
+  return 0
+}
+
+/**
+ * §4.3 `agentop vault recover` — TTY ONLY: the 24 words are typed here (never echoed, never on argv,
+ * never in a web form) and handed to the service, which opens the vault in RECOVERY mode. Then the
+ * three steps are owed: presence, the authenticator, a NEW recovery key (the old words were just typed).
+ */
+async function cmdRecover(): Promise<number> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stderr.write(t('The recovery key is typed only on a terminal.\n', 'A chave de recuperação só é digitada em um terminal.\n'))
+    return 1
+  }
+  if (!(await askVaultSocket({ op: 'status' }))) return down()
+  const words = await maskedInput(t('Your 24 words (spaces between them; 4 letters each is enough)', 'Suas 24 palavras (com espaços; 4 letras de cada bastam)'))
+  const r = await ask({ op: 'recover', words })
+  if (!r) return down()
+  if (!r.ok) return said(r)
+  const todo = Array.isArray(r.todo) ? (r.todo as string[]) : []
+  process.stdout.write(t(
+    `The vault is open in recovery mode. Before anything else: ${todo.join(', ')} — run \`agentop vault enroll\`. Your old 24 words will stop working when you receive the new ones.\n`,
+    `O cofre está aberto em modo de recuperação. Antes de qualquer outra coisa: ${todo.join(', ')} — rode \`agentop vault enroll\`. Suas 24 palavras antigas deixam de funcionar quando você receber as novas.\n`))
   return 0
 }
 
@@ -242,6 +297,7 @@ export async function runVault(args: string[]): Promise<number> {
     case 'rekey': return cmdRekey(rest)
     case 'add-passphrase': return cmdAddPassphrase()
     case 'reset': return cmdReset(rest)
+    case 'recover': return cmdRecover()
     case '--help': case '-h': case 'help':
       process.stdout.write(HELP + '\n')
       return 0

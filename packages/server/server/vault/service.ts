@@ -30,7 +30,8 @@ import {
   type Lang, type OpenState, type Platform, type Protector, type ProtectorId, type ProtectorIo,
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
-  helloProtector, fido2Protector, finishRetirement, recoveryProtector,
+  helloProtector, fido2Protector, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
+  presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
@@ -316,9 +317,22 @@ export async function createVault(protector: Protector, passphrase?: string): Pr
   }
 }
 
-function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string = vaultDir()): Protector[] {
+/**
+ * The protectors for a vault's RECORDED wrappers. Presence wrappers (Hello, a security key) are left
+ * out unless `presence` is asked for: an AUTOMATIC open (a consumer needing a secret, the service
+ * starting) must never raise a Windows Hello dialog nobody asked for — SECRETS.4 §1.2: the human
+ * scope is LOCKED at every start and after every auto-lock, until somebody unlocks it on purpose.
+ */
+function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string = vaultDir(), opts: { presence?: boolean } = {}): Protector[] {
   const ids = vault ? vault.wrappers.map(w => w.type) : []
-  return ids.map(id => protectorById(id, passphrase, dir)).filter((p): p is Protector => p !== null)
+  return ids.filter(id => opts.presence || !isPresenceId(id)).map(id => protectorById(id, passphrase, dir)).filter((p): p is Protector => p !== null)
+}
+
+/** The user's word for their presence gesture (§3.5 `{presence}`). */
+export function presenceWord(id: ProtectorId | null | undefined, lang: Lang = vaultLang()): string {
+  if (id === 'hello') return 'Windows Hello'
+  if (id === 'fido2') return lang === 'pt' ? 'sua chave de segurança' : 'your security key'
+  return lang === 'pt' ? 'seu dispositivo de presença' : 'your presence device'
 }
 
 export function protectorLabel(id: ProtectorId | null): string | null {
@@ -412,12 +426,71 @@ export async function pendingPlaintext(): Promise<number> {
   return n
 }
 
-async function tryOpen(passphrase?: string): Promise<OpenState> {
+async function tryOpen(passphrase?: string, opts: { presence?: boolean } = {}): Promise<OpenState> {
   const raw = await io().readFile(join(vaultDir(), 'vault.json'))
   let vault: VaultJson | null = null
   if (raw) { try { vault = JSON.parse(new TextDecoder().decode(raw)) } catch { vault = null } }
-  return openVault(io(), vaultDir(), protectorsFor(vault, passphrase))
+  return openVault(io(), vaultDir(), protectorsFor(vault, passphrase, vaultDir(), opts))
 }
+
+// ── SECRETS.4: why it is locked, the unlock in two phases, recovery mode, auto-lock ────────────────
+
+export type LockedBy = 'start' | 'auto-lock' | 'user' | 'stepup-frozen' | 'presence-lost'
+let _lockedBy: LockedBy = 'start'
+export function lockedBy(): LockedBy { return _lockedBy }
+
+/**
+ * §2.2: after a gesture opened the DEK, and before the authenticator code was checked, the key sits
+ * HERE — not in `_opened` — so no purpose can be opened and nothing is served. At most 120 s, then
+ * zeroed. A wrong code zeroes it at once.
+ */
+export const PENDING_STEPUP_MS = 120_000
+let _pending: { opened: Opened; expiresMs: number; timer: ReturnType<typeof setTimeout> | null } | null = null
+
+/** §4.3: opened with the 24 words; until these three are re-done, every other gated action refuses. */
+export type RecoveryStep = 'presence' | 'authenticator' | 'recovery'
+let _recoveryTodo: Set<RecoveryStep> | null = null
+export function recoveryTodo(): RecoveryStep[] | null { return _recoveryTodo ? [..._recoveryTodo] : null }
+export function recoveryStepDone(step: RecoveryStep): void {
+  if (!_recoveryTodo) return
+  _recoveryTodo.delete(step)
+  if (_recoveryTodo.size === 0) _recoveryTodo = null
+}
+
+let _now: () => number = () => Date.now()
+let _autoClock: AutoLockClock | null = null
+let _autoTimer: ReturnType<typeof setInterval> | null = null
+let _onAutoLock: (minutes: number) => void = () => {}
+/** The service's toast/notification hook for an auto-lock (SSE + desktop notification). */
+export function setAutoLockNotifier(fn: (minutes: number) => void): void { _onAutoLock = fn }
+
+function autoLockMinutes(v: VaultJson): number { return v.autoLock?.minutes ?? AUTO_LOCK_DEFAULT_MIN }
+
+function startAutoLock(o: Opened): void {
+  // Human scope only — the runner scope never auto-locks (it is never `_opened`).
+  _autoClock = new AutoLockClock(autoLockMinutes(o.vault), _now())
+  if (!_autoTimer && realMode()) {
+    _autoTimer = setInterval(() => { autoLockTick(_now()) }, 15_000)
+    ;(_autoTimer as { unref?: () => void }).unref?.()
+  }
+}
+
+/** One look at the idle clock. Exported for tests (fake clock); the service calls it every 15 s. */
+export function autoLockTick(nowMs: number): boolean {
+  if (!_opened || !_autoClock || !_autoClock.due(nowMs)) return false
+  const minutes = _autoClock.periodMinutes
+  lockVault('auto-lock')
+  vaultAudit({ type: 'vault.auto-locked' })
+  try { _onAutoLock(minutes) } catch { /* a notification never breaks the lock */ }
+  return true
+}
+
+/** Human interaction (dashboard/TUI heartbeat, an `agentop` verb): resets the idle clock. */
+export function noteVaultActivity(): void { _autoClock?.use(_now()) }
+
+/** Change the idle period of the OPEN vault (persisted by the caller in vault.json). */
+export function setAutoLockPeriod(minutes: number): void { _autoClock?.setMinutes(minutes) }
+export function autoLockRemainingMs(): number | null { return _opened && _autoClock ? _autoClock.remainingMs(_now()) : null }
 
 function adopt(s: OpenState): Opened | null {
   _last = s
@@ -431,7 +504,102 @@ function adopt(s: OpenState): Opened | null {
   }
   _opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
   _migratedThisOpen = false
+  startAutoLock(_opened)
   return _opened
+}
+
+function presenceRefusal(s: Extract<OpenState, { state: 'locked' | 'protector-lost' }>): { ok: false; code: string; sentence: string } {
+  const code = presenceCode(s.reason)
+  const word = presenceWord(s.protector)
+  if (code) return { ok: false, code, sentence: presenceSentence(code, vaultLang(), word, s.reason) }
+  return s.state === 'protector-lost' ? refused('protector-lost', lostSentence(s)) : refused('locked', sentence('locked'))
+}
+
+export type GestureUnlock =
+  | { ok: true; state: 'open' }
+  | { ok: true; state: 'pending-stepup'; expiresInMs: number }
+  | { ok: false; code: string; sentence: string }
+
+/**
+ * §2.2 phase 1: the explicit unlock. Raises the presence gesture (or uses the OS wrapper / passphrase
+ * when the vault has no presence). When the authenticator is enrolled AND the vault has presence, the
+ * DEK goes to the PENDING slot and `completeUnlock` (gate.ts) checks the code; otherwise it opens.
+ */
+export async function unlockWithGesture(passphrase?: string): Promise<GestureUnlock> {
+  if (_opened) return { ok: true, state: 'open' }
+  if (_role !== 'holder') return refused('service-only', sentence('service-only'))
+  if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
+  abandonPending()
+  const s = await tryOpen(passphrase, { presence: true })
+  if (s.state === 'open') {
+    if (hasPresence(s.vault) && s.vault.stepup) {
+      const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
+      const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
+      ;(timer as { unref?: () => void }).unref?.()
+      _pending = { opened, expiresMs: _now() + PENDING_STEPUP_MS, timer }
+      return { ok: true, state: 'pending-stepup', expiresInMs: PENDING_STEPUP_MS }
+    }
+    adopt(s)
+    _lockedBy = 'start'
+    void runMigrations()
+    return { ok: true, state: 'open' }
+  }
+  _last = s
+  if (s.state === 'uninitialized') return refused('uninitialized', sentence('uninitialized'))
+  if (s.state === 'corrupt') return refused('tampered', sentence('tampered', { file: displayPath(join(vaultDir(), 'vault.json')), restoreWith: 'agentop vault reset' }))
+  if (s.state === 'protector-lost') _lockedBy = 'presence-lost'
+  return presenceRefusal(s)
+}
+
+/** The DEK waiting for its code, or null (expired ones are zeroed here). */
+export function pendingUnlock(): Opened | null {
+  if (_pending && _now() > _pending.expiresMs) abandonPending()
+  return _pending?.opened ?? null
+}
+
+/** §2.2: the code was right — the pending key becomes the open vault. */
+export function adoptPending(): boolean {
+  const p = pendingUnlock()
+  if (!p) return false
+  if (_pending?.timer) clearTimeout(_pending.timer)
+  _pending = null
+  adopt({ state: 'open', kid: p.kid, dek: p.dek, vault: p.vault, via: p.via })
+  void runMigrations()
+  return true
+}
+
+/** §2.2: a wrong code, an expiry, or a new attempt — the pending key is ZEROED. */
+export function abandonPending(): void {
+  if (!_pending) return
+  if (_pending.timer) clearTimeout(_pending.timer)
+  _pending.opened.dek.fill(0)
+  _pending = null
+}
+
+/**
+ * §4.3: open with the 24 words (the entropy, already checked against its checksum by the caller).
+ * Puts the vault in RECOVERY mode: the three re-enrolment steps are owed before anything else gated.
+ */
+export async function openWithRecovery(entropy: Uint8Array): Promise<{ ok: true } | { ok: false; code: string; sentence: string }> {
+  if (_role !== 'holder') return refused('service-only', sentence('service-only'))
+  if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
+  const raw = await io().readFile(join(vaultDir(), 'vault.json'))
+  const { parseVaultJson: parse } = await import('@agentistics/vault')
+  const vault = parse(raw)
+  if (!vault) return refused('uninitialized', sentence('uninitialized'))
+  const rec = vault.wrappers.find(w => w.type === 'recovery')
+  if (!rec) return refused('no-recovery', vaultLang() === 'pt' ? 'Este cofre não tem chave de recuperação.' : 'This vault has no recovery key.')
+  const u = await recoveryProtector({ io: io(), vaultDir: vaultDir(), entropy }).unwrap(rec, vault.kid)
+  if (!u.ok) {
+    vaultAudit({ type: 'vault.recover-failed' })
+    return refused('recovery-denied', vaultLang() === 'pt' ? 'Essas palavras não abrem este cofre. Nada foi aberto.' : 'Those words do not open this vault. Nothing was opened.')
+  }
+  abandonPending()
+  if (_opened) lockVault('user')
+  adopt({ state: 'open', kid: vault.kid, dek: u.dek, vault, via: 'recovery' })
+  _recoveryTodo = new Set<RecoveryStep>([...(hasPresence(vault) || vault.requirePresence ? ['presence' as const] : []), 'authenticator', 'recovery'])
+  vaultAudit({ type: 'vault.recovered' })
+  return { ok: true }
 }
 
 /**
@@ -513,11 +681,14 @@ export async function unlockVault(passphrase: string): Promise<{ ok: true } | { 
   return refused('locked', sentence('locked'))
 }
 
-/** Drop the key from this process. */
-export function lockVault(): void {
+/** Drop the key from this process — the open one AND any pending one. */
+export function lockVault(reason: LockedBy = 'user'): void {
   if (_opened) _opened.dek.fill(0)
   _opened = null
   _last = null
+  _autoClock = null
+  _lockedBy = reason
+  abandonPending()
 }
 
 function lostSentence(s: Extract<OpenState, { state: 'protector-lost' }>): string {
@@ -540,12 +711,23 @@ export interface VaultStatus {
   checked: string | null
   /** §5.3 / §7.1 "Hardening" line: null until the service has applied it (or in a client). */
   hardening?: HardeningReport | null
+  /** SECRETS.4: why it is locked (engine-api 1.6 `lockedBy`). */
+  lockedBy?: LockedBy | null
+  /** ms until auto-lock while open; null when not open. */
+  autoLockInMs?: number | null
+  /** A gesture opened the key and the authenticator code is awaited (§2.2). */
+  pendingStepup?: boolean
+  /** §4.3: the re-enrolment steps still owed after a recovery; null when not in recovery mode. */
+  recoveryTodo?: RecoveryStep[] | null
 }
 
 /** Never throws, never opens the vault. */
 export async function vaultStatus(): Promise<VaultStatus> {
   const s = await vaultStatusInner()
-  return { ...s, hardening: _hardening }
+  return {
+    ...s, hardening: _hardening, lockedBy: s.state === 'open' ? null : _lockedBy, autoLockInMs: autoLockRemainingMs(),
+    pendingStepup: pendingUnlock() !== null, recoveryTodo: recoveryTodo(),
+  }
 }
 
 async function vaultStatusInner(): Promise<VaultStatus> {
@@ -582,6 +764,13 @@ async function vaultStatusInner(): Promise<VaultStatus> {
   if (_last?.state === 'corrupt') {
     return { state: 'corrupt', protector: primary, protectorLabel: protectorLabel(primary), wrappers, kid: null, sentence: sentence('tampered', { file: displayPath(join(vaultDir(), 'vault.json')), restoreWith: 'agentop vault reset' }), pending, checked }
   }
+  if (vault.wrappers?.some(w => isPresenceId(w.type))) {
+    const word = presenceWord(primary)
+    const text = _lockedBy === 'auto-lock'
+      ? sentence('auto-locked', { minutes: vault.autoLock?.minutes ?? AUTO_LOCK_DEFAULT_MIN, presence: word })
+      : _pending ? sentence('stepup-required') : sentence('presence-required', { presence: word })
+    return { state: 'locked', protector: primary, protectorLabel: protectorLabel(primary), wrappers, kid: vault.kid, sentence: text, pending, checked }
+  }
   return { state: 'locked', protector: primary, protectorLabel: protectorLabel(primary), wrappers, kid: vault.kid, sentence: sentence('locked'), pending, checked }
 }
 
@@ -591,6 +780,11 @@ export async function notOpenRefusal(): Promise<VaultRefusalError> {
   if (_hardening?.state === 'failed') return refusal('hardening-failed', { reason: _hardening.reason ?? '' })
   const s = _last
   if (s?.state === 'protector-lost') return new VaultRefusalError('protector-lost', lostSentence(s))
+  if (s?.state === 'locked' && s.vault.wrappers.some(w => isPresenceId(w.type))) {
+    return _lockedBy === 'auto-lock'
+      ? refusal('auto-locked', { minutes: s.vault.autoLock?.minutes ?? AUTO_LOCK_DEFAULT_MIN, presence: presenceWord(s.protector) })
+      : refusal('presence-required', { presence: presenceWord(s.protector) })
+  }
   if (s?.state === 'locked') return refusal('locked')
   if (s?.state === 'corrupt') return refusal('tampered', { file: displayPath(join(vaultDir(), 'vault.json')), restoreWith: 'agentop vault reset' })
   if (_initFailure?.kind === 'unavailable') return new VaultRefusalError('protector-unavailable', sentence('protector-unavailable', { protector: protectorLabel(_initFailure.protector) ?? _initFailure.protector, reason: _initFailure.reason }))
@@ -646,7 +840,7 @@ export async function withSecret<T>(
 /** Activity hook for auto-lock (S4.7): every human-scope open counts as use. */
 let _onUse: () => void = () => {}
 export function setVaultUseListener(fn: () => void): void { _onUse = fn }
-function noteVaultUse(): void { try { _onUse() } catch { /* never breaks an open */ } }
+function noteVaultUse(): void { _autoClock?.use(_now()); try { _onUse() } catch { /* never breaks an open */ } }
 
 /**
  * Seal `plaintext` into `path` (tmp + fsync + rename + chmod 0600 + fsync dir). THROWS a
@@ -689,6 +883,8 @@ export async function openFromFile(path: string, purpose: string, name: string):
 export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
+  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
+  | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.unlock'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {
@@ -768,12 +964,18 @@ export function __resetVaultForTests(opts: {
   _migratedThisOpen = false
   _hardening = null
   _hardeningRun = null
+  _lockedBy = 'start'
+  _recoveryTodo = null
+  _now = () => Date.now()
   if (opts.dir) _vaultDir = opts.dir
   _io = opts.io ?? null
   _fs = opts.fs ?? realSecretFs
   _scryptForTests = opts.scrypt
   if (opts.lang) { const l = opts.lang; _lang = () => l }
 }
+
+/** Test seam: the clock auto-lock and the pending-stepup expiry read. */
+export function __setVaultClockForTests(now: () => number): void { _now = now }
 
 /** Test seam: pretend this process's hardening came out as `r` (null = not yet applied). */
 export function __setHardeningForTests(r: HardeningReport | null): void {

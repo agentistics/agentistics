@@ -10,6 +10,7 @@
 import { basename } from 'node:path'
 import { isKid, parseSealed, parseVaultJson } from '@agentistics/vault'
 import { sealedFiles } from './boot'
+import { requireVaultStepUp, type GateContext } from './gate'
 import {
   displayPath, lockVault, pendingPlaintextFiles, restoreWithFor, secretFs, vaultDir, vaultStatus,
   type VaultState,
@@ -97,17 +98,15 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
 }
 
 /**
- * THE gate every vault ACTION goes through. Today it allows: the one action is "lock now", which
- * only ever REDUCES what is open. SECRETS.4 plugs the authenticator / Windows Hello presence in
- * HERE and nowhere else, so a new action cannot forget to ask.
+ * THE gate every vault ACTION goes through — implemented in gate.ts (SECRETS.4 §2.4) and re-exported
+ * here, where VAULT.UI first routed every action, so a caller cannot reach an action without it.
  */
-export async function requireVaultStepUp(_action: 'lock'): Promise<{ ok: true } | { ok: false; error: string }> {
-  return { ok: true }
-}
+export { requireVaultStepUp } from './gate'
 
-export async function lockVaultNow(): Promise<{ ok: true } | { ok: false; error: string }> {
-  const gate = await requireVaultStepUp('lock')
-  if (!gate.ok) return gate
-  lockVault()
+/** "Lock now" from the dashboard: gated (§2.4 — a stolen session cannot even toggle the vault). */
+export async function lockVaultNow(ctx: GateContext): Promise<{ ok: true } | { ok: false; code: string; error: string }> {
+  const gate = await requireVaultStepUp('lock', ctx)
+  if (!gate.ok) return { ok: false, code: gate.code, error: gate.sentence }
+  lockVault('user')
   return { ok: true }
 }

@@ -36,9 +36,13 @@ import {
 import { AGENTISTICS_DATA_DIR } from '../config'
 import {
   adoptCreated, chooseAutoProtector, createVault, ensureVaultOpen, lockVault, protectorById, protectorLabel,
-  refused, runMigrations, sealBytes, sentence, unlockVault, vaultAudit, vaultDir, vaultExists, vaultLang,
-  vaultRole, vaultStatus, withSecret,
+  refused, runMigrations, sealBytes, sentence, unlockWithGesture, vaultAudit, vaultDir, vaultExists, vaultLang,
+  vaultRole, vaultStatus, withSecret, noteVaultActivity,
 } from './service'
+import {
+  addPassphraseAllowed, beginAuthenticator, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
+  enrolPresence, recoverWithWords, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
+} from './gate'
 import { setVaultOpHandler, type OpContext, type OpResult } from './socket'
 import { MAX_BODY } from './wire'
 import { realProtectorIo } from './io'
@@ -65,17 +69,23 @@ async function opStatus(): Promise<OpResult> {
 }
 async function opLock(h: Record<string, unknown>): Promise<OpResult> {
   // §2.4: a lock from a local TTY is never gated — reducing exposure must always work.
-  return gated('lock-local', h, async () => { lockVault(); return { reply: { ok: true, status: await vaultStatus() } } })
+  return gated('lock-local', h, async () => { lockVault('user'); return { reply: { ok: true, status: await vaultStatus() } } })
 }
+/** §2.2 phase 1: raise the gesture (or use the passphrase / OS wrapper); may leave a code owed. */
 async function opUnlock(h: Record<string, unknown>): Promise<OpResult> {
   if (h.passphrase !== undefined && !str(h.passphrase, 1024)) return bad()
-  return gated('unlock', h, async () => {
-    const u = typeof h.passphrase === 'string' ? await unlockVault(h.passphrase) : { ok: (await ensureVaultOpen({ create: false })) !== null } as const
-    if (u.ok) return { reply: { ok: true, status: await vaultStatus() } }
-    if ('code' in u) return { reply: { ok: false, code: u.code, sentence: u.sentence } }
-    const s = await vaultStatus()
-    return { reply: { ok: false, code: s.state, sentence: s.sentence ?? sentence('locked') } }
-  })
+  if (h.code !== undefined && !str(h.code, 16)) return bad()
+  const u = await unlockWithGesture(typeof h.passphrase === 'string' ? h.passphrase : undefined)
+  if (!u.ok) return { reply: { ok: false, code: u.code, sentence: u.sentence } }
+  if (u.state === 'pending-stepup' && typeof h.code === 'string') return opUnlockCode(h)
+  return { reply: { ok: true, unlock: u.state, status: await vaultStatus() } }
+}
+/** §2.2 phase 2: the authenticator code for the pending key. */
+async function opUnlockCode(h: Record<string, unknown>): Promise<OpResult> {
+  if (!str(h.code, 16)) return bad()
+  const r = await completeUnlock(h.code)
+  if (!r.ok) return { reply: r }
+  return { reply: { ok: true, unlock: 'open', status: await vaultStatus() } }
 }
 
 // ── seal ────────────────────────────────────────────────────────────────────────────────────
@@ -368,6 +378,9 @@ async function opAddPassphrase(h: Record<string, unknown>): Promise<OpResult> {
   return gated('add-passphrase', h, async () => {
     const r = await openOrRefuse()
     if (!r.ok) return { reply: r.reply }
+    // §4.3: the recovery key replaces the recovery passphrase wherever a protector exists.
+    const allowed = addPassphraseAllowed(r.o.vault)
+    if (!allowed.ok) return { reply: allowed }
     const k = await addPassphraseWrapper(realProtectorIo(), vaultDir(), { state: 'open', ...r.o }, protectorById('passphrase', h.passphrase as string)!)
     if (!k.ok) return { reply: refused('add-passphrase-failed', k.reason) }
     r.o.vault = k.vault
@@ -387,14 +400,67 @@ async function opReset(h: Record<string, unknown>): Promise<OpResult> {
   })
 }
 
+// ── SECRETS.4 §2 / §4 / §5.1 ─────────────────────────────────────────────────────────────────
+
+const SOCKET: GateContext['session'] = 'socket'
+const codeOf = (h: Record<string, unknown>) => (typeof h.code === 'string' && h.code.length <= 16 ? h.code : undefined)
+
+async function opRecover(h: Record<string, unknown>): Promise<OpResult> {
+  if (!str(h.words, 1024)) return bad()
+  const r = await recoverWithWords(h.words)
+  return { reply: r.ok ? { ok: true, todo: r.todo } : r }
+}
+
+/** Hands out a NEW seed's otpauth URI — once, by design: it must be scanned (§2.5). */
+async function opAuthenticatorBegin(h: Record<string, unknown>): Promise<OpResult> {
+  const label = typeof h.label === 'string' && /^[\w .@-]{1,64}$/.test(h.label) ? h.label : 'this machine'
+  const r = await beginAuthenticator({ code: codeOf(h), session: SOCKET }, label)
+  return { reply: r.ok ? { ok: true, uri: r.uri, secret: r.secret } : r }
+}
+async function opAuthenticatorConfirm(h: Record<string, unknown>): Promise<OpResult> {
+  if (!str(h.code1, 16) || !str(h.code2, 16)) return bad()
+  const r = await confirmAuthenticator(h.code1, h.code2)
+  return { reply: r.ok ? { ok: true } : r }
+}
+/** Hands out the NEW 24 words — once, by design: they are written on paper (§4.2). */
+async function opRecoveryBegin(h: Record<string, unknown>): Promise<OpResult> {
+  const r = await beginRecoveryKey({ code: codeOf(h), session: SOCKET })
+  return { reply: r.ok ? { ok: true, words: r.words, positions: r.positions } : r }
+}
+async function opRecoveryConfirm(h: Record<string, unknown>): Promise<OpResult> {
+  if (!Array.isArray(h.typed) || h.typed.length !== 3 || !h.typed.every(w => str(w, 16))) return bad()
+  const r = await confirmRecoveryKey(h.typed as string[])
+  return { reply: r.ok ? { ok: true } : r }
+}
+async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
+  if (h.protector !== 'hello' && h.protector !== 'fido2') return bad()
+  const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET })
+  return { reply: r.ok ? { ok: true, removed: r.removed } : r }
+}
+async function opSetAutoLock(h: Record<string, unknown>): Promise<OpResult> {
+  const r = await setAutoLockMinutes(h.minutes, { code: codeOf(h), session: SOCKET })
+  return { reply: r.ok ? { ok: true } : r }
+}
+
 // ── dispatch ────────────────────────────────────────────────────────────────────────────────
 
 export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch } = {}): Promise<OpResult> {
   // Only the holder answers; a client process that somehow listened would have no key to use.
   if (vaultRole() !== 'holder') return { reply: refused('service-only', sentence('service-only')) }
   const h = ctx.header
+  // §5.1: any `agentop` verb is human interaction (a status poll is not).
+  if (h.op !== 'status') noteVaultActivity()
   switch (h.op) {
     case 'status': return opStatus()
+    case 'unlock-code': return opUnlockCode(h)
+    case 'recover': return opRecover(h)
+    case 'authenticator-begin': return opAuthenticatorBegin(h)
+    case 'authenticator-confirm': return opAuthenticatorConfirm(h)
+    case 'recovery-begin': return opRecoveryBegin(h)
+    case 'recovery-confirm': return opRecoveryConfirm(h)
+    case 'presence-enroll': return opPresenceEnroll(h)
+    case 'set-auto-lock': return opSetAutoLock(h)
+    case 'activity': return { reply: { ok: true } }
     case 'lock': return opLock(h)
     case 'unlock': return opUnlock(h)
     case 'seal': return opSeal(ctx)
@@ -413,13 +479,30 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
   }
 }
 
-/** The closed list, for the tests that walk every op. */
+/**
+ * The closed list, for the tests that walk every op. Two ops hand a NEW secret to the caller ONCE, by
+ * design, and never one the vault already held: `authenticator-begin` (the seed's otpauth URI, to be
+ * scanned) and `recovery-begin` (the 24 words, to be written down).
+ */
 export const VAULT_OPS = [
-  'status', 'lock', 'unlock', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
+  'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
+  'recovery-begin', 'recovery-confirm', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
 ] as const
 
 let _installed = false
-export function installVaultOps(): void { if (!_installed) { setVaultOpHandler(ctx => handleVaultOp(ctx)); _installed = true } }
+export function installVaultOps(): void {
+  if (_installed) return
+  setVaultOpHandler(ctx => handleVaultOp(ctx))
+  // The CLI proves the code with each gated op (no grants on the socket: a CLI call is one action).
+  setSocketGate(async (action, h) => {
+    const map: Record<string, VaultAction> = { 'lock-local': 'lock-local', rekey: 'rekey', 'add-passphrase': 'add-passphrase', reset: 'reset' }
+    const a = map[action]
+    if (!a) return { ok: false, code: 'bad-request', sentence: 'unknown vault action' }
+    const g = await requireVaultStepUp(a, { code: codeOf(h), session: SOCKET })
+    return g.ok ? { ok: true } : g
+  })
+  _installed = true
+}
 export function opsInstalled(): boolean { installVaultOps(); return _installed }
 
