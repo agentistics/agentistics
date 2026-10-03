@@ -179,6 +179,21 @@ export interface EngineAuditEvent {
 }
 
 /** Mirrors the host's notification payload. */
+/** One state change of a native session (1.7, H17). */
+export interface EngineNativeSessionEvent {
+  sessionId: string
+  /** `waiting-approval`: the runtime asked the person; `waiting`: a run ended; `working`: one started. */
+  kind: 'working' | 'waiting' | 'waiting-approval'
+  from?: 'working' | 'waiting' | 'waiting-approval'
+  /** Absolute. */
+  cwd: string
+  label?: string
+  /** The board task the session is filed on, when it is. */
+  taskId?: string
+  /** ISO. */
+  at: string
+}
+
 export interface EngineNotification {
   type: 'error' | 'warning' | 'info' | 'success'
   code?: string
@@ -415,6 +430,13 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   safeError: SafeError
   spawnBudget(): Promise<EngineSpawnBudget>
   notify(n: EngineNotification): void
+  /**
+   * 1.7 (H17), optional: a NATIVE session's own state change, into the host's event channel (the
+   * inbox `agentop events` reads, and its desktop/peer delivery). Facts only — no question text, no
+   * tool input. Fire-and-forget: never throws, never delays the run. Absent on an older host, and a
+   * native session is then simply not in that channel.
+   */
+  events?: { nativeSession(e: EngineNativeSessionEvent): void }
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {
