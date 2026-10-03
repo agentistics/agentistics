@@ -221,7 +221,7 @@ test('pollRunningVersion succeeds the moment the server answers with the wanted 
   const result = await pollRunningVersion(47291, '2.37.0', {
     timeoutMs: 10_000, intervalMs: 0, fetchImpl, sleepImpl: async () => {}, nowImpl: () => 0,
   })
-  expect(result).toEqual({ ok: true, observed: '2.37.0' })
+  expect(result).toEqual({ ok: true, observed: '2.37.0', state: 'matched' })
   expect(calls).toBe(2)
 })
 
@@ -237,7 +237,7 @@ test('pollRunningVersion never claims success while the server keeps answering t
     sleepImpl: async (ms) => { now += ms },
     nowImpl: () => now,
   })
-  expect(result).toEqual({ ok: false, observed: '2.36.1' })
+  expect(result).toEqual({ ok: false, observed: '2.36.1', state: 'stale' })
 })
 
 test('pollRunningVersion reports nothing observed when the port never answers at all', async () => {
@@ -248,7 +248,7 @@ test('pollRunningVersion reports nothing observed when the port never answers at
     sleepImpl: async (ms) => { now += ms },
     nowImpl: () => now,
   })
-  expect(result).toEqual({ ok: false, observed: null })
+  expect(result).toEqual({ ok: false, observed: null, state: 'down' })
 })
 
 test('pollRunningVersion stops polling once the bounded time is spent, never forever', async () => {
@@ -262,6 +262,73 @@ test('pollRunningVersion stops polling once the bounded time is spent, never for
   })
   // 4s budget / 1s interval — polls at 0, 1000, 2000, 3000, 4000: five attempts, never a sixth.
   expect(calls).toBe(5)
+})
+
+// --- the liveness window is ADAPTIVE (a booting server is not a failed one) --------------------------
+//
+// Measured: right after a restart the server's first minute is spent building its first data, and a
+// request meanwhile times out rather than being refused. A fixed 60 s window of "nothing answered"
+// then claimed v<new> "may have failed to start" over a server that was simply still starting. A
+// refused connection means nothing is bound; a timeout / 5xx means something IS, and we keep waiting
+// for it (up to a hard cap) — and say which it was.
+
+const timeoutErr = () => Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' })
+const refusedErr = () => Object.assign(new Error('Unable to connect. Is the computer able to access the url?'), { code: 'ConnectionRefused' })
+
+test('a server that is bound but busy past the base window is waited for, and matched when it answers', async () => {
+  let now = 0
+  const r = await pollRunningVersion(47291, '2.37.0', {
+    timeoutMs: 60_000, intervalMs: 1_000,
+    fetchImpl: async () => { if (now < 75_000) throw timeoutErr(); return { ok: true, json: async () => ({ current: '2.37.0' }) } },
+    sleepImpl: async ms => { now += ms },
+    nowImpl: () => now,
+  })
+  expect(r).toMatchObject({ ok: true, observed: '2.37.0', state: 'matched' })
+})
+
+test('refused connections (nothing bound) end at the BASE window — no free extension', async () => {
+  let now = 0
+  const r = await pollRunningVersion(47291, '2.37.0', {
+    timeoutMs: 60_000, intervalMs: 1_000, fetchImpl: async () => { throw refusedErr() },
+    sleepImpl: async ms => { now += ms }, nowImpl: () => now,
+  })
+  expect(r).toEqual({ ok: false, observed: null, state: 'down' })
+  expect(now).toBeLessThanOrEqual(61_000)
+})
+
+test('busy forever stops at the hard cap and says "busy", not "down"', async () => {
+  let now = 0
+  const r = await pollRunningVersion(47291, '2.37.0', {
+    timeoutMs: 60_000, maxMs: 180_000, intervalMs: 1_000, fetchImpl: async () => { throw timeoutErr() },
+    sleepImpl: async ms => { now += ms }, nowImpl: () => now,
+  })
+  expect(r).toEqual({ ok: false, observed: null, state: 'busy' })
+  expect(now).toBeLessThanOrEqual(181_000)
+})
+
+test('a 5xx while booting counts as busy; a wrong version answering keeps the fixed window (it is not booting)', async () => {
+  let now = 0
+  const busy = await pollRunningVersion(47291, '2.37.0', {
+    timeoutMs: 10_000, maxMs: 40_000, intervalMs: 1_000,
+    fetchImpl: async () => ({ ok: false, json: async () => ({}) }),
+    sleepImpl: async ms => { now += ms }, nowImpl: () => now,
+  })
+  expect(busy.state).toBe('busy')
+  now = 0
+  const stale = await pollRunningVersion(47291, '2.37.0', {
+    timeoutMs: 10_000, maxMs: 40_000, intervalMs: 1_000,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ current: '2.36.1' }) }),
+    sleepImpl: async ms => { now += ms }, nowImpl: () => now,
+  })
+  expect(stale).toEqual({ ok: false, observed: '2.36.1', state: 'stale' })
+  expect(now).toBeLessThanOrEqual(11_000)
+})
+
+test('describeUnconfirmedRestart says "still starting" for a busy server, "failed to start" for a down one', () => {
+  const busy = describeUnconfirmedRestart({ port: 47291, want: '2.37.0', busy: true })
+  expect(busy[0]).toContain('still starting')
+  expect(busy[0]).not.toContain('failed to start')
+  expect(describeUnconfirmedRestart({ port: 47291, want: '2.37.0' })[0]).toContain('failed to start')
 })
 
 // --- describeStaleServer -----------------------------------------------------
@@ -302,22 +369,22 @@ test('describeStaleServer omits the pid/unit lines it has no facts for', () => {
 // confirm" — the only thing that tells them apart is knowing a restart was expected.
 
 test('decideVersionVerification succeeds once the served version matches', () => {
-  expect(decideVersionVerification({ ok: true, observed: '2.37.0' }, true)).toEqual({ ok: true })
+  expect(decideVersionVerification({ ok: true, observed: '2.37.0', state: 'down' }, true)).toEqual({ ok: true })
   // Whether or not a restart happened is irrelevant once the new version is confirmed.
-  expect(decideVersionVerification({ ok: true, observed: '2.37.0' }, false)).toEqual({ ok: true })
+  expect(decideVersionVerification({ ok: true, observed: '2.37.0', state: 'down' }, false)).toEqual({ ok: true })
 })
 
 test('decideVersionVerification fails on a stale version served by another process', () => {
   // The originally measured defect: an orphan answers, and it is never the new version.
-  expect(decideVersionVerification({ ok: false, observed: '2.36.1' }, true))
+  expect(decideVersionVerification({ ok: false, observed: '2.36.1', state: 'down' }, true))
     .toEqual({ ok: false, reason: 'mismatch' })
   // Still a mismatch even if `restartedServer` were somehow false — something IS answering.
-  expect(decideVersionVerification({ ok: false, observed: '2.36.1' }, false))
+  expect(decideVersionVerification({ ok: false, observed: '2.36.1', state: 'down' }, false))
     .toEqual({ ok: false, reason: 'mismatch' })
 })
 
 test('decideVersionVerification fails when a server was restarted and nothing ever answered (unit failed)', () => {
-  expect(decideVersionVerification({ ok: false, observed: null }, true))
+  expect(decideVersionVerification({ ok: false, observed: null, state: 'down' }, true))
     .toEqual({ ok: false, reason: 'unconfirmed' })
 })
 
@@ -326,14 +393,14 @@ test('decideVersionVerification fails when a server was restarted and nothing ev
   // sentence — but the case is named separately because it is the one `describeUnconfirmedRestart`
   // must render distinctly (see below): `activating (auto-restart)` is still crash-looping, not
   // merely slow, and the decision must fail exactly the same as `failed`.
-  expect(decideVersionVerification({ ok: false, observed: null }, true))
+  expect(decideVersionVerification({ ok: false, observed: null, state: 'down' }, true))
     .toEqual({ ok: false, reason: 'unconfirmed' })
 })
 
 test('decideVersionVerification succeeds when nothing was restarted at all', () => {
   // No managed service was running (e.g. a foreground/dev setup) — there is nothing to confirm,
   // and "nothing answered" must not read as a failure here.
-  expect(decideVersionVerification({ ok: false, observed: null }, false)).toEqual({ ok: true })
+  expect(decideVersionVerification({ ok: false, observed: null, state: 'down' }, false)).toEqual({ ok: true })
 })
 
 // --- describeUnconfirmedRestart ------------------------------------------------
