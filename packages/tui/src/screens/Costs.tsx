@@ -1,3 +1,4 @@
+import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box } from 'ink'
 import type { AppData } from '@agentistics/core'
@@ -8,15 +9,17 @@ import { COLORS } from '../theme'
 import { costsPlan, pageWindow } from '../dashboard/view'
 import type { TuiStrings } from '../i18n'
 
-export function Costs({ data, s, width, height, page }: {
+export function Costs({ data, figures = null, s, width, height, page }: {
   data: AppData
+  /** Projected figures (A4.6); absent → the selectors over `data`. */
+  figures?: DashboardFigures | null
   s: TuiStrings
   width: number
   height: number
   /** The requested page, 0-based. Clamped here — the shell may hand over a stale one. */
   page?: number
 }) {
-  const rows = modelRows(data)
+  const rows = figures?.models ?? modelRows(data)
   if (rows.length === 0) return <Empty message={s.empty} />
 
   const total = rows.reduce((n, r) => n + r.costUSD, 0)

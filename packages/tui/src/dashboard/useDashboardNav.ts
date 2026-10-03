@@ -12,6 +12,7 @@
  * uses the same flag to hold its own `?`/`q` handler back.
  */
 
+import type { DashboardFigures } from '../projected-figures'
 import { useCallback, useMemo, useState } from 'react'
 import { useInput } from 'ink'
 import type { AppData, HarnessId } from '@agentistics/core'
@@ -70,6 +71,8 @@ export function useDashboardNav(opts: {
    * key lands on.
    */
   data?: AppData | null
+  /** The projected figures (A4.6) when the screens draw those instead of the selectors' over `data`. */
+  figures?: DashboardFigures | null
   /** The height `DashboardView` is given, which is what decides how many rows a page holds. */
   height?: number
 }): DashboardNav {
@@ -101,7 +104,7 @@ export function useDashboardNav(opts: {
   // Paging is decided against the FILTERED list, so a page can never name a row the filter removed
   // and the page count is the count of what the filter left standing.
   const view = opts.data ? applyHarnessFilter(opts.data, harness) : null
-  const total = pageableTotal(screen, view)
+  const total = pageableTotal(screen, view, opts.figures ?? null)
   const body = dashboardRows(opts.height ?? 0).body
   const pages = pageWindow(total, listPlan(body, total).size, 0).pages
 

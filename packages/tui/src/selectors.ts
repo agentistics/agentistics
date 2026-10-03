@@ -16,19 +16,21 @@ import { calcCost, sessionCostUSD, sessionModelUsage, sessionLabel, sessionToken
 export interface HarnessRow {
   harness: HarnessId
   sessions: number
-  messages: number
+  /** `null` on the projected path: the journal counts the person's turns, not transcript lines. */
+  messages: number | null
   tokens: number
   costUSD: number
   /** Recorded Agent-tool invocations. Only Claude reports these (HARNESS_CAPABILITIES.agents),
    *  so for every other harness this is structurally 0 and must render as N/A, not as a count. */
-  agents: number
+  /** `null` on the projected path: no agent-invocation count is projected. */
+  agents: number | null
 }
 
 export interface Totals {
   sessions: number
   tokens: number
   costUSD: number
-  messages: number
+  messages: number | null
 }
 
 export interface ProjectRow {
@@ -93,7 +95,7 @@ function agentCount(sessions: SessionMeta[]): number {
 /** Claude's authoritative totals. Read ONLY from the statsCache — see the file header.
  *  Agent invocations are the exception: the cache has no agent data, so they are counted from
  *  whatever sessions still exist individually. */
-function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> {
+function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & { messages: number; agents: number } {
   let tokens = 0
   let costUSD = 0
   for (const [model, usage] of Object.entries(sc.modelUsage ?? {})) {
@@ -111,7 +113,7 @@ function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow,
 }
 
 /** Any non-Claude harness: per-session sums, because no cache covers them. */
-function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> {
+function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & { messages: number; agents: number } {
   let tokens = 0
   let costUSD = 0
   let messages = 0
@@ -138,7 +140,7 @@ export function overviewTotals(data: AppData): Totals {
       sessions: acc.sessions + r.sessions,
       tokens: acc.tokens + r.tokens,
       costUSD: acc.costUSD + r.costUSD,
-      messages: acc.messages + r.messages,
+      messages: acc.messages === null || r.messages === null ? null : acc.messages + r.messages,
     }),
     { sessions: 0, tokens: 0, costUSD: 0, messages: 0 },
   )

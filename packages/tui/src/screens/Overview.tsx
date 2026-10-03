@@ -1,3 +1,4 @@
+import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { AppData } from '@agentistics/core'
@@ -39,16 +40,18 @@ export function fitKpis(kpis: KpiSpec[], width: number): KpiSpec[] {
   return out
 }
 
-export function Overview({ data, s, width, height, streak }: {
+export function Overview({ data, figures = null, s, width, height, streak }: {
   data: AppData
+  /** Projected figures (A4.6); absent → the selectors over `data`. */
+  figures?: DashboardFigures | null
   s: TuiStrings
   width: number
   /** Rows this screen may use. It is drawn inside a pane now, so it is not the terminal's. */
   height: number
   streak: number
 }) {
-  const totals = overviewTotals(data)
-  const rows = harnessRows(data)
+  const totals = figures?.totals ?? overviewTotals(data)
+  const rows = figures?.harnesses ?? harnessRows(data)
   const series = activitySeries(data, ACTIVITY_DAYS, new Date())
   const totalCost = rows.reduce((n, r) => n + r.costUSD, 0)
 
@@ -66,7 +69,7 @@ export function Overview({ data, s, width, height, streak }: {
       { label: s.cost, value: fmtCost(totals.costUSD), color: COLORS.accent, width: 18 },
       { label: s.tokens, value: fmt(totals.tokens), color: COLORS.info, width: 12 },
       { label: s.sessionsCount, value: fmt(totals.sessions), width: 12 },
-      { label: s.messages, value: fmt(totals.messages), width: 12 },
+      { label: s.messages, value: totals.messages === null ? '—' : fmt(totals.messages), width: 12 },
       { label: s.streak, value: s.days(streak), color: COLORS.success, width: 10 },
     ],
     width,

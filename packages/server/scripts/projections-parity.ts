@@ -5,7 +5,7 @@
  * path (`/api/runtime/metrics`, the same query in-process), compared row by row.
  *
  *   bun packages/server/scripts/projections-parity.ts \
- *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|all] \
+ *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|all] \
  *     [--legacy-cache <file.json>] [--json <report.json>]
  *
  * READ-ONLY by construction: it refuses the live data dir and any path inside it. Building the legacy
@@ -28,7 +28,7 @@ const dataDir = arg('data-dir')
 const projectionsPath = arg('projections')
 const surface = arg('surface') ?? 'all'
 if (!dataDir || !projectionsPath) {
-  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|all]')
+  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|tui|all]')
   process.exit(2)
 }
 const live = resolve(homedir(), '.agentistics')
@@ -53,6 +53,7 @@ const { calcCost } = await import('@agentistics/core')
 const legacyMcp = await import('../../mcp/legacy-analytics')
 const projectedMcp = await import('../../mcp/projected-analytics')
 const parity = await import('../../mcp/surface-parity')
+const tuiFigures = await import('../../tui/src/projected-figures')
 
 type Report = import('../../mcp/surface-parity').ParityReport
 
@@ -101,6 +102,19 @@ if (surface === 'mcp' || surface === 'all') {
     reports.push(parity.compareRows(`mcp harnesses${scope}`, legacyMcp.legacyHarnesses(d) as any, await projectedMcp.projectedHarnesses(query) as any, F.agentistics_harnesses.key, F.agentistics_harnesses.fields))
   }
 }
+if (surface === 'tui' || surface === 'all') {
+  // The TUI's legacy Claude row is `statsCache` (whole history), so the covered pass, which has no
+  // statsCache, reads Claude as 0 there: judge the covered TUI pass on projects and models only.
+  const projected = await tuiFigures.projectedFigures(query)
+  for (const [scope, d] of [['', data], [' (journal-covered)', coveredData]] as const) {
+    const legacy = tuiFigures.legacyFigures(d)
+    reports.push(parity.compareObject(`tui totals${scope}`, legacy.totals as any, projected.totals as any, ['sessions', 'tokens', 'costUSD']))
+    reports.push(parity.compareRows(`tui harnesses${scope}`, legacy.harnesses as any, projected.harnesses as any, 'harness', ['sessions', 'tokens', 'costUSD']))
+    reports.push(parity.compareRows(`tui projects${scope}`, legacy.projects as any, projected.projects as any, 'path', ['sessions', 'tokens', 'costUSD']))
+    reports.push(parity.compareRows(`tui models${scope}`, legacy.models as any, projected.models as any, 'model', ['tokens', 'costUSD']))
+  }
+}
+
 // ── attribution, session by session ─────────────────────────────────────────────────────────────
 const tok = (t: any) => (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0)
 const proj = new Map<string, { main: number; sub: number; mainCost: number; models: Set<string> }>()
