@@ -95,3 +95,26 @@ export function refusalSentence(body: unknown, status: number, lang: 'pt' | 'en'
   if (b.error === 'engine-absent') return pt ? 'Esta versão não tem o runtime nativo.' : 'This build has no native runtime.'
   return pt ? `O servidor recusou (${status}).` : `The server refused (${status}).`
 }
+
+/**
+ * An approval option as the person reads it. The engine words its options in English ("Allow once",
+ * "Allow for this session: …", "Deny"); the known ones are translated, anything else passes as is.
+ */
+export function optionLabel(label: string, lang: 'pt' | 'en'): string {
+  if (lang !== 'pt') return label
+  if (label === 'Allow once') return 'Permitir uma vez'
+  if (label === 'Deny') return 'Negar'
+  const s = /^Allow for this session: commands starting with (.+)$/.exec(label)
+  if (s) return `Permitir nesta sessão: comandos que começam com ${s[1]}`
+  const t = /^Allow for this session: (.+)$/.exec(label)
+  if (t) return `Permitir nesta sessão: ${t[1]}`
+  return label
+}
+
+/** The option that refuses (drawn apart from the ones that allow). */
+export const isDenyOption = (label: string) => label === 'Deny'
+
+/** `1.2 s`, `350 ms`. */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
+}

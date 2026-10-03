@@ -85,3 +85,18 @@ describe('the native session API', () => {
     expect(refusalSentence(null, 500, 'pt')).toBe('O servidor recusou (500).')
   })
 })
+
+describe('optionLabel / formatDuration', () => {
+  test('the engine’s options in PT; unknown ones pass as is; EN untouched', async () => {
+    const { optionLabel, formatDuration, isDenyOption } = await import('./nativeSession')
+    expect(optionLabel('Allow once', 'pt')).toBe('Permitir uma vez')
+    expect(optionLabel('Deny', 'pt')).toBe('Negar')
+    expect(optionLabel('Allow for this session: commands starting with git status', 'pt')).toBe('Permitir nesta sessão: comandos que começam com git status')
+    expect(optionLabel('Allow for this session: file.write in src', 'pt')).toBe('Permitir nesta sessão: file.write in src')
+    expect(optionLabel('main', 'pt')).toBe('main')
+    expect(optionLabel('Allow once', 'en')).toBe('Allow once')
+    expect(isDenyOption('Deny')).toBe(true)
+    expect(formatDuration(350)).toBe('350 ms')
+    expect(formatDuration(1234)).toBe('1.2 s')
+  })
+})

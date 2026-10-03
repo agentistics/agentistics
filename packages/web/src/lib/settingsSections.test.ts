@@ -69,6 +69,12 @@ test('providers is a machine section — a central has no local runtime to hold 
   expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('providers')
 })
 
+test('providers is hidden on a community build (no engine, no native runtime) — UI.2', () => {
+  expect(ids({ central: false, nativeRuntime: false })).not.toContain('providers')
+  expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
+  expect(ids({ central: false })).toContain('providers') // not yet known: shown, as localChat
+})
+
 test('the other sections are unaffected by the new field', () => {
   expect(ids({ central: false, localChat: false })).toContain('preferences')
   expect(ids({ central: false, localChat: false })).toContain('notifications')
