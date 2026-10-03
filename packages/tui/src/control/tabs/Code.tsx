@@ -72,7 +72,12 @@ import {
   wizardHints,
   wizardKey,
   wizardLines,
+  withModels,
+  harnessModels,
+  assistantRows,
+  folderRows,
   type WizardEffect,
+  type WizardServices,
   type WizardState,
 } from '../code-wizard'
 import { codeStrings } from '../code-i18n'
@@ -85,6 +90,8 @@ import type { TabChrome } from '../ControlCenter'
 export interface CodeProps {
   /** The native harness is experimental and off (`agentop experimental enable`): said instead. */
   gateSentence?: string
+  /** NW-02…NW-05: what the wizard asks the control center for (assistants, models, folders, spawn). */
+  services?: WizardServices
   /** Absent: this build has no native runtime, and the tab says so in words. */
   code?: CodeHost
   /** How `agentop code …` opened the tab — acted on once, on the first mount. */
@@ -178,7 +185,7 @@ function useLatestState<T>(initial: T): [T, (next: T | ((prev: T) => T)) => void
 const defaultWrite = (bytes: string): void => { writeFrame(bytes) }
 
 export function Code({
-  code, gateSentence, launch, command, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
+  code, gateSentence, services, launch, command, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
   onAttention, onHelp, onPalette, onPaletteContext, writeTerminal = defaultWrite, inTmux = Boolean(process.env.TMUX),
 }: CodeProps) {
   const t = codeStrings(lang)
@@ -268,21 +275,33 @@ export function Code({
 
   // ── the wizard ───────────────────────────────────────────────────────────────────────────
 
+  // NW-02: each installed harness's own model rows, kept by id for the model step.
+  const harnessInfo = useRef(new Map<string, { modelSuggestions: string[]; defaultModel?: string }>())
   const startWizard = useCallback((firstMessage?: string, taskId?: string) => {
     if (!code) return
     setWizard(openWizard(firstMessage ?? ''))
-    // Both reads start at once; each lands only on a wizard that is still open. TK-06: a task chosen
-    // by the `tasks` tab is picked as soon as the list arrives, and the wizard goes to the review.
+    // The reads start at once; each lands only on a wizard that is still open. TK-06: a task chosen
+    // by the `tasks` tab is picked as soon as the list arrives, and the wizard goes to the assistant.
     void code.openTasks().then(r => setWizard(w => {
       if (!w) return w
       if (!r.ok) return { ...w, tasksError: r.sentence }
       const chosen = taskId ? r.tasks.find(t => t.id === taskId) : undefined
       return chosen
-        ? { ...w, tasks: r.tasks, tasksError: null, task: chosen, cursor: r.tasks.indexOf(chosen), step: 'review' }
+        ? { ...w, tasks: r.tasks, tasksError: null, task: chosen, cursor: 0, step: 'assistant' }
         : { ...w, tasks: r.tasks, tasksError: null }
     }))
-    void code.defaults().then(d => setWizard(w => (w ? { ...w, defaults: d } : w)))
-  }, [code])
+    const defaultsP = code.defaults()
+    void defaultsP.then(d => setWizard(w => (w ? { ...w, defaults: d } : w)))
+    void (services?.harnesses?.() ?? Promise.resolve([])).catch(() => []).then(list => {
+      harnessInfo.current = new Map(list.map(h => [h.id, { modelSuggestions: h.modelSuggestions, ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}) }]))
+      const assistants = assistantRows(list, { native: true, nativeLabel: t.assistantNative, nativeNote: t.nativeAssistantNote, harnessNote: t.harnessAssistantNote })
+      setWizard(w => (w ? { ...w, assistants } : w))
+    })
+    void Promise.all([defaultsP.catch(() => null), (services?.places?.() ?? Promise.resolve([])).catch(() => [])]).then(([d, places]) => {
+      const folders = folderRows(places, d?.cwd ?? null, t)
+      setWizard(w => (w ? { ...w, folders } : w))
+    })
+  }, [code, services, t])
 
   // `agentop code "…"` / `agentop code --resume <id>`, and the `home` tab's prompt / resume (HM-02,
   // HM-04): each LAUNCH OBJECT is acted on once. A new launch (a new object) is acted on again; a
@@ -319,23 +338,79 @@ export function Code({
           else { say(false, r.sentence); setWizard(w => (w ? { ...w, busy: false } : w)) }
         })
         return
+      case 'load-models': {
+        // NW-03: the native assistant's catalogue comes from the host; a harness's from its own spec.
+        const a = effect.assistant
+        if (!a.native) {
+          const info = harnessInfo.current.get(a.id) ?? { modelSuggestions: [] }
+          setWizard(w => (w ? withModels(w, { models: harnessModels(info, t) }) : w))
+          return
+        }
+        const read = services?.nativeModels
+        // No catalogue to ask (a host without one): the model the tab would use anyway, or why none.
+        if (!read) {
+          setWizard(w => {
+            if (!w) return w
+            const d = w.defaults
+            return withModels(w, d?.model
+              ? { models: [{ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: d.model.source === 'flag' ? t.fromFlag : t.fromLastSession }] }
+              : { sentence: d?.noModelSentence ?? t.unavailableBuild })
+          })
+          return
+        }
+        void read().then(r => setWizard(w => (w ? withModels(w, r) : w)))
+        return
+      }
       case 'start':
-        say(true, t.sayStarting)
-        void code.start({
-          taskId: effect.taskId,
-          model: effect.model,
-          cwd: effect.cwd,
-          ...(effect.firstMessage ? { firstMessage: effect.firstMessage } : {}),
-        }).then(r => {
-          if (!r.ok) { say(false, r.sentence); setWizard(w => (w ? { ...w, busy: false } : w)); return }
-          // NW-06: it lands on the new session — the host holds the first message until the
-          // subscribe effect attaches, so nothing is sent unwatched.
-          setWizard(null)
-          openSession(r.facts)
+      case 'spawn': {
+        const fail = (sentence: string) => { say(false, sentence); setWizard(w => (w ? { ...w, busy: false } : w)) }
+        // NW-04: a new worktree is created first; the session starts in the folder it made.
+        const makeWorktree = async (): Promise<string | null> => {
+          if (!effect.worktree) return effect.cwd
+          if (!services?.createWorktree) { fail(t.unavailableBuild); return null }
+          say(true, t.sayCreatingWorktree)
+          const r = await services.createWorktree(effect.cwd, effect.taskTitle)
+          if (!r.ok) { fail(r.sentence); return null }
           say(true, r.sentence)
+          return r.path
+        }
+        void makeWorktree().then(cwd => {
+          if (cwd === null) return
+          if (effect.kind === 'start') {
+            say(true, t.sayStarting)
+            void code.start({
+              taskId: effect.taskId,
+              model: effect.model,
+              ...(effect.provider ? { provider: effect.provider } : {}),
+              cwd,
+              ...(effect.firstMessage ? { firstMessage: effect.firstMessage } : {}),
+            }).then(r => {
+              if (!r.ok) { fail(r.sentence); return }
+              // NW-06: it lands on the new session — the host holds the first message until the
+              // subscribe effect attaches, so nothing is sent unwatched.
+              setWizard(null)
+              openSession(r.facts)
+              say(true, r.sentence)
+            })
+            return
+          }
+          // An installed harness runs under tmux, filed on the task; it lands on its new row.
+          if (!services?.spawn) { fail(t.unavailableBuild); return }
+          say(true, t.sayStartingHarness(effect.label))
+          void services.spawn({
+            harness: effect.harness, cwd, taskId: effect.taskId, task: effect.taskTitle,
+            ...(effect.model ? { model: effect.model } : {}), ...(effect.prompt ? { prompt: effect.prompt } : {}),
+          }).then(r => {
+            if (!r.ok) { fail(r.message); return }
+            setWizard(null)
+            say(true, r.message)
+            if (r.id) services.landOn?.(r.id)
+          })
         })
+        return
+      }
     }
-  }, [code, say, t, openSession])
+  }, [code, say, t, openSession, services])
 
   // ── geometry and lines ───────────────────────────────────────────────────────────────────
 

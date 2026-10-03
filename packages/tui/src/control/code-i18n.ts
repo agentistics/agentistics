@@ -192,6 +192,29 @@ export interface CodeStrings {
   fromFlag: string
   fromLastSession: string
   noSandboxReview: string
+  // ── NW-02…NW-05 ──
+  stepAssistant: string
+  stepModel: string
+  stepFolder: string
+  stepPrompt: string
+  whichAssistant: string
+  whichAssistantNote: string
+  whichModel: string
+  whichFolder: string
+  firstMessageTitle: string
+  firstMessageHint: string
+  loadingAssistants: string
+  loadingModels: string
+  loadingFolders: string
+  noAssistants: string
+  cliDefault: string
+  cliDefaultNote: string
+  newWorktreeOf: (repo: string) => string
+  newWorktreeNote: string
+  sayCreatingWorktree: string
+  sayStartingHarness: (label: string) => string
+  nativeAssistantNote: string
+  harnessAssistantNote: string
 
   // ── status sentences the TAB composes (the host composes the rest) ───────────────────────
   sayEmptyTitle: string
@@ -439,6 +462,28 @@ const EN: CodeStrings = {
   fromFlag: 'from --model',
   fromLastSession: 'from your last session',
   noSandboxReview: '▲ no sandbox: tools run as you in that folder; everything not allowlisted asks first',
+  stepAssistant: 'assistant',
+  stepModel: 'model',
+  stepFolder: 'folder',
+  stepPrompt: 'prompt',
+  whichAssistant: 'Which assistant?',
+  whichAssistantNote: '(only the ones installed here)',
+  whichModel: 'Which model?',
+  whichFolder: 'Where does it work?',
+  firstMessageTitle: 'First message',
+  firstMessageHint: 'optional · enter continues',
+  loadingAssistants: 'reading which assistants are installed…',
+  loadingModels: 'reading the models…',
+  loadingFolders: 'reading your repositories…',
+  noAssistants: 'No assistant can start on this machine.',
+  cliDefault: 'the CLI default',
+  cliDefaultNote: 'no model flag passed',
+  newWorktreeOf: repo => `${repo}  in a new worktree`,
+  newWorktreeNote: 'a new branch + folder for this task',
+  sayCreatingWorktree: 'Creating the worktree…',
+  sayStartingHarness: label => `Starting ${label}…`,
+  nativeAssistantNote: 'streams here · the policy asks · no sandbox',
+  harnessAssistantNote: 'tmux · attach to drive',
 
   sayEmptyTitle: 'A task needs a title.',
   sayNothingRunning: 'Nothing is running, so there is nothing to cancel.',
@@ -679,6 +724,28 @@ const PT: CodeStrings = {
   fromFlag: 'do --model',
   fromLastSession: 'da sua última sessão',
   noSandboxReview: '▲ sem sandbox: as ferramentas rodam como você nessa pasta; tudo fora da allowlist pergunta antes',
+  stepAssistant: 'assistente',
+  stepModel: 'modelo',
+  stepFolder: 'pasta',
+  stepPrompt: 'mensagem',
+  whichAssistant: 'Qual assistente?',
+  whichAssistantNote: '(só os instalados aqui)',
+  whichModel: 'Qual modelo?',
+  whichFolder: 'Onde ela trabalha?',
+  firstMessageTitle: 'Primeira mensagem',
+  firstMessageHint: 'opcional · enter continua',
+  loadingAssistants: 'lendo quais assistentes estão instalados…',
+  loadingModels: 'lendo os modelos…',
+  loadingFolders: 'lendo seus repositórios…',
+  noAssistants: 'Nenhum assistente pode iniciar nesta máquina.',
+  cliDefault: 'o padrão da CLI',
+  cliDefaultNote: 'nenhuma flag de modelo',
+  newWorktreeOf: repo => `${repo}  numa worktree nova`,
+  newWorktreeNote: 'um branch + pasta novos para esta tarefa',
+  sayCreatingWorktree: 'Criando a worktree…',
+  sayStartingHarness: label => `Iniciando ${label}…`,
+  nativeAssistantNote: 'transmite aqui · a política pergunta · sem sandbox',
+  harnessAssistantNote: 'tmux · anexe para conduzir',
 
   sayEmptyTitle: 'Uma task precisa de um título.',
   sayNothingRunning: 'Nada está rodando, então não há o que cancelar.',

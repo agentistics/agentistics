@@ -156,12 +156,15 @@ describe('Code tab — wiring', () => {
     const { app, said } = mount(host, { prompt: 'fix it' })
     await tick(120)
     expect(plain(app.lastFrame())).toContain('Which task is this session for?')
-    app.stdin.write('\r')
-    await tick()
-    expect(plain(app.lastFrame())).toContain('Review')
+    // task → assistant (native) → model (the tab's default) → folder (here) → first message → review
+    for (const expected of ['Which assistant?', 'Which model?', 'Where does it work?', 'First message', 'Review']) {
+      app.stdin.write('\r')
+      await tick()
+      expect(plain(app.lastFrame())).toContain(expected)
+    }
     app.stdin.write('\r')
     await tick(120)
-    expect(calls.start).toEqual([[{ taskId: 'task-1', model: 'claude-sonnet-5', cwd: '/repo', firstMessage: 'fix it' }]])
+    expect(calls.start).toEqual([[{ taskId: 'task-1', model: 'claude-sonnet-5', provider: 'anthropic', cwd: '/repo', firstMessage: 'fix it' }]])
     expect(calls.subscribe).toEqual([['ses_abcd']])
     expect(said.some(r => r.message === 'Started.')).toBe(true)
     app.unmount()

@@ -1343,6 +1343,13 @@ export interface ControlHost {
   homeTasks?(): Promise<{ tasks: HomeTask[] } | { unavailable: string }>
   /** HM-06: the configured providers and their state, from the real credential state. */
   homeProviders?(): Promise<{ providers: HomeProvider[] } | { unavailable: string }>
+  /**
+   * NW-03: the native assistant's models — per configured provider, with price, window and where each
+   * comes from; a provider that is not configured (or not reachable) is a row that says why.
+   */
+  nativeModels?(): Promise<{ models: { id: string; label: string; detail: string; disabled?: string }[] } | { sentence: string }>
+  /** NW-04: create a worktree of `repo` for this task; the folder it made, or why not. */
+  createWorktree?(repo: string, name: string): Promise<{ ok: true; path: string; sentence: string } | { ok: false; sentence: string }>
   /** TK-02…TK-07: one task's detail — rollup, subtasks, its sessions (with live state), activity. */
   taskDetail?(id: string): Promise<import('./task-detail').TaskDetailView | { unavailable: string }>
 
@@ -1873,6 +1880,8 @@ export interface SpawnSessionRequest {
    * would ask the question and throw the answer away.
    */
   task?: string
+  /** NW-02: the BOARD task to file it under (its id) — filed on the board right after it starts. */
+  taskId?: string
   prompt?: string
   model?: string
   effort?: string

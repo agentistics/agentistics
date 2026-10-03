@@ -18,7 +18,8 @@
  * of the screen spent telling the user what they had just typed.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import type { WizardServices } from './code-wizard'
 import { Box, useInput } from 'ink'
 import { useTerminalSize } from '../useTerminalSize'
 import { bodyHeight, isQuitChord, resolveScrollKey, resolveShellKey, scrollBy, type NavKey } from './nav'
@@ -169,6 +170,18 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     setCodeLaunch({ ...launch })
     setTab('code')
   }, [])
+  // NW-02…NW-05: what the code tab's wizard asks for, from the host this app already has.
+  const wizardServices = useMemo((): WizardServices => ({
+    ...(host.startableHarnesses ? { harnesses: () => host.startableHarnesses!() } : {}),
+    ...(host.nativeModels ? { nativeModels: () => host.nativeModels!() } : {}),
+    ...(host.searchProjects ? { places: () => host.searchProjects!('').then(r => r.options) } : {}),
+    ...(host.createWorktree ? { createWorktree: (repo: string, name: string) => host.createWorktree!(repo, name) } : {}),
+    ...(host.spawnSession ? {
+      spawn: (req: { harness: string; cwd: string; taskId: string; task: string; model?: string; prompt?: string }) =>
+        host.spawnSession!({ ...req, attach: false }).then(r => ({ ok: r.ok, message: r.message, ...(r.id ? { id: r.id } : {}) })),
+    } : {}),
+    landOn: (id: string) => { setSessionsFocus({ id }); setTab('sessions') },
+  }), [host])
   // TK-04: the `tasks` tab hands a live session to `sessions`, which selects it (a new object each time).
   const [sessionsFocus, setSessionsFocus] = useState<{ id: string } | undefined>(undefined)
   const focusSession = useCallback((id: string) => {
@@ -774,6 +787,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         <Screen visible={tab === 'code' && !overlayOpen}>
           <Code
             code={host.code}
+            services={wizardServices}
             {...(host.nativeGate ? { gateSentence: host.nativeGate() } : {})}
             launch={codeLaunch}
             command={codeCommand}

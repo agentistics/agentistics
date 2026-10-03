@@ -1091,7 +1091,8 @@ export function Sessions({
       })
       return
     }
-    if (r.state.step === 'review' && r.state.task) { file(r.state.task.id); return }
+    // Picking a task moves the wizard past its task step: here that means "file it there".
+    if (r.state.step !== 'task' && r.state.task) { file(r.state.task.id); return }
     setFilePick({ session, wiz: r.state })
   }, [filePick, host, run, onRefreshFleet, codeT])
 

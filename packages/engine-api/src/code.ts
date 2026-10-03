@@ -52,6 +52,8 @@ export interface CodeStartInput {
   /** REQUIRED (D-TUI-6): a session the TUI starts is always filed under a task. */
   taskId: string
   model: string
+  /** NW-03: the keyed provider to run it on (`anthropic`, `openrouter`, `ollama`, …); absent = Anthropic. */
+  provider?: string
   cwd: string
   /** Sent as the first prompt right after the session starts. */
   firstMessage?: string

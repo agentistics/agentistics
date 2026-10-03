@@ -4228,7 +4228,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
         ...(req.force ? { force: true } : {}),
-      }, S(), lang)
+      }, S(), lang).then(async r => {
+        // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
+        if (r.ok && r.id && req.taskId) {
+          const { attachSession } = await import('./sessions/task-web')
+          await attachSession(req.taskId, r.id).catch(() => null)
+        }
+        return r
+      })
     },
   }
 }
@@ -4341,6 +4348,69 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
     } catch {
       return { unavailable: pt ? 'O board de tarefas não pôde ser lido.' : 'The task board could not be read.' }
     }
+  }
+
+  // NW-03: the native assistant's models, per provider, with price and window and their provenance.
+  // The provider list and each live model list come from the SERVICE (keys are sealed in its vault);
+  // price and window from the shared tables (`@agentistics/core`) — N/A, with the reason, when unknown.
+  host.nativeModels = async () => {
+    const pt = host.lang === 'pt'
+    const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+    if (!nativeExperimentalOn()) return { sentence: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const { hasModelPrice, getModelPrice, resolveContextWindow } = await import('@agentistics/core')
+    type P = { id: string; label: string; state: string; kind?: string; baseUrl?: string; keyless?: boolean }
+    const get = async <T,>(path: string, ms: number): Promise<T | null> =>
+      fetch(`http://127.0.0.1:${PORT}${path}`, { signal: AbortSignal.timeout(ms) })
+        .then(r => (r.ok ? r.json() as Promise<T> : null)).catch(() => null)
+    const list = await get<{ enabled?: boolean; sentence?: string; providers?: P[] }>('/api/provider', 2000)
+    if (!list) return { sentence: pt ? 'O serviço do agentop não respondeu — os provedores vêm dele (inicie em serviços).' : 'The agentop service did not answer — providers come from it (start it in services).' }
+    if (list.enabled === false) return { sentence: list.sentence ?? EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const money = (n: number) => (n === 0 ? '$0' : n < 1 ? `$${n.toFixed(2)}` : `$${Number.isInteger(n) ? n : n.toFixed(2)}`)
+    const detailOf = (id: string, ctxLen?: number, local = false): string => {
+      // A LOCAL provider's model runs on this machine: it costs nothing, whatever the table knows.
+      const price = local ? (pt ? '$0 (roda nesta máquina)' : '$0 (runs on this machine)') : hasModelPrice(id)
+        ? (() => { const p = getModelPrice(id); return `${money(p.input)} / ${money(p.output)} per MTok` })()
+        : (pt ? 'preço N/A (não verificado)' : 'price N/A (unverified)')
+      const win = resolveContextWindow(id)
+      const k = (n: number) => (n >= 1e6 ? `${n / 1e6}M` : `${Math.round(n / 1e3)}k`)
+      const window = win ? `${k(win.tokens)} · ${win.source.split('/')[0]} ${win.verifiedAt}`
+        : ctxLen ? `${k(ctxLen)} (${pt ? 'do provedor' : 'from the provider'})`
+        : (pt ? 'janela N/A' : 'window N/A')
+      return `${price} · ${window}`
+    }
+    const models: { id: string; label: string; detail: string; disabled?: string; provider?: string }[] = []
+    // The model the code tab would use anyway (flag / last session) first, on its own provider.
+    const d = host.code ? await host.code.defaults().catch(() => null) : null
+    if (d?.model) models.push({ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: `${detailOf(d.model.id)} · ${d.model.source === 'flag' ? (pt ? 'da flag --model' : 'from --model') : (pt ? 'da sua última sessão' : 'from your last session')}` })
+    for (const p of list.providers ?? []) {
+      if (p.state !== 'present') {
+        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: pt ? 'não configurado — ctrl+, adiciona a chave (Configurações → Provedores)' : 'not configured — ctrl+, adds a key (Settings → Providers)' })
+        continue
+      }
+      const r = await get<{ ok: boolean; models?: { id: string; contextLength?: number }[]; sentence?: string }>(`/api/provider/${encodeURIComponent(p.id)}/models`, 4000)
+      if (!r || !r.ok || !r.models) {
+        // The provider's own sentence, without repeating its name (the row already says it).
+        const why = r?.sentence?.replace(new RegExp(`^${p.id}:\\s*`, 'i'), '')
+        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: why ?? (pt ? `não respondeu${p.baseUrl ? ` em ${p.baseUrl}` : ''}` : `did not answer${p.baseUrl ? ` at ${p.baseUrl}` : ''}`) })
+        continue
+      }
+      for (const m of r.models.slice(0, 8)) {
+        if (models.some(x => x.id === m.id && x.provider === p.id)) continue
+        models.push({ id: m.id, provider: p.id, label: `${p.id} · ${m.id}`, detail: detailOf(m.id, m.contextLength, p.kind === 'local') })
+      }
+    }
+    return { models }
+  }
+
+  // NW-04: a new worktree of a repository for this task — `<repo>/.worktrees/<name>` on a new branch.
+  host.createWorktree = async (repo, name) => {
+    const pt = host.lang === 'pt'
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'work'
+    const path = `${repo.replace(/\/$/, '')}/.worktrees/${slug}`
+    const p = Bun.spawn(['git', '-C', repo, 'worktree', 'add', '-b', slug, path], { stdout: 'pipe', stderr: 'pipe' })
+    const [err, code] = await Promise.all([new Response(p.stderr).text(), p.exited])
+    if (code !== 0) return { ok: false, sentence: pt ? `A worktree não foi criada: ${err.trim().split('\n').pop()}` : `The worktree was not created: ${err.trim().split('\n').pop()}` }
+    return { ok: true, path, sentence: pt ? `Worktree criada em ${path} (branch ${slug}).` : `Worktree created at ${path} (branch ${slug}).` }
   }
 
   // The native harness is EXPERIMENTAL (owner decision 2026-10-03, `native-gate.ts`): with the flag

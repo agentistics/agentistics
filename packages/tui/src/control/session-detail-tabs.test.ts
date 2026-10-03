@@ -60,7 +60,7 @@ describe('detail tabs (SS-03 chat · SS-04 terminal · SS-05 metrics)', () => {
 })
 
 describe('the file-under-a-task picker is the wizard\'s task step (SS-09)', () => {
-  test('same rows as NW-01, without the crumbs; picking a task reaches review', async () => {
+  test('same rows as NW-01, without the crumbs; picking a task leaves the task step', async () => {
     const { openWizard, wizardLines, filePickerLines, wizardKey } = await import('./code-wizard')
     const { codeStrings } = await import('./code-i18n')
     const t = codeStrings('en')
@@ -70,7 +70,7 @@ describe('the file-under-a-task picker is the wizard\'s task step (SS-09)', () =
     expect(pick.body).toEqual(full.body)
     expect(pick.head).toEqual(full.head.slice(2))
     const r = wizardKey(st, { input: '', return: true })
-    expect(r.state.step).toBe('review')
+    expect(r.state.step).not.toBe('task')
     expect(r.state.task?.id).toBe('t-1')
   })
 })
