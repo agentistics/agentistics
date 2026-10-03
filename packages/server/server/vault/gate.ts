@@ -42,7 +42,7 @@ import {
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
-import { finishBundleRestore } from './bundle-io'
+import { finishBundleRestore, markBundleWipePending } from './bundle-io'
 import { codeWindowOpen, consumeGestureToken, openCodeWindow, readMobile } from './mobile'
 import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markCommitted, prepareRekey } from './rekey'
 
@@ -60,6 +60,8 @@ export type VaultAction =
   | 'mobile-passkey-add' | 'mobile-passkey-remove' | 'mobile-code-reveal'
   // VAULT.PERSONAL §8: handing secrets to an agent session is a reveal by proxy — the gesture, fresh.
   | 'personal-grant'
+  // VAULT.PERSONAL backup: erase the vault's older bundles from the GitHub backup — irreversible, so code + gesture, fresh.
+  | 'personal-backup-wipe'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -104,6 +106,7 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'mobile-passkey-remove': { code: true, gesture: true, grant: null },
   'mobile-code-reveal': { code: true, gesture: true, grant: null },
   'personal-grant': { code: true, gesture: true, grant: 'read' },
+  'personal-backup-wipe': { code: true, gesture: true, grant: null },
 }
 
 /**
@@ -762,6 +765,7 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
     _flow = null
     vaultAudit({ type: 'vault.enroll-presence', protector: h.id })
     vaultAudit({ type: 'vault.rekey', protector: h.id })
+    void markBundleWipePending() // the next confirmed backup erases the bundles under the OLD key
     vaultAudit({ type: 'vault.rotate-recovery' })
     return { ok: true }
   }
@@ -862,6 +866,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
     dropUnlockWindow() // a protector change
     vaultAudit({ type: 'vault.rekey', protector: id })
+    void markBundleWipePending()
     return { ok: true, removed: k.removed, recoveryOwed: afterPresence(o.vault) }
   }
   const r = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all))

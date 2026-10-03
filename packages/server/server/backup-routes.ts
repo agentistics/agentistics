@@ -547,6 +547,9 @@ async function runRestoreJob(
       rr.finishRestoreJob(job, { ok: false, reason: metrics.reason })
       return
     }
+    // VAULT.PERSONAL: a vault bundle beside the archive is staged in the service (24 words to open it).
+    const { stageVaultFromArchive } = await import('./vault/bundle-io')
+    await stageVaultFromArchive(dl.archivePath, log).catch(() => 'refused')
 
     if (!input.withRepos) {
       rr.finishRestoreJob(job, { ok: true, written: metrics.written, skipped: metrics.skipped })

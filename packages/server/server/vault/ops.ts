@@ -28,6 +28,7 @@
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
 import { grantOf, grantedRef, scrubFor, useRef } from './grants'
+import { buildVaultBundle, stageBundleRestore } from './bundle-io'
 import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
@@ -514,6 +515,23 @@ async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
   return { reply: { ok: true, changed: text !== h.text, text } }
 }
 
+/** The backup's vault bundle — CIPHERTEXT only (VAULT.PERSONAL backup): nothing in it opens without the 24 words. */
+async function opVaultBundle(): Promise<OpResult> {
+  const b = await buildVaultBundle()
+  if (!b.ok) return { reply: refused(b.code, b.code === 'vault-locked' ? sentence('locked') : (vaultLang() === 'pt' ? 'O cofre não tem chave de recuperação; sem ela, um backup do cofre nunca poderia ser restaurado.' : 'The vault has no recovery key; without one, a backup of the vault could never be restored.')) }
+  vaultAudit({ type: 'vault.bundle-built' })
+  return { reply: { ok: true, bundle: JSON.stringify(b.bundle), count: b.count } }
+}
+
+/** A restore's bundle, staged by the service that holds the vault (an empty first-use vault is set aside; one holding secrets never is). */
+async function opVaultStageBundle(ctx: OpContext): Promise<OpResult> {
+  if (!ctx.body || ctx.body.length > 64 * 1024 * 1024) return bad()
+  const r = await stageBundleRestore(new TextDecoder().decode(ctx.body))
+  return { reply: r.ok ? { ok: true, replacedEmpty: r.replacedEmpty } : refused(r.code, r.code === 'vault-exists'
+    ? (vaultLang() === 'pt' ? 'Este computador já tem segredos no cofre; o cofre do backup não é aplicado por cima deles.' : 'This computer already holds secrets in its vault; the backup\'s vault is not applied over them.')
+    : (vaultLang() === 'pt' ? 'Isto não é um cofre de backup do Agentistics.' : 'This is not an Agentistics vault backup.')) }
+}
+
 // ── dispatch ────────────────────────────────────────────────────────────────────────────────
 
 export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch } = {}): Promise<OpResult> {
@@ -554,6 +572,8 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'personal-refs': return opPersonalRefs(h)
     case 'personal-ref': return opPersonalRef(h)
     case 'personal-scrub': return opPersonalScrub(h)
+    case 'vault-bundle': return opVaultBundle()
+    case 'vault-stage-bundle': return opVaultStageBundle(ctx)
     default: return bad()
   }
 }
@@ -567,7 +587,7 @@ export const VAULT_OPS = [
   'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
   'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
-  'personal-refs', 'personal-ref', 'personal-scrub',
+  'personal-refs', 'personal-ref', 'personal-scrub', 'vault-bundle', 'vault-stage-bundle',
 ] as const
 
 let _installed = false

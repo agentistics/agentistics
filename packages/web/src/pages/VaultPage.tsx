@@ -20,7 +20,7 @@ import { resolvePaging } from '../components/team/tablePaging'
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
   filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,
-  restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
+  restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp, wipeBackupHistory,
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
@@ -211,6 +211,15 @@ export default function VaultPage() {
         </div>
       )}
       {mobile && <PhonePanel lang={lang} isMobile={isMobile} state={mobile} isPhone={isPhone} host={host} gated={gated} onChanged={() => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback }) }) }} />}
+      {!isPhone && (
+        <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', marginTop: 18, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, flex: '1 1 260px' }}>{t('backupNote')}</span>
+          <button type="button" style={btn} onClick={() => {
+            if (!window.confirm(t('backupWipeConfirm'))) return
+            void gated(c => wipeBackupHistory(c), { action: 'personal-backup-wipe', target: '' }).then(r => flash(r.ok ? t('backupWiped', { n: r.deleted }) : (r.sentence || t('network'))))
+          }}><History size={14} /> {t('backupWipe')}</button>
+        </div>
+      )}
       <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 18, lineHeight: 1.6 }}>{t('neverPaste')}</div>
 
       {editing && (

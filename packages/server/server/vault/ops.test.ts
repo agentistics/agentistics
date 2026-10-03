@@ -76,6 +76,10 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     'personal-refs': { req: { op: 'personal-refs', managedId: 'nobody' } },
     'personal-ref': { req: { op: 'personal-ref', managedId: 'nobody', ref: 'vault://x' } },
     'personal-scrub': { req: { op: 'personal-scrub', managedId: 'nobody', text: 'plain text' } },
+    // The backup's bundle: ciphertext only — the marker secrets must not appear in it.
+    'vault-bundle': { req: { op: 'vault-bundle' } },
+    // Not a bundle: refused, nothing staged.
+    'vault-stage-bundle': { req: { op: 'vault-stage-bundle' }, body: new TextEncoder().encode('{"v":9}') },
   }
 
   for (const op of VAULT_OPS) {

@@ -43,7 +43,7 @@ describe('vault bundle: backup on one machine, restore on a fresh one with the 2
 
     // ── machine B: a fresh data dir, no vault, no protector that knows A ──
     const b = await machine()
-    expect(await stageBundleRestore(text)).toEqual({ ok: true })
+    expect(await stageBundleRestore(text)).toEqual({ ok: true, replacedEmpty: false })
     expect(await stageBundleRestore(text)).toEqual({ ok: false, code: 'vault-exists' }) // never overwrites
     expect((await vaultStatus()).state).not.toBe('open')
     expect((await recoverWithWords('abandon '.repeat(23) + 'art')).ok).toBe(false)
@@ -59,6 +59,26 @@ describe('vault bundle: backup on one machine, restore on a fresh one with the 2
     expect(existsSync(join(b, 'vault', 'restore-bundle.json'))).toBe(false)
     const vj = JSON.parse(readFileSync(join(b, 'vault', 'vault.json'), 'utf8'))
     expect(vj.wrappers.map((w: { type: string }) => w.type)).toEqual(['recovery'])
+  })
+  test('a fresh machine\'s EMPTY auto-created vault is set aside; a vault holding secrets is never replaced', async () => {
+    const a = await machine()
+    expect(await ensureVaultOpen()).not.toBeNull()
+    const r = await beginRecoveryKey({ session: SOCKET_SESSION })
+    if (!r.ok) throw new Error('no words')
+    await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), { session: SOCKET_SESSION })
+    await createItem({ kind: 'note', name: 'N', fields: { value: 'MARKER-note' } })
+    const built = await buildVaultBundle()
+    if (!built.ok) throw new Error('no bundle')
+    const text = JSON.stringify(built.bundle)
+    void a
+    const b = await machine()
+    expect(await ensureVaultOpen()).not.toBeNull() // first use created an empty vault
+    expect(await stageBundleRestore(text)).toEqual({ ok: true, replacedEmpty: true })
+    expect((await import('node:fs')).readdirSync(b).some(n => n.startsWith('vault.replaced-'))).toBe(true)
+    expect((await recoverWithWords(r.words.join(' '))).ok).toBe(true)
+    expect((await listItems()).map(i => i.name)).toEqual(['N'])
+    // and now this vault HOLDS secrets: a second restore is refused
+    expect(await stageBundleRestore(text)).toEqual({ ok: false, code: 'vault-exists' })
   })
   test('a vault without a recovery key cannot be bundled (it could never be restored)', async () => {
     await machine()

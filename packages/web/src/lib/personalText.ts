@@ -98,9 +98,15 @@ export const PERSONAL_TEXT = {
   network: { en: 'Could not reach agentop on this computer.', pt: 'Não foi possível falar com o agentop neste computador.' },
   neverPaste: { en: 'Agentistics never asks you to paste a secret into a chat.', pt: 'O Agentistics nunca pede para você colar um segredo num chat.' },
   backupNote: {
-    en: 'The GitHub backup carries these only as encrypted data. Git keeps old encrypted copies in its history; the backup settings can erase the vault history there.',
-    pt: 'O backup no GitHub leva estes dados só criptografados. O git guarda cópias criptografadas antigas no histórico; os ajustes do backup podem apagar o histórico do cofre lá.',
+    en: 'Backups keep older encrypted copies of your vault; they are erased by themselves after a key change, or now, with this button.',
+    pt: 'Os backups guardam cópias criptografadas antigas do seu cofre; elas são apagadas sozinhas depois de uma troca de chave, ou agora, por este botão.',
   },
+  backupWipe: { en: 'Erase the vault\'s history in the backup', pt: 'Apagar o histórico do cofre no backup' },
+  backupWipeConfirm: {
+    en: 'Erase the older vault copies from the GitHub backup? The newest stays; this cannot be undone. It asks for your code and Windows Hello.',
+    pt: 'Apagar as cópias antigas do cofre do backup no GitHub? A mais nova fica; não dá para desfazer. Pede o seu código e o Windows Hello.',
+  },
+  backupWiped: { en: '{n} older vault copy(ies) erased from the backup.', pt: '{n} cópia(s) antiga(s) do cofre apagada(s) do backup.' },
   phoneTitle: { en: 'On your phone', pt: 'No celular' },
   phoneInsecure: {
     en: 'To use your phone\'s fingerprint or face, open Agentistics by its https address — for example by turning on HTTPS certificates in your Tailscale network and using the machine\'s https name.',

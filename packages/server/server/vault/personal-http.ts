@@ -231,6 +231,21 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     return reply({ ok: true, revoked: grants.revokeGrant(sid), ...withGrant(g) })
   }
 
+  // ── backup: erase the vault's older bundles from the GitHub backup (code + gesture, fresh) ──
+  if (path === '/api/vault/personal/backup/wipe-history') {
+    const g = await step('personal-backup-wipe', b)
+    if (!g.ok) return reply(g)
+    const { wipeBundleHistoryNow } = await import('../backup/vault-bundle-github')
+    const r = await wipeBundleHistoryNow(() => {})
+    if (!r.ok) {
+      return reply(r.reason === 'not-configured'
+        ? fail('not-configured', 'This machine has no GitHub backup set up, so there is no history to erase.', 'Esta máquina não tem backup no GitHub configurado, então não há histórico para apagar.')
+        : fail('wipe-failed', 'GitHub could not be reached to erase the history; nothing was deleted. Try again later.', 'Não deu para falar com o GitHub para apagar o histórico; nada foi apagado. Tente de novo mais tarde.'))
+    }
+    vaultAudit({ type: 'vault.bundle-wiped' })
+    return reply({ ok: true, deleted: r.deleted, failed: r.failed })
+  }
+
   // ── §7 the phone: passkeys and the opt-in code window ──
   const origin = req.headers.get('origin') ?? ''
   const rpId = c.url.hostname
