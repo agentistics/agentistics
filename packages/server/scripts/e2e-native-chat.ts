@@ -14,7 +14,7 @@
  * mid-stream → the header names the task, and the task's own page carries the session and its cost
  * (UI follow-up 2). A screenshot at every step; any failed expectation exits non-zero.
  */
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, type Page } from 'playwright'
 
@@ -181,6 +181,37 @@ try {
   await page.goto(`${BASE}/sessions/${sessionId}`)
   await page.getByTestId('native-session').waitFor()
 
+  // 7c. attachments (UI follow-up 3): an image and a PDF go with a message; a text file is refused
+  const png = join(OUT, 'e2e-shot.png')
+  // a real 1×1 PNG, so the thumbnail can be shown to have DECODED
+  writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'))
+  const pdf = join(OUT, 'e2e-spec.pdf')
+  writeFileSync(pdf, '%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n')
+  const txt = join(OUT, 'e2e-notes.txt')
+  writeFileSync(txt, 'notes')
+  const attachInput = chat.getByTestId('native-attach-input')
+  await attachInput.setInputFiles(txt)
+  await page.getByRole('alert').filter({ hasText: /not an image|não é uma imagem/ }).waitFor({ timeout: 10000 })
+  expectThat(true, 'a text file is refused in words before any upload')
+  await attachInput.setInputFiles([png, pdf])
+  await chat.getByRole('button', { name: T('Remove e2e-shot.png', 'Remover e2e-shot.png') }).or(chat.locator('img').first()).first().waitFor({ timeout: 15000 })
+  await page.waitForTimeout(800)
+  await shot(page, 'attachments-composer')
+  await noHorizontalScroll(page, 'attachments in the composer')
+  await chat.locator('textarea').fill(T('What is in these?', 'O que tem nestes?'))
+  await chat.getByRole('button', { name: T('Send', 'Enviar') }).click()
+  const pngBytes = readFileSync(png).byteLength
+  const pdfBytes = readFileSync(pdf).byteLength
+  await page.getByText(new RegExp(`I received 2 attachments: image/png of ${pngBytes} bytes, application/pdf of ${pdfBytes} bytes`)).first().waitFor({ timeout: 20000 })
+  expectThat(true, `the model received both, byte for byte (PNG ${pngBytes} B, PDF ${pdfBytes} B)`)
+  await page.getByTestId('native-state').filter({ hasText: T('ready', 'pronta') }).waitFor({ timeout: 15000 })
+  await page.waitForTimeout(1500)
+  const sent = page.getByTestId('native-sent-attachments').last()
+  const thumbOk = await sent.locator('img').first().evaluate(el => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0)
+  expectThat(thumbOk, 'the sent image is drawn from the engine (decoded thumbnail)')
+  expectThat((await sent.innerText()).includes('e2e-spec.pdf'), 'the sent PDF is a chip naming it')
+  await shot(page, 'attachments-sent')
+
   // 8. leave, find it in the sessions list, reopen it: the conversation comes back from the window
   const url = page.url()
   await page.goto(`${BASE}/sessions`)
@@ -194,6 +225,7 @@ try {
   await page.waitForURL(url, { timeout: 10000 })
   await page.getByText(/hello\.txt now says hello/).first().waitFor({ timeout: 15000 })
   expectThat(true, 'reopened from the list, with its history')
+  expectThat(await page.getByTestId('native-sent-attachments').count() >= 1, 'the attachments come back with the history')
   await shot(page, 'reopened')
 
   expectThat(errors.length === 0, `no page errors (${errors.join(' | ').slice(0, 300)})`)

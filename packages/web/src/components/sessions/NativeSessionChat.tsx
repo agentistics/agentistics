@@ -5,18 +5,26 @@
  * the pieces: `ChatBubble` for text, `WorkingNote` while the run works, the composer's shell, field,
  * microphone and send button, the stop button's look, and `ApprovalCard`'s look
  * (`NativeApprovalCard`). New: `ToolCallCard`.
+ *
+ * Attachments (UI follow-up 3): the composer takes images — and PDFs where the session's provider
+ * does — by the paperclip, a paste or a drop, each checked against what that provider DECLARES
+ * (`GET /api/runtime/sessions/:id` → `attachments`, `refuseFile`) before it is uploaded through the
+ * host's chat attachment store; the message carries the stored names and the engine attaches the
+ * bytes. No declaration, no paperclip: a provider that takes none is never offered one.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader, Square } from 'lucide-react'
+import { FileText, Loader, Square } from 'lucide-react'
 import { ChatBubble } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { ToolCallCard } from './ToolCallCard'
 import { NativeApprovalCard } from './NativeApprovalCard'
-import { ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
+import { acceptOf, mediaTypeOf, refuseFile, uploadPreviewUrl, type NativeAttachmentCapability } from '../../lib/nativeAttachments'
+import type { NativeAttachmentView } from '../../lib/nativeChat'
 import { hasSomethingToSend, stopShown } from '../../lib/composerAction'
 import { nativeChatItems } from '../../lib/nativeChat'
 import { NATIVE_HARNESS_ID } from '../../lib/nativeSession'
-import type { NativeSession } from '../../hooks/useNativeSession'
+import type { NativeSession, NativeUpload } from '../../hooks/useNativeSession'
 import { useDictation } from '../../hooks/useDictation'
 import { useIsCoarsePointer } from '../../hooks/useIsMobile'
 
@@ -29,6 +37,13 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [uploads, setUploads] = useState<NativeUpload[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const sessionId = state.window?.session.sessionId
+  const cap = useAttachmentCapability(sessionId)
+  const s0 = state.window?.session
+  const providerLabel = s0 ? (s0.provider === 'openai-compatible' ? s0.credential?.id ?? s0.provider : s0.provider === 'anthropic' ? 'Anthropic' : s0.provider) : ''
   const coarse = useIsCoarsePointer()
   const editDraft = useCallback((f: (d: string) => string) => setDraft(f), [])
   const dictation = useDictation(lang, editDraft, setNotice)
@@ -47,17 +62,48 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
   const liveText = items.some(i => i.kind === 'turn' && i.key === 'live')
   const runningTools = items.flatMap(i => (i.kind === 'tool' && i.card.status === 'running' ? [{ name: i.card.name, ...(i.card.detail ? { detail: i.card.detail } : {}) }] : []))
   const showWorking = state.running && !awaiting && !liveText
-  const showStop = stopShown({ working: state.running, stopEnabled: state.runId !== undefined, draft, attachments: 0 })
-  const something = hasSomethingToSend({ draft, attachments: 0 })
+  const showStop = stopShown({ working: state.running, stopEnabled: state.runId !== undefined, draft, attachments: uploads.length })
+  const something = hasSomethingToSend({ draft, attachments: uploads.length })
+
+  /** Each file judged against the provider's declaration, then uploaded to the chat attachment store. */
+  const addFiles = async (files: readonly File[]) => {
+    if (files.length === 0 || !sessionId) return
+    setUploading(true)
+    let held = uploads
+    for (const file of files) {
+      const why = refuseFile(cap ?? null, { name: file.name, type: file.type, size: file.size }, held.map(u => ({ name: u.name, type: u.mediaType, size: u.size })), providerLabel, lang)
+      if (why) { setNotice(why); continue }
+      const body = new FormData()
+      body.append('file', file)
+      body.append('session', sessionId)
+      try {
+        const res = await fetch(`/api/fleet/attach?lang=${lang}`, { method: 'POST', body })
+        const json = await res.json() as { ok: boolean; name?: string; message?: string }
+        if (json.ok && json.name) {
+          held = [...held, { name: json.name, mediaType: mediaTypeOf(file)!, size: file.size }]
+          setUploads(held)
+        } else setNotice(json.message ?? (pt ? 'O anexo falhou.' : 'The attachment failed.'))
+      } catch {
+        setNotice(pt ? 'Erro de rede ao enviar o anexo.' : 'Network error uploading the attachment.')
+      }
+    }
+    setUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
+  }
 
   const doSend = async () => {
     const text = draft.trim()
-    if (!text || sending) return
+    if ((!text && uploads.length === 0) || sending || uploading) return
     dictation.end()
     setSending(true)
     setDraft('')
-    const ok = await send(text)
-    if (!ok) setDraft(d => (d === '' ? text : d))
+    const sent = uploads
+    setUploads([])
+    const ok = await send(text, sent)
+    if (!ok) {
+      setDraft(d => (d === '' ? text : d))
+      setUploads(u => (u.length === 0 ? sent : u))
+    }
     setSending(false)
   }
   const doStop = async () => {
@@ -92,6 +138,14 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
             // it is the model's own stream, and it gives way to the persisted message (lib/nativeChat).
             const bubble = <ChatBubble key={i.key} turn={i.turn} lang={lang} harness={NATIVE_HARNESS_ID}
               {...(i.turn.role === 'user' && i.turn.pending ? { awaiting: true, awaitingWorking: state.running } : {})} />
+            if (i.attachments?.length) {
+              return (
+                <div key={i.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                  <SentAttachments items={i.attachments} pt={pt} />
+                  {i.turn.text.trim() !== '' && bubble}
+                </div>
+              )
+            }
             if (!i.stopped) return bubble
             return (
               <div key={i.key} data-testid="stopped-answer" style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
@@ -125,7 +179,31 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
 
       <div style={{ padding: '0 12px 12px', maxWidth: 844, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
         <ComposerShell dimmed={state.closed}>
+          <ComposerAttachments
+            items={uploads.map(u => ({ name: u.name, path: u.name }))}
+            pt={pt}
+            isImage={name => uploads.find(u => u.name === name)?.mediaType.startsWith('image/') ?? false}
+            imageSrc={uploadPreviewUrl}
+            onOpenImage={name => window.open(uploadPreviewUrl(name), '_blank', 'noopener')}
+            onRemove={name => setUploads(u => u.filter(x => x.name !== name))}
+          />
+          {cap && (
+            <input ref={fileRef} type="file" multiple hidden accept={acceptOf(cap)} data-testid="native-attach-input"
+              onChange={e => void addFiles(Array.from(e.target.files ?? []))} />
+          )}
           <textarea
+            onPaste={e => {
+              const files = Array.from(e.clipboardData.files)
+              if (files.length === 0) return
+              e.preventDefault()
+              void addFiles(files)
+            }}
+            onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+            onDrop={e => {
+              if (e.dataTransfer.files.length === 0) return
+              e.preventDefault()
+              void addFiles(Array.from(e.dataTransfer.files))
+            }}
             value={draft}
             onChange={e => { setDraft(e.target.value); if (notice) setNotice(null) }}
             onKeyDown={e => {
@@ -137,6 +215,10 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
             style={composerFieldStyle}
           />
           <ComposerToolbar>
+            {cap && (
+              <ComposerAttachButton onClick={() => fileRef.current?.click()} disabled={state.closed} uploading={uploading}
+                label={cap.pdf ? (pt ? 'Anexar imagem ou PDF' : 'Attach an image or PDF') : (pt ? 'Anexar imagem' : 'Attach an image')} />
+            )}
             {dictation.ready && (
               <ComposerMicButton onClick={dictation.toggle} disabled={state.closed} listening={dictation.listening}
                 label={dictation.listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')} />
@@ -157,12 +239,47 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
                   {stopping ? <Loader size={14} className="ag-working-spin" /> : <Square size={13} fill="currentColor" />}
                 </button>
               ) : (
-                <ComposerSendButton onClick={() => void doSend()} disabled={sending || !something || state.closed} sending={sending} active={something && !state.closed} label={pt ? 'Enviar' : 'Send'} />
+                <ComposerSendButton onClick={() => void doSend()} disabled={sending || uploading || !something || state.closed} sending={sending} active={something && !state.closed} label={pt ? 'Enviar' : 'Send'} />
               )}
             </div>
           </ComposerToolbar>
         </ComposerShell>
       </div>
+    </div>
+  )
+}
+
+/** What the session's provider declares it takes as attachments; null when none, undefined while asked. */
+function useAttachmentCapability(sessionId: string | undefined): NativeAttachmentCapability | null | undefined {
+  const [cap, setCap] = useState<NativeAttachmentCapability | null | undefined>(undefined)
+  useEffect(() => {
+    if (!sessionId) return
+    let alive = true
+    fetch(`/api/runtime/sessions/${encodeURIComponent(sessionId)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((b: { attachments?: NativeAttachmentCapability | null } | null) => { if (alive) setCap(b?.attachments ?? null) })
+      .catch(() => { if (alive) setCap(null) })
+    return () => { alive = false }
+  }, [sessionId])
+  return cap
+}
+
+/** A sent message's attachments: image thumbnails that open, PDFs as a chip that opens. */
+function SentAttachments({ items, pt }: { items: readonly NativeAttachmentView[]; pt: boolean }) {
+  return (
+    <div data-testid="native-sent-attachments" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+      {items.map(a => (
+        <a key={a.url} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name}
+          aria-label={pt ? `Abrir ${a.name || 'anexo'}` : `Open ${a.name || 'attachment'}`}
+          style={a.mediaType.startsWith('image/')
+            ? { display: 'block', width: 120, height: 90, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--bg-elevated)' }
+            : { display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 10px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontSize: 12, textDecoration: 'none', maxWidth: 220 }}
+        >
+          {a.mediaType.startsWith('image/')
+            ? <img src={a.url} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            : <><FileText size={13} style={{ flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name.replace(/^[0-9a-f]{8}-/, '') || 'PDF'}</span></>}
+        </a>
+      ))}
     </div>
   )
 }

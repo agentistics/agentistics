@@ -220,3 +220,20 @@ describe('running, when the stream joined after run.started (e2e finding)', () =
     expect(s.running).toBe(false)
   })
 })
+
+describe('attachments in the conversation (UI follow-up 3)', () => {
+  test('a user message\'s attachments are views at the engine URL, by ref; a pending send shows its previews', () => {
+    const w = windowWith([
+      { seq: 1, message: { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', mediaType: 'image/png', data: '', ref: 'abc', name: 'x-shot.png' }] } },
+      { seq: 2, message: { role: 'user', content: [{ type: 'document', mediaType: 'application/pdf', data: '', ref: 'def', name: 'x-spec.pdf' }] } },
+    ])
+    let s = nativeChatReducer(INITIAL_NATIVE_CHAT, { type: 'window', window: w })
+    s = nativeChatReducer(s, { type: 'sent', clientRef: 'c1', text: '', attachments: [{ url: '/prev', mediaType: 'image/png', name: 'y.png' }] })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn') as Extract<ReturnType<typeof nativeChatItems>[number], { kind: 'turn' }>[]
+    expect(turns.map(t => [t.turn.text, t.attachments?.map(a => a.url)])).toEqual([
+      ['look', ['/api/runtime/sessions/ses_1/attachments/abc']],
+      ['', ['/api/runtime/sessions/ses_1/attachments/def']],
+      ['', ['/prev']],
+    ])
+  })
+})

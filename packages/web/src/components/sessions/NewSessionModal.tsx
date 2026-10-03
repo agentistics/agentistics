@@ -539,12 +539,22 @@ export function NewSessionModal({
         setNotice(refusalSentence(json, res.status, lang))
         return
       }
-      if (promptWithAttachments) {
-        await fetch(messagesUrl(id), {
+      // A native first message carries its attachments as STORED NAMES (UI follow-up 3): the engine
+      // attaches the bytes as image / PDF parts, after checking the provider takes them. A refusal
+      // (a provider with no attachments) is said on the bell — the session itself exists.
+      if (prompt.trim() || attachments.length > 0) {
+        const res = await fetch(messagesUrl(id), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientRef: `wizard-${Date.now()}`, text: promptWithAttachments }),
+          body: JSON.stringify({
+            clientRef: `wizard-${Date.now()}`, text: prompt.trim(),
+            ...(attachments.length > 0 ? { attachments: attachments.map(a => a.name) } : {}),
+          }),
         }).catch(() => null)
+        if (res && !res.ok) {
+          const body = await res.json().catch(() => null) as { sentence?: string } | null
+          pushNotification({ type: 'warning', code: 'sessions.native_first_message', meta: { note: body?.sentence ?? refusalSentence(body, res.status, lang) } })
+        }
       }
       const unfiled = filingSentence(json.filing, lang)
       if (unfiled) pushNotification({ type: 'warning', code: 'sessions.native_unfiled', meta: { note: unfiled } })

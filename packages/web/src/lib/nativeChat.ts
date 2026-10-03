@@ -34,6 +34,11 @@ export type NativePart =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
+  /** UI follow-up 3: an attachment the person sent — the window carries its REF, never its bytes. */
+  | { type: 'image' | 'document'; mediaType: string; data?: string; ref?: string; name?: string }
+
+/** An attachment as the chat draws it: a URL to its bytes (the engine's, or the upload's preview). */
+export interface NativeAttachmentView { url: string; mediaType: string; name: string }
 
 export interface NativeMessage {
   role: 'user' | 'assistant'
@@ -115,7 +120,7 @@ export interface NativeChatState {
   stopped?: string
   /** Open questions, by id. */
   asks: Record<string, NativeQuestion>
-  pending: { clientRef: string; text: string }[]
+  pending: { clientRef: string; text: string; attachments?: NativeAttachmentView[] }[]
   /** A sentence to show once (a refused send, a closed stream). */
   notice?: string
   closed: boolean
@@ -128,7 +133,7 @@ export const INITIAL_NATIVE_CHAT: NativeChatState = {
 export type NativeChatAction =
   | { type: 'window'; window: NativeWindow }
   | { type: 'frame'; frame: NativeFrame }
-  | { type: 'sent'; clientRef: string; text: string }
+  | { type: 'sent'; clientRef: string; text: string; attachments?: NativeAttachmentView[] }
   | { type: 'send-failed'; clientRef: string; sentence: string }
   | { type: 'notice'; sentence: string | undefined }
 
@@ -246,7 +251,7 @@ export function nativeChatReducer(s: NativeChatState, a: NativeChatAction): Nati
       }
     }
     case 'sent':
-      return { ...s, pending: [...s.pending, { clientRef: a.clientRef, text: a.text }], notice: undefined }
+      return { ...s, pending: [...s.pending, { clientRef: a.clientRef, text: a.text, ...(a.attachments?.length ? { attachments: a.attachments } : {}) }], notice: undefined }
     case 'send-failed':
       return { ...s, pending: s.pending.filter(p => p.clientRef !== a.clientRef), notice: a.sentence }
     case 'notice':
@@ -293,7 +298,7 @@ export interface ToolCard {
 }
 
 export type NativeChatItem =
-  | { kind: 'turn'; key: string; turn: ChatTurn; stopped?: boolean }
+  | { kind: 'turn'; key: string; turn: ChatTurn; stopped?: boolean; attachments?: NativeAttachmentView[] }
   | { kind: 'tool'; key: string; card: ToolCard }
   | { kind: 'approval'; key: string; ask: NativeAsk }
 
@@ -330,6 +335,16 @@ function toAsk(q: NativeQuestion): NativeAsk {
   }
 }
 
+/** A user message's attachments as views — each by its ref at the engine's URL for this session. */
+export function attachmentViews(sessionId: string | undefined, msg: NativeMessage): NativeAttachmentView[] {
+  if (!sessionId || typeof msg.content === 'string') return []
+  return msg.content.flatMap(p => (
+    (p.type === 'image' || p.type === 'document') && p.ref
+      ? [{ url: `/api/runtime/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(p.ref)}`, mediaType: p.mediaType, name: p.name ?? '' }]
+      : []
+  ))
+}
+
 export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
   const items: NativeChatItem[] = []
   const w = s.window
@@ -354,7 +369,10 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
     const msg = m.message
     if (msg.role === 'user') {
       const text = userText(msg)
-      if (text.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text } })
+      const atts = attachmentViews(w?.session.sessionId, msg)
+      if (text.trim() !== '' || atts.length > 0) {
+        items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text }, ...(atts.length ? { attachments: atts } : {}) })
+      }
       continue
     }
     if (typeof msg.content === 'string') {
@@ -408,7 +426,9 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
     items.push({ kind: 'tool', key: `x${tx}`, card: { key: tx, name: c.name, status: ask ? 'awaiting' : c.status, toolExecutionId: tx, ...(ask ? { ask } : {}) } })
   }
 
-  for (const p of s.pending) items.push({ kind: 'turn', key: `pending:${p.clientRef}`, turn: { role: 'user', text: p.text, pending: true } })
+  for (const p of s.pending) {
+    items.push({ kind: 'turn', key: `pending:${p.clientRef}`, turn: { role: 'user', text: p.text, pending: true }, ...(p.attachments?.length ? { attachments: p.attachments } : {}) })
+  }
 
   if (s.stopped !== undefined) items.push({ kind: 'turn', key: 'stopped', stopped: true, turn: { role: 'assistant', text: s.stopped } })
 

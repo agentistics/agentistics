@@ -197,6 +197,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // Client-originated, from the wizard's NATIVE start (`NewSessionModal.tsx`): the session started but
   // the board refused its filing (a subtask blocked since it was picked, a task deleted meanwhile).
   // `{note}` is `filingSentence`'s already-localized sentence. The session is unfiled, not lost.
+  // The wizard's NATIVE first message was refused by the engine (an attachment its provider does not
+  // take, …): the session exists; `{note}` is the engine's own sentence.
+  'sessions.native_first_message': {
+    pt: { title: 'Primeira mensagem não enviada', message: '{note}' },
+    en: { title: 'First message not sent', message: '{note}' },
+  },
   'sessions.native_unfiled': {
     pt: { title: 'Sessão não arquivada', message: '{note}' },
     en: { title: 'Session not filed', message: '{note}' },
