@@ -23,7 +23,7 @@
  * Until the progress file says COMPLETE for THIS journal file, the projection route answers
  * `projections_backfilling` and every surface falls back, item by item, to `/api/data`.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileIdentity } from './shadow'
@@ -155,28 +155,23 @@ export function backgroundImportArgv(cli: readonly string[], o: { nice: string |
   return [...prio, ...cli, 'journal', 'import', '--background']
 }
 
-function which(name: string): string | null {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (!dir) continue
-    const p = join(dir, name)
-    if (existsSync(p)) return p
-  }
-  return null
-}
-
 export interface AutoBackfillDeps {
   journalEnabled: boolean
   central: boolean
   journalPath: string
   progressPath: string
-  env?: Record<string, string | undefined>
+  /**
+   * The server's environment (the opt-out flag). Passed in: `journal/` never reads the process environment
+   * itself — the engine's provider-secrets lint walks this directory (Guard 3).
+   */
+  env: Record<string, string | undefined>
   spawn?: (argv: string[]) => void
   now?: () => number
 }
 
 /** Decide, and when the answer is yes start the low-priority child. Never throws. */
 export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
-  const env = d.env ?? process.env
+  const env = d.env
   const decision = planAutoBackfill({
     journalEnabled: d.journalEnabled,
     central: d.central,
@@ -189,12 +184,13 @@ export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
   if (!decision.start) return decision
   const argv = backgroundImportArgv(
     cliArgv(process.execPath, process.argv[1], import.meta.dir),
-    { nice: which('nice'), ionice: which('ionice') },
+    { nice: Bun.which('nice'), ionice: Bun.which('ionice') },
   )
   try {
     if (d.spawn) d.spawn(argv)
     else {
-      const child = Bun.spawn(argv, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', env: { ...process.env } })
+      // No `env`: the child inherits this process's environment (Bun's default).
+      const child = Bun.spawn(argv, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
       child.unref()
     }
   } catch (err) {

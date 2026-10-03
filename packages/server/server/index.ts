@@ -4371,7 +4371,7 @@ const scheduleBackfillCheck = () => {
     const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
       import('./config'), import('./journal/backfill'),
     ])
-    const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH })
+    const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env })
     if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
   })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
 }
