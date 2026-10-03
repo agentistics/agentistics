@@ -571,7 +571,7 @@ function SessionsTab({ detail }: { detail: TaskDetail }) {
                     ? <span style={pill(st.color)}>{st.label}</span>
                     // The fleet does not carry it: that is "we cannot see it now", not "it finished".
                     : <span style={pill()}>
-                      {row.historical ? 'historical' : row.endedAt ? 'finished' : 'not in fleet'}
+                      {row.historical ? 'historical' : row.native ? 'native' : row.endedAt ? 'finished' : 'not in fleet'}
                     </span>}
                 </td>
                 <td style={{ padding: '8px 10px' }}><span style={pill(harnessColor(row.harness))}>{row.harness}</span></td>

@@ -59,6 +59,10 @@
  * unreserved prefix at load.
  * Also (A5.4): `Engine.acp` (optional) drives an ACP-speaking harness for the host's fleet, and the host
  * offers `serverPort()` (optional) for an engine to write into a harness's exporter config.
+ * Also (UI.2/UI.3): native sessions filed on the board carry their cost: `NativeSessionLink` gains `label`,
+ * `cwd` and `usage` (`NativeSessionUsage`, the engine's own snapshot), and `tasks.reportNativeUsage`
+ * refreshes that snapshot for a session already filed. All optional, so a 1.6 engine still loads and
+ * a 1.7 engine on an older host files with no cost (the board then says "not measured").
  */
 export const ENGINE_API_VERSION = '1.7.0'
 

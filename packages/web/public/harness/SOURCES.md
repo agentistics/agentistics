@@ -15,3 +15,7 @@ somebody's trademark is worse than obviously not being one.
 
 Marks are the property of their respective owners and are used here to identify the tool whose
 sessions are being shown.
+
+## agentistics (the native harness)
+
+The product's own mark, `public/minimalistLogo.png` — not a vendor asset, nothing to attribute.

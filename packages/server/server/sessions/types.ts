@@ -348,6 +348,15 @@ export interface ManagedSession {
 }
 
 /**
+ * A row as the BOARD's readers see it: a fleet `ManagedSession`, or a synthetic row the board builds
+ * per read (a historical link — still a `ManagedSession` — or a NATIVE session, whose harness is the
+ * native runtime `'agentistics'`, a `RunHarness` and never a `HarnessId`; see `task-native.ts`).
+ * Only the board's read side takes it: everything that probes, reopens, attaches to or ships a fleet
+ * session keeps `ManagedSession`, so a native row can never reach it by type.
+ */
+export type BoardRow = Omit<ManagedSession, 'harness'> & { harness: HarnessId | 'agentistics' }
+
+/**
  * What a session is doing right now.
  *
  * There is deliberately no `idle`. An interactive assistant whose process is alive and whose screen

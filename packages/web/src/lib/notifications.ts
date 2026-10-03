@@ -194,6 +194,13 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão iniciada apesar do aviso de memória', message: '{note}' },
     en: { title: 'Session started despite the memory warning', message: '{note}' },
   },
+  // Client-originated, from the wizard's NATIVE start (`NewSessionModal.tsx`): the session started but
+  // the board refused its filing (a subtask blocked since it was picked, a task deleted meanwhile).
+  // `{note}` is `filingSentence`'s already-localized sentence. The session is unfiled, not lost.
+  'sessions.native_unfiled': {
+    pt: { title: 'Sessão não arquivada', message: '{note}' },
+    en: { title: 'Session not filed', message: '{note}' },
+  },
   // The session notifications (`sessionNotifications.ts`): written to the bell from the browser that
   // saw the transition, so the history keeps what the Nay button's card showed (and what
   // do-not-disturb kept quiet). `{name}` is the session's title and `{harness}` the assistant, both

@@ -11,6 +11,7 @@
  * In-memory only, deliberately: a page reload has no session left to be "still starting" about —
  * the next fleet poll after a reload answers the real question directly.
  */
+import { isNativeSessionId } from './sessionRoute'
 import { useSyncExternalStore } from 'react'
 import {
   addPendingSession, dismissFailedPendingSession, emptyPendingSessions, reconcilePendingSessions,
@@ -38,6 +39,10 @@ function commit(next: PendingSessionState): void {
  * the placeholder is in the store the instant the spawn returns, never a frame late.
  */
 export function markSessionPending(entry: { id: string; harness?: string; label?: string; cwd?: string }): void {
+  // A NATIVE session (UI.2) is never a fleet row, so a placeholder waiting for one would end as
+  // "did not appear — it may have failed to start" about a session that is running. It is opened on
+  // its own page straight away instead (`SessionRoute`).
+  if (isNativeSessionId(entry.id)) return
   commit(addPendingSession(state, entry, Date.now()))
 }
 

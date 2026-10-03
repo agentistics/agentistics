@@ -12,6 +12,7 @@
  * decoration.
  */
 
+import { NativeSessionsList } from './NativeSessionsList'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -1554,6 +1555,9 @@ export function SessionsAside({
             )}
           </div>
         )}
+
+        {/* NATIVE sessions (UI.3) — not fleet rows, so listed from the engine's own list. */}
+        <NativeSessionsList lang={lang} tap={tap} {...(sessionId ? { activeId: sessionId } : {})} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above

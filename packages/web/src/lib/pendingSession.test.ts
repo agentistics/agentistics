@@ -85,3 +85,14 @@ describe('dismissFailedPendingSession', () => {
     expect(dismissFailedPendingSession(state, 'a')).toBe(state)
   })
 })
+
+describe('markSessionPending — a native session is never a pending fleet row (UI.2)', () => {
+  test('a native id leaves no placeholder; a fleet id still does', async () => {
+    const { markSessionPending, getPendingSessionsSnapshot } = await import('./pendingSessionStore')
+    const before = JSON.stringify(getPendingSessionsSnapshot())
+    markSessionPending({ id: `ses_${'c3'.repeat(16)}`, harness: 'agentistics', label: 'native' })
+    expect(JSON.stringify(getPendingSessionsSnapshot())).toBe(before)
+    markSessionPending({ id: 'ag-claude-xyz', harness: 'claude', label: 'fleet' })
+    expect(JSON.stringify(getPendingSessionsSnapshot())).not.toBe(before)
+  })
+})

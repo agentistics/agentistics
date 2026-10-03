@@ -12,6 +12,8 @@ import {
   sortTaskStatuses, sortTaskTypes, type Filters, type StagedSessionDraft, type TaskPriorityId, type TaskProgress,
 } from '@agentistics/core'
 import { getDateRangeFilter } from '../hooks/useData'
+import { filingUrl } from './nativeSession'
+import { isNativeSessionId } from './sessionRoute'
 import type { ChatAttachmentRef, CommentTarget } from '@agentistics/core'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
@@ -228,6 +230,8 @@ export interface TaskSessionRow {
    * Sessions workspace can open — a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /** A NATIVE session (the engine's runtime): `id` is its `ses_…` id, `harness` is `agentistics`. */
+  native?: boolean
   /** Null when the conversation is not in the store, or when its harness never recorded one. Mirror
    *  of the server's `TaskSessionRow.model` (`task-report.ts`). */
   model: string | null
@@ -740,6 +744,9 @@ export type AttachResult =
  * the server can never say that about itself.
  */
 export async function attachSession(ref: string, sessionId: string, subtaskId?: string): Promise<AttachResult> {
+  // A NATIVE session has no fleet row for `/api/tasks/<ref>/sessions` to patch: the engine files it
+  // (with its label, folder and cost so far) through the board's own rules — UI follow-up 2.
+  if (isNativeSessionId(sessionId)) return attachNativeSession(ref, sessionId, subtaskId)
   try {
     const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/sessions`, {
       method: 'POST',
@@ -755,6 +762,43 @@ export async function attachSession(ref: string, sessionId: string, subtaskId?: 
     }
   } catch {
     return { ok: false, reason: 'network' }
+  }
+}
+
+const ATTACH_REASONS: readonly AttachRefusalReason[] = [
+  'no_such_task', 'no_such_session', 'no_such_subtask', 'needs_subtask', 'wrong_delivery', 'blocked', 'subtask_in_group',
+]
+
+async function attachNativeSession(ref: string, sessionId: string, subtaskId?: string): Promise<AttachResult> {
+  try {
+    const res = await fetch(filingUrl(sessionId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(subtaskId ? { taskId: ref, subtaskId } : { taskId: ref }),
+    })
+    if (res.ok) return { ok: true }
+    if (res.status === 404) return { ok: false, reason: 'no_such_session' }
+    const body = await res.json().catch(() => null) as { filing?: { reason?: string } } | null
+    const reason = body?.filing?.reason as AttachRefusalReason | undefined
+    return {
+      ok: false,
+      reason: reason && ATTACH_REASONS.includes(reason) ? reason : 'no_such_task',
+      // The board's FileResult names no blockers; the resolver then reads the subtask itself.
+      ...(reason === 'blocked' ? { blockedBy: [] } : {}),
+    }
+  } catch {
+    return { ok: false, reason: 'network' }
+  }
+}
+
+/** Where a native session is filed, or null — a native session has no fleet row carrying it. */
+export async function fetchNativeFiling(sessionId: string): Promise<{ taskId: string; taskTitle: string; subtaskId?: string } | null> {
+  try {
+    const res = await fetch(`/api/tasks/native-filing?session=${encodeURIComponent(sessionId)}`)
+    if (!res.ok) return null
+    return ((await res.json()) as { filing?: { taskId: string; taskTitle: string; subtaskId?: string } | null }).filing ?? null
+  } catch {
+    return null
   }
 }
 

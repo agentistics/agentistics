@@ -252,6 +252,27 @@ export interface EngineBoard {
   attach(ref: string, a: { files: Array<{ name: string; bytes: Uint8Array }>; author: string; sessionId: string; subtaskId?: string; note?: string }): Promise<EngineBoardAnswer>
 }
 
+/**
+ * What a native session has cost so far, as the ENGINE states it (1.7) — the only party that holds
+ * its model calls. `null` / absent = not measured, never zero (the board's own rule).
+ */
+export interface NativeSessionUsage {
+  /** Model calls folded in. */
+  responses: number
+  /** The person's messages (the board's "rounds"). */
+  rounds: number
+  /** Input + output + cache tokens, when every response reported them; `null` otherwise. */
+  tokens: number | null
+  /** Dollars; `null` when no response could be priced. */
+  costUSD: number | null
+  /** True when EVERY priced response was priced by what its provider stated (not a rate table). */
+  costMeasured: boolean
+  /** The model of the last response, when one named it. */
+  model?: string
+  /** When this snapshot was taken, ISO. */
+  updatedAt: string
+}
+
 /** A native session filed on the task board. */
 export interface NativeSessionLink {
   id: string
@@ -259,6 +280,12 @@ export interface NativeSessionLink {
   taskId: string
   subtaskId?: string
   linkedAt: string
+  /** The session's label, for the board's session list (1.7). */
+  label?: string
+  /** The session's working directory (1.7). */
+  cwd?: string
+  /** The engine's latest usage snapshot (1.7). Absent = nothing reported yet. */
+  usage?: NativeSessionUsage
 }
 
 export type FileResult = { ok: true; id: string } | { ok: false; reason: string }
@@ -381,6 +408,11 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
      * free, writes under the session's grant), and every write lands in the board's own activity log under its actor.
      */
     board?: EngineBoard
+    /**
+     * 1.7 — refresh the usage snapshot of a session ALREADY filed; never files, moves or unfiles one
+     * (a person's filing is not the engine's to change). Absent on an older host.
+     */
+    reportNativeUsage?(sessionId: string, usage: NativeSessionUsage): Promise<void>
   }
   /**
    * The public functions an engine reuses (1.2: the full `ReuseSurface`). A 1.1 host passed `{}`;

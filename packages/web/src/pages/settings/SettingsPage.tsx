@@ -7,6 +7,7 @@ import {
   type SettingsSection,
   type SettingsViewer,
 } from '../../lib/settingsSections'
+import { useEngineCaps } from '../../hooks/useEngineCaps'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
 const GROUP_LABELS: Record<SettingsGroup, { en: string; pt: string }> = {
@@ -26,12 +27,14 @@ export default function SettingsPage() {
   const ctx = useOutletContext<AppContext>()
   const isMobile = useIsMobile()
   const pt = ctx.lang === 'pt'
+  const { nativeRuntime } = useEngineCaps()
 
   const viewer: SettingsViewer = {
     central: ctx.isCentral,
     role: ctx.me?.role,
     isManager: ctx.me?.memberships.some(m => m.role === 'manager'),
     localChat: ctx.capabilities?.localChat,
+    ...(nativeRuntime !== null ? { nativeRuntime } : {}),
   }
 
   const sections = visibleSettingsSections(viewer)

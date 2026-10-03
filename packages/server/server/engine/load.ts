@@ -283,11 +283,22 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
     lang: () => lang,
-    // Filing a native session on the board arrives with the native runtime; until then the ONE write
-    // into a public store an engine may make is refused in words rather than faked.
+    // Filing a native session on the board: the ONE write into a public store an engine makes
+    // (engine-interface spec §4.6), judged by the board exactly like a fleet session's filing.
     tasks: {
-      fileNative: async () => ({ ok: false, reason: 'this build has no native sessions to file' }),
-      unfileNative: async () => {},
+      fileNative: async link => {
+        const { fileNativeSession } = await import('../sessions/task-web')
+        const out = await fileNativeSession(link)
+        return out.ok ? { ok: true, id: out.id } : { ok: false, reason: out.reason }
+      },
+      unfileNative: async sessionId => {
+        const { loadTaskWorld } = await import('../sessions/task-source')
+        await (await loadTaskWorld()).store.unfileNative(sessionId)
+      },
+      reportNativeUsage: async (sessionId, usage) => {
+        const { reportNativeSessionUsage } = await import('../sessions/task-web')
+        await reportNativeSessionUsage(sessionId, usage)
+      },
       // 1.7 (B6.5): the board's own operations in process for a native session's board tools.
       board: hostEngineBoard(() => lang),
     },
