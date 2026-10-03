@@ -34,6 +34,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - **Session titles** — sessions now display the Claude-generated title (parsed from the transcript's `ai-title`, or legacy `summary`, line) instead of the raw first prompt; a shared `sessionLabel()` helper also strips `<local-command-caveat>`/`<command-name>` wrappers from the first-prompt fallback so untitled sessions no longer look broken
 
 ### Fixed
+- **A day range no longer prices a session's lifetime cache writes** — cutting a session to a range (Today, 7d, a custom range) replaced its four token counters but kept its lifetime 1h/5m cache-write split and per-model breakdown, and the cost formula prices the split when one is present: a long Claude session's "Today" carried every cache write it had ever made. Both are now scaled to the cut (`cutSessionUsage`)
+- **VS Code "Today" is the spend incurred today, by event time** — the same rule as Costs (each session's own per-day usage), said in the status bar's tooltip. A session open since yesterday no longer hides tonight's spend under yesterday, nor carries yesterday's into today
 - **MCP cost now matches the dashboards' Costs** — the MCP's per-session cost dropped the cache-write TTL split, so 1-hour cache writes were priced at the 5-minute rate and every MCP cost read low. It now prices them like the web and TUI do (A4.4 parity: 624 of 647 sessions moved onto the dashboards' figure)
 - A trailing slash on the member endpoint produced double-slash routes that broke ingest and presence
 - Viewing a remote member's **Claude chat on the central** returned empty — the encoded project directory wasn't sent to the member's transcript reader, which locates the file by `<encodedDir>/<sessionId>.jsonl`

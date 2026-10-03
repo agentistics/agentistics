@@ -121,6 +121,7 @@ const EN: Record<string, string> = {
   // Status bar.
   statusTitle: 'Agentistics — today',
   statusToday: 'today: {0} · {1} tokens · {2} sessions',
+  statusRule: 'Today = the spend incurred today, by the time each response happened (UTC day), the same rule as Costs. A session open since yesterday counts only what it did today.',
   statusUnknown: 'today: no answer from the server',
   statusWaiting: '{0} waiting',
 
@@ -224,6 +225,7 @@ const PT: Record<string, string> = {
 
   statusTitle: 'Agentistics — hoje',
   statusToday: 'hoje: {0} · {1} tokens · {2} sessões',
+  statusRule: 'Hoje = o gasto incorrido hoje, pela hora de cada resposta (dia UTC), a mesma regra de Custos. Uma sessão aberta desde ontem conta só o que fez hoje.',
   statusUnknown: 'hoje: sem resposta do servidor',
   statusWaiting: '{0} esperando',
 

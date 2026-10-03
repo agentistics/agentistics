@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, HarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, sessionModelUsage, sessionCostUSD, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
@@ -1471,11 +1471,15 @@ export function computeDerivedStats(
       if (!cut) return s
       const { daily: _daily, ...rest } = s
       return {
-        ...rest,
-        input_tokens: cut.input_tokens,
-        output_tokens: cut.output_tokens,
-        cache_read_input_tokens: cut.cache_read_input_tokens,
-        cache_creation_input_tokens: cut.cache_creation_input_tokens,
+        // The four counters become the range's, and the cache-write TTL split and the per-model
+        // breakdown are scaled to them: left at their lifetime values, `calcCost` priced every cache
+        // write the session ever made under a range that said "today" (`cutSessionUsage`).
+        ...cutSessionUsage(rest, {
+          input_tokens: cut.input_tokens,
+          output_tokens: cut.output_tokens,
+          cache_read_input_tokens: cut.cache_read_input_tokens,
+          cache_creation_input_tokens: cut.cache_creation_input_tokens,
+        }),
         // The message split is not recorded per day — only the total is — so the range's messages
         // are apportioned to the two roles by the session's own ratio rather than invented. With no
         // lifetime messages to take a ratio from, they go to the user side, which is what an
