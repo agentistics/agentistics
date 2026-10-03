@@ -487,6 +487,12 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * product's own API. Absent: the engine assumes the default port.
    */
   serverOrigins?: readonly string[]
+  /**
+   * B8.8 (1.7, optional): an environment variable the PERSON named in a declaration (`{env:VAR}` in an
+   * MCP server's env or headers). The engine reads no environment of its own; it asks for exactly the
+   * names a declaration references. Absent: such a reference reads as unset.
+   */
+  environment?: { get(name: string): string | undefined }
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {

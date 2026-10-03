@@ -201,6 +201,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'Provider API keys entered for the native runtime (credentials.ts, 0600, never logged).',
   },
   {
+    pattern: '.agentistics/mcp-credentials', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop code mcp credential set <id> --origin <url>',
+    why: 'Tokens sent to remote MCP servers (B8.8, mcp-credentials.ts in the engine): sealed by the vault, '
+      + '0600, each bound to one origin. A credential is the archive\'s business never.',
+  },
+  {
     pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
     restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
     why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '

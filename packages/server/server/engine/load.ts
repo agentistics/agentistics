@@ -282,6 +282,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
+    // B8.8: the variables a person's MCP declaration names (`{env:VAR}`) — read only when named.
+    environment: { get: name => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? process.env[name] : undefined) },
     // B6.4: the origins this server answers on — the browser runtime never drives them.
     serverOrigins: [`http://127.0.0.1:${config.PORT}`, `http://localhost:${config.PORT}`, `http://[::1]:${config.PORT}`],
     // B6.6: memory, folded from the same journal the engine writes its `memory.noted` events to.
