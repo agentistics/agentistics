@@ -304,12 +304,24 @@ export interface TaskFile {
   kind?: string; author?: string; createdAt: string
 }
 
+/** Mirror of the server's `PieceTimes` (`task-times.ts`): start / finish / active time read from the
+ *  SESSIONS, with the status stamps only as the fallback. Optional on the wire: an older server omits it. */
+export interface PieceTimes {
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+  activeMinutes: number | null
+  source: 'sessions' | 'status' | null
+}
+
 /** One rollup for a subtask, or for the direct branch (`id: null`) — sessions filed on the task
  *  itself, under no subtask. Mirror of the server's `SubtaskView` (`task-report.ts`); see the
  *  2026-09-10 task-session-hierarchy spec §4.2/§4.3. */
 export interface SubtaskView {
   id: string | null
   rollup: AttemptRollup
+  /** Session-derived times for this piece (a group aggregates its members). */
+  times?: PieceTimes
   /**
    * The same delivery-evidence numbers `TaskDetail.stats` carries for the whole task, re-partitioned
    * to this bucket's own rows. `null` when nothing is filed under this bucket yet — never a block
@@ -330,6 +342,8 @@ export interface SubtaskView {
 
 export interface TaskDetail {
   task: TaskRecord
+  /** Start / finish / active time from the delivery's sessions (`task-times.ts`). */
+  times?: PieceTimes
   attempts: AttemptView[]
   rollup: AttemptRollup
   stats: TaskStats
