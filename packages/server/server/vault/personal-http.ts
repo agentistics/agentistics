@@ -10,6 +10,7 @@ import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, validGroupName, valida
 import * as gate from './gate'
 import * as store from './personal'
 import * as mobile from './mobile'
+import * as grants from './grants'
 import { vaultAudit, vaultLang } from './service'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
@@ -63,6 +64,11 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const g = await step('personal-list', {})
     if (!g.ok) return reply(g)
     return reply({ ok: true, ...(await mobile.mobileView()), loopback, secure: originMatchesRp(req.headers.get('origin') ?? `${c.url.protocol}//${c.url.host}`, c.url.hostname), ...withGrant(g) })
+  }
+  if (path === '/api/vault/personal/grants' && req.method === 'GET') {
+    const g = await step('personal-list', {})
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, grants: grants.listGrants().map(x => ({ sessionId: x.sessionId, createdAt: x.createdAt, refs: x.refs.map(r => ({ ref: r.ref, env: r.env, name: r.name, field: r.field })) })), ...withGrant(g) })
   }
   if (req.method !== 'POST') return null
   const b = await body()
@@ -202,6 +208,27 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!r.ok) return reply(storeFail(r))
     vaultAudit({ type: 'vault.personal-import' })
     return reply({ ok: true, created: r.created, replaced: r.replaced, skipped: r.skipped, ...withGrant(g) })
+  }
+
+  // ── §8 grants: which secrets a session's agent may USE (never see) ──
+  if (path === '/api/vault/personal/grants') {
+    const sid = typeof b.sessionId === 'string' && /^[A-Za-z0-9_:-]{1,80}$/.test(b.sessionId) ? b.sessionId : ''
+    const ids = Array.isArray(b.itemIds) ? b.itemIds.filter((x): x is string => typeof x === 'string' && ITEM_ID.test(x)).slice(0, 100) : []
+    const gids = Array.isArray(b.groupIds) ? b.groupIds.filter((x): x is string => typeof x === 'string' && GROUP_ID.test(x)).slice(0, 50) : []
+    if (!sid || (ids.length === 0 && gids.length === 0)) return reply(bad())
+    const g = await step('personal-grant', b, sid)
+    if (!g.ok) return reply(g)
+    const r = await grants.grantSession(sid, ids, gids)
+    if (!r.ok) return reply(fail(r.code === 'nothing' ? 'grant-empty' : 'not-found', 'Nothing to grant: the chosen secrets no longer exist.', 'Nada a liberar: os segredos escolhidos não existem mais.'))
+    for (const id of new Set(r.grant.refs.map(x => x.itemId))) vaultAudit({ type: 'vault.personal-grant', name: id })
+    return reply({ ok: true, refs: r.grant.refs.map(x => ({ ref: x.ref, env: x.env, name: x.name, field: x.field })), briefing: grants.grantBriefing(r.grant, pt() ? 'pt' : 'en'), ...withGrant(g) })
+  }
+  if (path === '/api/vault/personal/grants/revoke') {
+    const sid = typeof b.sessionId === 'string' ? b.sessionId : ''
+    // Revoking only REDUCES exposure: the read grant (code once) is enough.
+    const g = await step('personal-list', b)
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, revoked: grants.revokeGrant(sid), ...withGrant(g) })
   }
 
   // ── §7 the phone: passkeys and the opt-in code window ──

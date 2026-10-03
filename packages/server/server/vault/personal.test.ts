@@ -283,3 +283,23 @@ describe('no value leaves except through reveal', () => {
     for (const f of walk(dir)) expect(readFileSync(f).includes(Buffer.from('MARKER')), f).toBe(false)
   })
 })
+
+describe('§8 grants over HTTP', () => {
+  test('granting asks the gesture fresh; the answer carries references and a briefing, never a value', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta
+    hello.deny = true
+    expect((await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [m.id] })).json.ok).toBe(false)
+    hello.deny = false
+    const g0 = hello.gestures
+    const r = await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [m.id] })
+    expect(r.json.ok).toBe(true)
+    expect(hello.gestures).toBe(g0 + 1)
+    expect(r.json.refs.map((x: J) => x.ref)).toEqual(['vault://banco-exemplo/login', 'vault://banco-exemplo/password'])
+    expect(JSON.stringify(r.json)).not.toContain('MARKER')
+    expect(JSON.stringify(r.json)).not.toContain('eu@example.com')
+    const l = await http('GET', '/api/vault/personal/grants')
+    expect(l.json.grants[0].sessionId).toBe('abc123')
+    expect((await http('POST', '/api/vault/personal/grants/revoke', { sessionId: 'abc123' })).json.revoked).toBe(true)
+  })
+})

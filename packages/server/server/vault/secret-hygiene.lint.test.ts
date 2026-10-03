@@ -64,6 +64,11 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _recoverWrong: 'a wrong-words counter and a pause deadline for the page recovery (v2.98.1)',
   },
   'server/server/vault/http.ts': { LOOPBACK_HOSTS: 'host names that mean "this computer"' },
+  'server/server/vault/grants.ts': {
+    _grants: 'per-session grants (VAULT.PERSONAL §8): item ids and reference names, NEVER a value; memory only, dropped on lock',
+    _now: 'a clock',
+    _scrubbers: 'a compiled scrubber per granted session: holds the granted values\' FORMS so served copies can be scrubbed; dropped with the grant and on lock (the service holds the DEK anyway)',
+  },
   'server/server/vault/mobile.ts': {
     _now: 'a clock',
     _challenges: 'WebAuthn challenges (random bytes, public by nature): 60 s, single use, bound to one session',

@@ -57,6 +57,8 @@ export type VaultAction =
   // VAULT.PERSONAL §7 — the phone. Each raises Windows Hello ON THE COMPUTER, on purpose: adding a way to
   // reveal, removing one, and loosening reveal to the code are escalations made at the desk.
   | 'mobile-passkey-add' | 'mobile-passkey-remove' | 'mobile-code-reveal'
+  // VAULT.PERSONAL §8: handing secrets to an agent session is a reveal by proxy — the gesture, fresh.
+  | 'personal-grant'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -100,6 +102,7 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'mobile-passkey-add': { code: true, gesture: true, grant: null },
   'mobile-passkey-remove': { code: true, gesture: true, grant: null },
   'mobile-code-reveal': { code: true, gesture: true, grant: null },
+  'personal-grant': { code: true, gesture: true, grant: 'read' },
 }
 
 /**

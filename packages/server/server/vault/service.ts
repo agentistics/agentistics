@@ -944,7 +944,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {
