@@ -124,6 +124,7 @@ __ENGINE_VERBS__
   vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset
                 (every secret agentop stores is encrypted — never plain text)
   upgrade       Upgrade agentop to the latest version
+  uninstall     Remove agentop (service, shell hook, binary); your data is asked separately
   autostart     Start a mode with the system (systemd user service on Linux)
   check-update  Print a notice if a newer version is available (else silent);
                 a release marked [critical] says so louder (auto-install is opt-in)
@@ -723,6 +724,11 @@ if (command === 'check-update') {
     // Network unavailable — stay silent
   }
   process.exit(0)
+}
+
+if (command === 'uninstall') {
+  const { runUninstall } = await import('../server/cli-uninstall.ts')
+  process.exit(await runUninstall(process.argv.slice(3)))
 }
 
 if (command === 'autostart') {

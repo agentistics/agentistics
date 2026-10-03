@@ -989,6 +989,21 @@ async function installLogonEntry(distro: string): Promise<{ ok: boolean; message
   }
 }
 
+/** Removes both Windows logon mechanisms (task + Startup script). Idempotent; one line per thing removed or refused. */
+export async function removeWslLogonEntries(): Promise<string[]> {
+  if (platform() !== 'linux' || !isWSL()) return []
+  const lines: string[] = []
+  const task = wslTaskPlan(wslDistro())
+  if (task.ok) {
+    const res = await run(task.remove)
+    const v = wslTaskRemoveOutcome(task.name, res.code, res.stderr)
+    if (!v.ok || res.code === 0) lines.push(v.message)
+  }
+  const gone = await removeStartupEntry()
+  if (gone) lines.push(gone)
+  return lines
+}
+
 async function removeStartupEntry(): Promise<string | null> {
   const dir = await windowsStartupDir()
   if (!dir || !existsSync(join(dir, STARTUP_FILE_NAME))) return null

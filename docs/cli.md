@@ -42,6 +42,7 @@ agentop --version    # print version (and a notice if an update exists)
 | [`ci-push`](#ci-push) | One-shot push of a GitHub Actions run's metrics to a central (per repo) |
 | [`autostart`](#autostart) | Start a mode with the system (systemd user service) |
 | [`upgrade`](#upgrade) | Upgrade `agentop` to the latest release |
+| [`uninstall`](#uninstall) | Remove `agentop` — service, shell hook, binary; your data is asked about separately |
 | [`check-update`](#check-update) | Print an "update available" banner, else stay silent |
 | [`doctor`](#doctor) | Run the exposure preflight before publishing a central |
 | [`setup-token`](#setup-token) | Reissue a central's one-time owner setup token |
@@ -662,6 +663,9 @@ Download and install the latest `agentop` release in place. (`update` is an alia
 agentop upgrade
 ```
 
+`agentop upgrade --help` (or `-h`) prints help. Any flag it does not know is refused and nothing is
+upgraded — an upgrade only runs with no flags or with `--lang en|pt`.
+
 On a **central** you upgrade the Docker stack instead — pull the repo and rebuild:
 
 ```bash
@@ -673,6 +677,27 @@ On a **member** running as a systemd service, restart it after upgrading:
 ```bash
 agentop upgrade && systemctl --user restart agentop-server
 ```
+
+---
+
+## `uninstall`
+
+Remove `agentop` from this machine.
+
+```bash
+agentop uninstall                # asks for confirmation, then asks separately about your data
+agentop uninstall --yes          # skips the first confirmation only
+agentop uninstall --keep-data    # never asks about, or touches, ~/.agentistics
+```
+
+It stops and disables the autostart service, removes the update-check hook from your shell rc, on
+WSL removes the Windows logon task and the Startup-folder script, and removes the `agentop` binary
+(and the `.bak` copy `agentop upgrade` keeps).
+
+**Your data is a separate question, and the default is No.** `~/.agentistics` holds your metrics
+history, preferences, task board and the **vault**. If you answer yes to deleting it, the vault and
+its 24 recovery words become your responsibility: without them its secrets cannot be recovered, by
+you or by anyone else. `--yes` never answers that question for you.
 
 ---
 
