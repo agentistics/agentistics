@@ -39,11 +39,11 @@ function refsFor(m: PersonalMeta, taken: Set<string>): GrantRef[] {
 }
 
 /** Grant (replacing any earlier grant of this session) — items by id plus every item of the named groups. */
-export async function grantSession(sessionId: string, itemIds: readonly string[], groupIds: readonly string[]): Promise<{ ok: true; grant: Grant } | { ok: false; code: 'nothing' | 'not-found' }> {
+export async function grantSession(sessionId: string, itemIds: readonly string[], groupIds: readonly string[]): Promise<{ ok: true; grant: Grant } | { ok: false; code: 'grant-empty' | 'not-found' }> {
   const live = (await listItems()).filter(m => !m.deletedAt)
   const chosen = live.filter(m => itemIds.includes(m.id) || (m.groupId !== null && groupIds.includes(m.groupId)))
   if (itemIds.some(id => !live.find(m => m.id === id))) return { ok: false, code: 'not-found' }
-  if (chosen.length === 0) return { ok: false, code: 'nothing' }
+  if (chosen.length === 0) return { ok: false, code: 'grant-empty' }
   const taken = new Set<string>()
   const refs = chosen.sort((a, b) => a.name.localeCompare(b.name)).flatMap(m => refsFor(m, taken))
   const g: Grant = { sessionId, refs, groups: [...groupIds], createdAt: new Date(_now()).toISOString() }
@@ -119,11 +119,11 @@ export function grantedRef(sessionId: string, ref: string): GrantRef | null {
  * page: `agentop vault ref`, run INSIDE a granted session's command at the moment it executes. Only a ref
  * the session was granted; every use audited as the act (never the value).
  */
-export async function useRef(sessionId: string, ref: string): Promise<{ ok: true; value: string } | { ok: false; code: 'not-granted' | 'gone' }> {
+export async function useRef(sessionId: string, ref: string): Promise<{ ok: true; value: string } | { ok: false; code: 'not-granted' | 'secret-gone' }> {
   const r = grantedRef(sessionId, ref)
   if (!r) return { ok: false, code: 'not-granted' }
   const v = await revealField(r.itemId, r.field)
-  if (!v.ok || v.meta.deletedAt) return { ok: false, code: 'gone' }
+  if (!v.ok || v.meta.deletedAt) return { ok: false, code: 'secret-gone' }
   return { ok: true, value: v.value }
 }
 

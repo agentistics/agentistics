@@ -499,7 +499,7 @@ async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
   if (!sid || typeof h.ref !== 'string') return bad()
   const r = await useRef(sid, h.ref)
   if (!r.ok) {
-    return { reply: refused(r.code === 'not-granted' ? 'not-granted' : 'gone', vaultLang() === 'pt'
+    return { reply: refused(r.code === 'not-granted' ? 'not-granted' : 'secret-gone', vaultLang() === 'pt'
       ? (r.code === 'not-granted' ? 'Este segredo não foi liberado para esta sessão.' : 'Este segredo não existe mais no cofre.')
       : (r.code === 'not-granted' ? 'This secret was not granted to this session.' : 'This secret no longer exists in the vault.')) }
   }

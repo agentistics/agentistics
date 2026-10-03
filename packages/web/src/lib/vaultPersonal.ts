@@ -105,3 +105,8 @@ export function copyWithAutoClear(text: string, clip: Pick<Clipboard, 'writeText
   }).catch(() => false)
   return { done, cancel: () => { if (t !== null) { timers.clear(t); void clip.writeText('').catch(() => {}) } } }
 }
+
+export interface GrantAnswer { refs: { ref: string; env: string; name: string; field: string }[]; briefing: string }
+/** Grant a session the chosen items/groups (gate `personal-grant`: the gesture, fresh). The answer: references + briefing, never a value. */
+export const grantSession = (sessionId: string, itemIds: string[], groupIds: string[], code?: string, gestureToken?: string) =>
+  vaultPost<GrantAnswer>(`${P}/grants`, withCode({ sessionId, itemIds, groupIds, ...tok(gestureToken) }, code))

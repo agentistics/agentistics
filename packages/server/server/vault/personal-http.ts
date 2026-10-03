@@ -219,7 +219,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const g = await step('personal-grant', b, sid)
     if (!g.ok) return reply(g)
     const r = await grants.grantSession(sid, ids, gids)
-    if (!r.ok) return reply(fail(r.code === 'nothing' ? 'grant-empty' : 'not-found', 'Nothing to grant: the chosen secrets no longer exist.', 'Nada a liberar: os segredos escolhidos não existem mais.'))
+    if (!r.ok) return reply(fail(r.code === 'grant-empty' ? 'grant-empty' : 'not-found', 'Nothing to grant: the chosen secrets no longer exist.', 'Nada a liberar: os segredos escolhidos não existem mais.'))
     for (const id of new Set(r.grant.refs.map(x => x.itemId))) vaultAudit({ type: 'vault.personal-grant', name: id })
     return reply({ ok: true, refs: r.grant.refs.map(x => ({ ref: x.ref, env: x.env, name: x.name, field: x.field })), briefing: grants.grantBriefing(r.grant, pt() ? 'pt' : 'en'), ...withGrant(g) })
   }
@@ -257,7 +257,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!secure) return reply(notSecure())
     const action = typeof b.action === 'string' ? b.action : ''
     const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
-    if (!/^personal-(reveal|edit|trash|restore|restore-version|purge|group-delete)$/.test(action)) return reply(bad())
+    if (!/^personal-(reveal|edit|trash|restore|restore-version|purge|group-delete|grant)$/.test(action)) return reply(bad())
     const g = await step('personal-list', b)
     if (!g.ok) return reply(g)
     const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)
