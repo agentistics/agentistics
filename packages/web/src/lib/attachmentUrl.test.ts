@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { attachmentNameUrl, attachmentUrl, galleryFileUrl, sessionMediaUrl, setAttachmentsDir } from './attachmentUrl'
+import { attachmentNameUrl, attachmentUrl, galleryFileUrl, sessionViewedUrl, sessionMediaUrl, setAttachmentsDir } from './attachmentUrl'
 
 describe('galleryFileUrl', () => {
   const sessionId = 's1'
@@ -23,9 +23,10 @@ describe('galleryFileUrl', () => {
     expect(galleryFileUrl(f, sessionId)).toBe(attachmentUrl(f.path))
   })
 
-  it('a VIEWED file anywhere else falls to the session media route — never widened, never guessed', () => {
+  it('a VIEWED file anywhere else goes to the transcript-bound viewed route', () => {
     const f = { path: '/repo/some/screenshot.png', name: 'screenshot.png', origin: 'viewed' as const }
-    expect(galleryFileUrl(f, sessionId)).toBe(sessionMediaUrl(sessionId, f.path))
+    expect(galleryFileUrl(f, sessionId)).toBe(sessionViewedUrl(sessionId, f.path))
+    expect(galleryFileUrl(f, sessionId)).toContain('/api/fleet/viewed?')
   })
 
   describe('a RELOCATED AGENTISTICS_DIR — the default guess no longer matches the real path', () => {
@@ -43,13 +44,13 @@ describe('galleryFileUrl', () => {
       // not borrow that route.
       setAttachmentsDir('/srv/agentop-data/attachments')
       const f = { path: '/home/u/.agentistics/attachments/abcd-shot.png', name: 'abcd-shot.png', origin: 'viewed' as const }
-      expect(galleryFileUrl(f, sessionId)).toBe(sessionMediaUrl(sessionId, f.path))
+      expect(galleryFileUrl(f, sessionId)).toBe(sessionViewedUrl(sessionId, f.path))
     })
 
     it('a file merely sharing the real dir as a PREFIX string, not a path segment, is not swept in', () => {
       setAttachmentsDir('/srv/agentop-data/attachments')
       const f = { path: '/srv/agentop-data/attachments-evil/file.png', name: 'file.png', origin: 'viewed' as const }
-      expect(galleryFileUrl(f, sessionId)).toBe(sessionMediaUrl(sessionId, f.path))
+      expect(galleryFileUrl(f, sessionId)).toBe(sessionViewedUrl(sessionId, f.path))
     })
 
     it('resetting to null goes back to the default-layout guess', () => {

@@ -124,6 +124,7 @@ __ENGINE_VERBS__
   vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset
                 (every secret agentop stores is encrypted — never plain text)
   upgrade       Upgrade agentop to the latest version
+  uninstall     Remove agentop (service, shell hook, binary); your data is asked separately
   autostart     Start a mode with the system (systemd user service on Linux)
   check-update  Print a notice if a newer version is available (else silent);
                 a release marked [critical] says so louder (auto-install is opt-in)
@@ -628,6 +629,16 @@ if (command === '--version' || command === '-v') {
 }
 
 if (command === 'upgrade' || command === 'update') {
+  const { parseUpgradeArgs, UPGRADE_HELP } = await import('../server/upgrade-args.ts')
+  const parsed = parseUpgradeArgs(process.argv.slice(3))
+  if (parsed.kind === 'help') {
+    process.stdout.write(UPGRADE_HELP)
+    process.exit(0)
+  }
+  if (parsed.kind === 'unknown') {
+    process.stderr.write(`agentop upgrade: unknown argument "${parsed.arg}" — nothing was upgraded.\n\n${UPGRADE_HELP}`)
+    process.exit(2)
+  }
   const { runUpgrade } = await import('../server/upgrade.ts')
   // Exit code reflects reality: non-zero when the install was refused/rolled back, or when a
   // running service could not be restarted onto the new version.
@@ -713,6 +724,11 @@ if (command === 'check-update') {
     // Network unavailable — stay silent
   }
   process.exit(0)
+}
+
+if (command === 'uninstall') {
+  const { runUninstall } = await import('../server/cli-uninstall.ts')
+  process.exit(await runUninstall(process.argv.slice(3)))
 }
 
 if (command === 'autostart') {

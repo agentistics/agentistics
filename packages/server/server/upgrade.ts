@@ -1114,6 +1114,14 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     return 1
   }
 
+  // WSL: an upgraded machine may never have had autostart set up (WSL.1 only ran at install), or
+  // still hold the old logon task that let WSL idle the distro out. Repaired here, one line.
+  try {
+    const { repairWslAutostart } = await import('./autostart.ts')
+    const line = await repairWslAutostart()
+    if (line) process.stdout.write(`  ${line}\n`)
+  } catch { /* the upgrade itself succeeded; autostart repair is best-effort */ }
+
   writeProgress({ stage: 'done', version: info.latest })
   process.stdout.write(`\n${_GR}${_B}Done — now running v${info.latest}.${_R}\n\n`)
   return 0

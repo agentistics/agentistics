@@ -394,7 +394,7 @@ describe('subtaskViews — the three shapes, no session counted twice', () => {
     const views = subtaskViews(task(), subs, rows, metasAll, costOf)
     expect(views).toHaveLength(2)
     expect(views[0]).toEqual({
-      id: 's1', rollup: expect.objectContaining({ sessionsUsed: 1 }), stats: expect.anything(),
+      id: 's1', rollup: expect.objectContaining({ sessionsUsed: 1 }), stats: expect.anything(), times: expect.anything(),
     })
     expect(views[1]!.id).toBeNull()
   })
@@ -734,5 +734,33 @@ describe('buildTaskDetail — a moved conversation is where it was filed LAST', 
     expect(view('a2').rollup.costUSD).toBe(10)
     expect(view('a1').rollup.sessionsUsed).toBe(0)
     expect(detail.rollup.costUSD).toBe(10)
+  })
+})
+
+describe('subtaskViews times (from sessions, not status)', () => {
+  const metas = metasOf(
+    meta({ session_id: 'c1', start_time: '2026-10-01T10:00:00Z', end_time: '2026-10-01T11:00:00Z', active_minutes: 40 }),
+    meta({ session_id: 'c2', start_time: '2026-10-02T10:00:00Z', end_time: '2026-10-02T10:30:00Z', active_minutes: 20 }),
+  )
+  it('a done subtask with sessions takes start/end from them and the union of active time', () => {
+    const subs = [subtask({ id: 's1', done: true, startedAt: '2026-09-01T00:00:00Z', deliveredAt: '2026-09-01T01:00:00Z' })]
+    const rows = [
+      row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' }),
+      row({ id: 'r2', conversationId: 'c2', subtaskId: 's1' }),
+    ]
+    const v = subtaskViews(task(), subs, rows, metas, () => 0).find(x => x.id === 's1')!
+    expect(v.times).toMatchObject({
+      source: 'sessions', startedAt: '2026-10-01T10:00:00.000Z', completedAt: '2026-10-02T10:30:00.000Z', activeMinutes: 60,
+    })
+  })
+  it('a subtask that is not done shows no completed; one with no session falls back to its status stamps', () => {
+    const subs = [
+      subtask({ id: 's1', done: false }),
+      subtask({ id: 's2', done: true, startedAt: '2026-09-01T00:00:00Z', deliveredAt: '2026-09-01T02:00:00Z' }),
+    ]
+    const rows = [row({ id: 'r1', conversationId: 'c1', subtaskId: 's1' })]
+    const views = subtaskViews(task(), subs, rows, metas, () => 0)
+    expect(views.find(x => x.id === 's1')!.times.completedAt).toBeNull()
+    expect(views.find(x => x.id === 's2')!.times).toMatchObject({ source: 'status', durationMs: 2 * 3_600_000 })
   })
 })

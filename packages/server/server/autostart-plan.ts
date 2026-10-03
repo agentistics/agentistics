@@ -97,13 +97,89 @@ export function wslTaskName(distro: string): string {
   return `Agentistics autostart (${distro})`
 }
 
-/** The command the task runs: boots the distro and, with it, its systemd. */
+/** Where the keep-alive's lock lives inside the distro: a second instance finds it held and exits. */
+export const KEEPALIVE_LOCK = '/tmp/agentop-keepalive.lock'
+
+/**
+ * The command the task runs: it boots the distro AND KEEPS IT BOOTED.
+ *
+ * The task used to run `wsl.exe … --exec /bin/true`, which exits at once — and WSL stops a distro
+ * once no client process remains, taking the systemd user service with it. So agentop was only
+ * reachable while somebody had a terminal open (the owner's company PC, v2.98.0). The keep-alive is
+ * a `sleep infinity` held under `flock -n`: a lightweight process that never ends, started HIDDEN
+ * (PowerShell `Start-Process -WindowStyle Hidden`), and idempotent — a second logon, or the repair
+ * re-registering the task, finds the lock held and the new copy exits immediately, so exactly one
+ * instance ever runs. The distro name was validated against a closed alphabet before it gets here.
+ */
 export function wslTaskCommand(distro: string): string {
-  return `wsl.exe -d ${distro} --exec /bin/true`
+  const args = ['-d', distro, '--exec', '/usr/bin/flock', '-n', KEEPALIVE_LOCK, '/bin/sleep', 'infinity']
+    .map(a => `'${a}'`).join(',')
+  return `powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList ${args}"`
+}
+
+/** Does a registered task still run the OLD one-shot `/bin/true`? Anything without the keep-alive is stale. */
+export function wslTaskIsStale(verboseQuery: string): boolean {
+  return !/sleep/.test(verboseQuery) || !/infinity/.test(verboseQuery)
+}
+
+/** The Startup-folder fallback: `schtasks /SC ONLOGON` is refused without admin on a company PC. */
+export const STARTUP_FILE_NAME = 'agentistics-wsl-keepalive.vbs'
+/** Relative to `%APPDATA%` (Windows spelling; the IO layer maps it through `wslpath`). */
+export const STARTUP_DIR_REL = 'Microsoft\\Windows\\Start Menu\\Programs\\Startup'
+
+/**
+ * The hidden keep-alive script, byte for byte what the owner's machine already carries (CRLF, window
+ * style 0 = hidden, do not wait) — keeping name AND content identical is what makes writing it
+ * idempotent over an existing install. The distro was validated against the closed alphabet first.
+ */
+export function startupScript(distro: string): string {
+  return `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "wsl.exe -d ${distro} --exec sleep infinity", 0, False\r\n`
+}
+
+export type StartupState = 'missing' | 'stale' | 'current'
+
+/** Compare what is on disk (`null` = no file) with the script this version would write. */
+export function startupState(onDisk: string | null, distro: string): StartupState {
+  if (onDisk === null) return 'missing'
+  return onDisk === startupScript(distro) ? 'current' : 'stale'
+}
+
+export type AutostartRepair =
+  | { action: 'none'; why: string }
+  | { action: 'enable'; line: string }
+  | { action: 'refresh-task'; line: string }
+
+/**
+ * What `agentop upgrade` should do about autostart on WSL. Only WSL (elsewhere nothing here applies),
+ * and never silently: a repair carries the ONE plain line the user is shown.
+ *  - nothing installed at all (an upgraded machine WSL.1 never ran on) → enable it;
+ *  - the unit is there but the logon task is missing or still the one-shot → re-register the task;
+ *  - everything current → leave it alone.
+ */
+export function autostartRepairPlan(f: {
+  wsl: boolean
+  unitEnabled: boolean
+  /** `null` = schtasks.exe could not be queried (no interop): do not guess. */
+  taskPresent: boolean | null
+  taskStale: boolean
+  /** The Startup-folder entry; `null` = could not be read (no interop), `undefined` = not asked. */
+  startup?: StartupState | null
+}): AutostartRepair {
+  if (!f.wsl) return { action: 'none', why: 'not WSL' }
+  if (!f.unitEnabled) {
+    return { action: 'enable', line: 'Autostart was not set up on this WSL machine — enabled it, so agentop is reachable without opening a terminal.' }
+  }
+  // Either mechanism counts: the owner's machine cannot register the task and runs on the script.
+  if (f.startup === 'current') return { action: 'none', why: 'startup entry is current' }
+  if (f.taskPresent === null && !f.startup) return { action: 'none', why: 'logon task could not be queried' }
+  if (!f.taskPresent || f.taskStale) {
+    return { action: 'refresh-task', line: 'Updated the Windows logon task so WSL stays running — agentop is reachable without opening a terminal.' }
+  }
+  return { action: 'none', why: 'autostart is current' }
 }
 
 export type WslTaskPlan =
-  | { ok: true; name: string; create: string[]; remove: string[]; query: string[] }
+  | { ok: true; name: string; create: string[]; remove: string[]; query: string[]; queryVerbose: string[] }
   | { ok: false; reason: string }
 
 /**
@@ -127,6 +203,7 @@ export function wslTaskPlan(distro: string | undefined): WslTaskPlan {
     create: ['schtasks.exe', '/Create', '/F', '/SC', 'ONLOGON', '/RL', 'LIMITED', '/TN', name, '/TR', wslTaskCommand(distro)],
     remove: ['schtasks.exe', '/Delete', '/F', '/TN', name],
     query: ['schtasks.exe', '/Query', '/TN', name],
+    queryVerbose: ['schtasks.exe', '/Query', '/V', '/FO', 'LIST', '/TN', name],
   }
 }
 
@@ -185,7 +262,7 @@ export interface StatusFacts {
   unitActive: string // systemctl is-active output, or ''
   unitEnabled: string
   /** WSL only: `null` outside WSL. */
-  wsl: null | { distro: string | undefined; taskPresent: boolean | null }
+  wsl: null | { distro: string | undefined; taskPresent: boolean | null; startup?: StartupState | null }
 }
 
 export interface StatusLine { label: string; ok: boolean; detail: string; fix?: string }
@@ -215,10 +292,10 @@ export function statusLines(f: StatusFacts): StatusLine[] {
     const p = wslTaskPlan(f.wsl.distro)
     const name = p.ok ? p.name : 'Agentistics autostart (<distro>)'
     out.push({
-      label: 'Windows logon task',
-      ok: f.wsl.taskPresent === true,
-      detail: f.wsl.taskPresent === null ? `${name}: could not be queried (no schtasks.exe interop)` : f.wsl.taskPresent ? `${name}: registered` : `${name}: missing — Windows will not boot this distro at logon`,
-      fix: f.wsl.taskPresent === true ? undefined : 'agentop autostart server enable',
+      label: 'Windows logon entry',
+      ok: f.wsl.taskPresent === true || f.wsl.startup === 'current',
+      detail: f.wsl.startup === 'current' ? `${STARTUP_FILE_NAME}: in the Startup folder` : f.wsl.taskPresent === null ? `${name}: could not be queried (no schtasks.exe interop)` : f.wsl.taskPresent ? `${name}: registered` : `${name}: missing — Windows will not boot this distro at logon`,
+      fix: f.wsl.taskPresent === true || f.wsl.startup === 'current' ? undefined : 'agentop autostart server enable',
     })
   }
   return out

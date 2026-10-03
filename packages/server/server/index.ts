@@ -2924,6 +2924,50 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // THE BYTES of a file the session VIEWED or wrote, for the gallery. Admitted only by what this
+    // session's own transcript named (`viewed-file.ts`), never by the query. Rides the `/api/fleet`
+    // prefix in `capability-guard.ts`, so it is `localShell` and refused on a central or public profile.
+    if (url.pathname === '/api/fleet/viewed' && req.method === 'GET') {
+      const id = url.searchParams.get('id')
+      const path = url.searchParams.get('path')
+      if (!id || !path) {
+        return new Response(JSON.stringify({ ok: false, message: 'bad_request' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const { readFleetViewedMedia, fleetLang } = await import('./sessions/fleet-web')
+        const out = await readFleetViewedMedia(fleetLang(url.searchParams.get('lang')), id, path)
+        if (!out.ok) {
+          return new Response(JSON.stringify({ ok: false, message: out.message }), {
+            status: out.status,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(out.bytes as unknown as BodyInit, {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': out.mime,
+            'Content-Disposition': `inline; filename="${out.name.replace(/[^\w.-]/g, '_')}"`,
+            'X-Content-Type-Options': 'nosniff',
+            // The media marker: `applyBaselineHeaders` recognises it and REPLACES it with the media
+            // policy (this plus `frame-ancestors 'self'`, and `vscode-webview:` on an embedding
+            // profile), instead of the dashboard baseline — which is why this panel's PDF frame no
+            // longer draws the browser's "cannot display" glyph. See `response-policy.ts`.
+            'Content-Security-Policy': OPAQUE_MEDIA_CSP,
+            // A session rewrites the file it is working on; a cached copy would show the old one.
+            'Cache-Control': 'private, no-store',
+          },
+        })
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     // The viewer's geometry, applied to the ASSISTANT's pane — and this is the half with a floor.
     // `PANE_COLS`/`PANE_ROWS` exist because a 24-row pane redrew the top of an `AskUserQuestion`
     // off the screen and broke `readDialog`/`approvalTail`, invisible from an attached terminal.

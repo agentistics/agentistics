@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   formatStatusLines, lingerOutcome, lingerPlan, parseLinger, portHeldVerdict, statusLines,
-  validDistro, wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome,
+  autostartRepairPlan, KEEPALIVE_LOCK, startupScript, startupState, STARTUP_FILE_NAME, type StartupState, validDistro, wslTaskCommand, wslTaskIsStale, wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome,
 } from './autostart-plan'
 import { systemdUnit } from './service-manager'
 
@@ -46,7 +46,7 @@ describe('WSL logon task', () => {
     expect(p.create).toEqual([
       'schtasks.exe', '/Create', '/F', '/SC', 'ONLOGON', '/RL', 'LIMITED',
       '/TN', 'Agentistics autostart (Ubuntu-22.04)',
-      '/TR', 'wsl.exe -d Ubuntu-22.04 --exec /bin/true',
+      '/TR', wslTaskCommand('Ubuntu-22.04'),
     ])
     expect(p.remove).toEqual(['schtasks.exe', '/Delete', '/F', '/TN', 'Agentistics autostart (Ubuntu-22.04)'])
     expect(p.query[1]).toBe('/Query')
@@ -88,7 +88,7 @@ describe('status lines', () => {
   const base = { busSocket: false, linger: 'no' as const, user: 'ana', unitActive: 'inactive', unitEnabled: 'enabled', wsl: null }
   test('each failing fact carries its fix', () => {
     const lines = statusLines({ ...base, wsl: { distro: 'Ubuntu', taskPresent: false } })
-    expect(lines.map(l => l.label)).toEqual(['systemd user linger', 'systemd user bus', 'agentop-server unit', 'Windows logon task'])
+    expect(lines.map(l => l.label)).toEqual(['systemd user linger', 'systemd user bus', 'agentop-server unit', 'Windows logon entry'])
     expect(lines.every(l => !l.ok && l.fix)).toBe(true)
     expect(formatStatusLines(lines)).toContain('fix: sudo loginctl enable-linger ana')
   })
@@ -96,5 +96,65 @@ describe('status lines', () => {
     const lines = statusLines({ ...base, busSocket: true, linger: 'yes', unitActive: 'active' })
     expect(lines).toHaveLength(3)
     expect(lines.every(l => l.ok && !l.fix)).toBe(true)
+  })
+})
+
+describe('WSL keep-alive and the upgrade repair', () => {
+  test('the task keeps the distro alive: hidden, one instance (flock -n), never /bin/true', () => {
+    const c = wslTaskCommand('Ubuntu-22.04')
+    expect(c).toContain('-WindowStyle Hidden')
+    expect(c).toContain('flock')
+    expect(c).toContain(KEEPALIVE_LOCK)
+    expect(c).toContain("'sleep'".replace("'sleep'", '/bin/sleep'))
+    expect(c).toContain("'infinity'")
+    expect(c).not.toContain('/bin/true')
+    expect(c.length).toBeLessThan(261) // schtasks /TR limit
+  })
+  test('the old one-shot task reads as stale; the keep-alive does not', () => {
+    expect(wslTaskIsStale('Task To Run: wsl.exe -d Ubuntu --exec /bin/true')).toBe(true)
+    expect(wslTaskIsStale(`Task To Run: ${wslTaskCommand('Ubuntu')}`)).toBe(false)
+  })
+  const base = { wsl: true, unitEnabled: true, taskPresent: true, taskStale: false }
+  test('not WSL: nothing', () => expect(autostartRepairPlan({ ...base, wsl: false }).action).toBe('none'))
+  test('upgraded machine with no autostart: enable, with one plain line', () => {
+    const r = autostartRepairPlan({ ...base, unitEnabled: false, taskPresent: false })
+    expect(r.action).toBe('enable')
+    if (r.action === 'enable') expect(r.line.split('\n')).toHaveLength(1)
+  })
+  test('missing or stale task: refresh it', () => {
+    expect(autostartRepairPlan({ ...base, taskPresent: false }).action).toBe('refresh-task')
+    expect(autostartRepairPlan({ ...base, taskStale: true }).action).toBe('refresh-task')
+  })
+  test('current: untouched; unqueryable task: never guessed', () => {
+    expect(autostartRepairPlan(base).action).toBe('none')
+    expect(autostartRepairPlan({ ...base, taskPresent: null }).action).toBe('none')
+  })
+})
+
+describe('WSL Startup-folder fallback', () => {
+  test('the script is the one already on the owner\'s machine, byte for byte', () => {
+    expect(startupScript('Ubuntu-22.04')).toBe(
+      'Set sh = CreateObject("WScript.Shell")\r\nsh.Run "wsl.exe -d Ubuntu-22.04 --exec sleep infinity", 0, False\r\n')
+    expect(STARTUP_FILE_NAME).toBe('agentistics-wsl-keepalive.vbs')
+  })
+  test('state: missing, stale and current, so writing it is idempotent', () => {
+    expect(startupState(null, 'U')).toBe('missing')
+    expect(startupState('Set sh = x', 'U')).toBe('stale')
+    expect(startupState(startupScript('U'), 'U')).toBe('current')
+    expect(startupState(startupScript('U'), 'Other')).toBe('stale')
+  })
+  test('a current startup entry satisfies the repair plan even when the task is refused', () => {
+    const f = { wsl: true, unitEnabled: true, taskPresent: false, taskStale: false }
+    expect(autostartRepairPlan({ ...f, startup: 'current' }).action).toBe('none')
+    expect(autostartRepairPlan({ ...f, startup: 'missing' }).action).toBe('refresh-task')
+    expect(autostartRepairPlan({ ...f, startup: 'stale' }).action).toBe('refresh-task')
+    expect(autostartRepairPlan({ ...f, startup: null, taskPresent: null }).action).toBe('none')
+  })
+  test('status counts the startup entry as a registered logon entry', () => {
+    const base = { busSocket: true, linger: 'yes' as const, user: 'a', unitActive: 'active', unitEnabled: 'enabled' }
+    const row = (startup: StartupState) =>
+      statusLines({ ...base, wsl: { distro: 'U', taskPresent: false, startup } }).at(-1)!
+    expect(row('current').ok).toBe(true)
+    expect(row('missing').ok).toBe(false)
   })
 })
