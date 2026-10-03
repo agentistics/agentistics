@@ -3,13 +3,14 @@
  * same URL as a fleet session (`sessionPath`); the route sends a native id here (`isNativeSessionId`,
  * `SessionRoute`) because a native session is not a fleet row — no process to find, no terminal — and
  * the fleet's page would wait for one that never comes. A header (back, the mark, the title, the
- * model and provider, the state) over `NativeSessionChat`.
+ * model and provider, the task it is filed under, the state) over `NativeSessionChat`.
  */
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { NativeSessionChat } from '../components/sessions/NativeSessionChat'
+import { NativeFilingButton } from '../components/sessions/NativeFilingButton'
 import { useNativeSession } from '../hooks/useNativeSession'
 import { NATIVE_HARNESS_ID, NATIVE_HARNESS_LABEL } from '../lib/nativeSession'
 
@@ -42,6 +43,7 @@ export default function NativeSessionPage() {
             {s ? `${NATIVE_HARNESS_LABEL} · ${s.model}${providerLabel ? ` · ${providerLabel}` : ''}` : '…'}
           </span>
         </div>
+        <NativeFilingButton sessionId={sessionId} title={s?.title || NATIVE_HARNESS_LABEL} lang={lang} />
         <span
           data-testid="native-state"
           style={{

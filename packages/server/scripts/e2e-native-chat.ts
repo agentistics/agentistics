@@ -9,9 +9,10 @@
  *     bun packages/server/scripts/e2e-native-chat.ts [--lang en|pt] [--width 390]
  *
  * The run: open the wizard from "+ New session" → pick Agentistics → provider + model → the folder →
- * a first message → start → the answer streams in → the shell call asks → approve → its card turns
- * done and the file exists → a long answer → Stop ends it mid-stream. A screenshot at every step; any
- * failed expectation exits non-zero.
+ * a task's SUBTASK to file it under → a first message → start → the answer streams in → the shell
+ * call asks → approve → its card turns done and the file exists → a long answer → Stop ends it
+ * mid-stream → the header names the task, and the task's own page carries the session and its cost
+ * (UI follow-up 2). A screenshot at every step; any failed expectation exits non-zero.
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -55,6 +56,12 @@ async function dismissFirstRun(page: Page) {
 }
 
 await fetch(`${BASE}/api/user-prefs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: LANG }) })
+// The delivery the session is filed under — a task with one subtask, made through the board's API.
+const TASK_TITLE = `${T('Native delivery', 'Entrega nativa')} ${WIDTH}-${Date.now() % 100000}`
+const SUBTASK_TITLE = T('Write hello.txt', 'Escrever hello.txt')
+const madeTask = await (await fetch(`${BASE}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: TASK_TITLE }) })).json() as { task?: { id: string }; id?: string }
+const TASK_ID = madeTask.task?.id ?? madeTask.id ?? ''
+await fetch(`${BASE}/api/tasks/${encodeURIComponent(TASK_ID)}/subtasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: SUBTASK_TITLE }) })
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: WIDTH, height: 844 } })
 const errors: string[] = []
@@ -91,7 +98,13 @@ try {
   await page.getByText(WS.split('/').pop()!, { exact: false }).last().waitFor({ timeout: 15000 })
   await page.waitForTimeout(600)
   await page.locator('[role="option"], button').filter({ hasText: WS.split('/').pop()! }).last().click()
-  expectThat(await page.getByText(T('Task (optional)', 'Tarefa (opcional)')).count() === 0, 'no task filing offered for a native session')
+  // the task step, as for a fleet session: pick the delivery, then its subtask
+  await page.getByRole('button', { name: T('None — pick or create…', 'Nenhuma — escolher ou criar…') }).click()
+  await page.getByPlaceholder(T('Search tasks, or type a new name', 'Buscar tarefas, ou digitar um nome novo')).fill(TASK_TITLE)
+  await page.getByRole('button', { name: new RegExp(TASK_TITLE) }).first().click()
+  await page.getByRole('button', { name: SUBTASK_TITLE }).first().click()
+  await page.getByRole('button', { name: new RegExp(TASK_TITLE) }).first().waitFor()
+  expectThat(true, 'the task step is offered for a native session, and a subtask is picked')
   await shot(page, 'wizard-where-step')
   await page.getByRole('button', { name: T('Continue', 'Continuar'), exact: false }).last().click()
 
@@ -148,6 +161,24 @@ try {
   expectThat(await page.getByTestId('stopped-answer').count() === 1, 'what was written stays, marked as stopped')
   await shot(page, 'stopped')
   await noHorizontalScroll(page, 'after stop')
+
+  // 7b. filed: the header names the task; the board carries the session and its cost
+  await page.getByTestId('native-filing').filter({ hasText: TASK_TITLE }).waitFor({ timeout: 15000 })
+  expectThat(true, 'the session header names the task it is filed under')
+  const sessionId = page.url().split('/').pop()!
+  const detail = await (await fetch(`${BASE}/api/tasks/${encodeURIComponent(TASK_ID)}`)).json() as {
+    task: { rollup: { costUSD: number | null; sessionsUsed: number }; sessions: { id: string; native?: boolean; subtaskId: string | null; costUSD: number | null }[]; subtaskRollups: { id: string | null; rollup: { costUSD: number | null } }[] }
+  }
+  const filed = detail.task.sessions.find(x => x.id === sessionId)
+  expectThat(filed?.native === true && filed.subtaskId !== null, 'the task lists the native session under its subtask')
+  expectThat((detail.task.rollup.costUSD ?? 0) > 0 && (filed?.costUSD ?? 0) > 0, `its cost rolls up into the task ($${detail.task.rollup.costUSD})`)
+  expectThat(detail.task.subtaskRollups.some(v => v.id === filed?.subtaskId && (v.rollup.costUSD ?? 0) > 0), 'and into the subtask')
+  await page.goto(`${BASE}/tasks/${encodeURIComponent(TASK_ID)}`)
+  await page.waitForTimeout(2000)
+  await dismissFirstRun(page)
+  await shot(page, 'task-page')
+  await page.goto(`${BASE}/sessions/${sessionId}`)
+  await page.getByTestId('native-session').waitFor()
 
   // 8. leave, find it in the sessions list, reopen it: the conversation comes back from the window
   const url = page.url()

@@ -1824,6 +1824,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
       }))
     }
+    // Where a NATIVE session is filed (UI follow-up 2): the native session page's filing control reads
+    // it — a native session has no fleet row to carry its task name.
+    if (url.pathname === '/api/tasks/native-filing' && req.method === 'GET') {
+      const { nativeFilingOf } = await import('./sessions/task-web')
+      return json({ filing: await nativeFilingOf(url.searchParams.get('session') ?? '') })
+    }
     if (url.pathname === '/api/tasks/activity' && req.method === 'GET') {
       const { taskActivity } = await import('./sessions/task-web')
       const limit = Number(url.searchParams.get('limit'))

@@ -76,13 +76,45 @@ export const approveUrl = (id: string, execId: string) => `${base(id)}/tools/${e
 export const cancelUrl = (id: string, runId: string) => `${base(id)}/runs/${encodeURIComponent(runId)}/cancel`
 export const CREATE_URL = '/api/runtime/sessions'
 
-export function createBody(a: { cwd: string; model: string; provider: string; title: string }): Record<string, string> {
+export function createBody(a: {
+  cwd: string; model: string; provider: string; title: string
+  /** UI follow-up 2: the task (and subtask) the wizard's task step chose — the engine files there. */
+  filing?: { taskId: string; subtaskId?: string } | null
+}): Record<string, string> {
   return {
     cwd: a.cwd,
     model: a.model,
     ...(a.provider ? { provider: a.provider } : {}),
     ...(a.title.trim() ? { title: a.title.trim() } : {}),
+    ...(a.filing ? { taskId: a.filing.taskId, ...(a.filing.subtaskId ? { subtaskId: a.filing.subtaskId } : {}) } : {}),
   }
+}
+
+/** PUT {taskId, subtaskId?} files (or moves) a native session on the board; DELETE unfiles it. */
+export function filingUrl(id: string): string {
+  return `${CREATE_URL}/${encodeURIComponent(id)}/filing`
+}
+
+const FILING_REASONS: Record<string, { en: string; pt: string }> = {
+  blocked: { en: 'that subtask is blocked by another one', pt: 'essa subtarefa está bloqueada por outra' },
+  no_such_task: { en: 'that task no longer exists', pt: 'essa tarefa não existe mais' },
+  no_such_subtask: { en: 'that subtask no longer exists', pt: 'essa subtarefa não existe mais' },
+  subtask_in_group: { en: 'a subtask inside a group cannot hold a session — file it on the group', pt: 'uma subtarefa dentro de um grupo não recebe sessão — arquive no grupo' },
+  wrong_delivery: { en: 'that subtask belongs to another task', pt: 'essa subtarefa é de outra tarefa' },
+  board_unavailable: { en: 'the board could not be reached', pt: 'o board não respondeu' },
+}
+
+/**
+ * The filing's outcome as the person reads it, or null when there is nothing to say (filed, or no
+ * filing asked). A refused filing leaves the session STARTED and unfiled — the sentence says both.
+ */
+export function filingSentence(filing: unknown, lang: 'pt' | 'en'): string | null {
+  const f = (filing && typeof filing === 'object' ? filing : null) as { ok?: unknown; reason?: unknown } | null
+  if (!f || f.ok !== false) return null
+  const reason = typeof f.reason === 'string' ? f.reason : ''
+  const words = FILING_REASONS[reason]
+  if (lang === 'pt') return words ? `A sessão começou, mas não foi arquivada: ${words.pt}.` : `A sessão começou, mas não foi arquivada (${reason}).`
+  return words ? `The session started, but was not filed: ${words.en}.` : `The session started, but was not filed (${reason}).`
 }
 
 /** The question a tool call's approval answers sits under that call's execution id. */

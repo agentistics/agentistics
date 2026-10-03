@@ -46,7 +46,13 @@
  * new causes arrive as `code: 'locked'` with the sentence and `lockedBy`. An engine built against 1.5
  * still loads; a 1.6 engine on a 1.5 host sees `undefined` for each new member and must cope.
  */
-export const ENGINE_API_VERSION = '1.6.0'
+/**
+ * 1.7.0 — native sessions filed on the board carry their cost: `NativeSessionLink` gains `label`,
+ * `cwd` and `usage` (`NativeSessionUsage`, the engine's own snapshot), and `tasks.reportNativeUsage`
+ * refreshes that snapshot for a session already filed. All optional, so a 1.6 engine still loads and
+ * a 1.7 engine on an older host files with no cost (the board then says "not measured").
+ */
+export const ENGINE_API_VERSION = '1.7.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

@@ -5,6 +5,8 @@ import {
   cancelUrl,
   configuredProviders,
   createBody,
+  filingSentence,
+  filingUrl,
   nativeHarnessAnswer,
   nativeRuntimeFrom,
   refusalSentence,
@@ -77,6 +79,10 @@ describe('the native session API', () => {
   test('createBody', () => {
     expect(createBody({ cwd: '/w', model: 'm', provider: 'anthropic', title: ' T ' })).toEqual({ cwd: '/w', model: 'm', provider: 'anthropic', title: 'T' })
     expect(createBody({ cwd: '/w', model: 'm', provider: '', title: '' })).toEqual({ cwd: '/w', model: 'm' })
+    // UI follow-up 2: the filing target, when the wizard's task step named one
+    expect(createBody({ cwd: '/w', model: 'm', provider: '', title: '', filing: { taskId: 't-1', subtaskId: 's-1' } }))
+      .toEqual({ cwd: '/w', model: 'm', taskId: 't-1', subtaskId: 's-1' })
+    expect(createBody({ cwd: '/w', model: 'm', provider: '', title: '', filing: { taskId: 't-1' } })).toEqual({ cwd: '/w', model: 'm', taskId: 't-1' })
   })
 
   test('refusalSentence: the engine’s own words, else a sentence per status', () => {
@@ -99,5 +105,18 @@ describe('optionLabel / formatDuration', () => {
     expect(isDenyOption('Deny')).toBe(true)
     expect(formatDuration(350)).toBe('350 ms')
     expect(formatDuration(1234)).toBe('1.2 s')
+  })
+})
+
+describe('filing a native session (UI follow-up 2)', () => {
+  test('filingUrl', () => {
+    expect(filingUrl('ses_1')).toBe('/api/runtime/sessions/ses_1/filing')
+  })
+  test('filingSentence: nothing when filed; the board\'s reason in words when refused', () => {
+    expect(filingSentence({ ok: true, id: 'native:x' }, 'en')).toBeNull()
+    expect(filingSentence(undefined, 'en')).toBeNull()
+    expect(filingSentence({ ok: false, reason: 'blocked' }, 'en')).toBe('The session started, but was not filed: that subtask is blocked by another one.')
+    expect(filingSentence({ ok: false, reason: 'blocked' }, 'pt')).toBe('A sessão começou, mas não foi arquivada: essa subtarefa está bloqueada por outra.')
+    expect(filingSentence({ ok: false, reason: 'weird' }, 'en')).toBe('The session started, but was not filed (weird).')
   })
 })

@@ -15,9 +15,10 @@ import type {
 import { groupMembers, isGroupMember, isGroupSubtask, legacyTaskId } from './task-model'
 import { conversationOwners, distinctConversations } from './task-conversations'
 import { isHistoricalRow } from './task-historical'
+import { isNativeRow, nativeRollupSession } from './task-native'
 import { rollupAttempt, type AttemptRollup, type RollupSession } from './task-rollup'
 import { scopedTaskStats, taskStats, type TaskStats } from './task-stats'
-import type { ManagedSession } from './types'
+import type { BoardRow } from './types'
 
 /** A rollup row: an attempt, or the sessions of a task that name no attempt. */
 export interface AttemptView {
@@ -55,6 +56,12 @@ export interface TaskSessionRow {
    * names no session, so a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /**
+   * True for a NATIVE session (`NativeSessionLink`): `harness` is `'agentistics'`, `id` is the
+   * engine's `ses_…` id (it opens at `/sessions/<id>` like any session, and unfiles by it), and its
+   * numbers are the engine's snapshot.
+   */
+  native?: boolean
   /** Null when the conversation is not in the store, or when its harness never recorded one — see
    *  `RollupSession.meta`. Read straight off `SessionMeta.model` (`data.ts` resolves it from the
    *  JSONL when not already in session-meta); never a second guess at what the session ran. */
@@ -140,11 +147,11 @@ export interface TaskDetail {
  * Callers that ask about many tasks pass `owners` (computed once, `conversationOwners(rows)`) instead
  * of paying for it per task.
  */
-export function rowsOfTask(
+export function rowsOfTask<R extends BoardRow>(
   task: Pick<Task, 'id'>,
-  rows: readonly ManagedSession[],
+  rows: readonly R[],
   owners: ReadonlyMap<string, string> = conversationOwners(rows),
-): ManagedSession[] {
+): R[] {
   return rows.filter(r =>
     (r.taskId === task.id
       || (r.task !== undefined && legacyTaskId(r.task) === task.id))
@@ -181,7 +188,7 @@ export { distinctConversations }
 export function subtaskSessionCount(
   task: Pick<Task, 'id'>,
   subtaskId: string,
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   owners?: ReadonlyMap<string, string>,
 ): number {
   return distinctConversations(rowsOfTask(task, rows, owners)).filter(r => r.subtaskId === subtaskId).length
@@ -191,7 +198,7 @@ export function subtaskSessionCount(
 export function subtaskHasSession(
   task: Pick<Task, 'id'>,
   subtaskId: string,
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   owners?: ReadonlyMap<string, string>,
 ): boolean {
   return subtaskSessionCount(task, subtaskId, rows, owners) > 0
@@ -208,7 +215,7 @@ export function subtaskHasSession(
  * is measured when it was estimated is precisely the confusion that field exists to prevent.
  */
 export function rollupSessionsFor(
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): RollupSession[] {
@@ -225,6 +232,8 @@ export function rollupSessionsFor(
   // anything, and it contributes no numbers anyway — the same rule `usage-dedupe.ts` applies to a
   // usage record with no message id, and `filedUnder` to an attachment.
   return distinctConversations(rows).map(r => {
+    // A NATIVE session's numbers are the engine's own snapshot (`task-native.ts`), never a meta.
+    if (isNativeRow(r)) return nativeRollupSession(r)
     const meta = r.conversationId ? metas.get(r.conversationId) ?? null : null
     return {
       rowId: r.id,
@@ -238,7 +247,7 @@ export function rollupSessionsFor(
 export function attemptViews(
   task: Task,
   attempts: readonly Attempt[],
-  allRows: readonly ManagedSession[],
+  allRows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): AttemptView[] {
@@ -330,7 +339,7 @@ export interface SubtaskView {
 export function subtaskViews(
   task: Task,
   subtasks: readonly Subtask[],
-  allRows: readonly ManagedSession[],
+  allRows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): SubtaskView[] {
@@ -413,7 +422,7 @@ export function groupVisibility(groupId: string, subtasks: readonly Subtask[]): 
  * the honest answer and not an empty repository.
  */
 export function reposOfRows(
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
 ): string[] {
   const out: string[] = []
@@ -429,7 +438,7 @@ export function reposOfRows(
 export function buildTaskList(o: {
   tasks: readonly Task[]
   attempts: readonly Attempt[]
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
@@ -462,7 +471,7 @@ export function buildTaskList(o: {
 export function buildTaskDetail(o: {
   task: Task
   attempts: readonly Attempt[]
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
@@ -514,10 +523,20 @@ export function buildTaskDetail(o: {
         ...(r.label ? { label: r.label } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
-        model: meta?.model ?? null,
-        tokens: meta ? sessionTokenTotal(meta) : null,
-        costUSD: meta ? o.costOf(meta) : null,
-        rounds: meta?.user_message_count ?? null,
+        ...(isNativeRow(r) ? { native: true } : {}),
+        ...(isNativeRow(r)
+          ? {
+            model: r.nativeUsage?.model ?? null,
+            tokens: r.nativeUsage?.tokens ?? null,
+            costUSD: r.nativeUsage?.costUSD ?? null,
+            rounds: r.nativeUsage?.rounds ?? null,
+          }
+          : {
+            model: meta?.model ?? null,
+            tokens: meta ? sessionTokenTotal(meta) : null,
+            costUSD: meta ? o.costOf(meta) : null,
+            rounds: meta?.user_message_count ?? null,
+          }),
       }
     }),
     // Newest last, the way a conversation reads.

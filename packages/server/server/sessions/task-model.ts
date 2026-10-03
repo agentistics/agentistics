@@ -630,6 +630,22 @@ export interface HistoricalSession {
   note?: string
 }
 
+/**
+ * A NATIVE session (the engine's runtime, `ses_…`) filed on the board — `@agentistics/engine-api`'s
+ * `NativeSessionLink`, which IS this record: the engine writes it only through
+ * `host.tasks.fileNative`, never by touching `tasks.json` (engine-interface spec §4.6). It lives on
+ * the board for the same reason `HistoricalSession` does — there is no fleet registry row behind a
+ * native session — and it carries the ENGINE's usage snapshot, because the engine is the only party
+ * that holds the session's model calls (`task-native.ts` turns it into a rollup row).
+ */
+import type { NativeSessionLink } from '@agentistics/engine-api'
+export type { NativeSessionLink, NativeSessionUsage } from '@agentistics/engine-api'
+
+/** `native:<sessionId>` — derived, never chosen by a caller. One link per session. */
+export function nativeLinkId(sessionId: string): string {
+  return `native:${sessionId}`
+}
+
 export interface TaskBook {
   tasks: Task[]
   attempts: Attempt[]
@@ -641,6 +657,8 @@ export interface TaskBook {
    * Always an array on a read (a book written before this existed carries none).
    */
   historicalSessions: HistoricalSession[]
+  /** Native sessions filed on a task — see `NativeSessionLink`. Always an array on a read. */
+  nativeSessions: NativeSessionLink[]
   /**
    * The status VOCABULARY — see `@agentistics/core`'s `taskStatus.ts`. Absent or empty means "never
    * seeded yet"; `task-source.ts`'s `ensureStatusesSeeded` fills it in, once, the first time the

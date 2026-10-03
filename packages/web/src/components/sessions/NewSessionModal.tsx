@@ -36,13 +36,13 @@ import { ProjectPicker } from './ProjectPicker'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useEngineCaps } from '../../hooks/useEngineCaps'
 import { useNativeProviders } from '../../hooks/useNativeProviders'
-import { CREATE_URL, NATIVE_HARNESS_ID, createBody, messagesUrl, refusalSentence, withNativeHarness } from '../../lib/nativeSession'
+import { CREATE_URL, NATIVE_HARNESS_ID, createBody, filingSentence, messagesUrl, refusalSentence, withNativeHarness } from '../../lib/nativeSession'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { HarnessMark } from './HarnessMark'
 import { TaskPicker } from '../tasks/TaskPicker'
 import { boardCopy } from '../tasks/copy'
 import { useFleet } from '../../lib/fleet'
-import { attachSession, useTaskList, type TaskDetail } from '../../lib/tasks'
+import { attachSession, createTask, useTaskList, type TaskDetail } from '../../lib/tasks'
 import { BlockedSubtaskResolve } from '../tasks/BlockedSubtaskResolve'
 import { deliveryHint, suggestDelivery } from '../../lib/taskSuggest'
 import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFleetNewOptions'
@@ -506,19 +506,33 @@ export function NewSessionModal({
   /**
    * A NATIVE session (UI.2): created by the engine (`POST /api/runtime/sessions`) — no process, no
    * tmux, so no fleet row to wait for — and the first message, when there is one, sent straight to
-   * it. Filing under a task is a fleet-session act and is not offered for a native one (see the
-   * "where" step). A refusal is the engine's own sentence (no stored key, the BETA flag off, …).
+   * it. A task picked on the "where" step travels WITH the create (UI follow-up 2): the engine files
+   * the session there once it exists, through the board's own rules, and a refusal leaves it started
+   * and unfiled — said on the bell, never silently filed elsewhere. A task named only by title (a
+   * caller's `initialTask`) is resolved to the board's task of that title, or created, exactly as
+   * `/api/fleet/new` does for a fleet session. A create refusal is the engine's own sentence.
    */
+  async function nativeFilingTarget(): Promise<{ taskId: string; subtaskId?: string } | null> {
+    if (subtaskTarget) return subtaskTarget
+    const title = task.trim()
+    if (!title) return null
+    const existing = taskRows?.find(r => r.task.title === title)?.task.id
+    if (existing) return { taskId: existing }
+    const created = await createTask(title).catch(() => null)
+    return created ? { taskId: created.id } : null
+  }
+
   async function startNative() {
     setBusy(true)
     setNotice(null)
     try {
+      const filing = await nativeFilingTarget()
       const res = await fetch(CREATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createBody({ cwd, model, provider: nativeProvider, title: label })),
+        body: JSON.stringify(createBody({ cwd, model, provider: nativeProvider, title: label, filing })),
       })
-      const json = await res.json().catch(() => null) as { session?: { sessionId: string } } | null
+      const json = await res.json().catch(() => null) as { session?: { sessionId: string }; filing?: unknown } | null
       const id = json?.session?.sessionId
       if (!res.ok || !id) {
         setBusy(false)
@@ -532,6 +546,8 @@ export function NewSessionModal({
           body: JSON.stringify({ clientRef: `wizard-${Date.now()}`, text: promptWithAttachments }),
         }).catch(() => null)
       }
+      const unfiled = filingSentence(json.filing, lang)
+      if (unfiled) pushNotification({ type: 'warning', code: 'sessions.native_unfiled', meta: { note: unfiled } })
       setBusy(false)
       onStarted(id, { harness: NATIVE_HARNESS_ID, ...(label ? { label } : {}) })
     } catch {
@@ -867,8 +883,7 @@ export function NewSessionModal({
             * metrics split between the two and nothing on screen saying so. The row menu had
             * already been fixed this way; the form that files most sessions had not.
             */}
-          {/* Filing under a task is a fleet-session act; a native session is not filed (UI.2). */}
-          {!isNative && (<>
+          {/* A native session is filed like a fleet one (UI follow-up 2) — the engine files it on create. */}
           <Field label={pt ? 'Tarefa (opcional)' : 'Task (optional)'} hint={pt
             ? 'Agrupa várias sessões como um trabalho só, e é o que permite reabrir todas de uma vez.'
             : 'Groups several sessions as one piece of work, and is what lets you reopen them all at once.'}>
@@ -928,7 +943,6 @@ export function NewSessionModal({
               onClose={() => setPickingTask(false)}
             />
           )}
-          </>)}
           </>)}
 
           {/* STEP 3 — WHAT. The first message, and the files it points at. */}

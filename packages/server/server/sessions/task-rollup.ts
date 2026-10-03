@@ -38,6 +38,12 @@ export interface RollupSession {
   costMeasured?: boolean
   /** Copilot only. Never converted, never summed with `costUSD`. */
   credits?: SessionCredits
+  /**
+   * A NATIVE session (`task-native.ts`): no `SessionMeta` exists for it (its harness is the native
+   * runtime, not a `HarnessId`), so its figures arrive here instead. `reported` is false until the
+   * engine has stated any — such a session is used but not linked, exactly like a dead registry link.
+   */
+  native?: { harness: 'agentistics'; tokens: number | null; rounds: number | null; reported: boolean }
 }
 
 export interface AttemptRollup {
@@ -81,9 +87,10 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
   const provenance: Record<LinkProvenance, number> = { assigned: 0, observed: 0, none: 0 }
   for (const s of o.sessions) provenance[s.provenance] += 1
 
-  const linked = o.sessions.filter(s => s.meta !== null)
+  const linked = o.sessions.filter(s => s.meta !== null || s.native?.reported === true)
 
   const tokens = sumOrNull(linked.map(s => {
+    if (s.native) return s.native.tokens
     const m = s.meta!
     const has = m.input_tokens !== undefined || m.output_tokens !== undefined
       || m.cache_read_input_tokens !== undefined || m.cache_creation_input_tokens !== undefined
@@ -99,7 +106,7 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
     costByHarness = {}
     for (const s of o.sessions) {
       if (typeof s.costUSD !== 'number' || !Number.isFinite(s.costUSD)) continue
-      const h = s.meta ? (s.meta.harness ?? 'claude') : ''
+      const h = s.native ? s.native.harness : s.meta ? (s.meta.harness ?? 'claude') : ''
       costByHarness[h] = (costByHarness[h] ?? 0) + s.costUSD
     }
   }
@@ -114,8 +121,9 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
     sessionsUsed: o.sessions.length,
     sessionsLinked: linked.length,
     provenance,
-    rounds: sumOrNull(linked.map(s => s.meta!.user_message_count)),
-    activeMinutes: sumOrNull(linked.map(s => s.meta!.active_minutes)),
+    rounds: sumOrNull(linked.map(s => (s.native ? s.native.rounds : s.meta!.user_message_count))),
+    // The engine states no active time yet: a native session adds none (absent, never zero).
+    activeMinutes: sumOrNull(linked.map(s => (s.native ? null : s.meta!.active_minutes))),
     tokens,
     costUSD,
     costByHarness,

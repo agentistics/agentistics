@@ -14,7 +14,7 @@
 import type { SessionMeta } from '@agentistics/core'
 import { sessionTokens, type TokenBreakdown } from '@agentistics/core'
 import { distinctConversations } from './task-conversations'
-import type { ManagedSession } from './types'
+import type { BoardRow } from './types'
 
 export interface Bucket {
   key: string
@@ -145,7 +145,7 @@ export function taskStats(o: {
  * instead of one metric.
  */
 export function scopedTaskStats(o: {
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   createdAt: string
   deliveredAt?: string
@@ -196,7 +196,7 @@ export function scopedTaskStats(o: {
  */
 export function subtaskStats(o: {
   subtaskId: string | null
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   createdAt: string
   deliveredAt?: string
