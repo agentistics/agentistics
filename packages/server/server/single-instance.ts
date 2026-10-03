@@ -291,3 +291,27 @@ export async function probeInstanceLock(file: string, probe: LockProbe = OS_PROB
   if (holder === undefined) return null
   return (await holdsLock(file, holder, probe, ticks)) ? holder : null
 }
+
+/** How long a start made by the service manager waits for another server to let go of the data dir. */
+export const SERVICE_LOCK_WAIT = { timeoutMs: 10 * 60_000, pollMs: 5_000 } as const
+
+/**
+ * `probeInstanceLock`, but WAITING (bounded) while a live holder keeps the lock — what `agentop
+ * server` asks first when the service manager started it, so its early check applies the same wait
+ * as `index.ts`'s `waitForInstanceLock` instead of exiting before that wait is ever reached. Claims
+ * nothing. Returns the holder still there at the deadline, or `null` once the data dir is free.
+ */
+export async function waitForInstanceFree(
+  file: string,
+  o: { timeoutMs: number; pollMs: number; probe?: LockProbe; onWait?: (holder: number) => void; sleep?: (ms: number) => Promise<void> },
+): Promise<number | null> {
+  const deadline = Date.now() + o.timeoutMs
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  let told = false
+  for (;;) {
+    const holder = await probeInstanceLock(file, o.probe ?? OS_PROBE)
+    if (holder === null || Date.now() >= deadline) return holder
+    if (!told) { told = true; o.onWait?.(holder) }
+    await sleep(Math.min(o.pollMs, Math.max(1, deadline - Date.now())))
+  }
+}

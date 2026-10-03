@@ -910,9 +910,16 @@ if (command === 'server' || command === 'start' || !command) {
   // start, and a service manager restarting one every five seconds, paid that each time (190 times
   // on 2026-10-03). The probe claims nothing; the claim in index.ts stays the authority.
   {
-    const { probeInstanceLock } = await import('../server/single-instance.ts')
+    const { probeInstanceLock, waitForInstanceFree, SERVICE_LOCK_WAIT } = await import('../server/single-instance.ts')
     const { serverLockFile, AGENTISTICS_DATA_DIR } = await import('../server/config.ts')
-    const holder = await probeInstanceLock(serverLockFile())
+    // Started by the service manager (systemd sets INVOCATION_ID): the SAME bounded wait as index.ts's
+    // claim, or this early check would exit 75 before that wait is ever reached. By hand: at once.
+    const holder = process.env.INVOCATION_ID
+      ? await waitForInstanceFree(serverLockFile(), {
+          ...SERVICE_LOCK_WAIT,
+          onWait: pid => console.log(`[startup] another agentop server (pid ${pid}) holds ${AGENTISTICS_DATA_DIR} — waiting for it to stop (up to 10 min), then starting`),
+        })
+      : await probeInstanceLock(serverLockFile())
     if (holder !== null) {
       const { EXIT_INSTANCE_HELD } = await import('../server/service-exit.ts')
       console.error(

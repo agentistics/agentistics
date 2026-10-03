@@ -172,7 +172,7 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
 // megabytes. And two processes started in the same second both pass a "is the port free?" check,
 // which is precisely how two of those four arrived.
 {
-  const { claimInstanceLock, waitForInstanceLock } = await import('./single-instance')
+  const { claimInstanceLock, waitForInstanceLock, SERVICE_LOCK_WAIT } = await import('./single-instance')
   const { serverLockFile } = await import('./config')
   const { AGENTISTICS_DATA_DIR: LOCK_DIR } = await import('./config')
   // Started by the service manager (systemd sets INVOCATION_ID): WAIT, bounded, for a server started
@@ -180,7 +180,7 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   // (2026-10-03: ten minutes after a reboot). A start by hand still exits at once, with the sentence.
   const lock = process.env.INVOCATION_ID
     ? await waitForInstanceLock(serverLockFile(), {
-        timeoutMs: 10 * 60_000, pollMs: 5_000,
+        ...SERVICE_LOCK_WAIT,
         onWait: holder => console.log(`[startup] another agentop server${holder ? ` (pid ${holder})` : ''} holds ${LOCK_DIR} — waiting for it to stop (up to 10 min), then starting`),
       })
     : await claimInstanceLock(serverLockFile())

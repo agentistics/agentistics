@@ -254,3 +254,31 @@ test('waitForInstanceLock: bounded — a holder that never lets go is still refu
   expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
   await first.release()
 })
+
+// The CLI's early check (`agentop server`, before anything loads) under the service manager: the
+// same bounded wait as index.ts's claim, so a unit start is not refused before that wait runs.
+import { waitForInstanceFree } from './single-instance'
+
+test('waitForInstanceFree: waits for the holder to let go, claims nothing, then answers free', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const waits: number[] = []
+  setTimeout(() => { void first.release() }, 30)
+  expect(await waitForInstanceFree(file, { timeoutMs: 5_000, pollMs: 10, onWait: h => { waits.push(h) } })).toBeNull()
+  expect(waits).toEqual([process.pid])
+  // A probe claims nothing: the data dir is still free for index.ts's claim.
+  const claim = await claimInstanceLock(file, 4242)
+  expect(claim.ok).toBe(true)
+  if (claim.ok) await claim.release()
+})
+
+test('waitForInstanceFree: bounded — a holder that never lets go is still reported at the deadline', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const t0 = Date.now()
+  expect(await waitForInstanceFree(file, { timeoutMs: 60, pollMs: 10 })).toBe(process.pid)
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
+  await first.release()
+})
