@@ -816,6 +816,10 @@ export interface ControlSession {
   fell?: boolean
   /** Already-formatted token count, when this row's conversation has metrics. */
   tokens?: string
+  /** SS-05: the four counters, formatted; `null` = not recorded by the harness (drawn N/A). */
+  tokenParts?: { input: string | null; output: string | null; cacheRead: string | null; cacheWrite: string | null }
+  /** SS-05: the person's turn count, when recorded. */
+  turns?: number
   /** Already-formatted cost, same. */
   cost?: string
   /**

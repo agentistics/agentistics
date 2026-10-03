@@ -571,6 +571,113 @@ export interface DetailLine {
    * line, which carries `say` but no verified author.
    */
   role?: 'user' | 'assistant'
+  /** SS-03…05: this line is the detail pane's tab strip — drawn as tabs, the active one inverted. */
+  tabs?: { items: readonly string[]; active: number; hint: string }
+}
+
+// ── the detail pane's tabs (SS-03 chat · SS-04 terminal · SS-05 metrics) ─────────────────────────
+
+export type DetailTab = 'chat' | 'terminal' | 'metrics'
+export const DETAIL_TABS: readonly DetailTab[] = ['chat', 'terminal', 'metrics']
+
+export interface DetailTabWords {
+  tabs: Record<DetailTab, string>
+  /** `← → switch` */
+  hint: string
+  chatNative: string
+  chatExternal: string
+  chatUnlinked: string
+  chatClosed: string
+  termCaptured: string
+  termNative: string
+  termExternal: string
+  termClosed: string
+  termEmpty: string
+  tokens: string
+  input: string
+  output: string
+  cacheRead: string
+  cacheWrite: string
+  notRecorded: string
+  cost: string
+  costNote: string
+  context: string
+  contextNA: string
+  turns: string
+  metricsNone: string
+  metricsNative: string
+}
+
+/** The tab after `tab`, `step` along (wrapping) — PURE. */
+export function stepDetailTab(tab: DetailTab, step: number): DetailTab {
+  const i = DETAIL_TABS.indexOf(tab)
+  return DETAIL_TABS[(i + step + DETAIL_TABS.length) % DETAIL_TABS.length]!
+}
+
+/** The keys of `detailLines` that belong to a tab's body rather than to the facts under it. */
+const BODY_KEY = /^(chat\d+|say\d+|metrics|context|conv)$/
+
+/**
+ * The detail pane with tabs — PURE. The strip, then the active tab's BODY, then the facts every tab
+ * keeps (where · task · model · note · started · detach · the caveats, from `detailLines`).
+ *
+ * - chat: the conversation read off its transcript (`chatTurns`, the exact link only); otherwise a
+ *   sentence saying why nothing is shown — never the screen dressed as a conversation.
+ * - terminal: the captured frame (`lastLines`) of a session agentop hosts; native and external say
+ *   why there is none.
+ * - metrics: all four counters (N/A where the harness did not record one), cost (api-equivalent),
+ *   the context gauge or N/A with the reason, and turns.
+ */
+export function detailTabLines(
+  s: ControlSession,
+  tab: DetailTab,
+  base: readonly DetailLine[],
+  w: DetailTabWords,
+): DetailLine[] {
+  const native = s.harness === 'agentistics'
+  const external = !s.actionable && s.state !== 'closed'
+  const sentence = (key: string, value: string): DetailLine => ({ key, label: '', value, note: true })
+  const body: DetailLine[] = []
+  if (tab === 'chat') {
+    const turns = base.filter(l => /^chat\d+$/.test(l.key))
+    if (turns.length > 0) body.push(...turns)
+    else if (native) body.push(sentence('why', w.chatNative))
+    else if (external) body.push(sentence('why', w.chatExternal))
+    else if (s.state === 'closed') body.push(sentence('why', w.chatClosed))
+    else body.push(sentence('why', w.chatUnlinked))
+    const conv = base.find(l => l.key === 'conv')
+    if (conv) body.push(conv)
+  } else if (tab === 'terminal') {
+    if (native) body.push(sentence('why', w.termNative))
+    else if (external) body.push(sentence('why', w.termExternal))
+    else if (s.state === 'closed') body.push(sentence('why', w.termClosed))
+    else if (s.lastLines?.length) {
+      body.push(sentence('cap', w.termCaptured))
+      s.lastLines.forEach((line, i) => body.push({ key: `frame${i}`, label: '', value: line, say: true }))
+    } else body.push(sentence('why', w.termEmpty))
+  } else {
+    const p = s.tokenParts
+    if (p || s.tokens || s.cost) {
+      const na = w.notRecorded
+      if (p) {
+        body.push({ key: 'tok', label: w.tokens, value: s.tokens ?? '' })
+        body.push({ key: 'in', label: w.input, value: p.input ?? na })
+        body.push({ key: 'out', label: w.output, value: p.output ?? na })
+        body.push({ key: 'cr', label: w.cacheRead, value: p.cacheRead ?? na })
+        body.push({ key: 'cw', label: w.cacheWrite, value: p.cacheWrite ?? na })
+      } else if (s.tokens) body.push({ key: 'tok', label: w.tokens, value: s.tokens })
+      body.push({ key: 'cost', label: w.cost, value: s.cost ? `${s.cost}  ·  ${w.costNote}` : na })
+    } else body.push(sentence('why', native ? w.metricsNative : w.metricsNone))
+    body.push(s.context
+      ? { key: 'ctx', label: w.context, value: `${s.context.label}  ·  ${s.context.used} / ${s.context.window}` }
+      : { key: 'ctx', label: w.context, value: w.contextNA })
+    if (s.turns) body.push({ key: 'turns', label: w.turns, value: String(s.turns) })
+  }
+  const strip: DetailLine = {
+    key: 'tabs', label: '', value: DETAIL_TABS.map(t => w.tabs[t]).join('  '),
+    tabs: { items: DETAIL_TABS.map(t => w.tabs[t]), active: DETAIL_TABS.indexOf(tab), hint: w.hint },
+  }
+  return [strip, ...body, ...base.filter(l => !BODY_KEY.test(l.key))]
 }
 
 /**

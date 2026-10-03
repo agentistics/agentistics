@@ -1362,6 +1362,8 @@ export type SessionsIntent =
   | { kind: 'layout' }
   /** SS-01: `g` — group by the next of task · harness · state. */
   | { kind: 'cycleGroup' }
+  /** SS-03…05: `←` `→` on the list switch the detail pane's tab (chat · terminal · metrics). */
+  | { kind: 'detailTab'; step: number }
   | { kind: 'pin' }
   | { kind: 'verb'; action: SessionAction }
   | { kind: 'move' }
@@ -1444,6 +1446,8 @@ export function resolveSessionsKey(key: KeyPress, ctx: {
     case 'R': return { kind: 'verb', action: 'reopenFell' }
   }
 
+  if (!ctx.grid && key.leftArrow) return { kind: 'detailTab', step: -1 }
+  if (!ctx.grid && key.rightArrow) return { kind: 'detailTab', step: 1 }
   if (key.upArrow || key.downArrow || input === 'j' || input === 'k' || input === 'G') {
     return { kind: 'move' }
   }

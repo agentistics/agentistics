@@ -47,6 +47,10 @@ export interface ControlStrings {
    * the bar and in the frame around it.
    */
   tabsShort: Record<TabId, string>
+  /** SS-03…05: the footer hint for ← → on the list. */
+  keySessionsDetailTab: string
+  /** SS-03…05: the detail pane's tabs. */
+  sessionsDetailTabs: import('./session-fleet').DetailTabWords
   /** SS-01: the sentence `g` leaves. */
   sessionsGroupedBy: (grouping: string) => string
 
@@ -835,6 +839,26 @@ const EN: ControlStrings = {
     contribute: 'Contribute',
   },
 
+  sessionsDetailTabs: {
+    tabs: { chat: 'chat', terminal: 'terminal', metrics: 'metrics' },
+    hint: '← → switch',
+    chatNative: 'A native session: its conversation is in the code tab — enter opens it there.',
+    chatExternal: 'agentop did not start this assistant and its conversation is not linked, so nothing is shown rather than a guess. t files it under a task.',
+    chatUnlinked: 'No conversation is linked to this session exactly, so none is shown — the terminal tab has its screen.',
+    chatClosed: 'Not running, and no conversation is linked to it exactly — enter reopens it where it can be.',
+    termCaptured: 'captured on the last poll · enter attaches',
+    termNative: 'A native session has no terminal to capture: the conversation is the session. enter opens it in code.',
+    termExternal: 'Nothing to capture: agentop did not start this process.',
+    termClosed: 'Not running: there is no screen to capture.',
+    termEmpty: 'Nothing captured from its screen yet.',
+    tokens: 'tokens', input: 'input', output: 'output', cacheRead: 'cache read', cacheWrite: 'cache write',
+    notRecorded: 'N/A · not recorded',
+    cost: 'cost', costNote: 'api-equivalent estimate',
+    context: 'context', contextNA: 'N/A — no window reported or verified for this model',
+    turns: 'turns',
+    metricsNone: 'No metrics: no conversation with recorded usage is linked to this session.',
+    metricsNative: 'Its usage is in the code tab\'s panel (enter opens it); the fleet carries no native counters yet.',
+  },
   sessionsGroupedBy: g => `Grouped by ${({ task: 'task', harness: 'harness', status: 'state' } as Record<string, string>)[g] ?? g} — g groups by the next one.`,
   tabsShort: {
     home: 'home',
@@ -1280,6 +1304,7 @@ const EN: ControlStrings = {
   keySessionsNoTask: 'u unfiled',
   keyTabsAlt: '[ ] screens',
   keyAsideSection: '1-9 ←→ section',
+  keySessionsDetailTab: '←→ chat·terminal·metrics',
   sessionsNoTaskHidden: 'unfiled: hidden',
   sessionsNoTaskShown: 'unfiled: shown',
   wizHarness: 'Which assistant?',
@@ -1432,6 +1457,26 @@ const PT: ControlStrings = {
     contribute: 'Contribuir',
   },
 
+  sessionsDetailTabs: {
+    tabs: { chat: 'chat', terminal: 'terminal', metrics: 'métricas' },
+    hint: '← → alterna',
+    chatNative: 'Sessão nativa: a conversa está na aba código — enter abre lá.',
+    chatExternal: 'O agentop não iniciou este assistente e a conversa não está vinculada, então nada é mostrado em vez de um palpite. t arquiva numa tarefa.',
+    chatUnlinked: 'Nenhuma conversa está vinculada exatamente a esta sessão, então nenhuma é mostrada — a aba terminal tem a tela.',
+    chatClosed: 'Não está rodando, e nenhuma conversa está vinculada exatamente — enter reabre onde der.',
+    termCaptured: 'capturada no último poll · enter anexa',
+    termNative: 'Uma sessão nativa não tem terminal para capturar: a conversa é a sessão. enter abre no código.',
+    termExternal: 'Nada a capturar: o agentop não iniciou este processo.',
+    termClosed: 'Não está rodando: não há tela para capturar.',
+    termEmpty: 'Nada capturado da tela ainda.',
+    tokens: 'tokens', input: 'entrada', output: 'saída', cacheRead: 'cache lido', cacheWrite: 'cache escrito',
+    notRecorded: 'N/A · não registrado',
+    cost: 'custo', costNote: 'estimativa equivalente à API',
+    context: 'contexto', contextNA: 'N/A — janela não informada nem verificada para o modelo',
+    turns: 'turnos',
+    metricsNone: 'Sem métricas: nenhuma conversa com uso registrado está vinculada a esta sessão.',
+    metricsNative: 'O uso está no painel da aba código (enter abre); a frota ainda não traz contadores nativos.',
+  },
   sessionsGroupedBy: g => `Agrupado por ${({ task: 'tarefa', harness: 'harness', status: 'estado' } as Record<string, string>)[g] ?? g} — g agrupa pelo próximo.`,
   tabsShort: {
     home: 'início',
@@ -1862,6 +1907,7 @@ const PT: ControlStrings = {
   keySessionsNoTask: 'u sem tarefa',
   keyTabsAlt: '[ ] telas',
   keyAsideSection: '1-9 ←→ seção',
+  keySessionsDetailTab: '←→ chat·terminal·métricas',
   sessionsNoTaskHidden: 'sem tarefa: ocultas',
   sessionsNoTaskShown: 'sem tarefa: visíveis',
   wizHarness: 'Qual assistente?',

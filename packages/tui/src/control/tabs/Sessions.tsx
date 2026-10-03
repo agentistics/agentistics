@@ -88,7 +88,7 @@ import { Question as WrappedText } from '../Surface'
 import { SessionWizard } from './SessionWizard'
 import { TaskChoice } from '../TaskChoice'
 import {
-  GROUPINGS, breadcrumb, detailLines, groupSessions, selectableIndexes, selectedRow, idAtRow, searchArrangement, sessionCells, sessionRows,
+  GROUPINGS, breadcrumb, detailLines, detailTabLines, stepDetailTab, type DetailTab, groupSessions, selectableIndexes, selectedRow, idAtRow, searchArrangement, sessionCells, sessionRows,
   QUESTION_ROWS, askRows, fitApprovalPreview, actionLabels, asideRows, asideSelectable,
   asideRowKey, resolveAsideCursor,
   enabledActionIndexes, filterSessions,
@@ -122,6 +122,7 @@ import {
 import { isActivation, wheelDelta } from '../mouse'
 import { usePointer } from '../pointer'
 import { truncate } from '../../components/Primitives'
+import { wrapText } from '../code'
 import { COLORS, HARNESS_COLOR } from '../../theme'
 import type { ContextLevel } from '../sessions'
 
@@ -625,7 +626,8 @@ export function Sessions({
     && (selected!.state === 'working' || selected!.state === 'waiting'
       || selected!.state === 'waiting-approval')
 
-  const detail = useMemo(() => (selected ? detailLines(selected, {
+  const [detailTab, setDetailTab] = useState<DetailTab>('chat')
+  const detail = useMemo(() => (selected ? detailTabLines(selected, detailTab, detailLines(selected, {
     where: s.sessionsWhere,
     model: s.sessionsModel,
     note: s.sessionsNote,
@@ -646,8 +648,8 @@ export function Sessions({
     // The clock arithmetic happens HERE, not in the pure module and not in the string table: the
     // host reports the INSTANT a session started, and the pane repaints far more often than the
     // poll runs, so a duration computed anywhere upstream would freeze at whatever it was.
-  }, startedAt => s.sessionsAgo(Math.max(0, Math.round((Date.now() - startedAt) / 1000)))) : []),
-  [selected, s, fleet?.detachHint])
+  }, startedAt => s.sessionsAgo(Math.max(0, Math.round((Date.now() - startedAt) / 1000)))), s.sessionsDetailTabs) : []),
+  [selected, s, fleet?.detachHint, detailTab])
   // A question needs room whether or not the detail pane earned any, so it sets the floor. The
   // cockpit reserves `QUESTION_ROWS` for the same reason: a prompt with nowhere to draw is a prompt
   // the user cannot answer.
@@ -1221,6 +1223,9 @@ export function Sessions({
       case 'enter':
         if (selected) return runAction('attach')
         return runAction('new')
+      case 'detailTab':
+        setDetailTab(t => stepDetailTab(t, intent.step))
+        return
       case 'cycleGroup': {
         const next = nextCycleGrouping(grouping)
         setGrouping(next)
@@ -1425,7 +1430,7 @@ export function Sessions({
             capture: false,
             claimArrows: true,
             claimKeys: CLAIMED_KEYS,
-            hints: [s.keyQuit, s.keyTabsAlt, s.keyPane, s.keyBack, s.keyMove, s.keySessionsAttach],
+            hints: [s.keyQuit, s.keyTabsAlt, s.keyPane, s.keyBack, s.keySessionsDetailTab, s.keyMove, s.keySessionsAttach],
           }
         : {
             // The LIST claims the arrows too, which is the whole reason `[`/`]` exist. `←`/`→` had
@@ -1440,7 +1445,7 @@ export function Sessions({
               // of ordinary verbs under a red list would be the footer contradicting the screen.
               ? [s.keySessionsStopPick, s.keySessionsStopRun, s.keySessionsStopLeave, s.keyMove]
               : [
-              s.keyQuit, s.keyTabsAlt, narrow ? s.keyPane : s.keySessionsActions, s.keyAsideSection,
+              s.keyQuit, s.keyTabsAlt, narrow ? s.keyPane : s.keySessionsActions, s.keySessionsDetailTab,
               s.keySessionsAttach, s.keyMove,
               // Named only where the key actually does something on the selected row. The footer is
               // the only documentation this screen has, and a hint for an inert key is the one bug
@@ -2803,10 +2808,23 @@ function Detail({ lines, width, rows }: {
   rows: number
 }) {
   const labelWidth = Math.max(...lines.map(l => l.label.length), 0)
+  // A sentence (a caveat with no label) WRAPS rather than truncating: cut mid-word it stops saying
+  // why (SS-03/04 — "enter opens it i…"). Facts stay one line each.
+  const valueWidth = Math.max(1, width - labelWidth - 2)
+  const shown = lines.flatMap(l => (l.note && !l.label && !l.tabs && l.value.length > valueWidth
+    ? wrapText(l.value, valueWidth).map((value, i) => ({ ...l, key: `${l.key}~${i}`, value }))
+    : [l]))
 
   return (
     <Box flexDirection="column">
-      {lines.slice(0, Math.max(0, rows)).map(l => (
+      {shown.slice(0, Math.max(0, rows)).map(l => l.tabs ? (
+        <Text key={l.key} wrap="truncate">
+          {l.tabs.items.map((t, i) => (
+            <Text key={t} inverse={i === l.tabs!.active} bold={i === l.tabs!.active} dimColor={i !== l.tabs!.active}>{` ${t} `}</Text>
+          ))}
+          <Text dimColor>{`  ${l.tabs.hint}`}</Text>
+        </Text>
+      ) : (
         <Text key={l.key} wrap="truncate" dimColor={l.note}>
           {l.label ? <Text dimColor>{l.label.padEnd(labelWidth)}  </Text> : <Text>{' '.repeat(labelWidth + 2)}</Text>}
           {/*

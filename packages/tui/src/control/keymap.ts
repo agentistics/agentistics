@@ -121,7 +121,7 @@ export const SESSIONS: KeySection = {
     { keys: 'g', action: w('group by task · harness · state (each press: the next)', 'agrupar por tarefa · harness · estado (cada toque: o próximo)') },
     { keys: 'tab / shift+tab', action: w('between the list and the menu (narrow: menu · sessions · detail)', 'entre a lista e o menu (estreito: menu · sessões · detalhe)') },
     { keys: '1-9', action: w('jump to a menu section', 'ir a uma seção do menu') },
-    { keys: '← →', action: w('menu: previous / next section · cards: previous / next card', 'menu: seção anterior / seguinte · cartões: cartão anterior / seguinte') },
+    { keys: '← →', action: w('list: the detail tab (chat · terminal · metrics) · menu: previous / next section · cards: previous / next card', 'lista: a aba do detalhe (chat · terminal · métricas) · menu: seção anterior / seguinte · cartões: cartão anterior / seguinte') },
     { keys: 'esc', action: w('drop the search, then the project, then the task · leave the menu', 'tirar a busca, depois o projeto, depois a tarefa · sair do menu') },
     { keys: 'o', action: w('attach — hand the terminal to the session', 'anexar — entregar o terminal à sessão') },
     { keys: 'a / y', action: w('answer its question', 'responder à pergunta dela') },
