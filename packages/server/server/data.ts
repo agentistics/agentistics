@@ -1,3 +1,4 @@
+import { createBuildTimer } from './build-timer'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, HarnessId, WorkflowRun } from '@agentistics/core'
@@ -760,6 +761,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
   const timeoutMs = 300_000 // 5 minutes
 
   const buildPromise = async () => {
+    const timer = createBuildTimer()
     onProgress('statsCache', 0)
     onProgress('sessions', 0)
     onProgress('health', 0)
@@ -785,6 +787,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
         .then(v => { onProgress('health', 1); return v }),
     ])
 
+    timer.mark('read')
     onProgress('projects', 0)
     const knownIds = new Set(metaMap.keys())
     const parseCache = PARSE_CACHE_ENABLED ? await openParseCache() : NOOP_PARSE_CACHE
@@ -808,6 +811,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // disk, never a build.
     void gcGitStatsCache(Date.now() - 30 * 24 * 60 * 60 * 1000).catch(() => {})
     onProgress('projects', 1, String(projects.length))
+    timer.mark('projects')
     // Every path the Claude walk has already asked git about — including the ones that turned out
     // not to be repositories. `resolveProjectFacts` below skips these rather than re-reading them.
     const gitResolvedPaths = new Set(projects.map(p => p.path))
@@ -925,9 +929,11 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // MUST run AFTER supplementStatsCache so non-Claude sessions never corrupt Claude totals.
     const { getEnabledAdapters } = await import('./adapters/types')
     const extraHarnessSessions: SessionMeta[] = []
+    timer.mark('consolidate')
     for (const adapter of await getEnabledAdapters()) {
       if (adapter.id === 'claude') continue // already loaded above
       const extra = await adapter.loadSessions().catch(() => [] as SessionMeta[])
+      timer.mark(adapter.id)
       for (const s of extra) {
         // Key by (harness, session_id) so IDs never collide across harnesses
         sessions.push(s)
@@ -958,7 +964,9 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     //
     // It runs BEFORE the writeConsolidated below, so the remote reaches the store — and therefore
     // the uploader and the central, which has no filesystem to recover it from.
+    timer.mark('harnesses')
     await resolveProjectFacts(sessions, projects, gitResolvedPaths)
+    timer.mark('projectFacts')
 
     // --- The user's own session names ---
     // A label someone typed in the session manager is the ONE label nothing upstream may overwrite,
@@ -1159,6 +1167,8 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
 
     const totalTokens = dedupedSessions.reduce((sum, s) => sum + sessionTokenTotal(s), 0)
     onProgress('finalizing', 1, String(totalTokens))
+    timer.mark('finalize')
+    console.log(`[data] ${timer.line()}`)
 
     // The shadow journal (P1 §5): a flagged, additional consumer of the transcripts just read. It is NOT
     // awaited — `shadowIngest` never rejects, and a build's latency must never include it — and with
