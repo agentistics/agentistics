@@ -63,6 +63,7 @@ export const EVERYWHERE: KeySection = {
     { keys: '[ ]', action: w('previous / next screen — always, whatever has the keyboard', 'tela anterior / seguinte — sempre, esteja o teclado onde estiver') },
     { keys: '← →', action: w('previous / next screen, where the screen does not use the arrows', 'tela anterior / seguinte, onde a tela não usa as setas') },
     { keys: '?', action: w('this help — every key, by screen', 'esta ajuda — todas as teclas, por tela') },
+    { keys: 'ctrl+p', action: w('the command palette — every command, with its shortcut', 'a paleta de comandos — todos os comandos, com o atalho') },
     { keys: 'q', action: w('quit', 'sair') },
     { keys: 'ctrl+c', action: w('quit, even from a question or the code composer', 'sair, mesmo de uma pergunta ou do compositor do code') },
     { keys: 'r', action: w('re-read what is on screen', 'reler o que está na tela') },

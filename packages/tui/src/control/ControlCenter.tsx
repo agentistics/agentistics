@@ -45,6 +45,9 @@ import { HardwareTab } from './tabs/HardwareTab'
 import { Code } from './tabs/Code'
 import { Home } from './tabs/Home'
 import { Tasks } from './tabs/Tasks'
+import { Palette } from './PaletteOverlay'
+import { PALETTE_COMMANDS, filterCommands, whyNot, type PaletteCommand, type PaletteContext } from './palette'
+import type { CodeIntent } from './code'
 import type { CodeLaunch } from './code-types'
 import { writeFrame } from './altScreen'
 
@@ -464,16 +467,24 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // every claim to them means a screen that never reports cannot inherit a stale `true` and lock
   // the global keys with no owner left to release them.
   const reports = tab === 'services' || tab === 'sessions' || tab === 'backup' || tab === 'dashboard'
-    || tab === 'logs' || tab === 'code'
+    || tab === 'logs' || tab === 'code' || tab === 'home' || tab === 'tasks'
   /**
    * The key reference (`?`, GL-04). While it is open it owns the keyboard: every screen stands down
    * (`isActive` below), the global keys stand down, and the footer names only its own keys.
    */
   const [helpOpen, setHelpOpen] = useState(false)
+  // GL-03: the command palette. It owns the keyboard while open, like the help overlay.
+  const [palette, setPalette] = useState<{ query: string; sel: number } | null>(null)
+  const openPalette = useCallback(() => setPalette({ query: '', sel: 0 }), [])
+  /** Help or palette: either owns the body and the keyboard while it is up. */
+  const overlayOpen = helpOpen || palette !== null
+  const [paletteCtx, setPaletteCtx] = useState<Omit<PaletteContext, 'hasCode'>>({ sessionOpen: false, running: false, askWithDiff: false })
+  // A command the palette sends to the `code` tab — a new object each time, so the tab performs it once.
+  const [codeCommand, setCodeCommand] = useState<{ intent: CodeIntent } | undefined>(undefined)
   const [helpTop, setHelpTop] = useState(0)
   const openHelp = useCallback(() => { setHelpTop(0); setHelpOpen(true) }, [])
 
-  const capturing = (chrome.capture && reports) || helpOpen
+  const capturing = (chrome.capture && reports) || helpOpen || palette !== null
   const arrowsClaimed = Boolean(chrome.claimArrows) && reports
   const claimedKeys = reports ? (chrome.claimKeys ?? []) : []
 
@@ -504,6 +515,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         case 'refresh': return void refresh()
         case 'mouse': return toggleMouse()
         case 'help': return openHelp()
+        case 'palette': return openPalette()
       }
     }
 
@@ -533,6 +545,34 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     )
     if (next !== null) setHelpTop(next)
   }, { isActive: helpOpen })
+
+  const paletteList = palette ? filterCommands(palette.query, lang) : []
+  const fullCtx: PaletteContext = { hasCode: Boolean(host.code), ...paletteCtx }
+  const runCommand = (c: PaletteCommand) => {
+    const why = whyNot(c, fullCtx, lang)
+    if (why) { say({ ok: false, message: why }); return }
+    setPalette(null)
+    // GL-06: the command leaves its own sentence — never the previous one left standing.
+    if (c.run.kind !== 'quit' && c.run.kind !== 'help') say({ ok: true, message: `${c.label} — ${c.description[lang]}` })
+    const r = c.run
+    switch (r.kind) {
+      case 'tab': setTab(r.tab); return
+      case 'help': openHelp(); return
+      case 'quit': onExit({ kind: 'quit', code: 0 }); return
+      case 'lang': switchLang(lang === 'pt' ? 'en' : 'pt'); return
+      case 'code': setCodeCommand({ intent: r.intent }); setTab('code'); return
+      case 'later': return
+    }
+  }
+  useInput((input, key) => {
+    if (!palette) return
+    if (key.escape || (key.ctrl && input === 'p')) { setPalette(null); return }
+    if (key.upArrow) { setPalette(p => p && { ...p, sel: Math.max(0, p.sel - 1) }); return }
+    if (key.downArrow) { setPalette(p => p && { ...p, sel: Math.min(Math.max(0, paletteList.length - 1), p.sel + 1) }); return }
+    if (key.return) { const c = paletteList[palette.sel]; if (c) runCommand(c); return }
+    if (key.backspace || key.delete) { setPalette(p => p && { query: p.query.slice(0, -1), sel: 0 }); return }
+    if (input && !key.ctrl && !key.meta && !key.tab) setPalette(p => p && { query: p.query + input, sel: 0 })
+  }, { isActive: palette !== null })
 
   const tabs = tabBarTabs(TAB_ORDER, s.tabsShort)
   // Computed HERE and handed to the bar, rather than measured again inside it: the strip's cell
@@ -644,7 +684,9 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const mouseHints = mouse ? (mouseOn ? [s.keyMouseCopy, s.keyMouse] : [s.keyMouse]) : []
   // While the key reference is up the footer names ITS keys and nothing else — every other key on
   // this frame stands down, and a hint for one of them would be the lie the footer exists to avoid.
-  const hints = helpOpen
+  const hints = palette
+    ? [lang === 'pt' ? 'digite filtra' : 'type filter', '↑↓ move', lang === 'pt' ? 'enter executa' : 'enter run', lang === 'pt' ? 'esc fecha' : 'esc close']
+    : helpOpen
     ? [s.keyHelpClose, s.keyScroll, s.keyEnds]
     : [...(isStatic ? [...staticHints, s.keyHelp] : chrome.hints), ...mouseHints]
   // Same correction on the read-only screens' own footer: while the mouse reports, "select with the
@@ -683,7 +725,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* The native session. It frames its own regions (the conversation, the permission card, the
             composer, the session panel) like the two cockpits do, so the one that needs the person
             can wear the accent border. */}
-        <Screen visible={tab === 'home' && !helpOpen}>
+        <Screen visible={tab === 'home' && !overlayOpen}>
           <Home
             host={host}
             status={status}
@@ -691,7 +733,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             lang={lang}
             width={width}
             height={height}
-            isActive={tab === 'home' && !helpOpen}
+            isActive={tab === 'home' && !overlayOpen}
             nonce={nonce}
             onChrome={reportChrome}
             onSay={say}
@@ -700,32 +742,36 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             onOpenCode={openCode}
             onExit={onExit}
             onHelp={openHelp}
+            onPalette={openPalette}
           />
         </Screen>
 
-        <Screen visible={tab === 'tasks' && !helpOpen}>
+        <Screen visible={tab === 'tasks' && !overlayOpen}>
           <Tasks
             host={host}
             status={status}
             lang={lang}
             width={width}
             height={height}
-            isActive={tab === 'tasks' && !helpOpen}
+            isActive={tab === 'tasks' && !overlayOpen}
             nonce={nonce}
             onChrome={reportChrome}
             onSay={say}
           />
         </Screen>
 
-        <Screen visible={tab === 'code' && !helpOpen}>
+        <Screen visible={tab === 'code' && !overlayOpen}>
           <Code
             code={host.code}
             launch={codeLaunch}
+            command={codeCommand}
+            onPalette={openPalette}
+            onPaletteContext={setPaletteCtx}
             lang={lang}
             strings={s}
             width={width}
             height={height}
-            isActive={tab === 'code' && !helpOpen}
+            isActive={tab === 'code' && !overlayOpen}
             onChrome={reportChrome}
             onSay={say}
             onTab={stepTab}
@@ -736,7 +782,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           />
         </Screen>
 
-        <Screen visible={tab === 'services' && !helpOpen}>
+        <Screen visible={tab === 'services' && !overlayOpen}>
           <Services
             host={host}
             status={status}
@@ -744,7 +790,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             lang={lang}
             width={width}
             height={height}
-            isActive={tab === 'services' && !helpOpen}
+            isActive={tab === 'services' && !overlayOpen}
             run={run}
             // The output of whatever was last performed, and the way back to the facts. The cockpit
             // draws it into the detail region — the big pane the user pointed at.
@@ -768,7 +814,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* Like the services cockpit, the sessions screen frames its OWN regions — a menu, the
             list and the detail — so the one holding the keyboard can wear the accent border. One
             frame around all three said nothing about which of them the arrows were talking to. */}
-        <Screen visible={tab === 'sessions' && !helpOpen}>
+        <Screen visible={tab === 'sessions' && !overlayOpen}>
             <Sessions
               host={host}
               // Polled by the shell, not by this screen — the counter it feeds is in the header,
@@ -777,7 +823,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               strings={s}
               width={width}
               height={height}
-              isActive={tab === 'sessions' && !helpOpen}
+              isActive={tab === 'sessions' && !overlayOpen}
               run={run}
               onChrome={reportChrome}
               onExit={onExit}
@@ -795,13 +841,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             are the selection, and the detail pane is a fuller view of the same facts or the place
             a running backup streams into. It is its own tab rather than a corner of Services —
             an operation over the data, and operations come before the numbers. */}
-        <Screen visible={tab === 'backup' && !helpOpen}>
+        <Screen visible={tab === 'backup' && !overlayOpen}>
           <Backup
             host={host}
             strings={s}
             width={width}
             height={height}
-            isActive={tab === 'backup' && !helpOpen}
+            isActive={tab === 'backup' && !overlayOpen}
             run={run}
             task={task}
             onDismissTask={dismissTask}
@@ -814,7 +860,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             selector over it, not a cockpit of related panes. The connection state that used to sit
             in the standalone app's header rides on its screen strip instead of on a pane badge, so
             the same row says where you are and whether the numbers under it are live. */}
-        <Screen visible={tab === 'dashboard' && !helpOpen}>
+        <Screen visible={tab === 'dashboard' && !overlayOpen}>
           <Pane title={s.tabsShort.dashboard} width={width} height={height}>
             <Dashboard
               status={status}
@@ -822,14 +868,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'dashboard' && !helpOpen}
+              isActive={tab === 'dashboard' && !overlayOpen}
               nonce={nonce}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'hardware' && !helpOpen}>
+        <Screen visible={tab === 'hardware' && !overlayOpen}>
           <Pane title={s.tabsShort.hardware} width={width} height={height}>
             <HardwareTab
               status={status}
@@ -838,14 +884,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'hardware' && !helpOpen}
+              isActive={tab === 'hardware' && !overlayOpen}
               nonce={nonce}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'logs' && !helpOpen}>
+        <Screen visible={tab === 'logs' && !overlayOpen}>
           <Pane title={s.tabsShort.logs} width={width} height={height}>
             <Logs
               host={host}
@@ -857,13 +903,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'logs' && !helpOpen}
+              isActive={tab === 'logs' && !overlayOpen}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'cheatsheet' && !helpOpen}>
+        <Screen visible={tab === 'cheatsheet' && !overlayOpen}>
           <Pane title={s.tabsShort.cheatsheet} width={width} height={height}>
             <StaticTab
               sections={cheatContent(lang)}
@@ -877,7 +923,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'help' && !helpOpen}>
+        <Screen visible={tab === 'help' && !overlayOpen}>
           <Pane title={s.tabsShort.help} width={width} height={height}>
             <StaticTab
               sections={helpContent(lang)}
@@ -891,6 +937,9 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
+        {palette ? (
+          <Palette list={paletteList} total={PALETTE_COMMANDS.length} query={palette.query} sel={palette.sel} ctx={fullCtx} lang={lang} width={width} height={height} />
+        ) : null}
         {helpOpen ? (
           <HelpOverlay
             lines={help}
@@ -902,7 +951,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           />
         ) : null}
 
-        <Screen visible={tab === 'contribute' && !helpOpen}>
+        <Screen visible={tab === 'contribute' && !overlayOpen}>
           <Pane title={s.tabsShort.contribute} width={width} height={height}>
             <StaticTab
               sections={contributeContent(lang)}

@@ -19,6 +19,7 @@
  * for every line, which `code.test.ts` asserts over every builder at several widths.
  */
 
+import { codeScoped, type PaletteRun } from './palette'
 import { fmt, fmtCost, readTokens, totalTokens } from '@agentistics/core'
 import { COLORS } from '../theme'
 import type {
@@ -1488,18 +1489,11 @@ export interface CodeCommand {
  * a `/help` that printed nothing new, or an `/undo` with no checkpoint behind it, would be a dead
  * control, and this table is where one would hide.
  */
-export const CODE_COMMANDS: readonly CodeCommand[] = [
-  { id: 'new', label: '/new', keys: 'n', intent: { kind: 'open-wizard' } },
-  { id: 'diff', label: '/diff', keys: 'd', intent: { kind: 'open-diff' } },
-  { id: 'cancel', label: '/cancel', keys: 'esc', intent: { kind: 'cancel-run' } },
-  { id: 'panel', label: '/panel', keys: 'ctrl+b', intent: { kind: 'toggle-panel' } },
-  { id: 'mode', label: '/mode', keys: 'shift+tab', intent: { kind: 'cycle-mode' } },
-  { id: 'inspector', label: '/inspector', keys: 'ctrl+i', intent: { kind: 'panel-side', side: 'inspector' } },
-  { id: 'timeline', label: '/timeline', keys: 'ctrl+t', intent: { kind: 'panel-side', side: 'timeline' } },
-  { id: 'editor', label: '/editor', keys: 'ctrl+g', intent: { kind: 'open-editor' } },
-  { id: 'history', label: '/history', keys: 'ctrl+r', intent: { kind: 'open-history' } },
-  { id: 'copy', label: '/copy', keys: '', intent: { kind: 'copy' } },
-] as const
+// ONE command list (D-TUI-12, GL-03): the `/` popup is the command palette's `code` scope, in the
+// palette's order, with the palette's names and shortcuts (`palette.ts`).
+export const CODE_COMMANDS: readonly CodeCommand[] = codeScoped().map(c => ({
+  id: c.id as CodeCommandId, label: c.label, keys: c.keys, intent: (c.run as Extract<PaletteRun, { kind: 'code' }>).intent,
+}))
 
 /** Commands the draft could still become — the popup's rows. Only while the draft is one `/word`. */
 export function matchCommands(draft: string): CodeCommand[] {

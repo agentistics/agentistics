@@ -87,6 +87,12 @@ export interface CodeProps {
   code?: CodeHost
   /** How `agentop code …` opened the tab — acted on once, on the first mount. */
   launch?: CodeLaunch
+  /** GL-03: a command the palette sends here — a new object each time, performed once. */
+  command?: { intent: CodeIntent }
+  /** GL-03: `ctrl+p` opens the shell's palette (this tab captures the keyboard, so it forwards it). */
+  onPalette?: () => void
+  /** GL-03: what the palette needs to say which commands can run here. */
+  onPaletteContext?: (ctx: { sessionOpen: boolean; running: boolean; askWithDiff: boolean }) => void
   lang: CliLang
   strings: ControlStrings
   width: number
@@ -170,8 +176,8 @@ function useLatestState<T>(initial: T): [T, (next: T | ((prev: T) => T)) => void
 const defaultWrite = (bytes: string): void => { writeFrame(bytes) }
 
 export function Code({
-  code, launch, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
-  onAttention, onHelp, writeTerminal = defaultWrite, inTmux = Boolean(process.env.TMUX),
+  code, launch, command, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
+  onAttention, onHelp, onPalette, onPaletteContext, writeTerminal = defaultWrite, inTmux = Boolean(process.env.TMUX),
 }: CodeProps) {
   const t = codeStrings(lang)
   const availability = useMemo(() => (code ? code.availability() : null), [code])
@@ -412,6 +418,17 @@ export function Code({
 
   // ── keys ─────────────────────────────────────────────────────────────────────────────────
 
+  // GL-03: a command from the palette, performed once per object (a re-render is harmless).
+  const performedCommand = useRef<{ intent: CodeIntent } | undefined>(undefined)
+  useEffect(() => {
+    if (!command || performedCommand.current === command || !available) return
+    performedCommand.current = command
+    perform(command.intent)
+  })
+  useEffect(() => {
+    onPaletteContext?.({ sessionOpen, running, askWithDiff: Boolean(ask?.diff && ask.diff.files.length > 0) })
+  }, [sessionOpen, running, ask?.id])
+
   const perform = (intent: CodeIntent) => {
     const sid = facts?.sessionId
     switch (intent.kind) {
@@ -578,6 +595,8 @@ export function Code({
       performWizard(r.effect)
       return
     }
+    // GL-03: the palette is the shell's; this tab holds the keyboard, so it hands `ctrl+p` over.
+    if (key.ctrl && input === 'p' && onPalette) { onPalette(); return }
     const intent = codeKeyIntent({
       draft,
       sessionOpen,

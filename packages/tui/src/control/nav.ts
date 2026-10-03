@@ -309,6 +309,8 @@ export type ShellIntent =
   | { kind: 'refresh' }
   | { kind: 'mouse' }
   | { kind: 'help' }
+  /** GL-03: `ctrl+p` — the command palette. */
+  | { kind: 'palette' }
 
 /**
  * The shell's own keys — PURE, and the ONE place they are decided.
@@ -323,6 +325,7 @@ export function resolveShellKey(
 ): ShellIntent | null {
   const next = resolveTabKey(key, ctx.tab, ctx.arrows)
   if (next && next !== ctx.tab) return { kind: 'tab', tab: next }
+  if (key.ctrl && key.input === 'p') return { kind: 'palette' }
   if (key.ctrl) return null
   if (key.input === 'q') return { kind: 'quit' }
   if (key.input === 'r') return { kind: 'refresh' }
