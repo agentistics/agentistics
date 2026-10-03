@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart } from './asideSummary'
+import { applySummaryFilter, capacityText, nativeSummaryState, summaryCounts, summaryParts, toggleSummaryPart } from './asideSummary'
 
 const rows = [
   { id: 'a', state: 'working' }, { id: 'b', state: 'working' },
@@ -33,5 +33,22 @@ describe('asideSummary', () => {
   test('capacity is empty until provided', () => {
     expect(capacityText(null, true)).toBe('')
     expect(capacityText({ used: 3, max: 4 }, true)).toBe('1/4 vagas')
+  })
+})
+
+describe('asideSummary — native sessions (H17)', () => {
+  const native = [
+    { status: 'open', activity: 'working' }, { status: 'open', activity: 'waiting-approval' },
+    { status: 'open', activity: 'waiting' }, { status: 'open' }, { status: 'closed', activity: 'waiting' },
+  ]
+  test('an open session takes its activity; open with none yet is active only; closed is not counted', () => {
+    expect(native.map(nativeSummaryState)).toEqual(['working', 'waiting-approval', 'waiting', 'unknown', 'ended'])
+    const c = summaryCounts(native.map(r => ({ state: nativeSummaryState(r) })))
+    expect(c).toEqual({ active: 4, working: 1, needs: 2 })
+  })
+  test('fleet and native rows add up in one line', () => {
+    const c = summaryCounts([...rows, ...native.map(r => ({ state: nativeSummaryState(r) }))])
+    expect(c.working).toBe(3)
+    expect(c.needs).toBe(4)
   })
 })

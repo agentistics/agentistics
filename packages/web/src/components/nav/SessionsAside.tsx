@@ -13,7 +13,8 @@
  */
 
 import { NativeSessionsList } from './NativeSessionsList'
-import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
+import { applySummaryFilter, capacityText, nativeSummaryState, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
+import { useNativeSessionRows } from '../../hooks/useNativeSessionRows'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -668,7 +669,12 @@ export function SessionsAside({
   )
   const searched = useMemo(() => filterSessions(valueFiltered, query), [valueFiltered, query])
   const capacityLabel = capacityText(capacity, pt)
-  const summaryNumbers = useMemo(() => summaryCounts(searched), [searched])
+  // H17: the native sessions count too — the same words (working / waiting / waiting-approval), read
+  // from the engine's list, which the native block below renders from these same rows.
+  const nativeRows = useNativeSessionRows(sessionId)
+  const nativeStated = useMemo(() => nativeRows.map(r => ({ row: r, state: nativeSummaryState(r) })), [nativeRows])
+  const summaryNumbers = useMemo(() => summaryCounts([...searched, ...nativeStated]), [searched, nativeStated])
+  const nativeShown = useMemo(() => applySummaryFilter(nativeStated, summaryFilter).map(x => x.row), [nativeStated, summaryFilter])
   const matched = useMemo(
     () => applySummaryFilter(activeOnly ? searched.filter(r => active.has(r.state)) : searched, summaryFilter),
     [searched, activeOnly, active, summaryFilter],
@@ -1593,7 +1599,7 @@ export function SessionsAside({
         )}
 
         {/* NATIVE sessions (UI.3) — not fleet rows, so listed from the engine's own list. */}
-        <NativeSessionsList lang={lang} tap={tap} {...(sessionId ? { activeId: sessionId } : {})} />
+        <NativeSessionsList lang={lang} rows={nativeShown} tap={tap} {...(sessionId ? { activeId: sessionId } : {})} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above
