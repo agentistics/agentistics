@@ -66,3 +66,29 @@ describe('readers', () => {
     expect(budgetFromEnv(undefined)).toBe(SELF_BUDGET_BYTES)
   })
 })
+
+describe('selfGuardMessage', () => {
+  test('every non-none decision says something, in both languages', async () => {
+    const { selfGuardMessage } = await import('./self-guard')
+    const ds = [
+      decide({ exeReplaced: true }),
+      decide({ usedBytes: 2000 * MB }),
+      decide({ usedBytes: 2000 * MB }, 9_999_000, 10_000_000),
+      decide({ serverVersion: '9.0.0' }),
+    ]
+    for (const d of ds) for (const lang of ['en', 'pt'] as const) expect(selfGuardMessage(d, lang)?.length ?? 0).toBeGreaterThan(20)
+    expect(selfGuardMessage({ action: 'none' }, 'en')).toBeNull()
+  })
+})
+
+describe('planRestartArgv', () => {
+  test('keeps the original arguments and resolves a bare argv[0]', async () => {
+    const { planRestartArgv } = await import('./self-guard')
+    const yes = () => true
+    expect(planRestartArgv('/home/u/.local/bin/agentop\0', () => null, yes)).toEqual(['/home/u/.local/bin/agentop'])
+    expect(planRestartArgv('agentop\0tui\0', () => '/usr/bin/agentop', yes)).toEqual(['/usr/bin/agentop', 'tui'])
+    expect(planRestartArgv('/x/bun\0cli.ts\0start\0', () => null, yes)).toEqual(['/x/bun', 'cli.ts', 'start'])
+    expect(planRestartArgv('/gone/agentop\0', () => null, () => false)).toBeNull()
+    expect(planRestartArgv('', () => null, yes)).toBeNull()
+  })
+})

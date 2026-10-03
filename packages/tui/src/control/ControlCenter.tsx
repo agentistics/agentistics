@@ -109,6 +109,9 @@ export type RunAction = (fn: () => Promise<ActionResult>, label?: string) => Pro
  */
 const SESSION_POLL_MS = 5_000
 
+/** RES.1 — how often the self-guard asks; mirrors `SELF_CHECK_INTERVAL_MS` in the server's `self-guard.ts`. */
+const SELF_CHECK_MS = 60_000
+
 /**
  * The terminal bell, as an escape rather than a literal byte.
  *
@@ -151,7 +154,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // where there is genuinely nothing to know yet.
   const [status, setStatus] = useState<ControlStatus | null>(host.lastStatus?.() ?? null)
   const [busy, setBusy] = useState(true)
-  const [result, setResult] = useState<ActionResult | null>(null)
+  const [result, setResult] = useState<ActionResult | null>(() => {
+    const notice = host.takeNotice?.() ?? null
+    return notice ? { ok: true, message: notice } : null
+  })
   const [chrome, setChrome] = useState<ScreenChrome>({ capture: false, hints: [] })
   const [scroll, setScroll] = useState<Record<StaticTabId, number>>({
     help: 0,
@@ -186,6 +192,34 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   }, [host])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  /**
+   * RES.1 — the self-guard. A cockpit left open since boot was found at 1.7 GB RSS + 6.5 GB swap,
+   * running a binary an upgrade had already replaced. Once a minute the host is asked whether this
+   * process should reload its state or restart onto the new binary; either way the user lands back
+   * on the tab they were on. An `alert` is said once on the status line, not repeated every minute.
+   */
+  const tabRef = useRef(tab)
+  tabRef.current = tab
+  const lastAlert = useRef<string | null>(null)
+  useEffect(() => {
+    const check = host.selfCheck
+    if (!check) return
+    const timer = setInterval(() => {
+      void check.call(host).then(r => {
+        if (r.action === 'none') { lastAlert.current = null; return }
+        if (r.action === 'alert') {
+          if (lastAlert.current === r.message) return
+          lastAlert.current = r.message
+          setResult({ ok: false, message: r.message })
+          return
+        }
+        setResult({ ok: true, message: r.message })
+        onExit({ kind: r.action, tab: tabRef.current })
+      }).catch(() => { /* a check that failed is not a reason to act */ })
+    }, SELF_CHECK_MS)
+    return () => clearInterval(timer)
+  }, [host, onExit])
 
   /**
    * The session fleet, polled by the SHELL rather than by the sessions screen.

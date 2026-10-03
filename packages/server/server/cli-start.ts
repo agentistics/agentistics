@@ -74,7 +74,7 @@ import type {
   StartRequest,
   RestoreCandidate,
 } from '@agentistics/tui/control'
-import { DEFAULT_SESSION_VIEW } from '@agentistics/tui/control'
+import { DEFAULT_SESSION_VIEW, TAB_ORDER } from '@agentistics/tui/control'
 import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT } from './config'
 import {
   readPreferences, writePreferences, resolveArchiveMode, type ArchiveMode,
@@ -90,7 +90,7 @@ import { formatBytes, layerTotal, retainedTotal } from './backup/backup-size'
 import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory } from './backup/backup-store'
 import { scheduleStatus } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
-import { cachedBaseline } from './sessions/fleet-baseline'
+import { cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
 import { centralRuntimeChoices, centralStartPlan, runCentral, type CentralStartPlan } from './cli-central'
 import { flagFor, type CentralRuntimeId, type CentralRuntimeOption } from './central-runtime'
 import { onOutputLine, publishLines, streamCommand } from './cli-stream'
@@ -113,7 +113,10 @@ import {
   type AutostartMode,
 } from './autostart'
 import { confirm } from './cli-ui'
-import { CURRENT_VERSION, getVersionInfo } from './version'
+import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
+import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
+import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
 import { resolveLang } from './cli-lang'
@@ -129,7 +132,7 @@ import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
-import { recordedRepo, repoFacts } from './sessions/repo-facts'
+import { forgetRepoFacts, recordedRepo, repoFacts } from './sessions/repo-facts'
 import { markFleetPhase, timeFleetPhase } from './sessions/fleet-profile'
 // The `SessionView` -> `ControlSession` mapping, extracted so `agentop session ls` draws the same
 // rows from the same decision rather than mapping the fleet a second time.
@@ -2223,6 +2226,59 @@ async function waitRunning(
   }
 }
 
+/**
+ * RES.1 — when this process last reloaded itself, so the self-guard can refuse to loop. Module-level
+ * because the host is created once and the reload happens in `runStart`'s loop around it.
+ */
+let lastSelfReloadMs: number | null = null
+
+/** RES.1 — the sentence the next mount shows (a self-restart carries it over in the environment). */
+let pendingNotice: string | null = process.env.AGENTISTICS_START_NOTICE || null
+delete process.env.AGENTISTICS_START_NOTICE
+
+/** RES.1 — this process's own memory, whether its binary was replaced, and the server's version. */
+export async function readSelfSample(): Promise<SelfSample> {
+  const status = await readFileText('/proc/self/status', 'utf8').catch(() => null)
+  const { rssBytes, swapBytes } = status ? parseProcStatusMemory(status) : { rssBytes: null, swapBytes: null }
+  const exe = await readlink('/proc/self/exe').catch(() => null)
+  let serverVersion: string | null = null
+  if (!isServerProcess()) {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), 1500)
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: ctl.signal })
+      if (res.ok) serverVersion = ((await res.json()) as { current?: string }).current ?? null
+    } catch { /* no server — nothing to compare against */ } finally { clearTimeout(timer) }
+  }
+  return {
+    rssBytes, swapBytes,
+    usedBytes: rssBytes === null ? null : rssBytes + (swapBytes ?? 0),
+    exeReplaced: exeWasReplaced(exe),
+    ownVersion: CURRENT_VERSION,
+    serverVersion,
+  }
+}
+
+/** RES.1 — what a self-reload drops: the process-wide memos the cockpit's poll fills. */
+export function dropProcessCaches(): void {
+  forgetRepoFacts()
+  resetBaselineCache()
+  Bun.gc(true)
+  lastSelfReloadMs = Date.now()
+}
+
+/**
+ * RES.1 — the command line to re-run after an upgrade replaced our binary. `/proc/self/exe` names the
+ * DELETED file, so the path we were STARTED as is read from argv[0] (`/proc/self/cmdline`), resolved
+ * on the PATH when it is bare, and the original arguments are kept as they were (`agentop`,
+ * `agentop start`, `agentop tui`, or `bun cli.ts start` from a checkout). `null` when the path no
+ * longer resolves to a file — there is nothing to restart onto.
+ */
+export async function restartArgv(): Promise<string[] | null> {
+  const cmdline = await readFileText('/proc/self/cmdline', 'utf8').catch(() => '')
+  return planRestartArgv(cmdline, cmd => Bun.which(cmd), existsSync)
+}
+
 export function createControlHost(initialLang: CliLang, altScreen: Suspendable): StartHost {
   let lang = initialLang
   const S = () => cliStrings(lang)
@@ -2662,6 +2718,26 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     get lang() { return lang },
 
     lastStatus: () => lastStatus,
+
+    async selfCheck() {
+      const decision = decideSelfGuard({
+        sample: await readSelfSample(),
+        budgetBytes: budgetFromEnv(process.env.AGENTISTICS_TUI_BUDGET_MB),
+        lastReloadMs: lastSelfReloadMs,
+        nowMs: Date.now(),
+        compare: compareVersions,
+      })
+      const message = selfGuardMessage(decision, lang === 'pt' ? 'pt' : 'en')
+      if (decision.action === 'none' || !message) return { action: 'none' as const }
+      if (decision.action !== 'alert') pendingNotice = message
+      return { action: decision.action, message }
+    },
+
+    takeNotice() {
+      const n = pendingNotice
+      pendingNotice = null
+      return n
+    },
 
     async refresh(): Promise<ControlStatus> {
       const s = S()
@@ -4173,7 +4249,10 @@ export async function runStart(): Promise<StartResult> {
   // an unconfigured user on a list of services to start would still leave the mode and the
   // history-preservation consent behind something they have no reason to look for.
   const setup = await isUnconfigured()
-  let tab: TabId | undefined
+  // RES.1 — a self-restart lands on the tab the user was on (see the `restart` exit below).
+  const startTab = process.env.AGENTISTICS_START_TAB
+  let tab: TabId | undefined = startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : undefined
+  delete process.env.AGENTISTICS_START_TAB
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink
   // app never execs anything: it unmounts, the session gets the real tty here, and when the user
@@ -4193,6 +4272,20 @@ export async function runStart(): Promise<StartResult> {
     opening = false
     if (exit.kind === 'foreground') break
     if (exit.kind === 'quit') return exit.code
+    // RES.1 — the self-guard's two exits. A reload is the attach loop without the session: drop the
+    // caches, remount on the same tab. A restart hands the terminal to the NEW binary an upgrade put
+    // at our path, on the same tab, and leaves with its exit code.
+    if (exit.kind === 'reload') { dropProcessCaches(); tab = exit.tab; continue }
+    if (exit.kind === 'restart') {
+      const argv = await restartArgv()
+      if (!argv) { tab = exit.tab; continue }
+      const env = { ...process.env, AGENTISTICS_START_TAB: exit.tab, AGENTISTICS_START_NOTICE: host.takeNotice?.() ?? '' }
+      // Replace this process outright, so the memory it grew is handed back; spawning is the
+      // fallback where `execve` is not reachable, and then this process waits holding what it has.
+      await execInPlace(argv, env)
+      const child = Bun.spawn(argv, { stdio: ['inherit', 'inherit', 'inherit'], env })
+      return await child.exited
+    }
     await execAttachTicket(exit.ticket, cliStrings(host.lang))
     tab = 'sessions'
   }

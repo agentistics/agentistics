@@ -104,3 +104,57 @@ export function budgetFromEnv(raw: string | undefined): number {
   const n = raw ? Number(raw) : NaN
   return Number.isFinite(n) && n >= 128 ? Math.round(n * 1024 * 1024) : SELF_BUDGET_BYTES
 }
+
+// ── Rendering ────────────────────────────────────────────────────────────────────────────────────
+
+export type SelfGuardLang = 'en' | 'pt'
+
+function mbOf(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`
+}
+
+/** The status-line sentence for a decision; `null` for `none`. Names the culprit and the fix. */
+export function selfGuardMessage(d: SelfDecision, lang: SelfGuardLang): string | null {
+  const pt = lang === 'pt'
+  switch (d.action) {
+    case 'none':
+      return null
+    case 'restart': {
+      const to = d.serverVersion ? ` (v${d.serverVersion})` : ''
+      return pt
+        ? `Este agentop (v${d.ownVersion}) foi substituído por uma atualização${to} — reiniciando no lugar, na mesma aba.`
+        : `This agentop (v${d.ownVersion}) was replaced by an upgrade${to} — restarting in place, on the same tab.`
+    }
+    case 'reload':
+      return pt
+        ? `O agentop passou do orçamento de memória (${mbOf(d.usedBytes)} de RAM+swap, limite ${mbOf(d.budgetBytes)}) — recarregando o estado.`
+        : `agentop went over its memory budget (${mbOf(d.usedBytes)} RAM+swap, limit ${mbOf(d.budgetBytes)}) — reloading its state.`
+    case 'alert':
+      if (d.reason === 'memory') {
+        return pt
+          ? `O agentop segue acima do orçamento (${mbOf(d.usedBytes)} de RAM+swap, limite ${mbOf(d.budgetBytes)}) mesmo após recarregar — feche-o com q e abra de novo.`
+          : `agentop is still over its budget (${mbOf(d.usedBytes)} RAM+swap, limit ${mbOf(d.budgetBytes)}) after a reload — quit with q and open it again.`
+      }
+      return pt
+        ? `Este agentop é v${d.ownVersion} e o servidor é v${d.serverVersion} — feche com q e abra de novo para usar a versão nova.`
+        : `This agentop is v${d.ownVersion} and the server is v${d.serverVersion} — quit with q and reopen to run the new version.`
+  }
+}
+
+/**
+ * The argv to restart onto — PURE over `/proc/self/cmdline`'s text. argv[0] is kept when absolute,
+ * resolved through `which` when bare, and the rest is kept verbatim. `null` when it resolves to
+ * nothing that exists.
+ */
+export function planRestartArgv(
+  cmdline: string,
+  which: (cmd: string) => string | null,
+  exists: (path: string) => boolean,
+): string[] | null {
+  const parts = cmdline.split('\0')
+  if (parts.length && parts[parts.length - 1] === '') parts.pop()
+  const [argv0, ...rest] = parts
+  if (!argv0) return null
+  const bin = argv0.startsWith('/') ? argv0 : which(argv0)
+  return bin && exists(bin) ? [bin, ...rest] : null
+}
