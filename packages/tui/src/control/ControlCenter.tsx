@@ -834,6 +834,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               // center owns no persistence, so a setting it can toggle is a setting the host stores.
               view={status?.sessionView}
               onView={v => { void host.setSessionView?.(v) }}
+              onOpenCode={openCode}
             />
         </Screen>
 

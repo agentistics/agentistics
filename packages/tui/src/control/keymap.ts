@@ -115,9 +115,10 @@ export const SESSIONS: KeySection = {
   title: w('SESSIONS', 'SESSÕES'),
   tabs: ['sessions'],
   entries: [
-    { keys: '↑ ↓ / j k / g G', action: w('move in the list (in the menu: its rows)', 'mover na lista (no menu: as linhas dele)') },
+    { keys: '↑ ↓ / j k / G', action: w('move in the list (in the menu: its rows)', 'mover na lista (no menu: as linhas dele)') },
     { keys: 'pgup pgdn / home end', action: w('page / ends of the card grid', 'página / pontas da grade de cartões') },
-    { keys: 'enter', action: w('open the row\'s verbs in the menu · run the menu row', 'abrir as ações da linha no menu · executar a linha do menu') },
+    { keys: 'enter', action: w('open it: native → the code tab · running → attach · closed → reopen (in the menu: run the row)', 'abrir: nativa → aba código · rodando → anexar · fechada → reabrir (no menu: executar a linha)') },
+    { keys: 'g', action: w('group by task · harness · state (each press: the next)', 'agrupar por tarefa · harness · estado (cada toque: o próximo)') },
     { keys: 'tab / shift+tab', action: w('between the list and the menu (narrow: menu · sessions · detail)', 'entre a lista e o menu (estreito: menu · sessões · detalhe)') },
     { keys: '1-9', action: w('jump to a menu section', 'ir a uma seção do menu') },
     { keys: '← →', action: w('menu: previous / next section · cards: previous / next card', 'menu: seção anterior / seguinte · cartões: cartão anterior / seguinte') },

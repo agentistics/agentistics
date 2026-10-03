@@ -1360,6 +1360,8 @@ export type SessionsIntent =
   | { kind: 'closed' }
   | { kind: 'detail' }
   | { kind: 'layout' }
+  /** SS-01: `g` — group by the next of task · harness · state. */
+  | { kind: 'cycleGroup' }
   | { kind: 'pin' }
   | { kind: 'verb'; action: SessionAction }
   | { kind: 'move' }
@@ -1422,6 +1424,7 @@ export function resolveSessionsKey(key: KeyPress, ctx: {
   }
 
   switch (input) {
+    case 'g': return { kind: 'cycleGroup' }
     case 'b': return { kind: 'fold' }
     case 'h': return { kind: 'keys' }
     case 'v': return { kind: 'verb', action: 'group' }
@@ -1441,13 +1444,22 @@ export function resolveSessionsKey(key: KeyPress, ctx: {
     case 'R': return { kind: 'verb', action: 'reopenFell' }
   }
 
-  if (key.upArrow || key.downArrow || input === 'j' || input === 'k' || input === 'g' || input === 'G') {
+  if (key.upArrow || key.downArrow || input === 'j' || input === 'k' || input === 'G') {
     return { kind: 'move' }
   }
   if (ctx.grid && (key.leftArrow || key.rightArrow || key.pageUp || key.pageDown || key.home || key.end)) {
     return { kind: 'move' }
   }
   return null
+}
+
+/** SS-01: the groupings `g` cycles through, in the spec's order (task · harness · state). */
+export const CYCLE_GROUPINGS = ['task', 'harness', 'status'] as const
+
+/** The grouping after `current` in the `g` cycle — PURE. Anything outside the cycle starts it. */
+export function nextCycleGrouping(current: string): (typeof CYCLE_GROUPINGS)[number] {
+  const i = (CYCLE_GROUPINGS as readonly string[]).indexOf(current)
+  return CYCLE_GROUPINGS[(i + 1) % CYCLE_GROUPINGS.length]!
 }
 
 /** The width the keystroke column needs, so the descriptions line up — PURE. */

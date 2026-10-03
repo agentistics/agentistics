@@ -775,6 +775,8 @@ export const ID_CELL = 5
  *     command and still tells two rows apart, which is the column's other job.
  */
 export function sessionHandle(s: ControlSession): string {
+  // A native session's id is `ses_<hex>`: the prefix is the same on every row, so the hex is the handle.
+  if (s.id.startsWith('ses_')) return s.id.slice(4, 4 + ID_CELL)
   if (!s.id.startsWith('external:') && !s.id.startsWith('closed:')) return s.id.slice(0, ID_CELL)
   const conversation = s.resume?.sessionId
   if (conversation) return conversation.slice(0, ID_CELL)

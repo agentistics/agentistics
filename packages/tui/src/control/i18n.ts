@@ -47,6 +47,8 @@ export interface ControlStrings {
    * the bar and in the frame around it.
    */
   tabsShort: Record<TabId, string>
+  /** SS-01: the sentence `g` leaves. */
+  sessionsGroupedBy: (grouping: string) => string
 
   /** Footer key hints. */
   keyTabs: string
@@ -833,6 +835,7 @@ const EN: ControlStrings = {
     contribute: 'Contribute',
   },
 
+  sessionsGroupedBy: g => `Grouped by ${({ task: 'task', harness: 'harness', status: 'state' } as Record<string, string>)[g] ?? g} — g groups by the next one.`,
   tabsShort: {
     home: 'home',
     code: 'code',
@@ -1429,6 +1432,7 @@ const PT: ControlStrings = {
     contribute: 'Contribuir',
   },
 
+  sessionsGroupedBy: g => `Agrupado por ${({ task: 'tarefa', harness: 'harness', status: 'estado' } as Record<string, string>)[g] ?? g} — g agrupa pelo próximo.`,
   tabsShort: {
     home: 'início',
     code: 'código',

@@ -277,6 +277,10 @@ export interface CodeRecentSession {
   updatedAt: string
   status: string
   model: string
+  /** Where it works (SS-01: the fleet row's folder). */
+  cwd?: string
+  /** Its latest run is running right now (SS-02: "working"). */
+  running?: boolean
 }
 
 export interface CodePlanItem {

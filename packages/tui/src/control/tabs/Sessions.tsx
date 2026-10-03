@@ -12,6 +12,8 @@
  * counter it feeds is drawn in the header where it is readable from every other tab.
  */
 
+import { isNativeRow } from '../session-native'
+import { nextCycleGrouping } from '../sessions'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSessionsMenuHidden, setSessionsMenuHidden } from '../ephemeral'
 import { Box, Text, useInput } from 'ink'
@@ -217,7 +219,7 @@ const TRANSCRIPT_DEBOUNCE_MS = 300
 
 export function Sessions({
   host, fleet, strings: s, width, height, isActive, run, onChrome, onExit, onRefreshFleet,
-  view, onView,
+  view, onView, onOpenCode,
 }: {
   host: ControlHost
   /** `null` until the first poll lands, `undefined` when the host has no fleet at all. The two are
@@ -238,6 +240,8 @@ export function Sessions({
   view: SessionViewPrefs | undefined
   /** Store the arrangement, so a restart does not throw away what the user chose. */
   onView: (v: SessionViewPrefs) => void
+  /** SS-07: open a NATIVE session in the `code` tab (it has no terminal to attach to). */
+  onOpenCode?: (launch: { resume: string }) => void
 }) {
   // A stored `grouping: 'tree'` predates the cascade being a view: it meant "no bands, cascade on",
   // which is exactly `none` + cascade. Rewritten on the way in rather than left as a grouping the
@@ -978,6 +982,12 @@ export function Sessions({
   // `runAction`; routing it through here would hand it a row it must not act on.
   const actOn = useCallback((kind: Extract<Ask, { session: ControlSession }>['kind'] | 'attach') => {
     if (!selected) return
+    // SS-07: a NATIVE session has no terminal — "open" means the `code` tab, resumed.
+    if (kind === 'attach' && isNativeRow(selected)) {
+      if (onOpenCode) onOpenCode({ resume: selected.id })
+      else void run(async () => ({ ok: false, message: s.sessionsNotActionable }))
+      return
+    }
     // Asking to ATTACH to something with nothing running is asking to pick that conversation back
     // up — so it is answered with the reopen question rather than refused. Pressing the one key
     // that means "get me into this" and being told no, while a verb three rows down would have
@@ -1005,7 +1015,7 @@ export function Sessions({
       return
     }
     setAsk({ kind, session: selected })
-  }, [selected, host, run, onExit, s])
+  }, [selected, host, run, onExit, s, onOpenCode])
 
   /**
    * Jump the menu to a section, whatever the focus was.
@@ -1205,15 +1215,19 @@ export function Sessions({
         return showPane('sessions')
       // `enter` on a session opens its MANAGEMENT rather than attaching to it — the menu, with the
       // cursor on the first verb this row can take. A narrow terminal HAS the menu, as a pane.
+      // SS-07 (D-TUI-12): enter OPENS the selected row — native → the code tab, a live session →
+      // attach, a closed one → the reopen question, an external one → refused in words (`actOn`).
+      // The actions menu is one key away on `tab`. With nothing selected, enter starts a new one.
       case 'enter':
-        if ((cockpit.aside > 0 || narrow) && selected) {
-          if (narrow) showPane('menu')
-          else setFocus('aside')
-          setAsideRow(asidePicks[0] ?? 0)
-          return
-        }
-        // No menu to move to (a narrow wide-mode fallback), so enter keeps its old meaning there.
-        return runAction(actions[liveActions[0] ?? 0]?.action ?? 'new')
+        if (selected) return runAction('attach')
+        return runAction('new')
+      case 'cycleGroup': {
+        const next = nextCycleGrouping(grouping)
+        setGrouping(next)
+        toTop()
+        void run(async () => ({ ok: true, message: s.sessionsGroupedBy(next) }))
+        return
+      }
       // `esc` DROPS whatever is narrowing the list, one layer at a time, most-recent first.
       case 'esc':
         if (query) { setQuery(''); toTop(); return }
@@ -1282,7 +1296,7 @@ export function Sessions({
       // rather than a fixed number of cards along: with headings the pages hold different amounts.
       if (key.pageUp) return to(pages[Math.max(0, pageAt - 1)]?.items[0] ?? 0)
       if (key.pageDown) return to(pages[Math.min(pages.length - 1, pageAt + 1)]?.items[0] ?? here)
-      if (key.home || input === 'g') return to(0)
+      if (key.home) return to(0)
       if (key.end || input === 'G') return to(selectable.length - 1)
       return
     }

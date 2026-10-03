@@ -4296,6 +4296,22 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
       ...(codeLaunch?.model ? { model: codeLaunch.model } : {}),
       cwd: resolvePath(codeLaunch?.cwd ?? process.cwd()),
     })
+    // SS-01: the fleet lists this machine's NATIVE sessions too — they live in the engine's store,
+    // not in any process the poller sees, so they are appended from the code host's own list.
+    const code = host.code
+    const fleetOf = host.sessions?.bind(host)
+    if (fleetOf && code.recentSessions) {
+      host.sessions = async () => {
+        const [snap, recent] = await Promise.all([fleetOf(), code.recentSessions!(20).catch(() => null)])
+        if (!recent || !recent.ok || recent.sessions.length === 0) return snap
+        const { nativeFleetRows } = await import('@agentistics/tui/control/session-native')
+        const pt = host.lang === 'pt'
+        const rows = nativeFleetRows(recent.sessions, pt
+          ? { working: 'trabalhando', idle: 'parada · reabre no código', ended: 'encerrada' }
+          : { working: 'working', idle: 'idle · reopens in code', ended: 'ended' })
+        return { ...snap, sessions: [...snap.sessions, ...rows] }
+      }
+    }
   }
   try {
     return await runControlLoop(host, runControlCenter, codeLaunch)
