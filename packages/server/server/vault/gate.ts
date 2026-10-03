@@ -42,6 +42,7 @@ import {
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
+import { finishBundleRestore } from './bundle-io'
 import { codeWindowOpen, consumeGestureToken, openCodeWindow, readMobile } from './mobile'
 import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markCommitted, prepareRekey } from './rekey'
 
@@ -803,6 +804,8 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
   // lifted only by re-enrolling the authenticator, which recovery mode now allows.
   _mem = { ...FRESH_STEPUP }
   await saveState(_mem)
+  // VAULT.PERSONAL backup: a bundle staged on this machine is written back now that the key is open.
+  await finishBundleRestore().catch(() => null)
   return { ok: true, todo: recoveryTodo() ?? [] }
 }
 
