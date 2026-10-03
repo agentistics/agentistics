@@ -18,6 +18,7 @@ import { ChatBubble } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { ToolCallCard } from './ToolCallCard'
 import { NativeApprovalCard } from './NativeApprovalCard'
+import { NativeRunsStrip } from './NativeRunsStrip'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { acceptOf, mediaTypeOf, refuseFile, uploadPreviewUrl, type NativeAttachmentCapability } from '../../lib/nativeAttachments'
 import type { NativeAttachmentView } from '../../lib/nativeChat'
@@ -31,7 +32,7 @@ import { useIsCoarsePointer } from '../../hooks/useIsMobile'
 /** `live` is the page's `useNativeSession` — one stream per session, read by the header too. */
 export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
-  const { state, loadError, send, answer, stop } = live
+  const { state, runs, loadError, send, answer, stop } = live
   const items = useMemo(() => nativeChatItems(state), [state])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -176,6 +177,8 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
           {shownNotice}
         </div>
       )}
+
+      <NativeRunsStrip runs={runs} lang={lang} />
 
       <div style={{ padding: '0 12px 12px', maxWidth: 844, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
         <ComposerShell dimmed={state.closed}>

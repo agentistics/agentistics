@@ -14,7 +14,7 @@
  * runs. `RepoSearchResults` therefore takes its state as a prop and `createSearchQueue` takes its
  * delay, which is what makes both drivable directly — with the same arguments the component passes.
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   createSearchQueue, queryState, RepoSearchResults, runSearch, snippetOf,
@@ -28,15 +28,18 @@ import type { RepoLang, SearchHit, SearchResult } from '../../lib/repoApi'
  * `useEffect` (where `matchMedia` lives) never runs under `renderToStaticMarkup`.
  */
 const env = globalThis as unknown as { window?: { innerWidth: number } }
+const windowIsOurs = env.window === undefined
 env.window ??= { innerWidth: 1280 }
 const desktop = () => { env.window!.innerWidth = 1280 }
 const phone = () => { env.window!.innerWidth = 390 }
 
 // A `phone()` a test body restores by hand with its own trailing `desktop()` call is undone only on
 // the SUCCESS path — an assertion that throws between the two leaves `innerWidth: 390` for whatever
-// test runs next in the process. This global `window` is never removed either way, so the guard has
-// to be a reset, not a teardown.
+// test runs next in the process, so the width is reset after every test. And the `window` this file
+// created is REMOVED when it is done: left behind, a bare `{ innerWidth }` made a later file's
+// `typeof window !== 'undefined'` guard true and its `window.dispatchEvent` throw (idleReviewRequest).
 afterEach(() => desktop())
+afterAll(() => { if (windowIsOurs) delete env.window })
 
 function noop() { /* these renders never open anything */ }
 
