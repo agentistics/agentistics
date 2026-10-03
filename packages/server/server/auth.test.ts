@@ -12,6 +12,7 @@ import {
   parseCookies,
   constantTimeEqual,
   handleSession,
+  projectionsWebOn,
 } from './auth'
 
 // ---------------------------------------------------------------------------
@@ -191,6 +192,22 @@ describe('handleSession', () => {
     // as ON (owner decision, 2026-09-14), narrowed only by `capable` and by an explicit `false` — is
     // a property of `shellAllowed` and is pinned in `sessions/shell-gate.test.ts`, where it depends
     // on nothing but its arguments.
+  })
+
+  it('reports projectionsWeb as a boolean (A4.7)', async () => {
+    const res = await handleSession(new Request('http://x/api/team/session'))
+    const body = await res.json() as Record<string, unknown>
+    expect(typeof body['projectionsWeb']).toBe('boolean')
+  })
+
+  it('projectionsWeb needs the web opt-in, the projections gate, a non-central and localTranscripts', () => {
+    const on = { AGENTISTICS_PROJECTIONS: '1', AGENTISTICS_PROJECTIONS_SURFACES: 'mcp,web' }
+    expect(projectionsWebOn(on, false, true)).toBe(true)
+    expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS: '0' }, false, true)).toBe(false)
+    expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS_SURFACES: 'mcp' }, false, true)).toBe(false)
+    expect(projectionsWebOn(on, true, true)).toBe(false)
+    expect(projectionsWebOn(on, false, false)).toBe(false)
+    expect(projectionsWebOn({}, false, true)).toBe(false)
   })
 
   it('reports editorEnabled the same way it reports shellEnabled', async () => {

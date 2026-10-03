@@ -37,12 +37,25 @@ export class ProjectionUnavailable extends Error {
 /** Every page of one query: the API pages by key, at most 1000 groups a page. */
 const MAX_PAGES = 200
 
-export async function allMetricGroups(q: MetricsQueryFn, params: Record<string, string>): Promise<{ groups: MetricsGroupLike[]; basis: MetricsPageLike['basis'] }> {
+/** Query parameters; an array is one filter with several values, sent as REPEATED parameters (the
+ *  only spelling `project` accepts, since a path may hold a comma). */
+export type MetricsParams = Record<string, string | readonly string[]>
+
+export function metricsSearchParams(params: MetricsParams): URLSearchParams {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === 'string') p.append(k, v)
+    else for (const one of v) p.append(k, one)
+  }
+  return p
+}
+
+export async function allMetricGroups(q: MetricsQueryFn, params: MetricsParams): Promise<{ groups: MetricsGroupLike[]; basis: MetricsPageLike['basis'] }> {
   const groups: MetricsGroupLike[] = []
   let cursor: string | null = null
   let basis: MetricsPageLike['basis']
   for (let i = 0; i < MAX_PAGES; i++) {
-    const p = new URLSearchParams({ ...params, limit: '1000' })
+    const p = metricsSearchParams({ ...params, limit: '1000' })
     if (cursor) p.set('cursor', cursor)
     const a = await q(p)
     if (!a.ok) throw new ProjectionUnavailable(a.status, a.error)

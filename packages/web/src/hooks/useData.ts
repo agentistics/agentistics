@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, HarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, sessionModelUsage, sessionCostUSD, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, sessionModelUsage, sessionCostUSD, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
+import { cacheFiguresOf } from '../lib/cacheFigures'
 
 /**
  * True only for a non-empty string. `start_time`/`end_time`/`date` fields are typed as `string`
@@ -505,6 +506,15 @@ function utcDateFromDayStr(dayStr: string): Date {
  * make one screen report billions more or fewer tokens than the other for what a user picked as
  * "the same day". Aligning everything here to UTC is what makes every screen agree.
  */
+/**
+ * Whether a session is in the chosen projects. A project is its repository's ROOT, so choosing a root
+ * also selects the sessions of its worktrees; choosing one worktree's own path still selects only it.
+ */
+export function inProjects(chosen: ReadonlySet<string>, projectPath: string | undefined): boolean {
+  const p = projectPath ?? ''
+  return chosen.has(p) || chosen.has(canonicalProjectPath(p))
+}
+
 export function getDateRangeFilter(dateRange: DateRange, customStart?: string, customEnd?: string) {
   const now = utcEndOfDay(new Date())
   // TODAY is the current day alone, in progress. It ends at the end of the day rather than at this
@@ -1059,7 +1069,7 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
     if (!isDateStr(s.start_time)) return false
     const d = parseISO(s.start_time)
     if (d < start || d > end) return false
-    if (projects.length > 0 && !projectSet.has(s.project_path)) return false
+    if (projects.length > 0 && !inProjects(projectSet, s.project_path)) return false
     if (modelSet && (!s.model || !modelSet.has(s.model))) return false
     return true
   })
@@ -1429,7 +1439,7 @@ export function computeDerivedStats(
     // Filter sessions (date + projects + model + active-only)
     const selectedSessions = harnessSessions.filter(s => {
       if (!inDateRange(s)) return false
-      if (projectFiltered && !projectSet.has(s.project_path)) return false
+      if (projectFiltered && !inProjects(projectSet, s.project_path)) return false
       if (repoFiltered && !repoSet.has(s.git_remote || '')) return false
       if (tagMatches && !tagMatches(s)) return false
       if (modelSet && (!s.model || !modelSet.has(s.model))) return false
@@ -1641,7 +1651,7 @@ export function computeDerivedStats(
     const projectDateMap: Record<string, Set<string>> = {}
     for (const sess of harnessSessions) {
       if (!sess.project_path || !isDateStr(sess.start_time)) continue
-      if (projectFiltered && !projectSet.has(sess.project_path)) continue
+      if (projectFiltered && !inProjects(projectSet, sess.project_path)) continue
       if (modelSet && (!sess.model || !modelSet.has(sess.model))) continue
       const dates = projectDateMap[sess.project_path] ?? (projectDateMap[sess.project_path] = new Set())
       if (sess.user_message_timestamps?.length) {
@@ -1677,7 +1687,7 @@ export function computeDerivedStats(
       if (cacheBlindScope || nonClaudeHarness) {
         for (const s of (cacheBlindScope ? filteredSessions : harnessSessions)) {
           if (!isDateStr(s.start_time)) continue
-          if (projectFiltered && !projectSet.has(s.project_path)) continue
+          if (projectFiltered && !inProjects(projectSet, s.project_path)) continue
           if (modelSet && (!s.model || !modelSet.has(s.model))) continue
           if (s.user_message_timestamps?.length) {
             for (const ts of s.user_message_timestamps) {
@@ -2186,7 +2196,8 @@ export function computeDerivedStats(
     // Project stats
     const projectStats: Record<string, { sessions: number; messages: number; tools: number }> = {}
     for (const s of filteredSessions) {
-      const p = s.project_path || 'Unknown'
+      // The project ROOT: a worktree's sessions count under its repository (A4.4 decision 2).
+      const p = canonicalProjectPath(s.project_path || '') || 'Unknown'
       if (!projectStats[p]) projectStats[p] = { sessions: 0, messages: 0, tools: 0 }
       projectStats[p].sessions++
       projectStats[p].messages += (s.user_message_count ?? 0)
@@ -2291,17 +2302,6 @@ export function computeDerivedStats(
     // Claude Code users where cacheRead dwarfs uncached input by orders of magnitude.
     // Savings model: compare actual spend with what the same tokens would have cost as
     // plain input, then subtract the extra we paid for cache writes.
-    const cacheTotals = Object.values(filteredModelUsage).reduce(
-      (acc, u) => ({
-        inputTokens: acc.inputTokens + (u.inputTokens ?? 0),
-        cacheReadInputTokens: acc.cacheReadInputTokens + (u.cacheReadInputTokens ?? 0),
-        cacheCreationInputTokens: acc.cacheCreationInputTokens + (u.cacheCreationInputTokens ?? 0),
-      }),
-      { inputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
-    )
-    const cacheDenominator = cacheTotals.inputTokens + cacheTotals.cacheReadInputTokens + cacheTotals.cacheCreationInputTokens
-    const cacheHitRate = cacheDenominator > 0 ? cacheTotals.cacheReadInputTokens / cacheDenominator : 0
-
     /**
      * The four billed counters for the CURRENT filter — the one place any surface should read a
      * token total from.
@@ -2314,31 +2314,10 @@ export function computeDerivedStats(
     const tokenTotals: TokenBreakdown = sumTokens(Object.values(filteredModelUsage).map(usageTokens))
 
     const blended = blendedCostPerToken(globalModelUsage)
-    // What cacheRead tokens would have cost as plain input
-    const cacheHypotheticalInputUSD = (cacheTotals.cacheReadInputTokens / 1_000_000) * blended.input
-    // What cacheRead tokens actually cost
-    const cacheActualReadUSD = (cacheTotals.cacheReadInputTokens / 1_000_000) * blended.cacheRead
-    // Gross savings vs paying as regular input
-    const cacheGrossSavedUSD = cacheHypotheticalInputUSD - cacheActualReadUSD
-    // Premium paid for cache writes (extra over regular input)
-    const cacheWriteOverheadUSD = Math.max(
-      0,
-      (cacheTotals.cacheCreationInputTokens / 1_000_000) * (blended.cacheWrite - blended.input),
-    )
-    // Net savings
-    const cacheNetSavedUSD = cacheGrossSavedUSD - cacheWriteOverheadUSD
-
-    // Per-model hit rate (only for models with data)
-    const cachePerModel: Record<string, { hitRate: number; cacheReadTokens: number; inputTokens: number }> = {}
-    for (const [modelId, u] of Object.entries(filteredModelUsage)) {
-      const denom = (u.inputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)
-      if (denom === 0) continue
-      cachePerModel[modelId] = {
-        hitRate: (u.cacheReadInputTokens ?? 0) / denom,
-        cacheReadTokens: u.cacheReadInputTokens ?? 0,
-        inputTokens: u.inputTokens ?? 0,
-      }
-    }
+    // The cache figures (hit rate, savings, per model): one function, shared with the projected
+    // path (A4.7), so both price cache the same way.
+    const { cacheTotals, cacheHitRate, cacheGrossSavedUSD, cacheWriteOverheadUSD, cacheNetSavedUSD, cachePerModel } =
+      cacheFiguresOf(filteredModelUsage, blended)
 
     // Meta coverage range (commits/files only exist in meta sessions)
     const allMetaDates = (data.sessions ?? [])

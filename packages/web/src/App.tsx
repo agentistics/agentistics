@@ -20,6 +20,7 @@ import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
+import { useProjectedDerived } from './hooks/useProjectedDerived'
 import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
@@ -181,6 +182,9 @@ interface TeamSessionState {
    *  (`sessions/editor-gate.ts`): the capability AND the switch. Undefined reads as OFF — see
    *  `AppContext.editorEnabled`. */
   editorEnabled?: boolean
+  /** The web reads its session, cost and tool figures from the projections (A4.7): the server's
+   *  resolved answer (`projectionsWebOn`). Undefined (an older server) reads as OFF. */
+  projectionsWeb?: boolean
 }
 
 export interface IamAccount { id: string; name: string; email: string; role: 'owner' | 'member'; memberships: { teamId: string; role: 'manager' | 'user' }[]; mustChangePassword: boolean }
@@ -2829,7 +2833,16 @@ export default function AppLayout() {
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
   const runningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
-  const derived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  const legacyDerived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
+  // the server says this surface opted in and the filters are ones the API can express.
+  const projectedOverlay = useProjectedDerived({
+    enabled: teamSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
+  })
+  const derived = useMemo(
+    () => (legacyDerived && projectedOverlay ? { ...legacyDerived, ...projectedOverlay } : legacyDerived),
+    [legacyDerived, projectedOverlay],
+  )
 
   // ── the plan cost basis ──────────────────────────────────────────────────────────────────
   // Computed ONCE here and passed down: two surfaces each cutting A their own way would tell two

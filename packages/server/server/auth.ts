@@ -25,6 +25,7 @@ import { shellAllowedNow } from './sessions/shell-gate'
 import { getShellOverride } from './sessions/shell-override-store'
 import { editorAllowed } from './sessions/editor-gate'
 import { readPreferences } from './preferences'
+import { EXPERIMENTAL_FEATURES, projectionSurfaceOn } from '@agentistics/core'
 import type { Principal } from './iam-types'
 
 // ---------------------------------------------------------------------------
@@ -314,6 +315,17 @@ export function handleLogout(_req: Request): Response {
  * aggregator. The web uses it to hide local-only UI (archive consent gate, Nay chat).
  * Public — never behind the gate.
  */
+/**
+ * The web's projected read path is on when the person opted the web surface in
+ * (`AGENTISTICS_PROJECTIONS_SURFACES` names `web`), the projections themselves are on
+ * (`AGENTISTICS_PROJECTIONS`), this is not a central (the route answers 409 there), and the profile
+ * may read local transcripts (the route's capability).
+ */
+export function projectionsWebOn(env: Record<string, string | undefined>, central: boolean, localTranscripts: boolean): boolean {
+  const projections = EXPERIMENTAL_FEATURES.find(f => f.id === 'projections')!
+  return !central && localTranscripts && projections.isOn(env[projections.env]) && projectionSurfaceOn('web', env)
+}
+
 export async function handleSession(req: Request): Promise<Response> {
   const required = Boolean(TEAM_PASSWORD)
   const authed = isAuthed(req)
@@ -365,6 +377,10 @@ export async function handleSession(req: Request): Promise<Response> {
       // profile allows this, you have it off". Rides the SAME capability as the shell — see
       // `sessions/editor-gate.ts` for why there is no dedicated `localEditor` flag.
       editorEnabled: editorAllowed(CAPS.localShell, prefs.editorEnabled),
+      // Whether the web reads its session, cost and tool figures from the projections (A4.7). The
+      // browser has no environment, so the server says it. A UI hint like the rest: the route still
+      // refuses on its own terms, and the web falls back to /api/data when it does.
+      projectionsWeb: projectionsWebOn(process.env, TEAM_CENTRAL, CAPS.localTranscripts),
     }),
     { status: 200, headers: JSON_CT },
   )

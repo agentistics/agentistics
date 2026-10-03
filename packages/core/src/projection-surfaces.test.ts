@@ -24,3 +24,11 @@ describe('projection surfaces (per-surface rollout of the projected read path)',
     expect(projectionSurfaces({ [PROJECTION_SURFACES_ENV]: 'all' })).toEqual(['mcp', 'vscode', 'tui', 'web'])
   })
 })
+
+import { metricsSearchParams } from './projection-client'
+
+describe('metrics query parameters', () => {
+  test('an array is a repeated parameter, never joined with a comma', () => {
+    expect(metricsSearchParams({ project: ['/a,b', '/c'], metrics: 'cost' }).toString()).toBe('project=%2Fa%2Cb&project=%2Fc&metrics=cost')
+  })
+})

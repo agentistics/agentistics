@@ -5,7 +5,7 @@
  * path (`/api/runtime/metrics`, the same query in-process), compared row by row.
  *
  *   bun packages/server/scripts/projections-parity.ts \
- *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|all] \
+ *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|web|all] \
  *     [--journal <COPY of journal.db>] [--legacy-cache <file.json>] [--json <report.json>]
  *
  * `--journal` first catches the store up on that journal (a projection whose version changed is
@@ -31,7 +31,7 @@ const dataDir = arg('data-dir')
 const projectionsPath = arg('projections')
 const surface = arg('surface') ?? 'all'
 if (!dataDir || !projectionsPath) {
-  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|tui|all]')
+  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|tui|web|all]')
   process.exit(2)
 }
 const live = resolve(homedir(), '.agentistics')
@@ -58,6 +58,8 @@ const legacyMcp = await import('../../mcp/legacy-analytics')
 const projectedMcp = await import('../../mcp/projected-analytics')
 const parity = await import('../../mcp/surface-parity')
 const tuiFigures = await import('../../tui/src/projected-figures')
+const webLegacy = await import('../../web/src/hooks/useData')
+const webProjected = await import('../../web/src/lib/projectedDerived')
 
 type Report = import('../../mcp/surface-parity').ParityReport
 
@@ -128,6 +130,35 @@ if (surface === 'tui' || surface === 'all') {
   }
 }
 
+if (surface === 'web' || surface === 'all') {
+  // The web's derived figures with no filter (all time) against the projected overlay of the same
+  // scope. The legacy Claude figures come from statsCache when nothing narrows the scope, so the
+  // covered pass (no statsCache) is the one that compares the two paths' arithmetic.
+  // The covered pass filters on EVERY project the covered sessions ran in: a project filter is a
+  // "cache-blind" scope, which sends the legacy down its per-session path instead of statsCache, and
+  // that per-session arithmetic is what is worth comparing. (A harness filter does not: Claude alone
+  // is still read off statsCache.)
+  const allTime = { dateRange: 'all' as const, customStart: '', customEnd: '', projects: [] as string[], models: [] as string[] }
+  const rowsOf = (m: Record<string, any>, key: string, f: (v: any) => Record<string, unknown>) =>
+    Object.entries(m).map(([k, v]) => ({ [key]: k, ...f(v) }))
+  const tokens = (u: any) => ({ tokens: (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0) })
+  const passes: [string, any, import('@agentistics/core').Filters][] = [
+    ['', data, allTime],
+    [' (journal-covered, every covered project)', coveredData,
+      { ...allTime, projects: [...new Set<string>(coveredData.sessions.map((x: any) => x.project_path ?? ''))] }],
+  ]
+  for (const [scopeTag, d, filters] of passes) {
+    const scope = webProjected.projectedScope(filters, false, webLegacy.getDateRangeFilter('all'))!
+    const projected = await webProjected.projectedDerived(query, scope, webLegacy.blendedCostPerToken)
+    const legacy = webLegacy.computeDerivedStats(d, filters, [], false, new Set())!
+    reports.push(parity.compareObject(`web totals${scopeTag}`,
+      { sessions: legacy.totalSessions, costUSD: legacy.totalCostUSD, tokens: legacy.tokenTotals.input + legacy.tokenTotals.output + legacy.tokenTotals.cacheRead + legacy.tokenTotals.cacheWrite },
+      { sessions: projected.totalSessions, costUSD: projected.totalCostUSD, tokens: projected.tokenTotals.input + projected.tokenTotals.output + projected.tokenTotals.cacheRead + projected.tokenTotals.cacheWrite },
+      ['sessions', 'costUSD', 'tokens']))
+    reports.push(parity.compareRows(`web models${scopeTag}`, rowsOf(legacy.modelUsage, 'model', tokens), rowsOf(projected.modelUsage, 'model', tokens), 'model', ['tokens']))
+  }
+}
+
 // ── attribution, session by session ─────────────────────────────────────────────────────────────
 const tok = (t: any) => (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0)
 const proj = new Map<string, { main: number; sub: number; mainCost: number; models: Set<string> }>()
@@ -177,7 +208,7 @@ const status = await reader.status()
 store.close()
 
 // ── output ──────────────────────────────────────────────────────────────────────────────────────
-const verdict = reports.filter(r => !r.surface.includes('(journal-covered)')).every(r => r.equal) ? 'PASS' : 'FAIL'
+const verdict = reports.filter(r => !r.surface.includes('(journal-covered')).every(r => r.equal) ? 'PASS' : 'FAIL'
 for (const r of reports) {
   console.log(`${r.equal ? 'EQUAL' : 'DIFF '}  ${r.surface.padEnd(24)} rows ${r.rowsLegacy}→${r.rowsProjected}  matched ${r.matchedRows}  only-legacy ${r.onlyLegacy.length}  only-projected ${r.onlyProjected.length}  field diffs ${r.diffs.length}`)
   for (const d of r.diffs.slice(0, 4)) console.log(`         ${d.key} ${d.field}: ${JSON.stringify(d.legacy)} → ${JSON.stringify(d.projected)}`)
