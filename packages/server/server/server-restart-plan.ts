@@ -95,3 +95,40 @@ export function parseIsActive(stdout: string): boolean | null {
   if (s === 'inactive' || s === 'failed' || s === 'deactivating' || s === 'dead') return false
   return null
 }
+
+export interface ServiceFinding { status: 'pass' | 'warn'; label: string; detail: string }
+
+/**
+ * PURE: what `agentop doctor` reports about the `agentop-server` service. A server running OUTSIDE
+ * an installed unit is the shape of 2026-10-03: it holds the data dir, the unit is refused on every
+ * start, and nothing on screen says why. `unitText` is null when no unit is installed.
+ */
+export function serviceFindings(o: {
+  unitText: string | null
+  unitActive: boolean | null
+  /** Who holds the data-dir lock now, and its `/proc/<pid>/cgroup`; null when nobody does. */
+  holder: { pid: number; cgroup: string } | null
+}): ServiceFinding[] {
+  if (o.unitText === null) return []
+  const out: ServiceFinding[] = []
+  if (o.holder && !managedByAgentopUnit(o.holder.cgroup)) {
+    out.push({
+      status: 'warn',
+      label: 'an agentop server is running OUTSIDE the agentop-server service',
+      detail: `pid ${o.holder.pid} holds the data directory, so the service cannot start` +
+        `${o.unitActive === false ? ' (it is stopped)' : ''}. Stop that process (\`kill ${o.holder.pid}\`), ` +
+        'then `systemctl --user restart agentop-server`.',
+    })
+  } else if (o.holder) {
+    out.push({ status: 'pass', label: 'agentop server runs under its service', detail: `pid ${o.holder.pid}, inside agentop-server.service` })
+  }
+  const guarded = /^\s*RestartPreventExitStatus\s*=/m.test(o.unitText) && /^\s*StartLimitBurst\s*=/m.test(o.unitText)
+  if (!guarded) {
+    out.push({
+      status: 'warn',
+      label: 'the agentop-server unit has no restart guards',
+      detail: 'a refused start can loop every 5 s forever. `agentop restart server` adds them to the installed unit.',
+    })
+  }
+  return out
+}

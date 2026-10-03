@@ -117,3 +117,32 @@ describe('parseIsActive — silence is not "stopped"', () => {
     expect(parseIsActive('Failed to connect to bus: No such file or directory')).toBeNull()
   })
 })
+
+import { serviceFindings } from './server-restart-plan'
+
+describe('serviceFindings — what `agentop doctor` says about the service', () => {
+  const GUARDED = '[Unit]\nStartLimitIntervalSec=300\nStartLimitBurst=5\n[Service]\nType=simple\nExecStart=/b/agentop server\nRestartPreventExitStatus=75\n'
+
+  test('the incident shape: the data dir is held by a server outside the unit', () => {
+    const f = serviceFindings({ unitText: GUARDED, unitActive: false, holder: { pid: 3825199, cgroup: '0::/' } })
+    expect(f).toHaveLength(1)
+    expect(f[0]!.status).toBe('warn')
+    expect(f[0]!.detail).toContain('3825199')
+    expect(f[0]!.detail).toContain('systemctl --user restart agentop-server')
+  })
+
+  test('the service holding its own data dir is healthy', () => {
+    const f = serviceFindings({ unitText: GUARDED, unitActive: true, holder: { pid: 10, cgroup: '0::/user.slice/user@1000.service/app.slice/agentop-server.service' } })
+    expect(f).toEqual([{ status: 'pass', label: 'agentop server runs under its service', detail: expect.stringContaining('pid 10') }])
+  })
+
+  test('an installed unit without the restart guards is named, with the command that adds them', () => {
+    const old = '[Unit]\n[Service]\nType=simple\nExecStart=/b/agentop server\n'
+    const f = serviceFindings({ unitText: old, unitActive: true, holder: { pid: 10, cgroup: '0::/x/agentop-server.service' } })
+    expect(f.some(x => x.status === 'warn' && x.detail.includes('agentop restart server'))).toBe(true)
+  })
+
+  test('no unit: nothing to say about a service', () => {
+    expect(serviceFindings({ unitText: null, unitActive: null, holder: { pid: 1, cgroup: '0::/' } })).toEqual([])
+  })
+})
