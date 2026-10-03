@@ -140,6 +140,11 @@ export interface MetricsQuery {
   limit: number
   /** The key of the last group already returned; the page starts strictly after it. */
   after?: (string | null)[]
+  /**
+   * Harnesses whose facts this answer leaves out entirely — the native harness while it is
+   * experimental and off (`native-gate.ts`). Set by the route, never by a caller.
+   */
+  hiddenHarnesses?: readonly string[]
 }
 
 export interface QueryRefusal {
@@ -302,6 +307,7 @@ export function queryFingerprint(q: MetricsQuery): string {
     s: q.subagent ?? null,
     g: q.groupBy,
     m: [...q.metrics].sort(),
+    ...(q.hiddenHarnesses?.length ? { h: [...q.hiddenHarnesses].sort() } : {}),
   })
   let h = 0x811c9dc5
   for (let i = 0; i < norm.length; i++) {
@@ -371,8 +377,10 @@ function compileFilter(q: MetricsQuery): (f: Fact) => boolean {
   const from = q.from
   const to = q.to
   const sub = q.subagent
-  if (active.length === 0 && !from && !to && sub === undefined) return () => true
+  const hidden = q.hiddenHarnesses && q.hiddenHarnesses.length > 0 ? new Set(q.hiddenHarnesses) : null
+  if (active.length === 0 && !from && !to && sub === undefined && hidden === null) return () => true
   return (f: Fact) => {
+    if (hidden && hidden.has(f.harness)) return false
     // A cost fact is one agent's, so it passes or not. A run fact has both sides; it passes, and
     // the run loop cuts its tools to the selected side (`toolSide`).
     if (sub !== undefined && 'subagent' in f && f.subagent !== sub) return false

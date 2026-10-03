@@ -5,6 +5,7 @@
  * the fleet's page would wait for one that never comes. A header (back, the mark, the title, the
  * model and provider, the task it is filed under, the state) over `NativeSessionChat`.
  */
+import { NativeGate } from '../components/NativeGate'
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
@@ -14,7 +15,13 @@ import { NativeFilingButton } from '../components/sessions/NativeFilingButton'
 import { useNativeSession } from '../hooks/useNativeSession'
 import { NATIVE_HARNESS_ID, NATIVE_HARNESS_LABEL } from '../lib/nativeSession'
 
+/** Experimental (owner decision 2026-10-03): the page only where the native runtime may be shown. */
 export default function NativeSessionPage() {
+  const { lang } = useOutletContext<AppContext>()
+  return <NativeGate lang={lang}><NativeSessionBody /></NativeGate>
+}
+
+function NativeSessionBody() {
   const { lang } = useOutletContext<AppContext>()
   const pt = lang === 'pt'
   const { sessionId = '' } = useParams()
