@@ -19,11 +19,12 @@ describe('nativeUsageOf — the native calls card', () => {
 })
 
 import { nativeCard } from './nativeUsage'
-describe('nativeCard — shown whenever the engine is present', () => {
+describe('nativeCard — shown whenever the native runtime may be shown (engine + experimental flag)', () => {
   test('engine + no calls: card shows (empty state)', () => expect(nativeCard(true, null)).toEqual({ show: true, usage: null }))
   test('no engine, no calls: hidden', () => expect(nativeCard(false, null).show).toBe(false))
-  test('no engine but usage on record: shown', () => {
+  test('the flag off (or no engine) with usage on record: hidden — the native card is experimental', () => {
     const u = nativeUsageOf({ groups: [{ key: { model: 'm' }, metrics: { responses: { count: 1 }, tokens: { total: 1 } } }] })
-    expect(nativeCard(false, u).show).toBe(true)
+    expect(nativeCard(false, u)).toEqual({ show: false, usage: null })
+    expect(nativeCard(true, u).show).toBe(true)
   })
 })

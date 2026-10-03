@@ -69,8 +69,9 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       case 'billing': return !v.central
       // Runtime providers are credentials for THIS machine's own local runtime — a central has no
       // local runtime to spawn assistants with, the same reason `chat`/`connection`/`live` hide.
-      // And only where an engine provides the native runtime: a community build has none.
-      case 'providers': return !v.central && v.nativeRuntime !== false
+      // And only where the native runtime may be shown: an engine that provides it AND the experimental
+      // flag on (`nativeRuntimeFrom`). Unknown yet (loading) reads as hidden, never flashed.
+      case 'providers': return !v.central && v.nativeRuntime === true
       case 'users':
       case 'teams': return v.central && (v.role === 'owner' || !!v.isManager)
       // Machines is visible to ANY central account: owner/manager manage the fleet, a plain user

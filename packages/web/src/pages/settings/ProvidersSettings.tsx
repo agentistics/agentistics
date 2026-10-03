@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
+import { NativeGate } from '../../components/NativeGate'
 import { useOutletContext } from 'react-router-dom'
 import { Beaker, Check, CheckCheck, Copy, Cpu, Loader2, Pencil, Search, Trash2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
@@ -67,7 +68,13 @@ async function readJson(r: Response): Promise<any> {
   try { return await r.json() } catch { return null }
 }
 
+/** Experimental (owner decision 2026-10-03): the page only where the native runtime may be shown. */
 export default function ProvidersSettings() {
+  const { lang } = useOutletContext<AppContext>()
+  return <NativeGate lang={lang}><ProvidersSettingsBody /></NativeGate>
+}
+
+function ProvidersSettingsBody() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()

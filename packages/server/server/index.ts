@@ -1748,6 +1748,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     {
       const reserved = RESERVED_PREFIXES.find(p => url.pathname === p || url.pathname.startsWith(p + '/'))
       if (reserved) {
+        // The native harness and the providers are EXPERIMENTAL (`native-gate.ts`): with the flag
+        // off their routes are a 403 that names the command, even though the engine is present.
+        const { nativeGateRefusal, nativeExperimentalOn } = await import('./native-gate')
+        const gated = nativeGateRefusal(url.pathname, nativeExperimentalOn())
+        if (gated) return json(gated.body, gated.status)
         await loadEngine()
         const live = engine()
         if (live) {
@@ -1770,7 +1775,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // to SAY which build it is when it does not.
     if (url.pathname === '/api/engine' && req.method === 'GET') {
       await loadEngine()
-      return json(engineStatus())
+      // `nativeExperimental`: whether the native harness and the providers may be SHOWN here — the
+      // experimental flag (`native-gate.ts`). An engine that provides them is not enough.
+      const { nativeExperimentalOn } = await import('./native-gate')
+      return json({ ...engineStatus(), nativeExperimental: nativeExperimentalOn() })
     }
 
     // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).

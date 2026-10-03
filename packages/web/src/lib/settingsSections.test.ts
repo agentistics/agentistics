@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat', 'providers'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -64,7 +64,7 @@ test('chat is absent on a central, as before', () => {
 })
 
 test('providers is a machine section — a central has no local runtime to hold credentials for', () => {
-  expect(ids({ central: false })).toContain('providers')
+  expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
   expect(ids({ central: true, role: 'owner' })).not.toContain('providers')
   expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('providers')
 })
@@ -72,10 +72,17 @@ test('providers is a machine section — a central has no local runtime to hold 
 test('providers is hidden on a community build (no engine, no native runtime) — UI.2', () => {
   expect(ids({ central: false, nativeRuntime: false })).not.toContain('providers')
   expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
-  expect(ids({ central: false })).toContain('providers') // not yet known: shown, as localChat
+  // Not yet known: hidden — the providers are experimental, never flashed before the answer.
+  expect(ids({ central: false })).not.toContain('providers')
 })
 
 test('the other sections are unaffected by the new field', () => {
   expect(ids({ central: false, localChat: false })).toContain('preferences')
   expect(ids({ central: false, localChat: false })).toContain('notifications')
+})
+
+test('providers is experimental: hidden unless the native runtime may be shown (the flag on), and while unknown', () => {
+  expect(ids({ central: false })).not.toContain('providers')
+  expect(ids({ central: false, nativeRuntime: false })).not.toContain('providers')
+  expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
 })
