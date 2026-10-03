@@ -152,7 +152,9 @@ for (let b = 0; b < BOOTS; b++) {
 
     // /api/events: an append → `change`
     const ev: number[] = []
+    let fresh = 0
     for (let i = 0; i < 5; i++) {
+      const before = (await get(s, '/api/data')).text.replace(/"live(SessionIds|Processes)":\[[^\]]*\]/g, '')
       const ctl = new AbortController()
       const res = await fetch(`${s.base}/api/events`, { signal: ctl.signal })
       const reader = res.body!.getReader()
@@ -162,18 +164,25 @@ for (let b = 0; b < BOOTS; b++) {
       while (!buf.includes('connected')) buf += dec.decode((await reader.read()).value ?? new Uint8Array())
       buf = ''
       const t = performance.now()
-      appendFileSync(bySize.median.path, `${JSON.stringify({ type: 'system', uuid: crypto.randomUUID(), timestamp: new Date().toISOString(), content: 'perf' })}\n`)
+      // A new PERSON turn: it changes the session's figures, so fresh data differs from the old.
+      appendFileSync(bySize.median.path, `${JSON.stringify({ type: 'user', uuid: crypto.randomUUID(), parentUuid: null, sessionId: bySize.median.id, timestamp: new Date().toISOString(), message: { role: 'user', content: `perf ${i}` } })}\n`)
       const deadline = t + 15_000
       while (performance.now() < deadline) {
         const r = await Promise.race([reader.read(), Bun.sleep(15_000).then(() => null)])
         if (!r || r.done) break
         buf += dec.decode(r.value)
-        if (buf.includes('event: change')) { ev.push(performance.now() - t); break }
+        if (buf.includes('event: change')) {
+          ev.push(performance.now() - t)
+          // Is the data the client now refetches the NEW data?
+          const after = (await get(s, '/api/data')).text.replace(/"live(SessionIds|Processes)":\[[^\]]*\]/g, '')
+          if (after !== before) fresh++
+          break
+        }
       }
       ctl.abort()
       await Bun.sleep(2500)
     }
-    out.events_change_after_append = quantiles(ev)
+    out.events_change_after_append = { ...quantiles(ev), refetchSawTheChange: `${fresh}/${ev.length}` }
 
     // ── 3. live CLI sessions over a fake claude ───────────────────────────────────────────────
     out.live = {}

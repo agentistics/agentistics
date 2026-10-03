@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
-import { buildApiResponse, buildApiResponseStream, invalidateCache } from './data'
+import { buildApiResponse, buildApiResponseStream, invalidateCache, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -120,6 +120,7 @@ import {
   sseClients,
   sseEncoder,
   setupFileWatcher,
+  enableRebuildOnChange,
   maybeSpawnWatcher,
   serveStatic,
   SERVE_STATIC,
@@ -230,6 +231,7 @@ void (async () => {
 await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
   console.warn('[team-migrate] state migration failed (will retry next boot):', err instanceof Error ? err.message : String(err)))
 
+enableRebuildOnChange()
 void setupFileWatcher()
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
@@ -3559,10 +3561,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             liveProcesses = [...liveProcesses, ...team.liveProcesses]
           } catch { /* best-effort — the local snapshot still stands */ }
         }
-        return new Response(JSON.stringify({
-          ...data, liveSessionIds, liveProcesses,
-          ...(liveUnavailable ? { liveUnavailable } : {}), ...extra,
-        }), {
+        // The build is serialized once (`serializedData`); only the live fields are added per request.
+        // A central's response is scoped per principal, so it keeps the plain path.
+        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...extra }
+        const body = TEAM_CENTRAL || !data.sessions
+          ? JSON.stringify({ ...data, ...live })
+          : `${serializedData(data).slice(0, -1)},${JSON.stringify(live).slice(1)}`
+        return new Response(body, {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })

@@ -512,6 +512,37 @@ function revalidateInBackground(): void {
     .finally(() => { _revalidating = false })
 }
 
+/**
+ * Rebuild NOW and swap the result in (PERF.1: `rebuild-scheduler.ts` calls this when files change,
+ * and tells clients `change` only after it resolves). Waits for a first build already in flight, and
+ * holds the same guard as the TTL refresh so the two never build at once.
+ */
+export async function rebuildNow(): Promise<void> {
+  if (_status === 'computing' && _promise) await _promise.catch(() => undefined)
+  while (_revalidating) await new Promise(r => setTimeout(r, 50))
+  _revalidating = true
+  try {
+    const result = await _buildApiResponse()
+    _promise = Promise.resolve(result)
+    _resolvedAt = Date.now()
+    _status = 'done'
+  } finally {
+    _revalidating = false
+  }
+}
+
+const SERIALIZED = new WeakMap<object, string>()
+
+/**
+ * The built response as JSON, serialized ONCE per build (PERF.1). The route used to stringify the
+ * whole 10+ MB object on every request only to add a few live fields; it now appends those to this.
+ */
+export function serializedData(data: ApiResponse): string {
+  let s = SERIALIZED.get(data)
+  if (s === undefined) { s = JSON.stringify(data); SERIALIZED.set(data, s) }
+  return s
+}
+
 /** Backfill `git_remote` onto remote-less sessions (and their projects) from any session/project
  *  at the same `project_path` that already carries a remote. Members stamp git_remote at push time
  *  from their local repo, but legacy pushes / older consolidated sessions lack it — without this an
