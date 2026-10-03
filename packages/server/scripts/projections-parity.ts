@@ -5,7 +5,7 @@
  * path (`/api/runtime/metrics`, the same query in-process), compared row by row.
  *
  *   bun packages/server/scripts/projections-parity.ts \
- *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|web|all] \
+ *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|web|vscode|all] \
  *     [--journal <COPY of journal.db>] [--legacy-cache <file.json>] [--json <report.json>]
  *
  * `--journal` first catches the store up on that journal (a projection whose version changed is
@@ -31,7 +31,7 @@ const dataDir = arg('data-dir')
 const projectionsPath = arg('projections')
 const surface = arg('surface') ?? 'all'
 if (!dataDir || !projectionsPath) {
-  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|tui|web|all]')
+  console.error('usage: projections-parity --data-dir <copy> --projections <copy of projections.db> [--surface mcp|tui|web|vscode|all]')
   process.exit(2)
 }
 const live = resolve(homedir(), '.agentistics')
@@ -60,6 +60,8 @@ const parity = await import('../../mcp/surface-parity')
 const tuiFigures = await import('../../tui/src/projected-figures')
 const webLegacy = await import('../../web/src/hooks/useData')
 const webProjected = await import('../../web/src/lib/projectedDerived')
+const vscodeLegacy = await import('../../vscode/src/today')
+const vscodeProjected = await import('../../vscode/src/today-projected')
 
 type Report = import('../../mcp/surface-parity').ParityReport
 
@@ -157,6 +159,34 @@ if (surface === 'web' || surface === 'all') {
       ['sessions', 'costUSD', 'tokens']))
     reports.push(parity.compareRows(`web models${scopeTag}`, rowsOf(legacy.modelUsage, 'model', tokens), rowsOf(projected.modelUsage, 'model', tokens), 'model', ['tokens']))
   }
+}
+
+if (surface === 'vscode' || surface === 'all') {
+  // The status bar's "today", for each of the 30 UTC days before the newest session in the data. The
+  // legacy files a WHOLE session under its start day; the journal files each response under its
+  // billed day, so a session crossing midnight moves spend between neighbouring days.
+  const newest = (data.sessions ?? []).reduce((m: string, x: any) => ((x.start_time ?? '') > m ? x.start_time : m), '')
+  const days = Array.from({ length: 30 }, (_, i) => new Date(Date.parse(newest) - i * 86_400_000))
+  for (const [scopeTag, d] of [['', data], [' (journal-covered)', coveredData]] as const) {
+    const legacyRows = days.map(day => ({ day: vscodeLegacy.dayKey(day), ...vscodeLegacy.todayTotals(d.sessions ?? [], day) }))
+    const projectedRows = await Promise.all(days.map(async day => ({ day: vscodeLegacy.dayKey(day), ...await vscodeProjected.projectedToday(query, day) })))
+    reports.push(parity.compareRows(`vscode today, 30 days${scopeTag}`, legacyRows, projectedRows, 'day', ['sessions', 'tokens', 'costUSD']))
+  }
+  // The same 30 days with the legacy cut by the projections' rule: each session's own per-day usage
+  // (`daily`, what the web slices bounded ranges with). This isolates the pipeline from the day rule.
+  const sliced = days.map(day => {
+    const key = vscodeLegacy.dayKey(day)
+    let tokens = 0, sessions = 0
+    for (const x of coveredData.sessions as any[]) {
+      const u = x.daily?.[key]
+      if (!u) continue
+      sessions++
+      tokens += (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+    }
+    return { day: key, sessions, tokens }
+  })
+  const projectedDays = await Promise.all(days.map(async day => ({ day: vscodeLegacy.dayKey(day), ...await vscodeProjected.projectedToday(query, day) })))
+  reports.push(parity.compareRows('vscode today, 30 days (journal-covered, legacy cut by billed day)', sliced, projectedDays, 'day', ['sessions', 'tokens']))
 }
 
 // ── attribution, session by session ─────────────────────────────────────────────────────────────

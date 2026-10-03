@@ -132,7 +132,7 @@ export async function projectedRollup(q: MetricsQueryFn, dim: string | null, har
 
 
 /** The surfaces' HTTP query: `${apiBase}/api/runtime/metrics?…`, the refusal's code read off its body. */
-export function httpMetricsQuery(apiBase: string, fetchFn: typeof fetch = fetch): MetricsQueryFn {
+export function httpMetricsQuery(apiBase: string, fetchFn: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init)): MetricsQueryFn {
   return async params => {
     const res = await fetchFn(`${apiBase}/api/runtime/metrics?${params}`)
     const body = await res.json().catch(() => ({})) as { error?: unknown }

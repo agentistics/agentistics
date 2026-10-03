@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode'
+import { projectionSurfaceOn } from '@agentistics/core'
 import { AgentopClient } from './api'
 import { resolveEndpoints, type Endpoints } from './config'
 import { resolveLang, strings, type Lang } from './i18n'
@@ -172,7 +173,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // be worth a request of its own.
     const rate = currency === 'BRL' ? await client.brlRate() : null
     statusBar.setCurrency(currency, rate)
-    statusBar.setTotals(await client.today(new Date()))
+    // A4.5: the projections when this surface opted in, by the setting or by the editor's environment.
+    const projected = setting('readProjections', false) || projectionSurfaceOn('vscode', process.env)
+    statusBar.setTotals(await client.today(new Date(), { projected }))
   }
 
   function restartTodayTimer(): void {
