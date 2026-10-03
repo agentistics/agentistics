@@ -1853,6 +1853,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { nativeFilingOf } = await import('./sessions/task-web')
       return json({ filing: await nativeFilingOf(url.searchParams.get('session') ?? '') })
     }
+    // Every native session's filing at once (UI.UNIFY) — the fleet list's native rows read it.
+    if (url.pathname === '/api/tasks/native-filings' && req.method === 'GET') {
+      const { nativeFilingsAll } = await import('./sessions/task-web')
+      return json({ filings: await nativeFilingsAll() })
+    }
     if (url.pathname === '/api/tasks/activity' && req.method === 'GET') {
       const { taskActivity } = await import('./sessions/task-web')
       const limit = Number(url.searchParams.get('limit'))

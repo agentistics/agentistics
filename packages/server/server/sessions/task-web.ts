@@ -1191,6 +1191,29 @@ export async function nativeFilingOf(sessionId: string): Promise<{ taskId: strin
   return { taskId: task.id, taskTitle: task.title, ...(link.subtaskId ? { subtaskId: link.subtaskId } : {}) }
 }
 
+/**
+ * Where EVERY native session is filed, keyed by session id (UI.UNIFY): the fleet list shows a native
+ * session as an ordinary row, and a row carries its task and its cost — one read for the whole list
+ * instead of one per row. `usage` is the engine's own snapshot; absent = nothing reported yet, which
+ * the row renders as no figure rather than a zero.
+ */
+export async function nativeFilingsAll(): Promise<Record<string, { taskId: string; taskTitle: string; subtaskId?: string; costUSD?: number; tokens?: number }>> {
+  const w = await loadTaskWorld()
+  const out: Record<string, { taskId: string; taskTitle: string; subtaskId?: string; costUSD?: number; tokens?: number }> = {}
+  for (const link of w.book.nativeSessions) {
+    const task = w.book.tasks.find(t => t.id === link.taskId)
+    if (!task) continue
+    out[link.sessionId] = {
+      taskId: task.id,
+      taskTitle: task.title,
+      ...(link.subtaskId ? { subtaskId: link.subtaskId } : {}),
+      ...(typeof link.usage?.costUSD === 'number' ? { costUSD: link.usage.costUSD } : {}),
+      ...(typeof link.usage?.tokens === 'number' ? { tokens: link.usage.tokens } : {}),
+    }
+  }
+  return out
+}
+
 /** `EngineHostServices.tasks.reportNativeUsage`: refresh a filed session's snapshot; never files one. */
 export async function reportNativeSessionUsage(sessionId: string, raw: NativeSessionUsage): Promise<boolean> {
   const usage = sanitizeNativeUsage(raw)
