@@ -636,7 +636,22 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
 **Limits, stated:** a revealed value is in the browser's memory and the page's DOM for 30 seconds; a
 copy is in the clipboard for 30 seconds, readable by any program of yours, and longer in a clipboard
 history tool — the page says so. Names and notes are metadata: shown in the list without a gesture,
-sealed at rest. The backup gets its own section when it ships.
+sealed at rest.
+
+**The backup** carries the vault as ONE sealed bundle per backup (`packages/vault/src/bundle.ts`):
+every sealed record still sealed, wrapped once more under a subkey of the data key so the backup shows
+neither the names nor the count, plus `dek.recovery` — the data key wrapped under the 24 words — and a
+`vault.json` holding only that wrapper. Nothing tied to this computer travels (no Windows Hello, DPAPI or
+security-key wrapper), so on another machine the 24 words are the only way in; a restore lands in
+recovery mode (new authenticator, personal confirmation, new words). The bundle sits beside the archive
+and, on GitHub, is a second asset of the same release. **A backup is not a deletion:** older releases keep
+older bundles — ciphertext under the key of their time. After a data-key rotation, the next confirmed
+upload erases this machine's older bundle assets by itself; "Erase the vault's history in the backup" on
+the vault page does it on demand (code + Windows Hello). Restoring never applies a bundle over a vault that
+holds secrets; an empty first-use vault is set aside (renamed, not deleted). Tested end to end on a fresh
+data dir: personal secrets and the GitHub token come back with the 24 words, and nothing else opens them.
+**Limit:** a release deleted by hand outside agentop, or a copy of an archive made elsewhere, is outside
+what the wipe can reach.
 
 **Agents use a secret without seeing it** (spec §8). The person picks credentials or groups with the
 `:vault` chip in a session's composer; sending GRANTS exactly those to that session — the gesture,
