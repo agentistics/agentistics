@@ -1343,6 +1343,8 @@ export interface ControlHost {
   homeTasks?(): Promise<{ tasks: HomeTask[] } | { unavailable: string }>
   /** HM-06: the configured providers and their state, from the real credential state. */
   homeProviders?(): Promise<{ providers: HomeProvider[] } | { unavailable: string }>
+  /** TK-02…TK-07: one task's detail — rollup, subtasks, its sessions (with live state), activity. */
+  taskDetail?(id: string): Promise<import('./task-detail').TaskDetailView | { unavailable: string }>
 
   /** Re-detect config + services. Must never throw; failures come back as `unknown` services. */
   refresh(): Promise<ControlStatus>

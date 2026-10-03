@@ -224,7 +224,7 @@ const TRANSCRIPT_DEBOUNCE_MS = 300
 
 export function Sessions({
   host, fleet, strings: s, width, height, isActive, run, onChrome, onExit, onRefreshFleet,
-  view, onView, onOpenCode, lang = 'en',
+  view, onView, onOpenCode, lang = 'en', focus: focusRequest,
 }: {
   host: ControlHost
   /** `null` until the first poll lands, `undefined` when the host has no fleet at all. The two are
@@ -249,6 +249,8 @@ export function Sessions({
   onOpenCode?: (launch: { resume: string }) => void
   /** The interface language — the task picker (SS-09) speaks the code tab's strings. */
   lang?: CliLang
+  /** TK-04: select this session (a new object each time the `tasks` tab asks). */
+  focus?: { id: string }
 }) {
   // A stored `grouping: 'tree'` predates the cascade being a view: it meant "no bands, cascade on",
   // which is exactly `none` + cascade. Rewritten on the way in rather than left as a grouping the
@@ -587,6 +589,20 @@ export function Sessions({
     setCursor(clamped)
     glueRef.current = idAtRow(rows, selectable, clamped)
   }, [rows, selectable])
+
+  // TK-04: the `tasks` tab asked for a session — select it once it is on screen (each request is a
+  // new object, acted on once).
+  const focusDone = useRef<{ id: string } | undefined>(undefined)
+  useEffect(() => {
+    if (!focusRequest || focusDone.current === focusRequest) return
+    const i = selectable.findIndex(r => {
+      const row = rows[r]
+      return row?.kind === 'session' && row.session.id === focusRequest.id
+    })
+    if (i < 0) return
+    focusDone.current = focusRequest
+    moveTo(i)
+  }, [focusRequest, rows, selectable, moveTo])
 
   /**
    * Keep the glue honest across every reorder the user did not cause.

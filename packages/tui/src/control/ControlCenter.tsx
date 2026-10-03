@@ -169,6 +169,12 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     setCodeLaunch({ ...launch })
     setTab('code')
   }, [])
+  // TK-04: the `tasks` tab hands a live session to `sessions`, which selects it (a new object each time).
+  const [sessionsFocus, setSessionsFocus] = useState<{ id: string } | undefined>(undefined)
+  const focusSession = useCallback((id: string) => {
+    setSessionsFocus({ id })
+    setTab('sessions')
+  }, [])
   // Seeded from what the host already knows, so a REMOUNT does not open on the defaults. Detaching
   // from a session remounts this app, `refresh()` takes about a second to probe systemd and docker,
   // and for that second the sessions list was drawn with the shipped arrangement instead of the
@@ -760,6 +766,8 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             nonce={nonce}
             onChrome={reportChrome}
             onSay={say}
+            onOpenCode={openCode}
+            onFocusSession={focusSession}
           />
         </Screen>
 
@@ -840,6 +848,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               onView={v => { void host.setSessionView?.(v) }}
               onOpenCode={openCode}
               lang={lang}
+              {...(sessionsFocus ? { focus: sessionsFocus } : {})}
             />
         </Screen>
 

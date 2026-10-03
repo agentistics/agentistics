@@ -36,7 +36,7 @@ export interface KeyEntry {
 }
 
 export type KeySectionId =
-  | 'everywhere' | 'code' | 'services' | 'output' | 'sessions' | 'backup' | 'dashboard' | 'logs'
+  | 'everywhere' | 'code' | 'services' | 'output' | 'sessions' | 'tasks' | 'backup' | 'dashboard' | 'logs'
   | 'reading' | 'narrow'
 
 export interface KeySection {
@@ -181,6 +181,19 @@ export const DASHBOARD: KeySection = {
   ],
 }
 
+export const TASKS: KeySection = {
+  id: 'tasks',
+  title: w('TASKS', 'TAREFAS'),
+  tabs: ['tasks'],
+  entries: [
+    { keys: '↑ ↓', action: w('select a task (narrow, in the detail: scroll it)', 'selecionar uma tarefa (estreito, no detalhe: rolar)') },
+    { keys: 'enter', action: w('open its live session (native → code, others → selected in sessions)', 'abrir a sessão viva (nativa → código, outras → selecionada em sessões)') },
+    { keys: 'n', action: w('new session filed here (refused on a done task)', 'nova sessão arquivada aqui (recusada numa tarefa concluída)') },
+    { keys: 'w', action: w('open the task on the web — editing happens there', 'abrir a tarefa na web — a edição é lá') },
+    { keys: 'tab / esc', action: w('narrow: list ↔ detail', 'estreito: lista ↔ detalhe') },
+  ],
+}
+
 export const LOGS: KeySection = {
   id: 'logs',
   title: w('LOGS', 'LOGS'),
@@ -218,7 +231,7 @@ export const NARROW: KeySection = {
 
 /** Every section, in the order the overlay prints them when nothing else decides. */
 export const KEYMAP: readonly KeySection[] = [
-  EVERYWHERE, CODE, SERVICES, OUTPUT, SESSIONS, BACKUP, DASHBOARD, LOGS, READING, NARROW,
+  EVERYWHERE, CODE, SERVICES, OUTPUT, SESSIONS, TASKS, BACKUP, DASHBOARD, LOGS, READING, NARROW,
 ]
 
 /**

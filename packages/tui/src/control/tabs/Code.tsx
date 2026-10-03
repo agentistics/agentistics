@@ -268,13 +268,19 @@ export function Code({
 
   // ── the wizard ───────────────────────────────────────────────────────────────────────────
 
-  const startWizard = useCallback((firstMessage?: string) => {
+  const startWizard = useCallback((firstMessage?: string, taskId?: string) => {
     if (!code) return
     setWizard(openWizard(firstMessage ?? ''))
-    // Both reads start at once; each lands only on a wizard that is still open.
-    void code.openTasks().then(r => setWizard(w => (w
-      ? (r.ok ? { ...w, tasks: r.tasks, tasksError: null } : { ...w, tasksError: r.sentence })
-      : w)))
+    // Both reads start at once; each lands only on a wizard that is still open. TK-06: a task chosen
+    // by the `tasks` tab is picked as soon as the list arrives, and the wizard goes to the review.
+    void code.openTasks().then(r => setWizard(w => {
+      if (!w) return w
+      if (!r.ok) return { ...w, tasksError: r.sentence }
+      const chosen = taskId ? r.tasks.find(t => t.id === taskId) : undefined
+      return chosen
+        ? { ...w, tasks: r.tasks, tasksError: null, task: chosen, cursor: r.tasks.indexOf(chosen), step: 'review' }
+        : { ...w, tasks: r.tasks, tasksError: null }
+    }))
     void code.defaults().then(d => setWizard(w => (w ? { ...w, defaults: d } : w)))
   }, [code])
 
@@ -294,7 +300,7 @@ export function Code({
       })
       return
     }
-    startWizard(launch.prompt)
+    startWizard(launch.prompt, launch.taskId)
   }, [launch, code, available, openSession, startWizard, say])
 
   const performWizard = useCallback((effect: WizardEffect) => {

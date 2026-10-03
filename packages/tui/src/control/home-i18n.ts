@@ -37,7 +37,15 @@ export interface HomeStrings {
   tasksTitle: string
   tasksSub: (n: number) => string
   tasksReadOnly: string
-  tasksHints: { move: string; web: string }
+  tasksHints: { move: string; web: string; open: string; new: string; pane: string }
+  /** TK-02…TK-07: the detail pane's words. */
+  detail: import('./task-detail').TaskDetailWords
+  detailTitle: string
+  detailLoading: string
+  noLive: (ref: string) => string
+  liveElsewhere: (title: string) => string
+  doneNoNew: (ref: string) => string
+  narrowStrip: string
   notFiledCost: string
   progress: (done: number, total: number) => string
 }
@@ -77,7 +85,23 @@ const EN: HomeStrings = {
   tasksTitle: 'your tasks',
   tasksSub: n => `${n} · claimed by you or filed by your sessions`,
   tasksReadOnly: 'read-only here · edit on the web',
-  tasksHints: { move: '↑↓ select', web: 'w open on the web' },
+  tasksHints: { move: '↑↓ select', web: 'w open on the web', open: 'enter open its live session', new: 'n new session here', pane: 'tab pane' },
+  detail: {
+    priority: 'priority', due: 'due', blocked: 'blocked',
+    subtasksOf: (d, t, p) => `${p}%  (${d} of ${t} subtasks)`,
+    noSubtasks: 'no subtasks, so no progress bar — nobody broke this up yet',
+    cost: 'cost', tokens: 'tokens', rounds: 'rounds', na: 'N/A',
+    fromSessions: n => `from its ${n} session${n === 1 ? '' : 's'}`, noSession: 'no session filed yet',
+    subtasksHead: 'SUBTASKS', subtaskSessions: n => (n === 1 ? '1 session' : `${n} sessions`),
+    sessionsHead: 'SESSIONS', noSessions: 'none yet · n starts one filed here',
+    activityHead: 'ACTIVITY', readOnly: 'read-only here · edit, comment and move it on the web:',
+  },
+  detailTitle: 'task',
+  detailLoading: 'reading the task…',
+  noLive: ref => `${ref} has no live session. n starts one filed here.`,
+  liveElsewhere: title => `"${title}" is live — selected in sessions, where enter attaches.`,
+  doneNoNew: ref => `${ref} is done. Reopen it on the web before filing new work there.`,
+  narrowStrip: 'tasks · detail',
   notFiledCost: 'N/A',
   progress: (d, t) => `${d}/${t}`,
 }
@@ -117,7 +141,23 @@ const PT: HomeStrings = {
   tasksTitle: 'suas tarefas',
   tasksSub: n => `${n} · assumidas por você ou com sessões suas`,
   tasksReadOnly: 'só leitura aqui · edite na web',
-  tasksHints: { move: '↑↓ selecionar', web: 'w abrir na web' },
+  tasksHints: { move: '↑↓ selecionar', web: 'w abrir na web', open: 'enter abrir a sessão viva', new: 'n nova sessão aqui', pane: 'tab painel' },
+  detail: {
+    priority: 'prioridade', due: 'prazo', blocked: 'bloqueada',
+    subtasksOf: (d, t, p) => `${p}%  (${d} de ${t} subtarefas)`,
+    noSubtasks: 'sem subtarefas, então sem barra de progresso — ninguém dividiu esta ainda',
+    cost: 'custo', tokens: 'tokens', rounds: 'rodadas', na: 'N/A',
+    fromSessions: n => `das ${n} sessões dela`, noSession: 'nenhuma sessão arquivada ainda',
+    subtasksHead: 'SUBTAREFAS', subtaskSessions: n => (n === 1 ? '1 sessão' : `${n} sessões`),
+    sessionsHead: 'SESSÕES', noSessions: 'nenhuma ainda · n inicia uma arquivada aqui',
+    activityHead: 'ATIVIDADE', readOnly: 'só leitura aqui · edite, comente e mova na web:',
+  },
+  detailTitle: 'tarefa',
+  detailLoading: 'lendo a tarefa…',
+  noLive: ref => `${ref} não tem sessão viva. n inicia uma arquivada aqui.`,
+  liveElsewhere: title => `"${title}" está viva — selecionada em sessões, onde enter anexa.`,
+  doneNoNew: ref => `${ref} está concluída. Reabra na web antes de arquivar trabalho novo nela.`,
+  narrowStrip: 'tarefas · detalhe',
   notFiledCost: 'N/A',
   progress: (d, t) => `${d}/${t}`,
 }

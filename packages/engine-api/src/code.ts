@@ -124,6 +124,8 @@ export interface CodeLaunch {
   prompt?: string
   /** `agentop code --resume <id>`: open that session instead of starting a new one. */
   resume?: string
+  /** TK-06: the wizard opens with this board task already chosen (straight to the review). */
+  taskId?: string
 }
 
 // ── the conversation, as events ───────────────────────────────────────────────────────────────

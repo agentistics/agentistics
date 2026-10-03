@@ -4290,6 +4290,59 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
   // language is a closure variable the in-app toggle reassigns.
   const { loadEngine, engine } = await import('./engine/load')
   await loadEngine()
+  // TK-02…TK-07: a task's detail, its sessions' state read from the fleet this screen already shows.
+  host.taskDetail = async (id) => {
+    const pt = host.lang === 'pt'
+    try {
+      const [tw, { loadTaskBoard }, { sortTaskStatuses }] = await Promise.all([
+        import('./sessions/task-web'), import('./sessions/task-source'), import('@agentistics/core'),
+      ])
+      const [reply, board, events, fleet] = await Promise.all([
+        tw.showTask(id), loadTaskBoard(), tw.taskActivity({ ref: id, limit: 4 }),
+        host.sessions ? host.sessions().catch(() => null) : Promise.resolve(null),
+      ])
+      if (!reply) return { unavailable: pt ? 'Essa tarefa não está mais no board.' : 'That task is no longer on the board.' }
+      const d = reply.task
+      const t = d.task
+      const label = new Map(sortTaskStatuses(board.book.statuses).map(st => [st.id, st.label]))
+      const lbl = (st: string) => label.get(st) ?? st
+      const money = (n: number | null | undefined) => (n === null || n === undefined ? undefined : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+      const tok = (n: number | null) => (n === null ? null : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n))
+      const ref = (tid: string) => { const m = /^t-([0-9a-f]{4})/.exec(tid); return m ? `t-${m[1]}` : tid }
+      // TK-05: the task's own reason first, then what it waits on — by name and status, in words.
+      const waits = (t.blockedBy ?? []).map(b => board.book.tasks.find(x => x.id === b))
+        .filter((x): x is NonNullable<typeof x> => Boolean(x) && x!.status !== 'done')
+        .map(x => `${ref(x.id)} ${x.title} (${lbl(x.status)})`)
+      const blockedParts = [t.blockedReason?.trim(), waits.length ? (pt ? `espera ${waits.join(', ')}` : `waits on ${waits.join(', ')}`) : ''].filter(Boolean)
+      const live = new Map((fleet?.sessions ?? []).map(s => [s.id, s]))
+      const perSub = new Map(d.subtaskRollups.filter(r => r.id).map(r => [r.id!, r.rollup.sessionsUsed]))
+      return {
+        id: t.id, ref: ref(t.id), title: t.title, status: t.status, statusLabel: lbl(t.status),
+        ...(t.priority ? { priority: String(t.priority) } : {}),
+        ...(t.dueDate ? { due: t.dueDate.slice(0, 10) } : {}),
+        ...(t.repo ? { repo: t.repo } : {}),
+        ...(t.status === 'blocked' || blockedParts.length ? { blocked: blockedParts.join(' — ') || (pt ? 'sem motivo registrado' : 'no reason recorded') } : {}),
+        ...(d.subtasks.length ? { progress: { done: d.subtasks.filter(s => s.done).length, total: d.subtasks.length } } : {}),
+        rollup: { cost: money(d.rollup.costUSD) ?? null, tokens: tok(d.rollup.tokens), rounds: d.rollup.rounds, sessions: d.rollup.sessionsUsed },
+        subtasks: d.subtasks.map(s => ({ id: s.id, title: s.title, statusLabel: lbl(s.status), done: s.done, sessions: perSub.get(s.id) ?? 0 })),
+        sessions: d.sessions.map(r => {
+          const f = live.get(r.id)
+          const state = f?.state ?? 'closed'
+          return {
+            id: r.id, title: f?.title ?? r.label ?? r.id, harness: r.harness, state,
+            stateLabel: f?.stateLabel ?? (pt ? 'encerrada' : 'ended'),
+            ...(money(r.costUSD) ? { cost: money(r.costUSD)! } : {}),
+            live: state === 'working' || state === 'waiting' || state === 'waiting-approval',
+          }
+        }),
+        activity: events.map(e => `${e.at.slice(0, 16).replace('T', ' ')}  ${e.kind}${e.detail ? ` · ${e.detail}` : e.to ? ` · ${e.to}` : ''}  ${e.actor}`),
+        closed: t.status === 'done' || t.status === 'abandoned',
+      }
+    } catch {
+      return { unavailable: pt ? 'O board de tarefas não pôde ser lido.' : 'The task board could not be read.' }
+    }
+  }
+
   // The native harness is EXPERIMENTAL (owner decision 2026-10-03, `native-gate.ts`): with the flag
   // off there is no code host at all — the tab, the palette and the home say the gate's sentence.
   const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
