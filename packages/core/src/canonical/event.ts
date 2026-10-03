@@ -244,6 +244,13 @@ export interface ModelAttemptFacts {
   attempt?: number
   /** What the caller asked for. `model` on the event stays what the event is ABOUT. */
   modelRequested?: string
+  /**
+   * INV.1 — the deterministic per-ATTEMPT id the runtime minted for this call:
+   * `base32(sha256("agentistics/inv/v1"|sessionId|turnSeq|stepSeq|attempt))[:26]`, also sent to the
+   * provider as `Agentistics-Invocation-Id`. The same turn/step/attempt after a resume gives the SAME
+   * id; a retry gives a new one. Never secret. Not `attemptId` (that groups attempts and is random).
+   */
+  invocationId?: string
 }
 
 export interface ModelInvokedData extends ModelAttemptFacts {
@@ -307,6 +314,8 @@ export interface ModelCompletedData extends ModelAttemptFacts {
   costSource?: 'provider' | 'harness'
   latencyMs?: number
   status: 'completed' | 'failed'
+  /** INV.1 — the answer was replayed from the host's invocation cache after a resume: no new call, no new spend. */
+  replayed?: boolean
   /** D20 — the id the provider says answered; the one that prices the call. */
   modelServed?: string
   /** D20 — normalised (B1.1's `StopReason`) plus the provider's verbatim value. */

@@ -355,6 +355,26 @@ export interface EngineSecrets {
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
 }
 
+/**
+ * An answer the host already holds for a model call, by its deterministic invocation id (INV.1).
+ * Only what the loop needs to carry on; never a raw body or a credential.
+ */
+export interface EngineCachedInvocation {
+  messageId: string
+  servedModel: string
+  /** The provider's usage as the runtime's own `ProviderUsage` (`@agentistics/core`). */
+  usage: unknown
+  usageAnomalies?: unknown[]
+  stopReason: unknown
+  content: ReadonlyArray<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'other'; rawType: string }>
+  requestId?: string
+}
+
+export interface EngineInvocationCache {
+  /** `null`/`undefined` = nothing held. A hint: a throw is a miss and the call is simply made. */
+  get(invocationId: string): Promise<EngineCachedInvocation | null | undefined>
+}
+
 export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** Where things live. The engine reads no config of its own. */
   paths: {
@@ -444,4 +464,10 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * engine to call the host over loopback: the host's services are this object.
    */
   serverPort?(): number | null
+  /**
+   * 1.7 — INV.1 (additive, optional): the host's held answers by invocation id — the
+   * Cloud's egress proxy. Absent on every host today. Asked before a RESUMED run re-sends a call;
+   * a hit is journaled `model.completed {replayed: true}`.
+   */
+  invocationCache?: EngineInvocationCache
 }

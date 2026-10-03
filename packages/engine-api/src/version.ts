@@ -63,6 +63,9 @@
  * `cwd` and `usage` (`NativeSessionUsage`, the engine's own snapshot), and `tasks.reportNativeUsage`
  * refreshes that snapshot for a session already filed. All optional, so a 1.6 engine still loads and
  * a 1.7 engine on an older host files with no cost (the board then says "not measured").
+ * Also (INV.1): `invocationCache` (optional) — the host's held answers by deterministic invocation id,
+ * asked before a resumed run re-sends a model call; a hit is journaled `model.completed {replayed}`.
+ * Absent on every host today, and then every call is simply made.
  */
 export const ENGINE_API_VERSION = '1.7.0'
 
