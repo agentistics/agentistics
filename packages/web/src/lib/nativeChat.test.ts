@@ -237,3 +237,45 @@ describe('attachments in the conversation (UI follow-up 3)', () => {
     ])
   })
 })
+
+describe('B9.1: the model\'s reasoning in the chat', () => {
+  test('live: reasoning deltas stream into their own item, ahead of the answer, never into it', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([]) })
+    s = apply(s, { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: { kind: 'delta', seq: 2, runId: RUN, text: 'Let me ', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, runId: RUN, text: 'think.', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 4, runId: RUN, text: 'Answer' } })
+    const items = nativeChatItems(s)
+    expect(items.map(i => i.kind)).toEqual(['reasoning', 'turn'])
+    expect(items[0]).toMatchObject({ kind: 'reasoning', text: 'Let me think.', live: true })
+    expect(items[1]).toMatchObject({ kind: 'turn', turn: { text: 'Answer' } })
+    s = apply(s, { type: 'frame', frame: ev(5, 'run.ended', { status: 'completed' }) })
+    expect(s.liveReasoning).toBe('')
+  })
+
+  test('the window: a reasoning part is its own item, in place; a redacted one (no text) is not drawn', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'q' } },
+      { seq: 2, message: { role: 'assistant', content: [
+        { type: 'reasoning', text: 'plan', signature: 'sig' },
+        { type: 'reasoning', text: '', redactedData: 'opaque' },
+        { type: 'text', text: 'a' },
+      ] } },
+    ]) })
+    const items = nativeChatItems(s)
+    expect(items.map(i => i.kind)).toEqual(['turn', 'reasoning', 'turn'])
+    expect(items[1]).toMatchObject({ kind: 'reasoning', text: 'plan' })
+    expect(items[1]).not.toHaveProperty('live')
+  })
+
+  test('live reasoning the window already holds is not drawn twice', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([]) })
+    s = apply(s, { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: { kind: 'delta', seq: 2, runId: RUN, text: 'plan', channel: 'reasoning' } })
+    s = apply(s, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'q' } },
+      { seq: 2, message: { role: 'assistant', content: [{ type: 'reasoning', text: 'plan' }] } },
+    ]) })
+    expect(nativeChatItems(s).filter(i => i.kind === 'reasoning')).toHaveLength(1)
+  })
+})

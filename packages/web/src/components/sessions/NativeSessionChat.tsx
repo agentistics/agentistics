@@ -20,6 +20,8 @@ import { ToolCallCard } from './ToolCallCard'
 import { NativeApprovalCard } from './NativeApprovalCard'
 import { NativeRunsStrip } from './NativeRunsStrip'
 import { NativeModelSwitch } from './NativeModelSwitch'
+import { NativeEffortSwitch } from './NativeEffortSwitch'
+import { NativeReasoning } from './NativeReasoning'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { acceptOf, mediaTypeOf, refuseFile, uploadPreviewUrl, type NativeAttachmentCapability } from '../../lib/nativeAttachments'
 import type { NativeAttachmentView } from '../../lib/nativeChat'
@@ -33,7 +35,7 @@ import { useIsCoarsePointer } from '../../hooks/useIsMobile'
 /** `live` is the page's `useNativeSession` — one stream per session, read by the header too. */
 export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
-  const { state, runs, loadError, send, answer, stop, switchModel } = live
+  const { state, runs, loadError, send, answer, stop, switchModel, setEffort } = live
   const items = useMemo(() => nativeChatItems(state), [state])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -159,6 +161,7 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
               </div>
             )
           }
+          if (i.kind === 'reasoning') return <NativeReasoning key={i.key} text={i.text} {...(i.live ? { live: true } : {})} lang={lang} />
           if (i.kind === 'tool') {
             return (
               <div key={i.key} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
@@ -180,7 +183,12 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
       )}
 
       {state.window && (
-        <NativeModelSwitch model={state.window.session.model} provider={state.window.session.provider} running={state.running} lang={lang} onSwitch={switchModel} />
+        <div style={{ maxWidth: 820, width: 'calc(100% - 28px)', margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 14, minWidth: 0 }}>
+          <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+            <NativeModelSwitch model={state.window.session.model} provider={state.window.session.provider} running={state.running} lang={lang} onSwitch={switchModel} />
+          </div>
+          <NativeEffortSwitch effort={state.window.session.effort ?? 'off'} running={state.running} lang={lang} onSet={setEffort} />
+        </div>
       )}
       <NativeRunsStrip runs={runs} lang={lang} />
 

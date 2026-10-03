@@ -22,7 +22,7 @@ import {
   type NativeChatState,
   type NativeWindow,
 } from '../lib/nativeChat'
-import { approveUrl, cancelUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
+import { approveUrl, cancelUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
 import { parseRuns, type RunLineView } from '../lib/nativeRuns'
 
 const REFRESH_DEBOUNCE_MS = 250
@@ -43,6 +43,8 @@ export interface NativeSession {
   stop: () => Promise<void>
   /** H24: switch the model for the next runs; `null` when done, else the engine's sentence. */
   switchModel: (model: string) => Promise<string | null>
+  /** B9.1: set the reasoning effort for the next runs; `null` when done, else the engine's sentence. */
+  setEffort: (effort: 'low' | 'medium' | 'high' | 'off') => Promise<string | null>
 }
 
 export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
@@ -178,5 +180,16 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     }
   }, [id, lang, readWindow])
 
-  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel }
+  const setEffort = useCallback(async (effort: 'low' | 'medium' | 'high' | 'off'): Promise<string | null> => {
+    try {
+      const res = await fetch(effortUrl(id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ effort }) })
+      if (!res.ok) return refusalSentence(await res.json().catch(() => null), res.status, lang)
+      void readWindow()
+      return null
+    } catch {
+      return lang === 'pt' ? 'Erro de rede ao mudar o esforço de raciocínio.' : 'Network error changing the reasoning effort.'
+    }
+  }, [id, lang, readWindow])
+
+  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel, setEffort }
 }

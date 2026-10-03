@@ -21,7 +21,7 @@ export function NativeModelSwitch({ model, provider, running, lang, onSwitch }: 
   const { models } = useNativeProviders(open, provider, lang)
   const options = models.some(m => m.id === model) ? models : [{ id: model, label: model }, ...models]
   return (
-    <div data-testid="native-model" style={{ maxWidth: 820, width: 'calc(100% - 28px)', margin: '0 auto 4px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0, opacity: running ? 0.6 : 1 }}
+    <div data-testid="native-model" style={{ margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0, opacity: running ? 0.6 : 1 }}
       title={running ? (pt ? 'Uma run está em andamento — troque o modelo quando ela terminar.' : 'A run is in progress — switch the model when it ends.') : undefined}>
       <span>{pt ? 'Modelo' : 'Model'}</span>
       <div style={{ pointerEvents: running ? 'none' : 'auto', minWidth: 0 }} aria-disabled={running}>

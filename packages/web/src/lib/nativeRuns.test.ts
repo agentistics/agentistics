@@ -28,3 +28,11 @@ describe('H24 in the native chat', () => {
       .toBe('claude-sonnet-4-6 · tokens not measured · no price')
   })
 })
+
+describe('B9.1 in the native chat', () => {
+  test('the run line shows reasoning tokens when the provider counted them', () => {
+    const r = { runId: 'r', responses: 1, tokens: null, costUSD: null, costMeasured: false, cacheShare: null, context: null, reasoningTokens: 1200 }
+    expect(runLineText(r, 'en')).toContain('reasoning 1.2K')
+    expect(runLineText(r, 'pt')).toContain('raciocínio 1.2K')
+  })
+})

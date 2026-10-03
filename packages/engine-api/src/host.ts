@@ -386,7 +386,17 @@ export interface EngineCachedInvocation {
   usage: unknown
   usageAnomalies?: unknown[]
   stopReason: unknown
-  content: ReadonlyArray<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'other'; rawType: string }>
+  /**
+   * `reasoning` (B9.1, 1.7): the model's reasoning — an Anthropic thinking block keeps the `signature`
+   * (or `redactedData`) it must be resent with, so a replayed answer can continue a tool turn. A host
+   * stores the parts as JSON and hands them back unchanged.
+   */
+  content: ReadonlyArray<
+    | { type: 'text'; text: string }
+    | { type: 'tool_use'; id: string; name: string; input: unknown }
+    | { type: 'reasoning'; text: string; signature?: string; redactedData?: string }
+    | { type: 'other'; rawType: string }
+  >
   requestId?: string
 }
 
