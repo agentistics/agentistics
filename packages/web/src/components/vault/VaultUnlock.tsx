@@ -19,6 +19,7 @@ import { Fingerprint, Loader2, Lock, Smartphone } from 'lucide-react'
 import { Err, input, primaryBtn } from '../MfaSetup'
 import { cleanCode, codeComplete, loadVault, unlockCode, unlockGesture, type UiAction, type VaultView } from '../../lib/vaultApi'
 import { vt, type VaultKey } from '../../lib/vaultText'
+import { PHONE_APPROVE_POLL_MS, PHONE_APPROVE_WAIT_MS, helloFallback } from '../../lib/helloFallback'
 import {
   decidePhoneRequest, enrolDevice, enrolPasskey, enrolStatus, offersHere, phoneFacts, phoneRequests, readDeviceKey, requestEnrol,
   unlockWithDevice, unlockWithPasskey, type PhoneFacts, type PhoneRequest,
@@ -63,6 +64,12 @@ const TEXT = {
   reqApprove: { en: 'Approve with Windows Hello', pt: 'Aprovar com o Windows Hello' },
   reqDeny: { en: 'Refuse', pt: 'Recusar' },
   reqApproving: { en: 'Confirm on this computer…', pt: 'Confirme neste computador…' },
+  // Windows Hello failed (an error, not a cancel) — owner decision 2026-10-03, fallback (A)
+  helloFailedPhone: { en: 'Windows Hello did not work. Approve on your phone: open Agentistics there, type your authenticator code and confirm with your biometrics. This page carries on by itself.', pt: 'O Windows Hello não funcionou. Aprove no celular: abra o Agentistics nele, digite o código do autenticador e confirme com a digital. Esta página continua sozinha.' },
+  helloFailedWaiting: { en: 'Waiting for the phone…', pt: 'Esperando o celular…' },
+  helloFailedNoPhone: { en: 'Windows Hello did not work, and no phone with biometrics can open this vault yet. Try Hello again; register a phone on the Vault page so it can stand in next time. The 24 recovery words remain the last resort.', pt: 'O Windows Hello não funcionou, e nenhum celular com digital abre este cofre ainda. Tente o Hello de novo; registre um celular na página Cofre para que ele possa substituir da próxima vez. As 24 palavras de recuperação continuam sendo o último recurso.' },
+  helloFailedExpired: { en: 'The phone did not open the vault in time.', pt: 'O celular não abriu o cofre a tempo.' },
+  helloRetry: { en: 'Try Windows Hello again', pt: 'Tentar o Windows Hello de novo' },
 } as const
 type K = keyof typeof TEXT
 const tx = (k: K, lang: Lang, vars: Record<string, string> = {}) => TEXT[k][lang].replace(/\{(\w+)\}/g, (_, v: string) => vars[v] ?? '')
@@ -88,8 +95,10 @@ export function CodeField({ value, onChange, label, autoFocus, onEnter }: { valu
 }
 
 /** ON this computer: gesture first (the SERVICE raises the dialog), then the code field. */
-export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction }: { view: VaultView; lang: Lang; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void }) {
-  const [phase, setPhase] = useState<'idle' | 'gesture' | 'code'>(view.pendingStepup ? 'code' : 'idle')
+export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction, passkeys = 0 }: { view: VaultView; lang: Lang; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void; passkeys?: number }) {
+  // 'phone': Hello ERRORED and a phone with biometrics stands in (fallback A); this page waits for it.
+  const [phase, setPhase] = useState<'idle' | 'gesture' | 'code' | 'phone'>(view.pendingStepup ? 'code' : 'idle')
+  const [noPhone, setNoPhone] = useState(false)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -98,8 +107,14 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
 
   const gesture = async () => {
     setError(null); setPhase('gesture')
+    setNoPhone(false)
     const r = await unlockGesture()
-    if (!r.ok) { setPhase('idle'); setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); return }
+    if (!r.ok) {
+      const fb = helloFallback(r.code, { passkeys })
+      if (fb.phone) { setPhase('phone'); return }
+      setPhase('idle'); setNoPhone(fb.phoneMissing)
+      setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); return
+    }
     if (r.state === 'pending-stepup') setPhase('code')
     else onOpened()
   }
@@ -113,9 +128,34 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
     setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); setCode(''); setPhase('idle')
   }
 
+  // Fallback (A): the phone opens the vault (passkey + code); this page notices and carries on.
+  useEffect(() => {
+    if (phase !== 'phone') return
+    let alive = true
+    const until = Date.now() + PHONE_APPROVE_WAIT_MS
+    const poll = async () => {
+      if (!alive) return
+      const v = await loadVault()
+      if (!alive) return
+      if (v.kind !== 'failed' && v.view.state === 'open') { onOpened(); return }
+      if (Date.now() > until) { setPhase('idle'); setError(tx('helloFailedExpired', lang)); return }
+      setTimeout(() => { void poll() }, PHONE_APPROVE_POLL_MS)
+    }
+    const t = setTimeout(() => { void poll() }, PHONE_APPROVE_POLL_MS)
+    return () => { alive = false; clearTimeout(t) }
+  }, [phase, lang, onOpened])
+
+  const align = isMobile ? 'left' : center ? 'center' : 'right'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-end', gap: 8, width: isMobile ? '100%' : undefined }}>
-      {phase !== 'code' && (
+      {phase === 'phone' && (
+        <div role="status" data-hello-fallback="phone" style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: isMobile ? undefined : 380, textAlign: align }}>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}><Smartphone size={14} style={{ verticalAlign: '-2px' }} /> {tx('helloFailedPhone', lang)}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}><Loader2 size={13} className="ag-spin" style={{ verticalAlign: '-2px' }} /> {tx('helloFailedWaiting', lang)}</div>
+          <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => { void gesture() }}>{tx('helloRetry', lang)}</button>
+        </div>
+      )}
+      {phase !== 'code' && phase !== 'phone' && (
         <button type="button" style={btn} onClick={() => { void gesture() }} disabled={phase === 'gesture'}>
           {phase === 'gesture' && <Loader2 size={14} className="ag-spin" />}
           {phase === 'gesture' ? vt('unlocking', lang) : vt(label, lang)}
@@ -128,7 +168,8 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
           <button type="submit" style={{ ...btn, width: '100%', justifyContent: 'center' }} disabled={!codeComplete(code) || busy}>{vt('codeConfirm', lang)}</button>
         </form>
       )}
-      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: isMobile ? 'left' : center ? 'center' : 'right' }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: align }}>{error}</div>}
+      {noPhone && <div data-hello-fallback="no-phone" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, maxWidth: isMobile ? undefined : 380, textAlign: align }}>{tx('helloFailedNoPhone', lang)}</div>}
       {/* "recover" has its own standing button under the hero on a loopback page; never draw it twice. */}
       {error && errAction && onAction && errAction !== 'recover' && (
         <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => onAction(errAction)}>{vt(errAction === 'enroll' ? 'act_enroll' : errAction === 'unlock' ? 'act_unlock' : 'act_disable', lang)}</button>
@@ -207,7 +248,7 @@ export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn }:
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-start' }}>
       {facts.loopback
-        ? <UnlockControl view={view} lang={lang} onOpened={done} btn={btn ?? hotBtn(isMobile)} isMobile={isMobile} center={center} onAction={onAction} />
+        ? <UnlockControl view={view} lang={lang} onOpened={done} btn={btn ?? hotBtn(isMobile)} isMobile={isMobile} center={center} onAction={onAction} passkeys={facts.passkeys} />
         : <PhoneUnlock facts={facts} lang={lang} isMobile={isMobile} onOpened={done} />}
     </div>
   )

@@ -719,6 +719,27 @@ not hold the phone's secret); the page says those phones must be approved again 
 them. **Stated limit**: the device key sits in the phone browser's storage, so anyone who can run script
 on the Agentistics origin in that browser can read it — the same reach that could already drive the page.
 
+**When Windows Hello FAILS on the computer** (owner decision, 2026-10-03). A failure is not a cancel:
+`presence-unavailable` / `presence-timeout` mean Hello broke, `presence-cancelled` means the person said
+no. Only the first two open a fallback (`web/src/lib/helloFallback.ts`, pure, a test per row):
+
+| Row | When | What it opens | Factors |
+|---|---|---|---|
+| A — approve on the phone (**default**) | Hello errored and a phone with biometrics is registered | The computer's page says so and WAITS (polls the vault state, 5 min); the phone opens the vault through the phone path above — passkey + PRF **and** the code. Nothing new on the server: it is the same `stagePhoneUnlock` + `completeUnlock`. | 2 (passkey, code) |
+| A, no phone | Hello errored, no phone registered | A sentence: try Hello again, register a phone; nothing else is offered. | — |
+| Cancel | `presence-cancelled` | Nothing extra, whatever is registered or turned on — a fallback is never a way around saying no. | — |
+| Recovery | always, on this computer only | The 24 words, the last resort. | — |
+| C — the code alone (**opt-in, off**) | **NOT SHIPPED.** | — | — |
+
+**Why C is not in this release, stated as a limit.** The authenticator code is a CHECK, not a KEY: it
+proves a person holds the seed, it unwraps nothing. Once presence is enrolled every silent wrapper is
+retired (§7b), so the only things that can produce the data key are Hello, a security key, a phone's
+secret and the 24 words. A "code alone" unlock on the computer therefore needs a gesture-less wrapper of
+the data key to exist ON DISK again — exactly the copy §7b removes so that a stolen disk, backup or
+snapshot opens nothing. That is a change to the at-rest model, not a fallback screen, and it needs its own
+design and the owner's decision on that trade; until then the setting does not exist and the pure rule
+offers it only when the server says it is on (`codeOnlyAfterHelloError`), which no server does.
+
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 
 A member can restrict what each central connection receives, across **two dimensions** —
