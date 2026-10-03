@@ -636,8 +636,23 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
 **Limits, stated:** a revealed value is in the browser's memory and the page's DOM for 30 seconds; a
 copy is in the clipboard for 30 seconds, readable by any program of yours, and longer in a clipboard
 history tool — the page says so. Names and notes are metadata: shown in the list without a gesture,
-sealed at rest. Agents using these secrets (references, scrubbing, grants), the phone, and the backup
-each get their own section when they ship.
+sealed at rest. Agents using these secrets (references, scrubbing, grants) and the backup each get
+their own section when they ship.
+
+**The phone** (spec §7). A request that is not loopback never makes the service raise Windows Hello
+for a personal-secret action — a prompt on an empty desk, approved later by whoever sits down, is the
+worst of both. The phone proves the gesture with a **passkey** (WebAuthn, `userVerification:
+required`), verified by the service with no third-party library (`packages/vault/src/webauthn.ts`,
+ES256/RS256; refuses at the first failed check: challenge, origin, rpId, UP/UV, signature, a counter that
+does not move forward). A verified assertion mints a **gesture token: 60 s, single use, bound to the
+session and to exactly one action on one target** — a reveal of one field cannot edit anything.
+**Registering** a phone is an escalation, so it asks the code AND Windows Hello on the computer; the
+passkeys live in a sealed record, so a plain file write cannot add one. WebAuthn needs a secure context:
+over plain `http://` the page says how to get an https address instead of offering something that cannot
+work. The owner's alternative, **"accept my code on the phone"**, is off by default, turned on only from
+the computer (code + Windows Hello), and opens a **30-second reveal window** per fresh code — reveals
+only; editing and deleting from the phone always need the passkey. Over plain http that option sends the
+code and the value unencrypted on the local network, and the switch says so.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 

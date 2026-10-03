@@ -101,6 +101,32 @@ export const PERSONAL_TEXT = {
     en: 'The GitHub backup carries these only as encrypted data. Git keeps old encrypted copies in its history; the backup settings can erase the vault history there.',
     pt: 'O backup no GitHub leva estes dados só criptografados. O git guarda cópias criptografadas antigas no histórico; os ajustes do backup podem apagar o histórico do cofre lá.',
   },
+  phoneTitle: { en: 'On your phone', pt: 'No celular' },
+  phoneInsecure: {
+    en: 'To use your phone\'s fingerprint or face, open Agentistics by its https address — for example by turning on HTTPS certificates in your Tailscale network and using the machine\'s https name.',
+    pt: 'Para usar a digital ou o rosto do celular, abra o Agentistics pelo endereço https — por exemplo ligando os certificados HTTPS na sua rede Tailscale e usando o nome https da máquina.',
+  },
+  phoneUnsupported: { en: 'This browser cannot use a passkey.', pt: 'Este navegador não consegue usar uma passkey.' },
+  phoneReady: { en: 'This phone is registered: seeing or changing a secret asks for its fingerprint or face.', pt: 'Este celular está registrado: ver ou mudar um segredo pede a digital ou o rosto dele.' },
+  phoneRegisterWhy: {
+    en: 'Register this phone so that seeing a secret here asks for its fingerprint or face. It asks your code, then Windows Hello on the computer — once.',
+    pt: 'Registre este celular para que ver um segredo aqui peça a digital ou o rosto dele. Pede o seu código e depois o Windows Hello no computador — uma vez só.',
+  },
+  phoneRegister: { en: 'Register this phone\'s fingerprint', pt: 'Registrar a digital deste celular' },
+  phoneLabel: { en: 'Phone', pt: 'Celular' },
+  phoneApproveOnPc: { en: 'Approve it in Windows Hello on the computer…', pt: 'Aprove no Windows Hello do computador…' },
+  phoneCodeOn: { en: 'The computer also accepts your code here: a fresh code opens 30 seconds to see secrets.', pt: 'O computador também aceita o seu código aqui: um código novo abre 30 segundos para ver segredos.' },
+  phoneDesktopIntro: {
+    en: 'Phones that can open secrets with their own fingerprint or face. Register a phone from the phone itself (it needs an https address).',
+    pt: 'Celulares que podem abrir segredos com a própria digital ou rosto. Registre um celular pelo próprio celular (precisa de um endereço https).',
+  },
+  phoneNone: { en: 'No phone registered yet.', pt: 'Nenhum celular registrado ainda.' },
+  phoneRemove: { en: 'Remove', pt: 'Remover' },
+  phoneCodeToggle: { en: 'Accept my code on the phone (30 s to see secrets)', pt: 'Aceitar o meu código no celular (30 s para ver segredos)' },
+  phoneCodeCost: {
+    en: 'Off by default. With it on, anyone with this dashboard on the phone AND your current code can see secrets for 30 seconds. Over plain http the code and the value travel unencrypted on your network. Editing and deleting still need the phone\'s fingerprint.',
+    pt: 'Desligado por padrão. Ligado, quem tiver este painel no celular E o seu código atual vê segredos por 30 segundos. Em http simples, o código e o valor passam sem criptografia na sua rede. Editar e apagar continuam pedindo a digital do celular.',
+  },
 } as const satisfies Record<string, Pair>
 
 export type PKey = keyof typeof PERSONAL_TEXT

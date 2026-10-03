@@ -23,20 +23,22 @@ export interface ImportChoice { key: string; action: ImportAction; name?: string
 
 const P = '/api/vault/personal'
 const withCode = (b: Record<string, unknown>, code?: string) => (code ? { ...b, code } : b)
+/** A phone's single-use gesture token (§7), when the action was confirmed with a passkey. */
+const tok = (t?: string) => (t ? { gestureToken: t } : {})
 
 export const listPersonal = () => vaultGet<{ items: PersonalMeta[]; groups: PersonalGroup[] }>(P)
 export const listVersions = (id: string) => vaultGet<{ versions: PersonalMeta[] }>(`${P}/versions?id=${encodeURIComponent(id)}`)
 export const createPersonal = (item: PersonalItemInput, code?: string) => vaultPost<{ meta: PersonalMeta }>(P, withCode({ item }, code))
-export const editPersonal = (id: string, expectedVersion: number, item: PersonalItemInput, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/edit`, withCode({ id, expectedVersion, item }, code))
-export const revealPersonal = (id: string, field: string, code?: string, version?: number) => vaultPost<{ value: string; field: string; version: number }>(`${P}/reveal`, withCode({ id, field, ...(version ? { version } : {}) }, code))
-export const trashPersonal = (id: string, expectedVersion: number, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/trash`, withCode({ id, expectedVersion }, code))
-export const restorePersonal = (id: string, expectedVersion: number, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore`, withCode({ id, expectedVersion }, code))
-export const restoreVersion = (id: string, version: number, expectedVersion: number, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore-version`, withCode({ id, version, expectedVersion }, code))
-export const purgePersonal = (id: string, code?: string) => vaultPost(`${P}/purge`, withCode({ id }, code))
+export const editPersonal = (id: string, expectedVersion: number, item: PersonalItemInput, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/edit`, withCode({ id, expectedVersion, item, ...tok(gestureToken) }, code))
+export const revealPersonal = (id: string, field: string, code?: string, version?: number, gestureToken?: string) => vaultPost<{ value: string; field: string; version: number }>(`${P}/reveal`, withCode({ id, field, ...(version ? { version } : {}), ...tok(gestureToken) }, code))
+export const trashPersonal = (id: string, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/trash`, withCode({ id, expectedVersion, ...tok(gestureToken) }, code))
+export const restorePersonal = (id: string, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore`, withCode({ id, expectedVersion, ...tok(gestureToken) }, code))
+export const restoreVersion = (id: string, version: number, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore-version`, withCode({ id, version, expectedVersion, ...tok(gestureToken) }, code))
+export const purgePersonal = (id: string, code?: string, gestureToken?: string) => vaultPost(`${P}/purge`, withCode({ id, ...tok(gestureToken) }, code))
 export const movePersonal = (id: string, expectedVersion: number, groupId: string | null, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/move`, withCode({ id, expectedVersion, groupId }, code))
 export const createGroup = (name: string, code?: string) => vaultPost<{ group: PersonalGroup }>(`${P}/groups`, withCode({ name }, code))
 export const renameGroup = (id: string, expectedVersion: number, name: string, code?: string) => vaultPost<{ group: PersonalGroup }>(`${P}/groups/rename`, withCode({ id, expectedVersion, name }, code))
-export const deleteGroup = (id: string, code?: string) => vaultPost<{ moved: number }>(`${P}/groups/delete`, withCode({ id }, code))
+export const deleteGroup = (id: string, code?: string, gestureToken?: string) => vaultPost<{ moved: number }>(`${P}/groups/delete`, withCode({ id, ...tok(gestureToken) }, code))
 export const importPreview = (text: string, code?: string) => vaultPost<{ token: string; keys: ImportKey[]; skipped: number }>(`${P}/import/preview`, withCode({ text }, code))
 export const importCommit = (token: string, choices: ImportChoice[], groupId: string | null, code?: string) => vaultPost<{ created: number; replaced: number; skipped: number }>(`${P}/import/commit`, withCode({ token, choices, groupId }, code))
 

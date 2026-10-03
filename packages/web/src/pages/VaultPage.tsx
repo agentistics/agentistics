@@ -24,6 +24,7 @@ import {
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
+import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, registerPasskey, removePasskey, setCodeReveal, type MobileState } from '../lib/passkey'
 
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
@@ -51,18 +52,40 @@ export default function VaultPage() {
   // The code dialog the gate asks for: resolved with the typed code, or null when cancelled.
   const [codeAsk, setCodeAsk] = useState<null | ((code: string | null) => void)>(null)
   const askCode = useCallback(() => new Promise<string | null>(res => setCodeAsk(() => (c: string | null) => { setCodeAsk(null); res(c) })), [])
-  /** Run a gated call: the code when asked; "confirm on this computer" while a gesture may be up. */
-  const gated = useCallback(async <T,>(run: (code?: string) => Promise<Reply<T>>, gesture: boolean): Promise<Reply<T>> => {
-    if (gesture) setBusyHello(true)
-    try { return await withStepUp(run, askCode) } finally { setBusyHello(false) }
-  }, [askCode])
+  // §7: on a page NOT on this computer (the phone), a gesture is a passkey token, never a Hello prompt.
+  const [mobile, setMobile] = useState<MobileState | null>(null)
+  const isPhone = mobile !== null && !mobile.loopback
+  const host = typeof window !== 'undefined' ? window.location.hostname : ''
+  const canPasskey = isPhone && passkeySupport(window) === 'ok' && hasPasskeyHere(mobile, host)
+  /**
+   * Run a gated call: the code when asked. With `gesture`, on the computer the service raises Windows
+   * Hello ("confirm on this computer"); on the phone the passkey is asked FIRST and its single-use token,
+   * bound to exactly this action + target, rides the call.
+   */
+  const gated = useCallback(async <T,>(run: (code?: string, token?: string) => Promise<Reply<T>>, gesture: false | { action: string; target: string }): Promise<Reply<T>> => {
+    if (gesture && canPasskey) {
+      setBusyHello(true)
+      try {
+        const g = await withStepUp(c => phoneGesture(gesture.action, gesture.target, c), askCode)
+        if (!g.ok) return g as Reply<T>
+        return await withStepUp(c => run(c, g.gestureToken), askCode)
+      } finally { setBusyHello(false) }
+    }
+    if (gesture && !isPhone) setBusyHello(true)
+    try { return await withStepUp(c => run(c), askCode) } finally { setBusyHello(false) }
+  }, [askCode, canPasskey, isPhone])
 
   const load = useCallback(async () => {
     const v = await loadVault()
     if (v.kind === 'failed') { setState({ kind: 'failed' }); return }
     if (v.view.state !== 'open') { setState({ kind: 'locked' }); return }
     const r = await listPersonal()
-    if (r.ok) { setItems(r.items); setGroups(r.groups); setState({ kind: 'ready' }); return }
+    if (r.ok) {
+      setItems(r.items); setGroups(r.groups); setState({ kind: 'ready' })
+      const ms = await mobileState()
+      if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback })
+      return
+    }
     if (r.code === 'stepup-required' || r.status === 401) { setState(s => ({ kind: 'code', error: s.kind === 'code' ? s.error : null })); return }
     if (r.code === 'locked') { setState({ kind: 'locked' }); return }
     setState({ kind: 'failed' })
@@ -187,6 +210,7 @@ export default function VaultPage() {
           </label>
         </div>
       )}
+      {mobile && <PhonePanel lang={lang} isMobile={isMobile} state={mobile} isPhone={isPhone} host={host} gated={gated} onChanged={() => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback }) }) }} />}
       <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 18, lineHeight: 1.6 }}>{t('neverPaste')}</div>
 
       {editing && (
@@ -202,7 +226,7 @@ export default function VaultPage() {
   )
 }
 
-type Gated = <T>(run: (code?: string) => Promise<Reply<T>>, gesture: boolean) => Promise<Reply<T>>
+type Gated = <T>(run: (code?: string, token?: string) => Promise<Reply<T>>, gesture: false | { action: string; target: string }) => Promise<Reply<T>>
 
 // ── one row ──────────────────────────────────────────────────────────────────────────────────
 
@@ -219,7 +243,7 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
   const hideLater = (field: string) => { timers.current.push(setTimeout(() => setShown(s => { const n = { ...s }; delete n[field]; return n }), REVEAL_HIDE_MS)) }
   const reveal = async (field: string): Promise<string | null> => {
     setError(null)
-    const r = await gated(code => revealPersonal(m.id, field, code), true)
+    const r = await gated((code, tk) => revealPersonal(m.id, field, code, undefined, tk), { action: 'personal-reveal', target: `${m.id}:${field}` })
     if (!r.ok) { setError(r.sentence || t('network')); return null }
     return r.value
   }
@@ -238,9 +262,9 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
   const act = async (kind: 'trash' | 'restore' | 'purge') => {
     setError(null)
     if (kind === 'purge' && !window.confirm(t('purgeConfirm', { name: m.name }))) return
-    const r = kind === 'trash' ? await gated(c => trashPersonal(m.id, m.version, c), true)
-      : kind === 'restore' ? await gated(c => restorePersonal(m.id, m.version, c), true)
-        : await gated(c => purgePersonal(m.id, c), true)
+    const r = kind === 'trash' ? await gated((c, tk) => trashPersonal(m.id, m.version, c, tk), { action: 'personal-trash', target: m.id })
+      : kind === 'restore' ? await gated((c, tk) => restorePersonal(m.id, m.version, c, tk), { action: 'personal-restore', target: m.id })
+        : await gated((c, tk) => purgePersonal(m.id, c, tk), { action: 'personal-purge', target: m.id })
     if (!r.ok) { setError(r.sentence || t('network')); return }
     if (kind === 'purge') onRemoved(m.id); else onChanged((r as unknown as { meta: PersonalMeta }).meta)
   }
@@ -343,7 +367,7 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
     const f: Record<string, string> = {}
     for (const k of KIND_FIELDS[kind]) if (fields[k]) f[k] = fields[k]!
     const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, ...(Object.keys(f).length ? { fields: f } : {}) }
-    const r = editing ? await gated(c => editPersonal(item.id, item.version, body, c), true) : await gated(c => createPersonal(body, c), false)
+    const r = editing ? await gated((c, tk) => editPersonal(item.id, item.version, body, c, tk), { action: 'personal-edit', target: item.id }) : await gated(c => createPersonal(body, c), false)
     setBusy(false)
     if (!r.ok) { setError(r.sentence || t('network')); return }
     setFields({})
@@ -396,7 +420,7 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
   const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US')
   const restore = async (v: number) => {
     setError(null)
-    const r = await gated(c => restoreVersion(item.id, v, item.version, c), true)
+    const r = await gated((c, tk) => restoreVersion(item.id, v, item.version, c, tk), { action: 'personal-restore-version', target: item.id })
     if (!r.ok) { setError(r.sentence || t('network')); return }
     onRestored(r.meta)
   }
@@ -495,7 +519,7 @@ function GroupsDialog({ lang, isMobile, groups, items, gated, onClose, onChanged
   const [name, setName] = useState('')
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const run = async <T,>(fn: (c?: string) => Promise<Reply<T>>, gesture: boolean) => {
+  const run = async <T,>(fn: (c?: string, tk?: string) => Promise<Reply<T>>, gesture: false | { action: string; target: string }) => {
     setError(null)
     const r = await gated(fn, gesture)
     if (!r.ok) { setError(r.sentence || t('network')); return false }
@@ -515,13 +539,79 @@ function GroupsDialog({ lang, isMobile, groups, items, gated, onClose, onChanged
           {renaming?.id === g.id
             ? <button type="button" onClick={() => { void run(c => renameGroup(g.id, g.version, renaming.name.trim(), c), false).then(ok => { if (ok) setRenaming(null) }) }} style={{ ...primaryBtn, width: 'auto', padding: '5px 10px' }}>{t('save')}</button>
             : <button type="button" onClick={() => setRenaming({ id: g.id, name: g.name })} style={{ ...primaryBtn, width: 'auto', padding: '5px 10px', color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }}>{t('rename')}</button>}
-          <button type="button" title={t('deleteGroupNote')} onClick={() => { void run(c => deleteGroup(g.id, c), true) }} style={{ ...dangerBtn, width: 'auto', padding: '5px 10px' }}>{t('deleteGroup')}</button>
+          <button type="button" title={t('deleteGroupNote')} onClick={() => { void run((c, tk) => deleteGroup(g.id, c, tk), { action: 'personal-group-delete', target: g.id }) }} style={{ ...dangerBtn, width: 'auto', padding: '5px 10px' }}>{t('deleteGroup')}</button>
         </div>
       ))}
       {groups.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{t('deleteGroupNote')}</div>}
       {error && <Err text={error} />}
       <button type="button" onClick={onClose} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', padding: isMobile ? '12px 0' : '4px 0' }}>{t('close')}</button>
     </Sheet>
+  )
+}
+
+/**
+ * §7 — the phone. ON the phone: register this phone's passkey (needs https; the code, then Windows Hello
+ * on the computer — the one time both are needed). ON the computer: the registered phones (remove) and
+ * the opt-in "accept the code on the phone" switch, with its cost stated.
+ */
+function PhonePanel({ lang, isMobile, state, isPhone, host, gated, onChanged }: {
+  lang: Lang; isMobile: boolean; state: MobileState; isPhone: boolean; host: string; gated: Gated; onChanged: () => void
+}) {
+  const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const [error, setError] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const support = passkeySupport(window)
+  const here = hasPasskeyHere(state, host)
+  const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginTop: 18 }
+  const register = async () => {
+    setBusy(true); setError(null); setNote(t('phoneApproveOnPc'))
+    const r = await gated(c => registerPasskey(t('phoneLabel'), c), false)
+    setBusy(false); setNote(null)
+    if (!r.ok) { if (r.code !== 'passkey-cancelled') setError(r.sentence || t('network')); return }
+    onChanged()
+  }
+  if (isPhone) {
+    return (
+      <div style={box}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{t('phoneTitle')}</div>
+        {support === 'insecure' && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{t('phoneInsecure')}</div>}
+        {support === 'unsupported' && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{t('phoneUnsupported')}</div>}
+        {support === 'ok' && (here
+          ? <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{t('phoneReady')}</div>
+          : (
+            <>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>{t('phoneRegisterWhy')}</div>
+              <button type="button" disabled={busy} onClick={() => { void register() }} style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined }}>{busy ? t('working') : t('phoneRegister')}</button>
+            </>
+          ))}
+        {state.codeReveal && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>{t('phoneCodeOn')}</div>}
+        {note && <div role="status" style={{ fontSize: 12.5, marginTop: 8 }}>{note}</div>}
+        {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
+      </div>
+    )
+  }
+  return (
+    <div style={box}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{t('phoneTitle')}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>{t('phoneDesktopIntro')}</div>
+      {state.passkeys.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('phoneNone')}</div>}
+      {state.passkeys.map(p => (
+        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{p.label} <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>· {p.rpId}</span></span>
+          <button type="button" onClick={() => { void gated(c => removePasskey(p.id, c), { action: 'mobile-passkey-remove', target: p.id }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }}
+            style={{ ...dangerBtn, width: 'auto', padding: '5px 10px', minHeight: isMobile ? 44 : undefined }}>{t('phoneRemove')}</button>
+        </div>
+      ))}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={state.codeReveal} onChange={e => { const on = e.target.checked; void gated(c => setCodeReveal(on, c), { action: 'mobile-code-reveal', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }} style={{ marginTop: 3 }} />
+        <span>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{t('phoneCodeToggle')}</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('phoneCodeCost')}</span>
+        </span>
+      </label>
+      {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
+    </div>
   )
 }
 

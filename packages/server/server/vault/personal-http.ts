@@ -6,9 +6,10 @@
  * `personal.test.ts` seals a marker and drives every route to prove it.
  */
 import { readJsonLimited } from '../limits'
-import { GROUP_ID, ITEM_ID, KIND_FIELDS, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
+import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
 import * as gate from './gate'
 import * as store from './personal'
+import * as mobile from './mobile'
 import { vaultAudit, vaultLang } from './service'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
@@ -39,7 +40,10 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   }
   const codeOf = (b: Record<string, unknown>) => (typeof b.code === 'string' && b.code.length <= 16 ? b.code : undefined)
   const ver = (x: unknown) => (typeof x === 'number' && Number.isInteger(x) && x > 0 ? x : null)
-  const step = (action: gate.VaultAction, b: Record<string, unknown>) => gate.requireVaultStepUp(action, { grant, session, loopback, code: codeOf(b) })
+  const tokenOf = (b: Record<string, unknown>) => (typeof b.gestureToken === 'string' && b.gestureToken.length <= 64 ? b.gestureToken : undefined)
+  /** `binding` names the target a phone's gesture token was minted for (§7): a token for A never acts on B. */
+  const step = (action: gate.VaultAction, b: Record<string, unknown>, binding = '') =>
+    gate.requireVaultStepUp(action, { grant, session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding })
   const withGrant = (g: gate.GateResult) => (g.ok && g.grant ? { grant: g.grant } : {})
 
   // ── list: metadata only ──
@@ -54,6 +58,11 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!g.ok) return reply(g)
     const r = await store.listVersions(id)
     return reply(Array.isArray(r) ? { ok: true, versions: r } : storeFail(r))
+  }
+  if (path === '/api/vault/personal/mobile' && req.method === 'GET') {
+    const g = await step('personal-list', {})
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, ...(await mobile.mobileView()), loopback, secure: originMatchesRp(req.headers.get('origin') ?? `${c.url.protocol}//${c.url.host}`, c.url.hostname), ...withGrant(g) })
   }
   if (req.method !== 'POST') return null
   const b = await body()
@@ -72,7 +81,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const v = validateInput(b.item, { requireFields: false })
     if (!ITEM_ID.test(id) || !ev) return reply(bad())
     if (!v.ok) return reply(invalid(v.field))
-    const g = await step('personal-edit', b)
+    const g = await step('personal-edit', b, id)
     if (!g.ok) return reply(g)
     const r = await store.editItem(id, ev, v.value)
     if (!r.ok) return reply(storeFail(r))
@@ -84,7 +93,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const id = typeof b.id === 'string' ? b.id : '', field = typeof b.field === 'string' ? b.field : ''
     const version = b.version === undefined ? undefined : ver(b.version)
     if (!ITEM_ID.test(id) || !field || version === null) return reply(bad())
-    const g = await gate.requirePersonalReveal({ session, loopback, code: codeOf(b) })
+    const g = await gate.requirePersonalReveal({ session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` })
     if (!g.ok) return reply(g)
     const r = await store.revealField(id, field, version)
     if (!r.ok) return reply(storeFail(r))
@@ -98,7 +107,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (path !== route) continue
     const id = typeof b.id === 'string' ? b.id : '', ev = ver(b.expectedVersion)
     if (!ITEM_ID.test(id) || !ev) return reply(bad())
-    const g = await step(action, b)
+    const g = await step(action, b, id)
     if (!g.ok) return reply(g)
     const r = await run(id, ev)
     if (!r.ok) return reply(storeFail(r))
@@ -108,7 +117,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   if (path === '/api/vault/personal/restore-version') {
     const id = typeof b.id === 'string' ? b.id : '', ev = ver(b.expectedVersion), v = ver(b.version)
     if (!ITEM_ID.test(id) || !ev || !v) return reply(bad())
-    const g = await step('personal-restore-version', b)
+    const g = await step('personal-restore-version', b, id)
     if (!g.ok) return reply(g)
     const r = await store.restoreVersion(id, v, ev)
     if (!r.ok) return reply(storeFail(r))
@@ -118,7 +127,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   if (path === '/api/vault/personal/purge') {
     const id = typeof b.id === 'string' ? b.id : ''
     if (!ITEM_ID.test(id)) return reply(bad())
-    const g = await step('personal-purge', b)
+    const g = await step('personal-purge', b, id)
     if (!g.ok) return reply(g)
     const r = await store.purgeItem(id)
     if (!r.ok) return reply(storeFail(r))
@@ -160,7 +169,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   if (path === '/api/vault/personal/groups/delete') {
     const id = typeof b.id === 'string' ? b.id : ''
     if (!GROUP_ID.test(id)) return reply(bad())
-    const g = await step('personal-group-delete', b)
+    const g = await step('personal-group-delete', b, id)
     if (!g.ok) return reply(g)
     const r = await store.deleteGroup(id)
     if (!r.ok) return reply(storeFail(r))
@@ -194,7 +203,72 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     vaultAudit({ type: 'vault.personal-import' })
     return reply({ ok: true, created: r.created, replaced: r.replaced, skipped: r.skipped, ...withGrant(g) })
   }
+
+  // ── §7 the phone: passkeys and the opt-in code window ──
+  const origin = req.headers.get('origin') ?? ''
+  const rpId = c.url.hostname
+  const secure = originMatchesRp(origin, rpId)
+  const notSecure = () => fail('insecure-context',
+    'Biometrics on this device need a secure address (https). Open Agentistics by its https address — for example with the HTTPS certificate of your Tailscale network — and try again.',
+    'A digital neste aparelho precisa de um endereço seguro (https). Abra o Agentistics pelo endereço https — por exemplo com o certificado HTTPS da sua rede Tailscale — e tente de novo.')
+  const desktopOnly = () => fail('desktop-only', 'Do this on the computer itself.', 'Faça isto no próprio computador.')
+  if (path === '/api/vault/personal/mobile/register/begin') {
+    if (!secure) return reply(notSecure())
+    const label = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 60) : (pt() ? 'Celular' : 'Phone')
+    // An escalation (a new way to reveal): the code AND Windows Hello on the computer, fresh.
+    const g = await step('mobile-passkey-add', b)
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, options: mobile.beginRegistration(session, rpId, origin, label) })
+  }
+  if (path === '/api/vault/personal/mobile/register/finish') {
+    const r = await mobile.finishRegistration(session, b)
+    if (!r.ok) return reply(passkeyFail(r.code))
+    vaultAudit({ type: 'vault.personal-passkey-add' })
+    return reply({ ok: true, id: r.id })
+  }
+  if (path === '/api/vault/personal/mobile/assert/begin') {
+    if (!secure) return reply(notSecure())
+    const action = typeof b.action === 'string' ? b.action : ''
+    const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
+    if (!/^personal-(reveal|edit|trash|restore|restore-version|purge|group-delete)$/.test(action)) return reply(bad())
+    const g = await step('personal-list', b)
+    if (!g.ok) return reply(g)
+    const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)
+    if (!r.ok) return reply(fail('no-passkey', 'This device has no passkey registered for the vault yet.', 'Este aparelho ainda não tem uma passkey registrada para o cofre.'))
+    return reply({ ok: true, challengeId: r.challengeId, challenge: r.challenge, allowCredentials: r.allowCredentials, rpId: r.rpId, ...withGrant(g) })
+  }
+  if (path === '/api/vault/personal/mobile/assert/finish') {
+    const r = await mobile.finishAssertion(session, b)
+    if (!r.ok) return reply(passkeyFail(r.code))
+    return reply({ ok: true, gestureToken: r.gestureToken })
+  }
+  if (path === '/api/vault/personal/mobile/passkeys/remove') {
+    if (!loopback) return reply(desktopOnly())
+    const id = typeof b.id === 'string' ? b.id : ''
+    const g = await step('mobile-passkey-remove', b)
+    if (!g.ok) return reply(g)
+    if (!(await mobile.removePasskey(id))) return reply(fail('not-found', 'That passkey is not registered.', 'Essa passkey não está registrada.'))
+    vaultAudit({ type: 'vault.personal-passkey-remove' })
+    return reply({ ok: true })
+  }
+  if (path === '/api/vault/personal/mobile/code-reveal') {
+    if (!loopback) return reply(desktopOnly())
+    if (typeof b.enabled !== 'boolean') return reply(bad())
+    const g = await step('mobile-code-reveal', b)
+    if (!g.ok) return reply(g)
+    await mobile.setCodeReveal(b.enabled)
+    vaultAudit({ type: 'vault.personal-code-reveal' })
+    return reply({ ok: true, codeReveal: b.enabled })
+  }
   return null
+}
+
+/** A passkey check that failed, in words — the code names WHICH check, for the log and the tests. */
+function passkeyFail(code: string) {
+  if (code === 'no-challenge') return fail('passkey-expired', 'That confirmation expired (60 seconds) or was already used. Try again.', 'Essa confirmação expirou (60 segundos) ou já foi usada. Tente de novo.')
+  if (code === 'counter') return fail('passkey-clone', 'This passkey answered with an old counter, which is what a copied passkey does. It was refused.', 'Esta passkey respondeu com um contador antigo, que é o que uma passkey copiada faz. Ela foi recusada.')
+  if (code === 'no-verification') return fail('passkey-no-uv', 'The phone did not confirm it was you (fingerprint, face or PIN). Try again.', 'O celular não confirmou que é você (digital, rosto ou PIN). Tente de novo.')
+  return { ...fail('passkey-refused', 'The phone\'s confirmation could not be verified. Nothing was opened.', 'A confirmação do celular não pôde ser verificada. Nada foi aberto.'), check: code }
 }
 
 /** For the page: the kinds and their fields (no values, no secrets). */
