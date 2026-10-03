@@ -147,6 +147,8 @@ export const EVENT_TYPES = [
   'model.started', 'model.delta',
   // tool lifecycle detail
   'tool.approved', 'tool.denied', 'tool.progress',
+  // the native context manager's execution record (B4-CTX §3)
+  'tool.executed',
   // MCP
   'mcp.requested', 'mcp.completed',
   // browser
@@ -155,6 +157,8 @@ export const EVENT_TYPES = [
   'browser.tab.closed',
   // context
   'context.compacted', 'context.window.observed',
+  // the native context manager reopening a recorded execution (B4-CTX §5, §9)
+  'context.recalled',
   // policy
   'policy.requested', 'policy.approved', 'policy.denied',
   // attention (LIVE.1): a person is asked something and the session is blocked on it
@@ -417,6 +421,49 @@ export interface ToolFailedData extends ToolRef {
   result?: ToolResultRef
 }
 
+/**
+ * The native context manager's EXECUTION RECORD (context-manager design §3): one per tool call that
+ * ran, after it settled. Facts and content-store references only — the model's declared intent, the
+ * target and the output are conversation content and stay in the content store / the engine's record.
+ */
+export interface ToolExecutedData extends ToolRef {
+  /** The session-scoped handle the model recalls it by (`#41`); its parts are `#41.1`, `#41.2`, … */
+  handle: string
+  /** How it entered the window: whole, or a preview + its index line. */
+  entry: 'whole' | 'preview'
+  bytes: number
+  lines: number
+  /** ESTIMATED (`ceil(bytes / 4)`), identical on every provider; the provider's own count is on `model.completed`. */
+  tokens: number
+  /** How many stored parts the output was cut into (line-aligned). */
+  parts: number
+  /** The whole output in the content store. */
+  content: ToolResultRef
+  /** The call's input in the content store (design §4.3). */
+  input?: ToolResultRef
+  /** Known to touch secrets (`.env`, `printenv`, credential paths) — excluded from every exit path (§8.4). */
+  sensitive: boolean
+}
+
+/**
+ * The model reopened a recorded execution (`context.recall`, design §5). `toolExecutionId` is the
+ * recall call's own; `handle` is what it asked for. The pattern of a grep and the lines returned
+ * are not carried — only how much entered the window and how much was not resent.
+ */
+export interface ContextRecalledData extends ToolRef {
+  /** `#41` or `#41.2`, as asked. */
+  handle: string
+  mode: 'preview' | 'part' | 'lines' | 'grep' | 'whole'
+  /** `already-resident`: nothing resent (it is in the window). `unavailable`: missing or hash mismatch. */
+  outcome: 'returned' | 'already-resident' | 'unavailable' | 'unknown'
+  /** Parts this answer put in the window. */
+  partsReturned: number
+  /** Parts not resent because the window already held them (design §5.4). */
+  partsAlreadyResident: number
+  /** Estimated size of the answer. */
+  tokens: number
+}
+
 export interface McpRequestedData extends ToolRef {
   server: string
   tool: string
@@ -589,6 +636,7 @@ export interface EventData {
   'tool.approved': ToolApprovedData
   'tool.denied': ToolDeniedData
   'tool.progress': ToolProgressData
+  'tool.executed': ToolExecutedData
   'mcp.requested': McpRequestedData
   'mcp.completed': McpCompletedData
   'browser.session.started': BrowserSessionStartedData
@@ -603,6 +651,7 @@ export interface EventData {
   'browser.tab.closed': BrowserTabData
   'context.compacted': ContextCompactedData
   'context.window.observed': ContextWindowObservedData
+  'context.recalled': ContextRecalledData
   'policy.requested': PolicyRequestedData
   'policy.approved': PolicyDecidedData
   'policy.denied': PolicyDecidedData

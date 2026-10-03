@@ -593,11 +593,11 @@ Optional, emitted only where the source genuinely produces them:
 
 ```
 model.started        model.delta                       (streaming)
-tool.approved        tool.denied        tool.progress
+tool.approved        tool.denied        tool.progress      tool.executed      (native context manager)
 mcp.requested        mcp.completed
 browser.session.started  browser.tab.created  browser.tab.focused  browser.navigation
 browser.click  browser.input  browser.scroll  browser.screenshot  browser.download  browser.tab.closed
-context.compacted    context.window.observed
+context.compacted    context.window.observed           context.recalled   (native context manager)
 policy.requested     policy.approved    policy.denied
 alm.task.created     alm.task.updated   alm.task.completed   alm.evidence.attached
 turn.started         turn.ended                                (human turns — D22, D25)
