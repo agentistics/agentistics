@@ -3,7 +3,7 @@ import {
   BarChart2, TrendingUp, Clock, Wrench, FolderOpen, List, LayoutGrid, Trophy, Bot, Cpu, GitCompare,
 } from 'lucide-react'
 import { format, parseISO, subDays } from 'date-fns'
-import type { AppData, Filters, Lang, ModelUsage, SessionMeta, HarnessId } from '@agentistics/core'
+import type { AppData, Filters, Lang, ModelUsage, SessionMeta, SurfaceHarnessId } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
 import { formatModel, formatProjectName, repoShortName, calcCost, sessionCostUSD, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
 import { useDerivedStats, blendedCostPerToken, blendedSessionCost, type BlendedRates, type HarnessSummary } from '../hooks/useData'
@@ -807,8 +807,8 @@ export function PDFDirectExporter({ data, range, currentFilters, lang, currency,
 // fed the same filtered summaries as the rest of the report (see ExportPage).
 
 function CompareSectionContent({ summaries, harnesses, c, pt, currency, brlRate }: {
-  summaries: Record<HarnessId, HarnessSummary>
-  harnesses: HarnessId[]
+  summaries: Record<SurfaceHarnessId, HarnessSummary>
+  harnesses: SurfaceHarnessId[]
   c: Colors
   pt: boolean
   currency: 'USD' | 'BRL'
@@ -934,11 +934,11 @@ function CompareSectionContent({ summaries, harnesses, c, pt, currency, brlRate 
       <div style={{ marginBottom: 20 }}>
         <SubTitle title={pt ? 'Tabela comparativa' : 'Comparison table'} />
         {[
-          { label: pt ? 'Sessões' : 'Sessions', getValue: (h: HarnessId) => ({ val: fmt(summaries[h]?.sessions ?? 0), na: false }) },
-          { label: pt ? 'Mensagens' : 'Messages', getValue: (h: HarnessId) => ({ val: fmt(summaries[h]?.messages ?? 0), na: false }) },
-          { label: pt ? 'Total de tokens' : 'Total tokens', getValue: (h: HarnessId) => capable(h, 'tokens') ? { val: fmt(totalTokens(summaries[h]?.tokens ?? EMPTY_TOKENS)), na: false } : { val: 'N/A', na: true } },
-          { label: pt ? 'Custo estimado' : 'Estimated cost', getValue: (h: HarnessId) => capable(h, 'cost') ? { val: fmtCostInline(summaries[h]?.costUSD ?? 0), na: false } : { val: 'N/A', na: true } },
-          { label: pt ? 'Custo / 1M tokens' : 'Cost / 1M tokens', getValue: (h: HarnessId) => (capable(h, 'cost') && capable(h, 'tokens') && summaries[h]?.costPerMTokens != null) ? { val: `${fmtCostInline(summaries[h]!.costPerMTokens!)}`, na: false } : { val: 'N/A', na: true } },
+          { label: pt ? 'Sessões' : 'Sessions', getValue: (h: SurfaceHarnessId) => ({ val: fmt(summaries[h]?.sessions ?? 0), na: false }) },
+          { label: pt ? 'Mensagens' : 'Messages', getValue: (h: SurfaceHarnessId) => ({ val: fmt(summaries[h]?.messages ?? 0), na: false }) },
+          { label: pt ? 'Total de tokens' : 'Total tokens', getValue: (h: SurfaceHarnessId) => capable(h, 'tokens') ? { val: fmt(totalTokens(summaries[h]?.tokens ?? EMPTY_TOKENS)), na: false } : { val: 'N/A', na: true } },
+          { label: pt ? 'Custo estimado' : 'Estimated cost', getValue: (h: SurfaceHarnessId) => capable(h, 'cost') ? { val: fmtCostInline(summaries[h]?.costUSD ?? 0), na: false } : { val: 'N/A', na: true } },
+          { label: pt ? 'Custo / 1M tokens' : 'Cost / 1M tokens', getValue: (h: SurfaceHarnessId) => (capable(h, 'cost') && capable(h, 'tokens') && summaries[h]?.costPerMTokens != null) ? { val: `${fmtCostInline(summaries[h]!.costPerMTokens!)}`, na: false } : { val: 'N/A', na: true } },
         ].map(row => (
           <div key={row.label} style={{
             display: 'grid',
@@ -1070,7 +1070,7 @@ function CompareSectionContent({ summaries, harnesses, c, pt, currency, brlRate 
         {[
           {
             label: pt ? 'Dia de maior uso de tokens' : 'Busiest token day',
-            getValue: (h: HarnessId) => {
+            getValue: (h: SurfaceHarnessId) => {
               if (!capable(h, 'tokens')) return { val: 'N/A', na: true }
               const ptd = summaries[h]?.peakTokenDay
               if (!ptd) return { val: '—', na: false }
@@ -1079,7 +1079,7 @@ function CompareSectionContent({ summaries, harnesses, c, pt, currency, brlRate 
           },
           {
             label: pt ? 'Maior custo de sessão' : 'Peak session cost',
-            getValue: (h: HarnessId) => {
+            getValue: (h: SurfaceHarnessId) => {
               if (!capable(h, 'cost')) return { val: 'N/A', na: true }
               const psc = summaries[h]?.peakSessionCost
               if (psc == null) return { val: '—', na: false }
@@ -1168,9 +1168,9 @@ export interface PDFContentProps {
   logoDataUri: string
   /** Per-harness comparison summaries, scoped by the same filters as the rest of the
    *  report. Only used when the 'compare' section is enabled; omit/undefined otherwise. */
-  compareSummaries?: Record<HarnessId, HarnessSummary>
+  compareSummaries?: Record<SurfaceHarnessId, HarnessSummary>
   /** Harness columns to show in the compare section (already filtered/ordered). */
-  compareHarnesses?: HarnessId[]
+  compareHarnesses?: SurfaceHarnessId[]
 }
 
 export function PDFContent({ pdfTheme, sectionOrder, derived, pdfFilters, lang, currency, brlRate, blendedRates, chartMetric, chartOverlay, chartOverlayAll, logoDataUri, compareSummaries, compareHarnesses }: PDFContentProps) {

@@ -18,8 +18,8 @@
  * list, and its message figure is a different quantity.
  */
 
-import type { AppData, HarnessId } from '@agentistics/core'
-import { HARNESS_ORDER, projectedRollup, type MetricsQueryFn, type Rollup } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
+import { SURFACE_HARNESS_ORDER, projectedRollup, type MetricsQueryFn, type Rollup } from '@agentistics/core'
 import { harnessRows, modelRows, overviewTotals, projectRows, type HarnessRow, type ModelRow, type ProjectRow, type Totals } from './selectors'
 
 export interface DashboardFigures {
@@ -42,7 +42,7 @@ function basename(path: string): string {
   return parts[parts.length - 1] ?? path
 }
 
-export async function projectedFigures(q: MetricsQueryFn, harness: HarnessId | null = null): Promise<DashboardFigures> {
+export async function projectedFigures(q: MetricsQueryFn, harness: SurfaceHarnessId | null = null): Promise<DashboardFigures> {
   const scope = harness ?? undefined
   const [byHarness, byProject, byModel] = await Promise.all([
     projectedRollup(q, 'harness', scope),
@@ -51,9 +51,9 @@ export async function projectedFigures(q: MetricsQueryFn, harness: HarnessId | n
   ])
   const harnesses: HarnessRow[] = [...byHarness.values()]
     .filter(r => r.key)
-    .map(r => ({ harness: r.key as HarnessId, sessions: r.sessions, messages: null, tokens: mainTokens(r), costUSD: r.mainCost, agents: null }))
-    // The legacy screen's order: HARNESS_ORDER.
-    .sort((a, b) => HARNESS_ORDER.indexOf(a.harness) - HARNESS_ORDER.indexOf(b.harness))
+    .map(r => ({ harness: r.key as SurfaceHarnessId, sessions: r.sessions, messages: null, tokens: mainTokens(r), costUSD: r.mainCost, agents: null }))
+    // The legacy screen's order: SURFACE_HARNESS_ORDER.
+    .sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness))
   const totals = harnesses.reduce<Totals>(
     (acc, r) => ({ sessions: acc.sessions + r.sessions, tokens: acc.tokens + r.tokens, costUSD: acc.costUSD + r.costUSD, messages: null }),
     { sessions: 0, tokens: 0, costUSD: 0, messages: null },

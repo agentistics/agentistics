@@ -1,7 +1,7 @@
 import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
 import { fmt, fmtCost, HARNESS_CAPABILITIES } from '@agentistics/core'
 import { harnessRows, type HarnessRow } from '../selectors'
 import { DataTable, Empty, type Column } from '../components/Primitives'
@@ -15,7 +15,7 @@ import type { TuiStrings } from '../i18n'
  * A harness with no token data must never render a confident `0` — the whole point of
  * HARNESS_CAPABILITIES is that an admitted gap beats a wrong number.
  */
-function capable(harness: HarnessId, metric: 'tokens' | 'cost' | 'agents'): boolean {
+function capable(harness: SurfaceHarnessId, metric: 'tokens' | 'cost' | 'agents'): boolean {
   return HARNESS_CAPABILITIES[harness]?.[metric] ?? false
 }
 

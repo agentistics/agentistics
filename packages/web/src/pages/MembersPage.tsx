@@ -5,7 +5,7 @@ import {
 import { useOutletContext } from 'react-router-dom'
 import { Users, Search, Monitor, User as UserIcon, GitBranch, FolderOpen, Cpu, Terminal } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
-import { fmt, fmtCost, formatModel, repoShortName, type HarnessId } from '@agentistics/core'
+import { fmt, fmtCost, formatModel, repoShortName, type SurfaceHarnessId } from '@agentistics/core'
 import { aggregateMemberMetrics, withStatsCacheTotals, presenceFilterCaches, LOCAL_KEY, type MemberGroupBy, type MemberMetrics } from '../lib/member-metrics'
 import { cacheTotalsUsable } from '../lib/topUsage'
 import { MetricNote } from '../components/MetricNote'
@@ -141,7 +141,7 @@ export default function MembersPage() {
   /** Legend entries: only the harnesses actually painted in the chart, in the order they rank.
    *  The bars are coloured by dominant harness — without this the colour is an unexplained code. */
   const chartLegend = useMemo(() => {
-    const seen = new Map<HarnessId, number>()
+    const seen = new Map<SurfaceHarnessId, number>()
     for (const d of chartData) if (d.harness) seen.set(d.harness, (seen.get(d.harness) ?? 0) + 1)
     return [...seen.entries()]
       .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
@@ -432,7 +432,7 @@ function MemberCard({ rank, row, me, showMachines, machineName, title, subtitle,
   fmtDate: (iso: string | null) => string
 }) {
   const harness = row.topHarness?.key
-  const harnessColor = harness ? (HARNESS_COLORS[harness as HarnessId] ?? 'var(--text-tertiary)') : 'var(--text-tertiary)'
+  const harnessColor = harness ? (HARNESS_COLORS[harness as SurfaceHarnessId] ?? 'var(--text-tertiary)') : 'var(--text-tertiary)'
   const projectLabel = row.topProject
     ? (row.topProject.kind === 'repo' ? repoShortName(row.topProject.key) : shortPath(row.topProject.key))
     : '—'
@@ -498,7 +498,7 @@ function MemberCard({ rank, row, me, showMachines, machineName, title, subtitle,
         <Fact
           icon={<Terminal size={11} />}
           label={pt ? 'Harness mais usado' : 'Most used harness'}
-          value={harness ? (HARNESS_LABELS[harness as HarnessId] ?? harness) : (pt ? 'Sem dado' : 'No data')}
+          value={harness ? (HARNESS_LABELS[harness as SurfaceHarnessId] ?? harness) : (pt ? 'Sem dado' : 'No data')}
           hint={row.topHarness ? `${row.topHarness.sessions} ${pt ? 'sessões' : 'sessions'}` : undefined}
           color={harness ? harnessColor : undefined}
           muted={!harness}

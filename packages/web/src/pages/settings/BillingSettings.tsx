@@ -16,6 +16,7 @@ import {
   type BillingSettings as BillingSettingsShape,
   type BillingTimeline,
   type HarnessId,
+  isAdapterHarness,
 } from '@agentistics/core'
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -69,7 +70,8 @@ export default function BillingSettings() {
   const isMobile = useIsMobile()
 
   const harnesses: HarnessId[] = useMemo(() => {
-    const present = (ctx.data.harnesses ?? []).filter(h => HARNESS_ORDER.includes(h))
+    // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none.
+    const present = (ctx.data.harnesses ?? []).filter(isAdapterHarness)
     return present.length > 0 ? present : ['claude']
   }, [ctx.data.harnesses])
 

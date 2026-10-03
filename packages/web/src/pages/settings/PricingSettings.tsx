@@ -6,7 +6,7 @@ import { resolveProvider, providerOrder, type ProviderId } from '@agentistics/co
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import { createSharedPref } from '../../lib/sharedPref'
 
 type Origin = 'official' | 'community' | 'builtin'
@@ -152,10 +152,10 @@ export default function PricingSettings() {
    *  about your costs. A model appears the first time it is used, with no code change — the id
    *  comes from the sessions, and the rate from whichever source lists it. */
   const usedBy = useMemo(() => {
-    const map = new Map<string, Set<HarnessId>>()
-    const add = (model: string, h: HarnessId) => {
+    const map = new Map<string, Set<SurfaceHarnessId>>()
+    const add = (model: string, h: SurfaceHarnessId) => {
       if (!model) return
-      const set = map.get(model) ?? new Set<HarnessId>()
+      const set = map.get(model) ?? new Set<SurfaceHarnessId>()
       set.add(h)
       map.set(model, set)
     }
@@ -238,7 +238,7 @@ export default function PricingSettings() {
         .filter(g => g.rows.length > 0)
     }
     // harness
-    const seen = new Map<HarnessId, typeof entries>()
+    const seen = new Map<SurfaceHarnessId, typeof entries>()
     for (const e of entries) {
       for (const h of e.harnesses) seen.set(h, [...(seen.get(h) ?? []), e])
     }
@@ -393,7 +393,7 @@ export default function PricingSettings() {
               {groupBy === 'harness' && (
                 <span style={{
                   width: 8, height: 8, borderRadius: '50%', alignSelf: 'center',
-                  background: HARNESS_COLORS[group.key as HarnessId] ?? 'var(--text-tertiary)',
+                  background: HARNESS_COLORS[group.key as SurfaceHarnessId] ?? 'var(--text-tertiary)',
                 }} />
               )}
               <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>{group.label}</span>

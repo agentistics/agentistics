@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, Bot } from 'lucide-react'
 import { fmt, fmtCost } from '@agentistics/core'
-import type { AgentInvocation, HarnessId } from '@agentistics/core'
+import type { AgentInvocation, SurfaceHarnessId } from '@agentistics/core'
 import type { Lang } from '@agentistics/core'
 import { MetricNote } from './MetricNote'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -23,7 +23,7 @@ interface AgentMetricsPanelProps {
   planFactor?: number | null
   lang: Lang
   /** When set, gates the panel — renders N/A if the harness cannot produce agent metrics. */
-  harness?: HarnessId
+  harness?: SurfaceHarnessId
 }
 
 

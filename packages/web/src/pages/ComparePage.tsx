@@ -2,7 +2,7 @@ import React, { useMemo } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { GitCompare } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
-import type { HarnessId, Lang, TokenBreakdown } from '@agentistics/core'
+import type { SurfaceHarnessId, Lang, TokenBreakdown } from '@agentistics/core'
 import { EMPTY_TOKENS, TOKEN_PARTS, fmt, fmtCost, formatModel, t, tokenLabel, tokenSharePct, totalTokens } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
 import { computeFilteredHarnessSummaries } from '../hooks/useData'
@@ -11,7 +11,7 @@ import { CompareByFilter } from './compare/CompareByFilter'
 import { MetricNote } from '../components/MetricNote'
 
 interface HarnessAgg {
-  harness: HarnessId
+  harness: SurfaceHarnessId
   sessions: number
   messages: number
   inputTokens: number
@@ -59,9 +59,9 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
 
 interface MetricRowProps {
   label: string
-  values: { harness: HarnessId; value: number | null }[]
+  values: { harness: SurfaceHarnessId; value: number | null }[]
   format: (v: number) => string
-  colors: Record<HarnessId, string>
+  colors: Record<SurfaceHarnessId, string>
   lang: Lang
 }
 
@@ -360,8 +360,8 @@ function CompareByHarness() {
       ? (summaries[a.harness]?.costPerMTokens ?? null)
       : null,
   }))
-  const cheapestHarness = useMemo<HarnessId | null>(() => {
-    let best: HarnessId | null = null
+  const cheapestHarness = useMemo<SurfaceHarnessId | null>(() => {
+    let best: SurfaceHarnessId | null = null
     let bestVal = Infinity
     for (const { harness, value } of costPerMValues) {
       if (value !== null && value > 0 && value < bestVal) {

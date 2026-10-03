@@ -12,7 +12,7 @@
 // which sessions are visible — the page feeds it `/api/data`, which the central already scopes
 // per signed-in principal.
 
-import { calcCost, sessionCostUSD as sessionCostByModel, type HarnessId, type SessionMeta, type StatsCache } from '@agentistics/core'
+import { calcCost, sessionCostUSD as sessionCostByModel, type SurfaceHarnessId, type SessionMeta, type StatsCache } from '@agentistics/core'
 import { format, parseISO } from 'date-fns'
 
 /** How rows are grouped: one row per person (`user`) or one row per machine (`memberId`). */
@@ -73,10 +73,10 @@ export interface MemberMetrics {
   /** ISO timestamp of the latest session end (falling back to its start). */
   lastActivity: string | null
   /** All harnesses seen, ordered by session count desc then id asc. */
-  harnesses: HarnessId[]
+  harnesses: SurfaceHarnessId[]
   topProject: TopProject | null
   topModel: TopEntry | null
-  topHarness: TopEntry<HarnessId> | null
+  topHarness: TopEntry<SurfaceHarnessId> | null
 }
 
 /** Cost of a single session. Always via `calcCost` — never an inline pricing formula.
@@ -245,7 +245,7 @@ export function aggregateMemberMetrics(
     const topHarness = topOf(a.harnesses)
     const harnessList = [...a.harnesses.entries()]
       .sort((x, y) => (y[1] - x[1]) || x[0].localeCompare(y[0]))
-      .map(([id]) => id as HarnessId)
+      .map(([id]) => id as SurfaceHarnessId)
 
     const topUser = topOf(a.users)
     rows.push({
@@ -268,7 +268,7 @@ export function aggregateMemberMetrics(
       harnesses: harnessList,
       topProject,
       topModel: topOf(a.models),
-      topHarness: topHarness ? { key: topHarness.key as HarnessId, sessions: topHarness.sessions } : null,
+      topHarness: topHarness ? { key: topHarness.key as SurfaceHarnessId, sessions: topHarness.sessions } : null,
     })
   }
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { calcCost, getModelPrice, UNPRICED_PRICE, modelCostUSD, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, HARNESS_ORDER, sessionDay, normalizeSessionTimes } from './types'
+import { calcCost, getModelPrice, UNPRICED_PRICE, modelCostUSD, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, HARNESS_ORDER, SURFACE_HARNESS_ORDER, NATIVE_HARNESS_ID, sessionDay, normalizeSessionTimes } from './types'
 import type { ModelUsage, StatsCache } from './types'
 
 describe('sanitizeStatsCache', () => {
@@ -411,7 +411,7 @@ test('gemini-2.5-flash resolves to correct price', () => {
 // HARNESS_CAPABILITIES
 
 test('HARNESS_CAPABILITIES declares every harness', () => {
-  expect(Object.keys(HARNESS_CAPABILITIES).sort()).toEqual(['antigravity', 'claude', 'codex', 'copilot', 'gemini', 'kimi', 'opencode'])
+  expect(Object.keys(HARNESS_CAPABILITIES).sort()).toEqual(['agentistics', 'antigravity', 'claude', 'codex', 'copilot', 'gemini', 'kimi', 'opencode'])
 })
 
 test('kimi reports tokens, model and cost', () => {
@@ -657,7 +657,12 @@ test('HARNESS_ORDER lists every harness exactly once', () => {
   // The regression this guards: five places used to hardcode the list as a plain array, which
   // TypeScript accepts with a member missing — a new harness silently vanished from the Compare
   // page, the filter bar and the consolidate store.
-  expect([...HARNESS_ORDER].sort()).toEqual(Object.keys(HARNESS_CAPABILITIES).sort() as typeof HARNESS_ORDER)
+  // HARNESS_ORDER is the ADAPTER set; SURFACE_HARNESS_ORDER adds the native harness, and is what a
+  // surface enumerates. Every capability row is reachable from the surface list, and only the native
+  // one is missing from the adapter list.
+  expect([...SURFACE_HARNESS_ORDER].sort()).toEqual(Object.keys(HARNESS_CAPABILITIES).sort() as typeof SURFACE_HARNESS_ORDER)
+  expect(new Set(SURFACE_HARNESS_ORDER).size).toBe(SURFACE_HARNESS_ORDER.length)
+  expect(SURFACE_HARNESS_ORDER.filter(h => !(HARNESS_ORDER as string[]).includes(h))).toEqual([NATIVE_HARNESS_ID])
   expect(new Set(HARNESS_ORDER).size).toBe(HARNESS_ORDER.length)
 })
 

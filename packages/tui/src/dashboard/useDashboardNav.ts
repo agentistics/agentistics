@@ -15,8 +15,8 @@
 import type { DashboardFigures } from '../projected-figures'
 import { useCallback, useMemo, useState } from 'react'
 import { useInput } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
-import { HARNESS_ORDER } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
+import { SURFACE_HARNESS_ORDER } from '@agentistics/core'
 import {
   applyHarnessFilter,
   dashboardRows,
@@ -30,7 +30,7 @@ import {
 
 export interface DashboardFilter {
   /** `null` is the "all harnesses" entry, always first. */
-  options: (HarnessId | null)[]
+  options: (SurfaceHarnessId | null)[]
   index: number
 }
 
@@ -38,7 +38,7 @@ export interface DashboardNav {
   screen: DashboardScreenId
   setScreen: (id: DashboardScreenId) => void
   /** `null` means every harness — the filter is off. */
-  harness: HarnessId | null
+  harness: SurfaceHarnessId | null
   /** The harness picker, or `null` when it is closed. */
   filter: DashboardFilter | null
   /** True while the picker owns the keyboard. */
@@ -62,7 +62,7 @@ const PAGE_FORWARD = '.'
 export function useDashboardNav(opts: {
   isActive: boolean
   /** The harnesses that actually have data, so the picker never offers an empty one. */
-  harnesses: readonly HarnessId[] | undefined
+  harnesses: readonly SurfaceHarnessId[] | undefined
   /**
    * What the screens are drawing, so a page can be clamped against the rows that EXIST.
    *
@@ -77,7 +77,7 @@ export function useDashboardNav(opts: {
   height?: number
 }): DashboardNav {
   const [screen, setScreen] = useState<DashboardScreenId>(DASHBOARD_SCREENS[0]!)
-  const [harness, setHarness] = useState<HarnessId | null>(null)
+  const [harness, setHarness] = useState<SurfaceHarnessId | null>(null)
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
   const [page, setPage] = useState(0)
@@ -85,9 +85,9 @@ export function useDashboardNav(opts: {
   // Keyed on the joined ids rather than the array: `data.harnesses` is a fresh array on every
   // payload, and rebuilding this list each time would reset nothing but would churn every consumer.
   const key = (opts.harnesses ?? []).join(',')
-  const options = useMemo<(HarnessId | null)[]>(() => {
-    const present = new Set(key ? (key.split(',') as HarnessId[]) : [])
-    return [null, ...HARNESS_ORDER.filter(h => present.has(h))]
+  const options = useMemo<(SurfaceHarnessId | null)[]>(() => {
+    const present = new Set(key ? (key.split(',') as SurfaceHarnessId[]) : [])
+    return [null, ...SURFACE_HARNESS_ORDER.filter(h => present.has(h))]
   }, [key])
 
   /**

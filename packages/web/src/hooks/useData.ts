@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
-import type { AppData, Filters, DateRange, AgentInvocation, HarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, SURFACE_HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
@@ -223,7 +223,7 @@ export function reconcileClaudeDayCoverage(
  * left out.
  */
 export function summarizeApiCostByDay(
-  days: Partial<Record<HarnessId, Record<string, { costUSD: number; tokens: number; sessions: number }>>>,
+  days: Partial<Record<SurfaceHarnessId, Record<string, { costUSD: number; tokens: number; sessions: number }>>>,
   totalCostUSD: number,
   totalTokens: number,
 ): import('@agentistics/core').ApiCostByDay {
@@ -284,12 +284,12 @@ export interface RepoStat {
   ciSessions: number
   /** Distinct member display names that contributed to this repo (team/central). */
   members: string[]
-  harnesses: HarnessId[]
+  harnesses: SurfaceHarnessId[]
   firstActive: string
   lastActive: string
   activityByDay: Record<string, number>
   _users: Set<string>
-  _harnesses: Set<HarnessId>
+  _harnesses: Set<SurfaceHarnessId>
   _paths: Record<string, number>
 }
 
@@ -656,7 +656,7 @@ export function blendedSessionCost(
     + cacheWriteCost
 }
 
-export function filterByHarness<T extends { harness?: HarnessId }>(sessions: T[], harness?: HarnessId): T[] {
+export function filterByHarness<T extends { harness?: SurfaceHarnessId }>(sessions: T[], harness?: SurfaceHarnessId): T[] {
   if (!harness) return sessions
   return sessions.filter(s => (s.harness ?? 'claude') === harness)
 }
@@ -718,7 +718,7 @@ function peakIndex(arr: number[]): number | null {
  * user/harness/date filter is active — statsCache has no per-user/-harness
  * granularity, so the filtered view must come from per-session sums. Pure.
  */
-export function summarizeHarnessSessions(sessions: SessionMeta[], harness: HarnessId): HarnessSummary {
+export function summarizeHarnessSessions(sessions: SessionMeta[], harness: SurfaceHarnessId): HarnessSummary {
   return summarizeSessions(
     sessions.filter(s => (s.harness ?? 'claude') === harness),
     HARNESS_CAPABILITIES[harness].cost,
@@ -984,8 +984,8 @@ export function claudeSummaryFromStatsCache(
 
 export function computeHarnessSummaries(
   data: import('@agentistics/core').AppData,
-): Record<HarnessId, HarnessSummary> {
-  const result = {} as Record<HarnessId, HarnessSummary>
+): Record<SurfaceHarnessId, HarnessSummary> {
+  const result = {} as Record<SurfaceHarnessId, HarnessSummary>
 
   for (const harness of data.harnesses) {
     if (harness === 'claude') {
@@ -999,7 +999,7 @@ export function computeHarnessSummaries(
 }
 
 /** Most recent activity timestamp for one harness in a session list (end_time, else start_time). */
-export function lastActiveFor(sessions: { harness?: HarnessId; start_time?: string; end_time?: string }[], harness: HarnessId): string | null {
+export function lastActiveFor(sessions: { harness?: SurfaceHarnessId; start_time?: string; end_time?: string }[], harness: SurfaceHarnessId): string | null {
   return sessions
     .filter(s => (s.harness ?? 'claude') === harness)
     .reduce<string | null>((best, s) => {
@@ -1009,9 +1009,9 @@ export function lastActiveFor(sessions: { harness?: HarnessId; start_time?: stri
 }
 
 export interface FilteredHarnessSummaries {
-  activeHarnesses: HarnessId[]
-  summaries: Record<HarnessId, HarnessSummary>
-  lastActive: Record<HarnessId, string | null>
+  activeHarnesses: SurfaceHarnessId[]
+  summaries: Record<SurfaceHarnessId, HarnessSummary>
+  lastActive: Record<SurfaceHarnessId, string | null>
 }
 
 /**
@@ -1043,16 +1043,16 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
 
   // Columns: the explicitly selected harnesses, else the harnesses the selected users used
   // (so picking a member narrows the columns), else every harness in the data.
-  const order: HarnessId[] = HARNESS_ORDER
+  const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
   const userScoped = filterByUsers(data.sessions, usersSel)
   const scopedHarnesses = distinctHarnesses(userScoped)
-  const cols: HarnessId[] = harnessSel.length > 0
+  const cols: SurfaceHarnessId[] = harnessSel.length > 0
     ? order.filter(h => harnessSel.includes(h))
     : (scopedHarnesses.length > 0 ? scopedHarnesses : data.harnesses)
 
   if (!anyFilter) {
     const sums = computeHarnessSummaries(data)
-    const la = {} as Record<HarnessId, string | null>
+    const la = {} as Record<SurfaceHarnessId, string | null>
     for (const h of cols) la[h] = lastActiveFor(data.sessions, h)
     return { activeHarnesses: cols, summaries: sums, lastActive: la }
   }
@@ -1108,8 +1108,8 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
       : data.statsCache
   const claudeFromStatsCache = (userCacheUsable || machineCacheScoped) && !sliceActive
 
-  const sums = {} as Record<HarnessId, HarnessSummary>
-  const la = {} as Record<HarnessId, string | null>
+  const sums = {} as Record<SurfaceHarnessId, HarnessSummary>
+  const la = {} as Record<SurfaceHarnessId, string | null>
   for (const h of cols) {
     // Gap-fill from the FULLY scoped slice, not just the user-scoped one: `claudeFromStatsCache`
     // implies no date/project/model slice, so `filtered` differs from `userScoped` only by the
@@ -1992,8 +1992,8 @@ export function computeDerivedStats(
     // module. Deliberately NOT `format(parseISO(...), 'yyyy-MM-dd')` (local), which is used a few
     // lines above for the session-gap count: mixing the two rules would drift a session across a
     // billing-period boundary at UTC-3 while the chart beside it plots the other day.
-    const costDays: Partial<Record<HarnessId, Record<string, { costUSD: number; tokens: number; sessions: number }>>> = {}
-    const addDayCost = (harness: HarnessId, day: string, costUSD: number, tokens: number, sessions: number) => {
+    const costDays: Partial<Record<SurfaceHarnessId, Record<string, { costUSD: number; tokens: number; sessions: number }>>> = {}
+    const addDayCost = (harness: SurfaceHarnessId, day: string, costUSD: number, tokens: number, sessions: number) => {
       const byDay = (costDays[harness] ??= {})
       const entry = (byDay[day] ??= { costUSD: 0, tokens: 0, sessions: 0 })
       entry.costUSD += costUSD
@@ -2235,7 +2235,7 @@ export function computeDerivedStats(
           gitCommits: 0, linesAdded: 0, linesRemoved: 0, filesModified: 0,
           ciSessions: 0, members: [], harnesses: [],
           firstActive: '', lastActive: '', activityByDay: {},
-          _users: new Set<string>(), _harnesses: new Set<HarnessId>(), _paths: {},
+          _users: new Set<string>(), _harnesses: new Set<SurfaceHarnessId>(), _paths: {},
         }
       }
       if (s.project_path) r._paths[s.project_path] = (r._paths[s.project_path] ?? 0) + 1

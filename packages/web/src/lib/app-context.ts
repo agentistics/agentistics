@@ -1,4 +1,4 @@
-import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, SessionPreset, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, HarnessId, Project } from '@agentistics/core'
+import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, SessionPreset, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, SurfaceHarnessId, Project } from '@agentistics/core'
 import type { useDerivedStats } from '../hooks/useData'
 import type { PlanBasisView } from '../hooks/usePlanBasis'
 import type { A11yState } from '../hooks/useAccessibility'
@@ -63,7 +63,7 @@ export interface AppContext {
    *  `sessionCountByProject`/`models` are declared further down already — this only adds the two
    *  the dashboard's own context never needed. */
   availableProjects: Project[]
-  availableHarnesses: HarnessId[]
+  availableHarnesses: SurfaceHarnessId[]
 
   // preferences
   lang: Lang
@@ -160,12 +160,12 @@ export interface AppContext {
   // filter bar data (needed to render FiltersBar outside the header, e.g. in CustomPage)
   sessionCountByProject: Record<string, number>
   models: string[]
-  modelGroups: { harness: HarnessId; models: string[] }[]
+  modelGroups: { harness: SurfaceHarnessId; models: string[] }[]
   modelsInProject: Set<string> | null
   /** Distinct users present in the data (team mode). Empty in Solo mode. */
   users: string[]
   /** Harnesses present in the data. Empty in Solo mode (Claude-only). */
-  harnesses: HarnessId[]
+  harnesses: SurfaceHarnessId[]
   /** True when this instance is running as a team-mode central (aggregator). */
   isCentral: boolean
   /** The logged-in IAM account (role + memberships). Undefined when IAM is not active. */

@@ -276,6 +276,8 @@ async function readStore(): Promise<Map<HarnessId, SessionMeta[]>> {
       try { session = JSON.parse(raw) as SessionMeta } catch { continue }
       // A session with no start time contributes nothing to any chart.
       if (!session.start_time) continue
+      // Native sessions are synthesized from the journal, never stored — nothing to seed from.
+      if (session.harness === 'agentistics') continue
       add(session.harness ?? 'claude', session)
     }
   }
