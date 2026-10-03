@@ -232,6 +232,7 @@ await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
   console.warn('[team-migrate] state migration failed (will retry next boot):', err instanceof Error ? err.message : String(err)))
 
 enableRebuildOnChange()
+void import('./mem-log').then(m => m.startMemLog())
 void setupFileWatcher()
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
