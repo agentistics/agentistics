@@ -40,6 +40,8 @@ export interface AttemptRollup {
   costByHarness?: Record<string, number> | null
   costMeasuredSessions: number
   costEstimatedSessions: number
+  /** PRICE.UNKNOWN. Optional: an older server omits it. */
+  costUnpricedSessions?: number
   credits: { nanoAiu: number; premiumRequests: number } | null
   mixedCurrency: boolean
 }

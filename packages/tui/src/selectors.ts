@@ -11,7 +11,7 @@
  */
 
 import type { AppData, HarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
-import { calcCost, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
+import { calcCost, isUnpricedModel, unpricedTokens, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
 
 export interface HarnessRow {
   harness: HarnessId
@@ -20,6 +20,8 @@ export interface HarnessRow {
   messages: number | null
   tokens: number
   costUSD: number
+  /** PRICE.UNKNOWN: tokens of models with no price. Absent = 0. */
+  unpricedTokens?: number
   /** Recorded Agent-tool invocations. Only Claude reports these (HARNESS_CAPABILITIES.agents),
    *  so for every other harness this is structurally 0 and must render as N/A, not as a count. */
   /** `null` on the projected path: no agent-invocation count is projected. */
@@ -30,6 +32,8 @@ export interface Totals {
   sessions: number
   tokens: number
   costUSD: number
+  /** PRICE.UNKNOWN: tokens of models with no price — `costUSD` is a floor when above 0. Absent = 0. */
+  unpricedTokens?: number
   messages: number | null
 }
 
@@ -46,6 +50,8 @@ export interface ModelRow {
   model: string
   tokens: number
   costUSD: number
+  /** PRICE.UNKNOWN: the table has no price for this model — `costUSD` is 0 and must be shown as "unknown". */
+  unpriced?: boolean
 }
 
 export interface SessionRow {
@@ -98,16 +104,19 @@ function agentCount(sessions: SessionMeta[]): number {
 function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & { messages: number; agents: number } {
   let tokens = 0
   let costUSD = 0
+  let unpriced = 0
   for (const [model, usage] of Object.entries(sc.modelUsage ?? {})) {
     if (!usage) continue
     tokens += usageTokens(usage)
     costUSD += calcCost(usage, model)
+    if (isUnpricedModel(model)) unpriced += usageTokens(usage)
   }
   return {
     sessions: sc.totalSessions ?? 0,
     messages: sc.totalMessages ?? 0,
     tokens,
     costUSD,
+    ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
     agents: agentCount(sessions),
   }
 }
@@ -117,12 +126,14 @@ function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & {
   let tokens = 0
   let costUSD = 0
   let messages = 0
+  let unpriced = 0
   for (const s of sessions) {
     tokens += sessionTokens(s)
     costUSD += sessionCostUSD(s) ?? 0
+    unpriced += unpricedTokens(s)
     messages += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
   }
-  return { sessions: sessions.length, messages, tokens, costUSD, agents: agentCount(sessions) }
+  return { sessions: sessions.length, messages, tokens, costUSD, ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}), agents: agentCount(sessions) }
 }
 
 export function harnessRows(data: AppData): HarnessRow[] {
@@ -140,6 +151,7 @@ export function overviewTotals(data: AppData): Totals {
       sessions: acc.sessions + r.sessions,
       tokens: acc.tokens + r.tokens,
       costUSD: acc.costUSD + r.costUSD,
+      ...((acc.unpricedTokens ?? 0) + (r.unpricedTokens ?? 0) > 0 ? { unpricedTokens: (acc.unpricedTokens ?? 0) + (r.unpricedTokens ?? 0) } : {}),
       messages: acc.messages === null || r.messages === null ? null : acc.messages + r.messages,
     }),
     { sessions: 0, tokens: 0, costUSD: 0, messages: 0 },
@@ -209,6 +221,7 @@ export function modelRows(data: AppData): ModelRow[] {
     }
     row.tokens += usageTokens(usage)
     row.costUSD += calcCost(usage, model)
+    if (isUnpricedModel(model)) row.unpriced = true
   }
 
   for (const [model, usage] of Object.entries(data.statsCache?.modelUsage ?? {})) {

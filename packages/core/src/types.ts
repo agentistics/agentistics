@@ -1004,11 +1004,25 @@ export function normalizeSessionTimes<T extends { start_time?: unknown; end_time
   return s
 }
 
-export function getModelPrice(modelId: string) {
+export interface ModelPrice { input: number; output: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number }
+
+/**
+ * The price of a model the table does NOT know: this one frozen object, all zeros, recognised by identity.
+ * It is a marker, not a price — {@link isUnpricedModel} / {@link modelCostUSD} are how a caller asks, and a
+ * sum that ignores the question adds nothing instead of inventing a figure.
+ */
+export const UNPRICED_PRICE: Readonly<ModelPrice> = Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 })
+
+/**
+ * The price of a model. **Never a guess** (PRICE.UNKNOWN, owner rule): a model outside the table is UNPRICED
+ * on every harness — {@link UNPRICED_PRICE} — its tokens are counted, its cost is `null` through
+ * {@link modelCostUSD}, and a surface shows it as {@link UNPRICED_MODEL_LABEL}. (It used to fall back to a
+ * Sonnet-class price, which invented spending for every new or third-party model.)
+ */
+export function getModelPrice(modelId: string): ModelPrice {
   if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
-  // A model served off the user's own machine costs nothing. Checked BEFORE the table so no
-  // partial-prefix match can price it, and before the fallback, which would otherwise invent
-  // spending that grows with every local session. See local-models.ts.
+  // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
+  // the table so no partial-prefix match can price it. See local-models.ts.
   if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
   const id = String(modelId ?? '')
   let forwardKey = ''
@@ -1023,23 +1037,24 @@ export function getModelPrice(modelId: string) {
     }
   }
   const hit = forwardKey || reverseKey
-  if (hit) return MODEL_PRICING[hit]!
-  // Sonnet-class fallback — an ESTIMATE for a model the table does not know. A caller that must not
-  // invent a figure (a provider call journaled by the native runtime, e.g. an OpenRouter model) asks
-  // `hasModelPrice` first and reports the response as unpriced instead., cacheWrite1h at the same 2x-base-input rate every table row derives.
-  return { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 }
+  return hit ? MODEL_PRICING[hit]! : UNPRICED_PRICE
 }
 
 /**
  * Does the pricing table actually know this model (exactly, by prefix or as a truncated id), or is
- * it a local model that costs nothing? `false` means `getModelPrice` would fall back to a GUESS.
+ * it a local model that costs nothing? `false` means the model is UNPRICED.
  */
 export function hasModelPrice(modelId: string): boolean {
-  if (MODEL_PRICING[modelId] || isLocalModelId(modelId)) return true
-  const id = String(modelId ?? '')
-  if (!id) return false
-  return Object.keys(MODEL_PRICING).some(key => id.startsWith(key) || (key.startsWith(id) && key[id.length] === '-'))
+  return getModelPrice(modelId) !== UNPRICED_PRICE
 }
+
+/** The complement, for readability at call sites. */
+export const isUnpricedModel = (modelId: string): boolean => getModelPrice(modelId) === UNPRICED_PRICE
+
+/** What a surface calls a model it has no price for (per-model rows). */
+export const UNPRICED_MODEL_LABEL = { pt: 'desconhecido', en: 'unknown' } as const
+/** Appended to a TOTAL that includes tokens of unpriced models: the figure is a floor, and says so. */
+export const UNPRICED_TOTAL_MARKER = { pt: '+ uso sem preço', en: '+ unpriced usage' } as const
 
 /** Empty per-model usage accumulator. */
 export function emptyModelUsage(): ModelUsage {
@@ -1094,7 +1109,35 @@ export function sessionCostUSD(
 ): number | null {
   const entries = sessionModelUsage(s, fallbackModel)
   if (entries.length === 0) return null
-  return entries.reduce((sum, [model, u]) => sum + calcCost(u, model), 0)
+  // Only models the table knows are priced. A session whose every model is unknown has NO cost (null) —
+  // not a guess and not a confident zero; a mixed one is the sum of what could be priced (the caller
+  // reports `unpricedTokens` so the total can say it is a floor).
+  const priced = entries.filter(([model]) => !isUnpricedModel(model))
+  if (priced.length === 0) return null
+  return priced.reduce((sum, [model, u]) => sum + calcCost(u, model), 0)
+}
+
+const usageTokens = (u: ModelUsage): number =>
+  u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens
+
+/**
+ * Tokens that belong to models with no price — what a total must admit it did not price. Takes a session
+ * (priced per model like {@link sessionCostUSD}) or the `[modelId, usage]` pairs a caller already has.
+ */
+export function unpricedTokens(
+  from: Parameters<typeof sessionModelUsage>[0] | ReadonlyArray<readonly [string, ModelUsage]>,
+  fallbackModel?: string,
+): number {
+  if (Array.isArray(from)) {
+    return (from as ReadonlyArray<readonly [string, ModelUsage]>).reduce((sum, [model, u]) => sum + (isUnpricedModel(model) ? usageTokens(u) : 0), 0)
+  }
+  const sess = from as Parameters<typeof sessionModelUsage>[0]
+  const entries = sessionModelUsage(sess, fallbackModel)
+  // A session that names no model has no price either: ALL its tokens are unpriced.
+  if (entries.length === 0) {
+    return (sess.input_tokens ?? 0) + (sess.output_tokens ?? 0) + (sess.cache_read_input_tokens ?? 0) + (sess.cache_creation_input_tokens ?? 0)
+  }
+  return entries.reduce((sum, [model, u]) => sum + (isUnpricedModel(model) ? usageTokens(u) : 0), 0)
 }
 
 /**
@@ -1107,6 +1150,16 @@ export function sessionCostUSD(
  * `undefined`) is NOT "some breakdown" — treating it as one would price only the stated half and
  * silently drop whatever `cacheCreationInputTokens` carries beyond it, at no rate at all.
  */
+/**
+ * The cost of one model's usage, or `null` when the model is UNPRICED (PRICE.UNKNOWN). Use this wherever a
+ * per-model figure is DISPLAYED or a null must survive (rollups); {@link calcCost} is for sums.
+ */
+export function modelCostUSD(usage: ModelUsage, modelId: string): number | null {
+  if (isUnpricedModel(modelId)) return null
+  return calcCost(usage, modelId)
+}
+
+/** Sum-friendly: an UNPRICED model contributes 0 (tokens are reported separately — see {@link unpricedTokens}). */
 export function calcCost(usage: ModelUsage, modelId: string): number {
   const price = getModelPrice(modelId)
   const hasTtlBreakdown = usage.cacheCreation1hInputTokens !== undefined

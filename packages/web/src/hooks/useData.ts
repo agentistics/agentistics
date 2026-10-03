@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, HarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
@@ -2004,6 +2004,7 @@ export function computeDerivedStats(
       isDateStr(s.start_time) ? s.start_time.slice(0, 10) : null
 
     let totalCostUSD = 0
+    let unpricedTokensAll = 0
     let totalTokensAll = 0
     if (cacheBlindScope || nonClaudeHarness || harnessesFiltered) {
       // Use per-session calcCost with the session's model field (includes cache tokens).
@@ -2015,11 +2016,11 @@ export function computeDerivedStats(
       const modelSetFallback = modelSet?.size === 1 ? [...modelSet][0]! : undefined
       for (const sess of filteredSessions) {
         // Per-model pricing (multi-model sessions carry a `model_usage` breakdown).
+        // PRICE.UNKNOWN: a session none of whose models the table prices has NO cost — it is not
+        // priced at some blend of the others. Its tokens are counted and reported (`unpricedTokensAll`).
         const cost = sessionCostUSD(sess, modelSetFallback)
-        const sessCost = cost !== null
-          ? cost
-          : ((sess.input_tokens ?? 0) / 1_000_000) * blended.input
-            + ((sess.output_tokens ?? 0) / 1_000_000) * blended.output
+        const sessCost = cost ?? 0
+        unpricedTokensAll += unpricedTokens(sess, modelSetFallback)
         totalCostUSD += sessCost
         const tokens = (sess.input_tokens ?? 0) + (sess.output_tokens ?? 0)
           + (sess.cache_read_input_tokens ?? 0) + (sess.cache_creation_input_tokens ?? 0)
@@ -2029,6 +2030,7 @@ export function computeDerivedStats(
       }
     } else {
       totalCostUSD = Object.entries(filteredModelUsage).reduce((s, [id, u]) => s + calcCost(u, id), 0)
+      unpricedTokensAll = unpricedTokens(Object.entries(filteredModelUsage))
       totalTokensAll = Object.values(filteredModelUsage).reduce((s, u) => s + usageTokenTotal(u), 0)
 
       // Claude's half. `dailyModelTokens` is the ONLY day series Claude has, and it carries a
@@ -2213,13 +2215,9 @@ export function computeDerivedStats(
     // repo (shown as a flagged "no repository" card, never hidden). Cost is per-session (same
     // blended/calcCost path as the KPI total) so repo cards reconcile with the rest of the app.
     // Reactive to every active filter because it derives purely from filteredSessions.
-    const blendedRepo = blendedCostPerToken(globalModelUsage)
     const repoModelFallback = modelSet?.size === 1 ? [...modelSet][0]! : undefined
     const repoSessionCostUSD = (sess: SessionMeta): number => {
-      const cost = sessionCostUSD(sess, repoModelFallback)
-      if (cost !== null) return cost
-      return ((sess.input_tokens ?? 0) / 1_000_000) * blendedRepo.input
-           + ((sess.output_tokens ?? 0) / 1_000_000) * blendedRepo.output
+      return sessionCostUSD(sess, repoModelFallback) ?? 0 // PRICE.UNKNOWN: unpriced, not blended
     }
 
     const repoStatsMap: Record<string, RepoStat> = {}
@@ -2353,6 +2351,8 @@ export function computeDerivedStats(
       allTimeTotalSessions,
       totalToolCalls,
       totalCostUSD,
+      /** PRICE.UNKNOWN: tokens in `totalCostUSD`'s scope that belong to models with no price — the total is a floor when this is above 0. */
+      unpricedTokens: unpricedTokensAll,
       /** How many days of a date-filtered window were priced by `apportionModelUsage`'s
        *  global-proportions guess because no in-scope session could answer for them exactly.
        *  `0` outside a date filter, and `0` inside one when the sessions covered every day —

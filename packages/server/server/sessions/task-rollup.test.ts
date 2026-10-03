@@ -136,4 +136,15 @@ describe('rollupAttempt — costByHarness', () => {
     expect(r.costUSD).toBe(null)
     expect(r.costByHarness).toBe(null)
   })
+
+  it('PRICE.UNKNOWN: a session of an unknown model is counted as unpriced — tokens in, no cost invented', () => {
+    const r = rollupAttempt({ sessions: [
+      link({ rowId: 'r1', costUSD: 2 }),
+      link({ rowId: 'r2', meta: meta({ session_id: 's2', model: 'some-new-model' }), costUSD: null }),
+    ] })
+    expect(r.costUSD).toBe(2)
+    expect(r.costUnpricedSessions).toBe(1)
+    expect(r.tokens).toBe(2000)
+    expect(rollupAttempt({ sessions: [link()] }).costUnpricedSessions).toBe(0)
+  })
 })

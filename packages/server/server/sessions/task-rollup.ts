@@ -67,6 +67,11 @@ export interface AttemptRollup {
   costByHarness: Record<string, number> | null
   costMeasuredSessions: number
   costEstimatedSessions: number
+  /**
+   * PRICE.UNKNOWN: sessions that carried tokens but no price (their model is outside the table). Their
+   * tokens are in `tokens`; nothing is in `costUSD` for them — the cost is a floor while this is above 0.
+   */
+  costUnpricedSessions: number
   credits: SessionCredits | null
   /** True when this attempt holds both a dollar figure and a credit figure. */
   mixedCurrency: boolean
@@ -81,6 +86,13 @@ export interface AttemptRollup {
 function sumOrNull(values: readonly (number | null | undefined)[]): number | null {
   const real = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
   return real.length === 0 ? null : real.reduce((a, b) => a + b, 0)
+}
+
+/** Did this session report tokens at all (a null cost for lack of tokens is "nothing to price", not "unpriced")? */
+function sessionHasTokens(s: RollupSession): boolean {
+  if (s.native) return (s.native.tokens ?? 0) > 0
+  const m = s.meta
+  return !!m && ((m.input_tokens ?? 0) + (m.output_tokens ?? 0) + (m.cache_read_input_tokens ?? 0) + (m.cache_creation_input_tokens ?? 0)) > 0
 }
 
 export function rollupAttempt(o: { sessions: readonly RollupSession[] }): AttemptRollup {
@@ -129,6 +141,7 @@ export function rollupAttempt(o: { sessions: readonly RollupSession[] }): Attemp
     costByHarness,
     costMeasuredSessions: o.sessions.filter(s => s.costMeasured === true).length,
     costEstimatedSessions: o.sessions.filter(s => s.costUSD !== null && s.costMeasured !== true).length,
+    costUnpricedSessions: o.sessions.filter(s => s.costUSD === null && s.credits === undefined && sessionHasTokens(s)).length,
     credits,
     mixedCurrency: costUSD !== null && credits !== null,
   }

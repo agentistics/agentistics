@@ -16,12 +16,14 @@ export function legacySummary(data: any, harness?: string): unknown {
   // Claude-only, so it's used as a fallback ONLY for the unified/claude view.
   const allSessions = filterSessions((data.sessions ?? []) as AnySession[], harness);
   let totalCostUSD = 0;
+  let totalUnpriced = 0;
   let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0;
   const modelTokens: Record<string, number> = {};
   const projectSessions: Record<string, number> = {};
   const activeDates = new Set<string>();
   for (const s of allSessions) {
-    const { input, output, cacheRead, cacheWrite, cost } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, unpriced } = sessionTokens(s);
+    totalUnpriced += unpriced;
     totalInput += input; totalOutput += output; totalCacheRead += cacheRead; totalCacheWrite += cacheWrite;
     totalCostUSD += cost;
     if (s.model) modelTokens[s.model] = (modelTokens[s.model] ?? 0) + input + output;
@@ -44,6 +46,8 @@ export function legacySummary(data: any, harness?: string): unknown {
     totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheRead : 0),
     totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWrite : 0),
     estimatedCostUSD:      Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
+    // PRICE.UNKNOWN: tokens of models with no price are counted above but not priced; the cost is a floor.
+    ...(totalUnpriced > 0 ? { unpricedTokens: totalUnpriced, costNote: "estimatedCostUSD excludes usage of models with no price (+ unpriced usage)" } : {}),
     totalSessions: allSessions.length,
     topModel,
     topProject,
