@@ -51,7 +51,7 @@ export function SortButton({ label, dir, onClick, title, mobile, align = 'left',
 }
 
 /** A `<th>` for one column: sortable when it names a key, plain text when it does not. */
-export function SortTh<K extends string>({ label, sortKey, current, onSort, style, mobile, title, align }: {
+export function SortTh<K extends string>({ label, sortKey, current, onSort, style, mobile, title, align, handle, dataCol }: {
   label: ReactNode
   /** Absent = the column is not sortable, and carries no affordance. */
   sortKey?: K
@@ -62,6 +62,10 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
   /** The tooltip, already in the reader's language ("Sort by Cost"). */
   title?: string
   align?: 'left' | 'right'
+  /** A resize handle drawn on the header's trailing border. */
+  handle?: ReactNode
+  /** Marks the header so a double-click can measure the whole column. */
+  dataCol?: string
 }) {
   const a = align ?? (style?.textAlign === 'right' ? 'right' : 'left')
   return (
@@ -69,7 +73,8 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
       // `whiteSpace: 'nowrap'` by default — a header that wraps ("CONCLUÍDO EM" onto two lines) is
       // never worth breaking a column over; the table already scrolls inside its own container
       // (`overflow-x: auto`) rather than the page. Every caller may still override it explicitly.
-      style={{ whiteSpace: 'nowrap', ...style }}
+      style={{ whiteSpace: 'nowrap', ...(handle ? { position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis' } : {}), ...style }}
+      {...(dataCol ? { 'data-col': dataCol } : {})}
       aria-sort={sortKey ? ariaSortOf(current, sortKey) : undefined}
     >
       {sortKey
@@ -84,6 +89,7 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
           />
         )
         : label}
+      {handle}
     </th>
   )
 }

@@ -729,6 +729,8 @@ export interface RestartDeps {
   intervalMs?: number
   sleep?: (ms: number) => Promise<void>
   now?: () => number
+  /** Seconds waited so far on an unanswered tick; absent = print nothing. */
+  onWait?: (elapsedSec: number) => void
 }
 
 export type Exec = NonNullable<RestartDeps['run']>
@@ -891,6 +893,7 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   // wait for the new one to answer.
   const verdict = await awaitReplacement(before, () => observe(mode), {
     timeoutMs: deps.timeoutMs, intervalMs: deps.intervalMs, sleep: deps.sleep, now: deps.now,
+    ...(deps.onWait ? { onWait: deps.onWait } : {}),
   })
   const outcome = verdictMessage(verdict, unit, subject, t)
   return { ok: outcome.ok, message: [...notes, outcome.message].join('\n') }

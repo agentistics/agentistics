@@ -21,7 +21,7 @@ export default function CostsPage() {
     setExpandedChart,
   } = ctx
   const isMobile = useIsMobile()
-  // The native harness's own calls; absent (no card) when there are none or no projections.
+  // The native harness's own calls; absent only without an engine; with one and no calls the card shows an empty state.
   const native = useNativeUsage()
 
   return (
@@ -60,9 +60,9 @@ export default function CostsPage() {
         />
       </Section>
 
-      {native && (
+      {native.show && (
         <Section flashId="native" title={<><Cpu size={14} /> {lang === 'pt' ? 'Agentistics (nativo)' : 'Agentistics (native)'}</>}>
-          <NativeUsagePanel usage={native} currency={currency} brlRate={brlRate} lang={lang} />
+          <NativeUsagePanel usage={native.usage} currency={currency} brlRate={brlRate} lang={lang} />
         </Section>
       )}
 

@@ -409,7 +409,10 @@ async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
       const active = await sh(['systemctl', '--user', 'is-active', `agentop-${mode}`])
       if (active.out === 'active') {
         process.stdout.write(`  Restarting the agentop-${mode} service…\n`)
-        const res = await restartAutostart(mode)
+        const res = await restartAutostart(mode, {
+          // A heavy service can take a while to bind; say we are still waiting rather than go quiet.
+          onWait: sec => { if (sec >= 5 && sec % 5 === 0) process.stdout.write(`    …still waiting for agentop-${mode} to answer (${sec}s)\n`) },
+        })
         process.stdout.write(`    ${res.message.split('\n')[0]}\n`)
         if (!res.ok) failures.push(`agentop-${mode} service: ${res.message.split('\n')[0]}`)
         didSomething = true
@@ -505,7 +508,7 @@ export async function pollRunningVersion(
     nowImpl?: () => number
   } = {},
 ): Promise<VersionPollResult> {
-  const timeoutMs = opts.timeoutMs ?? 15_000
+  const timeoutMs = opts.timeoutMs ?? 60_000
   const intervalMs = opts.intervalMs ?? 1_000
   const doFetch = opts.fetchImpl ?? ((url: string) => fetch(url, { signal: AbortSignal.timeout(2_000) }))
   const sleep = opts.sleepImpl ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))

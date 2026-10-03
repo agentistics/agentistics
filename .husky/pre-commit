@@ -1,3 +1,2 @@
 bun run stub
-bun tsc --noEmit
-bun test
+bun scripts/precommit.ts

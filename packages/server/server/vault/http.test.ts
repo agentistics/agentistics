@@ -209,10 +209,10 @@ describe('POST /api/vault/recovery/begin + confirm', () => {
 })
 
 describe('POST /api/vault/recover', () => {
-  test('never takes the words: it says where they are typed', async () => {
+  test('never takes the words from a page that is not on this computer (v2.98.1: loopback only — v2981.test.ts)', async () => {
     const r = await http('POST', '/api/vault/recover', { words: 'abandon '.repeat(24).trim() })
-    expect(r).toMatchObject({ status: 403, json: { ok: false, code: 'recover-tty-only' } })
-    expect(r.json.sentence).toContain('agentop vault recover')
+    expect(r).toMatchObject({ status: 403, json: { ok: false, code: 'not-loopback' } })
+    expect(r.json.sentence).not.toContain('agentop')
   })
 })
 
@@ -260,7 +260,9 @@ describe('POST /api/vault/presence/enroll', () => {
     T += 11 * 60_000 // the held words are gone
     const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
     expect(p.json.code).toBe('presence-needs-recovery-words')
-    expect(String(p.json.sentence)).toContain('agentop vault enroll --presence')
+    // v2.98.1: the page never reads a command — it offers new words instead (ui-sentence.ts).
+    expect(String(p.json.sentence)).not.toContain('agentop')
+    expect(String(p.json.sentence)).toContain('Make new recovery words')
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('dpapi')
   })
 })
@@ -297,7 +299,8 @@ describe('POST /api/vault/presence/disable', () => {
     expect(flag.reply.ok).toBe(true)
     const r = await http('POST', '/api/vault/presence/disable', { code: codeAt(), words: 'abandon '.repeat(24).trim() })
     expect(r).toMatchObject({ status: 403, json: { code: 'recovery-required' } })
-    expect(r.json.sentence).toContain('agentop vault disable-presence')
+    expect(r.json.sentence).not.toContain('agentop')
+    expect(r.json.action).toBe('disable-presence')
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('hello')
     // The terminal path (the socket) with the real words works; wrong words do not.
     const wrong = await handleVaultOp({ header: { op: 'presence-disable', code: codeAt(), words: 'abandon '.repeat(23) + 'zoo' }, body: null, emit() {}, closed: new Promise(() => {}) })

@@ -129,7 +129,8 @@ export const WEBAUTHN_ARGS = ['-NoProfile', '-NonInteractive', '-Command', WEBAU
  * and on WSL→Windows) verifies them, the Windows transport REFUSES in words and never spawns the bridge.
  */
 export const WEBAUTHN_BRIDGE_VERIFIED = false
-export const WEBAUTHN_UNVERIFIED_REASON = 'the Windows security-key bridge (webauthn.dll) is not verified on real hardware yet, so it is not used; use Windows Hello on this machine'
+/** A KEY, never a sentence (v2.98.1): the page shows the kind as "coming soon" and never offers it. */
+export const WEBAUTHN_UNVERIFIED_REASON = 'bridge-unverified'
 
 export interface Fido2Options {
   io: ProtectorIo
@@ -186,10 +187,10 @@ export function fido2Protector(o: Fido2Options): Protector {
   async function bridge(verb: 'check' | 'make' | 'get', a?: Uint8Array, salt?: Uint8Array): Promise<Out> {
     if (!WEBAUTHN_BRIDGE_VERIFIED && !o.allowUnverifiedBridge) return { ok: false, code: 'presence-unavailable', reason: WEBAUTHN_UNVERIFIED_REASON }
     const ps = await powershell()
-    if (!ps) return { ok: false, code: 'presence-unavailable', reason: o.wsl ? 'Windows interop is off or powershell.exe was not found' : 'powershell.exe was not found' }
+    if (!ps) return { ok: false, code: 'presence-unavailable', reason: o.wsl ? 'interop-off' : 'powershell-missing' }
     const stdin = `${verb}\n${a ? Buffer.from(a).toString('base64') : ''}\n${salt ? Buffer.from(salt).toString('base64') : ''}\n`
     const r = await run(ps, WEBAUTHN_ARGS, stdin)
-    if ('threw' in r) return { ok: false, code: r.threw, reason: 'powershell.exe did not answer' }
+    if ('threw' in r) return { ok: false, code: r.threw, reason: 'no-answer' }
     if (r.code !== 0) {
       const e = parseBridgeError(r.err)
       if (e.raw) logBridge(`webauthn ${verb}: ${e.raw}`)
@@ -201,11 +202,11 @@ export function fido2Protector(o: Fido2Options): Protector {
   /** libfido2: the first plugged-in key, and whether it lists hmac-secret. */
   async function device(): Promise<{ ok: true; path: string; token: string } | { ok: false; code: PresenceCode; reason: string }> {
     const token = await tool('fido2-token')
-    if (!token) return { ok: false, code: 'presence-unavailable', reason: `libfido2's tools were not found — ${FIDO2_INSTALL_HINT}` }
+    if (!token) return { ok: false, code: 'presence-unavailable', reason: 'fido2-tools-missing' }
     const l = await run(token, ['-L'], null)
-    if ('threw' in l) return { ok: false, code: l.threw, reason: 'fido2-token did not answer' }
+    if ('threw' in l) return { ok: false, code: l.threw, reason: 'no-answer' }
     const path = l.out.split(/\r?\n/).map(s => /^([^:\s]+):/.exec(s.trim())?.[1]).find(Boolean)
-    if (l.code !== 0 || !path) return { ok: false, code: 'presence-unavailable', reason: 'no security key is plugged in' }
+    if (l.code !== 0 || !path) return { ok: false, code: 'presence-unavailable', reason: 'no-key' }
     return { ok: true, path, token }
   }
   /** What the key says about itself: hmac-secret support, and whether a PIN is SET (`clientPin`, not `noclientPin`). */
@@ -233,15 +234,15 @@ export function fido2Protector(o: Fido2Options): Protector {
     const k = await info(d)
     if (!k.hmac) return { ok: false, code: 'no-hmac-secret', reason: NO_HMAC }
     const cred = await tool('fido2-cred')
-    if (!cred) return { ok: false, code: 'presence-unavailable', reason: `fido2-cred was not found — ${FIDO2_INSTALL_HINT}` }
+    if (!cred) return { ok: false, code: 'presence-unavailable', reason: 'fido2-tools-missing' }
     const stdin = `${Buffer.from(randomBytes(32)).toString('base64')}\n${FIDO2_RP}\nvault\n${Buffer.from(userId).toString('base64')}\n`
     // fido2-cred has no -p (making a credential always needs a touch); -v when the key has a PIN.
     const r = await run(cred, ['-M', '-h', ...(k.pin ? ['-v'] : []), d.path], stdin)
-    if ('threw' in r) return { ok: false, code: r.threw, reason: 'fido2-cred did not answer' }
-    if (r.code !== 0) { const f = cliFailure(r.err); return { ok: false, code: f.code, reason: f.detail } }
+    if ('threw' in r) return { ok: false, code: r.threw, reason: 'no-answer' }
+    if (r.code !== 0) { const f = cliFailure(r.err); logBridge(`fido2-cred: ${f.detail}`); return { ok: false, code: f.code, reason: 'device-error' } }
     // -M prints: client data hash, rp id, format, authdata, credential id, signature[, x509]
     const credId = r.out.split(/\r?\n/)[4]?.trim()
-    if (!credId) return { ok: false, code: 'presence-unavailable', reason: 'fido2-cred returned no credential id' }
+    if (!credId) return { ok: false, code: 'presence-unavailable', reason: 'no-credential-id' }
     return { ok: true, out: credId }
   }
 
@@ -250,17 +251,17 @@ export function fido2Protector(o: Fido2Options): Protector {
     const d = await device()
     if (!d.ok) return d
     const assert = await tool('fido2-assert')
-    if (!assert) return { ok: false, code: 'presence-unavailable', reason: `fido2-assert was not found — ${FIDO2_INSTALL_HINT}` }
+    if (!assert) return { ok: false, code: 'presence-unavailable', reason: 'fido2-tools-missing' }
     const { pin } = await info(d)
     const stdin = `${Buffer.from(randomBytes(32)).toString('base64')}\n${FIDO2_RP}\n${credential}\n${Buffer.from(salt).toString('base64')}\n`
     const r = await run(assert, ['-G', '-h', ...verifyArgs(pin), d.path], stdin)
-    if ('threw' in r) return { ok: false, code: r.threw, reason: 'fido2-assert did not answer' }
-    if (r.code !== 0) { const f = cliFailure(r.err); return { ok: false, code: f.code, reason: f.detail } }
+    if ('threw' in r) return { ok: false, code: r.threw, reason: 'no-answer' }
+    if (r.code !== 0) { const f = cliFailure(r.err); logBridge(`fido2-assert: ${f.detail}`); return { ok: false, code: f.code, reason: 'device-error' } }
     // -G -h prints: client data hash, rp id, authdata, hmac-secret, signature
     const lines = r.out.split(/\r?\n/)
-    if (!flagsHold(lines[2]?.trim(), pin)) return { ok: false, code: 'presence-unavailable', reason: 'the security key did not confirm it was touched' }
+    if (!flagsHold(lines[2]?.trim(), pin)) return { ok: false, code: 'presence-unavailable', reason: 'not-touched' }
     const hm = lines[3]?.trim()
-    if (!hm) return { ok: false, code: 'presence-unavailable', reason: 'fido2-assert returned no hmac-secret' }
+    if (!hm) return { ok: false, code: 'presence-unavailable', reason: 'no-hmac-output' }
     return { ok: true, out: hm }
   }
 
@@ -312,6 +313,11 @@ export function fido2Protector(o: Fido2Options): Protector {
       return { ok: true, record: { type: 'fido2', createdAt: new Date().toISOString(), params: { file: FIDO2_FILE, transport: o.transport } } }
     },
     async discardHeld(held) { zero(held.kek) }, // a resident-less credential needs no removal
+    /** ONE touch, nothing kept: a credential is made and thrown away (it is not resident on the key). */
+    async proveHuman() {
+      const m = await make()
+      return m.ok ? { ok: true as const } : fail(m)
+    },
     async wrap(dek, kid) {
       const d = await self.derive!(kid)
       if (!d.ok) return d
@@ -319,13 +325,13 @@ export function fido2Protector(o: Fido2Options): Protector {
     },
     async unwrap(_record: WrapperRecord, kid: string): Promise<UnwrapResult> {
       const raw = await o.io.readFile(file)
-      if (!raw) return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', `${FIDO2_FILE} is missing`) }
+      if (!raw) return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'file-missing') }
       let f: Fido2File
       try {
         f = JSON.parse(text(raw)) as Fido2File
         if (f.v !== 1 || !f.credential || !f.salt || !f.wrapped) throw new Error('shape')
       } catch {
-        return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', `${FIDO2_FILE} is damaged`) }
+        return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'file-damaged') }
       }
       const s = await counted(secret(f.credential, new Uint8Array(Buffer.from(f.salt, 'base64'))))
       if (!s.ok) {
@@ -336,7 +342,7 @@ export function fido2Protector(o: Fido2Options): Protector {
       const kek = deriveKek(key, kid, 'fido2')
       const dek = openDek(kek, new Uint8Array(Buffer.from(f.wrapped, 'base64')), 'fido2', kid)
       zero(kek); zero(key)
-      return dek ? { ok: true, dek } : { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'this is not the security key that sealed the vault') }
+      return dek ? { ok: true, dek } : { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'not-reproducible') }
     },
     async remove() {
       await o.io.removeFile(file).catch(() => {})
