@@ -31,7 +31,7 @@ import {
   type SecretFs, type SentenceArgs, type VaultRefusal, type Checked, type VaultJson, type ScryptParams,
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
   helloProtector, fido2Protector, effectiveUnlockPolicy, unlockNeedsCode, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
-  presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN,
+  presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN, WEBAUTHN_BRIDGE_VERIFIED,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
@@ -201,10 +201,23 @@ export function protectorById(id: ProtectorId, passphrase?: string, dir: string 
  * headless box or a container gets none and stays on its OS protector (or passphrase).
  */
 export function presenceCandidates(): Protector[] {
-  if (!realMode()) return _override?.filter(p => p.id === 'hello' || p.id === 'fido2') ?? []
+  const soon = presenceSoon()
+  if (!realMode()) return _override?.filter(p => (p.id === 'hello' || p.id === 'fido2') && !soon.includes(p.id)) ?? []
   const ids: ProtectorId[] = platform() === 'win32' || isWsl() ? ['hello', 'fido2'] : platform() === 'linux' || platform() === 'darwin' ? ['fido2'] : []
-  return ids.map(id => protectorById(id)).filter((p): p is Protector => p !== null)
+  return ids.filter(id => !soon.includes(id)).map(id => protectorById(id)).filter((p): p is Protector => p !== null)
 }
+
+/**
+ * v2.98.1 (the owner's machine): presence kinds this platform HAS but this build cannot offer yet. On
+ * Windows / WSL a security key goes through the webauthn.dll bridge, whose struct layouts are not yet
+ * verified on real hardware (fido2.ts `WEBAUTHN_BRIDGE_VERIFIED`), so it is never OFFERED there: the
+ * page shows it as "coming soon" instead of letting it fail with an internal sentence.
+ */
+export function presenceSoon(): ProtectorId[] {
+  if (!realMode()) return _soonForTests
+  return (platform() === 'win32' || isWsl()) && !WEBAUTHN_BRIDGE_VERIFIED ? ['fido2'] : []
+}
+let _soonForTests: ProtectorId[] = []
 
 /** The candidates detection probes on this machine, in order. */
 export function candidateProtectors(): Protector[] {
@@ -332,7 +345,7 @@ function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string
 export function presenceWord(id: ProtectorId | null | undefined, lang: Lang = vaultLang()): string {
   if (id === 'hello') return 'Windows Hello'
   if (id === 'fido2') return lang === 'pt' ? 'sua chave de segurança' : 'your security key'
-  return lang === 'pt' ? 'seu dispositivo de presença' : 'your presence device'
+  return lang === 'pt' ? 'a sua confirmação pessoal' : 'your personal confirmation'
 }
 
 export function protectorLabel(id: ProtectorId | null): string | null {
@@ -931,7 +944,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {
@@ -1000,8 +1013,11 @@ export async function destroyRunnerVault(): Promise<void> {
 export function __resetVaultForTests(opts: {
   dir?: string; io?: ProtectorIo; fs?: SecretFs; scrypt?: ScryptParams; lang?: Lang
   protectors?: Protector[]; autoInit?: { strict: Protector; delaysMs: number[] } | { candidates: Protector[] }
+  /** Presence kinds to report as "coming soon" (never offered). */
+  presenceSoon?: ProtectorId[]
 } = {}): void {
   lockVault()
+  _soonForTests = opts.presenceSoon ?? []
   _unlockWindowAnchorMs = null // a fresh service: no per-day window survives a restart
   _last = null
   _lastAttemptMs = 0

@@ -17,3 +17,13 @@ describe('nativeUsageOf — the native calls card', () => {
     expect(u.costPartial).toBe(true) // one row could not be priced: the total is a floor
   })
 })
+
+import { nativeCard } from './nativeUsage'
+describe('nativeCard — shown whenever the engine is present', () => {
+  test('engine + no calls: card shows (empty state)', () => expect(nativeCard(true, null)).toEqual({ show: true, usage: null }))
+  test('no engine, no calls: hidden', () => expect(nativeCard(false, null).show).toBe(false))
+  test('no engine but usage on record: shown', () => {
+    const u = nativeUsageOf({ groups: [{ key: { model: 'm' }, metrics: { responses: { count: 1 }, tokens: { total: 1 } } }] })
+    expect(nativeCard(false, u).show).toBe(true)
+  })
+})

@@ -155,3 +155,10 @@ Include your install method, version, and steps to reproduce.
 - Full module-by-module documentation lives in `CLAUDE.md` (dense, written for an AI harness) and
   `docs/*.md` (the canonical, human-and-tool-readable version) — see the
   [wiki](https://github.com/agentistics/agentistics/wiki) for an index.
+
+## Commit hooks
+
+The pre-commit hook is fast and partial: an incremental typecheck plus the tests related to your staged
+files (`scripts/affected-tests.ts`); shared code falls back to the whole suite, and the slow set
+(`scripts/slow-tests.txt`) is left to CI. The full suite runs in CI and before every release. WIP commits
+may use `--no-verify`; the final commit must not.

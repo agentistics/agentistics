@@ -483,17 +483,59 @@ touched.
 
 ### What a page can and cannot do
 
+The vault is driven from Settings → Vault; nobody is asked to run a command. Since v2.98.1 a reply from
+`/api/vault*` never names a terminal command: every body leaves through one exit that swaps a command
+for the page's own control and tells the page which button to draw (`vault/ui-sentence.ts`; a test
+fails the build if a route bypasses it). The one exception is the setup code, below.
+
 - **Only the agentop dashboard on this machine can drive the vault.** Every vault request that changes
   something must be a same-origin JSON request. A web page you happen to have open cannot send one: it
   cannot unlock, cannot keep the vault from auto-locking, and cannot use up your wrong-code allowance.
-- **The first setup from a page needs a code from this machine.** Before any authenticator exists there
-  is nothing to ask, so Settings → Vault asks for a one-time **setup code**: 8 digits, 10 minutes, one
-  use. Only `agentop vault setup-code`, run on a terminal, prints it. It is never written to a log
-  (logs get copied), and each run makes a new one, so an earlier code stops working. A terminal on this
-  machine needs no setup code.
-- **The 24 words are never typed into a page.** Recovery is `agentop vault recover`, in a terminal.
-  While a recovered vault is being set up again, the steps that hand out a new key (new words, a new
-  authenticator, presence) answer **only** the terminal (`agentop vault enroll`), never the dashboard.
+- **"A page opened on this computer" is a fact the server checks on every request** (`loopbackRequest`
+  in `vault/http.ts`). All four must hold: the TCP peer is a loopback address, the `Host` header is
+  `localhost` / `127.0.0.1` / `[::1]`, no proxy header (`Forwarded`, `X-Forwarded-*`, `CF-Connecting-IP`,
+  …) is present, and the browser-set `Origin` is loopback too. The LAN fails the peer; a tunnel or a
+  remote-access relay fails the `Host` (it names the public name) or carries a proxy header; a hostile
+  site open in your browser fails the `Origin` (a browser never lets a page forge it); DNS rebinding
+  fails the `Host`.
+- **The first setup from a page ON this computer is proven by one presence gesture.** Before any
+  authenticator exists there is no code to ask, and that is the window in which a page reaching this
+  API (an XSS, a mistaken exposure) could enrol *its* authenticator and receive the first 24 words.
+  Two facts now stand for "a person at this computer": the loopback request above (which removes the
+  mistaken exposure) and ONE Windows Hello prompt or security-key touch, which the operating system
+  draws and a script cannot answer (which removes the script). The gesture creates a throwaway
+  credential and deletes it at once; nothing in the vault changes. The proof is held for that session,
+  10 minutes, and honoured only on loopback requests: a proof given on this computer never stands for a
+  request from the LAN.
+- **The setup code is the fallback**, for a first setup from anywhere that is not this computer and
+  for a machine with no Windows Hello or security key: 8 digits, 10 minutes, one use, printed only by
+  `agentop vault setup-code` on a terminal, never written to a log, and each run makes a new one. It
+  is deliberately not shown in the page off loopback — showing it there would defeat it.
+- **Recovery with the 24 words is accepted from a page on this computer only.** The words go in ONE
+  loopback request (refused before the body is read when the request is not loopback) straight into
+  the same function `agentop vault recover` calls; they are never logged or echoed, their entropy is
+  zeroed after use, and five wrong tries pause it for ten minutes. The session that recovered may then
+  finish the re-enrolment from that same loopback page (new authenticator, personal confirmation, NEW
+  words); any other session, and any request from off this computer, is refused as before. The terminal
+  path is unchanged.
+- **The main machine's "turn personal confirmation off"** also takes the 24 words from a loopback page
+  (code + gesture still asked); off loopback the words are ignored.
+- **Internal text never reaches a person.** A presence protector's reason is a key from a closed list
+  (`PRESENCE_DETAILS`), translated per language; anything else — a .NET type, a sentence some tool
+  printed — is replaced by "the details are in the agentop log". A test greps the Hello and security-key
+  protectors for any reason that is not a key.
+- **A kind that cannot be offered yet is not offered.** Security keys through Windows (the
+  `webauthn.dll` bridge) are not verified on real hardware, so on Windows / WSL the page shows them as
+  "coming soon" and the server refuses them in words; enrolling a kind that already protects the vault
+  changes nothing, and an existing Windows Hello credential is reused, never deleted by a failed
+  enrolment.
+
+**What the loopback + gesture proof does NOT exclude:** another program running as you on this
+computer can send a loopback request with any headers it likes — but that program can already reach
+the vault's local socket, so the page path gives it nothing new; it still has to get *you* to approve a
+Windows Hello prompt. An SSH port-forward lands on loopback too, which means it is someone who already
+holds your account. An XSS inside the dashboard itself passes the loopback check; the gesture is what
+stops it, and a person who approves a prompt they did not ask for is the limit stated below.
 
 ### What it does NOT stop
 
@@ -514,6 +556,8 @@ macOS; the list below says where it cannot. Kernel, root and administrator compr
   protects the vault comes from a signature Hello gives over a fixed challenge. One approved gesture
   gives malware that key for good, not only for that moment.
 - **A modified agentop install** (above).
+- **Typed into a page:** the 24 words of a page recovery pass through the browser and a JavaScript
+  string; neither can be zeroed. The page drops them the moment the request returns.
 - **Strings in memory:** JavaScript strings cannot be zeroed and the garbage collector may copy them.
   Zeroing is best-effort: every buffer the vault owns is zeroed, and a secret becomes a string only at
   the last boundary that demands one. The 24 words are never kept in memory across steps. Their buffer

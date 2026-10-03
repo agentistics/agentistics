@@ -5,8 +5,10 @@
  *
  * Nothing here decides what an action asks. The server sends its §2.4 table (`gates`), every route
  * enforces it again, and this screen only draws it (🔑 code, 👆 presence) and asks for the code BEFORE
- * the request where it knows one is owed. There is deliberately no "show secret" anywhere, no copy
- * button on the 24 words, and no field that accepts them — recovery is typed on a terminal (§4.3).
+ * the request where it knows one is owed. There is deliberately no "show secret" anywhere and no copy
+ * button on the 24 words. v2.98.1: the 24 words ARE accepted here for a recovery, but only from a page
+ * opened on this computer (loopback — the server checks it on every request), and nothing on this page
+ * ever tells a person to run a command: a refusal carries an `action` and the page draws its button.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
@@ -21,7 +23,8 @@ import {
   loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, UNLOCK_MODES, type UnlockMode, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   askWords, howConfirms, howNow, presenceProbe, primarySection, sectionBadge, wizardPlan,
-  type BadgeKey, type SectionId, type Tone,
+  addableKinds, localProof, recoverWithWords, recoverySteps, splitWords,
+  type BadgeKey, type SectionId, type Tone, type UiAction,
   type Credential, type LoadResult, type VaultView, type WizardPhaseStep, type WizardStep,
 } from '../../lib/vaultApi'
 
@@ -48,9 +51,12 @@ export default function VaultSettings() {
   const [now, setNow] = useState(() => Date.now())
   const [creds, setCreds] = useState<{ credentials: Credential[]; recoveryCreatedAt: string | null } | null>(null)
   const [wizard, setWizard] = useState<WizardStep[] | null>(null)
+  // v2.98.1: "add another way" opens the wizard on ONE kind (never re-running one already enrolled).
+  const [wizardKind, setWizardKind] = useState<'hello' | 'fido2' | null>(null)
+  const [recoverOpen, setRecoverOpen] = useState(false)
   const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number } }>(null)
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(UPGRADE_DISMISS_KEY) === '1' } catch { return false } })
-  const busyUi = wizard !== null || dialog !== null
+  const busyUi = wizard !== null || dialog !== null || recoverOpen
 
   const load = useCallback(async () => {
     const r = await loadVault()
@@ -150,6 +156,16 @@ export default function VaultSettings() {
     setDialog({ kind, minutes })
   }
 
+  /** v2.98.1: the page control a refusal points at — the server never sends a command to a page. */
+  const onAction = (a: UiAction) => {
+    setDialog(null)
+    if (a === 'recover') { setWizard(null); setRecoverOpen(true) }
+    else if (a === 'enroll') setWizard(view.recoveryTodo ? recoverySteps(view.recoveryTodo) : steps.length > 0 ? steps : null)
+    else if (a === 'disable-presence') setDialog({ kind: 'presence-off' })
+    else { setWizard(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  }
+  const canRecover = view.loopback === true && Boolean(view.recoveryCreatedAt)
+
   return (
     <>
       <SectionHeader label={t('title')} />
@@ -166,8 +182,13 @@ export default function VaultSettings() {
               : t('intro')}
           </div>
           <div style={{ width: isMobile ? '100%' : undefined, marginTop: 4 }}>
-            <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} center />
+            <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} center onAction={onAction} />
           </div>
+          {canRecover && (
+            <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setRecoverOpen(true)}>
+              <KeyRound size={14} /> {t('rec_recover')}
+            </button>
+          )}
           {view.sentence && <div role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6, maxWidth: 440 }}>{view.sentence}</div>}
         </div>
       ) : (
@@ -249,13 +270,21 @@ export default function VaultSettings() {
                   <PrefRow key={`${c.type}-${c.createdAt}`} label={c.label} sub={vtf('pres_since', lang, { date: fmt(c.createdAt) })}><span /></PrefRow>
                 ))}
                 {!creds && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{presWord}</div>}
-                {view.presenceAvailable.includes('fido2') && (
-                  <PrefRow label={t('pres_addKey')}>
-                    <button type="button" style={btn} onClick={() => setWizard(['presence'])} title={tip('enroll-presence')} aria-label={`${t('pres_addKey')}. ${tip('enroll-presence')}`}>
-                      {t('pres_addKey')} <Gate code={g('enroll-presence').code} gesture={g('enroll-presence').gesture} lang={lang} />
-                    </button>
-                  </PrefRow>
+                {/* v2.98.1: only kinds that are offered here AND not already on — never Hello a second time. */}
+                {(addableKinds(view).length > 0 || soonKinds(view).length > 0) && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', margin: '4px 0 6px' }}>{t('pres_addOther')}</div>
                 )}
+                {addableKinds(view).map(k => {
+                  const label = t(k === 'hello' ? 'pres_add_hello' : 'pres_add_fido2')
+                  return (
+                    <PrefRow key={k} label={label}>
+                      <button type="button" style={btn} onClick={() => { setWizardKind(k); setWizard(['presence']) }} title={tip('enroll-presence')} aria-label={`${label}. ${tip('enroll-presence')}`}>
+                        {label} <Gate code={g('enroll-presence').code} gesture={g('enroll-presence').gesture} lang={lang} />
+                      </button>
+                    </PrefRow>
+                  )
+                })}
+                {soonKinds(view).map(k => <SoonRow key={k} lang={lang} btn={btn} />)}
                 {view.requirePresence
                   ? <Note>{t('pres_mainMachine')}</Note>
                   : (
@@ -267,11 +296,15 @@ export default function VaultSettings() {
                   )}
               </>
             ) : view.presenceAvailable.length === 0 ? (
-              <Note>{t('pres_unavailable')}</Note>
+              <>
+                <Note>{t('pres_unavailable')}</Note>
+                {soonKinds(view).map(k => <SoonRow key={k} lang={lang} btn={btn} />)}
+              </>
             ) : (
               <>
                 <Note>{t('pres_off')}</Note>
                 <button type="button" style={styleFor('presence')} onClick={() => startSetup('presence')} title={t('ultraBody')}>{t(view.presenceAvailable.includes('hello') ? 'pres_turnOn' : 'pres_turnOnKey')}</button>
+                {soonKinds(view).map(k => <SoonRow key={k} lang={lang} btn={btn} />)}
               </>
             )}
           </Sec>
@@ -285,6 +318,9 @@ export default function VaultSettings() {
               </button>
             </PrefRow>
             <Note>{t('rec_lost')}</Note>
+            {canRecover && (
+              <button type="button" style={{ ...btn, marginBottom: 12 }} onClick={() => setRecoverOpen(true)}><KeyRound size={14} /> {t('rec_recover')}</button>
+            )}
           </Sec>
 
           <Sec icon={Timer} title={t('sec_autolock')} desc={t('sec_autolock_d')} badge={badgeOf('autolock')}>
@@ -360,13 +396,20 @@ export default function VaultSettings() {
       {dialog && (
         <GateDialog
           lang={lang} view={view} isMobile={isMobile} kind={dialog.kind} minutes={dialog.minutes} policy={dialog.policy}
-          onCancel={() => setDialog(null)} onDone={() => { setDialog(null); void load() }}
+          onCancel={() => setDialog(null)} onDone={() => { setDialog(null); void load() }} onAction={onAction}
         />
       )}
       {wizard && (
         <EnrolWizard
-          lang={lang} isMobile={isMobile} initial={view} steps={wizard}
-          onClose={() => { setWizard(null); void load() }}
+          lang={lang} isMobile={isMobile} initial={view} steps={wizard} fixedKind={wizardKind}
+          onClose={() => { setWizard(null); setWizardKind(null); void load() }} onAction={onAction}
+        />
+      )}
+      {recoverOpen && (
+        <RecoverDialog
+          lang={lang} isMobile={isMobile} loopback={view.loopback === true}
+          onCancel={() => { setRecoverOpen(false); void load() }}
+          onRecovered={todo => { setRecoverOpen(false); void load().then(() => { const st = recoverySteps(todo); if (st.length) setWizard(st) }) }}
         />
       )}
     </>
@@ -463,6 +506,41 @@ function Gate({ code, gesture, lang }: { code: boolean; gesture: boolean; lang: 
   )
 }
 
+/**
+ * Mobile convention: a long dialog is FULL-SCREEN on a phone and sits above the bottom nav — a centred
+ * card let the nav cover its last button (the 24-word recovery's "Open the vault", at 390px).
+ */
+const fullOnMobile = (isMobile: boolean, cardStyle: React.CSSProperties): { o: React.CSSProperties; c: React.CSSProperties } => isMobile
+  ? { o: { ...overlay, padding: 0, zIndex: 3000 }, c: { ...cardStyle, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' } }
+  : { o: overlay, c: cardStyle }
+
+/** v2.98.1: kinds this platform has but this build cannot offer yet, never already enrolled. */
+const soonKinds = (v: VaultView): string[] => (v.presenceSoon ?? []).filter(k => !v.wrappers.includes(k))
+
+/** "Coming soon": shown, disabled, with ONE plain line — never offered and then failing. */
+function SoonRow({ lang, btn }: { lang: 'en' | 'pt'; btn: React.CSSProperties }) {
+  return (
+    <PrefRow label={vt('pres_add_fido2', lang)} sub={vt('pres_soon_fido2', lang)}>
+      <button type="button" style={{ ...btn, opacity: 0.55, cursor: 'not-allowed' }} disabled aria-disabled>{vt('pres_soon', lang)}</button>
+    </PrefRow>
+  )
+}
+
+/** A refusal, and — when the server pointed at a page control — the button for it (v2.98.1). */
+function ActionErr({ text, action, lang, onAction }: { text: string; action?: UiAction | null; lang: 'en' | 'pt'; onAction?: (a: UiAction) => void }) {
+  const label: Record<UiAction, VaultKey> = { recover: 'act_recover', unlock: 'act_unlock', enroll: 'act_enroll', 'disable-presence': 'act_disable' }
+  return (
+    <>
+      <Err text={text} />
+      {action && onAction && (
+        <button type="button" onClick={() => onAction(action)} style={{ ...primaryBtn, width: 'auto', marginBottom: 10, color: 'var(--text-primary)', borderColor: 'var(--border)', background: 'transparent' }}>
+          {vt(label[action], lang)}
+        </button>
+      )}
+    </>
+  )
+}
+
 function Note({ children, tone }: { children: React.ReactNode; tone?: 'warn' | 'bad' }) {
   const color = tone === 'bad' ? 'var(--accent-red, #ef4444)' : tone === 'warn' ? 'var(--accent-orange, #f59e0b)' : 'var(--text-secondary)'
   return <div role={tone ? 'alert' : undefined} style={{ fontSize: 12, color, lineHeight: 1.6, marginBottom: 12 }}>{children}</div>
@@ -496,17 +574,18 @@ function CodeField({ value, onChange, label, autoFocus, onEnter }: { value: stri
 }
 
 /** The locked state's button: gesture first (the SERVICE raises the dialog), then the code field. */
-function UnlockControl({ view, lang, onOpened, btn, isMobile, center }: { view: VaultView; lang: 'en' | 'pt'; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean }) {
+function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction }: { view: VaultView; lang: 'en' | 'pt'; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void }) {
   const [phase, setPhase] = useState<'idle' | 'gesture' | 'code'>(view.pendingStepup ? 'code' : 'idle')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errAction, setErrAction] = useState<UiAction | null>(null)
   const label: VaultKey = view.wrappers.includes('hello') ? 'unlockWith_hello' : view.wrappers.includes('fido2') ? 'unlockWith_fido2' : 'unlockPlain'
 
   const gesture = async () => {
     setError(null); setPhase('gesture')
     const r = await unlockGesture()
-    if (!r.ok) { setPhase('idle'); setError(r.sentence || vt('network', lang)); return }
+    if (!r.ok) { setPhase('idle'); setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); return }
     if (r.state === 'pending-stepup') setPhase('code')
     else onOpened()
   }
@@ -517,7 +596,7 @@ function UnlockControl({ view, lang, onOpened, btn, isMobile, center }: { view: 
     setBusy(false)
     if (r.ok) { setCode(''); onOpened(); return }
     // §2.2: a wrong code zeroes the key at once — back to the gesture, with the sentence saying why.
-    setError(r.sentence || vt('network', lang)); setCode(''); setPhase('idle')
+    setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); setCode(''); setPhase('idle')
   }
 
   return (
@@ -536,6 +615,10 @@ function UnlockControl({ view, lang, onOpened, btn, isMobile, center }: { view: 
         </form>
       )}
       {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: isMobile ? 'left' : center ? 'center' : 'right' }}>{error}</div>}
+      {/* "recover" has its own standing button under the hero on a loopback page; never draw it twice. */}
+      {error && errAction && onAction && errAction !== 'recover' && (
+        <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => onAction(errAction)}>{vt(errAction === 'enroll' ? 'act_enroll' : errAction === 'unlock' ? 'act_unlock' : 'act_disable', lang)}</button>
+      )}
     </div>
   )
 }
@@ -670,9 +753,9 @@ function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
   )
 }
 
-function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onDone }: {
+function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onDone, onAction }: {
   lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }
-  onCancel: () => void; onDone: () => void
+  onCancel: () => void; onDone: () => void; onAction?: (a: UiAction) => void
 }) {
   const action = gateActionOf(kind)
   const gate = gateFor(view, action)
@@ -680,16 +763,23 @@ function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onD
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errAction, setErrAction] = useState<UiAction | null>(null)
+  // v2.98.1: the main machine's "turn off" also asks the 24 words — typed here, on a loopback page only.
+  const wantsWords = kind === 'presence-off' && view.requirePresence && view.loopback === true
+  const [words, setWords] = useState('')
   const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : kind === 'unlock-policy' ? vt('sec_unlock', lang) : vt('pres_offConfirm', lang)
   const submit = async () => {
     if (busy || (wantsCode && !codeComplete(code))) return
     setBusy(true); setError(null)
     const c = wantsCode ? code : undefined
+    const w = wantsWords ? splitWords(words).join(' ') : undefined
     const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c)
-      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c) : await presenceDisable(c)
+      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c) : await presenceDisable(c, w)
     setBusy(false)
+    setWords('') // never kept past the request
     if (r.ok) { onDone(); return }
     setError(r.sentence || vt('network', lang)); setCode('')
+    setErrAction(r.action && r.action !== 'disable-presence' ? r.action : null)
   }
   useEscape(onCancel)
   return (
@@ -698,11 +788,18 @@ function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onD
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>{title}</div>
         {kind === 'presence-off' && <Note tone="warn">{vt('pres_offConsequence', lang)}</Note>}
         {wantsCode && <CodeField value={code} onChange={setCode} label={vt('gate_dialog_code', lang)} autoFocus />}
+        {wantsWords && (
+          <label style={{ display: 'block', marginBottom: 10 }}>
+            <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{vt('pres_offWords', lang)}</span>
+            <textarea value={words} onChange={e => setWords(e.target.value)} rows={3} autoComplete="off" autoCapitalize="none" spellCheck={false}
+              style={{ ...input, marginBottom: 0, letterSpacing: 'normal', fontFamily: 'var(--font-mono, ui-monospace, monospace)', resize: 'vertical' }} />
+          </label>
+        )}
         {gate.gesture && <Note>{vtf('gate_dialog_presence', lang, { presence: vt(presenceKey(view.wrappers), lang) })}</Note>}
-        {error && <Err text={error} />}
+        {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
         <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
           <button type="button" onClick={onCancel} style={{ ...primaryBtn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent', minHeight: isMobile ? 44 : undefined }}>{vt('cancel', lang)}</button>
-          <button type="submit" disabled={busy || (wantsCode && !codeComplete(code))} style={{ ...(kind === 'presence-off' ? dangerBtn : primaryBtn), minHeight: isMobile ? 44 : undefined }}>
+          <button type="submit" disabled={busy || (wantsCode && !codeComplete(code)) || (wantsWords && splitWords(words).length !== 24)} style={{ ...(kind === 'presence-off' ? dangerBtn : primaryBtn), minHeight: isMobile ? 44 : undefined }}>
             {busy ? vt('working', lang) : vt('gate_continue', lang)}
           </button>
         </div>
@@ -723,11 +820,14 @@ function useEscape(onEsc: () => void) {
 
 type Phase = 'intro' | 'qr' | 'words' | 'confirm' | 'presence' | 'done'
 
-function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
+function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind, onAction }: {
   lang: 'en' | 'pt'; isMobile: boolean; initial: VaultView; steps: WizardStep[]; onClose: () => void
+  /** v2.98.1: "add another way" — the wizard enrols THIS kind and offers no other. */
+  fixedKind?: 'hello' | 'fido2' | null
+  onAction?: (a: UiAction) => void
 }) {
-  // The whole §7.3 flow: device check → authenticator → recovery key → presence (each only if still missing).
-  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps, initial.setupCode?.owed === true))
+  // The whole §7.3 flow: [gesture | setup code] → device check → authenticator → presence → recovery key (each only if still missing).
+  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps, initial.setupCode?.owed === true, initial.loopback === true && Boolean(initial.localProofKind)))
   const t = (k: VaultKey) => vt(k, lang)
   const [view, setView] = useState(initial)
   const [i, setI] = useState(0)
@@ -736,6 +836,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const [phase, setPhase] = useState<Phase>('intro')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errAction, setErrAction] = useState<UiAction | null>(null)
   const [oldCode, setOldCode] = useState('')
   const [uri, setUri] = useState<{ uri: string; secret: string } | null>(null)
   const [c1, setC1] = useState('')
@@ -744,7 +845,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const [words, setWords] = useState<string[] | null>(null)
   const [positions, setPositions] = useState<number[]>([])
   const [typed, setTyped] = useState<string[]>(['', '', ''])
-  const [kind, setKind] = useState<'hello' | 'fido2'>(initial.presenceAvailable.includes('hello') ? 'hello' : 'fido2')
+  const [kind, setKind] = useState<'hello' | 'fido2'>(fixedKind ?? (initial.presenceAvailable.includes('hello') ? 'hello' : 'fido2'))
   const [presCode, setPresCode] = useState('')
   // Review S2: the server answers `setup-code-required` for a page's FIRST enrolment; the code comes
   // from this machine's terminal (`agentop vault setup-code`). `askCode`: a first recovery key outside
@@ -791,11 +892,11 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   }
   const next = async () => {
     await refresh()
-    setError(null); setOldCode(''); setC1(''); setPresCode(''); setUri(null); setWords(null); setTyped(['', '', ''])
+    setError(null); setErrAction(null); setOldCode(''); setC1(''); setPresCode(''); setUri(null); setWords(null); setTyped(['', '', ''])
     if (i + 1 < plan.length) { setI(i + 1); setPhase('intro') } else { setFinished(true); setPhase('done') }
   }
   // A failure names the step it stopped at; reopening the wizard resumes from what is still missing.
-  const fail = (s: string) => { setError(`${vtf('wiz_failedAt', lang, { step: t(`wiz_step_${step ?? 'presence'}` as VaultKey) })} ${s || t('network')}`); setBusy(false) }
+  const fail = (s: string, action?: UiAction) => { setError(`${vtf('wiz_failedAt', lang, { step: t(`wiz_step_${step ?? 'presence'}` as VaultKey) })} ${s || t('network')}`); setErrAction(action && action !== 'enroll' ? action : null); setBusy(false) }
 
   const gateOf = (action: string) => gateFor(view, action)
   const needCodeFor = (action: string) => needsTypedCode({ ...gateOf(action), grant: false }, false)
@@ -813,6 +914,22 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     await next()
   }
 
+  // ── v2.98.1: ONE gesture on a loopback page stands for the setup code
+  const proveLocal = async () => {
+    if (busy) return
+    setBusy(true); setError(null)
+    setGestureTotal(1)
+    const r = await localProof()
+    setGestureTotal(0)
+    if (!r.ok) {
+      // Not loopback after all, or no device: fall back to the setup code, in the same place.
+      if (r.code === 'not-loopback' || r.code === 'no-local-proof') setPlan(p => p.map(x => (x === 'local' ? 'setup' : x)))
+      return fail(r.sentence, r.action)
+    }
+    setBusy(false)
+    await next()
+  }
+
   // ── authenticator
   const showQr = async () => {
     if (busy) return
@@ -821,7 +938,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     setBusy(false)
     if (!r.ok) {
       if (r.code === 'setup-code-required') { setNeedSetup(true); setSetupCode('') }
-      return fail(r.sentence)
+      return fail(r.sentence, r.action)
     }
     setNeedSetup(false); setSetupCode('')
     setUri({ uri: r.uri, secret: r.secret }); setPhase('qr')
@@ -830,7 +947,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     if (busy || !codeComplete(c1)) return
     setBusy(true); setError(null)
     const r = await authenticatorConfirm(c1)
-    if (!r.ok) { setC1(''); return fail(r.sentence) }
+    if (!r.ok) { setC1(''); return fail(r.sentence, r.action) }
     setBusy(false); setUri(null); setFlowOk(true)
     await next()
   }
@@ -844,7 +961,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     if (!r.ok) {
       if (r.code === 'setup-code-required') { setNeedSetup(true); setSetupCode('') }
       if (r.code === 'stepup-required') { setAskCode(true); setOldCode('') }
-      return fail(r.sentence)
+      return fail(r.sentence, r.action)
     }
     setNeedSetup(false); setSetupCode(''); setAskCode(false)
     setWords(r.words); setPositions(r.positions); setTyped(['', '', '']); setPhase('words')
@@ -853,7 +970,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     if (busy || typed.some(w => w.trim() === '')) return
     setBusy(true); setError(null)
     const r = await recoveryConfirm(typed.map(w => w.trim().toLowerCase()))
-    if (!r.ok) { setTyped(['', '', '']); return fail(r.sentence) }
+    if (!r.ok) { setTyped(['', '', '']); return fail(r.sentence, r.action) }
     setBusy(false); setWords(null)
     await next()
   }
@@ -865,7 +982,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     setGestureTotal(probeGestures)
     const r = await presenceProbe(kind)
     setGestureTotal(0)
-    if (!r.ok) return fail(r.sentence)
+    if (!r.ok) return fail(r.sentence, r.action)
     setBusy(false)
     await next()
   }
@@ -880,7 +997,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
     if (!r.ok) {
       setPresCode('')
       if (r.code === 'presence-needs-recovery-words') { setNeedWords(true); setBusy(false); setError(r.sentence); return }
-      return fail(r.sentence)
+      return fail(r.sentence, r.action)
     }
     setBusy(false); setNeedWords(false)
     // The recovery key is owed now: it is the LAST step (append it when this wizard did not plan it).
@@ -897,23 +1014,35 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const prog = plan.length > 1 && phase !== 'done'
 
   return (
-    <div style={overlay} role="dialog" aria-modal="true" aria-label={t('wiz_title')}>
-      <div className="ag-vault-wizard" style={{ ...card, maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+    <div style={fullOnMobile(isMobile, card).o} role="dialog" aria-modal="true" aria-label={t('wiz_title')}>
+      <div className="ag-vault-wizard" style={fullOnMobile(isMobile, { ...card, maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }).c}>
         <style>{PRINT_CSS}</style>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{t('wiz_title')}</div>
         {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: plan.length })}</div>}
         {phase !== 'done' && <Note>{t('wiz_safe')}</Note>}
 
+        {phase === 'intro' && step === 'local' && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_local_title')}</div>
+            {gestureLine}
+            <Note>{t('wiz_local_intro')}</Note>
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
+            <button type="button" style={cta} disabled={busy} onClick={() => { void proveLocal() }}>
+              {busy ? t('unlocking') : t(view.localProofKind === 'fido2' ? 'wiz_local_go_fido2' : 'wiz_local_go_hello')}
+            </button>
+          </div>
+        )}
         {phase === 'intro' && step === 'setup' && (
           <form onSubmit={e => { e.preventDefault(); void acceptSetup() }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_setup_title')}</div>
             <Note>{t('wiz_setup_intro')}</Note>
+            <Note>{t('wiz_setup_remote')}</Note>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('wiz_setup_run')}</div>
             <code style={{ ...codeBlock, display: 'block', marginBottom: 6, overflowX: 'auto', whiteSpace: 'pre' }}>{view.setupCode?.command ?? 'agentop vault setup-code'}</code>
             {view.setupCode?.where && <Note>{view.setupCode.where}</Note>}
             <Note>{t('wiz_setup_valid')}</Note>
             <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why="" />
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="submit" style={cta} disabled={busy || !setupCodeComplete(setupCode)}>{busy ? t('working') : t('wiz_setup_go')}</button>
           </form>
         )}
@@ -923,7 +1052,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             {gestureLine}
             <Note>{vtf('wiz_probe_intro', lang, { presence: vt(presenceKey([kind]), lang) })}</Note>
             <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="button" style={cta} disabled={busy} onClick={() => { void probe() }}>{busy ? t('unlocking') : t('wiz_probe_go')}</button>
           </div>
         )}
@@ -933,7 +1062,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <Note>{t('wiz_auth_intro')}</Note>
             {needCodeFor('enroll-authenticator') && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="submit" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_auth_show')}</button>
           </form>
         )}
@@ -948,7 +1077,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
               <code style={{ ...codeBlock, display: 'block', marginBottom: 0 }}>{uri.secret.match(/.{1,4}/g)?.join(' ')}</code>
             </details>
             <CodeField value={c1} onChange={setC1} label={t('wiz_code')} autoFocus />
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="submit" style={cta} disabled={busy || !codeComplete(c1)}>{busy ? t('working') : t('codeConfirm')}</button>
           </form>
         )}
@@ -961,7 +1090,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             {((rotating && needCodeFor('rotate-recovery')) || askCode) && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {rotating && gateOf('rotate-recovery').gesture && <Note>{vtf('gate_dialog_presence', lang, { presence: vt(presenceKey(view.wrappers), lang) })}</Note>}
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="submit" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_rec_show')}</button>
           </form>
         )}
@@ -1002,7 +1131,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
                 />
               </label>
             ))}
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             <button type="submit" style={cta} disabled={busy || typed.some(w => w.trim() === '')}>{busy ? t('working') : t('codeConfirm')}</button>
           </form>
         )}
@@ -1012,20 +1141,27 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_pres_title')}</div>
             {gestureLine}
             <Note>{t('wiz_pres_intro')}</Note>
-            {view.presenceAvailable.length > 1 && (
+            {!fixedKind && (view.presenceAvailable.length > 1 || soonKinds(view).length > 0) && (
               <div role="radiogroup" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                {(['hello', 'fido2'] as const).filter(k => view.presenceAvailable.includes(k)).map(k => (
+                {(['hello', 'fido2'] as const).filter(k => view.presenceAvailable.includes(k) && !view.wrappers.includes(k)).map(k => (
                   <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
                     style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined, ...(kind === k ? null : { color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }) }}>
                     {t(k === 'hello' ? 'presenceName_hello' : 'presenceName_fido2')}
                   </button>
                 ))}
+                {soonKinds(view).map(k => (
+                  <button key={k} type="button" role="radio" aria-checked={false} disabled aria-disabled
+                    style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined, color: 'var(--text-tertiary)', borderColor: 'var(--border)', background: 'transparent', opacity: 0.6, cursor: 'not-allowed' }}>
+                    {t('presenceName_fido2')} · {t('pres_soon')}
+                  </button>
+                ))}
               </div>
             )}
+            {!fixedKind && soonKinds(view).length > 0 && <Note>{t('pres_soon_fido2')}</Note>}
             <Note>{vtf(kind === 'hello' ? 'wiz_pres_enrolHello' : 'wiz_pres_enrolKey', lang, { n: enrolGestures })}</Note>
             {view.wrappers.some(w => w !== 'hello' && w !== 'fido2' && w !== 'recovery' && w !== 'passphrase') && <Note>{t('wiz_pres_heldNote')}</Note>}
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
-            {error && <Err text={error} />}
+            {error && <ActionErr text={error} action={errAction} lang={lang} onAction={onAction} />}
             {!needWords && (
               <button type="submit" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))}>
                 {busy ? t('unlocking') : t('wiz_pres_go')}
@@ -1056,6 +1192,76 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * v2.98.1 — recovery with the 24 words, ON this computer only. Typing and pasting are both allowed (a
+ * paste into any box fills the boxes from there on); the words live in this component's state only
+ * until the request returns, and are cleared on success, on failure and on close. Never logged.
+ */
+function RecoverDialog({ lang, isMobile, loopback, onCancel, onRecovered }: {
+  lang: 'en' | 'pt'; isMobile: boolean; loopback: boolean; onCancel: () => void; onRecovered: (todo: string[]) => void
+}) {
+  const t = (k: VaultKey) => vt(k, lang)
+  const [w, setW] = useState<string[]>(() => Array(24).fill(''))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [todo, setTodo] = useState<string[] | null>(null)
+  const clear = () => setW(Array(24).fill(''))
+  useEffect(() => () => { clear() }, [])
+  useEscape(() => { if (!busy) { clear(); onCancel() } })
+  const filled = w.filter(x => x.trim() !== '').length
+  const put = (i: number, value: string) => {
+    const parts = splitWords(value)
+    if (parts.length > 1) { setW(cur => cur.map((x, k) => (k >= i && k - i < parts.length ? parts[k - i]! : x))); return }
+    setW(cur => cur.map((x, k) => (k === i ? value.trim().toLowerCase() : x)))
+  }
+  const submit = async () => {
+    if (busy || filled !== 24) return
+    setBusy(true); setError(null)
+    const r = await recoverWithWords(w.join(' '))
+    clear()
+    setBusy(false)
+    if (!r.ok) { setError(r.sentence || t('network')); return }
+    setTodo(r.todo)
+  }
+  return (
+    <div style={fullOnMobile(isMobile, card).o} role="dialog" aria-modal="true" aria-label={t('rec_recover_title')}>
+      <form onSubmit={e => { e.preventDefault(); void submit() }} className="ag-vault-recover" style={fullOnMobile(isMobile, { ...card, maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }).c}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>{t('rec_recover_title')}</div>
+        {todo ? (
+          <>
+            <Note>{t('rec_recover_after')}</Note>
+            <button type="button" style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }} onClick={() => onRecovered(todo)}>{t('rec_continue')}</button>
+          </>
+        ) : !loopback ? (
+          <Note tone="warn">{t('rec_recover_local')}</Note>
+        ) : (
+          <>
+            <Note>{t('rec_recover_intro')}</Note>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))`, gap: 6, marginBottom: 8 }}>
+              {w.map((x, i) => (
+                <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', width: 18, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
+                  <input value={x} onChange={e => put(i, e.target.value)} autoFocus={i === 0} autoComplete="off" autoCapitalize="none" spellCheck={false}
+                    aria-label={vtf('wiz_word', lang, { n: i + 1 })}
+                    style={{ ...input, marginBottom: 0, letterSpacing: 'normal', padding: '6px 8px', minHeight: isMobile ? 44 : undefined, minWidth: 0, width: '100%', boxSizing: 'border-box' }} />
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 8 }}>{vtf('rec_recover_count', lang, { n: filled })}</div>
+            {error && <Err text={error} />}
+            <button type="submit" style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }} disabled={busy || filled !== 24}>{busy ? t('working') : t('rec_recover_go')}</button>
+          </>
+        )}
+        {!todo && (
+          <button type="button" onClick={() => { clear(); onCancel() }} disabled={busy} style={{ marginTop: 12, background: 'none', border: 'none', color: 'var(--text-tertiary)', fontSize: 12, cursor: 'pointer', padding: isMobile ? '12px 0' : '4px 0', fontFamily: 'inherit' }}>
+            {t('cancel')}
+          </button>
+        )}
+      </form>
     </div>
   )
 }
