@@ -323,6 +323,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'ingested there; absent, it re-reads and the journal dedupes.',
   },
   {
+    pattern: '.agentistics/journal.db.backfill.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the automatic first import writes it again as it runs',
+    why: "The automatic first import's progress (state, counts, when it completed), bound to the "
+      + 'identity of the journal file it describes. Restored beside a different journal it is ignored, '
+      + 'and the import runs again; the journal dedupes.',
+  },
+  {
     pattern: '.agentistics/journal.db.import.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — `agentop journal import` re-derives it by re-reading its sources',
     why: "`agentop journal import`'s resume state: a cursor per replayed source and the store entries "
@@ -400,6 +407,14 @@ const RUNTIME: ExcludeRule[] = [
   },
   // Written by the ENGINE, not by this tree, so `backup-coverage.lint.test.ts` (a grep over the
   // server's own source) cannot see it — `backup-plan.test.ts` pins this row instead.
+  // Written by the ENGINE (A5.1 live-ingestion hooks), like `.agentistics/runtime` below — pinned by
+  // `backup-plan.test.ts`, since the coverage grep reads only this tree.
+  {
+    pattern: '.agentistics/ingest', match: 'prefix', reason: 'runtime',
+    why: 'The hook spool (`ingest/hooks.jsonl`, 0600, and its one rotation): ids of sessions on THIS '
+      + 'machine that just ended a turn, consumed by the live feeder within seconds. Restored elsewhere '
+      + 'it would wake nothing; the transcripts themselves are what a backup carries.',
+  },
   {
     pattern: '.agentistics/runtime', match: 'prefix', reason: 'runtime',
     why: 'The native session store (`runtime/sessions.db` and its -wal/-shm). Not `secret`: a session '

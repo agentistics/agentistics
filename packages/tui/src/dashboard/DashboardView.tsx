@@ -37,6 +37,7 @@ import type { DashboardNav } from './useDashboardNav'
  * that is decided against its result, not out of the product.
  */
 export { applyHarnessFilter } from './view'
+import type { DashboardFigures } from '../projected-figures'
 
 export interface DashboardViewProps {
   /** `null` while nothing has been read yet — a different sentence from "there is nothing". */
@@ -53,9 +54,14 @@ export interface DashboardViewProps {
    * dashboard that drew zeros in that situation would be answering a question it cannot answer.
    */
   notice?: string
+  /**
+   * The projected figures (A4.6), when this TUI opted in and the server serves them: the four
+   * figure screens draw these instead of the selectors over `data`. `History` always reads `data`.
+   */
+  figures?: DashboardFigures | null
 }
 
-export function DashboardView({ data, s, width, height, nav, connection, notice }: DashboardViewProps) {
+export function DashboardView({ data, s, width, height, nav, connection, notice, figures = null }: DashboardViewProps) {
   const rows = dashboardRows(height)
   const fit = stripFit(s, nav.screen, width)
 
@@ -71,7 +77,7 @@ export function DashboardView({ data, s, width, height, nav, connection, notice 
       ? <Box marginTop={1}><Text color={COLORS.muted}>{notice}</Text></Box>
       : !view
         ? <Box marginTop={1}><Text color={COLORS.accent}>{s.loading}…</Text></Box>
-        : <Screen id={nav.screen} data={view} s={s} width={width} height={rows.body} streak={streak} page={nav.page} />
+        : <Screen id={nav.screen} data={view} figures={figures} s={s} width={width} height={rows.body} streak={streak} page={nav.page} />
 
   return (
     // `flexShrink={0}`: the budget above is this view's contract with whatever frames it, and a Box
@@ -96,9 +102,10 @@ export function DashboardView({ data, s, width, height, nav, connection, notice 
   )
 }
 
-function Screen({ id, data, s, width, height, streak, page }: {
+function Screen({ id, data, figures, s, width, height, streak, page }: {
   id: DashboardNav['screen']
   data: AppData
+  figures: DashboardFigures | null
   s: TuiStrings
   width: number
   height: number
@@ -107,11 +114,11 @@ function Screen({ id, data, s, width, height, streak, page }: {
   page: number
 }) {
   switch (id) {
-    case 'overview': return <Overview data={data} s={s} width={width} height={height} streak={streak} />
-    case 'projects': return <Projects data={data} s={s} width={width} height={height} page={page} />
+    case 'overview': return <Overview data={data} figures={figures} s={s} width={width} height={height} streak={streak} />
+    case 'projects': return <Projects data={data} figures={figures} s={s} width={width} height={height} page={page} />
     case 'history': return <History data={data} s={s} width={width} height={height} page={page} />
-    case 'costs': return <Costs data={data} s={s} width={width} height={height} page={page} />
-    case 'harnesses': return <Harnesses data={data} s={s} width={width} height={height} />
+    case 'costs': return <Costs data={data} figures={figures} s={s} width={width} height={height} page={page} />
+    case 'harnesses': return <Harnesses data={data} figures={figures} s={s} width={width} height={height} />
   }
 }
 

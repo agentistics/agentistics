@@ -13,7 +13,7 @@
  */
 
 import { legacyTaskId } from './task-model'
-import type { ManagedSession } from './types'
+import type { BoardRow } from './types'
 
 /**
  * Is `a` at least as new as `b`? By `createdAt` when both parse and differ; otherwise REGISTRY
@@ -21,7 +21,7 @@ import type { ManagedSession } from './types'
  * unparseable stamp must not be a reason to keep the older row: an unreadable date is not evidence
  * that a row is old.
  */
-function atLeastAsNew(a: ManagedSession, b: ManagedSession): boolean {
+function atLeastAsNew(a: BoardRow, b: BoardRow): boolean {
   const ta = Date.parse(a.createdAt)
   const tb = Date.parse(b.createdAt)
   if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta > tb
@@ -44,9 +44,9 @@ function atLeastAsNew(a: ManagedSession, b: ManagedSession): boolean {
  *
  * A row with NO conversation link is always kept: it cannot be shown to be a duplicate of anything.
  */
-export function distinctConversations(rows: readonly ManagedSession[]): ManagedSession[] {
+export function distinctConversations<R extends BoardRow>(rows: readonly R[]): R[] {
   const slotOf = new Map<string, number>()
-  const out: ManagedSession[] = []
+  const out: R[] = []
   for (const r of rows) {
     if (!r.conversationId) {
       out.push(r)
@@ -114,8 +114,8 @@ export function distinctConversations(rows: readonly ManagedSession[]): ManagedS
  * conversation, so a pre-filtered subset (one task's rows) would compute it from the rows that
  * happen to agree with the task being asked about.
  */
-export function conversationOwners(rows: readonly ManagedSession[]): Map<string, string> {
-  type Statement = { row: ManagedSession; key: string | null }
+export function conversationOwners(rows: readonly BoardRow[]): Map<string, string> {
+  type Statement = { row: BoardRow; key: string | null }
   const byId = new Map<string, Statement>()
   const byName = new Map<string, Statement>()
   // A name is hashed on every call otherwise, and a registry has a handful of distinct ones.

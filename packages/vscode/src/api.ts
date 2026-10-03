@@ -17,6 +17,8 @@ import type {
   Arrangement, FleetActionId, FleetPayload, LinkStatus, NewOptions, SpawnRequest,
 } from './protocol'
 import { todayTotals, type TodayTotals } from './today'
+import { projectedToday } from './today-projected'
+import { httpMetricsQuery } from '@agentistics/core'
 
 export interface AttachTicket {
   argv: string[]
@@ -156,7 +158,17 @@ export class AgentopClient {
    * `null` and `{cost: 0}` are kept apart all the way to the status bar: a day with no work is a
    * real zero, and a server that is not running is not a day with no work.
    */
-  async today(now: Date): Promise<TodayTotals | null> {
+  async today(now: Date, opts: { projected?: boolean } = {}): Promise<TodayTotals | null> {
+    if (opts.projected) {
+      // A4.5: a few hundred bytes from the projections. A refusal (gate off, central, no reader) or an
+      // unreachable route reads /api/data below, exactly as before.
+      try {
+        return await projectedToday(httpMetricsQuery(this.api, (input, init) =>
+          fetch(input, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) })), now)
+      } catch {
+        // fall through to the legacy read
+      }
+    }
     try {
       const res = await fetch(this.url('/api/data'), { signal: AbortSignal.timeout(DATA_TIMEOUT_MS) })
       if (!res.ok) return null

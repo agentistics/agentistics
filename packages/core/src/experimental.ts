@@ -20,12 +20,20 @@ export interface ExperimentalFeature {
   env: string
   /** What the variable must read for the feature to be on — the feature's OWN parser, mirrored. */
   isOn: (raw: string | undefined) => boolean
+  /**
+   * ON when no variable decides (the journal and the projections, since the backfill item): only an
+   * explicit negative turns it off. Absent means opt-in, as before.
+   */
+  defaultOn?: boolean
   description: { en: string; pt: string }
 }
 
 /** The affirmative spellings `JOURNAL_ENABLED` and `projectionsEnabled` accept. */
 const truthy = (raw: string | undefined): boolean =>
   ['1', 'true', 'on', 'yes'].includes((raw ?? '').trim().toLowerCase())
+
+/** A default-on feature's parser: absent or blank is ON, and anything but an affirmative is OFF. */
+export const onUnlessOff = (raw: string | undefined): boolean => (raw ?? '').trim() === '' || truthy(raw)
 
 export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
@@ -41,7 +49,8 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
     id: 'journal',
     env: 'AGENTISTICS_JOURNAL',
-    isOn: truthy,
+    isOn: onUnlessOff,
+    defaultOn: true,
     description: {
       en: 'Durable event journal: every build also feeds a local SQLite journal (shadow writer).',
       pt: 'Journal durável de eventos: cada build também alimenta um journal SQLite local (shadow writer).',
@@ -50,7 +59,8 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
     id: 'projections',
     env: 'AGENTISTICS_PROJECTIONS',
-    isOn: truthy,
+    isOn: onUnlessOff,
+    defaultOn: true,
     description: {
       en: 'Projections: runtime metrics folded from the journal into a local store.',
       pt: 'Projeções: métricas de runtime derivadas do journal num armazenamento local.',
@@ -98,8 +108,20 @@ export function resolveExperimental(preference: boolean | undefined, env: Env): 
     }
     return preference === true
       ? { id: f.id, env: f.env, on: true, source: 'preference' as const, overridden: false, envValue: undefined }
-      : { id: f.id, env: f.env, on: false, source: 'default' as const, overridden: false, envValue: undefined }
+      : { id: f.id, env: f.env, on: f.defaultOn === true, source: 'default' as const, overridden: false, envValue: undefined }
   })
+}
+
+/**
+ * Is one feature on in this environment: an explicit variable decides, otherwise its default. The ONE
+ * reading every module uses (`JOURNAL_ENABLED`, `projectionsEnabled`), so the table and the code
+ * cannot disagree.
+ */
+export function featureOn(id: string, env: Env = process.env): boolean {
+  const f = EXPERIMENTAL_FEATURES.find(x => x.id === id)
+  if (!f) return false
+  const raw = env[f.env]
+  return explicit(raw) ? f.isOn(raw) : f.defaultOn === true
 }
 
 /**

@@ -7,6 +7,7 @@
  * written to have fixed once.
  */
 
+import { pieceTimes, spanOf, type PieceTimes, type SessionSpan } from './task-times'
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
 import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
 import type {
@@ -15,9 +16,10 @@ import type {
 import { groupMembers, isGroupMember, isGroupSubtask, legacyTaskId } from './task-model'
 import { conversationOwners, distinctConversations } from './task-conversations'
 import { isHistoricalRow } from './task-historical'
+import { isNativeRow, nativeRollupSession } from './task-native'
 import { rollupAttempt, type AttemptRollup, type RollupSession } from './task-rollup'
 import { scopedTaskStats, taskStats, type TaskStats } from './task-stats'
-import type { ManagedSession } from './types'
+import type { BoardRow } from './types'
 
 /** A rollup row: an attempt, or the sessions of a task that name no attempt. */
 export interface AttemptView {
@@ -55,6 +57,12 @@ export interface TaskSessionRow {
    * names no session, so a surface must not link to `/sessions/<id>` for it.
    */
   historical?: boolean
+  /**
+   * True for a NATIVE session (`NativeSessionLink`): `harness` is `'agentistics'`, `id` is the
+   * engine's `ses_…` id (it opens at `/sessions/<id>` like any session, and unfiles by it), and its
+   * numbers are the engine's snapshot.
+   */
+  native?: boolean
   /** Null when the conversation is not in the store, or when its harness never recorded one — see
    *  `RollupSession.meta`. Read straight off `SessionMeta.model` (`data.ts` resolves it from the
    *  JSONL when not already in session-meta); never a second guess at what the session ran. */
@@ -121,6 +129,8 @@ export interface TaskDetail {
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
+  /** The whole delivery's times, from every session under it (`task-times.ts`). */
+  times: PieceTimes
 }
 
 /**
@@ -140,11 +150,11 @@ export interface TaskDetail {
  * Callers that ask about many tasks pass `owners` (computed once, `conversationOwners(rows)`) instead
  * of paying for it per task.
  */
-export function rowsOfTask(
+export function rowsOfTask<R extends BoardRow>(
   task: Pick<Task, 'id'>,
-  rows: readonly ManagedSession[],
+  rows: readonly R[],
   owners: ReadonlyMap<string, string> = conversationOwners(rows),
-): ManagedSession[] {
+): R[] {
   return rows.filter(r =>
     (r.taskId === task.id
       || (r.task !== undefined && legacyTaskId(r.task) === task.id))
@@ -181,7 +191,7 @@ export { distinctConversations }
 export function subtaskSessionCount(
   task: Pick<Task, 'id'>,
   subtaskId: string,
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   owners?: ReadonlyMap<string, string>,
 ): number {
   return distinctConversations(rowsOfTask(task, rows, owners)).filter(r => r.subtaskId === subtaskId).length
@@ -191,7 +201,7 @@ export function subtaskSessionCount(
 export function subtaskHasSession(
   task: Pick<Task, 'id'>,
   subtaskId: string,
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   owners?: ReadonlyMap<string, string>,
 ): boolean {
   return subtaskSessionCount(task, subtaskId, rows, owners) > 0
@@ -208,7 +218,7 @@ export function subtaskHasSession(
  * is measured when it was estimated is precisely the confusion that field exists to prevent.
  */
 export function rollupSessionsFor(
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): RollupSession[] {
@@ -225,6 +235,8 @@ export function rollupSessionsFor(
   // anything, and it contributes no numbers anyway — the same rule `usage-dedupe.ts` applies to a
   // usage record with no message id, and `filedUnder` to an attachment.
   return distinctConversations(rows).map(r => {
+    // A NATIVE session's numbers are the engine's own snapshot (`task-native.ts`), never a meta.
+    if (isNativeRow(r)) return nativeRollupSession(r)
     const meta = r.conversationId ? metas.get(r.conversationId) ?? null : null
     return {
       rowId: r.id,
@@ -238,7 +250,7 @@ export function rollupSessionsFor(
 export function attemptViews(
   task: Task,
   attempts: readonly Attempt[],
-  allRows: readonly ManagedSession[],
+  allRows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): AttemptView[] {
@@ -302,6 +314,12 @@ export interface SubtaskView {
    * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §C.5.
    */
   stats: TaskStats | null
+  /**
+   * When this piece started / finished and how long it was ACTIVE, read from its sessions
+   * (`task-times.ts`) — the status stamps answer only when no session is linked. A GROUP aggregates
+   * its members' own times, since a member never holds a session itself.
+   */
+  times: PieceTimes
 }
 
 /**
@@ -327,10 +345,54 @@ export interface SubtaskView {
  * `parentGroupId`) is bucketed by its own id, completely unaffected by any of this — exactly
  * today's pre-§B behaviour.
  */
+/** The spans of the conversations behind these rows — meta first, the registry row as the fallback. */
+function spansOfRows(rows: readonly BoardRow[], metas: ReadonlyMap<string, SessionMeta>): SessionSpan[] {
+  const out: SessionSpan[] = []
+  for (const r of rows) {
+    const m = r.conversationId ? metas.get(r.conversationId) : undefined
+    const span = spanOf({
+      ...(m?.start_time ? { metaStart: m.start_time } : {}),
+      ...(m?.end_time ? { metaEnd: m.end_time } : {}),
+      ...(typeof m?.active_minutes === 'number' ? { activeMin: m.active_minutes } : {}),
+      rowCreatedAt: r.createdAt,
+      ...(r.endedAt ? { rowEndedAt: r.endedAt } : {}),
+    })
+    if (span) out.push(span)
+  }
+  return out
+}
+
+/** A group's times: its own sessions plus its members' pieces (a member holds none, so theirs are status-derived). */
+function groupTimes(group: Subtask, members: readonly Subtask[], ownSpans: SessionSpan[]): PieceTimes {
+  const own = pieceTimes({
+    spans: ownSpans, done: group.done,
+    ...(group.startedAt ? { statusStartedAt: group.startedAt } : {}),
+    ...(group.deliveredAt ? { statusDeliveredAt: group.deliveredAt } : {}),
+  })
+  if (own.source === 'sessions' || members.length === 0) return own
+  const parts = members.map(m => pieceTimes({
+    spans: [], done: m.done,
+    ...(m.startedAt ? { statusStartedAt: m.startedAt } : {}),
+    ...(m.deliveredAt ? { statusDeliveredAt: m.deliveredAt } : {}),
+  }))
+  const starts = parts.map(p => p.startedAt).filter((x): x is string => !!x).sort()
+  const ends = parts.map(p => p.completedAt).filter((x): x is string => !!x).sort()
+  const startedAt = own.startedAt ?? starts[0] ?? null
+  const completedAt = group.done ? (own.completedAt ?? (ends.length === members.length ? ends.at(-1)! : null)) : null
+  const a = startedAt ? Date.parse(startedAt) : NaN
+  const b = completedAt ? Date.parse(completedAt) : NaN
+  return {
+    startedAt, completedAt,
+    durationMs: Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : null,
+    activeMinutes: null,
+    source: startedAt || completedAt ? 'status' : null,
+  }
+}
+
 export function subtaskViews(
   task: Task,
   subtasks: readonly Subtask[],
-  allRows: readonly ManagedSession[],
+  allRows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
   costOf: (m: SessionMeta) => number,
 ): SubtaskView[] {
@@ -368,6 +430,11 @@ export function subtaskViews(
       ...(isGroupSubtask(s)
         ? { groupProgress: groupProgress((membersByGroup.get(s.id) ?? []).map(m => m.done)) }
         : {}),
+      times: isGroupSubtask(s) ? groupTimes(s, membersByGroup.get(s.id) ?? [], spansOfRows(mineRows, metas)) : pieceTimes({
+        spans: spansOfRows(mineRows, metas), done: s.done,
+        ...(s.startedAt ? { statusStartedAt: s.startedAt } : {}),
+        ...(s.deliveredAt ? { statusDeliveredAt: s.deliveredAt } : {}),
+      }),
     }
   })
   const direct = rows.filter(r => !r.subtaskId)
@@ -379,6 +446,7 @@ export function subtaskViews(
         rows: direct, metas, createdAt: task.createdAt,
         ...(task.deliveredAt ? { deliveredAt: task.deliveredAt } : {}),
       }),
+      times: pieceTimes({ spans: spansOfRows(direct, metas), done: Boolean(task.deliveredAt) }),
     })
   }
   return views
@@ -413,7 +481,7 @@ export function groupVisibility(groupId: string, subtasks: readonly Subtask[]): 
  * the honest answer and not an empty repository.
  */
 export function reposOfRows(
-  rows: readonly ManagedSession[],
+  rows: readonly BoardRow[],
   metas: ReadonlyMap<string, SessionMeta>,
 ): string[] {
   const out: string[] = []
@@ -429,7 +497,7 @@ export function reposOfRows(
 export function buildTaskList(o: {
   tasks: readonly Task[]
   attempts: readonly Attempt[]
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
@@ -462,7 +530,7 @@ export function buildTaskList(o: {
 export function buildTaskDetail(o: {
   task: Task
   attempts: readonly Attempt[]
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
@@ -485,6 +553,11 @@ export function buildTaskDetail(o: {
     // a session filed under no attempt belongs to the task all the same, and summing the views
     // would either double it or drop it depending on which list it landed in.
     rollup: rollupAttempt({ sessions: rollupSessionsFor(mine, o.metas, o.costOf) }),
+    times: pieceTimes({
+      spans: spansOfRows(mine, o.metas), done: Boolean(o.task.deliveredAt),
+      ...(o.task.startedAt ? { statusStartedAt: o.task.startedAt } : {}),
+      ...(o.task.deliveredAt ? { statusDeliveredAt: o.task.deliveredAt } : {}),
+    }),
     stats: taskStats({
       metas,
       createdAt: o.task.createdAt,
@@ -514,10 +587,20 @@ export function buildTaskDetail(o: {
         ...(r.label ? { label: r.label } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
-        model: meta?.model ?? null,
-        tokens: meta ? sessionTokenTotal(meta) : null,
-        costUSD: meta ? o.costOf(meta) : null,
-        rounds: meta?.user_message_count ?? null,
+        ...(isNativeRow(r) ? { native: true } : {}),
+        ...(isNativeRow(r)
+          ? {
+            model: r.nativeUsage?.model ?? null,
+            tokens: r.nativeUsage?.tokens ?? null,
+            costUSD: r.nativeUsage?.costUSD ?? null,
+            rounds: r.nativeUsage?.rounds ?? null,
+          }
+          : {
+            model: meta?.model ?? null,
+            tokens: meta ? sessionTokenTotal(meta) : null,
+            costUSD: meta ? o.costOf(meta) : null,
+            rounds: meta?.user_message_count ?? null,
+          }),
       }
     }),
     // Newest last, the way a conversation reads.

@@ -1,3 +1,4 @@
+import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box } from 'ink'
 import type { AppData } from '@agentistics/core'
@@ -8,15 +9,17 @@ import { COLORS } from '../theme'
 import { listPlan, pageWindow } from '../dashboard/view'
 import type { TuiStrings } from '../i18n'
 
-export function Projects({ data, s, width, height, page }: {
+export function Projects({ data, figures = null, s, width, height, page }: {
   data: AppData
+  /** Projected figures (A4.6); absent → the selectors over `data`. */
+  figures?: DashboardFigures | null
   s: TuiStrings
   width: number
   height: number
   /** The requested page, 0-based. Clamped here — the shell may hand over a stale one. */
   page?: number
 }) {
-  const all = projectRows(data)
+  const all = figures?.projects ?? projectRows(data)
   if (all.length === 0) return <Empty message={s.noProjects} />
 
   const plan = listPlan(height, all.length)

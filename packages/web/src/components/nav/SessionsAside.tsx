@@ -12,6 +12,9 @@
  * decoration.
  */
 
+import { NativeSessionsList } from './NativeSessionsList'
+import { applySummaryFilter, capacityText, nativeSummaryState, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
+import { useNativeSessionRows } from '../../hooks/useNativeSessionRows'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -88,6 +91,8 @@ const OPEN_BESIDE = '__open_beside__'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
+  /** THE CAPACITY HOOK: when a source of "N/M vagas" exists it is passed here; absent draws nothing. */
+  capacity?: { used: number; max: number } | null
   rows: readonly ControlSession[]
   finishedTasks: readonly string[]
   /** True until the first poll answers — an empty list before then is "not asked yet". */
@@ -234,7 +239,7 @@ function groupMenuExtras(
 const notifyExtras = notifyMenuExtras
 
 export function SessionsAside({
-  lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
+  lang, capacity, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
@@ -262,6 +267,8 @@ export function SessionsAside({
     navigate(splitHref(openBeside(readSplitRoute(routeSessionId, routeSearch), id), routeSearch))
   }
   const [query, setQuery] = useState('')
+  /** The summary line's own filter ("3 ativas · 2 trabalhando · 1 precisa de você"). Memory only. */
+  const [summaryFilter, setSummaryFilter] = useState<SummaryPart | null>(null)
   const [creating, setCreating] = useState(false)
   /**
    * The aside's own arrangement — which dimension it sub-groups by, the manual order per
@@ -661,9 +668,16 @@ export function SessionsAside({
     [rows, filters],
   )
   const searched = useMemo(() => filterSessions(valueFiltered, query), [valueFiltered, query])
+  const capacityLabel = capacityText(capacity, pt)
+  // H17: the native sessions count too — the same words (working / waiting / waiting-approval), read
+  // from the engine's list, which the native block below renders from these same rows.
+  const nativeRows = useNativeSessionRows(sessionId)
+  const nativeStated = useMemo(() => nativeRows.map(r => ({ row: r, state: nativeSummaryState(r) })), [nativeRows])
+  const summaryNumbers = useMemo(() => summaryCounts([...searched, ...nativeStated]), [searched, nativeStated])
+  const nativeShown = useMemo(() => applySummaryFilter(nativeStated, summaryFilter).map(x => x.row), [nativeStated, summaryFilter])
   const matched = useMemo(
-    () => (activeOnly ? searched.filter(r => active.has(r.state)) : searched),
-    [searched, activeOnly, active],
+    () => applySummaryFilter(activeOnly ? searched.filter(r => active.has(r.state)) : searched, summaryFilter),
+    [searched, activeOnly, active, summaryFilter],
   )
   /** How many rows the switch is withholding, so the row can say what turning it off would show. */
   const hidden = useMemo(
@@ -677,7 +691,7 @@ export function SessionsAside({
    * the list (value filters → search → active only); `groupRowsResolved` stays whole for the TOTAL
    * in the header (`3/61`) and for the menu's attention count.
    */
-  const narrowing = listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
+  const narrowing = summaryFilter !== null || listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
   const groupRowsShown = useMemo(() => {
     if (!narrowing) return groupRowsResolved
     const ids = new Set(matched.map(r => r.id))
@@ -1185,6 +1199,35 @@ export function SessionsAside({
         </div>
       </div>
 
+      {/* THE SUMMARY LINE: what the fleet is doing right now. Each part is a filter (press again to
+          clear it); the capacity slot stays empty until a source provides "N/M vagas". */}
+      <div
+        role="group"
+        aria-label={pt ? 'Resumo das sessões' : 'Sessions summary'}
+        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 0', padding: '0 2px', fontSize: 11, color: 'var(--text-tertiary)' }}
+      >
+        {summaryParts(summaryNumbers, pt).map((v, i) => (
+          <span key={v.part} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
+            {i > 0 && <span aria-hidden>·</span>}
+            <button
+              type="button"
+              onClick={() => setSummaryFilter(toggleSummaryPart(summaryFilter, v.part))}
+              aria-pressed={summaryFilter === v.part}
+              style={{
+                border: 'none', background: summaryFilter === v.part ? 'var(--bg-elevated)' : 'transparent',
+                color: summaryFilter === v.part ? 'var(--text-primary)' : v.part === 'needs' && v.count > 0 ? 'var(--anthropic-orange)' : 'inherit',
+                font: 'inherit', cursor: 'pointer', borderRadius: 6,
+                padding: isMobile ? '12px 5px' : '2px 4px', minHeight: tap,
+                fontWeight: summaryFilter === v.part || (v.part === 'needs' && v.count > 0) ? 600 : 400,
+              }}
+            >
+              {v.text}
+            </button>
+          </span>
+        ))}
+        {capacityLabel && (<><span aria-hidden>·</span><span data-testid="aside-capacity">{capacityLabel}</span></>)}
+      </div>
+
       {/*
         * THE THREE STANDING VERBS, one row under the search: start a session, write to several, and
         * arrange the list. They share the column's width equally with a small gap, so three icons
@@ -1554,6 +1597,9 @@ export function SessionsAside({
             )}
           </div>
         )}
+
+        {/* NATIVE sessions (UI.3) — not fleet rows, so listed from the engine's own list. */}
+        <NativeSessionsList lang={lang} rows={nativeShown} tap={tap} {...(sessionId ? { activeId: sessionId } : {})} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above

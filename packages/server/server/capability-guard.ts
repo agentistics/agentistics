@@ -137,12 +137,13 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // so an engine can never weaken the guard on its own door. `capability-guard.test.ts` asserts
   // every reserved prefix resolves.
   //  - `/api/runtime/sessions` spawns and drives native sessions: host power, `localShell`.
-  //  - `/api/ingest` and the OTLP pair receive a harness's live record of this machine's
+  //  - `/api/ingest` and the OTLP routes (logs, metrics, traces) receive a harness's live record of this machine's
   //    conversations — transcript data by another road, so the transcript readers' gate.
   ['/api/runtime/sessions', 'localShell'],
   ['/api/ingest', 'localTranscripts'],
   ['/v1/logs', 'localTranscripts'],
   ['/v1/metrics', 'localTranscripts'],
+  ['/v1/traces', 'localTranscripts'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */

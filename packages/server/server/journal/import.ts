@@ -114,6 +114,11 @@ export interface ImportOptions {
   now?: () => number
   signal?: AbortSignal
   onProgress?: (p: ImportProgress) => void
+  /**
+   * Awaited before every batch of both halves: where a background import WAITS while the machine is
+   * under memory pressure (`backfill.ts`). Nothing is in flight while it waits.
+   */
+  beforeBatch?: () => Promise<void>
 }
 
 export type ImportResult =
@@ -302,6 +307,8 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
       let done = 0
       for (const batch of batches(plan.replay, batchSize)) {
         if (aborted()) { report.interrupted = true; break }
+        if (opts.beforeBatch) await opts.beforeBatch()
+        if (aborted()) { report.interrupted = true; break }
         await Promise.all(batch.map(p => limit(async () => {
           if (aborted()) { report.interrupted = true; return }
           const key = sourceKey(harness, p.source.sessionId)
@@ -359,6 +366,8 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
       if (!ids) continue
       let done = 0
       for (const batch of batches(plan.import, batchSize)) {
+        if (aborted()) { report.interrupted = true; break }
+        if (opts.beforeBatch) await opts.beforeBatch()
         if (aborted()) { report.interrupted = true; break }
         for (const e of batch) {
           if (aborted()) { report.interrupted = true; break }

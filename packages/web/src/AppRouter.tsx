@@ -16,7 +16,10 @@ const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
 const ComparePage = lazy(() => import('./pages/ComparePage'))
 const ExportPage = lazy(() => import('./pages/ExportPage'))
-const SessionsPage = lazy(() => import('./pages/SessionsPage'))
+// Every /sessions route renders through `SessionRoute`, which sends a NATIVE session id to its own
+// page (UI.3) and everything else to `SessionsPage` — one component type at all three, so the
+// workspace's aside stays mounted across selections exactly as before.
+const SessionRoute = lazy(() => import('./pages/SessionRoute'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
 const PreferencesSettings = lazy(() => import('./pages/settings/PreferencesSettings'))
@@ -64,14 +67,14 @@ export default function AppRouter() {
               state of its own — the active fleet's summary — rather than being blank until you pick
               something. One route with an optional segment, not two, so the aside stays mounted and
               the list does not flash on every selection. */}
-          <Route path="sessions" element={<Suspense fallback={<PageFallback />}><SessionsPage /></Suspense>} />
-          <Route path="sessions/:sessionId" element={<Suspense fallback={<PageFallback />}><SessionsPage /></Suspense>} />
+          <Route path="sessions" element={<Suspense fallback={<PageFallback />}><SessionRoute /></Suspense>} />
+          <Route path="sessions/:sessionId" element={<Suspense fallback={<PageFallback />}><SessionRoute /></Suspense>} />
           {/* The DEDICATED terminal — its own place rather than a mode of the page above. A route
               survives a reload, is a link somebody can send, gives a phone the router's own back
               gesture, and cannot be lost by a re-render; `?pane=` carries which screen it shows, or
               a shared link would open on whichever pane the recipient last used. See
               `lib/terminalSurface.ts`. */}
-          <Route path="sessions/:sessionId/terminal" element={<Suspense fallback={<PageFallback />}><SessionsPage /></Suspense>} />
+          <Route path="sessions/:sessionId/terminal" element={<Suspense fallback={<PageFallback />}><SessionRoute /></Suspense>} />
           <Route path="workflows" element={<Suspense fallback={<PageFallback />}><WorkflowsPage /></Suspense>} />
           {/* GONE, and redirected rather than 404'd. Its two panels — top projects and
               languages — are on Home, and the dimension the page was really asked for is the

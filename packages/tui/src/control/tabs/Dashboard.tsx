@@ -20,11 +20,13 @@
  */
 
 import React, { useEffect, useMemo } from 'react'
+import type { HarnessId } from '@agentistics/core'
 import type { ControlStatus } from '../types'
 import type { CliLang } from '../lang'
 import type { ControlStrings } from '../i18n'
 import type { TabChrome } from '../ControlCenter'
 import { useAppData } from '../../data/useAppData'
+import { useProjectedFigures } from '../../data/useProjectedFigures'
 import { DashboardView } from '../../dashboard/DashboardView'
 import { useDashboardNav } from '../../dashboard/useDashboardNav'
 import { dashboardRows, dashboardSource, stripFit, DASHBOARD_SCREENS } from '../../dashboard/view'
@@ -55,7 +57,14 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
     nonce,
   })
 
-  const nav = useDashboardNav({ isActive, harnesses: data?.harnesses, data, height })
+  // Before the nav, because the pager counts the rows the screens actually draw. The harness filter
+  // is read from the nav one render late: a re-render follows the nav's own change anyway.
+  const [harness, setHarness] = React.useState<HarnessId | null>(null)
+  const figures = useProjectedFigures(source.kind === 'api' ? source.apiBase : null, {
+    enabled: isActive, harness, stamp: data, nonce,
+  })
+  const nav = useDashboardNav({ isActive, harnesses: data?.harnesses, data, figures, height })
+  useEffect(() => { setHarness(nav.harness) }, [nav.harness])
 
   useEffect(() => {
     if (!isActive) return
@@ -85,6 +94,7 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
       height={height}
       nav={nav}
       connection={connection}
+      figures={figures}
       notice={notice(source.kind, s)}
     />
   )

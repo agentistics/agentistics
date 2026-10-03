@@ -221,7 +221,7 @@ export function canSkip(prior: CommittedStamp | undefined, current: SourceStamp 
 }
 
 /** The journal file's identity: a replaced file is a different journal and inherits nothing. */
-function fileIdentity(path: string): string | null {
+export function fileIdentity(path: string): string | null {
   try {
     const st = statSync(path)
     return `${st.ino}:${Math.floor(st.birthtimeMs)}`

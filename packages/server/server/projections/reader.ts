@@ -14,6 +14,7 @@
 import type { Journal } from '../journal/types'
 import { COST_BY_DIMENSION, RUN_METRICS, STORED_PROJECTIONS } from './catalog'
 import type { CostFact, ProjectionReader, RunFact } from './facts'
+import { withRepoAttribution, type RepoResolver } from './repo-attribution'
 import { flagOffStore, openProjectionStore, projectionsEnabled, type OpenStoreOptions, type ProjectionStore } from './store'
 
 const READ_PAGE = 500
@@ -32,12 +33,16 @@ async function* rowsOf<T>(store: ProjectionStore, id: string, range: { from?: st
 export interface ReaderOptions {
   /** The live journal, for a head that is current rather than as of the last pass. */
   journal?: Journal
+  /** Attributes a repository to facts the journal left without one (`repo-attribution.ts`). */
+  repoOf?: RepoResolver
 }
 
 export function createProjectionReader(store: ProjectionStore, opts: ReaderOptions = {}): ProjectionReader {
+  const attributed = <T extends { repo: string; project: string }>(it: AsyncIterable<T>): AsyncIterable<T> =>
+    (opts.repoOf ? withRepoAttribution(it, opts.repoOf) : it)
   return {
-    costFacts: range => rowsOf<CostFact>(store, COST_BY_DIMENSION.id, range),
-    runFacts: range => rowsOf<RunFact>(store, RUN_METRICS.id, range),
+    costFacts: range => attributed(rowsOf<CostFact>(store, COST_BY_DIMENSION.id, range)),
+    runFacts: range => attributed(rowsOf<RunFact>(store, RUN_METRICS.id, range)),
     async status() {
       const metas = store.metas()
       const versions: Record<string, number> = {}

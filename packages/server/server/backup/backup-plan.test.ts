@@ -264,3 +264,8 @@ describe('the native session store (.agentistics/runtime)', () => {
     expect(omittedSecrets().some(r => r.pattern.startsWith('.agentistics/runtime'))).toBe(false)
   })
 })
+
+test('the engine live-ingestion hook spool is excluded as runtime (A5.1)', () => {
+  expect(excludeFor('.agentistics/ingest/hooks.jsonl')?.reason).toBe('runtime')
+  expect(excludeFor('.agentistics/ingest/hooks.jsonl.1')?.reason).toBe('runtime')
+})

@@ -87,10 +87,54 @@ export interface FleetTransition {
   answeredHere?: { choice: number }
 }
 
-/** The host's fleet, as an engine may follow it (1.4). */
+/** A session of another harness an engine asks the host to start for one of its agents (1.7, B6.2). */
+export interface EngineDelegateSpawn {
+  harness: HarnessId
+  /** Absolute. */
+  cwd: string
+  /** The whole brief: the session sees nothing else. */
+  prompt: string
+  /** Always explicit: an agent never inherits its parent's model. */
+  model: string
+  effort?: 'low' | 'medium' | 'high'
+  /** The session's name in the fleet. */
+  label: string
+  /** File it on the board at start (R1: no unfiled session). A filing that fails stops the session. */
+  taskId?: string
+  subtaskId?: string
+  /** The native session asking — recorded on the start, never used to widen anything. */
+  requestedBy: string
+}
+
+/**
+ * - `not_allowed`: the person has not allowed agents to start this harness (superskill R2 — the
+ *   HOST decides, default deny); the sentence says where to allow it.
+ * - `unavailable`: this machine cannot start it (not installed, no fleet backend, a central).
+ * - `memory_budget`: the machine's admission refused it.
+ * - `filing_failed`: it started but could not be filed, so it was stopped.
+ * - `refused`: any other refusal of the start (bad cwd, model unsupported), in the sentence.
+ */
+export type EngineDelegateRefusal = 'not_allowed' | 'unavailable' | 'memory_budget' | 'filing_failed' | 'refused'
+
+export type EngineDelegateSpawnResult =
+  | { ok: true; managedId: string }
+  | { ok: false; code: EngineDelegateRefusal; sentence: string }
+
+/** The host's fleet, as an engine may follow it (1.4) — and, from 1.7, delegate to (B6.2). */
 export interface EngineFleet {
   /** Confirmed transitions only. Returns unsubscribe. A callback that throws is logged, never fatal. */
   subscribe(cb: (t: FleetTransition) => void): () => void
+  /**
+   * 1.7 — the harnesses an agent may start here: installed AND allowed by the person. OPTIONAL
+   * (with `spawn`, `lastReply`, `stop`): a host before 1.7 offers no delegation.
+   */
+  delegateHarnesses?(): Promise<readonly HarnessId[]>
+  /** 1.7 — starts a managed session for an engine's agent; consent and admission are the host's. */
+  delegateSpawn?(req: EngineDelegateSpawn): Promise<EngineDelegateSpawnResult>
+  /** 1.7 — the session's latest assistant reply (its handback), and whether it is still live. */
+  lastReply?(managedId: string): Promise<{ ok: true; text: string; live: boolean } | { ok: false; reason: string }>
+  /** 1.7 — ends a session this engine started. */
+  stop?(managedId: string): Promise<void>
 }
 
 /**
@@ -135,6 +179,21 @@ export interface EngineAuditEvent {
 }
 
 /** Mirrors the host's notification payload. */
+/** One state change of a native session (1.7, H17). */
+export interface EngineNativeSessionEvent {
+  sessionId: string
+  /** `waiting-approval`: the runtime asked the person; `waiting`: a run ended; `working`: one started. */
+  kind: 'working' | 'waiting' | 'waiting-approval'
+  from?: 'working' | 'waiting' | 'waiting-approval'
+  /** Absolute. */
+  cwd: string
+  label?: string
+  /** The board task the session is filed on, when it is. */
+  taskId?: string
+  /** ISO. */
+  at: string
+}
+
 export interface EngineNotification {
   type: 'error' | 'warning' | 'info' | 'success'
   code?: string
@@ -178,6 +237,57 @@ export interface EngineSpawnBudget {
   unmeasured: boolean
 }
 
+/**
+ * One answer of the board (1.7). `body` is what the matching `/api/tasks` route answers with; a
+ * refusal carries the route's own `reason` and its HTTP-equivalent `status` (404 for a thing that
+ * does not exist, 409 for a claim someone else holds, 422/400 for a request the board will not do).
+ * Never thrown.
+ */
+export type EngineBoardAnswer =
+  | { ok: true; body: unknown }
+  | { ok: false; status: number; reason: string; body?: unknown }
+
+/** The board's operations an engine may call (1.7). Every write names its actor and session. */
+export interface EngineBoard {
+  list(): Promise<EngineBoardAnswer>
+  get(ref: string): Promise<EngineBoardAnswer>
+  next(q: { actor?: string; limit?: number }): Promise<EngineBoardAnswer>
+  activity(q: { ref?: string; limit?: number }): Promise<EngineBoardAnswer>
+  create(t: { title: string; detail?: string; actor: string; sessionId: string }): Promise<EngineBoardAnswer>
+  /** Add (`title`, `isGroup`) or edit (`id` + columns) a subtask — the `/subtasks` route's body. */
+  subtask(ref: string, payload: Record<string, unknown>, by: { actor: string; sessionId: string }): Promise<EngineBoardAnswer>
+  comment(ref: string, c: { body: string; author: string; sessionId: string; subtaskId?: string }): Promise<EngineBoardAnswer>
+  status(ref: string, s: { status: string; actor: string; sessionId: string; reason?: string; blockedBy?: string[] }): Promise<EngineBoardAnswer>
+  claim(ref: string, c: { by: string; sessionId: string; leaseMs?: number; note?: string; takeover?: boolean; release?: boolean }): Promise<EngineBoardAnswer>
+  /**
+   * Files the session produced (verification screenshots, EVID.1), stored in the host's attachment
+   * store and posted as ONE comment. The engine has read the bytes under its own policy; the host
+   * checks kind and size again and never reads a path.
+   */
+  attach(ref: string, a: { files: Array<{ name: string; bytes: Uint8Array }>; author: string; sessionId: string; subtaskId?: string; note?: string }): Promise<EngineBoardAnswer>
+}
+
+/**
+ * What a native session has cost so far, as the ENGINE states it (1.7) — the only party that holds
+ * its model calls. `null` / absent = not measured, never zero (the board's own rule).
+ */
+export interface NativeSessionUsage {
+  /** Model calls folded in. */
+  responses: number
+  /** The person's messages (the board's "rounds"). */
+  rounds: number
+  /** Input + output + cache tokens, when every response reported them; `null` otherwise. */
+  tokens: number | null
+  /** Dollars; `null` when no response could be priced. */
+  costUSD: number | null
+  /** True when EVERY priced response was priced by what its provider stated (not a rate table). */
+  costMeasured: boolean
+  /** The model of the last response, when one named it. */
+  model?: string
+  /** When this snapshot was taken, ISO. */
+  updatedAt: string
+}
+
 /** A native session filed on the task board. */
 export interface NativeSessionLink {
   id: string
@@ -185,6 +295,12 @@ export interface NativeSessionLink {
   taskId: string
   subtaskId?: string
   linkedAt: string
+  /** The session's label, for the board's session list (1.7). */
+  label?: string
+  /** The session's working directory (1.7). */
+  cwd?: string
+  /** The engine's latest usage snapshot (1.7). Absent = nothing reported yet. */
+  usage?: NativeSessionUsage
 }
 
 export type FileResult = { ok: true; id: string } | { ok: false; reason: string }
@@ -254,6 +370,26 @@ export interface EngineSecrets {
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
 }
 
+/**
+ * An answer the host already holds for a model call, by its deterministic invocation id (INV.1).
+ * Only what the loop needs to carry on; never a raw body or a credential.
+ */
+export interface EngineCachedInvocation {
+  messageId: string
+  servedModel: string
+  /** The provider's usage as the runtime's own `ProviderUsage` (`@agentistics/core`). */
+  usage: unknown
+  usageAnomalies?: unknown[]
+  stopReason: unknown
+  content: ReadonlyArray<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'other'; rawType: string }>
+  requestId?: string
+}
+
+export interface EngineInvocationCache {
+  /** `null`/`undefined` = nothing held. A hint: a throw is a miss and the call is simply made. */
+  get(invocationId: string): Promise<EngineCachedInvocation | null | undefined>
+}
+
 export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** Where things live. The engine reads no config of its own. */
   paths: {
@@ -294,11 +430,31 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   safeError: SafeError
   spawnBudget(): Promise<EngineSpawnBudget>
   notify(n: EngineNotification): void
+  /**
+   * 1.7 (H17), optional: a NATIVE session's own state change, into the host's event channel (the
+   * inbox `agentop events` reads, and its desktop/peer delivery). Facts only — no question text, no
+   * tool input. Fire-and-forget: never throws, never delays the run. Absent on an older host, and a
+   * native session is then simply not in that channel.
+   */
+  events?: { nativeSession(e: EngineNativeSessionEvent): void }
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {
     fileNative(link: Omit<NativeSessionLink, 'id' | 'linkedAt'>): Promise<FileResult>
     unfileNative(sessionId: string): Promise<void>
+    /**
+     * The task board's own operations, in process (1.7, B6.5): what a native session's `board.*`
+     * tools call. OPTIONAL: absent on an older host, and a 1.7 engine then offers no board tools.
+     * The host runs each operation through the SAME functions its `/api/tasks` routes use, so a
+     * refusal is the route's own `reason`; the engine's policy has already judged the call (reads
+     * free, writes under the session's grant), and every write lands in the board's own activity log under its actor.
+     */
+    board?: EngineBoard
+    /**
+     * 1.7 — refresh the usage snapshot of a session ALREADY filed; never files, moves or unfiles one
+     * (a person's filing is not the engine's to change). Absent on an older host.
+     */
+    reportNativeUsage?(sessionId: string, usage: NativeSessionUsage): Promise<void>
   }
   /**
    * The public functions an engine reuses (1.2: the full `ReuseSurface`). A 1.1 host passed `{}`;
@@ -324,4 +480,16 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   apiVersion?: string
   /** The fleet's confirmed transitions (1.4). Absent = the host offers none (an engine copes). */
   fleet?: EngineFleet
+  /**
+   * 1.7 — the port this host's own API server listens on (`PORT`), so an engine can WRITE it into a
+   * harness's exporter configuration (`agentop ingest install claude --channel otlp`). Never for the
+   * engine to call the host over loopback: the host's services are this object.
+   */
+  serverPort?(): number | null
+  /**
+   * 1.7 — INV.1 (additive, optional): the host's held answers by invocation id — the
+   * Cloud's egress proxy. Absent on every host today. Asked before a RESUMED run re-sends a call;
+   * a hit is journaled `model.completed {replayed: true}`.
+   */
+  invocationCache?: EngineInvocationCache
 }

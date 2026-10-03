@@ -21,6 +21,7 @@ import type { ControlService } from '../control/types'
 import { sourceRowFit, type SourceRowFit } from '../control/surface.ts'
 import { modelRows, projectRows, sessionHarness, sessionRows } from '../selectors'
 import type { TuiStrings } from '../i18n'
+import type { DashboardFigures } from '../projected-figures'
 
 /**
  * The dashboard's five screens.
@@ -348,12 +349,12 @@ export function listPlan(height: number, total: number): ListPlan {
  * The screens that page nothing report 0, which reads as a single page and no keys — `overview`
  * draws no list, and `harnesses` cannot have more rows than there are harnesses.
  */
-export function pageableTotal(id: DashboardScreenId, data: AppData | null): number {
+export function pageableTotal(id: DashboardScreenId, data: AppData | null, figures: DashboardFigures | null = null): number {
   if (!data) return 0
   switch (id) {
     case 'history': return sessionRows(data).length
-    case 'projects': return projectRows(data).length
-    case 'costs': return modelRows(data).length
+    case 'projects': return (figures?.projects ?? projectRows(data)).length
+    case 'costs': return (figures?.models ?? modelRows(data)).length
     default: return 0
   }
 }

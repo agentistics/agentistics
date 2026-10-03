@@ -19,7 +19,7 @@ import { BACKUP_LAYERS, excludeFor, planSources } from './backup-plan'
 
 const SERVER_SRC = join(import.meta.dir, '..')
 
-/** Every name the server source builds a `~/.agentistics/<name>` path from. */
+/** Every name the server source builds a `~/.agentistics/<name>` path from (tests excluded: they write nothing there). */
 function namesFromSource(): string[] {
   const patterns = [
     String.raw`join\(AGENTISTICS_DATA_DIR, '[^']+'`,
@@ -29,7 +29,9 @@ function namesFromSource(): string[] {
   for (const p of patterns) {
     let out = ''
     try {
-      out = execFileSync('grep', ['-rhoE', p, SERVER_SRC, '--include=*.ts'], { encoding: 'utf-8' })
+      // The SOURCE, not its tests: a test builds paths under made-up homes (`uninstall-plan.test.ts`'s
+      // '/home/a'), which are fixtures, never a name agentop writes.
+      out = execFileSync('grep', ['-rhoE', p, SERVER_SRC, '--include=*.ts', '--exclude=*.test.ts'], { encoding: 'utf-8' })
     } catch {
       // grep exits non-zero when nothing matched; an empty result is a legitimate answer here.
       continue

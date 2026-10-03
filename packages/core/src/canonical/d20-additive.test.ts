@@ -81,6 +81,13 @@ const badStop: ModelCompletedData = { ...a1Completed.data, stopReason: { normali
 const badIterations: ModelCompletedData = { ...a1Completed.data, iterations: { relation: 'included', items: [] } }
 void badAttempt; void badStop; void badIterations
 
+// INV.1 — additive too: the deterministic invocation id on every attempt fact, the replay mark on completed.
+const inv1Completed: ModelCompletedData = { ...a1Completed.data, invocationId: 'ne7dfbdsvvefeq57l7bnfszdnb', replayed: true }
+const inv1Facts: ModelAttemptFacts = { invocationId: 'ne7dfbdsvvefeq57l7bnfszdnb' }
+// @ts-expect-error — `invocationId` is the minted string, not a number
+const badInvocationId: ModelAttemptFacts = { invocationId: 1 }
+void inv1Completed; void inv1Facts; void badInvocationId
+
 describe('D20 — additive only', () => {
   test('every D20 field is optional on all three model.* data shapes and on ModelInvocation', () => {
     const noFacts: ModelAttemptFacts = {}

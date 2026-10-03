@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode'
+import { projectionSurfaceOn } from '@agentistics/core'
 import { AgentopClient } from './api'
 import { resolveEndpoints, type Endpoints } from './config'
 import { resolveLang, strings, type Lang } from './i18n'
@@ -172,7 +173,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // be worth a request of its own.
     const rate = currency === 'BRL' ? await client.brlRate() : null
     statusBar.setCurrency(currency, rate)
-    statusBar.setTotals(await client.today(new Date()))
+    // The projections are the default (the backfill item). The setting turns them off for this editor,
+    // and AGENTISTICS_PROJECTIONS_SURFACES=legacy in the editor's environment does too.
+    const projected = setting('readProjections', true) && projectionSurfaceOn('vscode', process.env)
+    statusBar.setTotals(await client.today(new Date(), { projected }))
   }
 
   function restartTodayTimer(): void {

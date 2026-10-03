@@ -413,7 +413,10 @@ export function createSessionsPoller(o: {
         }
         const before = prevDigest.get(r.id)
         if (backgroundWork({ frame, ...(rules ? { rules } : {}) })) background.add(r.id)
-        const state = attentionOf({
+        // A5.4: a backend that KNOWS the state (an ACP agent states it) is believed over the frame.
+        const stated = o.backend.activityOf?.(r.id)
+        if (stated) corroborated.add(r.id)
+        const state = stated ?? attentionOf({
           alive: true,
           lastActivityMs: b.lastActivityMs,
           nowMs,
@@ -425,7 +428,12 @@ export function createSessionsPoller(o: {
         activity.set(r.id, state)
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
         // different moments — and it costs nothing extra, the frame is already here.
-        if (state === 'waiting-approval') {
+        const statedDialog = state === 'waiting-approval' ? o.backend.dialogOf?.(r.id) : undefined
+        if (statedDialog) {
+          approvals.set(r.id, approvalTail(frame, APPROVAL_LINES))
+          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label, selected: i === 0 })))
+          dialogSelect.set(r.id, 'numbered')
+        } else if (state === 'waiting-approval') {
           approvals.set(r.id, approvalTail(frame, APPROVAL_LINES))
           // Read from the SAME frame that decided the state, so what is offered and what the state
           // says can never describe different moments. Empty when the screen cannot be parsed with

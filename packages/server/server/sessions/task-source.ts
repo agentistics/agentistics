@@ -13,7 +13,8 @@ import { readRegistry } from './registry'
 import { createTaskStore, type TaskStore } from './task-store'
 import { migrateLegacyTasks, type TaskBook } from './task-model'
 import { historicalRows } from './task-historical'
-import type { ManagedSession } from './types'
+import { nativeRows } from './task-native'
+import type { BoardRow, ManagedSession } from './types'
 import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
 
 /**
@@ -32,6 +33,10 @@ import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigrati
  *  - `rollupRows` — `registryRows` plus one synthetic row per historical link, APPENDED after them.
  *    Use it to answer "what belongs to this delivery and what did it cost": the list, detail,
  *    overview, stats, done gates, subtask `hasSession`, evidence and the sharing to a central.
+ *    `loadTaskWorld` also appends one NATIVE row per `NativeSessionLink` (`task-native.ts`): a
+ *    `BoardRow` whose harness is the native runtime — never a `ManagedSession`, so no fleet code can
+ *    take one by type. `loadTaskBoard` (the sharing path) leaves them out: a central's model has no
+ *    native harness, and shipping one would be shipping a row nobody there can price or open.
  *
  * Audit of the readers (the registry itself is untouched, so fleet code that calls `readRegistry()`
  * directly — cli-session, cli-start, the sessions host, terminal/input channels, live claims, hardware
@@ -41,7 +46,7 @@ export interface TaskWorld {
   store: TaskStore
   book: TaskBook
   registryRows: ManagedSession[]
-  rollupRows: ManagedSession[]
+  rollupRows: BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
 }
@@ -154,6 +159,6 @@ export async function loadTaskWorld(): Promise<TaskWorld> {
   ])
   return {
     store, book, registryRows, metas, costOf: sessionCostUSD,
-    rollupRows: [...registryRows, ...historicalRows(book.historicalSessions, metas)],
+    rollupRows: [...registryRows, ...historicalRows(book.historicalSessions, metas), ...nativeRows(book.nativeSessions)],
   }
 }

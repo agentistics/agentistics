@@ -36,6 +36,10 @@ export function sessionTokens(s: AnySession) {
     output_tokens: output,
     cache_read_input_tokens: cacheRead,
     cache_creation_input_tokens: cacheWrite,
+    // The TTL split, when recorded: 1h writes bill at twice the 5m rate. Dropping it priced every
+    // write at 5m, so the MCP read lower than the dashboards' Costs (A4.4 parity).
+    cache_creation_1h_input_tokens: s.cache_creation_1h_input_tokens,
+    cache_creation_5m_input_tokens: s.cache_creation_5m_input_tokens,
   }) ?? calcCost({
     inputTokens: input,
     outputTokens: output,
