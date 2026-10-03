@@ -19,13 +19,15 @@ export function isNativeRow(s: Pick<ControlSession, 'harness'>): boolean {
 
 export function nativeFleetRows(
   recent: readonly CodeRecentSession[],
-  labels: { working: string; idle: string; ended: string },
+  labels: { working: string; idle: string; ended: string; approve?: string; policyAsks?: string },
 ): ControlSession[] {
   return recent.map(r => {
     const ms = Date.parse(r.updatedAt) || undefined
     const cwd = r.cwd ?? ''
     const project = cwd.split('/').filter(Boolean).pop() ?? ''
-    const state = r.running ? 'working' as const : 'closed' as const
+    // SS-06: a question the POLICY is asking (read from the engine, not guessed) — answerable from here.
+    const asking = r.ask && r.ask.options.length > 0 ? r.ask : null
+    const state = asking ? 'waiting-approval' as const : r.running ? 'working' as const : 'closed' as const
     const taskTitle = r.task?.replace(/^t-[0-9a-f]{4,} /, '')
     return {
       id: r.sessionId,
@@ -39,7 +41,14 @@ export function nativeFleetRows(
       ...(taskTitle ? { task: taskTitle } : {}),
       searchFields: { name: r.title, folder: cwd, harness: NATIVE_HARNESS, note: '', task: r.task ?? '', prompt: '' },
       state,
-      stateLabel: r.running ? labels.working : r.status === 'open' ? labels.idle : labels.ended,
+      stateLabel: asking ? (labels.approve ?? 'approve') : r.running ? labels.working : r.status === 'open' ? labels.idle : labels.ended,
+      ...(asking ? {
+        approvalLines: [asking.prompt],
+        // Never pre-selected: the person picks; the code host answers with the number they chose.
+        dialogOptions: asking.options.map((label, i) => ({ number: i + 1, label, selected: false })),
+        canChoose: true,
+        nativeAsk: { questionId: asking.questionId },
+      } : {}),
       actionable: true,
       attached: false,
       ...(ms ? (r.running ? { startedAt: ms } : { endedAt: ms }) : {}),

@@ -4307,10 +4307,24 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
         const { nativeFleetRows } = await import('@agentistics/tui/control/session-native')
         const pt = host.lang === 'pt'
         const rows = nativeFleetRows(recent.sessions, pt
-          ? { working: 'trabalhando', idle: 'encerrada', ended: 'encerrada' }
-          : { working: 'working', idle: 'ended', ended: 'ended' })
+          ? { working: 'trabalhando', idle: 'encerrada', ended: 'encerrada', approve: 'aprovar' }
+          : { working: 'working', idle: 'ended', ended: 'ended', approve: 'approve' })
         return { ...snap, sessions: [...snap.sessions, ...rows] }
       }
+    }
+    // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
+    // re-reading that the SAME question is still pending (a stale list must not answer a new one).
+    const answerTmux = host.answerSession?.bind(host)
+    host.answerSession = async (id, choice, text) => {
+      if (!id.startsWith('ses_')) {
+        return answerTmux ? answerTmux(id, choice, text) : { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+      }
+      const recent = await code.recentSessions?.(20).catch(() => null)
+      const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined
+      const label = choice !== undefined ? ask?.options[choice - 1] : undefined
+      if (!ask || label === undefined) return { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+      const r = code.answer(id, ask.questionId, choice! - 1, text)
+      return r.ok ? { ok: true, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessAnswered(label) } : { ok: false, message: r.sentence }
     }
   }
   try {

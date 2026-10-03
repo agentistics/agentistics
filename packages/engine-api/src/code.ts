@@ -281,6 +281,8 @@ export interface CodeRecentSession {
   cwd?: string
   /** Its latest run is running right now (SS-02: "working"). */
   running?: boolean
+  /** SS-06: the policy question it is waiting on right now (answered through `answer`). */
+  ask?: { questionId: string; prompt: string; options: readonly string[] }
 }
 
 export interface CodePlanItem {

@@ -47,6 +47,8 @@ export interface ControlStrings {
    * the bar and in the frame around it.
    */
   tabsShort: Record<TabId, string>
+  /** SS-06: heads a native session's question — the policy's, not a screen read. */
+  sessionsApproveWhatPolicy: string
   /** SS-03…05: the footer hint for ← → on the list. */
   keySessionsDetailTab: string
   /** SS-03…05: the detail pane's tabs. */
@@ -1156,6 +1158,7 @@ const EN: ControlStrings = {
   sessionsApproveCaveat:
     'it takes whichever option the dialog above has highlighted — read it first.',
   sessionsApproveWhat: 'on its screen right now',
+  sessionsApproveWhatPolicy: 'the policy asks — the same options the code tab shows',
   sessionsChoiceHighlighted: '(its default)',
   sessionsChooseBlind: 'this dialog is a choice, and agentop cannot pick an option on this harness.',
   sessionsChooseAttach: 'o attaches to the session, where you can answer it — esc goes back.',
@@ -1760,6 +1763,7 @@ const PT: ControlStrings = {
   sessionsApproveCaveat:
     'ela pega a opção que o diálogo acima está destacando — leia antes.',
   sessionsApproveWhat: 'na tela dela agora',
+  sessionsApproveWhatPolicy: 'a política pergunta — as mesmas opções da aba código',
   sessionsChoiceHighlighted: '(o padrão dela)',
   sessionsChooseBlind: 'esse diálogo é uma escolha, e o agentop não sabe selecionar uma opção neste harness.',
   sessionsChooseAttach: 'o anexa na sessão, onde dá para responder — esc volta.',

@@ -820,6 +820,8 @@ export interface ControlSession {
   tokenParts?: { input: string | null; output: string | null; cacheRead: string | null; cacheWrite: string | null }
   /** SS-05: the person's turn count, when recorded. */
   turns?: number
+  /** SS-06: a native session's pending policy question (answered through the code host). */
+  nativeAsk?: { questionId: string }
   /** Already-formatted cost, same. */
   cost?: string
   /**

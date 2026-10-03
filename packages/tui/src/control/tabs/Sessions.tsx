@@ -3082,7 +3082,7 @@ function Question({
     const preview = fitApprovalPreview(session.approvalLines ?? [], room)
     const evidence = preview.length > 0 ? (
       <>
-        <Text dimColor>{truncate(s.sessionsApproveWhat, width)}</Text>
+        <Text dimColor>{truncate(isNativeRow(session) ? s.sessionsApproveWhatPolicy : s.sessionsApproveWhat, width)}</Text>
         {preview.map((line, i) => (
           <Text key={`ap${i}`} wrap="truncate" color={COLORS.text}>{truncate(line, width)}</Text>
         ))}

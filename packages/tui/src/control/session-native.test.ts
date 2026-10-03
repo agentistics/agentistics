@@ -41,3 +41,21 @@ describe('state in words, with the dot beside the word (SS-02)', () => {
     expect(stateCell({ state: 'unknown', stateLabel: 'external' })).toBe('◌ external')
   })
 })
+
+describe('a native session waiting on the policy (SS-06)', () => {
+  test('approve, with the policy\'s options numbered and none pre-selected', () => {
+    const [row] = nativeFleetRows([{
+      sessionId: 'ses_q', title: 'Patch', updatedAt: '2026-10-03T12:00:00.000Z', status: 'open', model: 'm', running: true,
+      ask: { questionId: 'x:permission', prompt: 'file.patch notes.txt', options: ['Allow once', 'Allow for this session', 'Deny'] },
+    }], { ...L, approve: 'approve' })
+    expect(row).toMatchObject({
+      state: 'waiting-approval', stateLabel: 'approve', canChoose: true, nativeAsk: { questionId: 'x:permission' },
+      approvalLines: ['file.patch notes.txt'],
+    })
+    expect(row!.dialogOptions).toEqual([
+      { number: 1, label: 'Allow once', selected: false },
+      { number: 2, label: 'Allow for this session', selected: false },
+      { number: 3, label: 'Deny', selected: false },
+    ])
+  })
+})
