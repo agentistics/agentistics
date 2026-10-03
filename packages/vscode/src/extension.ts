@@ -173,8 +173,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // be worth a request of its own.
     const rate = currency === 'BRL' ? await client.brlRate() : null
     statusBar.setCurrency(currency, rate)
-    // A4.5: the projections when this surface opted in, by the setting or by the editor's environment.
-    const projected = setting('readProjections', false) || projectionSurfaceOn('vscode', process.env)
+    // The projections are the default (the backfill item). The setting turns them off for this editor,
+    // and AGENTISTICS_PROJECTIONS_SURFACES=legacy in the editor's environment does too.
+    const projected = setting('readProjections', true) && projectionSurfaceOn('vscode', process.env)
     statusBar.setTotals(await client.today(new Date(), { projected }))
   }
 

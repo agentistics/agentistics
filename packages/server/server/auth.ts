@@ -316,8 +316,8 @@ export function handleLogout(_req: Request): Response {
  * Public — never behind the gate.
  */
 /**
- * The web's projected read path is on when the person opted the web surface in
- * (`AGENTISTICS_PROJECTIONS_SURFACES` names `web`), the projections themselves are on
+ * The web's projected read path is on when the web surface reads the projections (the default;
+ * `AGENTISTICS_PROJECTIONS_SURFACES=legacy` is the fallback), the projections themselves are on
  * (`AGENTISTICS_PROJECTIONS`), this is not a central (the route answers 409 there), and the profile
  * may read local transcripts (the route's capability).
  */

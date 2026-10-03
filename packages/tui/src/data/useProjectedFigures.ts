@@ -1,6 +1,6 @@
 /**
- * useProjectedFigures — the dashboard's figures off the projections (A4.6), for a TUI that opted in
- * (`AGENTISTICS_PROJECTIONS_SURFACES` names `tui`).
+ * useProjectedFigures — the dashboard's figures off the projections (A4.6): the default, with
+ * `AGENTISTICS_PROJECTIONS_SURFACES=legacy` as the fallback.
  *
  * `null` means "draw the selectors over `/api/data`". That is the answer when this surface did not opt
  * in, while the first answer is pending, and whenever the server refuses: 404 when its

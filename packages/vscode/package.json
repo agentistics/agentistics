@@ -130,8 +130,8 @@
         },
         "agentistics.readProjections": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Read today's totals from the projections (`/api/runtime/metrics`, the journal) instead of `/api/data`: a few hundred bytes instead of megabytes, and each response is counted on the day it was billed. Needs `AGENTISTICS_PROJECTIONS` on the server; when the server refuses, the extension reads `/api/data` as before. `AGENTISTICS_PROJECTIONS_SURFACES=vscode` in the editor's environment turns it on too."
+          "default": true,
+          "markdownDescription": "Read today's totals from the projections (`/api/runtime/metrics`, the journal): a few hundred bytes instead of the whole `/api/data`. On by default; turn it off to read `/api/data` instead. When the server serves no projections (`AGENTISTICS_PROJECTIONS` off, a central), the extension reads `/api/data` by itself. `AGENTISTICS_PROJECTIONS_SURFACES=legacy` in the editor's environment also turns it off."
         },
         "agentistics.currency": {
           "type": "string",

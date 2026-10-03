@@ -208,6 +208,9 @@ describe('handleSession', () => {
     expect(projectionsWebOn(on, true, true)).toBe(false)
     expect(projectionsWebOn(on, false, false)).toBe(false)
     expect(projectionsWebOn({}, false, true)).toBe(false)
+    // The default: the projections on and no surface list reads them on the web too; "legacy" is the fallback.
+    expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: '1' }, false, true)).toBe(true)
+    expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: '1', AGENTISTICS_PROJECTIONS_SURFACES: 'legacy' }, false, true)).toBe(false)
   })
 
   it('reports editorEnabled the same way it reports shellEnabled', async () => {

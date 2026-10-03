@@ -1,6 +1,6 @@
 /**
  * projected-figures.ts — the dashboard's figures read off the PROJECTIONS (`GET /api/runtime/metrics`,
- * P3 / A4.6), for a TUI that opted in (`AGENTISTICS_PROJECTIONS_SURFACES` names `tui`).
+ * P3 / A4.6): the default (`AGENTISTICS_PROJECTIONS_SURFACES=legacy` is the fallback).
  *
  * The screens draw `DashboardFigures`, which have two producers:
  * - `legacyFigures(data)` is the selectors over `/api/data`, unchanged;

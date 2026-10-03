@@ -1,8 +1,8 @@
 /**
  * projectedDerived.ts: the web's session, cost and tool figures read from the PROJECTIONS
  * (`GET /api/runtime/metrics`, P3 / A4.7). They are laid over `computeDerivedStats`'s answer when the
- * server says this surface opted in (`projectionsWeb` on `/api/team/session`, which is
- * `AGENTISTICS_PROJECTIONS_SURFACES` naming `web`).
+ * server says this surface reads them (`projectionsWeb` on `/api/team/session`: the default, unless
+ * `AGENTISTICS_PROJECTIONS_SURFACES=legacy`, whenever the server serves projections).
  *
  * What it replaces is the `derived` fields that the pages and the custom page's widgets (the "gallery":
  * `componentCatalog.tsx`) read for sessions, costs and tools:

@@ -88,8 +88,8 @@ interface AnalyticsSources {
 }
 
 /**
- * One analytics tool's answer. Projected (A4.4) only when this surface opted in
- * (`AGENTISTICS_PROJECTIONS_SURFACES` names `mcp`) AND the server serves projections — a refusal
+ * One analytics tool's answer. Projected (A4.4) by default (`AGENTISTICS_PROJECTIONS_SURFACES=legacy`
+ * is the fallback) whenever the server serves projections — a refusal
  * (the server's `AGENTISTICS_PROJECTIONS` gate off, a central, no reader) answers from `/api/data`.
  */
 async function analytics(tool: ProjectedTool, harness: string | undefined, from: AnalyticsSources): Promise<unknown> {

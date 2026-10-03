@@ -1,7 +1,7 @@
 /**
  * The MCP analytics tools read off the PROJECTIONS (`GET /api/runtime/metrics`, P3 / A4.4) — the same
- * JSON shapes as `legacy-analytics.ts`, so a surface that opted in (`AGENTISTICS_PROJECTIONS_SURFACES`
- * names `mcp`) answers the same questions from the journal instead of `/api/data`.
+ * JSON shapes as `legacy-analytics.ts`, so the MCP answers the same questions from the journal instead
+ * of `/api/data` (the default; `AGENTISTICS_PROJECTIONS_SURFACES=legacy` is the fallback).
  *
  * Every row carries `source: "projections"`. Where the projection's figure means something else than
  * the legacy field, the legacy field is NOT reused under the old name:
