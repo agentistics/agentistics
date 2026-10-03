@@ -79,3 +79,30 @@ describe('shortTokens', () => {
     expect(shortTokens(0)).toBe('0')
   })
 })
+
+describe('todayTotals: the spend incurred today, by event time (A4.5 decision 1)', () => {
+  it("a session open since yesterday counts only today's own usage, priced as the cut", () => {
+    const s = session('2026-08-31T20:00:00.000Z', {
+      input_tokens: 200, output_tokens: 100, cache_read_input_tokens: 18_000, cache_creation_input_tokens: 1_700,
+      daily: {
+        '2026-08-31': { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 9_000, cache_creation_input_tokens: 850, messages: 2 },
+        '2026-09-01': { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 9_000, cache_creation_input_tokens: 850, messages: 2 },
+      },
+    } as Partial<SessionMeta>)
+    const out = todayTotals([s], NOW)
+    expect(out.sessions).toBe(1)
+    expect(out.tokens).toBe(100 + 50 + 9_000 + 850)
+    expect(out.costUSD).toBeCloseTo(todayTotals([session('2026-09-01T01:00:00.000Z')], NOW).costUSD, 10)
+  })
+
+  it('a session that started today but did nothing today (all its usage is another day) is not counted', () => {
+    const s = session('2026-09-01T00:10:00.000Z', {
+      daily: { '2026-08-31': { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 1, messages: 1 } },
+    } as Partial<SessionMeta>)
+    expect(todayTotals([s], NOW).sessions).toBe(0)
+  })
+
+  it('a session with no daily keeps the start-day rule', () => {
+    expect(todayTotals([session('2026-09-01T02:00:00.000Z')], NOW).sessions).toBe(1)
+  })
+})

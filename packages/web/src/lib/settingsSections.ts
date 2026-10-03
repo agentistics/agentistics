@@ -15,6 +15,10 @@ export interface SettingsViewer {
    *  entirely, so the section has nothing to offer. `undefined` (not yet loaded) shows it —
    *  hiding a section on a slow fetch is worse than showing one that is briefly empty. */
   localChat?: boolean
+  /** `GET /api/engine`'s `manifest.provides.nativeRuntime` (UI.2). `false` — a community build, no
+   *  engine — means there is no native runtime to hold provider credentials for. `undefined` (not yet
+   *  loaded) shows the section, the same reading `localChat` gets. */
+  nativeRuntime?: boolean
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -65,7 +69,8 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       case 'billing': return !v.central
       // Runtime providers are credentials for THIS machine's own local runtime — a central has no
       // local runtime to spawn assistants with, the same reason `chat`/`connection`/`live` hide.
-      case 'providers': return !v.central
+      // And only where an engine provides the native runtime: a community build has none.
+      case 'providers': return !v.central && v.nativeRuntime !== false
       case 'users':
       case 'teams': return v.central && (v.role === 'owner' || !!v.isManager)
       // Machines is visible to ANY central account: owner/manager manage the fleet, a plain user

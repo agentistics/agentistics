@@ -337,6 +337,23 @@ describe('agent dimension', () => {
     expect(refusal('subagent=true&metrics=messages').code).toBe('metric_dimension_mismatch')
     expect(refusal('subagent=maybe').code).toBe('bad_boolean')
   })
+  it('A4.7 decision 2: subagent=false|true splits the TOOL figures by the run facts\' subagent share', async () => {
+    const reader = () => fakeReader([], [
+      runFact({ runId: 'r1', tools: { Bash: { calls: 3, errors: 1, durationMs: 300, durationCalls: 3, subagent: { calls: 1, errors: 1, durationMs: 100, durationCalls: 1 } } } }),
+      runFact({ runId: 'r2', sessionId: 's2', tools: { Read: { calls: 2, errors: 0, durationMs: null } } }),
+    ])
+    const main = await runMetricsQuery(reader(), q('subagent=false&metrics=tools'))
+    expect(main.groups[0]!.metrics.tools!.byTool.map(t => [t.name, t.calls, t.errors])).toEqual([['Bash', 2, 0], ['Read', 2, 0]])
+    expect(main.groups[0]!.metrics.tools!.byTool.find(t => t.name === 'Bash')!.durationMs).toBe(200)
+    const sub = await runMetricsQuery(reader(), q('subagent=true&metrics=tools'))
+    expect(sub.groups[0]!.metrics.tools!.byTool.map(t => [t.name, t.calls, t.errors])).toEqual([['Bash', 1, 1]])
+    const all = await runMetricsQuery(reader(), q('metrics=tools'))
+    expect(all.groups[0]!.metrics.tools!.calls).toBe(5)
+  })
+  it('the tool split is per run fact only: the agent dimension still refuses tools, and subagent still refuses messages', () => {
+    expect(refusal('groupBy=agent&subagent=false&metrics=tools').code).toBe('metric_dimension_mismatch')
+    expect(refusal('subagent=false&metrics=tools,messages').code).toBe('metric_dimension_mismatch')
+  })
   it('with an agent dimension the run stream is not read', async () => {
     const reader = fakeReader([costFact()], [runFact()])
     await runMetricsQuery(reader, q('groupBy=agent&metrics=cost,sessions,runs'))

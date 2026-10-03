@@ -100,7 +100,8 @@ export class StatusBar {
       shortTokens(this.totals.tokens),
       this.totals.sessions,
     )}${waiting}`
-    this.item.tooltip = this.strings.statusTitle ?? 'Agentistics'
+    // The rule, said where the number is (A4.5 decision 1): "today" is the spend incurred today.
+    this.item.tooltip = [this.strings.statusTitle ?? 'Agentistics', this.strings.statusRule].filter(Boolean).join('\n')
     this.item.backgroundColor = this.attention > 0
       ? new vscode.ThemeColor('statusBarItem.warningBackground')
       : undefined

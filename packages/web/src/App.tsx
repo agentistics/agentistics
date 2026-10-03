@@ -20,6 +20,8 @@ import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
+import { useProjectedDerived } from './hooks/useProjectedDerived'
+import { journalBackfillText, type JournalBackfillSummary } from './lib/journalBackfill'
 import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
@@ -181,6 +183,12 @@ interface TeamSessionState {
    *  (`sessions/editor-gate.ts`): the capability AND the switch. Undefined reads as OFF — see
    *  `AppContext.editorEnabled`. */
   editorEnabled?: boolean
+  /** The web reads its session, cost and tool figures from the projections (A4.7): the server's
+   *  resolved answer (`projectionsWebOn`). Undefined (an older server) reads as OFF. */
+  projectionsWeb?: boolean
+  /** The journal's first import (`journal/backfill.ts`): its state for a one-line note; `null` or
+   *  undefined when there is nothing to say. */
+  journalBackfill?: JournalBackfillSummary | null
 }
 
 export interface IamAccount { id: string; name: string; email: string; role: 'owner' | 'member'; memberships: { teamId: string; role: 'manager' | 'user' }[]; mustChangePassword: boolean }
@@ -2829,7 +2837,16 @@ export default function AppLayout() {
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
   const runningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
-  const derived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  const legacyDerived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
+  // the server says this surface opted in and the filters are ones the API can express.
+  const projectedOverlay = useProjectedDerived({
+    enabled: teamSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
+  })
+  const derived = useMemo(
+    () => (legacyDerived && projectedOverlay ? { ...legacyDerived, ...projectedOverlay } : legacyDerived),
+    [legacyDerived, projectedOverlay],
+  )
 
   // ── the plan cost basis ──────────────────────────────────────────────────────────────────
   // Computed ONCE here and passed down: two surfaces each cutting A their own way would tell two
@@ -3532,6 +3549,13 @@ export default function AppLayout() {
       />
     )
   }
+
+  // The journal's first import, one muted line above the page while it runs: the figures on the page
+  // come from /api/data until it completes (the server refuses the projections until then).
+  const backfillText = journalBackfillText(teamSession?.journalBackfill, lang)
+  const backfillNote = backfillText
+    ? <div role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{backfillText}</div>
+    : null
 
   // Built once so the magnifier layer (Task 8) can be handed the exact same object the pages get
   // via <Outlet context>; two separately-built objects would drift out of sync.
@@ -4737,7 +4761,7 @@ export default function AppLayout() {
               gap: isMobile ? 14 : 20,
             }
       }>
-        {inSessionsWorkspace || isMobile ? <Outlet context={appCtx} /> : (
+        {inSessionsWorkspace || isMobile ? <>{!inSessionsWorkspace && backfillNote}<Outlet context={appCtx} /></> : (
           <div ref={pageScrollRef} data-page-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
             <div style={{
               // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
@@ -4752,6 +4776,7 @@ export default function AppLayout() {
               {fleetOpen && dashboardTopBar && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
               )}
+              {backfillNote}
               <Outlet context={appCtx} />
             </div>
             {pageFooter}

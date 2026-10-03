@@ -11,7 +11,8 @@ import {
   canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
-import { historicalLinkId, type HistoricalSession } from './task-model'
+import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
+import { sanitizeNativeUsage } from './task-native'
 import { planConversationFiling } from './task-historical'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
@@ -1110,7 +1111,92 @@ export async function detachSession(sessionId: string): Promise<boolean> {
   // `conversationOwners` finds no statement at all and the conversation belongs to no task, which is
   // what a detach means. (Were a registry row for it to appear later, its own filing speaks for it.)
   const w = await loadTaskWorld()
-  return (await w.store.unfileHistorical(sessionId)) !== null
+  if ((await w.store.unfileHistorical(sessionId)) !== null) return true
+  // Or a NATIVE link (`native:<ses_…>` or the session id) — the same "drop the statement" act.
+  return (await w.store.unfileNative(sessionId)) !== null
+}
+
+/**
+ * File a NATIVE session (the engine's `ses_…`) under a task or one of its subtasks — the host's
+ * implementation of `EngineHostServices.tasks.fileNative`, the ONE write into a public store an
+ * engine gets (engine-interface spec §4.6). Judged by the same `planAttach` a fleet session's filing
+ * is (`no_such_task`, `no_such_subtask`, `wrong_delivery`, `blocked`, `subtask_in_group`), it is a
+ * MOVE like every filing, it advances the task's status the way a first session does, and it is
+ * logged on the task's activity. The engine is trusted for WHICH session; the board decides WHERE.
+ */
+export type FileNativeResult =
+  | { ok: true; id: string; movedFrom?: FilingTarget }
+  | {
+    ok: false
+    reason: 'no_such_task' | 'no_such_subtask' | 'needs_subtask' | 'wrong_delivery' | 'blocked' | 'subtask_in_group' | 'bad_session'
+    blockedBy?: readonly string[]
+  }
+
+const NATIVE_SESSION_ID = /^ses_[0-9a-f]{32}$/
+
+export async function fileNativeSession(o: {
+  sessionId: string
+  taskId: string
+  subtaskId?: string
+  label?: string
+  cwd?: string
+  usage?: NativeSessionUsage
+}): Promise<FileNativeResult> {
+  if (!NATIVE_SESSION_ID.test(o.sessionId)) return { ok: false, reason: 'bad_session' }
+  const w = await loadTaskWorld()
+  const task = findTask(o.taskId, w.book.tasks)
+  if (!task) return { ok: false, reason: 'no_such_task' }
+  const plan = planAttach({
+    target: o.subtaskId ? { kind: 'subtask', id: o.subtaskId } : { kind: 'task', id: task.id },
+    taskIds: w.book.tasks.map(t => t.id),
+    subtasks: w.book.subtasks.map(st => ({
+      id: st.id, taskId: st.taskId, done: st.done, blockedBy: st.blockedBy, parentGroupId: st.parentGroupId,
+    })),
+  })
+  if (!plan.ok) {
+    return plan.reason === 'blocked' ? { ok: false, reason: 'blocked', blockedBy: plan.blockedBy } : { ok: false, reason: plan.reason }
+  }
+  if (plan.taskId !== task.id) return { ok: false, reason: 'wrong_delivery' }
+
+  const usage = o.usage ? sanitizeNativeUsage(o.usage) : null
+  const link: NativeSessionLink = {
+    id: nativeLinkId(o.sessionId),
+    sessionId: o.sessionId,
+    taskId: task.id,
+    ...(plan.subtaskId ? { subtaskId: plan.subtaskId } : {}),
+    linkedAt: new Date().toISOString(),
+    ...(o.label?.trim() ? { label: o.label.trim().slice(0, 300) } : {}),
+    ...(o.cwd?.trim() ? { cwd: o.cwd.trim() } : {}),
+    ...(usage ? { usage } : {}),
+  }
+  const { replaced } = await w.store.fileNative(link)
+  const movedFrom: FilingTarget | undefined = replaced
+    && (replaced.taskId !== link.taskId || (replaced.subtaskId ?? null) !== (link.subtaskId ?? null))
+    ? { taskId: replaced.taskId, ...(replaced.subtaskId ? { subtaskId: replaced.subtaskId } : {}) }
+    : undefined
+  const label = link.label ?? o.sessionId
+  const advanced = statusAfterAttach(task.status)
+  if (advanced) await markTask(task.id, advanced, label)
+  await w.store.logEvents([event(task.id, label, 'session', { to: o.sessionId, detail: 'agentistics · native' })])
+  return { ok: true, id: link.id, ...(movedFrom ? { movedFrom } : {}) }
+}
+
+/** Where a native session is filed — task id, title and subtask — or null when it is not. */
+export async function nativeFilingOf(sessionId: string): Promise<{ taskId: string; taskTitle: string; subtaskId?: string } | null> {
+  if (!NATIVE_SESSION_ID.test(sessionId)) return null
+  const w = await loadTaskWorld()
+  const link = w.book.nativeSessions.find(n => n.sessionId === sessionId)
+  const task = link ? w.book.tasks.find(t => t.id === link.taskId) : undefined
+  if (!link || !task) return null
+  return { taskId: task.id, taskTitle: task.title, ...(link.subtaskId ? { subtaskId: link.subtaskId } : {}) }
+}
+
+/** `EngineHostServices.tasks.reportNativeUsage`: refresh a filed session's snapshot; never files one. */
+export async function reportNativeSessionUsage(sessionId: string, raw: NativeSessionUsage): Promise<boolean> {
+  const usage = sanitizeNativeUsage(raw)
+  if (!usage) return false
+  const w = await loadTaskWorld()
+  return w.store.reportNativeUsage(sessionId, usage)
 }
 
 export async function markTask(

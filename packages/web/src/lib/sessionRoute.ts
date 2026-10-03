@@ -20,6 +20,15 @@
  * disappear.
  */
 
+/**
+ * A NATIVE Agentistics session (`ses_` + 32 hex, minted by the engine). It is not a fleet row — no
+ * process, no tmux — so the route sends it to its own chat (`NativeSessionPage`) rather than through
+ * the fleet's page, which would wait for a row that never comes.
+ */
+export function isNativeSessionId(id: string | undefined): boolean {
+  return id !== undefined && /^ses_[0-9a-f]{32}$/.test(id)
+}
+
 /** The path for one session row. `id` is used verbatim; only the URL encoding is added. */
 export function sessionPath(id: string): string {
   return `/sessions/${encodeURIComponent(id)}`

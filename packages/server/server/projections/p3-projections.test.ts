@@ -172,6 +172,12 @@ describe('costByDimension', () => {
     data: { harness: 'claude', conversationLink: 'observed' },
   } as AnyAgentisticsEvent
 
+  test('A4.4 decision 2: a worktree cwd rolls up to its project root, in cost AND run facts', () => {
+    const inWorktree = { ...runStarted, data: { ...(runStarted as any).data, cwd: '/home/u/app/.worktrees/feature-x' } } as AnyAgentisticsEvent
+    expect(project(costByDimensionProjection, [inWorktree, base({}, 'w1')]).facts[0]!.project).toBe('/home/u/app')
+    expect(project(runMetricsProjection, [inWorktree, base({}, 'w2')]).fact!.project).toBe('/home/u/app')
+  })
+
   test('D21: a counter no response reported is ABSENT, and one some response left out is named partial', () => {
     const r = project(costByDimensionProjection, [runStarted,
       base({ usage: { input: 5, output: 6 } }, 'a1'),
@@ -265,6 +271,28 @@ describe('runMetrics / toolMetrics / agentMetrics', () => {
     ]
     const f = project(toolMetricsProjection, evs).tools.Bash!
     expect(f).toMatchObject({ calls: 3, errors: 1, finished: 2, durationMs: 1234 + 2000, durationCalls: 2, maxDurationMs: 2000 })
+  })
+
+  test('decision 2 (A4.7): a run fact carries its subagents\' share of each tool, by the cost facts\' main-agent rule', () => {
+    const mk = (type: string, id: string, agentId: string | undefined, data: object): AnyAgentisticsEvent => ({
+      eventId: id, schema: 1, type, occurredAt: '2026-01-01T00:00:00.000Z', recordedAt: '2026-01-01T00:00:00.000Z',
+      sessionId: 's', runId: 'r', ...(agentId ? { agentId } : {}),
+      source: { kind: 'harness', id: 'claude' }, provenance: { mode: 'replayed', confidence: 'exact', adapterVersion: '1.5.0' }, data,
+    }) as AnyAgentisticsEvent
+    const evs = [
+      mk('run.started', 'rs', undefined, { harness: 'claude', conversationLink: 'observed' }),
+      mk('agent.started', 'am', 'main', { kind: 'main' }),
+      mk('agent.started', 'as', 'sub', { kind: 'subagent' }),
+      mk('tool.requested', 't1', 'main', { toolExecutionId: 'x', name: 'Bash', canonicalName: 'Bash', kind: 'shell' }),
+      mk('tool.requested', 't2', 'sub', { toolExecutionId: 'y', name: 'Bash', canonicalName: 'Bash', kind: 'shell' }),
+      mk('tool.failed', 't3', 'sub', { toolExecutionId: 'y', status: 'failed' }),
+      mk('tool.requested', 't4', 'sub', { toolExecutionId: 'z', name: 'Read', canonicalName: 'Read', kind: 'read' }),
+    ]
+    const tools = project(runMetricsProjection, evs).fact!.tools
+    expect(tools.Bash).toMatchObject({ calls: 2, errors: 1, subagent: { calls: 1, errors: 1 } })
+    expect(tools.Read).toMatchObject({ calls: 1, subagent: { calls: 1 } })
+    // In any order: the split is a fold like every other.
+    expect(project(runMetricsProjection, [...evs].reverse()).fact!.tools).toEqual(tools)
   })
 
   test('agentMetrics: a harness that cannot produce agents says so (null + reason), never an empty rollup', () => {

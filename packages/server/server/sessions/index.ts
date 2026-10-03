@@ -41,8 +41,23 @@ const windowsBackend: SessionBackend = {
   },
 }
 
+/**
+ * A5.4: once, the tmux backend wrapped by the ACP composite (`acp-backend.ts`). The composite only
+ * takes a spawn when the person opted the harness into ACP (`preferences.acpHarnesses`) AND the
+ * engine drives it (`engine.acp`, engine-api 1.7); otherwise every verb is tmux's, unchanged.
+ */
+let composite: SessionBackend | null = null
+
 export async function resolveBackend(): Promise<SessionBackend> {
-  return process.platform === 'win32' ? windowsBackend : tmuxBackend
+  if (process.platform === 'win32') return windowsBackend
+  if (!composite) {
+    const { withAcp } = await import('./acp-backend')
+    composite = withAcp(tmuxBackend, {
+      acp: async () => (await import('../engine/load')).engine()?.acp ?? null,
+      allowed: async () => ((await (await import('../preferences')).readPreferences()).acpHarnesses ?? []),
+    })
+  }
+  return composite
 }
 
 export * from './types'

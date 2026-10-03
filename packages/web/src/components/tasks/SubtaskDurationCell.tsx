@@ -18,23 +18,33 @@
 
 import { fmtElapsed, elapsedMs } from '@agentistics/core'
 import { NA, fmtStamp } from './board'
+import { fmtActive } from './subtaskRollup'
 import type { Lang } from './copy'
 
-export function DurationCellView({ startedAt, deliveredAt, lang }: {
+export function DurationCellView({ startedAt, deliveredAt, activeMinutes, lang }: {
   startedAt?: string
   deliveredAt?: string
+  /** The union of the sessions' active time — a SECOND figure under the wall-clock one, so the two
+   *  are never confused ("2d 3h" apart, "ativo 42min" worked). Absent when no session measured it. */
+  activeMinutes?: number | null
   lang: Lang
 }) {
-  if (!startedAt || !deliveredAt) return null
-  const ms = elapsedMs(startedAt, deliveredAt)
-  const text = ms === null ? null : fmtElapsed(ms, lang)
+  const active = typeof activeMinutes === 'number' ? fmtActive(activeMinutes, lang) : null
+  const both = !!startedAt && !!deliveredAt
+  if (!both && !active) return null
+  const ms = both ? elapsedMs(startedAt!, deliveredAt!) : null
+  const text = !both ? null : ms === null ? null : fmtElapsed(ms, lang)
   return (
     <span
-      title={`${fmtStamp(startedAt, lang)} → ${fmtStamp(deliveredAt, lang)}`}
+      title={`${both ? `${fmtStamp(startedAt!, lang)} → ${fmtStamp(deliveredAt!, lang)}` : ''}${both && active ? ' · ' : ''}${active ?? ''}`}
       style={{
+        display: 'inline-flex', flexDirection: 'column', lineHeight: 1.25,
         fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-        color: text === null ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+        color: both && text === null ? 'var(--text-tertiary)' : 'var(--text-secondary)',
       }}
-    >{text ?? NA}</span>
+    >
+      {both && <span>{text ?? NA}</span>}
+      {active && <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{active}</span>}
+    </span>
   )
 }

@@ -348,6 +348,15 @@ export interface ManagedSession {
 }
 
 /**
+ * A row as the BOARD's readers see it: a fleet `ManagedSession`, or a synthetic row the board builds
+ * per read (a historical link — still a `ManagedSession` — or a NATIVE session, whose harness is the
+ * native runtime `'agentistics'`, a `RunHarness` and never a `HarnessId`; see `task-native.ts`).
+ * Only the board's read side takes it: everything that probes, reopens, attaches to or ships a fleet
+ * session keeps `ManagedSession`, so a native row can never reach it by type.
+ */
+export type BoardRow = Omit<ManagedSession, 'harness'> & { harness: HarnessId | 'agentistics' }
+
+/**
  * What a session is doing right now.
  *
  * There is deliberately no `idle`. An interactive assistant whose process is alive and whose screen
@@ -525,6 +534,13 @@ export interface SessionBackend {
   detachHint(): Promise<string>
   /** Map of managed session ID to OS pane process ID, where available. */
   listPanePids?(): Promise<Map<string, number>>
+  /**
+   * A5.4 — the session's state as the BACKEND knows it (an ACP agent states it; a terminal does not).
+   * When it answers, the poller uses it instead of reading the frame. Absent / undefined: read the frame.
+   */
+  activityOf?(id: string): SessionActivity | undefined
+  /** A5.4 — the open dialog's option labels, numbered from 1, when the backend knows them. */
+  dialogOf?(id: string): string[] | undefined
 }
 
 /** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a

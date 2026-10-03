@@ -36,7 +36,7 @@ describe('createTaskStore', () => {
     const { s } = await store()
     expect(await s.read()).toEqual({
       tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
-      historicalSessions: [], statuses: [], types: [],
+      historicalSessions: [], nativeSessions: [], statuses: [], types: [],
     })
   })
 
@@ -111,7 +111,7 @@ describe('createTaskStore', () => {
     await writeFile(file, '{ this is not json', 'utf8')
     expect(await s.read()).toEqual({
       tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
-      historicalSessions: [], statuses: [], types: [],
+      historicalSessions: [], nativeSessions: [], statuses: [], types: [],
     })
   })
 
@@ -541,6 +541,72 @@ describe('setRanks and the activity log', () => {
       const [h] = (await s.read()).historicalSessions
       expect(h!.taskId).toBe('t-1')
       expect(h!.subtaskId).toBeUndefined()
+    })
+  })
+
+  describe('native session links (engine-interface spec §4.6)', () => {
+    const usage = (cost: number | null, at: string) => ({
+      responses: 2, rounds: 1, tokens: 1200, costUSD: cost, costMeasured: cost !== null, model: 'm', updatedAt: at,
+    })
+    const nlink = (sid: string, taskId: string, over: Record<string, unknown> = {}) => ({
+      id: `native:${sid}`, sessionId: sid, taskId, linkedAt: '2026-10-03T00:00:00.000Z', ...over,
+    })
+
+    it('round-trips links (label, cwd, usage) and re-derives the id', async () => {
+      const { file, s } = await store()
+      await writeFile(file, JSON.stringify({
+        nativeSessions: [
+          { ...nlink('ses_a', 't-1'), id: 'forged', label: 'L', cwd: '/w', usage: usage(0.5, '2026-10-03T01:00:00.000Z') },
+          { sessionId: 'ses_b' },
+          { taskId: 't-1' },
+        ],
+      }), 'utf8')
+      const got = (await s.read()).nativeSessions
+      expect(got).toEqual([{ ...nlink('ses_a', 't-1'), label: 'L', cwd: '/w', usage: usage(0.5, '2026-10-03T01:00:00.000Z') }])
+    })
+
+    it('drops a usage snapshot that cannot be trusted, keeping the filing', async () => {
+      const { file, s } = await store()
+      await writeFile(file, JSON.stringify({ nativeSessions: [{ ...nlink('ses_a', 't-1'), usage: { ...usage(-1, '2026-10-03T01:00:00.000Z') } }] }), 'utf8')
+      const [n] = (await s.read()).nativeSessions
+      expect(n!.taskId).toBe('t-1')
+      expect(n!.usage).toBeUndefined()
+    })
+
+    it('survives every other write; a move keeps the usage; unfile by id or session id', async () => {
+      const { s } = await store()
+      await s.upsertTask(task('t-1'))
+      await s.fileNative({ ...nlink('ses_a', 't-1'), usage: usage(0.25, '2026-10-03T01:00:00.000Z') })
+      await s.upsertTask(task('t-2'))
+      await s.patchTask('t-1', { priority: 'high' })
+      const out = await s.fileNative(nlink('ses_a', 't-2'))
+      expect(out.replaced?.taskId).toBe('t-1')
+      const [n] = (await s.read()).nativeSessions
+      expect([n!.taskId, n!.usage?.costUSD]).toEqual(['t-2', 0.25])
+      expect((await s.unfileNative('native:ses_a'))?.sessionId).toBe('ses_a')
+      expect(await s.unfileNative('ses_a')).toBeNull()
+    })
+
+    it('a usage report refreshes a filed session only, and never rolls the cost back', async () => {
+      const { s } = await store()
+      expect(await s.reportNativeUsage('ses_a', usage(1, '2026-10-03T02:00:00.000Z'))).toBe(false)
+      expect((await s.read()).nativeSessions).toEqual([])
+      await s.fileNative(nlink('ses_a', 't-1'))
+      expect(await s.reportNativeUsage('ses_a', usage(1, '2026-10-03T02:00:00.000Z'))).toBe(true)
+      await s.reportNativeUsage('ses_a', usage(0.5, '2026-10-03T01:00:00.000Z'))
+      expect((await s.read()).nativeSessions[0]!.usage?.costUSD).toBe(1)
+    })
+
+    it('a task removal takes its native links; a subtask removal sends them to the delivery', async () => {
+      const { s } = await store()
+      await s.upsertTask(task('t-1'))
+      await s.upsertTask(task('t-2'))
+      await s.upsertSubtask(subtask('s-1', 't-2'))
+      await s.fileNative(nlink('ses_a', 't-1'))
+      await s.fileNative(nlink('ses_b', 't-2', { subtaskId: 's-1' }))
+      await s.removeTask('t-1')
+      await s.removeSubtask('s-1')
+      expect((await s.read()).nativeSessions.map(n => [n.sessionId, n.taskId, n.subtaskId])).toEqual([['ses_b', 't-2', undefined]])
     })
   })
 })

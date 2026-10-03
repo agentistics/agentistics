@@ -366,3 +366,25 @@ describe('turn.ended + previousAssistantAt (D25)', () => {
     expect(true).toBe(true)
   })
 })
+
+describe('the native context manager events (B4-CTX: tool.executed, context.recalled)', () => {
+  test('are in the vocabulary and optional', () => {
+    for (const t of ['tool.executed', 'context.recalled'] as const) {
+      expect(isEventType(t)).toBe(true)
+      expect(REQUIRED_EVENT_TYPES as readonly string[]).not.toContain(t)
+    }
+  })
+
+  test('carry facts and content references, never content', () => {
+    const executed: AgentisticsEvent<'tool.executed'>['data'] = {
+      toolExecutionId: 'tx_1', handle: '#41', entry: 'preview', bytes: 48_000, lines: 840, tokens: 12_000,
+      parts: 6, content: { sha256: 'a'.repeat(64), bytes: 48_000 }, sensitive: false,
+    }
+    const recalled: AgentisticsEvent<'context.recalled'>['data'] = {
+      toolExecutionId: 'tx_2', handle: '#41.2', mode: 'part', outcome: 'returned',
+      partsReturned: 1, partsAlreadyResident: 0, tokens: 2000,
+    }
+    expect(Object.keys(executed).sort()).toEqual(['bytes', 'content', 'entry', 'handle', 'lines', 'parts', 'sensitive', 'tokens', 'toolExecutionId'])
+    expect(recalled.outcome).toBe('returned')
+  })
+})

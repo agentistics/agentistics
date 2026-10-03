@@ -118,7 +118,7 @@ export async function catchUpProjections(opts: CatchUpOptions): Promise<CatchUpR
   const t0 = performance.now()
   const env = opts.env ?? process.env
   const base = { projections: [] as ProjectionPassReport[], pages: 0, eventsRead: 0, cursor: 0, journalHead: null as number | null }
-  if (!projectionsEnabled(env)) return { state: 'disabled', reason: 'flag-off: AGENTISTICS_PROJECTIONS is not set', ...base, ms: 0 }
+  if (!projectionsEnabled(env)) return { state: 'disabled', reason: 'flag-off: AGENTISTICS_PROJECTIONS is set off', ...base, ms: 0 }
 
   const defs = opts.projections ?? STORED_PROJECTIONS
   const ownStore = opts.store === undefined

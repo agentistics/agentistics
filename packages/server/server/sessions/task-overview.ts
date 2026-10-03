@@ -17,7 +17,8 @@ import type { SessionMeta } from '@agentistics/core'
 import { sessionTokens } from '@agentistics/core'
 import { isClosed, type Task } from './task-model'
 import type { Bucket } from './task-stats'
-import type { ManagedSession } from './types'
+import { isNativeRow } from './task-native'
+import type { BoardRow } from './types'
 import { conversationOwners, distinctConversations } from './task-conversations'
 import { rowsOfTask } from './task-report'
 
@@ -122,7 +123,7 @@ function addInto(into: Record<string, number>, from: Readonly<Record<string, num
 
 export function buildBoardOverview(o: {
   tasks: readonly Task[]
-  rows: readonly ManagedSession[]
+  rows: readonly BoardRow[]
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   /**
@@ -183,6 +184,24 @@ export function buildBoardOverview(o: {
     let taskRounds: number | null = null
 
     for (const r of mine) {
+      // A NATIVE session: the engine's snapshot is all there is (no meta, no start day in it).
+      if (isNativeRow(r)) {
+        const u = r.nativeUsage
+        if (!u) continue
+        if (u.costUSD !== null) {
+          taskCost = (taskCost ?? 0) + u.costUSD
+          taskByHarness[r.harness] = (taskByHarness[r.harness] ?? 0) + u.costUSD
+        }
+        taskRounds = (taskRounds ?? 0) + u.rounds
+        if (u.tokens !== null) totalTokens = (totalTokens ?? 0) + u.tokens
+        const bumpNative = (m: typeof models, key: string) => {
+          const cur = m.get(key) ?? { sessions: 0, tokens: null }
+          m.set(key, { sessions: cur.sessions + 1, tokens: u.tokens === null ? cur.tokens : (cur.tokens ?? 0) + u.tokens })
+        }
+        if (u.model) bumpNative(models, u.model)
+        bumpNative(harnesses, r.harness)
+        continue
+      }
       const meta = r.conversationId ? o.metas.get(r.conversationId) : undefined
       if (!meta) continue
 

@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
+import { featureOn } from '@agentistics/core'
 
 loadEnvConfig()
 
@@ -86,11 +87,10 @@ export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
   ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db')
   : join(AGENTISTICS_DATA_DIR, 'journal.db')
 // The shadow writer's flag (P1 §1 item 5, §11): while `AGENTISTICS_JOURNAL` is on, a build ALSO feeds
-// the journal. **Absent reads as OFF** — a machine must not start writing a database because it was
-// upgraded — and only an explicit affirmative turns it on. Rolling back is unsetting it.
-export const JOURNAL_ENABLED = ['1', 'true', 'on', 'yes'].includes(
-  (process.env.AGENTISTICS_JOURNAL ?? '').trim().toLowerCase(),
-)
+// the journal. **ON by default** since the journal-backfill item (the projections read it on every
+// surface): only an explicit negative (`0`, `false`, `off`, `no`) turns it off. `featureOn` is the one
+// reading, shared with the experimental table.
+export const JOURNAL_ENABLED = featureOn('journal', process.env)
 // The live path (LIVE.3, P4 A5.3): an engine's file-tail and attention producer feed the journal
 // between builds. Effective ONLY with `AGENTISTICS_JOURNAL` — it feeds that journal and nothing else.
 // **Absent reads as OFF**, same affirmative-only parsing. Read by the host and handed to an engine as
@@ -115,6 +115,12 @@ export const JOURNAL_STAMPS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
 export const JOURNAL_IMPORT_STATE_PATH = process.env.AGENTISTICS_JOURNAL_DIR
   ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.import.json')
   : join(AGENTISTICS_DATA_DIR, 'journal.db.import.json')
+// The automatic first import's progress (`journal/backfill.ts`): its state, its counts, and when it
+// COMPLETED, bound to the journal file's identity. Until it says complete, the projections answer
+// `projections_backfilling` and every surface reads /api/data.
+export const JOURNAL_BACKFILL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
+  ? join(process.env.AGENTISTICS_JOURNAL_DIR, 'journal.db.backfill.json')
+  : join(AGENTISTICS_DATA_DIR, 'journal.db.backfill.json')
 // Consolidated per-session metrics (mode 'consolidate'): <data dir>/sessions/<id>.json
 export const CONSOLIDATED_DIR = join(AGENTISTICS_DATA_DIR, 'sessions')
 // Persisted workflow runs (survive Claude's transcript cleanup): <data dir>/workflows/<runId>.json

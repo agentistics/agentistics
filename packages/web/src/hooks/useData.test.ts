@@ -1874,6 +1874,35 @@ describe('the `all` range claims sessions that record a per-day split', () => {
   })
 })
 
+describe('a day range prices only its own cache writes (cutSessionUsage)', () => {
+  // THE DEFECT: the cut replaced the four counters but kept the LIFETIME 1h/5m split, and calcCost
+  // prices the split when it is present, so "Today" carried every cache write the session ever made.
+  const session: SessionMeta = {
+    session_id: 'ttl', harness: 'claude', project_path: '/p', model: 'claude-opus-5-5',
+    start_time: '2026-09-03T10:00:00.000Z',
+    input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000,
+    cache_creation_1h_input_tokens: 1_000_000, cache_creation_5m_input_tokens: 0,
+    user_message_count: 1, assistant_message_count: 1,
+    daily: {
+      '2026-09-03': { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 900_000, messages: 1 },
+      '2026-09-05': { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 100_000, messages: 1 },
+    },
+  } as unknown as SessionMeta
+  const data = {
+    statsCache: { version: 1, lastComputedDate: '2026-08-01', dailyActivity: [], dailyModelTokens: [], modelUsage: {}, totalSessions: 0, totalMessages: 0, hourCounts: {} },
+    sessions: [session], allSessions: [], projects: [], harnesses: ['claude'],
+  } as unknown as import('@agentistics/core').AppData
+
+  test("one day's cost is that day's share of the session's cost", () => {
+    const oneDay = { dateRange: 'custom', customStart: '2026-09-05', customEnd: '2026-09-05', projects: [], models: [] } as unknown as import('@agentistics/core').Filters
+    const all = { dateRange: 'all', customStart: '', customEnd: '', projects: [], models: [] } as unknown as import('@agentistics/core').Filters
+    const whole = computeDerivedStats(data, all, [], true, new Set(['ttl']))!.totalCostUSD
+    const day = computeDerivedStats(data, oneDay, [], true, new Set(['ttl']))!.totalCostUSD
+    expect(whole).toBeGreaterThan(0)
+    expect(day).toBeCloseTo(whole / 10, 6)
+  })
+})
+
 describe('the activity calendar counts the days a session WORKED', () => {
   // "Estou há alguns dias trabalhando e dia 4 foi pulado." It was: the day filter learned to read
   // `SessionMeta.daily` and the calendar did not, so a conversation open since Tuesday drew one

@@ -22,8 +22,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
-import { historicalLinkId, migratePriority, migrateStatus, subtaskDone } from './task-model'
+import { historicalLinkId, migratePriority, migrateStatus, nativeLinkId, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
+import { sanitizeNativeUsage } from './task-native'
+import type { NativeSessionLink, NativeSessionUsage } from './task-model'
 import type {
   Attempt, AttemptStatus, HistoricalSession, Subtask, Task, TaskBook, TaskClaim, TaskComment,
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus,
@@ -68,6 +70,7 @@ export interface AttemptPatch {
 const EMPTY_BOOK = (): TaskBook => ({
   tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
   historicalSessions: [],
+  nativeSessions: [],
   // Absent/empty is exactly what `planStatusMigration` reads as "never seeded yet" — see
   // `task-source.ts`'s `ensureStatusesSeeded`, which fills this in on the very next load.
   statuses: [],
@@ -172,6 +175,20 @@ export interface TaskStore {
    * written, because a conversation with no statement belongs to no task (`conversationOwners`).
    */
   unfileHistorical(ref: string): Promise<HistoricalSession | null>
+
+  /**
+   * File a NATIVE session (see `NativeSessionLink`) — or MOVE it. One link per session, decided under
+   * the lock; a usage snapshot already on the link survives a move unless the new link carries one.
+   */
+  fileNative(link: NativeSessionLink): Promise<{ replaced?: NativeSessionLink }>
+  /** Drop a native link by its own id or its session id. Null when there was none. */
+  unfileNative(ref: string): Promise<NativeSessionLink | null>
+  /**
+   * Refresh the usage snapshot of a session ALREADY filed. Never files one: false when the session
+   * holds no link (the engine reports after every run; an unfiled session has nowhere to roll up).
+   * An OLDER snapshot than the one held is ignored (two reports racing cannot roll the cost back).
+   */
+  reportNativeUsage(sessionId: string, usage: NativeSessionUsage): Promise<boolean>
 }
 
 /**
@@ -422,6 +439,24 @@ function sanitizeHistorical(raw: unknown): HistoricalSession | null {
   }
 }
 
+/** A native link is kept only when it names a SESSION and a TASK; its id is re-derived, never trusted. */
+function sanitizeNative(raw: unknown): NativeSessionLink | null {
+  if (!raw || typeof raw !== 'object') return null
+  const n = raw as Record<string, unknown>
+  const sessionId = str(n.sessionId); const taskId = str(n.taskId)
+  if (!sessionId || !taskId) return null
+  const usage = sanitizeNativeUsage(n.usage)
+  return {
+    id: nativeLinkId(sessionId),
+    sessionId, taskId,
+    ...(str(n.subtaskId) ? { subtaskId: str(n.subtaskId)! } : {}),
+    linkedAt: str(n.linkedAt) ?? new Date(0).toISOString(),
+    ...(str(n.label) ? { label: str(n.label)!.slice(0, 300) } : {}),
+    ...(str(n.cwd) ? { cwd: str(n.cwd)! } : {}),
+    ...(usage ? { usage } : {}),
+  }
+}
+
 function sanitizeFile(raw: unknown): TaskFile | null {
   if (!raw || typeof raw !== 'object') return null
   const f = raw as Record<string, unknown>
@@ -476,6 +511,16 @@ export function createTaskStore(file: string): TaskStore {
               .map(sanitizeHistorical)
               .filter((h): h is HistoricalSession => h !== null)
               .map(h => [h.id, h] as const),
+          ).values(),
+        ],
+        // Same whitelist rule: the engine's links survive every read-modify-write of the board
+        // (engine-interface spec §4.6 — a community build must not delete them either).
+        nativeSessions: [
+          ...new Map(
+            arr(raw.nativeSessions)
+              .map(sanitizeNative)
+              .filter((n): n is NativeSessionLink => n !== null)
+              .map(n => [n.id, n] as const),
           ).values(),
         ],
         tombstones: arr(raw.tombstones).filter((v): v is string => typeof v === 'string'),
@@ -612,6 +657,11 @@ export function createTaskStore(file: string): TaskStore {
             const { subtaskId: _dropped, ...rest } = h
             return rest
           }),
+          nativeSessions: book.nativeSessions.map(n => {
+            if (n.subtaskId !== id) return n
+            const { subtaskId: _dropped, ...rest } = n
+            return rest
+          }),
         })
         return true
       })
@@ -645,6 +695,8 @@ export function createTaskStore(file: string): TaskStore {
           // frees it to be filed elsewhere (a link left behind would name a task nobody can open and
           // keep the conversation from ever being owned by another one).
           historicalSessions: book.historicalSessions.filter(h => h.taskId !== id),
+          // A native link goes with its task too; the SESSION stays in the engine, free to be filed again.
+          nativeSessions: book.nativeSessions.filter(n => n.taskId !== id),
           events: book.events.filter(e => e.taskId !== id),
           // The status VOCABULARY is board-wide, not per-task — deleting a task never touches it.
           statuses: book.statuses,
@@ -772,6 +824,40 @@ export function createTaskStore(file: string): TaskStore {
           historicalSessions: book.historicalSessions.filter(h => h.id !== found.id),
         })
         return found
+      })
+    },
+    fileNative(link) {
+      return enqueue(async () => {
+        const book = await read()
+        const replaced = book.nativeSessions.find(n => n.id === link.id)
+        const usage = link.usage ?? replaced?.usage
+        await write({
+          ...book,
+          nativeSessions: [...book.nativeSessions.filter(n => n.id !== link.id), { ...link, ...(usage ? { usage } : {}) }],
+        })
+        return replaced ? { replaced } : {}
+      })
+    },
+    unfileNative(ref) {
+      return enqueue(async () => {
+        const book = await read()
+        const found = book.nativeSessions.find(n => n.id === ref || n.sessionId === ref)
+        if (!found) return null
+        await write({ ...book, nativeSessions: book.nativeSessions.filter(n => n.id !== found.id) })
+        return found
+      })
+    },
+    reportNativeUsage(sessionId, usage) {
+      return enqueue(async () => {
+        const book = await read()
+        const found = book.nativeSessions.find(n => n.sessionId === sessionId)
+        if (!found) return false
+        if (found.usage && Date.parse(found.usage.updatedAt) > Date.parse(usage.updatedAt)) return true
+        await write({
+          ...book,
+          nativeSessions: book.nativeSessions.map(n => (n.id === found.id ? { ...n, usage } : n)),
+        })
+        return true
       })
     },
     seedTypes(list) {

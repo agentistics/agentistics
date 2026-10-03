@@ -52,7 +52,9 @@ describe('experimental-boot', () => {
     const home = dirWith('{"experimental":true}')
     expect(await run({ AGENTISTICS_DIR: home, HOME: home })).toBe('true')
     expect(await run({ AGENTISTICS_DIR: home, HOME: home, AGENTISTICS_JOURNAL: '0' })).toBe('false')
-    expect(await run({ AGENTISTICS_DIR: dirWith('{"experimental":false}'), HOME: home })).toBe('false')
+    // The journal is ON by default since the backfill item: a preference that is false does not turn
+    // it off; only an explicit =0 does.
+    expect(await run({ AGENTISTICS_DIR: dirWith('{"experimental":false}'), HOME: home })).toBe('true')
   })
   test('does not import config or preferences (they load JOURNAL_ENABLED)', async () => {
     const src = await Bun.file(join(import.meta.dir, 'experimental-boot.ts')).text()

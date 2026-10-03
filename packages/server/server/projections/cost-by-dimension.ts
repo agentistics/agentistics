@@ -32,7 +32,7 @@
 import type { AgentisticsEvent, AnyAgentisticsEvent, Confidence, Projection, ProviderId } from '@agentistics/core'
 import type { CostFact } from './facts'
 import {
-  dimensionsOf, emptyCostCell, emptyDimensionFacts, foldConfidence, foldCostResponse, foldDimensionFacts, priceCell,
+  dimensionsOf, emptyCostCell, foldAgentKind, subagentRule, emptyDimensionFacts, foldConfidence, foldCostResponse, foldDimensionFacts, priceCell,
   pricingModelOf, utcDay,
   type CostCell, type DimensionFacts,
 } from './kit'
@@ -76,9 +76,7 @@ function foldOne(s: CostByDimensionState, e: AnyAgentisticsEvent): void {
   if (e.sessionId && (s.sessionId === undefined || e.sessionId < s.sessionId)) s.sessionId = e.sessionId
   foldDimensionFacts(s.dims, e)
   if (e.type === 'agent.started') {
-    if (!e.agentId) return
-    const prev = s.agentKinds.get(e.agentId)
-    if (!prev || e.eventId < prev.id) s.agentKinds.set(e.agentId, { id: e.eventId, main: e.data.kind === 'main' })
+    foldAgentKind(s.agentKinds, e)
     return
   }
   if (e.type !== 'model.completed') return
@@ -110,12 +108,7 @@ function finish(s: CostByDimensionState): CostByDimensionResult {
   // `session-meta.ts`'s rule for which agents are MAIN: the ones an `agent.started` says are main; with
   // none declared, every agent not known to be a subagent. A response with no agent is the session's
   // own, never a subagent's.
-  const declaredMain = [...s.agentKinds].filter(([, k]) => k.main).map(([id]) => id)
-  const knownSub = new Set([...s.agentKinds].filter(([, k]) => !k.main).map(([id]) => id))
-  const isSubagent = (agentId: string | null): boolean => {
-    if (agentId === null) return false
-    return declaredMain.length > 0 ? !declaredMain.includes(agentId) : knownSub.has(agentId)
-  }
+  const isSubagent = subagentRule(s.agentKinds)
   const facts: CostFact[] = []
   for (const k of keys) {
     const c = s.cells.get(k)!
@@ -149,7 +142,8 @@ function finish(s: CostByDimensionState): CostByDimensionResult {
 
 export const costByDimensionProjection: Projection<CostByDimensionState, CostByDimensionResult> = {
   name: 'cost-by-dimension',
-  version: 1,
+  // 2: `project` is the project root (`canonicalProjectPath`), so worktrees roll up (A4.4 decision 2).
+  version: 2,
   empty: () => ({ seen: new Set(), dims: emptyDimensionFacts(), cells: new Map(), agentKinds: new Map() }),
   fold(state, events) {
     for (const e of events) foldOne(state, e)

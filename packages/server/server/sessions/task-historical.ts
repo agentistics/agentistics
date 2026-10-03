@@ -38,12 +38,12 @@
 
 import { sessionLabel, type SessionMeta } from '@agentistics/core'
 import type { HistoricalSession } from './task-model'
-import type { ManagedSession } from './types'
+import type { BoardRow, ManagedSession } from './types'
 
 /** A read-only row synthesised from a `HistoricalSession`. Never written anywhere. */
 export type HistoricalRow = ManagedSession & { historical: true }
 
-export function isHistoricalRow(r: ManagedSession): r is HistoricalRow {
+export function isHistoricalRow(r: BoardRow): r is HistoricalRow {
   return (r as { historical?: unknown }).historical === true
 }
 

@@ -25,6 +25,7 @@ import {
   type AgentisticsEvent,
   type AnyAgentisticsEvent,
   type Confidence,
+  canonicalProjectPath,
   type HarnessId,
   type ModelUsage,
   type ProviderId,
@@ -113,7 +114,8 @@ export function dimensionsOf(f: DimensionFacts): {
   const task = [...f.taskIds].sort()[0] ?? null
   return {
     repo: f.session?.repo ?? '',
-    project: f.session?.project ?? f.run?.cwd ?? '',
+    // The project ROOT: a worktree's spend rolls up to its repository, on every surface (A4.4 decision 2).
+    project: canonicalProjectPath(f.session?.project ?? f.run?.cwd ?? ''),
     taskId: task,
     harness: resolveHarness(f.run?.harness, f.sourceId),
     ...(f.run?.conversationId ? { conversationId: f.run.conversationId } : {}),
@@ -240,13 +242,38 @@ export function foldProvider(map: Map<string, ProviderId>, model: string, provid
   if (prev === undefined || provider < prev) map.set(model, provider)
 }
 
+// ── Agents: which are the run's main agent ──────────────────────────────────────────────────────
+
+/** `agent.started` per agent, the earliest event settling it: is this agent declared main? */
+export type AgentKinds = Map<string, { id: string; main: boolean }>
+
+export function foldAgentKind(kinds: AgentKinds, e: AnyAgentisticsEvent): void {
+  if (e.type !== 'agent.started' || !e.agentId) return
+  const prev = kinds.get(e.agentId)
+  if (!prev || e.eventId < prev.id) kinds.set(e.agentId, { id: e.eventId, main: e.data.kind === 'main' })
+}
+
+/**
+ * `session-meta.ts`'s rule for which agents are MAIN, shared by cost facts and tool facts so a
+ * subagent is the same agent in both: the agents an `agent.started` declares main; with none declared,
+ * every agent not known to be a subagent. Work with no agent is the session's own, never a subagent's.
+ */
+export function subagentRule(kinds: AgentKinds): (agentId: string | null | undefined) => boolean {
+  const declaredMain = [...kinds].filter(([, k]) => k.main).map(([id]) => id)
+  const knownSub = new Set([...kinds].filter(([, k]) => !k.main).map(([id]) => id))
+  return agentId => {
+    if (!agentId) return false
+    return declaredMain.length > 0 ? !declaredMain.includes(agentId) : knownSub.has(agentId)
+  }
+}
+
 // ── Tools: one execution, request to result ─────────────────────────────────────────────────────
 
 export type ToolOutcome = 'completed' | 'failed' | 'cancelled' | 'denied' | 'unknown'
 
 export interface ToolExec {
   /** The request with the smallest event id wins — deterministic, whatever the arrival order. */
-  req?: { id: string; canonical: string; raw: string; at: string }
+  req?: { id: string; canonical: string; raw: string; at: string; agentId?: string }
   end?: { id: string; outcome: ToolOutcome; at: string; durationMs?: number }
   conf: Confidence | null
 }
@@ -266,7 +293,9 @@ export function foldToolEvent(acc: ToolAcc, e: AnyAgentisticsEvent): void {
   if (!x) { x = { conf: null }; acc.set(execId, x) }
   x.conf = foldConfidence(x.conf, e.provenance.confidence)
   if (e.type === 'tool.requested') {
-    if (!x.req || e.eventId < x.req.id) x.req = { id: e.eventId, canonical: e.data.canonicalName, raw: e.data.name, at: e.occurredAt }
+    if (!x.req || e.eventId < x.req.id) {
+      x.req = { id: e.eventId, canonical: e.data.canonicalName, raw: e.data.name, at: e.occurredAt, ...(e.agentId ? { agentId: e.agentId } : {}) }
+    }
     return
   }
   // A terminal event: the one with the smallest event id settles the outcome.
@@ -311,9 +340,15 @@ export function execDurationMs(x: ToolExec): number | null {
 }
 
 /** Per tool, by `canonical` (or the harness's own `raw`) name; a result with no request is `unknown`. */
-export function toolFigures(acc: ToolAcc, names: 'canonical' | 'raw' = 'canonical'): Record<string, ToolFigure> {
+export function toolFigures(
+  acc: ToolAcc,
+  names: 'canonical' | 'raw' = 'canonical',
+  /** Only the executions this accepts (e.g. a subagent's). Default: all of them. */
+  only: (x: ToolExec) => boolean = () => true,
+): Record<string, ToolFigure> {
   const out: Record<string, ToolFigure> = {}
   for (const x of acc.values()) {
+    if (!only(x)) continue
     const name = x.req ? (names === 'raw' ? x.req.raw : x.req.canonical) : 'unknown'
     let f = out[name]
     if (!f) {

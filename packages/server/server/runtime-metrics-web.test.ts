@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { AUTH_PUBLIC } from './index-routes'
 import { routeCapability } from './capability-guard'
 import type { ProjectionReader } from './projections/facts'
-import { handleRuntimeMetricsRequest, projectionsEnabled, RUNTIME_METRICS_PATH } from './runtime-metrics-web'
+import { handleRuntimeMetricsRequest, MAX_ANSWER_LAG, projectionsEnabled, RUNTIME_METRICS_PATH } from './runtime-metrics-web'
 import { costFact, fakeReader } from './runtime-metrics-fixtures'
 
 /** A reader that fails the test the moment anything touches it. */
@@ -19,16 +19,17 @@ const get = (qs = '') => {
 }
 
 describe('the flag', () => {
-  it('absent reads OFF; only an affirmative turns it on', () => {
-    expect(projectionsEnabled(undefined)).toBe(false)
-    expect(projectionsEnabled('')).toBe(false)
+  it('absent reads ON (the default since the backfill item); only an explicit negative turns it off', () => {
+    expect(projectionsEnabled(undefined)).toBe(true)
+    expect(projectionsEnabled('')).toBe(true)
     expect(projectionsEnabled('0')).toBe(false)
+    expect(projectionsEnabled('off')).toBe(false)
     expect(projectionsEnabled('false')).toBe(false)
     for (const v of ['1', 'true', 'on', 'yes', ' ON ']) expect(projectionsEnabled(v)).toBe(true)
   })
   it('off → projections_disabled, nothing touched (not even a bad query string is parsed)', async () => {
     const [req, url] = get('?bogus=1')
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: undefined, central: false, reader: untouchable })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '0', central: false, reader: untouchable })
     expect(out.status).toBe(404)
     expect((out.body as { error: string }).error).toBe('projections_disabled')
   })
@@ -50,6 +51,24 @@ describe('the route', () => {
     const url = new URL(`http://x${RUNTIME_METRICS_PATH}`)
     const out = await handleRuntimeMetricsRequest(new Request(url, { method: 'POST' }), url, { flag: '1', central: false, reader: untouchable })
     expect(out.status).toBe(405)
+  })
+  it('the first import not complete → projections_backfilling (every surface reads /api/data), reader untouched', async () => {
+    const [req, url] = get()
+    const out = await handleRuntimeMetricsRequest(req, url, {
+      flag: '1', central: false, reader: untouchable,
+      backfill: { pending: true, progress: { v: 1, identity: 'i', state: 'running', startedAt: 's', updatedAt: 'u', written: 42 } },
+    })
+    expect(out.status).toBe(503)
+    expect(out.body).toMatchObject({ error: 'projections_backfilling', progress: { state: 'running', written: 42 } })
+  })
+  it('the projections far behind the journal → projections_catching_up, never a partial answer', async () => {
+    const [req, url] = get()
+    const reader = fakeReader([costFact()], [], { cursor: 10, journalHead: 10 + MAX_ANSWER_LAG + 1, versions: {}, rebuilding: false })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader })
+    expect(out.status).toBe(503)
+    expect(out.body).toMatchObject({ error: 'projections_catching_up', lag: MAX_ANSWER_LAG + 1 })
+    const near = fakeReader([costFact()], [], { cursor: 10, journalHead: 10 + MAX_ANSWER_LAG, versions: {}, rebuilding: false })
+    expect((await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: near })).status).toBe(200)
   })
   it('bad input → 400 with the code', async () => {
     const [req, url] = get('?metrics=vibes')
