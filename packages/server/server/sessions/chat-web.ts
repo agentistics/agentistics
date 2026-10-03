@@ -37,8 +37,24 @@ import { pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_LOGS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import type { SessionConversationLink } from '@agentistics/core'
+import type { SurfaceMark } from '../projections/session-surface'
+import { planSessionSource } from './session-source'
+import type { SessionSurfaceDeps } from './session-surface-deps'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
+
+/** What the journal remembers of a conversation whose transcript is gone — numbers only (D5, Q3). */
+export interface ChatRecorded {
+  firstAt: string | null
+  lastAt: string | null
+  turns: number
+  toolCalls: number
+  toolsFailed: number
+  toolsDenied: number
+  models: string[]
+  /** `null` = no model response was ever recorded (absent is not zero). */
+  tokens: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null
+}
 
 export interface ChatPayload {
   /** The turns, oldest first. Empty with no `unavailable` means a conversation with nothing in it. */
@@ -71,6 +87,19 @@ export interface ChatPayload {
   transcript?: TranscriptAvailability
   /** WHERE this session's conversation link came from (LIVE.1). Additive; absent = not linked yet. */
   link?: SessionConversationLink | null
+  /**
+   * LIVE.2 — the times a person was asked something in this conversation (an approval, a question), as the
+   * journal recorded them. HISTORY: whether a card can be answered NOW is the live fleet row's word alone.
+   * Present only when the `sessions` surface is on and the journal has marks; the legacy payload is
+   * otherwise byte for byte what it was.
+   */
+  attention?: SurfaceMark[]
+  /**
+   * LIVE.2 — the transcript is gone (`transcript.state` `expired` or `deleted`) and the journal knows the
+   * conversation: its NUMBERS, and nothing else (the owner's Q3 — no turns, no tool summaries, no
+   * text). Always accompanies `unavailable`, which says why.
+   */
+  recorded?: ChatRecorded
   /** True while the session is running, so the view knows whether to expect more. */
   live: boolean
   /**
@@ -128,7 +157,7 @@ async function readSessionChatCore(
   // file unreadable under a `PROJECTS_DIR` fixed at import time, which is why that branch went
   // untested long enough to become a blank pane in front of a user.
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
-  onRow: (row: { link?: SessionConversationLink | null }) => void = () => undefined,
+  onRow: (row: { id: string; conversationId?: string; harness?: string; link?: SessionConversationLink | null }) => void = () => undefined,
 ): Promise<ChatPayload> {
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
@@ -318,6 +347,35 @@ async function readSessionChatCore(
 }
 
 /**
+ * LIVE.2 — fold the journal's answer into a chat payload by `planSessionSource` (the one place the rule
+ * lives). `deps` undefined (no engine / flag off) is the legacy path and returns `base` itself.
+ */
+export async function mergeSessionSurface(
+  base: ChatPayload,
+  who: { harness: string; conversationId: string } | null,
+  deps: SessionSurfaceDeps | undefined,
+): Promise<ChatPayload> {
+  if (!deps || !who || !base.transcript) return base
+  const found = await deps.lookup(who.harness, who.conversationId).catch(() => ({ ready: false, row: null }))
+  const plan = planSessionSource({
+    enginePresent: true, surfaceFlag: true, projectionReady: found.ready,
+    projected: found.row !== null, projectedAttention: found.row?.attention.length ?? 0,
+    transcript: base.transcript, legacyReadOk: base.unavailable === undefined,
+  })
+  const row = found.row
+  if (plan.from === 'legacy' || !row) return base
+  if (plan.from === 'legacy+overlay') return { ...base, attention: row.attention }
+  return {
+    ...base,
+    recorded: {
+      firstAt: row.firstAt, lastAt: row.lastAt, turns: row.turns, toolCalls: row.toolCalls,
+      toolsFailed: row.toolsFailed, toolsDenied: row.toolsDenied, models: row.models, tokens: row.tokens,
+    },
+    ...(row.attention.length > 0 ? { attention: row.attention } : {}),
+  }
+}
+
+/**
  * The chat for one session, plus the two canonical facts (LIVE.1): `transcript` (always present
  * on a success path — `present/resolved` when the file was read) and `link` (the row's provenance).
  */
@@ -326,14 +384,23 @@ export async function readSessionChat(
   lang: CliLang,
   id: string,
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+  /** LIVE.2 — absent unless an engine is present and the `sessions` surface is on; absent = legacy, byte for byte. */
+  surface?: SessionSurfaceDeps,
 ): Promise<ChatPayload> {
   let link: SessionConversationLink | null | undefined
-  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link })
+  let who: { harness: string; conversationId: string } | null = null
+  const p = await readSessionChatCore(host, lang, id, readerFor, r => {
+    link = r.link
+    const c = conversationOfRow(r)
+    const h = r.harness
+    who = c && h ? { harness: h, conversationId: c } : null
+  })
   const transcript: TranscriptAvailability | undefined = p.transcript
     ?? (p.unavailable === undefined && p.turns.length > 0 ? { state: 'present', reason: 'resolved' } : undefined)
-  return {
+  const merged: ChatPayload = {
     ...p,
     ...(transcript ? { transcript } : {}),
     ...(link !== undefined ? { link } : {}),
   }
+  return mergeSessionSurface(merged, who, surface)
 }

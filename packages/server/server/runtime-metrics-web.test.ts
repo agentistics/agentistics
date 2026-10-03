@@ -112,6 +112,7 @@ describe('LIVE C5 — the projection catch-up is single-flight, coalesced and bo
     let release: () => void = () => {}
     const store = {
       reader: {} as never,
+      store: {} as never,
       close() {},
       catchUp: () => { passes++; return passes === 1 ? new Promise<unknown>(r => { release = () => r({ state: 'done' }) }) : Promise.resolve({ state: 'done' }) },
     }

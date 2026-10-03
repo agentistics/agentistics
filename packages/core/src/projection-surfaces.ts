@@ -35,3 +35,16 @@ export function projectionSurfaces(env: Env = process.env): ProjectionSurface[] 
 export function projectionSurfaceOn(surface: ProjectionSurface, env: Env = process.env): boolean {
   return projectionSurfaces(env).includes(surface)
 }
+
+/**
+ * LIVE.2's `sessions` surface (the chat, the tail and the reopen list read the journal's SESSION_SURFACE
+ * projection). It is NOT one of the four metric surfaces and is NOT in the default set: it is on only
+ * when `sessions` is NAMED, because its default-on is the owner's call after the 24 h memory
+ * measurement (LIVE.4, spec `2026-10-02-live-sessions-from-journal` §6 C5). It moves no metric surface (C1),
+ * and `projectionSurfaces()` ignores the token. Inert without an engine (C2) — the caller checks that.
+ */
+export const SESSIONS_SURFACE_TOKEN = 'sessions'
+
+export function sessionsSurfaceOn(env: Env = process.env): boolean {
+  return (env[PROJECTION_SURFACES_ENV] ?? '').split(',').some(s => s.trim().toLowerCase() === SESSIONS_SURFACE_TOKEN)
+}

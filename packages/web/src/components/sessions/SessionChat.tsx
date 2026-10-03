@@ -28,7 +28,7 @@
  */
 
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -36,6 +36,8 @@ import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
 import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
+import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../../lib/sessionRecorded'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
 import { ApprovalCard } from './ApprovalCard'
@@ -123,6 +125,10 @@ const SEND_NOW_RESULT_MS = 6000
 interface ChatPayload {
   turns: ChatTurn[]
   unavailable?: string
+  /** LIVE.2: the times a person was asked something, from the journal. HISTORY — never a control. */
+  attention?: ChatAttentionMark[]
+  /** LIVE.2: numbers only, for a conversation whose transcript is gone (accompanies `unavailable`). */
+  recorded?: ChatRecorded
   live: boolean
   /** Already-localized: these turns are the END of a longer conversation. See `chat-web.ts`. */
   older?: string
@@ -1105,6 +1111,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   }, [working])
 
   const turns = useMemo(() => payload?.turns ?? [], [payload])
+  const placedAttention = useMemo(() => placeAttention(turns, payload?.attention ?? []), [turns, payload?.attention])
 
   /**
    * Stable, session-namespaced DOM ids for every turn — derived from identity (who, when, a hash of
@@ -2029,6 +2036,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--text-tertiary)' }}>
           {payload.unavailable}
         </p>
+        {payload.recorded && <RecordedBlock recorded={payload.recorded} pt={pt} />}
+        {(payload.attention ?? []).map((m, i) => <AttentionMarkLine key={`am-${i}`} mark={m} pt={pt} />)}
         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-tertiary)', opacity: 0.8 }}>
           {pt
             ? 'A visão de terminal continua disponível para esta sessão.'
@@ -2106,9 +2115,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
             }}>{payload.older}</p>
           )}
 
-          {turns.map((t, i) => (
+          {turns.map((t, i) => (<Fragment key={i}>
+            {(placedAttention.before.get(i) ?? []).map((m, j) => <AttentionMarkLine key={`am-${i}-${j}`} mark={m} pt={pt} />)}
             <ChatBubble
-              key={i}
               turn={t}
               lang={lang}
               harness={session.harness}
@@ -2137,7 +2146,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
               }
             />
-          ))}
+          </Fragment>))}
+          {placedAttention.after.map((m, j) => <AttentionMarkLine key={`am-end-${j}`} mark={m} pt={pt} />)}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript
               carries the same text — so it is drawn as one: faded, with the wait said in words

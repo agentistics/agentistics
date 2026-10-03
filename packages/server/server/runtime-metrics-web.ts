@@ -22,7 +22,7 @@
  * failure is the CALLER's `safeError`.
  */
 import type { ProjectionReader } from './projections/facts'
-import { projectionsEnabled as storeProjectionsEnabled } from './projections/store'
+import { projectionsEnabled as storeProjectionsEnabled, type ProjectionStore } from './projections/store'
 import { parseMetricsQuery, runMetricsQuery } from './runtime-metrics-query'
 
 export const RUNTIME_METRICS_PATH = '/api/runtime/metrics'
@@ -128,6 +128,8 @@ export const CATCH_UP_MAX_PAGES = 50
 
 export interface LiveStore {
   reader: ProjectionReader
+  /** The materialised store itself — the session surfaces' keyed read (`projections/session-surface-reader.ts`). */
+  store: ProjectionStore
   close(): void
   catchUp(): Promise<unknown>
 }
@@ -158,6 +160,7 @@ async function openLive(): Promise<LiveStore | null> {
       const opened = await openProjectionReader({ journal, repoOf: memoRepoResolver(getGitRemote) })
       live = {
         reader: opened.reader,
+        store: opened.store,
         close: () => { opened.close(); journal.close() },
         catchUp: () => runProjectionCatchUp({ journal, store: opened.store, maxPages: CATCH_UP_MAX_PAGES }),
       }
@@ -195,6 +198,17 @@ export function maybeCatchUp(store: LiveStore, now = Date.now()): void {
       }
     } while (catchUpDirty)
   })().finally(() => { catching = null })
+}
+
+/**
+ * The store for the SESSION surfaces (LIVE.2) — the same single store and the same single-flight catch-up
+ * as the metrics route, opened lazily on the first request that needs it. `null` when it cannot open.
+ * The caller has already checked the engine and both flags; nothing here opens a file on its own.
+ */
+export async function liveStoreForSessions(): Promise<LiveStore | null> {
+  const store = await openLive()
+  if (store) maybeCatchUp(store)
+  return store
 }
 
 /** Tests only: what the next catch-up decision sees. */
