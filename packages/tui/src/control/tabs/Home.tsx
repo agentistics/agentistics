@@ -28,7 +28,7 @@ import { useAppData } from '../../data/useAppData'
 import { dashboardSource } from '../../dashboard/view'
 import {
   compactTokens, homeLayout, money, providerTone, resumeRows, statusGlyph, todayFigures,
-  type HomeProvider, type HomeTask,
+  type HomeProvider, type HomeTask, type NativeRecent,
 } from '../home'
 import { homeStrings } from '../home-i18n'
 
@@ -89,6 +89,8 @@ export function Home(p: HomeProps) {
   const [prompt, setPrompt] = useState('')
   const [tasks, setTasks] = useState<{ tasks: HomeTask[] } | { unavailable: string } | null>(null)
   const [providers, setProviders] = useState<{ providers: HomeProvider[] } | { unavailable: string } | null>(null)
+  // HM-04: the native sessions this machine can reopen in `code`, beside the fleet's rows.
+  const [native, setNative] = useState<NativeRecent[]>([])
 
   const source = useMemo(() => dashboardSource(p.status?.services), [p.status?.services])
   const { data } = useAppData(source.kind === 'api' ? source.apiBase : null, { enabled: p.isActive, nonce: p.nonce })
@@ -99,10 +101,11 @@ export function Home(p: HomeProps) {
     let alive = true
     void p.host.homeTasks?.().then(r => { if (alive) setTasks(r) }).catch(() => {})
     void p.host.homeProviders?.().then(r => { if (alive) setProviders(r) }).catch(() => {})
+    void p.host.code?.recentSessions?.(3).then(r => { if (alive && r.ok) setNative(r.sessions) }).catch(() => {})
     return () => { alive = false }
   }, [p.isActive, p.nonce, p.host])
 
-  const resume = useMemo(() => resumeRows(fleetRows, Date.now()), [fleetRows])
+  const resume = useMemo(() => resumeRows(fleetRows, Date.now(), 3, native, st => (p.lang === 'pt' ? `nativa · ${st === 'open' ? 'aberta' : st}` : `native · ${st}`)), [fleetRows, native, p.lang])
   const today = useMemo(() => (data ? todayFigures(data.sessions ?? [], fleetRows, new Date()) : null), [data, fleetRows])
 
   // The footer names only keys that work here (GL-05), most important first.
@@ -162,7 +165,10 @@ export function Home(p: HomeProps) {
   }, { isActive: p.isActive })
 
   // ── layout ──
-  const logoRows = Math.max(6, Math.min(11, p.height - 16))
+  // HM-01: the icon at full size when the frame has room, smaller as the height shrinks, and the
+  // compact mark (the same geometry at 12×6) when the terminal is too narrow for the icon beside the
+  // wordmark.
+  const logoRows = p.width < 76 ? 6 : Math.max(6, Math.min(11, p.height - 16))
   const logoCols = logoRows * 2
   const logo = useMemo(() => logoArt(LOGO_SVG, logoCols, logoRows), [logoCols, logoRows])
   const infoW = Math.max(10, p.width - logoCols - (layout.narrow ? 3 : 12))

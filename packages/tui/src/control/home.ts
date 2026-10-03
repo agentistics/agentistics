@@ -137,23 +137,41 @@ export interface ResumeRow {
  * then closed ones that can be reopened. A row with no way back (`unknown` — agentop did not start it)
  * is left out: a numbered shortcut to "cannot open that" is not a resume.
  */
-export function resumeRows(fleet: readonly ControlSession[], now: number, max = 3): ResumeRow[] {
+/** A native session the code host can reopen (engine-api 1.8 `CodeRecentSession`). */
+export interface NativeRecent { sessionId: string; title: string; task?: string; updatedAt: string; status: string }
+
+export function resumeRows(
+  fleet: readonly ControlSession[],
+  now: number,
+  max = 3,
+  native: readonly NativeRecent[] = [],
+  nativeLabel: (status: string) => string = s => `native · ${s}`,
+): ResumeRow[] {
   const resumable = fleet.filter(f => f.state !== 'unknown' && f.state !== 'lost' && (f.state !== 'closed' || f.resume))
   const when = (f: ControlSession) => f.endedAt ?? f.startedAt ?? 0
-  const live = (f: ControlSession) => (LIVE.has(f.state) ? 1 : 0)
-  return [...resumable]
-    .sort((a, b) => live(b) - live(a) || when(b) - when(a))
+  const rows: (ResumeRow & { at: number; live: number })[] = resumable.map(f => ({
+    id: f.id,
+    title: f.title,
+    ...(f.cost ? { cost: f.cost } : {}),
+    ...(f.task ? { task: f.task } : {}),
+    age: ageOf(when(f), now),
+    state: f.state,
+    stateLabel: f.stateLabel,
+    native: f.harness === 'agentistics',
+    at: when(f),
+    live: LIVE.has(f.state) ? 1 : 0,
+  }))
+  for (const n of native) {
+    const at = Date.parse(n.updatedAt) || 0
+    rows.push({
+      id: n.sessionId, title: n.title, ...(n.task ? { task: n.task } : {}), age: ageOf(at, now),
+      state: n.status === 'open' ? 'waiting' : 'closed', stateLabel: nativeLabel(n.status), native: true, at, live: 0,
+    })
+  }
+  return rows
+    .sort((a, b) => b.live - a.live || b.at - a.at)
     .slice(0, max)
-    .map(f => ({
-      id: f.id,
-      title: f.title,
-      ...(f.cost ? { cost: f.cost } : {}),
-      ...(f.task ? { task: f.task } : {}),
-      age: ageOf(when(f), now),
-      state: f.state,
-      stateLabel: f.stateLabel,
-      native: f.harness === 'agentistics',
-    }))
+    .map(({ at: _at, live: _live, ...r }) => r)
 }
 
 // ── your tasks (HM-05) ────────────────────────────────────────────────────────────────────────────

@@ -65,6 +65,19 @@ describe('resume (HM-04)', () => {
   })
 })
 
+describe('resume merges the native sessions (HM-04)', () => {
+  test('running fleet rows first, then native and closed rows by recency; a native row opens in code', () => {
+    const now = NOW.getTime()
+    const rows = resumeRows(
+      [row('work', 'working', { startedAt: now - 9e6 }), row('old', 'closed', { endedAt: now - 7e6, resume: { sessionId: 's', title: 't' } })],
+      now, 3,
+      [{ sessionId: 'ses_a', title: 'Parser fix', task: 't-0539 Parser', updatedAt: new Date(now - 6e4).toISOString(), status: 'open' }],
+    )
+    expect(rows.map(r => [r.id, r.native])).toEqual([['work', false], ['ses_a', true], ['old', false]])
+    expect(rows[1]).toMatchObject({ task: 't-0539 Parser', age: '1m', stateLabel: 'native · open' })
+  })
+})
+
 describe('glyphs, ages, machine line', () => {
   test('status glyphs by the board vocabulary', () => {
     expect(statusGlyph('in_progress').glyph).toBe('◐')

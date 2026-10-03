@@ -267,6 +267,18 @@ export interface CodeHistoryTurn {
   tools: { name: string; verb: string; target: string }[]
 }
 
+/** HM-04: one native session the home's resume card can reopen in the `code` tab. */
+export interface CodeRecentSession {
+  sessionId: string
+  title: string
+  /** The task it is filed under, by its short handle and title, when it is filed. */
+  task?: string
+  /** Last activity (ISO). */
+  updatedAt: string
+  status: string
+  model: string
+}
+
 export interface CodePlanItem {
   text: string
   status: 'done' | 'active' | 'todo'
@@ -331,6 +343,11 @@ export interface CodeTabHost {
    * returns, and emits `mode` (and `rules` when the switch dropped any) to the session's readers.
    */
   cycleMode(sessionId: string): CodeResult<{ mode: CodeModeId; sentence: string }>
+  /**
+   * HM-04: this machine's most recent native sessions, newest activity first — what the home's
+   * resume card offers next to the fleet's rows. Optional: a host without it lists none.
+   */
+  recentSessions?(limit: number): Promise<CodeResult<{ sessions: CodeRecentSession[] }>>
   /** CD-18: this machine's earlier prompts, newest first, identical texts once (the newest kept). */
   promptHistory(): Promise<CodeResult<{ prompts: CodePromptRecord[] }>>
   /**

@@ -3047,6 +3047,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      */
     async homeProviders() {
       const pt = S().lang === 'pt'
+      type ProviderBody = { enabled?: boolean; sentence?: string; providers?: { id: string; label: string; state: string; keyless?: boolean; last4?: string; storedAt?: string }[] }
+      // The SERVICE first: provider keys are sealed in the vault, and the vault opens only inside the
+      // running agentop service — this process can read who is configured only by asking it. Without
+      // a service, the engine in this process answers (keyless endpoints still read as configured).
+      const fromService = await fetch(`http://127.0.0.1:${PORT}/api/provider`, { signal: AbortSignal.timeout(1500) })
+        .then(r => (r.ok ? r.json() as Promise<ProviderBody> : null)).catch(() => null)
+      if (fromService) {
+        if (fromService.enabled === false) return { unavailable: fromService.sentence ?? (pt ? 'O runtime nativo está desligado (BETA).' : 'The native runtime is off (BETA).') }
+        const providers = (fromService.providers ?? [])
+          .filter(p => p.state === 'present')
+          .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
+        return providers.length > 0
+          ? { providers }
+          : { unavailable: pt ? 'Nenhum provedor configurado — ctrl+, para adicionar.' : 'No provider configured — ctrl+, adds one.' }
+      }
       try {
         const { loadEngine, engine } = await import('./engine/load')
         await loadEngine()
