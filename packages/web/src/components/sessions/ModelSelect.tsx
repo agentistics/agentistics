@@ -42,9 +42,11 @@ export interface ModelSelectProps {
   unsetLabel: string
   /** Also accept a typed id — true only where the list is the incomplete fallback table. */
   freeText?: boolean
+  /** The trigger's accessible name, when the list is not models (the native wizard's provider). */
+  ariaLabel?: string
 }
 
-export function ModelSelect({ lang, open, onOpenChange, value, onChange, options, unsetLabel, freeText }: ModelSelectProps) {
+export function ModelSelect({ lang, open, onOpenChange, value, onChange, options, unsetLabel, freeText, ariaLabel }: ModelSelectProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -117,7 +119,7 @@ export function ModelSelect({ lang, open, onOpenChange, value, onChange, options
       {open && (
         <div
           role="listbox"
-          aria-label={pt ? 'Modelo' : 'Model'}
+          aria-label={ariaLabel ?? (pt ? 'Modelo' : 'Model')}
           style={{
             position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 10,
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',

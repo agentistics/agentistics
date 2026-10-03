@@ -146,3 +146,77 @@ describe('nativeChatReducer + nativeChatItems — the conversation', () => {
     expect(needsWindowRefresh(ev(1, 'policy.requested'))).toBe(false)
   })
 })
+
+describe('across runs (e2e findings)', () => {
+  const firstRun = windowWith([
+    { seq: 1, message: { role: 'user', content: 'go' } },
+    { seq: 2, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'shell__start', input: { command: 'make' } }] } },
+    { seq: 3, message: { role: 'user', content: [{ type: 'tool_result', toolUseId: 'tu1', content: 'ok' }] } },
+    { seq: 4, message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } },
+  ], { runId: RUN, status: 'completed', toolCalls: [{ toolExecutionId: TX, toolUseId: 'tu1', name: 'shell.start', state: 'settled' }] })
+
+  test('an earlier run’s call is never a ghost card, and keeps its facts, once a newer run is the latest', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: firstRun },
+      { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: ev(2, 'tool.requested', { toolExecutionId: TX, name: 'shell.start' }) },
+      { type: 'frame', frame: ev(3, 'tool.completed', { toolExecutionId: TX, exitCode: 0, durationMs: 630 }) },
+      { type: 'frame', frame: ev(4, 'run.ended', { status: 'completed' }) })
+    s = apply(s, { type: 'frame', frame: { kind: 'event', seq: 5, event: { type: 'run.started', runId: 'run_2', data: {} } } },
+      { type: 'window', window: { ...firstRun, messages: [...firstRun.messages, { seq: 5, message: { role: 'user', content: 'again' } }], latestRun: { runId: 'run_2', status: 'running', toolCalls: [] } } })
+    const tools = nativeChatItems(s).filter(i => i.kind === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ card: { status: 'completed', exitCode: 0, durationMs: 630 } })
+  })
+
+  test('a stopped answer keeps what was written, marked as stopped, until the next run', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([{ seq: 1, message: { role: 'user', content: 'long' } }]) },
+      { type: 'frame', frame: ev(1, 'run.started') }, { type: 'frame', frame: ev(2, 'model.invoked') },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, text: 'word1 word2' } },
+      { type: 'frame', frame: ev(4, 'run.ended', { status: 'abandoned' }) })
+    expect(s.running).toBe(false)
+    expect(nativeChatItems(s).at(-1)).toMatchObject({ kind: 'turn', key: 'stopped', stopped: true, turn: { role: 'assistant', text: 'word1 word2' } })
+    s = apply(s, { type: 'frame', frame: { kind: 'event', seq: 5, event: { type: 'run.started', runId: 'run_3', data: {} } } })
+    expect(nativeChatItems(s).some(i => i.key === 'stopped')).toBe(false)
+  })
+})
+
+describe('the live text and a stale window (e2e finding: a refresh landing after model.invoked)', () => {
+  test('a late window carrying the PREVIOUS answer does not hide the answer being streamed now', () => {
+    const before = windowWith([
+      { seq: 1, message: { role: 'user', content: 'first' } },
+      { seq: 2, message: { role: 'assistant', content: [{ type: 'text', text: 'one' }] } },
+      { seq: 3, message: { role: 'user', content: 'second' } },
+    ])
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: before },
+      { type: 'frame', frame: ev(1, 'run.started') }, { type: 'frame', frame: ev(2, 'model.invoked') },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, text: 'word1 word2' } })
+    // the refresh scheduled by the previous run lands now, with an older answer appended
+    s = apply(s, { type: 'window', window: { ...before, messages: [...before.messages, { seq: 4, message: { role: 'assistant', content: [{ type: 'text', text: 'late previous answer' }] } }] } })
+    expect(nativeChatItems(s).at(-1)).toMatchObject({ kind: 'turn', key: 'live', turn: { text: 'word1 word2' } })
+  })
+})
+
+describe('a stream joined mid-answer (e2e finding: the wizard sends before the page connects)', () => {
+  test('the partial live text gives way to the persisted message that contains it — no duplicate', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([{ seq: 1, message: { role: 'user', content: 'go' } }]) },
+      { type: 'frame', frame: { kind: 'delta', seq: 7, text: 'the file with a shell command.' } })
+    s = apply(s, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'go' } },
+      { seq: 2, message: { role: 'assistant', content: [{ type: 'text', text: 'I will create the file with a shell command.' }] } },
+    ]) })
+    expect(nativeChatItems(s).filter(i => i.kind === 'turn' && i.turn.role === 'assistant')).toHaveLength(1)
+  })
+})
+
+describe('running, when the stream joined after run.started (e2e finding)', () => {
+  test('the window’s running run makes the session running (Stop shows); the window seeing it end stops it', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([]) },
+      { type: 'frame', frame: { kind: 'delta', seq: 9, text: 'x' } })
+    expect(s.running).toBe(false)
+    s = apply(s, { type: 'window', window: windowWith([], { runId: 'run_7', status: 'running', toolCalls: [] }) })
+    expect(s.running).toBe(true)
+    expect(s.runId).toBe('run_7')
+    s = apply(s, { type: 'window', window: windowWith([], { runId: 'run_7', status: 'completed', toolCalls: [] }) })
+    expect(s.running).toBe(false)
+  })
+})

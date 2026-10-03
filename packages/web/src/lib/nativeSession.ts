@@ -58,9 +58,13 @@ export interface ProviderChoice {
   label: string
 }
 
-/** Providers a native session can run on now: a usable stored credential, or keyless (local). */
+/**
+ * Providers a native session can run on now — the engine's own rule (`defaultCheckCredential`): a
+ * usable stored credential, a record stored keyless, or Ollama, the one local endpoint that never
+ * needs one.
+ */
 export function configuredProviders(list: readonly { id: string; label: string; state: string; keyless?: boolean }[]): ProviderChoice[] {
-  return list.filter(p => p.state === 'present' || p.keyless === true).map(p => ({ id: p.id, label: p.label }))
+  return list.filter(p => p.state === 'present' || p.keyless === true || p.id === 'ollama').map(p => ({ id: p.id, label: p.label }))
 }
 
 const base = (id: string) => `/api/runtime/sessions/${encodeURIComponent(id)}`

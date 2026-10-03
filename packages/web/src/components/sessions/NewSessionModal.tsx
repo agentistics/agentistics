@@ -306,7 +306,9 @@ export function NewSessionModal({
 
   // WHAT HAPPENS IF YOU LEAVE IT ALONE — named where the CLI publishes it, vague where it does not.
   // See `unsetText`'s own note, shared with `StagedSessionCompose`.
-  const modelUnset = unsetText(harness?.defaultModel, pt)
+  // The native harness REQUIRES a model (the engine has no default to fall back on): its unset row is
+  // a request, not a description of a default.
+  const modelUnset = isNative ? (pt ? 'Escolha um modelo' : 'Choose a model') : unsetText(harness?.defaultModel, pt)
   const effortUnset = unsetText(harness?.defaultEffort, pt)
 
   const STEP_TITLE: Record<StepId, string> = {
@@ -778,6 +780,7 @@ export function NewSessionModal({
                 onOpenChange={setProviderOpen}
                 value={nativeProvider}
                 onChange={id => { setNativeProvider(id); setModel('') }}
+                ariaLabel={pt ? 'Provedor' : 'Provider'}
                 options={nativeOptions.providers ?? []}
                 unsetLabel={nativeOptions.providers === null ? (pt ? 'Carregando…' : 'Loading…') : (pt ? 'Nenhum' : 'None')}
               />
@@ -791,7 +794,7 @@ export function NewSessionModal({
               used. An absent picker says "we cannot name these for you"; a one-option one says
               nothing at all. */}
           {visibleQuestions(wizardHarness).model && (
-            <Field label={pt ? 'Modelo (opcional)' : 'Model (optional)'}>
+            <Field label={wizardHarness?.modelRequired ? (pt ? 'Modelo' : 'Model') : (pt ? 'Modelo (opcional)' : 'Model (optional)')}>
               {/* CLOSED where the list is the CLI's own set; it takes a typed id only where the
                   list is the server's fallback table, which cannot name every id the CLI accepts
                   (see `ModelSelect`'s header and `server/model-catalog.ts`).

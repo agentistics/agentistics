@@ -71,8 +71,11 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
       <div
         ref={scrollRef}
         onScroll={e => { const el = e.currentTarget; atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 14px' }}
       >
+        {/* The same 820 px column `SessionChat` centres its bubbles and composer in — on a wide screen
+            it also keeps the composer clear of the Nay button in the corner. */}
+        <div style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
         {state.window === null && !loadError && (
           <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)', fontSize: 12.5 }}>
             <Loader size={14} className="ag-working-spin" /> {pt ? 'Abrindo a sessão…' : 'Opening the session…'}
@@ -85,9 +88,20 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
         )}
         {items.map(i => {
           if (i.kind === 'turn') {
-            return <ChatBubble key={i.key} turn={i.turn} lang={lang} harness={NATIVE_HARNESS_ID}
-              {...(i.key === 'live' ? { provisional: true } : {})}
+            // The live text is NOT `provisional`: that is the fleet's "read from the screen" scrape. Here
+            // it is the model's own stream, and it gives way to the persisted message (lib/nativeChat).
+            const bubble = <ChatBubble key={i.key} turn={i.turn} lang={lang} harness={NATIVE_HARNESS_ID}
               {...(i.turn.role === 'user' && i.turn.pending ? { awaiting: true, awaitingWorking: state.running } : {})} />
+            if (!i.stopped) return bubble
+            return (
+              <div key={i.key} data-testid="stopped-answer" style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                {bubble}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 4 }}>
+                  <Square size={9} fill="currentColor" />
+                  {pt ? 'Parada por você — a resposta acima ficou incompleta.' : 'Stopped by you — the answer above is incomplete.'}
+                </span>
+              </div>
+            )
           }
           if (i.kind === 'tool') {
             return (
@@ -100,15 +114,16 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
           return <NativeApprovalCard key={i.key} ask={i.ask} lang={lang} onAnswer={a => answer(i.ask.questionId, a)} />
         })}
         {showWorking && <WorkingNote lang={lang} {...(runningTools.length > 0 ? { tools: runningTools } : {})} />}
+        </div>
       </div>
 
       {shownNotice && (
-        <div role="alert" style={{ margin: '0 14px 8px', padding: '8px 10px', borderRadius: 9, background: 'var(--accent-red-dim, rgba(239,68,68,0.12))', color: 'var(--accent-red)', fontSize: 12.5, overflowWrap: 'anywhere' }}>
+        <div role="alert" style={{ maxWidth: 820, width: 'calc(100% - 28px)', boxSizing: 'border-box', margin: '0 auto 8px', padding: '8px 10px', borderRadius: 9, background: 'var(--accent-red-dim, rgba(239,68,68,0.12))', color: 'var(--accent-red)', fontSize: 12.5, overflowWrap: 'anywhere' }}>
           {shownNotice}
         </div>
       )}
 
-      <div style={{ padding: '0 12px 12px' }}>
+      <div style={{ padding: '0 12px 12px', maxWidth: 844, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
         <ComposerShell dimmed={state.closed}>
           <textarea
             value={draft}

@@ -91,6 +91,8 @@ export function parseNativeFrame(raw: string): NativeFrame | null {
 export type ToolStatus = 'running' | 'awaiting' | 'completed' | 'failed' | 'denied' | 'cancelled'
 
 interface LiveCall {
+  /** The run the call belongs to — only the CURRENT run's unmatched calls are drawn from events. */
+  runId?: string
   name: string
   status: ToolStatus
   exitCode?: number
@@ -106,9 +108,11 @@ export interface NativeChatState {
   runId?: string
   /** Text streamed by the model call in flight. */
   liveText: string
-  /** How many assistant messages the window held when that call started (see `nativeChatItems`). */
-  liveBase: number
   calls: Record<string, LiveCall>
+  /** toolUseId → toolExecutionId, ACCUMULATED from every window read (each names only its latest run). */
+  execByUse: Record<string, string>
+  /** What a STOPPED call had streamed — never persisted (the call was aborted), shown until the next run. */
+  stopped?: string
   /** Open questions, by id. */
   asks: Record<string, NativeQuestion>
   pending: { clientRef: string; text: string }[]
@@ -118,7 +122,7 @@ export interface NativeChatState {
 }
 
 export const INITIAL_NATIVE_CHAT: NativeChatState = {
-  window: null, lastSeq: null, running: false, liveText: '', liveBase: 0, calls: {}, asks: {}, pending: [], closed: false,
+  window: null, lastSeq: null, running: false, liveText: '', calls: {}, execByUse: {}, asks: {}, pending: [], closed: false,
 }
 
 export type NativeChatAction =
@@ -128,7 +132,24 @@ export type NativeChatAction =
   | { type: 'send-failed'; clientRef: string; sentence: string }
   | { type: 'notice'; sentence: string | undefined }
 
-const assistantCount = (w: NativeWindow | null) => (w ? w.messages.filter(m => m.message.role === 'assistant').length : 0)
+/** The text of the window's LAST assistant message — what the streamed text becomes once persisted. */
+function lastAssistantText(w: NativeWindow | null): string {
+  const m = w?.messages.filter(x => x.message.role === 'assistant').at(-1)?.message
+  if (!m) return ''
+  return typeof m.content === 'string' ? m.content : m.content.flatMap(p => (p.type === 'text' ? [p.text] : [])).join('\n\n')
+}
+
+/**
+ * Has the window caught up with the streamed text? By CONTENT, not by counting messages: a window read
+ * scheduled by an earlier frame can land after this call started, carrying an older answer — a count
+ * would then hide the text being written now.
+ */
+function persisted(w: NativeWindow | null, live: string): boolean {
+  const t = live.trim()
+  // CONTAINS, not starts-with: a stream joined mid-answer (the first message is sent before the page
+  // has connected) holds only the tail of what the model wrote.
+  return t !== '' && lastAssistantText(w).includes(t)
+}
 const userText = (m: NativeMessage) => (typeof m.content === 'string' ? m.content : m.content.flatMap(p => (p.type === 'text' ? [p.text] : [])).join('\n'))
 
 const TERMINAL: Record<string, ToolStatus> = {
@@ -154,15 +175,21 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   const { type, runId, data = {} } = f.event
   const tx = typeof data.toolExecutionId === 'string' ? data.toolExecutionId : undefined
   switch (type) {
-    case 'run.started':
-      return { ...next, running: true, ...(runId ? { runId } : {}), liveText: '', liveBase: assistantCount(next.window) }
-    case 'run.ended':
-      return { ...next, running: false, liveText: '', asks: {} }
+    case 'run.started': {
+      const { stopped: _s, ...rest } = next
+      return { ...rest, running: true, ...(runId ? { runId } : {}), liveText: '' }
+    }
+    case 'run.ended': {
+      // A stopped call persisted nothing (it was aborted mid-answer): keep what it had written, so the
+      // person sees where it stopped rather than the text vanishing.
+      const cut = data.status === 'abandoned' && next.liveText !== '' && !persisted(next.window, next.liveText)
+      return { ...next, running: false, liveText: '', asks: {}, ...(cut ? { stopped: next.liveText } : {}) }
+    }
     case 'model.invoked':
-      return { ...next, liveText: '', liveBase: assistantCount(next.window) }
+      return { ...next, liveText: '' }
     case 'tool.requested':
       if (!tx) return next
-      return { ...next, calls: { ...next.calls, [tx]: { name: String(data.name ?? data.canonicalName ?? 'tool'), status: 'running' } } }
+      return { ...next, calls: { ...next.calls, [tx]: { ...(runId ? { runId } : {}), name: String(data.name ?? data.canonicalName ?? 'tool'), status: 'running' } } }
     case 'tool.completed':
     case 'tool.failed':
     case 'tool.denied': {
@@ -203,13 +230,19 @@ export function nativeChatReducer(s: NativeChatState, a: NativeChatAction): Nati
         return false
       })
       const runningFromWindow = lr?.status === 'running'
+      const execByUse = { ...s.execByUse }
+      for (const c of lr?.toolCalls ?? []) execByUse[c.toolUseId] = c.toolExecutionId
+      // Running or not: a run the window says is RUNNING is running (the page may have joined the stream
+      // after its run.started — the wizard sends the first message before the page connects); the
+      // window seeing THAT run finished ends it (a run.ended lost to a gap); otherwise the stream decides.
+      const running = runningFromWindow ? true : lr && lr.runId === s.runId ? false : s.lastSeq === null ? false : s.running
       return {
         ...s,
         window: w,
+        execByUse,
         pending,
-        // the stream decides while it is live; the window decides on a cold open (a reload mid-run)
-        running: s.lastSeq === null ? runningFromWindow : s.running,
-        ...(lr && (s.runId === undefined || s.lastSeq === null) ? { runId: lr.runId } : {}),
+        running,
+        ...(lr && (runningFromWindow || s.runId === undefined || s.lastSeq === null) ? { runId: lr.runId } : {}),
       }
     }
     case 'sent':
@@ -260,7 +293,7 @@ export interface ToolCard {
 }
 
 export type NativeChatItem =
-  | { kind: 'turn'; key: string; turn: ChatTurn }
+  | { kind: 'turn'; key: string; turn: ChatTurn; stopped?: boolean }
   | { kind: 'tool'; key: string; card: ToolCard }
   | { kind: 'approval'; key: string; ask: NativeAsk }
 
@@ -300,8 +333,7 @@ function toAsk(q: NativeQuestion): NativeAsk {
 export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
   const items: NativeChatItem[] = []
   const w = s.window
-  const execByUse = new Map<string, string>()
-  for (const c of w?.latestRun?.toolCalls ?? []) execByUse.set(c.toolUseId, c.toolExecutionId)
+  const execByUse = new Map<string, string>(Object.entries(s.execByUse))
   const results = new Map<string, { content: string; isError?: boolean }>()
   for (const m of w?.messages ?? []) {
     if (typeof m.message.content === 'string') continue
@@ -344,6 +376,7 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
       const res = results.get(p.id)
       const ask = askFor(tx)
       const ref = w?.latestRun?.toolCalls.find(c => c.toolUseId === p.id)
+      const knownName = ref?.name ?? (tx ? s.calls[tx]?.name : undefined)
       const status: ToolStatus = ask ? 'awaiting'
         : live && live.status !== 'running' ? live.status
           : res ? (res.isError ? 'failed' : 'completed')
@@ -352,7 +385,7 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
       items.push({
         kind: 'tool', key: `t${p.id}`,
         card: {
-          key: p.id, name: ref?.name ?? canonical(p.name), status,
+          key: p.id, name: knownName ?? canonical(p.name), status,
           ...(detail ? { detail } : {}),
           ...(res ? { result: res.content } : {}),
           ...(res?.isError ? { isError: true } : {}),
@@ -366,16 +399,20 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
     flush(msg.content.length)
   }
 
-  // Calls the window has not caught up with: cards from their events.
+  // Calls of the CURRENT run the window has not caught up with: cards from their events. A call of an
+  // earlier run is in the window by now; drawing it again from its events would be a ghost.
   for (const [tx, c] of Object.entries(s.calls)) {
     if (seenTx.has(tx)) continue
+    if (c.runId !== undefined && s.runId !== undefined && c.runId !== s.runId) continue
     const ask = askFor(tx)
     items.push({ kind: 'tool', key: `x${tx}`, card: { key: tx, name: c.name, status: ask ? 'awaiting' : c.status, toolExecutionId: tx, ...(ask ? { ask } : {}) } })
   }
 
   for (const p of s.pending) items.push({ kind: 'turn', key: `pending:${p.clientRef}`, turn: { role: 'user', text: p.text, pending: true } })
 
-  if (s.liveText !== '' && assistantCount(w) <= s.liveBase) {
+  if (s.stopped !== undefined) items.push({ kind: 'turn', key: 'stopped', stopped: true, turn: { role: 'assistant', text: s.stopped } })
+
+  if (s.liveText !== '' && !persisted(w, s.liveText)) {
     items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: s.liveText, pending: true } })
   }
 

@@ -56,10 +56,11 @@ describe('the native harness in the wizard', () => {
     const list = [
       { id: 'anthropic', label: 'Anthropic', state: 'present' },
       { id: 'openai', label: 'OpenAI', state: 'absent' },
-      { id: 'ollama', label: 'Ollama', state: 'absent', keyless: true },
+      { id: 'ollama', label: 'Ollama', state: 'absent' },
+      { id: 'litellm', label: 'LiteLLM', state: 'absent', keyless: true },
       { id: 'deepseek', label: 'DeepSeek', state: 'unreadable' },
     ]
-    expect(configuredProviders(list).map(p => p.id)).toEqual(['anthropic', 'ollama'])
+    expect(configuredProviders(list).map(p => p.id)).toEqual(['anthropic', 'ollama', 'litellm'])
   })
 })
 
