@@ -10,12 +10,12 @@
  * 30 seconds too.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, Vault as VaultIcon } from 'lucide-react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, Vault as VaultIcon, X } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Err, card, input, overlay, primaryBtn, dangerBtn } from '../components/MfaSetup'
-import { cleanCode, codeComplete, loadVault, type Reply } from '../lib/vaultApi'
+import { cleanCode, codeComplete, loadVault, vaultPost, type Reply } from '../lib/vaultApi'
 import { resolvePaging } from '../components/team/tablePaging'
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
@@ -31,24 +31,14 @@ import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../li
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
 
-export default function VaultPage() {
-  const ctx = useOutletContext<AppContext>()
-  const lang: Lang = ctx.lang === 'pt' ? 'pt' : 'en'
-  const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
-  const isMobile = useIsMobile()
-
+/**
+ * The page's state, its load and its `gated` runner — shared by the page and the FAB's quick panel
+ * (`QuickVault`), so the two can never disagree about what a reveal asks or how a locked vault opens.
+ */
+export function usePersonalVault() {
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [items, setItems] = useState<PersonalMeta[]>([])
   const [groups, setGroups] = useState<PersonalGroup[]>([])
-  const [filter, setFilter] = useState<PersonalFilter>({ q: '', kind: 'all', groupId: 'all', trash: false })
-  const [qLive, setQLive] = useState('')
-  const [page, setPage] = useState(0)
-  const [size, setSize] = useState(25)
-  const [editing, setEditing] = useState<PersonalMeta | 'new' | null>(null)
-  const [versionsOf, setVersionsOf] = useState<PersonalMeta | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [groupsOpen, setGroupsOpen] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
   const [busyHello, setBusyHello] = useState(false)
   // The code dialog the gate asks for: resolved with the typed code, or null when cancelled.
   const [codeAsk, setCodeAsk] = useState<null | ((code: string | null) => void)>(null)
@@ -92,6 +82,25 @@ export default function VaultPage() {
     setState({ kind: 'failed' })
   }, [])
   useEffect(() => { void load() }, [load])
+  return { state, setState, items, setItems, groups, setGroups, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load }
+}
+
+export default function VaultPage() {
+  const ctx = useOutletContext<AppContext>()
+  const lang: Lang = ctx.lang === 'pt' ? 'pt' : 'en'
+  const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const isMobile = useIsMobile()
+
+  const [filter, setFilter] = useState<PersonalFilter>({ q: '', kind: 'all', groupId: 'all', trash: false })
+  const [qLive, setQLive] = useState('')
+  const [page, setPage] = useState(0)
+  const [size, setSize] = useState(25)
+  const [editing, setEditing] = useState<PersonalMeta | 'new' | null>(null)
+  const [versionsOf, setVersionsOf] = useState<PersonalMeta | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const { state, setState, items, setItems, groups, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load } = usePersonalVault()
 
   // Reactive search: every keystroke, debounced 120 ms; page back to 1 whenever the filter changes.
   useEffect(() => { const id = setTimeout(() => setFilter(f => ({ ...f, q: qLive })), 120); return () => clearTimeout(id) }, [qLive])
@@ -236,13 +245,98 @@ export default function VaultPage() {
   )
 }
 
+// ── the FAB's quick vault ────────────────────────────────────────────────────────────────────
+
+/**
+ * The personal vault as a quick sheet, opened from the chat button's vault icon (owner 2026-10-03):
+ * search + the list + reveal/copy, from anywhere. The SAME hook, rows and unlock as the page — a
+ * locked vault shows the shared inline unlock, a list that owes its code asks it here. Managing a
+ * secret (edit, versions, groups, trash) stays on the page, one link away.
+ */
+export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: boolean; onClose: () => void }) {
+  const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const navigate = useNavigate()
+  const { state, setState, items, setItems, groups, busyHello, codeAsk, gated, load } = usePersonalVault()
+  const [q, setQ] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
+  const kindLabel = useCallback((k: PersonalKind) => pt_(`kind_${k}` as PKey, lang), [lang])
+  const shown = useMemo(() => filterPersonal(items, groups, { q, kind: 'all', groupId: 'all', trash: false }, kindLabel), [items, groups, q, kindLabel])
+  const groupName = (id: string | null) => (id ? groups.find(g => g.id === id)?.name ?? '' : '')
+  const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
+  const btn: React.CSSProperties = {
+    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
+    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
+  }
+  // Escape closes the sheet — but not while a code dialog on top of it is the one being answered.
+  useEffect(() => {
+    if (codeAsk) return
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
+  }, [onClose, codeAsk])
+  const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
+  const c: React.CSSProperties = isMobile
+    ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
+    : { ...card, maxWidth: 560, maxHeight: '86vh', overflowY: 'auto', boxSizing: 'border-box' }
+  return (
+    <div style={o} role="dialog" aria-modal="true" aria-label={t('quickTitle')} onClick={onClose} data-quick-vault>
+      <div style={c} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span aria-hidden style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}><VaultIcon size={16} /></span>
+          <strong style={{ fontSize: 15, flex: 1 }}>{t('quickTitle')}</strong>
+          <button type="button" className="ag-tap-icon" aria-label={t('quickClose')} onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 6 }}><X size={18} /></button>
+        </div>
+        {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
+        {state.kind === 'failed' && <Err text={t('network')} />}
+        {state.kind === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
+        {state.kind === 'code' && (
+          <CodeForm lang={lang} isMobile={isMobile} prompt={t('needsCode')} error={state.error} onSubmit={async code => {
+            const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
+            if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
+            await load()
+          }} />
+        )}
+        {state.kind === 'ready' && (
+          <>
+            <label style={{ position: 'relative', display: 'block', marginBottom: 10 }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
+                style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined }} />
+            </label>
+            {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+            {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
+            {shown.length === 0
+              ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>{items.filter(i => !i.deletedAt).length === 0 ? t('empty') : t('noMatch')}</div>
+              : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {shown.map(m => (
+                    <ItemRow key={m.id} m={m} lang={lang} isMobile={isMobile} btn={btn} group={groupName(m.groupId)} groups={groups} compact
+                      gated={gated} onChanged={x => setItems(cur => [x, ...cur.filter(y => y.id !== x.id)])} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))}
+                      onFlash={flash} onEdit={() => {}} onVersions={() => {}} />
+                  ))}
+                </div>
+              )}
+          </>
+        )}
+        <button type="button" style={{ ...btn, marginTop: 14, background: 'transparent' }} onClick={() => { onClose(); navigate('/vault') }}>
+          <VaultIcon size={14} /> {t('quickAll')}
+        </button>
+      </div>
+      {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
+    </div>
+  )
+}
+
 type Gated = <T>(run: (code?: string, token?: string) => Promise<Reply<T>>, gesture: false | { action: string; target: string }) => Promise<Reply<T>>
 
 // ── one row ──────────────────────────────────────────────────────────────────────────────────
 
-function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRemoved, onFlash, onEdit, onVersions }: {
+function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRemoved, onFlash, onEdit, onVersions, compact = false }: {
   m: PersonalMeta; lang: Lang; isMobile: boolean; btn: React.CSSProperties; group: string; groups: PersonalGroup[]; gated: Gated
   onChanged: (m: PersonalMeta) => void; onRemoved: (id: string) => void; onFlash: (s: string) => void; onEdit: () => void; onVersions: () => void
+  /** The quick panel: reveal and copy only — managing a secret is the page's job. */
+  compact?: boolean
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   // field → value, for 30 s after a reveal; dropped on unmount.
@@ -312,7 +406,7 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+      {!compact && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
         {!trashed && <button type="button" style={btn} onClick={onEdit}><Pencil size={13} /> {t('edit')}</button>}
         {!trashed && <button type="button" style={btn} onClick={onVersions}><History size={13} /> {t('versions')}</button>}
         {!trashed && (
@@ -325,7 +419,7 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
         {!trashed && <button type="button" style={btn} onClick={() => { void act('trash') }}><Trash2 size={13} /> {t('delete')}</button>}
         {trashed && <button type="button" style={btn} onClick={() => { void act('restore') }}><RotateCcw size={13} /> {t('restore')}</button>}
         {trashed && <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => { void act('purge') }}><Trash2 size={13} /> {t('purge')}</button>}
-      </div>
+      </div>}
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
     </div>
   )

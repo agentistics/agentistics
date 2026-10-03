@@ -139,6 +139,11 @@ export const PERSONAL_TEXT = {
   phoneStale: { en: '{n} phone key(s) stopped working when the vault changed its key; those phones must be approved again.', pt: '{n} chave(s) de celular pararam de funcionar quando o cofre trocou de chave; esses celulares precisam ser aprovados de novo.' },
   phoneStaleClear: { en: 'Clear them', pt: 'Limpar' },
   phonePasskeys: { en: 'Phones with biometrics', pt: 'Celulares com digital' },
+  // The FAB's quick vault (right-click / long-press on the chat button).
+  fabOpen: { en: 'Open the vault', pt: 'Abrir o cofre' },
+  quickTitle: { en: 'Vault', pt: 'Cofre' },
+  quickAll: { en: 'Open the Vault page', pt: 'Abrir a página do Cofre' },
+  quickClose: { en: 'Close', pt: 'Fechar' },
 
 } as const satisfies Record<string, Pair>
 
