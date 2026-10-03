@@ -97,13 +97,63 @@ export function wslTaskName(distro: string): string {
   return `Agentistics autostart (${distro})`
 }
 
-/** The command the task runs: boots the distro and, with it, its systemd. */
+/** Where the keep-alive's lock lives inside the distro: a second instance finds it held and exits. */
+export const KEEPALIVE_LOCK = '/tmp/agentop-keepalive.lock'
+
+/**
+ * The command the task runs: it boots the distro AND KEEPS IT BOOTED.
+ *
+ * The task used to run `wsl.exe … --exec /bin/true`, which exits at once — and WSL stops a distro
+ * once no client process remains, taking the systemd user service with it. So agentop was only
+ * reachable while somebody had a terminal open (the owner's company PC, v2.98.0). The keep-alive is
+ * a `sleep infinity` held under `flock -n`: a lightweight process that never ends, started HIDDEN
+ * (PowerShell `Start-Process -WindowStyle Hidden`), and idempotent — a second logon, or the repair
+ * re-registering the task, finds the lock held and the new copy exits immediately, so exactly one
+ * instance ever runs. The distro name was validated against a closed alphabet before it gets here.
+ */
 export function wslTaskCommand(distro: string): string {
-  return `wsl.exe -d ${distro} --exec /bin/true`
+  const args = ['-d', distro, '--exec', '/usr/bin/flock', '-n', KEEPALIVE_LOCK, '/bin/sleep', 'infinity']
+    .map(a => `'${a}'`).join(',')
+  return `powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList ${args}"`
+}
+
+/** Does a registered task still run the OLD one-shot `/bin/true`? Anything without the keep-alive is stale. */
+export function wslTaskIsStale(verboseQuery: string): boolean {
+  return !/sleep/.test(verboseQuery) || !/infinity/.test(verboseQuery)
+}
+
+export type AutostartRepair =
+  | { action: 'none'; why: string }
+  | { action: 'enable'; line: string }
+  | { action: 'refresh-task'; line: string }
+
+/**
+ * What `agentop upgrade` should do about autostart on WSL. Only WSL (elsewhere nothing here applies),
+ * and never silently: a repair carries the ONE plain line the user is shown.
+ *  - nothing installed at all (an upgraded machine WSL.1 never ran on) → enable it;
+ *  - the unit is there but the logon task is missing or still the one-shot → re-register the task;
+ *  - everything current → leave it alone.
+ */
+export function autostartRepairPlan(f: {
+  wsl: boolean
+  unitEnabled: boolean
+  /** `null` = schtasks.exe could not be queried (no interop): do not guess. */
+  taskPresent: boolean | null
+  taskStale: boolean
+}): AutostartRepair {
+  if (!f.wsl) return { action: 'none', why: 'not WSL' }
+  if (!f.unitEnabled) {
+    return { action: 'enable', line: 'Autostart was not set up on this WSL machine — enabled it, so agentop is reachable without opening a terminal.' }
+  }
+  if (f.taskPresent === null) return { action: 'none', why: 'logon task could not be queried' }
+  if (!f.taskPresent || f.taskStale) {
+    return { action: 'refresh-task', line: 'Updated the Windows logon task so WSL stays running — agentop is reachable without opening a terminal.' }
+  }
+  return { action: 'none', why: 'autostart is current' }
 }
 
 export type WslTaskPlan =
-  | { ok: true; name: string; create: string[]; remove: string[]; query: string[] }
+  | { ok: true; name: string; create: string[]; remove: string[]; query: string[]; queryVerbose: string[] }
   | { ok: false; reason: string }
 
 /**
@@ -127,6 +177,7 @@ export function wslTaskPlan(distro: string | undefined): WslTaskPlan {
     create: ['schtasks.exe', '/Create', '/F', '/SC', 'ONLOGON', '/RL', 'LIMITED', '/TN', name, '/TR', wslTaskCommand(distro)],
     remove: ['schtasks.exe', '/Delete', '/F', '/TN', name],
     query: ['schtasks.exe', '/Query', '/TN', name],
+    queryVerbose: ['schtasks.exe', '/Query', '/V', '/FO', 'LIST', '/TN', name],
   }
 }
 

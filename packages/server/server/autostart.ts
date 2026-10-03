@@ -24,7 +24,7 @@ import { PORT } from './config'
 import { isWSL } from './wsl-ports-io'
 import {
   formatStatusLines, lingerOutcome, lingerPlan, parseLinger, portHeldVerdict, statusLines,
-  wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome, type BusFacts,
+  autostartRepairPlan, wslTaskCreateOutcome, wslTaskIsStale, wslTaskPlan, wslTaskRemoveOutcome, type BusFacts,
 } from './autostart-plan'
 import { cliStrings, type CliStrings } from './cli-i18n'
 import { resolveLang } from './cli-lang'
@@ -952,6 +952,34 @@ export async function autostartStatus(mode?: AutostartMode): Promise<AutostartRe
     })))
   }
   return { ok: true, message: lines.join('\n') }
+}
+
+/**
+ * `agentop upgrade`'s autostart check on WSL: repair what is missing or stale, say so in ONE line.
+ * Returns '' when nothing was needed or this is not WSL. The decision is the pure
+ * `autostartRepairPlan`; this only gathers its facts and executes the answer.
+ */
+export async function repairWslAutostart(): Promise<string> {
+  if (platform() !== 'linux' || !isWSL()) return ''
+  const task = wslTaskPlan(wslDistro())
+  if (!task.ok) return ''
+  const enabled = await run(['systemctl', '--user', 'is-enabled', 'agentop-server'])
+  const unitEnabled = enabled.stdout.trim().startsWith('enabled') || enabled.stdout.trim().startsWith('linked')
+  let taskPresent: boolean | null = null
+  let taskStale = false
+  if (unitEnabled) {
+    const q = await run(task.queryVerbose)
+    taskPresent = q.code === 0 ? true : q.code === 127 ? null : false
+    taskStale = q.code === 0 && wslTaskIsStale(q.stdout)
+  }
+  const plan = autostartRepairPlan({ wsl: true, unitEnabled, taskPresent, taskStale })
+  if (plan.action === 'none') return ''
+  if (plan.action === 'enable') {
+    const r = await enableAutostart('server')
+    return r.ok ? plan.line : `Could not enable autostart on WSL: ${r.message.split('\n').pop()}`
+  }
+  const res = await run(task.create)
+  return wslTaskCreateOutcome(task.name, res.code, res.stderr).ok ? plan.line : `Could not update the Windows logon task: ${res.stderr || `exit ${res.code}`}`
 }
 
 /** Type guard used by the cli to validate the user-supplied mode. */
