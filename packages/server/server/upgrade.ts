@@ -1,6 +1,7 @@
 import { rename, chmod, unlink, rm } from 'fs/promises'
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { spawn as spawnChild } from 'node:child_process'
 import { platform } from 'os'
 import { basename, dirname, join } from 'path'
 import { getVersionInfo, CURRENT_VERSION, compareVersions } from './version.ts'
@@ -364,37 +365,27 @@ export type RestartOutcome = {
  *   still carries the old version number).
  */
 /**
- * Detect and restart unmanaged background `agentop server` processes (e.g. started via
- * `agentop server --bg` or `agentop start`) so upgrading always replaces the running server.
+ * Restart a server that NO service manager owns, onto `newBin` — only ever reached when no
+ * `agentop-server` unit is installed (see `server-restart-plan.ts`). Targets only processes whose
+ * argv IS `agentop server`, waits for each to exit and for the data-dir lock to be free, and starts
+ * exactly one replacement. The old version matched `pgrep -f 'agentop.*(server|start)'`, which
+ * killed the systemd unit's own server on 2026-10-03 (docs/incidents/2026-10-03-restart-loop.md).
  */
-async function restartBackgroundServerPids(newBin: string): Promise<boolean> {
-  try {
-    const { out } = await sh(['pgrep', '-f', 'agentop.*(server|start)'])
-    const pids = out.split('\n')
-      .map(s => parseInt(s.trim(), 10))
-      .filter(p => !isNaN(p) && p > 0 && p !== process.pid && p !== process.ppid)
-
-    if (pids.length === 0) return false
-
-    process.stdout.write('  Restarting background agentop server process…\n')
-    for (const pid of pids) {
-      try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
-    }
-    await new Promise(r => setTimeout(r, 1000))
-    for (const pid of pids) {
-      try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
-    }
-
-    const { spawn } = await import('node:child_process')
-    const { homedir } = await import('node:os')
-    const { join } = await import('node:path')
-    const log = join(homedir(), '.agentistics', 'agentop-server.log')
-    const child = spawn('sh', ['-c', `nohup "${newBin}" server --bg >> "${log}" 2>&1 &`], { stdio: 'ignore', detached: true })
-    child.unref()
-    return true
-  } catch {
-    return false
-  }
+async function handOverUnmanagedServers(pids: readonly number[], newBin: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const { handOverDetached } = await import('./server-restart-io.ts')
+  const { serverLockFile } = await import('./config.ts')
+  process.stdout.write('  Restarting the agentop server started outside any service manager…\n')
+  return handOverDetached(pids, serverLockFile(), {
+    spawnServer: () => {
+      const log = join(AGENTISTICS_DATA_DIR, 'agentop-server.log')
+      const fd = openSync(log, 'a')
+      // A new session + no inherited handles, the shape `startBackgroundUpgrade` uses — no `sh -c`,
+      // no `nohup`, and no `--bg` launcher in between to race the lock.
+      const child = spawnChild(newBin, ['server'], { detached: true, stdio: ['ignore', fd, fd] })
+      child.unref()
+      try { closeSync(fd) } catch { /* the child kept its own dup */ }
+    },
+  })
 }
 
 async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
@@ -402,23 +393,58 @@ async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
   let restartedServer = false
   const failures: string[] = []
 
-  // 1) Native systemd user services: solo/member run as `agentop server`; `agentop watch` is the
-  //    OTel daemon. Restart only the ones that are actually active so we never start a stopped one.
+  // 1) The server: the SERVICE MANAGER restarts it, or nothing does (`server-restart-plan.ts`).
+  //    Decided once, here, from the unit file, the manager's own answer and /proc — never by
+  //    killing whatever a pattern matched. `watch` keeps its own unit-only path below.
+  let serverPlan: import('./server-restart-plan.ts').ServerRestartPlan = { kind: 'none' }
   if (platform() === 'linux') {
-    for (const mode of ['server', 'watch'] as const) {
-      const active = await sh(['systemctl', '--user', 'is-active', `agentop-${mode}`])
-      if (active.out === 'active') {
-        process.stdout.write(`  Restarting the agentop-${mode} service…\n`)
-        const res = await restartAutostart(mode, {
-          // A heavy service can take a while to bind; say we are still waiting rather than go quiet.
-          onWait: sec => { if (sec >= 5 && sec % 5 === 0) process.stdout.write(`    …still waiting for agentop-${mode} to answer (${sec}s)\n`) },
-        })
-        process.stdout.write(`    ${res.message.split('\n')[0]}\n`)
-        if (!res.ok) failures.push(`agentop-${mode} service: ${res.message.split('\n')[0]}`)
-        didSomething = true
-        // Only `server` answers `/api/version` on `PORT`; `watch` has no HTTP surface at all.
-        if (mode === 'server') restartedServer = true
-      }
+    const { planServerRestart, parseIsActive } = await import('./server-restart-plan.ts')
+    const { readProcs } = await import('./server-restart-io.ts')
+    const { unitPath } = await import('./autostart.ts')
+    const unitInstalled = existsSync(unitPath('server'))
+    const unitActive = unitInstalled
+      ? parseIsActive((await sh(['systemctl', '--user', 'is-active', 'agentop-server'])).out)
+      : null
+    serverPlan = planServerRestart({ unitInstalled, unitActive, procs: readProcs(), selfPid: process.pid })
+
+    if (serverPlan.kind === 'service') {
+      process.stdout.write('  Restarting the agentop-server service…\n')
+      const res = await restartAutostart('server', {
+        // A heavy service can take a while to bind; say we are still waiting rather than go quiet.
+        onWait: sec => { if (sec >= 5 && sec % 5 === 0) process.stdout.write(`    …still waiting for agentop-server to answer (${sec}s)\n`) },
+      })
+      process.stdout.write(`    ${res.message.split('\n')[0]}\n`)
+      if (!res.ok) failures.push(`agentop-server service: ${res.message.split('\n')[0]}`)
+      didSomething = true
+      restartedServer = true
+    } else if (serverPlan.kind === 'manager-unreachable') {
+      failures.push(
+        'agentop-server service: the service manager could not be asked whether it runs ' +
+        '(no reachable user bus from here) — nothing was stopped or started. ' +
+        'Run `systemctl --user restart agentop-server` from a normal terminal.',
+      )
+      didSomething = true
+    } else if (serverPlan.kind === 'outside-service') {
+      failures.push(
+        `agentop server pid ${serverPlan.pids.join(', ')} runs OUTSIDE the agentop-server service — ` +
+        'it was left alone. Stop it (`kill <pid>`), then `systemctl --user restart agentop-server`.',
+      )
+      didSomething = true
+    } else if (serverPlan.kind === 'detached') {
+      const res = await handOverUnmanagedServers(serverPlan.pids, newBin)
+      if (!res.ok) failures.push(`background agentop server: ${res.reason}`)
+      didSomething = true
+      restartedServer = res.ok
+    }
+
+    // `agentop watch` (the OTel daemon, no HTTP surface): its own unit, restarted only when active.
+    const watch = parseIsActive((await sh(['systemctl', '--user', 'is-active', 'agentop-watch'])).out)
+    if (watch === true) {
+      process.stdout.write('  Restarting the agentop-watch service…\n')
+      const res = await restartAutostart('watch')
+      process.stdout.write(`    ${res.message.split('\n')[0]}\n`)
+      if (!res.ok) failures.push(`agentop-watch service: ${res.message.split('\n')[0]}`)
+      didSomething = true
     }
   }
 
@@ -454,12 +480,6 @@ async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
         '(re-run `agentop start` from the repo)',
       )
     }
-  }
-
-  // 4) Background unmanaged server process: if systemd did not restart server, check for and bounce running background server
-  if (!didSomething) {
-    const restartedBg = await restartBackgroundServerPids(newBin)
-    if (restartedBg) { didSomething = true; restartedServer = true }
   }
 
   if (!didSomething && failures.length === 0) {

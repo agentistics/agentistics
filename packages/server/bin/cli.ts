@@ -889,6 +889,24 @@ if (command === 'server' || command === 'start' || !command) {
     if (envFile) console.log(`  central: loaded ${envFile}`)
   }
 
+  // ONE SERVER PER DATA DIR, asked before ANYTHING loads. `index.ts` claims the lock for real, but
+  // only after the vault, the watcher daemon and every import of the app have run — so a duplicate
+  // start, and a service manager restarting one every five seconds, paid that each time (190 times
+  // on 2026-10-03). The probe claims nothing; the claim in index.ts stays the authority.
+  {
+    const { probeInstanceLock } = await import('../server/single-instance.ts')
+    const { serverLockFile, AGENTISTICS_DATA_DIR } = await import('../server/config.ts')
+    const holder = await probeInstanceLock(serverLockFile())
+    if (holder !== null) {
+      const { EXIT_INSTANCE_HELD } = await import('../server/service-exit.ts')
+      console.error(
+        `[startup] another agentop server (pid ${holder}) is already using ${AGENTISTICS_DATA_DIR} — not starting a second one.\n` +
+        '          `agentop doctor` says which one it is and whether it is the service.',
+      )
+      process.exit(EXIT_INSTANCE_HELD)
+    }
+  }
+
   // Background: spawn a detached copy (logging to ~/.agentistics) and return the terminal.
   if (args.includes('--bg') || args.includes('--background')) {
     const { spawn } = await import('node:child_process')
