@@ -17,6 +17,7 @@ import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
+import { CodeField, VaultUnlock } from '../../components/vault/VaultUnlock'
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
   authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanCode, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
@@ -182,7 +183,8 @@ export default function VaultSettings() {
               : t('intro')}
           </div>
           <div style={{ width: isMobile ? '100%' : undefined, marginTop: 4 }}>
-            <UnlockControl view={view} lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} center onAction={onAction} />
+            {/* §10: the same unlock every screen mounts — Hello here, the phone's own ways off this computer. */}
+            <VaultUnlock lang={lang} onOpened={() => { void load() }} btn={hot} isMobile={isMobile} center onAction={onAction} />
           </div>
           {canRecover && (
             <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setRecoverOpen(true)}>
@@ -557,69 +559,6 @@ function SetupCodeField({ value, onChange, label, why }: { value: string; onChan
         inputMode="numeric" autoComplete="off" autoFocus maxLength={9}
       />
     </label>
-  )
-}
-
-function CodeField({ value, onChange, label, autoFocus, onEnter }: { value: string; onChange: (v: string) => void; label: string; autoFocus?: boolean; onEnter?: () => void }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 10 }}>
-      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</span>
-      <input
-        value={value} onChange={e => onChange(cleanCode(e.target.value))} placeholder="123456" style={{ ...input, marginBottom: 0 }}
-        inputMode="numeric" autoComplete="one-time-code" autoFocus={autoFocus} maxLength={6}
-        onKeyDown={e => { if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter() } }}
-      />
-    </label>
-  )
-}
-
-/** The locked state's button: gesture first (the SERVICE raises the dialog), then the code field. */
-function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction }: { view: VaultView; lang: 'en' | 'pt'; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void }) {
-  const [phase, setPhase] = useState<'idle' | 'gesture' | 'code'>(view.pendingStepup ? 'code' : 'idle')
-  const [code, setCode] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [errAction, setErrAction] = useState<UiAction | null>(null)
-  const label: VaultKey = view.wrappers.includes('hello') ? 'unlockWith_hello' : view.wrappers.includes('fido2') ? 'unlockWith_fido2' : 'unlockPlain'
-
-  const gesture = async () => {
-    setError(null); setPhase('gesture')
-    const r = await unlockGesture()
-    if (!r.ok) { setPhase('idle'); setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); return }
-    if (r.state === 'pending-stepup') setPhase('code')
-    else onOpened()
-  }
-  const submit = async () => {
-    if (!codeComplete(code) || busy) return
-    setBusy(true); setError(null)
-    const r = await unlockCode(code)
-    setBusy(false)
-    if (r.ok) { setCode(''); onOpened(); return }
-    // §2.2: a wrong code zeroes the key at once — back to the gesture, with the sentence saying why.
-    setError(r.sentence || vt('network', lang)); setErrAction(r.action && r.action !== 'unlock' ? r.action : null); setCode(''); setPhase('idle')
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-end', gap: 8, width: isMobile ? '100%' : undefined }}>
-      {phase !== 'code' && (
-        <button type="button" style={btn} onClick={() => { void gesture() }} disabled={phase === 'gesture'}>
-          {phase === 'gesture' && <Loader2 size={14} className="ag-spin" />}
-          {phase === 'gesture' ? vt('unlocking', lang) : vt(label, lang)}
-        </button>
-      )}
-      {phase === 'code' && (
-        <form onSubmit={e => { e.preventDefault(); void submit() }} style={{ width: isMobile ? '100%' : 260 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>{vt('pendingCodeHint', lang)}</div>
-          <CodeField value={code} onChange={setCode} label={vt('codeLabel', lang)} autoFocus />
-          <button type="submit" style={{ ...btn, width: '100%', justifyContent: 'center' }} disabled={!codeComplete(code) || busy}>{vt('codeConfirm', lang)}</button>
-        </form>
-      )}
-      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)', maxWidth: isMobile ? undefined : 360, textAlign: isMobile ? 'left' : center ? 'center' : 'right' }}>{error}</div>}
-      {/* "recover" has its own standing button under the hero on a loopback page; never draw it twice. */}
-      {error && errAction && onAction && errAction !== 'recover' && (
-        <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => onAction(errAction)}>{vt(errAction === 'enroll' ? 'act_enroll' : errAction === 'unlock' ? 'act_unlock' : 'act_disable', lang)}</button>
-      )}
-    </div>
   )
 }
 

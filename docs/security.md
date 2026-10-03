@@ -685,13 +685,39 @@ required`), verified by the service with no third-party library (`packages/vault
 ES256/RS256; refuses at the first failed check: challenge, origin, rpId, UP/UV, signature, a counter that
 does not move forward). A verified assertion mints a **gesture token: 60 s, single use, bound to the
 session and to exactly one action on one target** — a reveal of one field cannot edit anything.
-**Registering** a phone is an escalation, so it asks the code AND Windows Hello on the computer; the
-passkeys live in a sealed record, so a plain file write cannot add one. WebAuthn needs a secure context:
+**Registering** a phone is an escalation in two halves on two devices: the phone asks with the code (the
+vault open), a pending request with a two-number match code appears on the computer, and the person
+approves it there with Windows Hello (loopback only, gate row `phone-enrol-approve`). The approval is
+single use, bound to the phone's session and kind, and expires in five minutes, so a stolen code alone
+enrols nothing. The passkeys live in a sealed record, so a plain file write cannot add one. WebAuthn needs a secure context:
 over plain `http://` the page says how to get an https address instead of offering something that cannot
 work. The owner's alternative, **"accept my code on the phone"**, is off by default, turned on only from
 the computer (code + Windows Hello), and opens a **30-second reveal window** per fresh code — reveals
 only; editing and deleting from the phone always need the passkey. Over plain http that option sends the
 code and the value unencrypted on the local network, and the switch says so.
+
+**Opening the vault from the phone** (spec §10). Once presence is enrolled every silent wrapper is
+retired, so a locked vault opens only with Windows Hello, a security key or the 24 words — none of which a
+phone can give — and `POST /api/vault/unlock` now REFUSES off loopback instead of raising Hello on an
+empty desk. A phone therefore gets a copy of the data key of its own, and the secret behind it lives ON
+THE PHONE, never on the computer (`packages/vault/src/phone-wrap.ts`, `vault/phone-unlock.json`, 0600,
+holding ids, the kid, salts, ciphertext and a passkey's PUBLIC key — no label, no secret):
+- **Passkey**: the WebAuthn **PRF** extension turns a per-copy salt into 32 bytes only after the phone's
+  biometrics; that is the KEK. Opening = a verified assertion (fresh challenge, origin, rpId, UV, counter)
+  carrying the PRF output, PLUS the authenticator code. A phone without PRF keeps its passkey for
+  confirming actions and is told, in a sentence, that it cannot open a locked vault.
+- **Device key** (only while "code alone from the phone" is on): 32 random bytes handed to the phone's
+  browser once, at approval. Opening = that key PLUS the code. Turning the switch off deletes every
+  device copy and forgets the devices.
+In both cases the code is asked BEFORE anything is unwrapped and checked by the same `completeUnlock`
+the computer uses, with the unwrapped key — so the phone's unlock lands in the same auto-lock window, a
+wrong code zeroes the key, the freeze counts it, and it is audited as `vault.unlock` with `device` (the
+owner's label for that phone). A copy someone writes into the file with a key of their own opens nothing
+real: the key it yields must then open the authenticator seed sealed under the REAL key before anything
+is adopted. A data-key rotation leaves every phone copy stale (it cannot be re-wrapped: the computer does
+not hold the phone's secret); the page says those phones must be approved again and offers to clear
+them. **Stated limit**: the device key sits in the phone browser's storage, so anyone who can run script
+on the Agentistics origin in that browser can read it — the same reach that could already drive the page.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 

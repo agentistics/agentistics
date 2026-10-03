@@ -113,26 +113,33 @@ export const PERSONAL_TEXT = {
     pt: 'Para usar a digital ou o rosto do celular, abra o Agentistics pelo endereço https — por exemplo ligando os certificados HTTPS na sua rede Tailscale e usando o nome https da máquina.',
   },
   phoneUnsupported: { en: 'This browser cannot use a passkey.', pt: 'Este navegador não consegue usar uma passkey.' },
-  phoneReady: { en: 'This phone is registered: seeing or changing a secret asks for its fingerprint or face.', pt: 'Este celular está registrado: ver ou mudar um segredo pede a digital ou o rosto dele.' },
+  phoneReady: { en: 'This phone is registered: it opens the vault with its fingerprint or face plus your code, and seeing or changing a secret asks for its fingerprint again.', pt: 'Este celular está registrado: abre o cofre com a digital ou o rosto mais o seu código, e ver ou mudar um segredo pede a digital de novo.' },
   phoneRegisterWhy: {
-    en: 'Register this phone so that seeing a secret here asks for its fingerprint or face. It asks your code, then Windows Hello on the computer — once.',
-    pt: 'Registre este celular para que ver um segredo aqui peça a digital ou o rosto dele. Pede o seu código e depois o Windows Hello no computador — uma vez só.',
+    en: 'Register this phone so it can open the vault and see secrets with its own fingerprint or face. It asks your code here, then an approval with Windows Hello on the computer — once.',
+    pt: 'Registre este celular para ele abrir o cofre e ver segredos com a própria digital ou rosto. Pede o seu código aqui e depois uma aprovação com o Windows Hello no computador — uma vez só.',
   },
+
   phoneRegister: { en: 'Register this phone\'s fingerprint', pt: 'Registrar a digital deste celular' },
   phoneLabel: { en: 'Phone', pt: 'Celular' },
   phoneApproveOnPc: { en: 'Approve it in Windows Hello on the computer…', pt: 'Aprove no Windows Hello do computador…' },
   phoneCodeOn: { en: 'The computer also accepts your code here: a fresh code opens 30 seconds to see secrets.', pt: 'O computador também aceita o seu código aqui: um código novo abre 30 segundos para ver segredos.' },
   phoneDesktopIntro: {
-    en: 'Phones that can open secrets with their own fingerprint or face. Register a phone from the phone itself (it needs an https address).',
-    pt: 'Celulares que podem abrir segredos com a própria digital ou rosto. Registre um celular pelo próprio celular (precisa de um endereço https).',
+    en: 'Phones that can open the vault and its secrets. A phone registers from the phone itself: it asks your code there, and a request appears here for you to approve with Windows Hello. Windows Hello is never asked from a phone.',
+    pt: 'Celulares que podem abrir o cofre e os segredos. Um celular se registra pelo próprio celular: ele pede o seu código lá, e aparece um pedido aqui para você aprovar com o Windows Hello. O Windows Hello nunca é pedido a partir de um celular.',
   },
+
   phoneNone: { en: 'No phone registered yet.', pt: 'Nenhum celular registrado ainda.' },
   phoneRemove: { en: 'Remove', pt: 'Remover' },
-  phoneCodeToggle: { en: 'Accept my code on the phone (30 s to see secrets)', pt: 'Aceitar o meu código no celular (30 s para ver segredos)' },
+  phoneCodeToggle: { en: 'Open the vault from the phone with the code alone (and see secrets for 30 s)', pt: 'Abrir o cofre pelo celular só com o código (e ver segredos por 30 s)' },
   phoneCodeCost: {
-    en: 'Off by default. With it on, anyone with this dashboard on the phone AND your current code can see secrets for 30 seconds. Over plain http the code and the value travel unencrypted on your network. Editing and deleting still need the phone\'s fingerprint.',
-    pt: 'Desligado por padrão. Ligado, quem tiver este painel no celular E o seu código atual vê segredos por 30 segundos. Em http simples, o código e o valor passam sem criptografia na sua rede. Editar e apagar continuam pedindo a digital do celular.',
+    en: 'Off by default. With it on, a phone you approved here once keeps a key of its own, and that phone plus your current code opens the vault (and shows secrets for 30 seconds) — no fingerprint. A code alone, on any other device, still opens nothing. Turning it off deletes every such key at once. Over plain http outside Tailscale the code travels unencrypted. Editing and deleting still need the phone\'s fingerprint.',
+    pt: 'Desligado por padrão. Ligado, um celular que você aprovou aqui uma vez guarda uma chave própria, e esse celular mais o seu código atual abre o cofre (e mostra segredos por 30 segundos) — sem digital. Um código sozinho, em qualquer outro aparelho, continua não abrindo nada. Desligar apaga todas essas chaves de uma vez. Em http simples fora do Tailscale o código passa sem criptografia. Editar e apagar continuam pedindo a digital do celular.',
   },
+  phoneDevices: { en: 'Phones that open with the code alone', pt: 'Celulares que abrem só com o código' },
+  phoneStale: { en: '{n} phone key(s) stopped working when the vault changed its key; those phones must be approved again.', pt: '{n} chave(s) de celular pararam de funcionar quando o cofre trocou de chave; esses celulares precisam ser aprovados de novo.' },
+  phoneStaleClear: { en: 'Clear them', pt: 'Limpar' },
+  phonePasskeys: { en: 'Phones with biometrics', pt: 'Celulares com digital' },
+
 } as const satisfies Record<string, Pair>
 
 export type PKey = keyof typeof PERSONAL_TEXT

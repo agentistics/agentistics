@@ -26,7 +26,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Paperclip, X } from 'lucide-react'
+import { unlockIfLocked } from '../vault/VaultUnlockHost'
+import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Lock, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { HarnessPicker } from './HarnessPicker'
@@ -810,6 +811,13 @@ export function NewSessionModal({
                 options={nativeOptions.providers ?? []}
                 unsetLabel={nativeOptions.providers === null ? (pt ? 'Carregando…' : 'Loading…') : (pt ? 'Nenhum' : 'None')}
               />
+              {/* VAULT.PERSONAL §10: a key the locked vault keeps unreadable — unlock right here. */}
+              {nativeOptions.locked && (
+                <button type="button" onClick={() => { void unlockIfLocked().then(ok => { if (ok) nativeOptions.reload() }) }}
+                  style={{ marginTop: 8, padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 12.5, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+                  <Lock size={13} /> {pt ? 'O cofre está trancado — destrancar para usar as chaves guardadas' : 'The vault is locked — unlock to use the stored keys'}
+                </button>
+              )}
             </Field>
           )}
 

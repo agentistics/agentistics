@@ -10,8 +10,8 @@
  * 30 seconds too.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Lock, Pencil, Plus, RotateCcw, Search, Trash2, Vault as VaultIcon } from 'lucide-react'
+import { useOutletContext } from 'react-router-dom'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, Vault as VaultIcon } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Err, card, input, overlay, primaryBtn, dangerBtn } from '../components/MfaSetup'
@@ -24,7 +24,9 @@ import {
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
-import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, registerPasskey, removePasskey, setCodeReveal, type MobileState } from '../lib/passkey'
+import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, removePasskey, setCodeReveal, type MobileState } from '../lib/passkey'
+import { LockedVaultInline, PhoneEnrol } from '../components/vault/VaultUnlock'
+import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../lib/phoneVault'
 
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
@@ -34,7 +36,6 @@ export default function VaultPage() {
   const lang: Lang = ctx.lang === 'pt' ? 'pt' : 'en'
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const isMobile = useIsMobile()
-  const navigate = useNavigate()
 
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [items, setItems] = useState<PersonalMeta[]>([])
@@ -83,7 +84,7 @@ export default function VaultPage() {
     if (r.ok) {
       setItems(r.items); setGroups(r.groups); setState({ kind: 'ready' })
       const ms = await mobileState()
-      if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback })
+      if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback, devices: ms.devices })
       return
     }
     if (r.code === 'stepup-required' || r.status === 401) { setState(s => ({ kind: 'code', error: s.kind === 'code' ? s.error : null })); return }
@@ -125,8 +126,8 @@ export default function VaultPage() {
     return (
       <div style={pageWrap}>{header}
         <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5 }}><Lock size={16} /> {t('locked')}</div>
-          <button type="button" style={hot} onClick={() => navigate('/settings/vault')}>{t('openSettings')}</button>
+          {/* §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone. */}
+          <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />
         </div>
       </div>
     )
@@ -210,7 +211,7 @@ export default function VaultPage() {
           </label>
         </div>
       )}
-      {mobile && <PhonePanel lang={lang} isMobile={isMobile} state={mobile} isPhone={isPhone} host={host} gated={gated} onChanged={() => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback }) }) }} />}
+      {mobile && <PhonePanel lang={lang} isMobile={isMobile} state={mobile} isPhone={isPhone} host={host} gated={gated} onChanged={() => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback, devices: ms.devices }) }) }} />}
       {!isPhone && (
         <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', marginTop: 18, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, flex: '1 1 260px' }}>{t('backupNote')}</span>
@@ -568,35 +569,23 @@ function PhonePanel({ lang, isMobile, state, isPhone, host, gated, onChanged }: 
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const [error, setError] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [stale, setStale] = useState(0)
   const support = passkeySupport(window)
   const here = hasPasskeyHere(state, host)
+  const device = readDeviceKey()
+  const deviceHere = Boolean(device && state.codeReveal && state.devices?.some(d => d.id === device.deviceId))
+  useEffect(() => { if (!isPhone) void phoneFacts().then(f => { if (f.ok) setStale(f.stale) }) }, [isPhone, state])
   const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginTop: 18 }
-  const register = async () => {
-    setBusy(true); setError(null); setNote(t('phoneApproveOnPc'))
-    const r = await gated(c => registerPasskey(t('phoneLabel'), c), false)
-    setBusy(false); setNote(null)
-    if (!r.ok) { if (r.code !== 'passkey-cancelled') setError(r.sentence || t('network')); return }
-    onChanged()
-  }
+  const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }
+  const small: React.CSSProperties = { ...dangerBtn, width: 'auto', padding: '5px 10px', minHeight: isMobile ? 44 : undefined }
   if (isPhone) {
+    // §10: register through the request the computer approves; once this phone works, say so.
     return (
-      <div style={box}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{t('phoneTitle')}</div>
-        {support === 'insecure' && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{t('phoneInsecure')}</div>}
-        {support === 'unsupported' && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{t('phoneUnsupported')}</div>}
-        {support === 'ok' && (here
-          ? <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{t('phoneReady')}</div>
-          : (
-            <>
-              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>{t('phoneRegisterWhy')}</div>
-              <button type="button" disabled={busy} onClick={() => { void register() }} style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined }}>{busy ? t('working') : t('phoneRegister')}</button>
-            </>
-          ))}
-        {state.codeReveal && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>{t('phoneCodeOn')}</div>}
-        {note && <div role="status" style={{ fontSize: 12.5, marginTop: 8 }}>{note}</div>}
-        {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
+      <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(here || deviceHere)
+          ? <div style={{ ...box, marginTop: 0, fontSize: 12.5, color: 'var(--text-secondary)' }}><div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-primary)' }}>{t('phoneTitle')}</div>{here ? t('phoneReady') : t('phoneCodeOn')}</div>
+          : <PhoneEnrol lang={lang} isMobile={isMobile} onDone={onChanged} />}
+        {support === 'unsupported' && <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{t('phoneUnsupported')}</div>}
       </div>
     )
   }
@@ -604,14 +593,29 @@ function PhonePanel({ lang, isMobile, state, isPhone, host, gated, onChanged }: 
     <div style={box}>
       <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{t('phoneTitle')}</div>
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>{t('phoneDesktopIntro')}</div>
-      {state.passkeys.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('phoneNone')}</div>}
+      {state.passkeys.length === 0 && !(state.devices?.length) && <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('phoneNone')}</div>}
+      {state.passkeys.length > 0 && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginTop: 4 }}>{t('phonePasskeys')}</div>}
       {state.passkeys.map(p => (
-        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+        <div key={p.id} style={row}>
           <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{p.label} <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>· {p.rpId}</span></span>
           <button type="button" onClick={() => { void gated(c => removePasskey(p.id, c), { action: 'mobile-passkey-remove', target: p.id }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }}
-            style={{ ...dangerBtn, width: 'auto', padding: '5px 10px', minHeight: isMobile ? 44 : undefined }}>{t('phoneRemove')}</button>
+            style={small}>{t('phoneRemove')}</button>
         </div>
       ))}
+      {(state.devices?.length ?? 0) > 0 && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginTop: 8 }}>{t('phoneDevices')}</div>}
+      {state.devices?.map(d => (
+        <div key={d.id} style={row}>
+          <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{d.label}</span>
+          <button type="button" onClick={() => { void gated(c => removeDevice(d.id, c), { action: 'mobile-passkey-remove', target: d.id }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }}
+            style={small}>{t('phoneRemove')}</button>
+        </div>
+      ))}
+      {stale > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{t('phoneStale', { n: stale })}</span>
+          <button type="button" style={small} onClick={() => { void gated(c => clearStalePhones(c), { action: 'mobile-passkey-remove', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }}>{t('phoneStaleClear')}</button>
+        </div>
+      )}
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
         <input type="checkbox" checked={state.codeReveal} onChange={e => { const on = e.target.checked; void gated(c => setCodeReveal(on, c), { action: 'mobile-code-reveal', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }} style={{ marginTop: 3 }} />
         <span>

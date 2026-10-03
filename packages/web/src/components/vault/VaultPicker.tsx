@@ -6,9 +6,10 @@
  * itself asks for the code at send time.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Folder, KeyRound, Loader2, Lock } from 'lucide-react'
+import { Folder, KeyRound, Loader2 } from 'lucide-react'
 import { Err, card, input, overlay, primaryBtn } from '../MfaSetup'
-import { cleanCode, codeComplete, loadVault, stepUp, unlockCode, unlockGesture } from '../../lib/vaultApi'
+import { cleanCode, codeComplete, loadVault, stepUp } from '../../lib/vaultApi'
+import { LockedVaultInline } from './VaultUnlock'
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
 import type { VaultSelection } from '../../lib/vaultChip'
 import { pt_, type PKey } from '../../lib/personalText'
@@ -20,9 +21,6 @@ const T = {
     en: 'The agent gets REFERENCES (vault://…) and uses them in commands; it never sees a value, and any value that shows up in an output is replaced. Sending asks you to confirm.',
     pt: 'O agente recebe REFERÊNCIAS (vault://…) e as usa nos comandos; ele nunca vê um valor, e qualquer valor que aparecer numa saída é trocado. Enviar pede a sua confirmação.',
   },
-  locked: { en: 'The vault is locked.', pt: 'O cofre está trancado.' },
-  unlock: { en: 'Unlock', pt: 'Destrancar' },
-  unlocking: { en: 'Confirm on this computer…', pt: 'Confirme neste computador…' },
   code: { en: 'Authenticator code', pt: 'Código do autenticador' },
   confirmCode: { en: 'Confirm', pt: 'Confirmar' },
   search: { en: 'Search…', pt: 'Buscar…' },
@@ -70,7 +68,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
   lang: Lang; isMobile: boolean; initial: VaultSelection | null
   onConfirm: (sel: VaultSelection) => void; onClear: () => void; onClose: () => void
 }) {
-  type Phase = 'loading' | 'locked' | 'unlock-code' | 'list-code' | 'ready' | 'failed'
+  type Phase = 'loading' | 'locked' | 'list-code' | 'ready' | 'failed'
   const [phase, setPhase] = useState<Phase>('loading')
   const [items, setItems] = useState<PersonalMeta[]>([])
   const [groups, setGroups] = useState<PersonalGroup[]>([])
@@ -78,12 +76,11 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
   const [pick, setPick] = useState<Set<string>>(() => new Set(initial?.items.map(i => i.id) ?? []))
   const [pickG, setPickG] = useState<Set<string>>(() => new Set(initial?.groups.map(g => g.id) ?? []))
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const load = async () => {
     const v = await loadVault()
     if (v.kind === 'failed') { setPhase('failed'); return }
-    if (v.view.state !== 'open') { setPhase(v.view.pendingStepup ? 'unlock-code' : 'locked'); return }
+    if (v.view.state !== 'open') { setPhase('locked'); return }
     const r = await listPersonal()
     if (r.ok) { setItems(r.items.filter(i => !i.deletedAt)); setGroups(r.groups); setPhase('ready'); return }
     setPhase(r.code === 'stepup-required' || r.status === 401 ? 'list-code' : 'failed')
@@ -103,21 +100,8 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{t('intro', lang)}</div>
       {phase === 'loading' && <Loader2 size={14} className="ag-spin" />}
       {phase === 'failed' && <Err text={t('failed', lang)} />}
-      {phase === 'locked' && (
-        <div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}><Lock size={14} /> {t('locked', lang)}</div>
-          <button type="button" disabled={busy} style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined }} onClick={() => {
-            setBusy(true); setError(null)
-            void unlockGesture().then(async r => {
-              setBusy(false)
-              if (!r.ok) { setError(r.sentence); return }
-              if (r.state === 'pending-stepup') setPhase('unlock-code'); else await load()
-            })
-          }}>{busy ? t('unlocking', lang) : t('unlock', lang)}</button>
-          {error && <Err text={error} />}
-        </div>
-      )}
-      {phase === 'unlock-code' && <CodeInput lang={lang} isMobile={isMobile} error={error} onCode={async c => { const r = await unlockCode(c); if (!r.ok) { setError(r.sentence); setPhase('locked'); return } await load() }} />}
+      {/* §10: the shared unlock — Hello + code on this computer, the phone's own ways on a phone. */}
+      {phase === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
       {phase === 'list-code' && <CodeInput lang={lang} isMobile={isMobile} error={error} onCode={async c => { const r = await stepUp(c); if (!r.ok) { setError(r.sentence); return } setError(null); await load() }} />}
       {phase === 'ready' && (
         <>

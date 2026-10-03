@@ -43,6 +43,7 @@ import { ModelBreakdown } from './components/ModelBreakdown'
 import { ProjectsList } from './components/ProjectsList'
 import { FiltersBar } from './components/FiltersBar'
 import { NotificationToasts } from './components/NotificationToasts'
+import { VaultUnlockHost } from './components/vault/VaultUnlockHost'
 import { BetaTag } from './components/BetaTag'
 import { KeyboardProbe, keyboardProbeOn } from './components/KeyboardProbe'
 import { shouldNudgeViewport, shouldResetDocumentScroll } from './lib/viewportReset'
@@ -4959,6 +4960,10 @@ export default function AppLayout() {
 
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+
+      {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
+          computer — the phones waiting for approval. A central has no vault of its own here. */}
+      <VaultUnlockHost lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} enabled={!isCentral} />
 
       {/* THE KEYBOARD PROBE, and only when the URL asks for it (`?kbdebug=1`). It reads the three
           quantities that can hold the iOS displacement — the document scroll, the visual viewport's
