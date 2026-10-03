@@ -32,6 +32,7 @@ import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { splitSlashLine } from '../../lib/slashLine'
+import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks } from '../../lib/pastedContent'
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
 import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
@@ -205,6 +206,41 @@ const LONG_PRESS_MS = 480
  * answer is the place it takes you to, and a sentence plus a destination on one 10px chip is two
  * targets in a control that has room for one.
  */
+/** A paste the harness wrapped in `<pasted_content>`: first lines, expandable. Tags and id never shown. */
+function PastedBlock({ text, pt }: { text: string; pt: boolean }) {
+  const [open, setOpen] = useState(false)
+  const { head, total, truncated } = pastePreview(text)
+  return (
+    <div style={{
+      margin: '6px 0', border: '1px solid var(--border-subtle)', borderRadius: 8,
+      background: 'var(--bg-elevated)', overflow: 'hidden', minWidth: 0,
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: 32,
+          padding: '4px 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left',
+        }}
+      >
+        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'none' : 'rotate(-90deg)' }} />
+        <span style={{ fontWeight: 600 }}>{pt ? 'Texto colado' : 'Pasted text'}</span>
+        <span style={{ color: 'var(--text-tertiary)' }}>
+          {pt ? `${total} ${total === 1 ? 'linha' : 'linhas'}` : `${total} ${total === 1 ? 'line' : 'lines'}`}
+        </span>
+      </button>
+      <div className="ag-chat-md" style={{
+        padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-primary)',
+        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: open ? 360 : undefined, overflowY: open ? 'auto' : 'hidden',
+      }}>
+        {open ? text : head}{!open && truncated ? ' …' : ''}
+      </div>
+    </div>
+  )
+}
+
 function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
@@ -400,7 +436,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
   // A DICTATED message carries a one-line mark for the model (`dictationMark.ts`); the person sees
   // their words and a small microphone instead of the mark.
   const { text: spokenText, dictated } = mine ? stripDictatedMark(turn.text) : { text: turn.text, dictated: false }
-  const { images, text: prose } = splitImageAttachments(spokenText)
+  const { images, text: prose } = splitImageAttachments(stripInjectedBlocks(spokenText))
 
   // And `[Image #4]` — the same question asked of what the HARNESS substituted rather than what the
   // composer typed; without this it ran into the first word of the prose (see `splitImageMarkers`).
@@ -799,6 +835,15 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
                 thing you pressed and the thing that appears are visibly the same act. The rule is
                 `slashLine.ts` and it is anchored: a `/home/...` path is not a command. */}
             {turn.shell ? <ShellRunBlock run={turn.shell} pt={pt} /> : (() => {
+              if (hasPastedContent(text)) {
+                return (
+                  <>
+                    {splitPastedContent(text).map((seg, i) => seg.kind === 'paste'
+                      ? <PastedBlock key={i} text={seg.text} pt={pt} />
+                      : <ReactMarkdown key={i} remarkPlugins={[remarkGfm, remarkBreaks]}>{seg.text}</ReactMarkdown>)}
+                  </>
+                )
+              }
               const { command, rest } = splitSlashLine(text)
               if (command === '') {
                 return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
