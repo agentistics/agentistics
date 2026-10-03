@@ -167,11 +167,12 @@ try {
   expectThat(true, 'the session header names the task it is filed under')
   const sessionId = page.url().split('/').pop()!
   const detail = await (await fetch(`${BASE}/api/tasks/${encodeURIComponent(TASK_ID)}`)).json() as {
-    task: { rollup: { costUSD: number | null; sessionsUsed: number }; sessions: { id: string; native?: boolean; subtaskId: string | null; costUSD: number | null }[]; subtaskRollups: { id: string | null; rollup: { costUSD: number | null } }[] }
+    task: { rollup: { costUSD: number | null; sessionsUsed: number; rounds: number | null }; sessions: { id: string; native?: boolean; subtaskId: string | null; costUSD: number | null }[]; subtaskRollups: { id: string | null; rollup: { costUSD: number | null } }[] }
   }
   const filed = detail.task.sessions.find(x => x.id === sessionId)
   expectThat(filed?.native === true && filed.subtaskId !== null, 'the task lists the native session under its subtask')
   expectThat((detail.task.rollup.costUSD ?? 0) > 0 && (filed?.costUSD ?? 0) > 0, `its cost rolls up into the task ($${detail.task.rollup.costUSD})`)
+  expectThat(detail.task.rollup.rounds === 2, `both messages count as rounds, the stopped one too (${detail.task.rollup.rounds})`)
   expectThat(detail.task.subtaskRollups.some(v => v.id === filed?.subtaskId && (v.rollup.costUSD ?? 0) > 0), 'and into the subtask')
   await page.goto(`${BASE}/tasks/${encodeURIComponent(TASK_ID)}`)
   await page.waitForTimeout(2000)

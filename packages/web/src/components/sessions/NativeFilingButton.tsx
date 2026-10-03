@@ -32,7 +32,7 @@ export function NativeFilingButton({ sessionId, title, lang }: { sessionId: stri
         aria-label={label}
         title={label}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6, maxWidth: 160, height: 34, padding: '0 10px',
+          display: 'flex', alignItems: 'center', gap: 6, maxWidth: 'min(160px, 28vw)', height: 34, padding: '0 10px',
           borderRadius: 9, border: '1px solid var(--border-subtle)', flexShrink: 1, minWidth: 34, cursor: 'pointer',
           background: filing ? 'var(--bg-elevated)' : 'transparent',
           color: filing ? 'var(--text-primary)' : 'var(--text-tertiary)', fontSize: 12, fontFamily: 'inherit',
