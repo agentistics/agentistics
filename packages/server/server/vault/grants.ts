@@ -107,6 +107,26 @@ export function grantBriefing(g: Grant, lang: 'en' | 'pt' = 'en'): string {
 
 export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _now = now ?? (() => Date.now()) }
 
+/** A reference as typed (`vault://key` or `vault://key/field`) → the granted ref it names, or null. */
+export function grantedRef(sessionId: string, ref: string): GrantRef | null {
+  const g = _grants.get(sessionId)
+  if (!g) return null
+  return g.refs.find(r => r.ref === ref) ?? null
+}
+
+/**
+ * VAULT.PERSONAL §8.3 — THE one place a personal value leaves the service for a process that is not a
+ * page: `agentop vault ref`, run INSIDE a granted session's command at the moment it executes. Only a ref
+ * the session was granted; every use audited as the act (never the value).
+ */
+export async function useRef(sessionId: string, ref: string): Promise<{ ok: true; value: string } | { ok: false; code: 'not-granted' | 'gone' }> {
+  const r = grantedRef(sessionId, ref)
+  if (!r) return { ok: false, code: 'not-granted' }
+  const v = await revealField(r.itemId, r.field)
+  if (!v.ok || v.meta.deletedAt) return { ok: false, code: 'gone' }
+  return { ok: true, value: v.value }
+}
+
 /** The cached scrubber for a session, if it is granted and warm — the synchronous paths (a terminal frame) use this. */
 export function scrubSync(sessionId: string, text: string): string {
   if (!text) return text

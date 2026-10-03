@@ -27,6 +27,7 @@
  * Every op validates its own inputs; an unknown op is `bad-request`. `ops.test.ts` runs each op with
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
+import { grantOf, grantedRef, scrubFor, useRef } from './grants'
 import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
@@ -480,6 +481,39 @@ async function opSetAutoLock(h: Record<string, unknown>): Promise<OpResult> {
   return { reply: r.ok ? { ok: true } : r }
 }
 
+// ── VAULT.PERSONAL §8.3: what a hook inside a granted session may ask ─────────────────────────────
+//
+// `personal-ref` is the DELIBERATE exception to "no op returns a human-scope plaintext" (client.ts):
+// the person granted THIS managed session THIS reference, and the value goes to the command that is
+// executing with it — never into a reply a page reads, never to a session without the grant. Every use
+// is audited as the act. `personal-refs` and `personal-scrub` return no value at all.
+const sessionIdOf = (h: Record<string, unknown>) => (typeof h.managedId === 'string' && /^[A-Za-z0-9_:-]{1,80}$/.test(h.managedId) ? h.managedId : null)
+
+async function opPersonalRefs(h: Record<string, unknown>): Promise<OpResult> {
+  const sid = sessionIdOf(h)
+  const g = sid ? grantOf(sid) : null
+  return { reply: { ok: true, refs: g ? g.refs.map(r => r.ref) : [] } }
+}
+async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
+  const sid = sessionIdOf(h)
+  if (!sid || typeof h.ref !== 'string') return bad()
+  const r = await useRef(sid, h.ref)
+  if (!r.ok) {
+    return { reply: refused(r.code === 'not-granted' ? 'not-granted' : 'gone', vaultLang() === 'pt'
+      ? (r.code === 'not-granted' ? 'Este segredo não foi liberado para esta sessão.' : 'Este segredo não existe mais no cofre.')
+      : (r.code === 'not-granted' ? 'This secret was not granted to this session.' : 'This secret no longer exists in the vault.')) }
+  }
+  const ref = grantedRef(sid, h.ref)
+  vaultAudit({ type: 'vault.personal-use', name: ref?.itemId })
+  return { reply: { ok: true, value: r.value } }
+}
+async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
+  const sid = sessionIdOf(h)
+  if (!sid || typeof h.text !== 'string' || h.text.length > 4 * 1024 * 1024) return bad()
+  const text = await scrubFor(sid, h.text)
+  return { reply: { ok: true, changed: text !== h.text, text } }
+}
+
 // ── dispatch ────────────────────────────────────────────────────────────────────────────────
 
 export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch } = {}): Promise<OpResult> {
@@ -517,6 +551,9 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'vault-rekey': return opRekey(h)
     case 'vault-add-passphrase': return opAddPassphrase(h)
     case 'vault-reset': return opReset(h)
+    case 'personal-refs': return opPersonalRefs(h)
+    case 'personal-ref': return opPersonalRef(h)
+    case 'personal-scrub': return opPersonalScrub(h)
     default: return bad()
   }
 }
@@ -530,6 +567,7 @@ export const VAULT_OPS = [
   'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
   'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
+  'personal-refs', 'personal-ref', 'personal-scrub',
 ] as const
 
 let _installed = false

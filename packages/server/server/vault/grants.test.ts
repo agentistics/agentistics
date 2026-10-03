@@ -63,3 +63,22 @@ describe('served copies of a granted session are scrubbed (§8.4)', () => {
     expect(scrubTerminalLine('s2', 'key=sk-MARKER-123456')).toBe('key=sk-MARKER-123456')
   })
 })
+
+describe('the vault.sock ops a hook calls (§8.3)', () => {
+  test('personal-ref gives a GRANTED session its value and audits the use; another session is refused; scrub replaces', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const { becomeVaultHolder, vaultDir } = await import('./service')
+    const { readFileSync } = await import('node:fs')
+    becomeVaultHolder()
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'sk-MARKER-777777' } })).meta
+    await grantSession('s1', [b.id], [])
+    const op = (header: Record<string, unknown>) => handleVaultOp({ header: header as never, body: null, emit() {}, closed: new Promise(() => {}) })
+    expect((await op({ op: 'personal-refs', managedId: 's1' })).reply).toMatchObject({ ok: true, refs: ['vault://openai'] })
+    expect((await op({ op: 'personal-ref', managedId: 's1', ref: 'vault://openai' })).reply).toMatchObject({ ok: true, value: 'sk-MARKER-777777' })
+    expect((await op({ op: 'personal-ref', managedId: 's2', ref: 'vault://openai' })).reply).toMatchObject({ ok: false, code: 'not-granted' })
+    expect((await op({ op: 'personal-scrub', managedId: 's1', text: 'k=sk-MARKER-777777' })).reply).toMatchObject({ ok: true, changed: true, text: 'k=«vault:OpenAI»' })
+    const audit = readFileSync(`${vaultDir()}/audit.jsonl`, 'utf8')
+    expect(audit).toContain('vault.personal-use')
+    expect(audit).not.toContain('MARKER')
+  })
+})

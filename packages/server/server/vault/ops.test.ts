@@ -72,6 +72,10 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     'recovery-begin': { req: { op: 'recovery-begin' } },
     // A one-time code for a page's FIRST enrolment (review S2) — minted, never a held secret.
     'setup-code': { req: { op: 'setup-code', tty: true } },
+    // VAULT.PERSONAL §8.3 — without a grant: no refs, a refusal, the text back unchanged.
+    'personal-refs': { req: { op: 'personal-refs', managedId: 'nobody' } },
+    'personal-ref': { req: { op: 'personal-ref', managedId: 'nobody', ref: 'vault://x' } },
+    'personal-scrub': { req: { op: 'personal-scrub', managedId: 'nobody', text: 'plain text' } },
   }
 
   for (const op of VAULT_OPS) {
