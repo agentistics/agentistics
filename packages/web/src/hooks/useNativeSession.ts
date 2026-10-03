@@ -22,7 +22,7 @@ import {
   type NativeChatState,
   type NativeWindow,
 } from '../lib/nativeChat'
-import { approveUrl, cancelUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
+import { approveUrl, cancelUrl, dirsUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
 import { parseRuns, type RunLineView } from '../lib/nativeRuns'
 
 const REFRESH_DEBOUNCE_MS = 250
@@ -45,6 +45,8 @@ export interface NativeSession {
   switchModel: (model: string) => Promise<string | null>
   /** B9.1: set the reasoning effort for the next runs; `null` when done, else the engine's sentence. */
   setEffort: (effort: 'low' | 'medium' | 'high' | 'off') => Promise<string | null>
+  /** H20: add an extra folder (`/add-dir`); `null` when done, else the engine's sentence. */
+  addDir: (path: string) => Promise<string | null>
 }
 
 export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
@@ -191,5 +193,16 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     }
   }, [id, lang, readWindow])
 
-  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel, setEffort }
+  const addDir = useCallback(async (path: string): Promise<string | null> => {
+    try {
+      const res = await fetch(dirsUrl(id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })
+      if (!res.ok) return refusalSentence(await res.json().catch(() => null), res.status, lang)
+      void readWindow()
+      return null
+    } catch {
+      return lang === 'pt' ? 'Erro de rede ao adicionar a pasta.' : 'Network error adding the folder.'
+    }
+  }, [id, lang, readWindow])
+
+  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel, setEffort, addDir }
 }

@@ -21,6 +21,7 @@ import { NativeApprovalCard } from './NativeApprovalCard'
 import { NativeRunsStrip } from './NativeRunsStrip'
 import { NativeModelSwitch } from './NativeModelSwitch'
 import { NativeEffortSwitch } from './NativeEffortSwitch'
+import { NativeExtraDirs } from './NativeExtraDirs'
 import { NativeReasoning } from './NativeReasoning'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { acceptOf, mediaTypeOf, refuseFile, uploadPreviewUrl, type NativeAttachmentCapability } from '../../lib/nativeAttachments'
@@ -35,7 +36,7 @@ import { useIsCoarsePointer } from '../../hooks/useIsMobile'
 /** `live` is the page's `useNativeSession` — one stream per session, read by the header too. */
 export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
-  const { state, runs, loadError, send, answer, stop, switchModel, setEffort } = live
+  const { state, runs, loadError, send, answer, stop, switchModel, setEffort, addDir } = live
   const items = useMemo(() => nativeChatItems(state), [state])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -188,6 +189,9 @@ export function NativeSessionChat({ live, lang }: { live: NativeSession; lang: '
             <NativeModelSwitch model={state.window.session.model} provider={state.window.session.provider} running={state.running} lang={lang} onSwitch={switchModel} />
           </div>
           <NativeEffortSwitch effort={state.window.session.effort ?? 'off'} running={state.running} lang={lang} onSet={setEffort} />
+          <div style={{ flexBasis: '100%', minWidth: 0, marginBottom: 4 }}>
+            <NativeExtraDirs dirs={state.window.session.extraDirs ?? []} running={state.running} lang={lang} onAdd={addDir} />
+          </div>
         </div>
       )}
       <NativeRunsStrip runs={runs} lang={lang} />

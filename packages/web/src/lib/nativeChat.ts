@@ -56,7 +56,7 @@ export interface NativeToolCallRef {
 }
 
 export interface NativeWindow {
-  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string }; effort?: 'low' | 'medium' | 'high' }
+  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string }; effort?: 'low' | 'medium' | 'high'; extraDirs?: string[] }
   messages: { seq: number; message: NativeMessage }[]
   nextBefore?: number
   latestRun?: { runId: string; status: string; toolCalls: NativeToolCallRef[] }

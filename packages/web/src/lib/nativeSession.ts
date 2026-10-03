@@ -74,6 +74,8 @@ export const windowUrl = (id: string) => `${base(id)}/messages?limit=200`
 export const modelUrl = (id: string) => `${base(id)}/model`
 /** B9.1: the reasoning effort for the next runs (low, medium, high, off). */
 export const effortUrl = (id: string) => `${base(id)}/effort`
+/** H20: `/add-dir` — an extra folder for the session (POST {path}). */
+export const dirsUrl = (id: string) => `${base(id)}/dirs`
 /** H6: one line per run (tokens, cost, cache share, the context gauge). */
 export const runsUrl = (id: string) => `${base(id)}/runs`
 export const messagesUrl = (id: string) => `${base(id)}/messages`
