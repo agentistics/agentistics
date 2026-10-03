@@ -436,8 +436,9 @@ export function attachArgs(id: string): string[] {
  * `lost`. Reported exactly that way.
  *
  * The distinction is the MESSAGE, because that is the only thing tmux gives us. Both forms it uses
- * are matched (`error connecting to <socket>` on 3.x, `no server running on <socket>` on older
- * builds), and anything else is a failure the caller must THROW on — `createSessionsPoller` already
+ * are matched (`error connecting to <socket> (No such file or directory)` on 3.x, `no server running
+ * on <socket>` on older builds), and anything else — including `error connecting` with any OTHER
+ * reason — is a failure the caller must THROW on — `createSessionsPoller` already
  * keeps its previous list and says the refresh failed, which is the honest answer and was
  * unreachable while this returned `[]`.
  *
@@ -451,7 +452,13 @@ export function attachArgs(id: string): string[] {
 export function tmuxListIsEmptyState(code: number, out: string, err = ''): boolean {
   if (code === 0) return true
   const text = `${out}\n${err}`.toLowerCase()
-  return text.includes('no server running on') || text.includes('error connecting to')
+  if (text.includes('no server running on')) return true
+  // `error connecting to <socket> (<strerror>)` is tmux 3.x's wording for EVERY connect failure,
+  // and only ENOENT — the socket file does not exist — means there is no server. A socket that
+  // exists and answers `Permission denied` / `Operation not permitted` / `Resource temporarily
+  // unavailable` is a server THIS process cannot reach, and calling that "no sessions" showed a
+  // whole live fleet as ended (2026-10-03, docs/incidents/2026-10-03-restart-loop.md).
+  return /error connecting to [^\n]*\(no such file or directory\)/.test(text)
 }
 
 export function parseTmuxList(stdout: string): BackendSession[] {
