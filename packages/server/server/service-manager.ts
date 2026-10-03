@@ -22,6 +22,7 @@
  * Nothing here touches the filesystem, `process`, or the network — facts in, file contents out.
  */
 
+import { EXIT_INSTANCE_HELD } from './service-exit'
 import { servicePath } from './sessions/service-path'
 
 /** An init system this product can register a mode with. */
@@ -136,6 +137,8 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
     `Description=${spec.description}`,
     'After=network-online.target',
     'Wants=network-online.target',
+    // A BOUNDED restart: see `START_LIMIT_LINES`. Only a unit that restarts at all needs it.
+    ...(spec.keepsRunning ? START_LIMIT_LINES : []),
     '',
     '[Service]',
   ]
@@ -172,6 +175,9 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
     // leaves the service, and the fleet, running.
     lines.push('OOMPolicy=continue')
     lines.push('Restart=on-failure', 'RestartSec=5')
+    // A start REFUSED because another server holds the data dir is not a failure a restart can fix
+    // — see `service-exit.ts`. Without this line the unit restarted itself 190 times in one night.
+    lines.push(RESTART_PREVENT_LINE)
   } else {
     // The command RETURNS once the thing it started is up. Without RemainAfterExit the unit is
     // inactive(dead) a second after a perfectly successful start, and every status readout lies.
@@ -179,6 +185,53 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
   }
   lines.push('', '[Install]', 'WantedBy=default.target', '')
   return lines.join('\n')
+}
+
+/**
+ * ANY restart loop ends. Five starts inside five minutes and systemd stops trying (the unit goes
+ * `failed`, `agentop doctor` and `systemctl --user status` say so). `RestartSec=5` alone allowed a
+ * start every five seconds forever, and each one loads the whole application.
+ */
+const START_LIMIT_LINES = ['StartLimitIntervalSec=300', 'StartLimitBurst=5']
+const RESTART_PREVENT_LINE = `RestartPreventExitStatus=${EXIT_INSTANCE_HELD}`
+
+/**
+ * Bring an ALREADY INSTALLED long-running unit up to the two restart guards in `systemdUnit()`:
+ * `StartLimit*` in `[Unit]` and `RestartPreventExitStatus=` in `[Service]`. Same MERGE as
+ * `migrateUnitKillMode` — every line the user has is kept, an explicit value is never overwritten,
+ * and a `[Unit]` section is created when the unit has none. `null` when there is nothing to do.
+ */
+export function migrateUnitRestartGuards(text: string): string | null {
+  if (!/^\s*\[Service\]\s*$/m.test(text)) return null
+  if (!/^\s*Type\s*=\s*simple\s*$/m.test(text)) return null
+  let lines = text.split('\n')
+  let changed = false
+
+  const missingLimits = START_LIMIT_LINES.filter(l => {
+    const key = l.split('=')[0]!
+    return !new RegExp(`^\\s*${key}\\s*=`, 'm').test(text)
+  })
+  if (missingLimits.length > 0) {
+    const unitAt = lines.findIndex(l => /^\s*\[Unit\]\s*$/.test(l))
+    if (unitAt >= 0) {
+      // At the end of the [Unit] section: before the blank line / next section that closes it.
+      let end = unitAt + 1
+      while (end < lines.length && !/^\s*\[/.test(lines[end]!) && lines[end]!.trim() !== '') end++
+      lines.splice(end, 0, ...missingLimits)
+    } else {
+      lines = ['[Unit]', ...missingLimits, '', ...lines]
+    }
+    changed = true
+  }
+
+  if (!/^\s*RestartPreventExitStatus\s*=/m.test(text)) {
+    const at = lines.findIndex(l => /^\s*ExecStart\s*=/.test(l))
+    if (at >= 0) {
+      lines.splice(at + 1, 0, '# Refused because another server holds the data dir — do not loop. See systemdUnit().', RESTART_PREVENT_LINE)
+      changed = true
+    }
+  }
+  return changed ? lines.join('\n') : null
 }
 
 /**

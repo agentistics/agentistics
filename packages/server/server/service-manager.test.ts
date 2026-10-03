@@ -19,6 +19,7 @@ import {
   systemdUnit,
   migrateUnitKillMode,
   migrateUnitOOMPolicy,
+  migrateUnitRestartGuards,
   migrateUnitPath,
   systemdPathLine,
   type ServiceManagerFacts,
@@ -368,4 +369,61 @@ test('a long-running unit keeps going when the kernel OOM-kills one of its proce
   expect(migrateUnitOOMPolicy(old + 'OOMPolicy=stop\n')).toBeNull()             // an explicit choice stays
   expect(migrateUnitOOMPolicy(systemdUnit(RETURNS))).toBeNull()                  // a oneshot owns no children
   expect(systemdUnit(FOREGROUND)).toContain('OOMPolicy=continue')                // and new units are born with it
+})
+
+// 2026-10-03: a server started outside the unit held the data dir, and the unit restarted itself
+// every five seconds for twenty minutes — 190 full app loads, each one refused. Two guards.
+import { EXIT_INSTANCE_HELD } from './service-exit'
+
+describe('restart guards — a refused start must not become a restart loop', () => {
+  test('new long-running units are born with both guards', () => {
+    const unit = systemdUnit(FOREGROUND)
+    // "another server holds the data dir" is not a failure a restart can fix.
+    expect(unit).toContain(`RestartPreventExitStatus=${EXIT_INSTANCE_HELD}`)
+    // And ANY loop is bounded: five starts in five minutes and systemd gives up.
+    const unitSection = unit.slice(0, unit.indexOf('[Service]'))
+    expect(unitSection).toContain('StartLimitIntervalSec=300')
+    expect(unitSection).toContain('StartLimitBurst=5')
+  })
+
+  test('a oneshot gets neither — it never restarts', () => {
+    const unit = systemdUnit(RETURNS)
+    expect(unit).not.toContain('RestartPreventExitStatus')
+    expect(unit).not.toContain('StartLimitBurst')
+  })
+
+  test('an installed unit is MIGRATED: guards inserted in their own sections, every other line kept', () => {
+    const old = [
+      '[Unit]', 'Description=agentop server (agentistics autostart)', 'After=network-online.target', '',
+      '[Service]', 'Type=simple', 'ExecStart=/home/u/.local/bin/agentop server', 'KillMode=process',
+      'OOMPolicy=continue', 'Restart=on-failure', 'RestartSec=5', '', '[Install]', 'WantedBy=default.target', '',
+    ].join('\n')
+    const next = migrateUnitRestartGuards(old)!
+    expect(next).not.toBeNull()
+    const unitSection = next.slice(0, next.indexOf('[Service]'))
+    const serviceSection = next.slice(next.indexOf('[Service]'), next.indexOf('[Install]'))
+    expect(unitSection).toContain('StartLimitIntervalSec=300')
+    expect(unitSection).toContain('StartLimitBurst=5')
+    expect(serviceSection).toContain(`RestartPreventExitStatus=${EXIT_INSTANCE_HELD}`)
+    for (const line of old.split('\n').filter(Boolean)) expect(next).toContain(line)
+    expect(migrateUnitRestartGuards(next)).toBeNull() // idempotent
+  })
+
+  test('an explicit choice is never overwritten, and a oneshot is left alone', () => {
+    const custom = '[Unit]\nStartLimitBurst=20\n\n[Service]\nType=simple\nExecStart=/x server\nRestartPreventExitStatus=3\n'
+    const next = migrateUnitRestartGuards(custom)!
+    expect(next).toContain('StartLimitBurst=20')
+    expect(next).not.toContain('StartLimitBurst=5')
+    expect(next).toContain('RestartPreventExitStatus=3')
+    expect(next).not.toContain(`RestartPreventExitStatus=${EXIT_INSTANCE_HELD}`)
+    expect(next).toContain('StartLimitIntervalSec=300')
+    expect(migrateUnitRestartGuards(systemdUnit(RETURNS))).toBeNull()
+  })
+
+  test('a unit with no [Unit] section gets one', () => {
+    const bare = '[Service]\nType=simple\nExecStart=/x server\n'
+    const next = migrateUnitRestartGuards(bare)!
+    expect(next.indexOf('[Unit]')).toBeLessThan(next.indexOf('[Service]'))
+    expect(next).toContain('StartLimitBurst=5')
+  })
 })

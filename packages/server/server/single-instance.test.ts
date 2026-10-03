@@ -169,3 +169,29 @@ test('the release completes before the process exits', async () => {
   const next = await claimInstanceLock(file, 2222)
   expect(next.ok).toBe(true)
 })
+
+// ---------------------------------------------------------------------------
+// 2026-10-03: a duplicate start used to learn it was a duplicate only AFTER the vault, the watcher
+// daemon and every import of index.ts had run — seconds of CPU each time, and a systemd unit
+// restarting it every five seconds spent that 190 times. `probeInstanceLock` answers the same
+// question WITHOUT claiming anything, so `agentop server` can ask it first.
+// ---------------------------------------------------------------------------
+import { probeInstanceLock } from './single-instance'
+
+test('probe: a live holder is reported, and the probe claims nothing', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file, process.pid)
+  expect(first.ok).toBe(true)
+  expect(await probeInstanceLock(file)).toBe(process.pid)
+  // Still the first claimant's file: a probe must never take or remove it.
+  expect((await readFile(file, 'utf-8')).trim()).toBe(String(process.pid))
+})
+
+test('probe: no lock, or a lock left by a dead process, is "free" — and is left in place', async () => {
+  const file = await lockPath()
+  expect(await probeInstanceLock(file)).toBeNull()
+  await writeFile(file, '999999')
+  expect(await probeInstanceLock(file)).toBeNull()
+  // Stale-lock cleanup belongs to the claim, under O_EXCL; a probe deleting it would race it.
+  expect((await readFile(file, 'utf-8')).trim()).toBe('999999')
+})

@@ -207,3 +207,26 @@ export async function claimInstanceLock(
   }
   return { ok: false }
 }
+
+/**
+ * Who holds the lock at `file`, WITHOUT claiming or cleaning anything — `null` when nobody live
+ * does (no file, an unreadable one, or a dead / recycled writer).
+ *
+ * `claimInstanceLock` is called from `index.ts`, after the vault, the watcher daemon and every
+ * import of the app have already run. A duplicate start therefore paid seconds of CPU to learn it
+ * was a duplicate, and a service manager restarting it every five seconds paid that over and over
+ * — 190 times in one incident (docs/incidents/2026-10-03-restart-loop.md). `agentop server` asks
+ * this first and exits with `EXIT_INSTANCE_HELD` before loading anything. The claim stays the
+ * authority: a probe that says "free" can still lose the race, and then the claim refuses.
+ */
+export async function probeInstanceLock(file: string, probe: LockProbe = OS_PROBE): Promise<number | null> {
+  let raw: string
+  try {
+    raw = (await readFile(file, 'utf-8')).trim()
+  } catch {
+    return null
+  }
+  const holder = parseInt(raw, 10)
+  if (!Number.isInteger(holder) || holder <= 0) return null
+  return (await holdsLock(file, holder, probe)) ? holder : null
+}
