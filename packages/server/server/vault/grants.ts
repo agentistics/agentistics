@@ -167,3 +167,12 @@ export function scrubTerminalLine(sessionId: string, line: string): string {
   const p = scrubSync(sessionId, plain)
   return p !== plain ? p : line
 }
+
+/**
+ * engine-api 1.8 `vaultRefs` (VAULT.PERSONAL §8.3) — what the host hands an engine for its NATIVE
+ * sessions. Grant keys are namespaced `native:<id>`; the engine passes its own session id.
+ */
+export const nativeVaultRefs = {
+  env: (sessionId: string) => grantEnv(`native:${sessionId}`),
+  scrub: (sessionId: string, text: string) => scrubFor(`native:${sessionId}`, text),
+}

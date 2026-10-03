@@ -82,3 +82,16 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     expect(audit).not.toContain('MARKER')
   })
 })
+
+describe('engine-api 1.7 vaultRefs (native sessions)', () => {
+  test('keys are namespaced: a native session reads only a `native:` grant, never a CLI session\'s', async () => {
+    const { nativeVaultRefs } = await import('./grants')
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'sk-MARKER-888888' } })).meta
+    await grantSession('rt1', [b.id], [])            // a CLI (managed) session named rt1
+    expect(await nativeVaultRefs.env('rt1')).toEqual({})
+    await grantSession('native:rt1', [b.id], [])
+    expect(await nativeVaultRefs.env('rt1')).toEqual({ VAULT_OPENAI: 'sk-MARKER-888888' })
+    expect(await nativeVaultRefs.scrub('rt1', 'k=sk-MARKER-888888')).toBe('k=«vault:OpenAI»')
+    expect(await nativeVaultRefs.scrub('other', 'k=sk-MARKER-888888')).toBe('k=sk-MARKER-888888')
+  })
+})

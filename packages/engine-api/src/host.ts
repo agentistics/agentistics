@@ -390,6 +390,26 @@ export interface EngineInvocationCache {
   get(invocationId: string): Promise<EngineCachedInvocation | null | undefined>
 }
 
+/**
+ * 1.8 — VAULT.PERSONAL §8.3: a native session's agent USES the personal secrets its person granted to
+ * that session, without the model ever seeing a value. The host holds the grants (memory only, gesture
+ * to create, gone on lock); the engine asks at TOOL CALL time and never stores what it gets.
+ */
+export interface EngineVaultRefs {
+  /**
+   * The env overlay for THIS session's granted references (`VAULT_<KEY>[_<FIELD>]` → value), opened now.
+   * `{}` when the session has no grant. Apply it to ONE tool call's process and drop it — never bake it
+   * into a tool set shared by sessions, never write it to the journal, the history or the content store.
+   */
+  env(sessionId: string): Promise<Record<string, string>>
+  /**
+   * The text with this session's granted values — and their base64/url/hex forms — replaced by
+   * `«vault:NAME»`. Unchanged (no work) for a session without a grant. Call it on every tool OUTPUT
+   * before the model, the history, the journal or the UI stream sees it.
+   */
+  scrub(sessionId: string, text: string): Promise<string>
+}
+
 export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** Where things live. The engine reads no config of its own. */
   paths: {
@@ -492,4 +512,12 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * a hit is journaled `model.completed {replayed: true}`.
    */
   invocationCache?: EngineInvocationCache
+}
+
+/**
+   * 1.8 — grants of the person's own secrets to native sessions (VAULT.PERSONAL §8.3). OPTIONAL: a host
+   * before 1.8 has none, and an engine then offers no vault references to its sessions (a `vault://`
+   * reference in a command stays literal and fails visibly) — it never resolves one itself.
+   */
+  vaultRefs?: EngineVaultRefs
 }
