@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { PERSONAL_PURPOSE, b64url, verifyAssertion, verifyRegistration, type StoredPasskey, type WebAuthnFail } from '@agentistics/vault'
 import { openFromFile, sealToFile } from './service'
 import { personalRoot } from './personal'
+import { dropPhoneWraps } from './phone-store'
 
 const RECORD_NAME = 'mobile/settings'
 const CHALLENGE_TTL_MS = 60_000
@@ -24,25 +25,53 @@ const TOKEN_TTL_MS = 60_000
 export const CODE_WINDOW_MS = 30_000
 
 let _now: () => number = () => Date.now()
-interface MobileRecord { v: 1; passkeys: StoredPasskey[]; codeReveal: boolean }
+/** A phone approved for "code alone" (§10): its NAME and when — the device secret lives on the phone only. */
+export interface PhoneDevice { id: string; label: string; createdAt: string }
+interface MobileRecord { v: 1; passkeys: StoredPasskey[]; codeReveal: boolean; devices: PhoneDevice[] }
 const file = () => join(personalRoot(), 'mobile.sealed')
 
 export async function readMobile(): Promise<MobileRecord> {
   const r = await openFromFile(file(), PERSONAL_PURPOSE, RECORD_NAME)
-  if (!r.ok) return { v: 1, passkeys: [], codeReveal: false }
+  if (!r.ok) return { v: 1, passkeys: [], codeReveal: false, devices: [] }
   try {
     const o = JSON.parse(new TextDecoder().decode(r.plaintext)) as MobileRecord
-    return { v: 1, passkeys: Array.isArray(o.passkeys) ? o.passkeys : [], codeReveal: o.codeReveal === true }
-  } catch { return { v: 1, passkeys: [], codeReveal: false } } finally { r.plaintext.fill(0) }
+    return { v: 1, passkeys: Array.isArray(o.passkeys) ? o.passkeys : [], codeReveal: o.codeReveal === true, devices: Array.isArray(o.devices) ? o.devices : [] }
+  } catch { return { v: 1, passkeys: [], codeReveal: false, devices: [] } } finally { r.plaintext.fill(0) }
 }
 async function writeMobile(m: MobileRecord): Promise<void> {
   await sealToFile(file(), PERSONAL_PURPOSE, RECORD_NAME, new TextEncoder().encode(JSON.stringify(m)))
 }
 
 /** What the page shows: labels and dates, never a key. */
-export async function mobileView(): Promise<{ passkeys: { id: string; label: string; rpId: string; createdAt: string }[]; codeReveal: boolean }> {
+export async function mobileView(): Promise<{ passkeys: { id: string; label: string; rpId: string; createdAt: string }[]; codeReveal: boolean; devices: PhoneDevice[] }> {
   const m = await readMobile()
-  return { passkeys: m.passkeys.map(p => ({ id: p.credentialId, label: p.label, rpId: p.rpId, createdAt: p.createdAt })), codeReveal: m.codeReveal }
+  return { passkeys: m.passkeys.map(p => ({ id: p.credentialId, label: p.label, rpId: p.rpId, createdAt: p.createdAt })), codeReveal: m.codeReveal, devices: m.devices }
+}
+
+/** The owner's name for a phone (passkey or device), for the audit's "opened from …". */
+export async function phoneLabel(id: string): Promise<string | undefined> {
+  const m = await readMobile()
+  return m.passkeys.find(p => p.credentialId === id)?.label ?? m.devices.find(d => d.id === id)?.label
+}
+export async function storedPasskey(id: string): Promise<StoredPasskey | undefined> {
+  return (await readMobile()).passkeys.find(p => p.credentialId === id)
+}
+export async function addDevice(d: PhoneDevice): Promise<void> {
+  const m = await readMobile()
+  await writeMobile({ ...m, devices: [...m.devices.filter(x => x.id !== d.id), d] })
+}
+export async function removeDevice(id: string): Promise<boolean> {
+  const m = await readMobile()
+  const next = m.devices.filter(d => d.id !== id)
+  await dropPhoneWraps(w => w.kind === 'device' && w.id === id)
+  if (next.length === m.devices.length) return false
+  await writeMobile({ ...m, devices: next })
+  return true
+}
+/** A passkey's counter after an assertion verified elsewhere (the enrol PRF step). */
+export async function notePasskeyCount(id: string, signCount: number): Promise<void> {
+  const m = await readMobile()
+  await writeMobile({ ...m, passkeys: m.passkeys.map(p => (p.credentialId === id ? { ...p, signCount } : p)) })
 }
 
 // ── challenges ──────────────────────────────────────────────────────────────────────────────
@@ -127,6 +156,8 @@ export function consumeGestureToken(session: string, token: string | undefined, 
 export async function removePasskey(id: string): Promise<boolean> {
   const m = await readMobile()
   const next = m.passkeys.filter(p => p.credentialId !== id)
+  // Removing a phone removes its way to OPEN the vault too — the copy of the key goes first.
+  await dropPhoneWraps(w => w.kind === 'passkey' && w.id === id)
   if (next.length === m.passkeys.length) return false
   await writeMobile({ ...m, passkeys: next })
   return true
@@ -134,7 +165,10 @@ export async function removePasskey(id: string): Promise<boolean> {
 
 export async function setCodeReveal(enabled: boolean): Promise<void> {
   const m = await readMobile()
-  await writeMobile({ ...m, codeReveal: enabled })
+  // Turning "code alone" off deletes every device key's copy of the data key AND forgets the devices:
+  // a switch that is off must not leave a way in behind it.
+  if (!enabled) await dropPhoneWraps(w => w.kind === 'device')
+  await writeMobile({ ...m, codeReveal: enabled, ...(enabled ? {} : { devices: [] }) })
   if (!enabled) _windows = new Map()
 }
 

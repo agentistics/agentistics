@@ -168,6 +168,15 @@ describe('§2.4 — every row of the table', () => {
         expect((await requireVaultStepUp(action, C)).ok).toBe(true)
         return
       }
+      if (!row.code) {
+        // Gesture only (§10 the computer's approval of a phone): no code asked, Hello raised, fresh, no grant.
+        const g0 = hello.gestures
+        const ok = await requireVaultStepUp(action, C)
+        expect(ok).toMatchObject({ ok: true })
+        expect(ok.ok && ok.grant).toBeFalsy()
+        expect(hello.gestures - g0).toBe(1)
+        return
+      }
       expect(await requireVaultStepUp(action, C)).toMatchObject({ ok: false, code: 'stepup-required' })
       const g0 = hello.gestures
       const ok = await requireVaultStepUp(action, { ...C, code: codeAt() })

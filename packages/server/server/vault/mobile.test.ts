@@ -14,6 +14,7 @@ import { __resetVaultForTests, __setVaultClockForTests, sealToFile } from './ser
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests } from './personal'
 import { __resetMobileForTests } from './mobile'
+import { __resetPhoneForTests } from './phone'
 import { handleVaultHttp } from './http'
 
 const STORE = new Map<string, Uint8Array>()
@@ -86,7 +87,7 @@ beforeEach(async () => {
   STORE.clear(); for (const k of Object.keys(grants)) delete grants[k]
   hello = fake('hello'); dpapi = fake('dpapi'); T = 1_800_000_000_000
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [dpapi, hello], autoInit: { candidates: [dpapi] } })
-  __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock); __resetMobileForTests(clock)
+  __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock); __resetMobileForTests(clock); __resetPhoneForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   await http('POST', '/api/vault/local-proof')
   seed = base32Decode((await http('POST', '/api/vault/authenticator/begin')).json.secret)
@@ -100,10 +101,14 @@ beforeEach(async () => {
 afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-mobile-done', 'vault') }) })
 
 async function registerPhone(p = phone()) {
-  const b = await http('POST', '/api/vault/personal/mobile/register/begin', { code: codeAt(), label: 'Pixel' }, PHONE)
+  // §10: the phone asks with the code, the computer approves with Hello, then the passkey is created.
+  const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', label: 'Pixel', code: codeAt() }, PHONE)
   next()
+  expect(q.json.ok).toBe(true)
+  expect((await http('POST', '/api/vault/phone/requests/decide', { id: q.json.id, approve: true })).json.ok).toBe(true)
+  const b = await http('POST', '/api/vault/personal/mobile/register/begin', { requestId: q.json.id }, PHONE)
   expect(b.json.ok).toBe(true)
-  const f = await http('POST', '/api/vault/personal/mobile/register/finish', { challengeId: b.json.options.challengeId, ...p.create(b.json.options.challenge) }, PHONE)
+  const f = await http('POST', '/api/vault/personal/mobile/register/finish', { requestId: q.json.id, challengeId: b.json.options.challengeId, ...p.create(b.json.options.challenge) }, PHONE)
   expect(f.json.ok).toBe(true)
   return p
 }
@@ -130,7 +135,7 @@ describe('registering a phone passkey', () => {
   test('needs the code AND Windows Hello on the computer; a plain-http page is refused', async () => {
     expect((await http('POST', '/api/vault/personal/mobile/register/begin', { code: codeAt() }, PHONE_HTTP)).json.code).toBe('insecure-context')
     const g0 = hello.gestures
-    expect((await http('POST', '/api/vault/personal/mobile/register/begin', {}, PHONE)).status).toBe(401)
+    expect((await http('POST', '/api/vault/personal/mobile/register/begin', {}, PHONE)).json.code).toBe('not-approved')
     await registerPhone()
     expect(hello.gestures).toBe(g0 + 1)
     const v = await http('GET', '/api/vault/personal/mobile', undefined, LOCAL)

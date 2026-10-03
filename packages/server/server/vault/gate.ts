@@ -62,6 +62,10 @@ export type VaultAction =
   | 'personal-grant'
   // VAULT.PERSONAL backup: erase the vault's older bundles from the GitHub backup — irreversible, so code + gesture, fresh.
   | 'personal-backup-wipe'
+  // VAULT.PERSONAL §10 — opening from a phone. The phone's REQUEST to be registered costs the code
+  // (fresh, no grant: it starts an escalation); the computer's APPROVAL costs Windows Hello, fresh, and
+  // only on loopback — together a stolen code alone cannot enrol a device.
+  | 'phone-enrol-request' | 'phone-enrol-approve'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -107,6 +111,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'mobile-code-reveal': { code: true, gesture: true, grant: null },
   'personal-grant': { code: true, gesture: true, grant: 'read' },
   'personal-backup-wipe': { code: true, gesture: true, grant: null },
+  'phone-enrol-request': { code: true, gesture: false, grant: null },
+  'phone-enrol-approve': { code: false, gesture: true, grant: null },
 }
 
 /**
@@ -398,9 +404,17 @@ export async function stepUpForRead(code: string, session: string): Promise<Gate
   return requireVaultStepUp('list', { code, session })
 }
 
+/** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */
+export async function phoneUnlockGuard(): Promise<Refusal | null> {
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  if ((await loadState()).frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
+  return null
+}
+
 // ── §2.2 phase 2: the code that completes an unlock ─────────────────────────────────────────────
 
-export async function completeUnlock(code: string): Promise<{ ok: true } | Refusal> {
+/** `audit: false` — the caller writes its own line (the phone's "opened from <label>", §10). */
+export async function completeUnlock(code: string, opts: { audit?: boolean } = {}): Promise<{ ok: true } | Refusal> {
   const p = pendingUnlock()
   if (!p) return refused('no-pending-unlock', vaultLang() === 'pt' ? 'Nenhum desbloqueio está esperando um código (passaram-se 120 segundos?). Rode `agentop vault unlock` de novo.' : 'No unlock is waiting for a code (did 120 seconds pass?). Run `agentop vault unlock` again.')
   // Review S7: a rotation a crash left between commit and finish still has the authenticator seed
@@ -414,7 +428,7 @@ export async function completeUnlock(code: string): Promise<{ ok: true } | Refus
   }
   adoptPending()
   noteCodeUnlock() // the per-day window is anchored HERE, to a gesture+code unlock
-  vaultAudit({ type: 'vault.unlock' })
+  if (opts.audit !== false) vaultAudit({ type: 'vault.unlock' })
   return { ok: true }
 }
 

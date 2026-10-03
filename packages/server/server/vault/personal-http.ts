@@ -10,6 +10,7 @@ import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, validGroupName, valida
 import * as gate from './gate'
 import * as store from './personal'
 import * as mobile from './mobile'
+import * as phone from './phone'
 import * as grants from './grants'
 import { vaultAudit, vaultLang } from './service'
 
@@ -256,17 +257,22 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   const desktopOnly = () => fail('desktop-only', 'Do this on the computer itself.', 'Faça isto no próprio computador.')
   if (path === '/api/vault/personal/mobile/register/begin') {
     if (!secure) return reply(notSecure())
-    const label = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 60) : (pt() ? 'Celular' : 'Phone')
-    // An escalation (a new way to reveal): the code AND Windows Hello on the computer, fresh.
-    const g = await step('mobile-passkey-add', b)
-    if (!g.ok) return reply(g)
-    return reply({ ok: true, options: mobile.beginRegistration(session, rpId, origin, label) })
+    // VAULT.PERSONAL §10: an escalation in TWO halves on TWO devices — the phone asked with the code
+    // (/api/vault/phone/enrol/request) and the computer approved it with Windows Hello. Without that
+    // approval, bound to this session, there is nothing to register.
+    const requestId = typeof b.requestId === 'string' ? b.requestId : ''
+    const label = phone.approvalLabel(session, requestId, 'passkey')
+    if (!label) return reply(fail('not-approved', 'The computer has not approved this phone yet (or the approval expired). Ask again and approve it on the computer.', 'O computador ainda não aprovou este celular (ou a aprovação expirou). Peça de novo e aprove no computador.'))
+    return reply({ ok: true, options: { ...mobile.beginRegistration(session, rpId, origin, label), extensions: { prf: {} } } })
   }
   if (path === '/api/vault/personal/mobile/register/finish') {
+    const requestId = typeof b.requestId === 'string' ? b.requestId : ''
+    if (!phone.approvalLabel(session, requestId, 'passkey')) return reply(fail('not-approved', 'The approval for this phone expired. Ask again.', 'A aprovação deste celular expirou. Peça de novo.'))
     const r = await mobile.finishRegistration(session, b)
     if (!r.ok) return reply(passkeyFail(r.code))
     vaultAudit({ type: 'vault.personal-passkey-add' })
-    return reply({ ok: true, id: r.id })
+    // The next step asks the passkey for its PRF output, which becomes this phone's way to OPEN the vault.
+    return reply({ ok: true, id: r.id, prf: phone.passkeyRegistered(session, requestId, r.id, rpId, origin) })
   }
   if (path === '/api/vault/personal/mobile/assert/begin') {
     if (!secure) return reply(notSecure())
