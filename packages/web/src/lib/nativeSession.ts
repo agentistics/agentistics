@@ -70,6 +70,8 @@ export function configuredProviders(list: readonly { id: string; label: string; 
 const base = (id: string) => `/api/runtime/sessions/${encodeURIComponent(id)}`
 
 export const windowUrl = (id: string) => `${base(id)}/messages?limit=200`
+/** H6: one line per run (tokens, cost, cache share, the context gauge). */
+export const runsUrl = (id: string) => `${base(id)}/runs`
 export const messagesUrl = (id: string) => `${base(id)}/messages`
 export const streamUrl = (id: string, from?: number) => `${base(id)}/stream${from !== undefined ? `?from=${from}` : ''}`
 export const approveUrl = (id: string, execId: string) => `${base(id)}/tools/${encodeURIComponent(execId)}/approve`

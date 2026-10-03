@@ -64,7 +64,7 @@ export function parseEvent(line: string): SessionEvent | null {
   if (typeof o.at !== 'string' || o.at === '') return null
   if (typeof o.id !== 'string' || o.id === '') return null
   if (typeof o.cwd !== 'string') return null
-  if (o.source !== 'poll' && o.source !== 'hook') return null
+  if (o.source !== 'poll' && o.source !== 'hook' && o.source !== 'native') return null
   if (typeof o.kind !== 'string' || !EVENT_KINDS.includes(o.kind as never)) return null
 
   return {

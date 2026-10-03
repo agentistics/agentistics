@@ -55,7 +55,13 @@ export const EVENT_KINDS: readonly EventKind[] = [
 /** The states a subscriber is offered by default: the ones that mean "something needs you". */
 export const DEFAULT_EVENT_KINDS: readonly EventKind[] = ['waiting', 'waiting-approval', 'exited']
 
-export type EventSource = 'poll' | 'hook'
+/**
+ * `native` (H17): a native Agentistics session said so ITSELF — the runtime asked the person
+ * (`policy.requested` → `waiting-approval`), finished a run (`waiting`) or started one (`working`).
+ * Exact like the hook, inferred from nothing, and the only source a native session has (it has no
+ * screen for the poll to read).
+ */
+export type EventSource = 'poll' | 'hook' | 'native'
 
 export interface SessionEvent {
   /** The line format this was written at. A reader tolerating an older one reads this first. */

@@ -22,7 +22,8 @@ import {
   type NativeChatState,
   type NativeWindow,
 } from '../lib/nativeChat'
-import { approveUrl, cancelUrl, execIdOf, messagesUrl, refusalSentence, streamUrl, windowUrl } from '../lib/nativeSession'
+import { approveUrl, cancelUrl, execIdOf, messagesUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
+import { parseRuns, type RunLineView } from '../lib/nativeRuns'
 
 const REFRESH_DEBOUNCE_MS = 250
 const RECONNECT_MS = 1500
@@ -32,6 +33,8 @@ export interface NativeUpload { name: string; mediaType: string; size: number }
 
 export interface NativeSession {
   state: NativeChatState
+  /** H6: one line per run (tokens, cost, cache share, the context gauge); re-read with the window. */
+  runs: RunLineView[]
   /** `null` while the first window read is in flight; a sentence when it failed (not found, …). */
   loadError: string | null
   /** UI follow-up 3: `attachments` are uploads already in the chat attachment store (stored names). */
@@ -47,7 +50,18 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
   const loadErrorRef = useRef<string | null>(null)
   const [, force] = useReducer((n: number) => n + 1, 0)
 
+  const runsRef = useRef<RunLineView[]>([])
+  const readRuns = useCallback(async () => {
+    try {
+      const res = await fetch(runsUrl(id))
+      if (!res.ok) return
+      runsRef.current = parseRuns(await res.json().catch(() => null))
+      force()
+    } catch { /* the lines are a reading aid; a failed read keeps the last ones */ }
+  }, [id])
+
   const readWindow = useCallback(async () => {
+    void readRuns()
     try {
       const res = await fetch(windowUrl(id))
       const body = await res.json().catch(() => null)
@@ -62,7 +76,7 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
       loadErrorRef.current = lang === 'pt' ? 'Erro de rede ao ler a sessão.' : 'Network error reading the session.'
       force()
     }
-  }, [id, lang])
+  }, [id, lang, readRuns])
 
   // the window, debounced
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -151,5 +165,5 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     }
   }, [id, lang])
 
-  return { state, loadError: loadErrorRef.current, send, answer, stop }
+  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop }
 }

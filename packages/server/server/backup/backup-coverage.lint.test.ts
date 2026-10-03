@@ -29,6 +29,8 @@ function namesFromSource(): string[] {
   for (const p of patterns) {
     let out = ''
     try {
+      // The SOURCE, not its tests: a test builds paths under made-up homes (`uninstall-plan.test.ts`'s
+      // '/home/a'), which are fixtures, never a name agentop writes.
       out = execFileSync('grep', ['-rhoE', p, SERVER_SRC, '--include=*.ts', '--exclude=*.test.ts'], { encoding: 'utf-8' })
     } catch {
       // grep exits non-zero when nothing matched; an empty result is a legitimate answer here.

@@ -111,7 +111,7 @@ export function peerMessage(events: readonly SessionEvent[]): string {
   const lines: string[] = [PEER_PREAMBLE, '']
   for (const e of events) {
     lines.push(`- ${e.at} · ${eventHeadline(e)}`)
-    lines.push(`  ${e.cwd}${e.source === 'hook' ? ' (reported by the Claude Code Stop hook)' : ''}`)
+    lines.push(`  ${e.cwd}${e.source === 'hook' ? ' (reported by the Claude Code Stop hook)' : e.source === 'native' ? ' (a native Agentistics session)' : ''}`)
     const tail = (e.lines ?? []).filter(l => l.trim() !== '').slice(-3)
     for (const t of tail) lines.push(`  | ${t.trim().slice(0, 200)}`)
   }
