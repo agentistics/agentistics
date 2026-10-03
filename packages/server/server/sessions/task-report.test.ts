@@ -14,6 +14,8 @@ import {
 } from './task-report'
 import type { Subtask, Task } from './task-model'
 import type { ManagedSession } from './types'
+import { nativeRows } from './task-native'
+import type { NativeSessionLink } from './task-model'
 
 const task = (over: Partial<Task> = {}): Task => ({
   id: 't1', title: 'a delivery', status: 'in_progress',
@@ -762,5 +764,11 @@ describe('subtaskViews times (from sessions, not status)', () => {
     const views = subtaskViews(task(), subs, rows, metas, () => 0)
     expect(views.find(x => x.id === 's1')!.times.completedAt).toBeNull()
     expect(views.find(x => x.id === 's2')!.times).toMatchObject({ source: 'status', durationMs: 2 * 3_600_000 })
+  })
+  it('a NATIVE session filed on a subtask counts too: its span starts when it was filed (UI.3 x times)', () => {
+    const subs = [subtask({ id: 's1', done: true, startedAt: '2026-09-01T00:00:00Z', deliveredAt: '2026-09-01T01:00:00Z' })]
+    const rows = nativeRows([{ sessionId: 'ses_n1', taskId: 't1', subtaskId: 's1', linkedAt: '2026-10-03T09:00:00Z' } as NativeSessionLink])
+    const v = subtaskViews(task(), subs, rows, metas, () => 0).find(x => x.id === 's1')!
+    expect(v.times).toMatchObject({ source: 'sessions', startedAt: '2026-10-03T09:00:00.000Z' })
   })
 })

@@ -346,7 +346,7 @@ export interface SubtaskView {
  * today's pre-§B behaviour.
  */
 /** The spans of the conversations behind these rows — meta first, the registry row as the fallback. */
-function spansOfRows(rows: readonly ManagedSession[], metas: ReadonlyMap<string, SessionMeta>): SessionSpan[] {
+function spansOfRows(rows: readonly BoardRow[], metas: ReadonlyMap<string, SessionMeta>): SessionSpan[] {
   const out: SessionSpan[] = []
   for (const r of rows) {
     const m = r.conversationId ? metas.get(r.conversationId) : undefined
