@@ -42,6 +42,7 @@ import {
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
+import { codeWindowOpen, consumeGestureToken, openCodeWindow, readMobile } from './mobile'
 import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markCommitted, prepareRekey } from './rekey'
 
 // ── the table ────────────────────────────────────────────────────────────────────────────────
@@ -53,6 +54,9 @@ export type VaultAction =
   // VAULT.PERSONAL (spec 2026-10-03-vault-personal.md §3)
   | 'personal-list' | 'personal-create' | 'personal-reveal' | 'personal-edit' | 'personal-trash' | 'personal-restore'
   | 'personal-restore-version' | 'personal-purge' | 'personal-group-write' | 'personal-group-delete' | 'personal-import-env'
+  // VAULT.PERSONAL §7 — the phone. Each raises Windows Hello ON THE COMPUTER, on purpose: adding a way to
+  // reveal, removing one, and loosening reveal to the code are escalations made at the desk.
+  | 'mobile-passkey-add' | 'mobile-passkey-remove' | 'mobile-code-reveal'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -93,6 +97,9 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'personal-group-write': { code: true, gesture: false, grant: 'read' },
   'personal-group-delete': { code: true, gesture: true, grant: 'read' },
   'personal-import-env': { code: true, gesture: false, grant: 'read' },
+  'mobile-passkey-add': { code: true, gesture: true, grant: null },
+  'mobile-passkey-remove': { code: true, gesture: true, grant: null },
+  'mobile-code-reveal': { code: true, gesture: true, grant: null },
 }
 
 /**
@@ -243,6 +250,9 @@ export interface GateContext {
    * proof and the page recovery are honoured ONLY while it is true, request by request.
    */
   loopback?: boolean
+  /** VAULT.PERSONAL §7: a phone's single-use gesture token (from a verified passkey assertion), and the action target it is bound to. */
+  gestureToken?: string
+  binding?: string
   /** Review S7: the 24 words, typed on a TTY and passed ONLY by the socket — never read from an HTTP body. */
   words?: string
   /**
@@ -286,14 +296,14 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
       const c = await checkCodeWith(o.dek, o.kid, ctx.code)
       if (!c.ok) return c
       if (row.grant) {
-        if (row.gesture && hasPresence(o.vault)) { const g = await proveGesture(o); if (!g.ok) return g }
+        if (row.gesture && hasPresence(o.vault)) { const g = await gestureFor(action, ctx, o); if (!g.ok) return g }
         noteVaultActivity()
         return { ok: true, grant: mintGrant(ctx.session, row.grant) }
       }
     }
   }
   if (row.gesture && hasPresence(o.vault)) {
-    const g = await proveGesture(o)
+    const g = await gestureFor(action, ctx, o)
     if (!g.ok) return g
   }
   noteVaultActivity()
@@ -333,6 +343,23 @@ export async function requirePersonalReveal(ctx: GateContext): Promise<GateResul
       ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
       : 'To see a secret, the vault must ask you to confirm. Set up the authenticator (and, where you can, personal confirmation) first.')
   }
+  if (!ctx.loopback && asks.gesture) {
+    // The phone (§7): a passkey token for THIS item+field, or — only when the owner opted in — the code,
+    // which opens a 30-second reveal window for this session. Never a Hello prompt on the computer.
+    if (consumeGestureToken(ctx.session, ctx.gestureToken, `personal-reveal:${ctx.binding ?? ''}`)) { noteVaultActivity(); return { ok: true } }
+    if ((await readMobile()).codeReveal && enrolled(o.vault)) {
+      if (codeWindowOpen(ctx.session)) { noteVaultActivity(); return { ok: true } }
+      if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
+      const c = await checkCodeWith(o.dek, o.kid, ctx.code)
+      if (!c.ok) return c
+      openCodeWindow(ctx.session)
+      noteVaultActivity()
+      return { ok: true }
+    }
+    return refused('mobile-gesture-required', vaultLang() === 'pt'
+      ? 'Para ver um segredo neste aparelho, confirme com a digital (registre a passkey deste celular) ou peça ao computador para aceitar o código (Ajustes do cofre, no computador).'
+      : 'To see a secret on this device, confirm with your biometrics (register this phone\'s passkey) or let the computer accept the code (vault settings, on the computer).')
+  }
   if (asks.code) {
     if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
     const c = await checkCodeWith(o.dek, o.kid, ctx.code)
@@ -341,6 +368,22 @@ export async function requirePersonalReveal(ctx: GateContext): Promise<GateResul
   if (asks.gesture) { const g = await proveGesture(o); if (!g.ok) return g }
   noteVaultActivity()
   return { ok: true }
+}
+
+/**
+ * The gesture an action owes. On loopback (and on the socket) it is the vault's own presence unwrap —
+ * Windows Hello on this computer. OFF loopback, for a personal-secret action, the service never raises
+ * a prompt on an empty desk: the gesture is a phone passkey's single-use token, bound to this session
+ * and to exactly this action and target (VAULT.PERSONAL §7).
+ */
+async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<{ ok: true } | Refusal> {
+  if (action.startsWith('personal-') && !ctx.loopback && !fromSocket(ctx)) {
+    if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
+    return refused('mobile-gesture-required', vaultLang() === 'pt'
+      ? 'Neste aparelho, confirme com a digital (a passkey registrada para o cofre). Sem ela, faça isto no computador.'
+      : 'On this device, confirm with your biometrics (the passkey registered for the vault). Without it, do this on the computer.')
+  }
+  return proveGesture(o)
 }
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */

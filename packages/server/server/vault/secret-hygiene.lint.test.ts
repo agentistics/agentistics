@@ -64,6 +64,12 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _recoverWrong: 'a wrong-words counter and a pause deadline for the page recovery (v2.98.1)',
   },
   'server/server/vault/http.ts': { LOOPBACK_HOSTS: 'host names that mean "this computer"' },
+  'server/server/vault/mobile.ts': {
+    _now: 'a clock',
+    _challenges: 'WebAuthn challenges (random bytes, public by nature): 60 s, single use, bound to one session',
+    _tokens: 'single-use gesture tokens from a verified passkey assertion: 60 s, bound to session + action; authorise, decrypt nothing',
+    _windows: 'per-session deadlines (ms) of the opt-in 30-second code reveal window; no key material',
+  },
   'server/server/vault/personal.ts': {
     _now: 'a clock',
     _imports: 'a parsed .env import between its preview and its commit (VAULT.PERSONAL): <= 10 min, bound to one session, single use, every value blanked on commit/expiry',
