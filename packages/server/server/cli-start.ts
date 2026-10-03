@@ -4208,6 +4208,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         detail: candidatePath(c, homedir()),
         source: c.source,
         ...(c.worktree ? { worktree: true } : {}),
+        // `cwd`/`history`/`typed` rows carry no proof of a repository in `source`; one stat each says.
+        ...(c.remote || c.source === 'repo' || c.worktree || (c.source !== 'folder' && existsSync(join(c.path, '.git'))) ? { git: true } : {}),
       })) }
     },
 

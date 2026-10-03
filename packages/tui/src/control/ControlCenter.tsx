@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { WizardServices } from './code-wizard'
+import { wizardPlaces } from './wizard-places'
 import { Box, useInput } from 'ink'
 import { useTerminalSize } from '../useTerminalSize'
 import { bodyHeight, isQuitChord, resolveScrollKey, resolveShellKey, scrollBy, type NavKey } from './nav'
@@ -174,7 +175,8 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const wizardServices = useMemo((): WizardServices => ({
     ...(host.startableHarnesses ? { harnesses: () => host.startableHarnesses!() } : {}),
     ...(host.nativeModels ? { nativeModels: () => host.nativeModels!() } : {}),
-    ...(host.searchProjects ? { places: () => host.searchProjects!('').then(r => r.options) } : {}),
+    // NW-04: recent repositories and places worked in (`wizardPlaces`), not every folder of $HOME.
+    ...(host.searchProjects ? { places: () => host.searchProjects!('').then(r => wizardPlaces(r.options)) } : {}),
     ...(host.createWorktree ? { createWorktree: (repo: string, name: string) => host.createWorktree!(repo, name) } : {}),
     ...(host.spawnSession ? {
       spawn: (req: { harness: string; cwd: string; taskId: string; task: string; model?: string; prompt?: string }) =>

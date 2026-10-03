@@ -1867,6 +1867,11 @@ export interface ProjectOption {
    * `source: 'repo'`), so a worktree row is no longer labelled "git repo" there either.
    */
   worktree?: boolean
+  /**
+   * A git checkout (a remote, a `.git` the walk saw, or one the host checked for on `cwd` / history
+   * rows, whose `source` hides it). What the code wizard's folder step offers "new worktree" on (NW-04).
+   */
+  git?: boolean
 }
 
 export interface SpawnSessionRequest {
