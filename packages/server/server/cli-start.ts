@@ -3047,6 +3047,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      */
     async homeProviders() {
       const pt = S().lang === 'pt'
+      // Providers are EXPERIMENTAL with the native harness (`native-gate.ts`).
+      const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+      if (!nativeExperimentalOn()) return { unavailable: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
       type ProviderBody = { enabled?: boolean; sentence?: string; providers?: { id: string; label: string; state: string; keyless?: boolean; last4?: string; storedAt?: string }[] }
       // The SERVICE first: provider keys are sealed in the vault, and the vault opens only inside the
       // running agentop service — this process can read who is configured only by asking it. Without
@@ -4287,7 +4290,13 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
   // language is a closure variable the in-app toggle reassigns.
   const { loadEngine, engine } = await import('./engine/load')
   await loadEngine()
-  const codeTab = engine()?.codeTab
+  // The native harness is EXPERIMENTAL (owner decision 2026-10-03, `native-gate.ts`): with the flag
+  // off there is no code host at all — the tab, the palette and the home say the gate's sentence.
+  const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+  const codeTab = nativeExperimentalOn() ? engine()?.codeTab : undefined
+  if (!nativeExperimentalOn() && engine()?.codeTab) {
+    host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
+  }
   if (codeTab) {
     const { createDraftEditor } = await import('./code-editor')
     host.code = await codeTab.host({

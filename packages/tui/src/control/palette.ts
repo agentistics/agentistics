@@ -89,6 +89,8 @@ export interface PaletteContext {
   sessionOpen: boolean
   running: boolean
   askWithDiff: boolean
+  /** The native harness is experimental and off: its commands say this sentence instead. */
+  gate?: string
 }
 
 const WHY = {
@@ -102,9 +104,9 @@ const WHY = {
 export function whyNot(c: PaletteCommand, ctx: PaletteContext, lang: 'en' | 'pt'): string | null {
   const r = c.run
   if (r.kind === 'later') return r.why[lang]
-  if (r.kind === 'tab' && r.tab === 'code' && !ctx.hasCode) return WHY.noCode[lang]
+  if (r.kind === 'tab' && r.tab === 'code' && !ctx.hasCode) return ctx.gate ?? WHY.noCode[lang]
   if (r.kind !== 'code') return null
-  if (!ctx.hasCode) return WHY.noCode[lang]
+  if (!ctx.hasCode) return ctx.gate ?? WHY.noCode[lang]
   if (r.needs === 'session' && !ctx.sessionOpen) return WHY.noSession[lang]
   if (r.needs === 'ask-diff' && !ctx.askWithDiff) return WHY.noAskDiff[lang]
   if (r.needs === 'running' && !ctx.running) return WHY.notRunning[lang]

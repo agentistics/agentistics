@@ -547,7 +547,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   }, { isActive: helpOpen })
 
   const paletteList = palette ? filterCommands(palette.query, lang) : []
-  const fullCtx: PaletteContext = { hasCode: Boolean(host.code), ...paletteCtx }
+  const fullCtx: PaletteContext = {
+    hasCode: Boolean(host.code), ...paletteCtx,
+    ...(host.nativeGate ? { gate: host.nativeGate() } : {}),
+  }
   const runCommand = (c: PaletteCommand) => {
     const why = whyNot(c, fullCtx, lang)
     if (why) { say({ ok: false, message: why }); return }
@@ -763,6 +766,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         <Screen visible={tab === 'code' && !overlayOpen}>
           <Code
             code={host.code}
+            {...(host.nativeGate ? { gateSentence: host.nativeGate() } : {})}
             launch={codeLaunch}
             command={codeCommand}
             onPalette={openPalette}

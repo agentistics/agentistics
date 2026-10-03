@@ -1326,6 +1326,11 @@ export interface ControlHost {
    */
   code?: CodeHost
   /**
+   * The native harness is present but EXPERIMENTAL and switched off (`agentop experimental enable`):
+   * the sentence every native surface says instead. Absent when it is on, or when there is none.
+   */
+  nativeGate?(): string
+  /**
    * SS-09: file a session under a board task — a native session, an agentop session, or an external
    * one through its conversation. The sentence says what happened (or why not).
    */

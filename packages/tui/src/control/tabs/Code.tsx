@@ -83,6 +83,8 @@ import type { ActionResult } from '../types'
 import type { TabChrome } from '../ControlCenter'
 
 export interface CodeProps {
+  /** The native harness is experimental and off (`agentop experimental enable`): said instead. */
+  gateSentence?: string
   /** Absent: this build has no native runtime, and the tab says so in words. */
   code?: CodeHost
   /** How `agentop code …` opened the tab — acted on once, on the first mount. */
@@ -176,7 +178,7 @@ function useLatestState<T>(initial: T): [T, (next: T | ((prev: T) => T)) => void
 const defaultWrite = (bytes: string): void => { writeFrame(bytes) }
 
 export function Code({
-  code, launch, command, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
+  code, gateSentence, launch, command, lang, strings: s, width, height, isActive, onChrome, onSay, onTab,
   onAttention, onHelp, onPalette, onPaletteContext, writeTerminal = defaultWrite, inTmux = Boolean(process.env.TMUX),
 }: CodeProps) {
   const t = codeStrings(lang)
@@ -680,7 +682,7 @@ export function Code({
   )
 
   if (!available) {
-    const sentence = !code ? t.unavailableBuild : availability && !availability.ok ? availability.sentence : t.unavailableBuild
+    const sentence = !code ? (gateSentence ?? t.unavailableBuild) : availability && !availability.ok ? availability.sentence : t.unavailableBuild
     const inner = paneBody(width)
     return frame(
       <Pane title={s.tabsShort.code} width={width} height={underHeader}>

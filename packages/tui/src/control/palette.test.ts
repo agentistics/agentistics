@@ -40,3 +40,16 @@ describe('command palette (GL-03)', () => {
     expect(resolveShellKey({ input: 'p', ctrl: true }, { tab: 'services', arrows: true, mouse: false })).toEqual({ kind: 'palette' })
   })
 })
+
+describe('the native harness is experimental (gate off)', () => {
+  test('native commands say the gate sentence instead of "no native harness"', async () => {
+    const { PALETTE_COMMANDS, whyNot } = await import('./palette')
+    const gate = 'experimental — agentop experimental enable'
+    const ctx = { hasCode: false, sessionOpen: false, running: false, askWithDiff: false, gate }
+    const code = PALETTE_COMMANDS.find(c => c.id === 'code')!
+    const mode = PALETTE_COMMANDS.find(c => c.id === 'mode')!
+    expect(whyNot(code, ctx, 'en')).toBe(gate)
+    expect(whyNot(mode, ctx, 'en')).toBe(gate)
+    expect(whyNot(PALETTE_COMMANDS.find(c => c.id === 'sessions')!, ctx, 'en')).toBeNull()
+  })
+})
