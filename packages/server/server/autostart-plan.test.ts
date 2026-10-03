@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   formatStatusLines, lingerOutcome, lingerPlan, parseLinger, portHeldVerdict, statusLines,
-  validDistro, wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome,
+  autostartRepairPlan, KEEPALIVE_LOCK, validDistro, wslTaskCommand, wslTaskIsStale, wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome,
 } from './autostart-plan'
 import { systemdUnit } from './service-manager'
 
@@ -46,7 +46,7 @@ describe('WSL logon task', () => {
     expect(p.create).toEqual([
       'schtasks.exe', '/Create', '/F', '/SC', 'ONLOGON', '/RL', 'LIMITED',
       '/TN', 'Agentistics autostart (Ubuntu-22.04)',
-      '/TR', 'wsl.exe -d Ubuntu-22.04 --exec /bin/true',
+      '/TR', wslTaskCommand('Ubuntu-22.04'),
     ])
     expect(p.remove).toEqual(['schtasks.exe', '/Delete', '/F', '/TN', 'Agentistics autostart (Ubuntu-22.04)'])
     expect(p.query[1]).toBe('/Query')
@@ -96,5 +96,37 @@ describe('status lines', () => {
     const lines = statusLines({ ...base, busSocket: true, linger: 'yes', unitActive: 'active' })
     expect(lines).toHaveLength(3)
     expect(lines.every(l => l.ok && !l.fix)).toBe(true)
+  })
+})
+
+describe('WSL keep-alive and the upgrade repair', () => {
+  test('the task keeps the distro alive: hidden, one instance (flock -n), never /bin/true', () => {
+    const c = wslTaskCommand('Ubuntu-22.04')
+    expect(c).toContain('-WindowStyle Hidden')
+    expect(c).toContain('flock')
+    expect(c).toContain(KEEPALIVE_LOCK)
+    expect(c).toContain("'sleep'".replace("'sleep'", '/bin/sleep'))
+    expect(c).toContain("'infinity'")
+    expect(c).not.toContain('/bin/true')
+    expect(c.length).toBeLessThan(261) // schtasks /TR limit
+  })
+  test('the old one-shot task reads as stale; the keep-alive does not', () => {
+    expect(wslTaskIsStale('Task To Run: wsl.exe -d Ubuntu --exec /bin/true')).toBe(true)
+    expect(wslTaskIsStale(`Task To Run: ${wslTaskCommand('Ubuntu')}`)).toBe(false)
+  })
+  const base = { wsl: true, unitEnabled: true, taskPresent: true, taskStale: false }
+  test('not WSL: nothing', () => expect(autostartRepairPlan({ ...base, wsl: false }).action).toBe('none'))
+  test('upgraded machine with no autostart: enable, with one plain line', () => {
+    const r = autostartRepairPlan({ ...base, unitEnabled: false, taskPresent: false })
+    expect(r.action).toBe('enable')
+    if (r.action === 'enable') expect(r.line.split('\n')).toHaveLength(1)
+  })
+  test('missing or stale task: refresh it', () => {
+    expect(autostartRepairPlan({ ...base, taskPresent: false }).action).toBe('refresh-task')
+    expect(autostartRepairPlan({ ...base, taskStale: true }).action).toBe('refresh-task')
+  })
+  test('current: untouched; unqueryable task: never guessed', () => {
+    expect(autostartRepairPlan(base).action).toBe('none')
+    expect(autostartRepairPlan({ ...base, taskPresent: null }).action).toBe('none')
   })
 })
