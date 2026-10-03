@@ -22,10 +22,10 @@ const fail = (code: string, en: string, ptText: string) => ({ ok: false as const
 const bad = () => fail('bad-request', 'Bad request.', 'Requisição inválida.')
 function storeFail(r: store.StoreFail) {
   switch (r.code) {
-    case 'conflict': return { ...fail('conflict', 'This secret was changed somewhere else since you opened it. Reload and try again.', 'Este segredo foi alterado em outro lugar desde que você o abriu. Recarregue e tente de novo.'), version: r.version }
+    case 'version-conflict': return { ...fail('version-conflict', 'This secret was changed somewhere else since you opened it. Reload and try again.', 'Este segredo foi alterado em outro lugar desde que você o abriu. Recarregue e tente de novo.'), version: r.version }
     case 'not-found': return fail('not-found', 'That secret no longer exists.', 'Esse segredo não existe mais.')
     case 'no-import': return fail('no-import', 'That import expired (10 minutes) or belongs to another window. Choose the file again.', 'Essa importação expirou (10 minutos) ou é de outra janela. Escolha o arquivo de novo.')
-    default: return fail('unreadable', 'That secret could not be opened on this machine.', 'Esse segredo não pôde ser aberto nesta máquina.')
+    default: return fail('record-unreadable', 'That secret could not be opened on this machine.', 'Esse segredo não pôde ser aberto nesta máquina.')
   }
 }
 const invalid = (field: string) => fail('invalid', `Check the field "${field}".`, `Confira o campo "${field}".`)

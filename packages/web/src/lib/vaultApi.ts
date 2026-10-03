@@ -108,6 +108,10 @@ const reply = <T,>(r: { status: number; json: Record<string, unknown> } | null):
 
 // ── the calls ────────────────────────────────────────────────────────────────────────────────
 
+/** VAULT.PERSONAL: the same door (grant header, JSON, refusal shape) for `lib/vaultPersonal.ts`. */
+export const vaultGet = <T,>(path: string) => call('GET', path).then(r => reply<T>(r))
+export const vaultPost = <T,>(path: string, body: unknown) => call('POST', path, body).then(r => reply<T>(r))
+
 export async function loadVault(): Promise<LoadResult> {
   const r = await call('GET', '/api/vault')
   if (!r) return { kind: 'failed' }

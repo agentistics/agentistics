@@ -10,7 +10,7 @@ import {
   GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
   PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
+  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Vault as VaultNavIcon, Target, TerminalSquare,
   TrendingUp, Trophy, Users, Wrench, X, Zap,
   ZoomIn, ClipboardList, BellOff,
 } from 'lucide-react'
@@ -786,6 +786,7 @@ function MobileBottomNav({
     { key: 'top', label: pt ? 'Top' : 'Top', icon: Trophy, onClick: () => { closeSheet(); navigate('/top') }, active: location.pathname.startsWith('/top') },
     { key: 'tasks', label: 'Agentask', icon: ClipboardList, onClick: () => { closeSheet(); navigate('/tasks') }, active: location.pathname.startsWith('/tasks'), beta: true },
     { key: 'tags', label: 'Tags', icon: TagIcon, onClick: () => { closeSheet(); navigate('/tags') }, active: location.pathname.startsWith('/tags') },
+    ...(isCentral ? [] : [{ key: 'vault', label: pt ? 'Cofre' : 'Vault', icon: VaultNavIcon, onClick: () => { closeSheet(); navigate('/vault') }, active: location.pathname.startsWith('/vault') } as Tile]),
     { key: 'custom', label: pt ? 'Personalizado' : 'Custom', icon: Layers, onClick: () => { closeSheet(); navigate('/custom') }, active: location.pathname.startsWith('/custom') },
     { key: 'export', label: pt ? 'Exportar' : 'Export', icon: FileDown, onClick: () => { closeSheet(); navigate('/export') }, active: location.pathname.startsWith('/export') },
     // Unconditional: the page's filter mode compares two SCOPES and needs no second harness.
@@ -1141,6 +1142,8 @@ function SideNav({
     ...(isCentral ? [{ to: '/members', labelPt: 'Membros', labelEn: 'Members', icon: <Users size={17} /> }] : []),
     { to: '/tasks',     labelPt: 'Agentask',  labelEn: 'Agentask',    icon: <ClipboardList size={17} />, beta: true },
     { to: '/tags',      labelPt: 'Tags',         labelEn: 'Tags',         icon: <TagIcon size={17} /> },
+    // VAULT.PERSONAL: the person's own secrets live on THEIR machine — never on a central (its /api/vault is 404).
+    ...(isCentral ? [] : [{ to: '/vault', labelPt: 'Cofre', labelEn: 'Vault', icon: <VaultNavIcon size={17} /> }]),
     { to: '/tools',     labelPt: 'Ferramentas',  labelEn: 'Tools',        icon: <Wrench size={17} /> },
     { to: '/custom',    labelPt: 'Personalizado',labelEn: 'Custom',       icon: <Layers size={17} /> },
     // Unconditional — see the mobile tile: comparing two filter scopes needs no second harness.

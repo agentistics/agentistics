@@ -156,7 +156,7 @@ describe('versions, CAS, trash, tamper, rotation', () => {
     const files = readdirSync(join(personalRoot(), 'items', m.id)).filter(f => f.endsWith('.meta.sealed'))
     expect(files).toHaveLength(10)
     const c = await http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: 5, item: { kind: 'password', name: 'p' } })
-    expect(c.json).toMatchObject({ ok: false, code: 'conflict', version: 12 })
+    expect(c.json).toMatchObject({ ok: false, code: 'version-conflict', version: 12 })
     expect((await http('GET', `/api/vault/personal/versions?id=${m.id}`)).json.versions).toHaveLength(10)
   })
   test('trash keeps 30 days, restore brings it back, and after 30 days it is gone from disk', async () => {

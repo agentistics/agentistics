@@ -24,7 +24,7 @@ let _now: () => number = () => Date.now()
 const iso = () => new Date(_now()).toISOString()
 const enc = (o: unknown) => new TextEncoder().encode(JSON.stringify(o))
 
-export type StoreFail = { ok: false; code: 'not-found' | 'conflict' | 'locked' | 'unreadable' | 'clash' | 'no-import'; version?: number }
+export type StoreFail = { ok: false; code: 'not-found' | 'version-conflict' | 'locked' | 'record-unreadable' | 'clash' | 'no-import'; version?: number }
 export function personalRoot(): string { return join(vaultDir(), PERSONAL_DIR) }
 const itemDir = (id: string) => join(personalRoot(), 'items', id)
 const groupDir = (id: string) => join(personalRoot(), 'groups', id)
@@ -111,7 +111,7 @@ async function current(id: string, expectedVersion: number): Promise<PersonalMet
   if (!ITEM_ID.test(id)) return { ok: false, code: 'not-found' }
   const m = await latestMeta(id)
   if (!m) return { ok: false, code: 'not-found' }
-  if (m.version !== expectedVersion) return { ok: false, code: 'conflict', version: m.version }
+  if (m.version !== expectedVersion) return { ok: false, code: 'version-conflict', version: m.version }
   return m
 }
 
@@ -120,7 +120,7 @@ export async function editItem(id: string, expectedVersion: number, input: Perso
   const m = await current(id, expectedVersion)
   if ('ok' in m) return m
   const prev = await readValue(id, m.version)
-  if (!prev) return { ok: false, code: 'unreadable' }
+  if (!prev) return { ok: false, code: 'record-unreadable' }
   const fields: Record<string, string> = {}
   for (const k of KIND_FIELDS[input.kind]) {
     const v = input.fields?.[k] ?? (input.kind === m.kind ? prev.fields[k] : undefined)
@@ -138,7 +138,7 @@ async function rewriteMeta(id: string, expectedVersion: number, change: (m: Pers
   const src = srcV === m.version ? m : await readMeta(id, srcV)
   if (!src) return { ok: false, code: 'not-found' }
   const value = await readValue(id, srcV)
-  if (!value) return { ok: false, code: 'unreadable' }
+  if (!value) return { ok: false, code: 'record-unreadable' }
   const meta: PersonalMeta = { ...src, ...change(src), id, version: m.version + 1, createdAt: m.createdAt, updatedAt: iso() }
   await writeVersion(meta, value)
   return { ok: true, meta }
@@ -163,7 +163,7 @@ export async function revealField(id: string, field: string, version?: number): 
   const m = version === undefined ? await latestMeta(id) : await readMeta(id, version)
   if (!m || !m.fields.includes(field)) return { ok: false, code: 'not-found' }
   const v = await readValue(id, m.version)
-  if (!v || typeof v.fields[field] !== 'string') return { ok: false, code: 'unreadable' }
+  if (!v || typeof v.fields[field] !== 'string') return { ok: false, code: 'record-unreadable' }
   return { ok: true, value: v.fields[field]!, meta: m }
 }
 
@@ -195,7 +195,7 @@ export async function renameGroup(id: string, expectedVersion: number, name: str
   if (!GROUP_ID.test(id)) return { ok: false, code: 'not-found' }
   const g = await latestGroup(id)
   if (!g) return { ok: false, code: 'not-found' }
-  if (g.version !== expectedVersion) return { ok: false, code: 'conflict', version: g.version }
+  if (g.version !== expectedVersion) return { ok: false, code: 'version-conflict', version: g.version }
   const next: PersonalGroup = { ...g, name, version: g.version + 1, updatedAt: iso() }
   await writeGroup(next)
   return { ok: true, group: next }
