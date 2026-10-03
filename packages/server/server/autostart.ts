@@ -24,7 +24,7 @@ import { PORT } from './config'
 import { isWSL } from './wsl-ports-io'
 import {
   formatStatusLines, lingerOutcome, lingerPlan, parseLinger, portHeldVerdict, statusLines,
-  autostartRepairPlan, wslTaskCreateOutcome, wslTaskIsStale, wslTaskPlan, wslTaskRemoveOutcome, type BusFacts,
+  autostartRepairPlan, startupScript, startupState, STARTUP_FILE_NAME, type StartupState, wslTaskCreateOutcome, wslTaskIsStale, wslTaskPlan, wslTaskRemoveOutcome, type BusFacts,
 } from './autostart-plan'
 import { cliStrings, type CliStrings } from './cli-i18n'
 import { resolveLang } from './cli-lang'
@@ -495,16 +495,10 @@ async function enableSystemd(mode: AutostartMode, spec: ServiceSpec): Promise<Au
   // WSL: Windows does not start the distro at logon, so the unit never gets its chance.
   let ok = true
   if (isWSL()) {
-    const task = wslTaskPlan(wslDistro())
-    if (!task.ok) {
-      ok = false
-      lines.push(task.reason)
-    } else {
-      const res = await run(task.create)
-      const v = wslTaskCreateOutcome(task.name, res.code, res.stderr)
-      ok = v.ok
-      lines.push(v.message)
-    }
+    const distro = wslDistro()
+    const v = distro ? await installLogonEntry(distro) : { ok: false, message: wslTaskPlan(distro).ok ? '' : (wslTaskPlan(distro) as { reason: string }).reason }
+    ok = v.ok
+    lines.push(v.message)
   }
 
   const hook = await installUpdateHook()
@@ -640,6 +634,8 @@ export async function disableAutostart(
       const res = await run(task.remove)
       lines.push(wslTaskRemoveOutcome(task.name, res.code, res.stderr).message)
     }
+    const gone = await removeStartupEntry()
+    if (gone) lines.push(gone)
   }
   return { ok: true, message: lines.join('\n') }
 }
@@ -937,7 +933,7 @@ export async function autostartStatus(mode?: AutostartMode): Promise<AutostartRe
     const bus = await readBusFacts()
     const u = await run(['systemctl', '--user', 'is-active', 'agentop-server'])
     const e = await run(['systemctl', '--user', 'is-enabled', 'agentop-server'])
-    let wsl: { distro: string | undefined; taskPresent: boolean | null } | null = null
+    let wsl: { distro: string | undefined; taskPresent: boolean | null; startup?: StartupState | null } | null = null
     if (isWSL()) {
       const task = wslTaskPlan(wslDistro())
       let present: boolean | null = null
@@ -945,7 +941,8 @@ export async function autostartStatus(mode?: AutostartMode): Promise<AutostartRe
         const q = await run(task.query)
         present = q.code === 0 ? true : q.code === 127 ? null : false
       }
-      wsl = { distro: wslDistro(), taskPresent: present }
+      const d = wslDistro()
+      wsl = { distro: d, taskPresent: present, startup: d ? await readStartupState(d) : null }
     }
     lines.push('', formatStatusLines(statusLines({
       ...bus, user: userInfo().username, unitActive: u.stdout, unitEnabled: e.stdout, wsl,
@@ -954,12 +951,57 @@ export async function autostartStatus(mode?: AutostartMode): Promise<AutostartRe
   return { ok: true, message: lines.join('\n') }
 }
 
+/** The user's Windows Startup folder as a WSL path, or null when interop cannot answer. */
+async function windowsStartupDir(): Promise<string | null> {
+  const appdata = await run(['cmd.exe', '/c', 'echo %APPDATA%'])
+  const win = appdata.code === 0 ? appdata.stdout.trim().replace(/\r/g, '') : ''
+  if (!win || win.includes('%')) return null
+  const mapped = await run(['wslpath', '-u', win])
+  const root = mapped.code === 0 ? mapped.stdout.trim() : ''
+  return root ? join(root, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup') : null
+}
+
+async function readStartupState(distro: string): Promise<StartupState | null> {
+  const dir = await windowsStartupDir()
+  if (!dir) return null
+  const text = await readFile(join(dir, STARTUP_FILE_NAME), 'utf8').catch(() => null)
+  return startupState(text, distro)
+}
+
+/**
+ * Register the logon entry that keeps the distro alive: the scheduled task first, and when Windows
+ * refuses it (no admin on a company PC) the hidden Startup-folder script. Returns the one line to show.
+ */
+async function installLogonEntry(distro: string): Promise<{ ok: boolean; message: string }> {
+  const task = wslTaskPlan(distro)
+  if (!task.ok) return { ok: false, message: task.reason }
+  const res = await run(task.create)
+  const v = wslTaskCreateOutcome(task.name, res.code, res.stderr)
+  if (v.ok) return v
+  const dir = await windowsStartupDir()
+  if (!dir) return v
+  try {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, STARTUP_FILE_NAME), startupScript(distro))
+    return { ok: true, message: `Windows refused the logon task, so ${STARTUP_FILE_NAME} was put in your Startup folder — logging in boots this distro and keeps it running.` }
+  } catch (err: any) {
+    return { ok: false, message: `${v.message} The Startup-folder fallback failed too: ${err?.message ?? err}` }
+  }
+}
+
+async function removeStartupEntry(): Promise<string | null> {
+  const dir = await windowsStartupDir()
+  if (!dir || !existsSync(join(dir, STARTUP_FILE_NAME))) return null
+  await unlink(join(dir, STARTUP_FILE_NAME)).catch(() => {})
+  return `Removed ${STARTUP_FILE_NAME} from the Windows Startup folder.`
+}
+
 /**
  * `agentop upgrade`'s autostart check on WSL: repair what is missing or stale, say so in ONE line.
  * Returns '' when nothing was needed or this is not WSL. The decision is the pure
  * `autostartRepairPlan`; this only gathers its facts and executes the answer.
  */
-export async function repairWslAutostart(): Promise<string> {
+export async function repairWslAutostart(opts: { enableIfMissing?: boolean } = { enableIfMissing: true }): Promise<string> {
   if (platform() !== 'linux' || !isWSL()) return ''
   const task = wslTaskPlan(wslDistro())
   if (!task.ok) return ''
@@ -967,19 +1009,21 @@ export async function repairWslAutostart(): Promise<string> {
   const unitEnabled = enabled.stdout.trim().startsWith('enabled') || enabled.stdout.trim().startsWith('linked')
   let taskPresent: boolean | null = null
   let taskStale = false
+  const startup = await readStartupState(wslDistro()!)
   if (unitEnabled) {
     const q = await run(task.queryVerbose)
     taskPresent = q.code === 0 ? true : q.code === 127 ? null : false
     taskStale = q.code === 0 && wslTaskIsStale(q.stdout)
   }
-  const plan = autostartRepairPlan({ wsl: true, unitEnabled, taskPresent, taskStale })
+  const plan = autostartRepairPlan({ wsl: true, unitEnabled, taskPresent, taskStale, startup })
   if (plan.action === 'none') return ''
   if (plan.action === 'enable') {
+    if (!opts.enableIfMissing) return ''
     const r = await enableAutostart('server')
     return r.ok ? plan.line : `Could not enable autostart on WSL: ${r.message.split('\n').pop()}`
   }
-  const res = await run(task.create)
-  return wslTaskCreateOutcome(task.name, res.code, res.stderr).ok ? plan.line : `Could not update the Windows logon task: ${res.stderr || `exit ${res.code}`}`
+  const r = await installLogonEntry(wslDistro()!)
+  return r.ok ? plan.line : `Could not update the Windows logon entry: ${r.message}`
 }
 
 /** Type guard used by the cli to validate the user-supplied mode. */
