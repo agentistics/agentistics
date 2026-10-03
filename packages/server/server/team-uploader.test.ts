@@ -22,7 +22,7 @@ import {
   __teardownConnectionForTests,
   scheduleOnChangeTrigger, loadSentState, reconcileUploaderNow, MAX_SUPPRESSED_STREAK,
   replayForgetJournals, getResyncProgress, guardedManualPush, peekPushContext,
-  AUTH_FAIL_SUSTAIN_MS, __setAuthErrSinceForTests,
+  AUTH_FAIL_SUSTAIN_MS, __setAuthErrSinceForTests, __expireAuthStopProbeForTests,
   type PushCycleContext,
 } from './team-uploader'
 import { handleTeamStatus } from './team-connections'
@@ -945,8 +945,13 @@ describe('sustained auth failure — durable mark, never removal (production-inc
       const result = await pushOnceDetailed(marked, ctx, { updateTeamConfig: fakeUpdateTeamConfig })
 
       expect(result).toEqual({ count: 0 })
-      // Only the cheap whoami probe was attempted — never the full ingest payload — while the
-      // central still rejects the token.
+      // The 401 also STOPPED the connection (uploader-auth-stop.ts): inside the probe window the
+      // central is not contacted at all…
+      expect(fx.hits).toEqual([])
+      // …and once the window has passed, only the cheap whoami probe is attempted — never the full
+      // ingest payload — while the central still rejects the token.
+      __expireAuthStopProbeForTests(id)
+      expect(await pushOnceDetailed(marked, ctx, { updateTeamConfig: fakeUpdateTeamConfig })).toEqual({ count: 0 })
       expect(fx.hits).toEqual(['/api/team/whoami'])
       expect(hitsBefore).toBeGreaterThan(0) // sanity: the marking cycle did contact the central
     } finally {
@@ -2492,4 +2497,98 @@ describe('an explicit push-now closes the window between two periodic cycles', (
       await central.stop()
     }
   }, 10_000)
+})
+
+
+// 2026-10-03: `ingest returned 403; stopping push` was logged every 2–5 s for HOURS — each file
+// change started another full ingest the central refused again. One 401/403 now STOPS the
+// connection: one log line, no further ingest, until its configuration changes or a throttled
+// whoami probe shows the central accepting the token again.
+describe('a 401/403 stops the uploader for that connection (uploader-auth-stop.ts)', () => {
+  function central(initial: number) {
+    let ingest = initial
+    let whoami = initial
+    const hits: string[] = []
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const path = new URL(req.url).pathname
+        hits.push(path)
+        if (path === '/api/team/policy') return Response.json({ pushIntervalSec: 30, instanceId: 'inst-1', capabilities: [] })
+        if (path === '/api/team/whoami') {
+          return whoami === 200 ? Response.json({ ok: true, user: 'test-user', org: 'default' }) : new Response('no', { status: whoami })
+        }
+        await req.json().catch(() => undefined)
+        return ingest === 200 ? Response.json({ ok: true, count: 0 }) : new Response('no', { status: ingest })
+      },
+    })
+    return { port: server.port!, hits, set: (i: number, w: number) => { ingest = i; whoami = w }, stop: () => server.stop(true) }
+  }
+  const session = (id: string): SessionMeta => ({ session_id: id, start_time: '2026-10-03T00:00:00.000Z', project_path: '/p' } as unknown as SessionMeta)
+
+  async function withWarns<T>(fn: () => Promise<T>): Promise<{ result: T; warns: string[] }> {
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (...a: unknown[]) => { warns.push(a.map(String).join(' ')) }
+    try { return { result: await fn(), warns } } finally { console.warn = orig }
+  }
+
+  it('after one 403, later pushes send NOTHING and log NOTHING', async () => {
+    const fx = central(403)
+    try {
+      const id = randomConnId()
+      const conn = fakeConn(id, fx.port)
+      let store: TeamConfig = { schema: 2, mode: 'member', connections: [conn] }
+      const upd = async (m: TeamConfigMutator): Promise<TeamConfig> => { const n = m(store); if (n !== undefined) store = n; return store }
+      const ctx = makeCtx({ storedSessions: [session('s1')], liveSessions: [session('s1')] })
+
+      const { warns } = await withWarns(async () => {
+        await pushOnceDetailed(conn, ctx, { updateTeamConfig: upd })
+        fx.hits.length = 0
+        for (let i = 0; i < 5; i++) await pushOnceDetailed(conn, ctx, { updateTeamConfig: upd })
+      })
+      expect(fx.hits).toEqual([])
+      expect(warns.filter(w => w.includes('403'))).toHaveLength(1)
+    } finally {
+      fx.stop()
+    }
+  })
+
+  it('a CHANGED token lifts the stop at once', async () => {
+    const fx = central(401)
+    try {
+      const id = randomConnId()
+      const conn = fakeConn(id, fx.port, { token: 'old' })
+      let store: TeamConfig = { schema: 2, mode: 'member', connections: [conn] }
+      const upd = async (m: TeamConfigMutator): Promise<TeamConfig> => { const n = m(store); if (n !== undefined) store = n; return store }
+      const ctx = makeCtx({ storedSessions: [session('s2')], liveSessions: [session('s2')] })
+      await withWarns(() => pushOnceDetailed(conn, ctx, { updateTeamConfig: upd }))
+      fx.set(200, 200)
+      fx.hits.length = 0
+      await pushOnceDetailed({ ...conn, token: 'new' }, ctx, { updateTeamConfig: upd })
+      expect(fx.hits).toContain('/api/team/ingest')
+    } finally {
+      fx.stop()
+    }
+  })
+
+  it('a central that was only restarting is noticed by the throttled probe, and pushes resume', async () => {
+    const fx = central(403)
+    try {
+      const id = randomConnId()
+      const conn = fakeConn(id, fx.port)
+      let store: TeamConfig = { schema: 2, mode: 'member', connections: [conn] }
+      const upd = async (m: TeamConfigMutator): Promise<TeamConfig> => { const n = m(store); if (n !== undefined) store = n; return store }
+      const ctx = makeCtx({ storedSessions: [session('s3')], liveSessions: [session('s3')] })
+      await withWarns(() => pushOnceDetailed(conn, ctx, { updateTeamConfig: upd }))
+      fx.set(200, 200)
+      __expireAuthStopProbeForTests(id)
+      fx.hits.length = 0
+      await pushOnceDetailed(conn, ctx, { updateTeamConfig: upd })
+      expect(fx.hits[0]).toBe('/api/team/whoami')
+      expect(fx.hits).toContain('/api/team/ingest')
+    } finally {
+      fx.stop()
+    }
+  })
 })
