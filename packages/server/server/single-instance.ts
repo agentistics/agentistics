@@ -147,6 +147,31 @@ async function isFresh(file: string): Promise<boolean> {
  * failure than the one this prevents. The re-claim goes through the same `O_EXCL` create, so two
  * processes finding the same stale lock still produce exactly one winner.
  */
+/**
+ * `claimInstanceLock`, but WAITING (bounded) while another live server holds the lock — for a start
+ * made by the service manager.
+ *
+ * Measured on 2026-10-03, right after a reboot: the systemd unit started while another server (one
+ * started outside the unit) held the data dir. It was refused and, rightly, not restarted in a loop.
+ * But when that other server went away, nothing started again, and the machine had no server for ten
+ * minutes. A unit start that waits for the holder costs one small file read per `pollMs`, and it
+ * takes over the moment the data dir is free. A start made by hand keeps exiting at once.
+ */
+export async function waitForInstanceLock(
+  file: string,
+  o: { timeoutMs: number; pollMs: number; pid?: number; probe?: LockProbe; onWait?: (holder: number | undefined) => void; sleep?: (ms: number) => Promise<void> },
+): Promise<LockResult> {
+  const deadline = Date.now() + o.timeoutMs
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  let told = false
+  for (;;) {
+    const r = await claimInstanceLock(file, o.pid ?? process.pid, o.probe ?? OS_PROBE)
+    if (r.ok || Date.now() >= deadline) return r
+    if (!told) { told = true; o.onWait?.(r.holder) }
+    await sleep(Math.min(o.pollMs, Math.max(1, deadline - Date.now())))
+  }
+}
+
 export async function claimInstanceLock(
   file: string,
   pid: number = process.pid,

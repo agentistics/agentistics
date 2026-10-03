@@ -172,10 +172,18 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
 // megabytes. And two processes started in the same second both pass a "is the port free?" check,
 // which is precisely how two of those four arrived.
 {
-  const { claimInstanceLock } = await import('./single-instance')
+  const { claimInstanceLock, waitForInstanceLock } = await import('./single-instance')
   const { serverLockFile } = await import('./config')
   const { AGENTISTICS_DATA_DIR: LOCK_DIR } = await import('./config')
-  const lock = await claimInstanceLock(serverLockFile())
+  // Started by the service manager (systemd sets INVOCATION_ID): WAIT, bounded, for a server started
+  // elsewhere to let go of the data dir instead of leaving the machine with no server once it does
+  // (2026-10-03: ten minutes after a reboot). A start by hand still exits at once, with the sentence.
+  const lock = process.env.INVOCATION_ID
+    ? await waitForInstanceLock(serverLockFile(), {
+        timeoutMs: 10 * 60_000, pollMs: 5_000,
+        onWait: holder => console.log(`[startup] another agentop server${holder ? ` (pid ${holder})` : ''} holds ${LOCK_DIR} — waiting for it to stop (up to 10 min), then starting`),
+      })
+    : await claimInstanceLock(serverLockFile())
   if (!lock.ok) {
     console.error(
       `[startup] another agentop server is already using ${LOCK_DIR}` +
@@ -190,6 +198,7 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   // release never got past its first `await`, so every clean stop left the lock on disk. A lock left
   // behind by a hard kill (or a reboot) is still reclaimed as stale by the next start —
   // `claimInstanceLock` checks that the holder is the process that WROTE it, not merely a live pid.
+  console.log(`[boot] +${Math.round(performance.now())} ms data dir claimed`)
   const release = () => { lock.releaseSync() }
   process.on('exit', release)
   process.on('SIGINT', () => { release(); process.exit(130) })
@@ -207,7 +216,10 @@ void (async () => {
   // Warm the response cache at boot so the FIRST user request is served instantly instead of paying
   // the full cold build (tens of seconds on a busy central). Runs for every mode — non-'off' modes
   // also persist the consolidated per-session store as a side effect; 'off' just warms the cache.
-  buildApiResponse().catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
+  const warmStart = performance.now()
+  buildApiResponse()
+    .then(() => console.log(`[boot] +${Math.round(performance.now())} ms first /api/data built (${Math.round(performance.now() - warmStart)} ms)`))
+    .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
 })()
 
 // Once-per-install move of the legacy single-connection team state files into the
@@ -4366,6 +4378,8 @@ const scheduleBackfillCheck = () => {
     if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
   })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
 }
+// One line with the boot's own clock, so a slow start can be read off the service's journal.
+console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
 setTimeout(scheduleBackfillCheck, 120_000).unref()
 setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
 } catch (err: unknown) {
