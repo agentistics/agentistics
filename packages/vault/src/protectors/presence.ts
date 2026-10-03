@@ -45,6 +45,7 @@ export function presenceCode(reason: string): PresenceCode | null {
  */
 export const PRESENCE_DETAILS = [
   'bridge-failed', 'hello-not-set-up', 'credential-exists', 'credential-deleted', 'hello-status', 'bad-request',
+  'not-reproducible',
 ] as const
 export type PresenceDetail = typeof PRESENCE_DETAILS[number]
 
@@ -55,6 +56,7 @@ const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
   'credential-deleted': { en: 'the credential was deleted', pt: 'a credencial foi apagada' },
   'hello-status': { en: 'Windows Hello gave an unexpected answer; the details are in the agentop log', pt: 'o Windows Hello deu uma resposta inesperada; os detalhes estão no log do agentop' },
   'bad-request': { en: 'the Windows bridge did not understand the request', pt: 'a ponte do Windows não entendeu o pedido' },
+  'not-reproducible': { en: 'it answered, but not with the key it gave when the vault was set up', pt: 'respondeu, mas não com a chave que deu quando o cofre foi configurado' },
 }
 
 function isDetail(s: string): s is PresenceDetail { return (PRESENCE_DETAILS as readonly string[]).includes(s) }
@@ -89,6 +91,13 @@ function detailWords(r: string, lang: Lang): string {
 
 export function presenceSentence(code: PresenceCode, lang: Lang, presence: string, reason = ''): string {
   const r = detailWords(reason.replace(/^presence-[a-z]+:\s*/, ''), lang)
+  // The reproducibility check runs at the FIRST real unlock (owner decision 2026-10-02), so its failure
+  // is its own sentence: the credential exists, it simply did not give back the setup's key.
+  if (code === 'presence-lost' && /^presence-lost:\s*not-reproducible$/.test(reason)) {
+    return lang === 'pt'
+      ? `${presence} respondeu, mas não com a mesma chave da configuração — então não abre este cofre. Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`; depois ligue a presença de novo.`
+      : `${presence} answered, but not with the key it gave at setup — so it cannot open this vault. Your secrets are intact. Open the vault with your 24-word recovery key: \`agentop vault recover\`, then turn presence on again.`
+  }
   if (lang === 'pt') {
     switch (code) {
       case 'presence-cancelled': return `${presence} foi cancelado, então o cofre continuou trancado. Nada foi aberto.`
@@ -149,3 +158,25 @@ export function zero(b: Uint8Array): void {
 export function describeThrown(err: unknown): PresenceCode {
   return /time/i.test(String((err as Error)?.message ?? err)) ? 'presence-timeout' : 'presence-unavailable'
 }
+
+// ── live progress: one tick per COMPLETED gesture ────────────────────────────────────────────────
+//
+// Owner, 2026-10-02: a step that says "confirm twice" and then raises a third dialog is a step nobody
+// can trust, and a person with a Hello dialog in front of them has no way to know how many are left.
+// Each bridge ticks here after a prompt the person actually answered (Hello create/sign, a key's
+// make/assert); the service turns the ticks into "confirmation i of n" for the page. Nothing secret
+// passes through: the listener receives no argument at all.
+
+let _gestureListener: (() => void) | null = null
+/** The service's hook; `null` detaches. One listener — the service owns one gesture at a time. */
+export function setGestureListener(fn: (() => void) | null): void { _gestureListener = fn }
+/** Called by a bridge after a gesture completed. Never throws into the bridge. */
+export function gestureDone(): void { try { _gestureListener?.() } catch { /* progress is advisory */ } }
+
+/**
+ * How many prompts each operation raises — the ONE place the page's counts come from. Owner decision
+ * 2026-10-02: the minimum the API allows. The device check asks nothing (`IsSupportedAsync` / the key
+ * is present); the enrolment is create/make + ONE sign/assert, its seal checked in memory with the key
+ * just derived; every unlock is ONE. That the key REPRODUCES is proved by the first real unlock.
+ */
+export const PRESENCE_GESTURES = { probe: 0, enroll: 2, unlock: 1 } as const

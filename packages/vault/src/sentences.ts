@@ -191,3 +191,35 @@ export class VaultRefusalError extends Error {
     this.code = code
   }
 }
+
+// ── the first page enrolment's setup code (review S2) ────────────────────────────────────────────
+
+/**
+ * PURE. The exact command that mints the setup code for THIS service. The code lives in the running
+ * service's memory and the CLI reaches it over `<data dir>/run/vault.sock`, so a service on a
+ * non-default data dir (a preview, a second instance) is only reached with the same `AGENTISTICS_DIR`.
+ */
+export function setupCodeCommand(dataDir: string, defaultDir: string): string {
+  if (dataDir === defaultDir) return 'agentop vault setup-code'
+  const q = /^[\w./~@%+=:,-]+$/.test(dataDir) ? dataDir : `'${dataDir.replace(/'/g, `'\\''`)}'`
+  return `AGENTISTICS_DIR=${q} agentop vault setup-code`
+}
+
+/**
+ * PURE. WHERE the setup code can be shown, in plain words. It is printed only on a real terminal
+ * (stdin and stdout both a TTY) — an assistant's chat, an IDE's output pane or a pipe is refused by
+ * design — so a refusal that says only "a terminal" leaves the person running it in the very place
+ * that cannot show it. Owner, 2026-10-02: ran it through an assistant's `!` prefix and got only that.
+ */
+export function setupCodeWhere(lang: Lang): string {
+  return lang === 'pt'
+    ? 'Abra o terminal do Ubuntu/WSL (ou o Terminal do macOS/Linux) e rode o comando lá. Dentro de um chat de assistente ou de uma IDE ele não aparece, por segurança.'
+    : 'Open the Ubuntu/WSL terminal (or the Terminal on macOS/Linux) and run the command there. Inside an assistant\'s chat or an IDE it is not shown, for security.'
+}
+
+/** PURE. The CLI's / the socket's refusal when the setup code is asked for without a terminal. */
+export function setupCodeTtyRefusal(lang: Lang, command = 'agentop vault setup-code'): string {
+  return lang === 'pt'
+    ? `O código de configuração só é mostrado num terminal de verdade. ${setupCodeWhere(lang)} Comando: ${command}`
+    : `The setup code is shown only on a real terminal. ${setupCodeWhere(lang)} Command: ${command}`
+}

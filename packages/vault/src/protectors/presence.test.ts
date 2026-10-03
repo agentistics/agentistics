@@ -129,16 +129,22 @@ describe('hello', () => {
     expect(m.creds.size).toBe(0)
   })
 
-  it('probe proves determinism, cleans up, and says so when the signature varies', async () => {
+  it('probe asks NO gesture (IsSupportedAsync only); a signature that does not reproduce is caught at the first unlock', async () => {
     const m = helloMachine()
-    const { io } = fakeIo(m.answer, WSL)
-    expect((await helloProtector({ io, vaultDir: '/v', wsl: true }).probe()).ok).toBe(true)
+    const f = fakeIo(m.answer, WSL)
+    expect((await helloProtector({ io: f.io, vaultDir: '/v', wsl: true }).probe()).ok).toBe(true)
     expect(m.creds.size).toBe(0)
+    expect(f.calls.map(c => c.stdin.split('\n')[0])).toEqual(['check'])
     let n = 0
     const m2 = helloMachine({ sign: () => ok(Buffer.from(`sig${n++}`).toString('base64')) })
-    const r = await helloProtector({ io: fakeIo(m2.answer, WSL).io, vaultDir: '/v', wsl: true }).probe()
-    expect(!r.ok && r.reason).toContain('signs differently')
-    expect(m2.creds.size).toBe(0)
+    const p2 = helloProtector({ io: fakeIo(m2.answer, WSL).io, vaultDir: '/v', wsl: true })
+    const w = await p2.wrap(DEK, 'k1')
+    expect(w.ok).toBe(true)
+    const u = await p2.unwrap(rec(w), 'k1')
+    expect(!u.ok && u.reason).toBe('presence-lost: not-reproducible')
+    const s = presenceSentence('presence-lost', 'pt', 'o Windows Hello', !u.ok ? u.reason : '')
+    expect(s).toContain('agentop vault recover')
+    expect(s).toContain('não com a mesma chave')
   })
 
   it('no interop / no powershell → unavailable, nothing run; native Windows uses SystemRoot first', async () => {

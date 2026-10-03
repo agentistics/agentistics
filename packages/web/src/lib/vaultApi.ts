@@ -41,7 +41,18 @@ export interface VaultView {
   recoveryTodo: string[] | null
   hardening: Hardening | null
   gates: Record<string, GateRow>
+  /** A page's FIRST enrolment owes the setup code (asked as the wizard's first step); the exact command and where to run it. Absent on an older server. */
+  setupCode?: { owed: boolean; command: string; where: string }
+  /** How many prompts the device check / the enrolment raise — stated by the server. Absent on an older one. */
+  gestures?: { probe: number; enroll: number }
+  /** Owner decision 2026-10-02: what an unlock asks besides the gesture. Absent on an older server. */
+  unlockPolicy?: UnlockPolicyView
 }
+export type UnlockMode = 'always' | 'hello-only' | 'daily'
+export interface UnlockPolicyView { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
+export const UNLOCK_MODES: readonly UnlockMode[] = ['daily', 'always', 'hello-only']
+export const UNLOCK_HOURS_MIN = 1
+export const UNLOCK_HOURS_MAX = 24
 
 /** A refusal, exactly as the server words it (already in the user's language). */
 export interface Refusal { ok: false; code: string; sentence: string; status: number }
@@ -102,12 +113,43 @@ export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ?
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock').then(r => reply<{ state: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
+/** Changing what an unlock asks: the code AND the gesture, fresh (the server's `set-unlock-policy` row). */
+export const setUnlockPolicy = (mode: UnlockMode, hours: number, code?: string) => call('POST', '/api/vault/unlock-policy', { mode, hours, ...(code ? { code } : {}) }).then(r => reply(r))
+/** PURE. The hours as typed: whole, 1–24, else null. */
+export function parseUnlockHours(s: string): number | null {
+  const t = s.trim()
+  if (!/^\d{1,2}$/.test(t)) return null
+  const n = Number(t)
+  return n >= UNLOCK_HOURS_MIN && n <= UNLOCK_HOURS_MAX ? n : null
+}
+/**
+ * PURE. The words for step 2 of "how your vault works" — the CURRENT unlock mode, when presence and
+ * the authenticator are both on (otherwise the old three answers stand).
+ */
+export function howStep2(v: Pick<VaultView, 'authenticator' | 'presence' | 'unlockPolicy'>): { key: 'how2_both' | 'how2_code' | 'how2_nothing' | 'how2_always' | 'how2_helloOnly' | 'how2_daily'; hours?: number } {
+  const how = howConfirms(v)
+  if (how !== 'both' || !v.authenticator || !v.presence) return { key: how === 'both' ? 'how2_both' : how === 'code' ? 'how2_code' : 'how2_nothing' }
+  const p = v.unlockPolicy ?? { mode: 'daily' as const, hours: 12 }
+  if (p.mode === 'always') return { key: 'how2_always' }
+  if (p.mode === 'hello-only') return { key: 'how2_helloOnly' }
+  return { key: 'how2_daily', hours: p.hours }
+}
 export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
 export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
 
+/** The wizard's first step: spend the setup code BEFORE any gesture; the proof stands for the rest of this wizard. */
+export const setupCodeAccept = (setupCode: string) => call('POST', '/api/vault/setup-code', { setupCode }).then(r => reply(r))
 /** `setupCode`: the one-time code `agentop vault setup-code` prints — a page's FIRST enrolment needs it (review S2). */
 export const authenticatorBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/authenticator/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ uri: string; secret: string }>(r))
 export const authenticatorConfirm = (code: string) => call('POST', '/api/vault/authenticator/confirm', { code }).then(r => reply<{ grant: string }>(r))
+export interface GestureProgress { kind: string; done: number; total: number }
+/** Polled while a probe / enrolment request is in flight. `null` = nothing in flight for this session. */
+export const presenceProgress = () => call('GET', '/api/vault/presence/progress').then(r => reply<{ progress: GestureProgress | null }>(r))
+/** PURE. "Confirmation i of n": the one being asked now (done + 1), never past n. */
+export function gestureStep(p: GestureProgress | null): { i: number; n: number } | null {
+  if (!p || p.total <= 0) return null
+  return { i: Math.min(p.total, p.done + 1), n: p.total }
+}
 export const presenceProbe = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(code ? { code } : {}) }).then(r => reply(r))
 export const recoveryBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/recovery/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ words: string[]; positions: number[] }>(r))
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
@@ -155,12 +197,20 @@ export function needsTypedCode(g: { code: boolean; grant: boolean }, grantIsAliv
 }
 
 export type WizardStep = 'authenticator' | 'recovery' | 'presence'
-/** What the wizard runs: the device check leads whenever a fresh enrolment will end in presence. */
-export type WizardPhaseStep = 'probe' | WizardStep
+/**
+ * What the wizard runs: the setup code leads whenever the server says a page's first enrolment owes
+ * it, then the device check whenever a fresh enrolment will end in presence.
+ */
+export type WizardPhaseStep = 'setup' | 'probe' | WizardStep
 
-/** PURE. The whole §7.3 flow for what is missing: probe → authenticator → recovery → presence. */
-export function wizardPlan(missing: readonly WizardStep[]): WizardPhaseStep[] {
-  return missing.includes('presence') && missing.includes('authenticator') ? ['probe', ...missing] : [...missing]
+/**
+ * PURE. The whole §7.3 flow for what is missing: setup code → probe → authenticator → presence →
+ * recovery. The setup code is FIRST, before any gesture (owner, 2026-10-02: it used to surface only
+ * after the Hello dialogs, as a red failure on the authenticator step).
+ */
+export function wizardPlan(missing: readonly WizardStep[], setupOwed = false): WizardPhaseStep[] {
+  const steps: WizardPhaseStep[] = missing.includes('presence') && missing.includes('authenticator') ? ['probe', ...missing] : [...missing]
+  return setupOwed && steps.length > 0 ? ['setup', ...steps] : steps
 }
 
 /** PURE. What an action will ask, as words for a tooltip — from the gate row, narrowed by this vault. */

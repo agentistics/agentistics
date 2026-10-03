@@ -29,6 +29,17 @@ function fake(id: ProtectorId): Fake {
       return d ? { ok: true, dek: new Uint8Array(d) } : { ok: false, kind: 'missing', reason: 'gone' }
     },
     async remove(_r: unknown, kid: string) { STORE.delete(`${id}:${kid}`) },
+    // The two-phase presence API (leader decision 2026-10-02): the gestures at `derive`, nothing written.
+    ...(id === 'hello' ? {
+      async derive() {
+        if (self.wrapFails) return { ok: false as const, reason: self.wrapFails }
+        return { ok: true as const, held: { kek: new Uint8Array(32).fill(7), fields: { marker: 'held' } } }
+      },
+      async sealHeld(_h: unknown, dek: Uint8Array, kid: string) {
+        STORE.set(`${id}:${kid}`, new Uint8Array(dek)); return { ok: true as const, record: { type: id, createdAt: 'x' } }
+      },
+      async discardHeld() {},
+    } : {}),
   }
   return self
 }
@@ -341,7 +352,7 @@ describe('S2 — first enrolment from a page needs a proof from this machine', (
   })
   test('a failed device check is said in words, never as a reason code', async () => {
     await silentVault()
-    hello.wrapFails = 'presence-unavailable: bridge-failed'
+    hello.probe = async () => ({ ok: false as const, reason: 'presence-unavailable: bridge-failed' })
     const r = await probePresence('hello', S)
     expect(!r.ok && r.sentence).not.toContain('bridge-failed')
     expect(!r.ok && r.code).toBe('presence-unavailable')
@@ -361,6 +372,7 @@ describe('S3 — reset when the vault cannot open: allowed from the terminal, wi
   test('a vault that is merely LOCKED behind presence is not reset that way — the sentence says unlock first', async () => {
     await authVault()
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await makeRecovery() // presence commits as the wizard's LAST step
     next()
     restart(); installVaultOps()
     const r = await op({ op: 'vault-reset' })
@@ -466,7 +478,9 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
     await authVault()
     const old = await silentCopy()
     __rekeyCrashAtForTests('prepare-mid')
-    await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
+    // Presence is HELD (nothing written); the rekey runs when the recovery key is confirmed — the crash lands there.
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await expect(makeRecovery()).rejects.toThrow('injected crash')
     restart()
     const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
     expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
@@ -602,5 +616,208 @@ describe('decision 2 — authenticator → presence (the key rotates) → recove
     expect(missingSteps({ authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
     expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
     expect(stepsToRun({ only: [], presence: null, requirePresence: false } as never, { authenticator: false, recovery: false, presence: false, available: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
+  })
+})
+
+// ── owner 2026-10-02: the setup code comes FIRST, before any gesture ───────────────────────────
+// The release preview did the Windows Hello gestures and only THEN asked for the setup code, as a red
+// failure. `acceptSetupCode` spends it first and holds a proof for that session; the device check
+// refuses without it; the view says it is owed, with the exact command and WHERE to run it.
+
+import { setupCodeCommand, setupCodeTtyRefusal, setupCodeWhere } from '@agentistics/vault'
+import { acceptSetupCode, setupCodeOwed } from './gate'
+import { readVaultView } from './inventory'
+
+const SWEB = { session: 'http:local' }
+const OTHER = { session: 'http:other' }
+
+describe('the setup code is asked BEFORE any gesture', () => {
+  test('the device check of a first page enrolment is refused without it — no gesture is raised', async () => {
+    await silentVault()
+    const before = hello.gestures
+    const r = await probePresence('hello', SWEB)
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect(hello.gestures).toBe(before)
+  })
+  test('accepting the code first carries the whole wizard: probe, authenticator, first words — no second code', async () => {
+    await silentVault()
+    expect(setupCodeOwed(false, SWEB)).toBe(true)
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    expect(setupCodeOwed(false, SWEB)).toBe(false)
+    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect((await beginAuthenticator(SWEB, 'box')).ok).toBe(true)
+  })
+  test('the proof belongs to the session that typed the code', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    expect(setupCodeOwed(false, OTHER)).toBe(true)
+    const r = await beginAuthenticator(OTHER, 'box')
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    expect((await beginRecoveryKey(OTHER)).ok).toBe(false)
+  })
+  test('the proof expires with the code\'s own 10 minutes', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
+    T += 11 * 60_000
+    expect(setupCodeOwed(false, SWEB)).toBe(true)
+  })
+  test('a wrong code is refused with the setup sentence, and the 5th wrong burns the real one', async () => {
+    await silentVault()
+    const { code } = mintSetupCode()
+    for (let i = 0; i < 5; i++) {
+      const r = await acceptSetupCode({ ...SWEB, setupCode: '00000000' })
+      expect(!r.ok && r.code).toBe('setup-code-required')
+    }
+    expect((await acceptSetupCode({ ...SWEB, setupCode: code })).ok).toBe(false)
+  })
+  test('not owed (the terminal) → accepted with nothing to check', async () => {
+    await silentVault()
+    expect((await acceptSetupCode({ session: 'socket' })).ok).toBe(true)
+  })
+  test('the view says it is owed, with the command and where to run it', async () => {
+    await silentVault()
+    const v = await readVaultView([], async () => [], SWEB.session)
+    expect(v.setupCode.owed).toBe(true)
+    expect(v.setupCode.command).toContain('agentop vault setup-code')
+    expect(v.setupCode.where).toBe(setupCodeWhere('en'))
+    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+    expect((await readVaultView([], async () => [], SWEB.session)).setupCode.owed).toBe(false)
+  })
+})
+
+describe('the command reaches THIS service, and the refusal says where a terminal is', () => {
+  test('the default data dir needs no env; any other one carries AGENTISTICS_DIR', () => {
+    expect(setupCodeCommand('/home/a/.agentistics', '/home/a/.agentistics')).toBe('agentop vault setup-code')
+    expect(setupCodeCommand('/tmp/s4-preview', '/home/a/.agentistics')).toBe('AGENTISTICS_DIR=/tmp/s4-preview agentop vault setup-code')
+    expect(setupCodeCommand('/tmp/my dir', '/home/a/.agentistics')).toBe("AGENTISTICS_DIR='/tmp/my dir' agentop vault setup-code")
+    expect(setupCodeCommand("/tmp/o'k", '/x')).toBe("AGENTISTICS_DIR='/tmp/o'\\''k' agentop vault setup-code")
+  })
+  test('the owner\'s wording, in PT, and its EN twin', () => {
+    expect(setupCodeWhere('pt')).toBe('Abra o terminal do Ubuntu/WSL (ou o Terminal do macOS/Linux) e rode o comando lá. Dentro de um chat de assistente ou de uma IDE ele não aparece, por segurança.')
+    expect(setupCodeWhere('en')).toContain('Ubuntu/WSL')
+    expect(setupCodeWhere('en')).toContain('assistant')
+  })
+  test('the TTY refusal names where to run it and the exact command', () => {
+    const pt = setupCodeTtyRefusal('pt', 'AGENTISTICS_DIR=/tmp/p agentop vault setup-code')
+    expect(pt).toContain(setupCodeWhere('pt'))
+    expect(pt).toContain('AGENTISTICS_DIR=/tmp/p agentop vault setup-code')
+    expect(setupCodeTtyRefusal('en')).toContain(setupCodeWhere('en'))
+  })
+})
+
+// ── owner 2026-10-02: the device check states its real gesture count and reports progress ───────
+
+import { PRESENCE_GESTURES, gestureDone } from '@agentistics/vault'
+import { gestureProgress } from './gate'
+
+describe('the device check asks nothing; the enrolment reports live "confirmation i of n" (owner 2026-10-02)', () => {
+  test('the device check raises no gesture and writes nothing', async () => {
+    await silentVault()
+    await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })
+    const before = hello.gestures
+    let wraps = 0
+    const wrap = hello.wrap.bind(hello)
+    hello.wrap = async (dek, kid) => { wraps++; return wrap(dek, kid) }
+    expect((await probePresence('hello', SWEB)).ok).toBe(true)
+    expect(hello.gestures).toBe(before)
+    expect(wraps).toBe(0)
+  })
+  test('enrolment progress is visible to the asking session while the dialogs are up, to nobody else, and gone after', async () => {
+    await authVault()
+    const seen: unknown[] = []
+    const derive = hello.derive!.bind(hello)
+    hello.derive = async (kid: string) => {
+      seen.push(gestureProgress(S)); gestureDone()
+      seen.push(gestureProgress(S)); seen.push(gestureProgress(OTHER)); gestureDone(); gestureDone()
+      seen.push(gestureProgress(S))
+      return derive(kid)
+    }
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    expect(seen).toEqual([
+      { kind: 'hello', done: 0, total: PRESENCE_GESTURES.enroll },
+      { kind: 'hello', done: 1, total: PRESENCE_GESTURES.enroll },
+      null,
+      { kind: 'hello', done: PRESENCE_GESTURES.enroll, total: PRESENCE_GESTURES.enroll }, // capped at n
+    ])
+    expect(gestureProgress(S)).toBeNull()
+  })
+  test('the view states the counts the page prints', async () => {
+    await silentVault()
+    expect((await readVaultView([], async () => [], SWEB.session)).gestures).toEqual({ probe: 0, enroll: 2 })
+  })
+})
+
+// ── leader decision 2026-10-02: the silent OS wrapper is removed ONLY as the wizard's very last step ──
+
+import { presenceHeldFor } from './gate'
+
+describe('the silent wrapper goes LAST — after the recovery key is confirmed, never at the presence step', () => {
+  const vj = () => parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+  const mark = async () => {
+    const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+    return r.ok ? new TextDecoder().decode(r.plaintext) : null
+  }
+
+  test('QUIT after presence and before recovery → the vault still opens silently and nothing is lost', async () => {
+    await authVault()
+    const before = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
+    const kid = vj().kid
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    // Nothing on disk changed: no presence wrapper, no hello file, the silent wrapper and its stored key intact.
+    expect(readFileSync(join(vaultDir(), 'vault.json'), 'utf8')).toBe(before)
+    expect(vj().wrappers.map(w => w.type)).toEqual(['dpapi'])
+    expect(STORE.has(`dpapi:${kid}`)).toBe(true)
+    expect(STORE.has(`hello:${kid}`)).toBe(false)
+    // The person quits: the service restarts (or the page is simply closed and the vault locks).
+    restart()
+    const g = hello.gestures
+    expect(await ensureVaultOpen()).not.toBeNull() // opens in SILENCE, as before the wizard
+    expect(hello.gestures).toBe(g)
+    expect(await mark()).toBe('MARK')
+    expect(vj().kid).toBe(kid)
+  })
+
+  test('the same quit without a restart: a lock drops the held key, and the next open is still silent', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    expect(presenceHeldFor(S)).toBe('hello')
+    lockVault('user')
+    expect(presenceHeldFor(S)).toBeNull()
+    expect(await ensureVaultOpen()).not.toBeNull()
+    expect(await mark()).toBe('MARK')
+    // and a recovery key made now is a plain recovery key: presence did not sneak in
+    await makeRecovery()
+    expect(vj().wrappers.map(w => w.type).sort()).toEqual(['dpapi', 'recovery'])
+  })
+
+  test('the held key expires with the wizard window (10 min): presence is not committed by a late recovery key', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    T += 11 * 60_000
+    expect(presenceHeldFor(S)).toBeNull()
+    await makeRecovery().catch(() => {}) // the wizard's window is over; whatever it says, presence stays off
+    expect(vj().wrappers.map(w => w.type)).toContain('dpapi')
+    expect(vj().wrappers.map(w => w.type)).not.toContain('hello')
+  })
+
+  test('confirming the recovery key is what commits: presence on, the silent wrapper retired, a new key, everything readable', async () => {
+    await authVault()
+    const old = vj().kid
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await makeRecovery()
+    const v = vj()
+    expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
+    expect(v.kid).not.toBe(old)
+    expect(v.retired).toBeUndefined()
+    expect(STORE.has(`dpapi:${old}`)).toBe(false)
+    expect(STORE.has(`hello:${v.kid}`)).toBe(true) // sealed with the HELD key, at the end
+    expect(await mark()).toBe('MARK')
+    expect(presenceHeldFor(S)).toBeNull()
+  })
+
+  test('another session cannot commit a presence it did not take', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    expect(presenceHeldFor({ session: 'http:someone-else' })).toBeNull()
   })
 })

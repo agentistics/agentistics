@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'bun:test'
 import { helloProtector, HELLO_SCRIPT } from './hello'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
-import { parseBridgeError, presenceSentence, PRESENCE_DETAILS } from './presence'
+import { parseBridgeError, presenceSentence, PRESENCE_DETAILS, PRESENCE_GESTURES, setGestureListener } from './presence'
 import { bytes, text, type ProtectorIo, type RunResult } from './types'
 
 const CAST = 'PRESENCE-ERROR unavailable bridge-failed System.Management.Automation.PSInvalidCastException 0x80004002'
@@ -94,5 +94,111 @@ describe('the sentence a person reads', () => {
   it('a raw .NET type that slipped into a reason anyway is not repeated to the person', () => {
     const s = presenceSentence('presence-unavailable', 'en', 'Windows Hello', 'presence-unavailable: System.Management.Automation.PSInvalidCastException')
     expect(s).not.toMatch(/System\./)
+  })
+})
+
+describe('the gesture count the page states is the count the bridge raises (owner 2026-10-02)', () => {
+  // A fake PowerShell that answers every verb: create → ok, sign → a fixed signature.
+  function okIo(calls: string[]): ProtectorIo {
+    const files = new Map<string, Uint8Array>()
+    return {
+      async run(_p, _a, stdin): Promise<RunResult> {
+        const verb = text(stdin ?? new Uint8Array()).split('\n')[0]!
+        calls.push(verb)
+        return { code: 0, stdout: bytes(verb === 'sign' ? Buffer.alloc(256, 7).toString('base64') : 'ok'), stderr: '' }
+      },
+      async readFile(f) { return files.get(f) ?? null },
+      async writeFile(f, b) { files.set(f, b) }, async removeFile(f) { files.delete(f) }, async createExclusive() { return true },
+      async firstExisting(c) { return c.find(x => x === WSL_INTEROP || x === WSL_POWERSHELL) ?? null },
+      async which() { return null },
+    }
+  }
+  it('device check 0, enrolment 2 (create + ONE sign), unlock 1 — the minimum the API allows (owner decision 2026-10-02)', async () => {
+    expect(PRESENCE_GESTURES).toEqual({ probe: 0, enroll: 2, unlock: 1 })
+    const calls: string[] = []
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const p = helloProtector({ io: okIo(calls), vaultDir: '/v', wsl: true })
+      expect((await p.probe()).ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.probe)
+      expect(calls).toEqual(['check'])
+      const w = await p.wrap(new Uint8Array(32).fill(1), 'k1')
+      expect(w.ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll)
+      expect(calls.filter(c => c === 'create' || c === 'sign')).toEqual(['create', 'sign'])
+      if (!w.ok) return
+      const u = await p.unwrap(w.record, 'k1')
+      expect(u.ok).toBe(true)
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll + PRESENCE_GESTURES.unlock)
+      // delete/check raise no dialog and tick nothing
+      await p.remove(w.record, 'k1')
+      expect(ticks).toBe(PRESENCE_GESTURES.enroll + PRESENCE_GESTURES.unlock)
+    } finally { setGestureListener(null) }
+  })
+  it('two-phase enrolment: derive takes the 2 prompts and writes nothing; sealHeld takes NONE, checks the held KEK opens it, then writes', async () => {
+    const calls: string[] = []
+    const io = okIo(calls)
+    const written: string[] = []
+    const w = io.writeFile.bind(io)
+    io.writeFile = async (f, b) => { written.push(f); return w(f, b) }
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const p = helloProtector({ io, vaultDir: '/v', wsl: true })
+      const d = await p.derive!('k1')
+      expect(d.ok).toBe(true)
+      if (!d.ok) return
+      expect(ticks).toBe(2)
+      expect(written).toEqual([]) // nothing on disk until the LAST step
+      const before = calls.length
+      const dek = new Uint8Array(32).fill(9)
+      const s = await p.sealHeld!(d.held, dek, 'k1')
+      expect(s.ok).toBe(true)
+      expect(calls.length).toBe(before) // no bridge call at all: no gesture
+      expect(ticks).toBe(2)
+      expect(written).toEqual(['/v/dek.hello'])
+      if (!s.ok) return
+      const u = await p.unwrap(s.record, 'k1') // the first real unlock: ONE sign, same key
+      expect(u.ok && Buffer.from(u.dek).equals(Buffer.from(dek))).toBe(true)
+      // A held key that is not 32 bytes (zeroed / damaged) is refused before anything is written.
+      const bad = await p.sealHeld!({ kek: new Uint8Array(3), fields: d.held.fields }, dek, 'k1')
+      expect(bad.ok).toBe(false)
+      expect(written).toEqual(['/v/dek.hello'])
+    } finally { setGestureListener(null) }
+  })
+  it('a failed or cancelled prompt does not count as one answered', async () => {
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const io: ProtectorIo = { ...okIo([]), async run(): Promise<RunResult> { return { code: 3, stdout: new Uint8Array(), stderr: 'PRESENCE-ERROR cancelled' } } }
+      expect((await helloProtector({ io, vaultDir: '/v', wsl: true }).wrap(new Uint8Array(32), 'k1')).ok).toBe(false)
+      expect(ticks).toBe(0)
+    } finally { setGestureListener(null) }
+  })
+})
+
+describe('the Hello dialog opens IN FRONT (owner 2026-10-02: it opened minimized/behind every time)', () => {
+  it('a topmost owner window takes the foreground through AttachThreadInput, never an ALT-key trick', () => {
+    expect(HELLO_SCRIPT).toContain('function Front(){')
+    expect(HELLO_SCRIPT).toContain('$F.TopMost=$true')
+    expect(HELLO_SCRIPT).toContain('[Ag.W]::AttachThreadInput($me,$ft,$true)')
+    expect(HELLO_SCRIPT).toContain('[void][Ag.W]::SetForegroundWindow($F.Handle)')
+    expect(HELLO_SCRIPT).toContain('[void][Ag.W]::AttachThreadInput($me,$ft,$false)') // detached again
+    expect(HELLO_SCRIPT).not.toContain('keybd_event')
+    expect(HELLO_SCRIPT).not.toContain('GetConsoleWindow') // a WSL-started powershell has no console window to bring up
+  })
+  it('the owner window is the dialog\'s owner: ForWindow calls with its WindowId, plain calls only as the fallback', () => {
+    expect(HELLO_SCRIPT).toContain('$w.Value=[uint64]$F.Handle.ToInt64()')
+    expect(HELLO_SCRIPT).toContain('$KCM::RequestCreateForWindowAsync($wid,$name,$opt)')
+    expect(HELLO_SCRIPT).toContain('$o.Credential.RequestSignForWindowAsync($wid,$buf)')
+    expect(HELLO_SCRIPT).toContain('} else { $r=AwaitOp ($KCM::RequestCreateAsync($name,$opt))')
+    expect(HELLO_SCRIPT).toContain('} else { $s=AwaitOp ($o.Credential.RequestSignAsync($buf))')
+  })
+  it('the foreground is never fatal, is raised only for the verbs that show a dialog, and the window keeps pumping', () => {
+    expect(HELLO_SCRIPT).toMatch(/function Front\(\)\{ try \{ .* \} catch \{ return \$null \} \}/)
+    expect(HELLO_SCRIPT.match(/\$wid=Front/g)?.length).toBe(2) // create + sign; check/delete raise nothing
+    expect(HELLO_SCRIPT).toContain('[System.Windows.Forms.Application]::DoEvents() }; Start-Sleep -Milliseconds 30')
+    expect(HELLO_SCRIPT).toContain('if ($sw.ElapsedMilliseconds -gt 60000) { Fail "timeout" "" "" }')
   })
 })

@@ -7,8 +7,13 @@
  * choosing a row for the new action:
  *
  *   action                                    code  gesture  grant reuse
- *   unlock                                    yes   yes      —            (two-phase, completeUnlock)
+ *   unlock                                    *     yes      —            (two-phase, completeUnlock)
+ *     * per the UNLOCK POLICY (unlock-policy.ts, owner decision 2026-10-02): 'always' asks the code every
+ *       time; 'hello-only' never at unlock (every other row below still asks it); 'daily' (the default)
+ *       asks it on the first unlock after the service starts and once the N-hour window, anchored to the
+ *       last gesture+code unlock and held in memory only, has expired.
  *   list / lock (HTTP) / set-auto-lock        yes   no       5-min 'read' grant
+ *   set-unlock-policy                         yes   yes      none — fresh each time
  *   lock-local (TTY, auto-lock, SIGTERM)      no    no       —            (reducing exposure is never gated)
  *   change-protector / rekey / enroll-presence / disable-presence / reset / rotate-recovery /
  *   enroll-runner / rotate-runner / enroll-authenticator / add-passphrase
@@ -27,21 +32,22 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, skewWords, wordsToEntropy, writePrivateAtomic,
-  type Protector, type ProtectorId, type StepUpState, type VaultJson,
+  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
+  type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
 } from '@agentistics/vault'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
-  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus,
+  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
 } from './service'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
 import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markCommitted, prepareRekey } from './rekey'
 
 // ── the table ────────────────────────────────────────────────────────────────────────────────
 
 export type VaultAction =
-  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock'
+  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock' | 'set-unlock-policy'
   | 'change-protector' | 'rekey' | 'enroll-presence' | 'disable-presence' | 'reset' | 'rotate-recovery'
   | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase' | 'create-recovery'
 
@@ -53,6 +59,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   list: { code: true, gesture: false, grant: 'read' },
   lock: { code: true, gesture: false, grant: 'read' },
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
+  // Owner decision 2026-10-02: loosening what an unlock asks is an escalation — code AND gesture, fresh.
+  'set-unlock-policy': { code: true, gesture: true, grant: null },
   'lock-local': { code: false, gesture: false, grant: null },
   'change-protector': { code: true, gesture: true, grant: null },
   rekey: { code: true, gesture: true, grant: null },
@@ -167,7 +175,10 @@ async function checkCodeWith(dek: Uint8Array, kid: string, code: string): Promis
   try { v = judgeCode(o.plaintext, code, _now(), before) } finally { o.plaintext.fill(0) }
   await saveState(v.state)
   if (v.ok) return { ok: true }
-  if (v.code !== 'stepup-paused') vaultAudit({ type: v.state.frozen ? 'vault.stepup-frozen' : 'vault.stepup-failed' })
+  if (v.code !== 'stepup-paused') {
+    vaultAudit({ type: v.state.frozen ? 'vault.stepup-frozen' : 'vault.stepup-failed' })
+    dropUnlockWindow() // any failed code: the next unlock owes the code again (unlock policy)
+  }
   if (v.state.frozen) lockVault('stepup-frozen')
   return stepupRefusal(v)
 }
@@ -292,6 +303,7 @@ export async function completeUnlock(code: string): Promise<{ ok: true } | Refus
     return c
   }
   adoptPending()
+  noteCodeUnlock() // the per-day window is anchored HERE, to a gesture+code unlock
   vaultAudit({ type: 'vault.unlock' })
   return { ok: true }
 }
@@ -360,9 +372,10 @@ export function mintSetupCode(): { code: string; expiresInMs: number } {
 
 function setupRequired(): Refusal {
   // Nothing is minted or reported here: the code exists only once a terminal asks for one.
+  const cmd = setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR)
   return refused('setup-code-required', vaultLang() === 'pt'
-    ? 'Para a primeira configuração pela página, digite o código de configuração desta máquina: rode `agentop vault setup-code` num terminal aqui.'
-    : 'For the first setup from a page, type this machine\'s setup code: run `agentop vault setup-code` in a terminal here.')
+    ? `Para a primeira configuração pela página, digite o código de configuração desta máquina: rode \`${cmd}\`. ${setupCodeWhere('pt')}`
+    : `For the first setup from a page, type this machine's setup code: run \`${cmd}\`. ${setupCodeWhere('en')}`)
 }
 
 /** Spend the setup code: right → consumed; wrong → counted, and the 5th wrong burns it. */
@@ -375,10 +388,37 @@ function spendSetupCode(given: string | undefined): boolean {
   return false
 }
 
-/** A first enrolment (nothing to ask a code for yet): the socket, or a page with the setup code. */
+/**
+ * The setup code, already spent by THIS session at the start of its wizard (owner, 2026-10-02: the
+ * page used to ask for it only after the Hello gestures, as a red failure). Memory only, bound to the
+ * session that typed it, 10 minutes — the window the code itself would have had.
+ */
+let _setupProof: { until: number; session: string } | null = null
+const setupProofHeld = (ctx: { session: string }): boolean => _setupProof !== null && _now() < _setupProof.until && _setupProof.session === ctx.session
+
+/** A first enrolment (nothing to ask a code for yet): the socket, this session's proof, or the setup code. */
 function firstEnrolProof(ctx: GateContext): { ok: true } | Refusal {
-  if (fromSocket(ctx)) return { ok: true }
+  if (fromSocket(ctx) || setupProofHeld(ctx)) return { ok: true }
   return spendSetupCode(ctx.setupCode) ? { ok: true } : setupRequired()
+}
+
+/** Over the vault file + this session: does a page starting the setup still owe the setup code? */
+export function setupCodeOwed(stepupEnrolled: boolean, ctx: { session: string }): boolean {
+  return !stepupEnrolled && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx)
+}
+
+/**
+ * The wizard's FIRST step when `setupCodeOwed`: spend the code BEFORE any gesture, and hold the proof
+ * for this session so the steps that follow (the device check, the authenticator, the first words) do
+ * not ask again. Not owed → nothing to check. Wrong → the same refusal, and the 5th wrong burns the code.
+ */
+export async function acceptSetupCode(ctx: GateContext): Promise<{ ok: true } | Refusal> {
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!setupCodeOwed(enrolled(o.vault), ctx)) return { ok: true }
+  if (!spendSetupCode(ctx.setupCode)) return setupRequired()
+  _setupProof = { until: _now() + SETUP_TTL_MS, session: ctx.session }
+  return { ok: true }
 }
 let _enrolWrong = 0
 const ENROL_MAX_WRONG = 5
@@ -419,9 +459,9 @@ export async function confirmAuthenticator(code: string, ctx: { session: string 
 }
 
 /**
- * §7.3 step 1, BEFORE anything is changed: does this presence device complete a real round trip
- * (wrap + unwrap, two gestures) with a throwaway key? Nothing is written to the vault and the
- * throwaway key is removed. Gated like the enrolment it precedes, unless it is part of the first
+ * §7.3 step 1, BEFORE anything is changed: is this presence device here and usable? NO gesture
+ * (owner decision 2026-10-02): `IsSupportedAsync` for Hello, "plugged in and offers hmac-secret" for a
+ * key. Nothing is written and nothing is created. Gated like the enrolment it precedes, unless it is part of the first
  * enrolment (no authenticator yet).
  */
 export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true } | Refusal> {
@@ -435,21 +475,40 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
       const g = await requireVaultStepUp('enroll-presence', ctx)
       if (!g.ok) return g
     }
+  } else if (!o.vault.stepup && !recoveryTodo()) {
+    // A first enrolment from a page: the setup code comes BEFORE any gesture, never after them.
+    const p = firstEnrolProof(ctx)
+    if (!p.ok) return p
   }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
   if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
-  const dek = new Uint8Array(randomBytes(32))
-  const kid = randomBytes(8).toString('hex')
-  try {
-    const w = await presence.wrap(dek, kid)
-    if (!w.ok) return enrolFailure(id, w.reason)
-    const back = await presence.unwrap(w.record, kid)
-    await presence.remove(w.record, kid).catch(() => {})
-    const same = back.ok && back.dek.length === dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(dek))
-    if (back.ok) back.dek.fill(0)
-    if (!same) return back.ok ? enrolFailure(id, 'presence-unavailable: bridge-failed') : enrolFailure(id, back.reason)
-    return { ok: true }
-  } finally { dek.fill(0) }
+  // NO gesture (PRESENCE_GESTURES.probe = 0, owner decision 2026-10-02): the presence protector's own
+  // probe is `IsSupportedAsync` / "the key is here and offers hmac-secret". The enrolment proves it
+  // works; the first real unlock proves it reproduces.
+  const r = await presence.probe().catch(() => ({ ok: false as const, reason: 'presence-unavailable: bridge-failed' }))
+  if (!r.ok) return enrolFailure(id, r.reason)
+  return { ok: true }
+}
+
+// ── live gesture progress (owner, 2026-10-02): "confirmation i of n" while the dialogs are up ────
+
+let _gestures: { session: string; kind: ProtectorId; done: number; total: number } | null = null
+
+/** Run `fn` while counting the gestures it raises, for THIS session's page to poll. */
+async function countGestures<T>(ctx: { session: string }, kind: ProtectorId, total: number, fn: () => Promise<T>): Promise<T> {
+  const mine = { session: ctx.session, kind, done: 0, total }
+  _gestures = mine
+  setGestureListener(() => { mine.done = Math.min(mine.total, mine.done + 1) })
+  try { return await fn() } finally {
+    setGestureListener(null)
+    if (_gestures === mine) _gestures = null
+  }
+}
+
+/** What the page draws while its gesture request is in flight; another session sees nothing. */
+export function gestureProgress(ctx: { session: string }): { kind: ProtectorId; done: number; total: number } | null {
+  const g = _gestures
+  return g && g.session === ctx.session ? { kind: g.kind, done: g.done, total: g.total } : null
 }
 
 async function writeVaultJson(v: VaultJson): Promise<void> {
@@ -466,10 +525,12 @@ function dropRecovery(): void { _recovery?.entropy.fill(0); _recovery = null }
 export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; words: string[]; positions: number[] } | Refusal> {
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (o.vault.wrappers.some(w => w.type === 'recovery')) {
+  if (o.vault.wrappers.some(w => w.type === 'recovery') && !presenceHeldFor(ctx)) {
+    // (Presence HELD for this session: these words are the ones that commit it — the enrolment that
+    // took the gestures was already gated, and the old words stop working the moment it commits.)
     const g = await requireVaultStepUp('rotate-recovery', ctx)
     if (!g.ok) return g
-  } else if (!recoveryTodo() && !fromSocket(ctx) && !flowActive(ctx)) {
+  } else if (!recoveryTodo() && !fromSocket(ctx) && !flowActive(ctx) && !presenceHeldFor(ctx)) {
     // Review S2: the FIRST 24 words, to a page outside its own wizard — the code if one exists, else
     // the setup code (nothing else on this machine can be asked yet).
     if (enrolled(o.vault)) {
@@ -494,6 +555,24 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
   if (!confirmWords(r.words, r.positions, typed)) return refused('recovery-confirm-wrong', vaultLang() === 'pt' ? 'Essas não são as palavras daquelas posições. Confira o papel e tente de novo.' : 'Those are not the words at those positions. Check your copy and try again.')
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
+  // Leader decision 2026-10-02: presence taken earlier in THIS wizard commits HERE, as the last step —
+  // the silent wrapper is retired only now, after the words are confirmed.
+  const h = presenceHeldFor(ctx) ? _heldPresence : null
+  if (h) {
+    _heldPresence = null
+    try {
+      if (h.oldKid !== o.kid) return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa de presença. Nada foi alterado; ligue a presença de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
+      const c = await commitHeldPresence(h, r.entropy, o)
+      if (!c.ok) return c
+    } finally { dropRecovery() }
+    recoveryStepDone('presence'); recoveryStepDone('recovery')
+    dropUnlockWindow() // a protector change
+    _flow = null
+    vaultAudit({ type: 'vault.enroll-presence', protector: h.id })
+    vaultAudit({ type: 'vault.rekey', protector: h.id })
+    vaultAudit({ type: 'vault.rotate-recovery' })
+    return { ok: true }
+  }
   try {
     // Review S6: staged, verified from disk, THEN it replaces the old wrapper — a failure keeps the old words.
     const w = await writeRecoveryVerified(realProtectorIo(), vaultDir(), o.dek, o.kid, r.entropy)
@@ -541,7 +620,8 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
 /**
  * Presence becomes the primary and the silent OS wrapper is retired — only after the authenticator and
  * a recovery key exist (otherwise a lost device would lose the vault), and through `enrollPresence`,
- * which verifies the new wrapper by a real unwrap before anything is removed.
+ * whose wrap checks its own seal in memory before anything is removed (no verifying gesture — the first
+ * real unlock is the reproducibility check, owner decision 2026-10-02).
  */
 export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean } | Refusal> {
   const lang = vaultLang()
@@ -567,14 +647,22 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   // Review S7: retiring a SILENT wrapper means a NEW data key — the old one survives in every earlier
   // copy of that wrapper. A second presence credential (no silent wrapper left) keeps the key.
   if (o.vault.wrappers.some(w => isSilentId(w.type))) {
-    const k = await enrolWithNewKey(id, presence, all, o, ctx)
+    // Leader decision 2026-10-02: the silent OS wrapper goes ONLY as the wizard's very last step, after
+    // the recovery key is confirmed. Unless the 24 words are typed for THIS call (the terminal, a
+    // recovery key that already exists), the gestures are taken now and NOTHING is written: the KEK is
+    // held in memory and the one rekey + retirement happens inside `confirmRecoveryKey`. Quitting
+    // before that leaves the vault exactly as it was — openable in silence.
+    const deferred = await maybeHoldPresence(id, presence, o, ctx)
+    if (deferred) return deferred
+    const k = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrolWithNewKey(id, presence, all, o, ctx))
     if (!k.ok) return k
     recoveryStepDone('presence')
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
+    dropUnlockWindow() // a protector change
     vaultAudit({ type: 'vault.rekey', protector: id })
     return { ok: true, removed: k.removed, recoveryOwed: afterPresence(o.vault) }
   }
-  const r = await enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all)
+  const r = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all))
   if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
   recoveryStepDone('presence')
@@ -601,11 +689,122 @@ function needsRecoveryWords(): Refusal {
 /**
  * Review S7 — the first presence enrolment, under a NEW data key (rekey.ts has the phases):
  * prepare (every record re-sealed and verified beside the old one) → wrap the new key under presence
- * (verified by a real unwrap) and under the recovery key (staged, verified) → ONE vault.json write naming
+ * (create + ONE sign, its seal checked in memory) and under the recovery key (staged, verified) → ONE vault.json write naming
  * the new kid (the silent wrappers retired with their OLD kid) → finish (staged records replace the
  * old) → the old key leaves memory. Any failure before the vault.json write leaves the vault exactly
  * as it was; any crash after it is finished on the next open.
  */
+// ── presence held until the LAST step (leader decision 2026-10-02) ─────────────────────────────
+
+/**
+ * The presence KEK derived at the wizard's presence step, waiting for the recovery key to be confirmed.
+ * MEMORY ONLY, bound to the session that took the gestures and to the vault key it was taken under,
+ * 10 minutes, zeroed on lock / expiry / a new attempt. While it waits nothing on disk has changed.
+ */
+let _heldPresence: {
+  id: ProtectorId; protector: Protector; held: HeldPresence; next: { dek: Uint8Array; kid: string }
+  oldKid: string; session: string; until: number; replacesRecovery: boolean
+} | null = null
+
+function dropHeldPresence(opts: { removeCredential: boolean } = { removeCredential: false }): void {
+  const h = _heldPresence
+  _heldPresence = null
+  if (!h) return
+  h.next.dek.fill(0)
+  if (opts.removeCredential && h.protector.discardHeld) void h.protector.discardHeld(h.held, h.next.kid).catch(() => {})
+  else h.held.kek.fill(0)
+}
+onVaultLock(() => dropHeldPresence({ removeCredential: true }))
+
+/** Is a presence enrolment waiting for this session's recovery key? (The view and the CLI say so.) */
+export function presenceHeldFor(ctx: { session: string }): ProtectorId | null {
+  const h = _heldPresence
+  if (!h) return null
+  if (_now() > h.until) { dropHeldPresence({ removeCredential: true }); return null }
+  return h.session === ctx.session ? h.id : null
+}
+
+/**
+ * The deferred half of `enrolPresence` for a vault that still has its silent wrapper. Returns null when
+ * this call must take the immediate path instead (the 24 words were typed for it on the terminal).
+ */
+async function maybeHoldPresence(
+  id: ProtectorId, presence: Protector, o: { dek: Uint8Array; kid: string; vault: VaultJson }, ctx: GateContext,
+): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean; held: true } | Refusal | null> {
+  const lang = vaultLang()
+  if (o.vault.wrappers.some(w => w.type === 'passphrase')) {
+    return refused('presence-passphrase-wrapper', lang === 'pt'
+      ? 'Este cofre também abre com uma senha, e ligar a presença troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
+      : 'This vault also opens with a passphrase, and turning presence on replaces the vault key — the passphrase cannot follow it. Nothing was changed.')
+  }
+  const inRecovery = recoveryTodo()?.includes('recovery') === true
+  const hasRecovery = o.vault.wrappers.some(w => w.type === 'recovery')
+  if (!inRecovery && hasRecovery) {
+    if (ctx.words && fromSocket(ctx)) return null // the words follow the new key in THIS call
+    if (ctx.replaceRecovery !== true) return needsRecoveryWords()
+  }
+  dropHeldPresence({ removeCredential: true }) // a new attempt replaces any earlier one
+  const next = newDataKey()
+  const d = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => derivePresence(presence, next.kid))
+  if (!d.ok) { next.dek.fill(0); return enrolFailure(id, d.reason) }
+  _heldPresence = { id, protector: presence, held: d.held, next, oldKid: o.kid, session: ctx.session, until: _now() + ENROL_TTL_MS, replacesRecovery: hasRecovery }
+  vaultAudit({ type: 'vault.presence-held', protector: id })
+  return { ok: true, removed: [], recoveryOwed: true, held: true }
+}
+
+/** A protector without the two-phase API (a test fake) holds nothing and wraps — with its gesture — at commit. */
+async function derivePresence(p: Protector, kid: string): Promise<{ ok: true; held: HeldPresence } | { ok: false; reason: string }> {
+  return p.derive ? p.derive(kid) : { ok: true, held: { kek: new Uint8Array(32), fields: {} } }
+}
+async function sealPresence(p: Protector, held: HeldPresence, dek: Uint8Array, kid: string): Promise<{ ok: true; record: WrapperRecord } | { ok: false; reason: string }> {
+  return p.sealHeld ? p.sealHeld(held, dek, kid) : p.wrap(dek, kid)
+}
+
+/**
+ * The wizard's LAST step when presence is held: ONE rekey under a new data key — presence sealed with
+ * the HELD KEK (no gesture, verified to open with it), the recovery key from the words just confirmed
+ * (staged, verified), then ONE vault.json write naming the new kid with the silent wrappers retired,
+ * then the retirement. Any failure before that write leaves the vault exactly as it was.
+ */
+async function commitHeldPresence(
+  h: NonNullable<typeof _heldPresence>, entropy: Uint8Array, o: { dek: Uint8Array; kid: string; vault: VaultJson },
+): Promise<{ ok: true; removed: ProtectorId[] } | Refusal> {
+  const all: Protector[] = [h.protector, ...o.vault.wrappers.map(w => protectorById(w.type)).filter((p): p is Protector => p !== null)]
+  const recFile = join(vaultDir(), RECOVERY_FILE)
+  let committed = false
+  const prep = await prepareRekey({ dek: o.dek, kid: o.kid }, h.next, [recFile])
+  if (!prep.ok) return enrolFailure(h.id, 'vault-write-failed')
+  const files = [...prep.files, recFile]
+  const abandon = async () => { await abandonRekey(files) }
+  try {
+    const w = await sealPresence(h.protector, h.held, h.next.dek, h.next.kid)
+    if (!w.ok) { await abandon(); return enrolFailure(h.id, w.reason) }
+    const rp = recoveryProtector({ io: realProtectorIo(), vaultDir: vaultDir(), entropy, file: RECOVERY_FILE + REKEY_SUFFIX })
+    const rw = await rp.wrap(h.next.dek, h.next.kid)
+    const rb = rw.ok ? await rp.unwrap(rw.record, h.next.kid) : null
+    const rsame = rb?.ok === true && timingSafeEqual(Buffer.from(rb.dek), Buffer.from(h.next.dek))
+    if (rb?.ok) rb.dek.fill(0)
+    if (!rsame) { await h.protector.remove(w.record, h.next.kid).catch(() => {}); await abandon(); return enrolFailure(h.id, 'vault-write-failed') }
+    const recRecord: VaultJson['wrappers'][number] = { type: 'recovery', createdAt: new Date(_now()).toISOString(), params: { file: RECOVERY_FILE } }
+    const silent = o.vault.wrappers.filter(x => isSilentId(x.type)).map(x => ({ ...x, params: { ...(x.params ?? {}), kid: o.kid } }))
+    const kept = o.vault.wrappers.filter(x => !isSilentId(x.type) && x.type !== h.protector.id && x.type !== 'recovery')
+    const vault: VaultJson = { ...o.vault, v: 2, kid: h.next.kid, wrappers: [w.record, ...kept, recRecord], retired: [...(o.vault.retired ?? []), ...silent] }
+    await writeVaultJson(vault)
+    committed = true
+    await markCommitted({ oldKid: o.kid, newKid: h.next.kid, files })
+    const oldDek = o.dek
+    o.dek = h.next.dek; o.kid = h.next.kid; o.vault = vault
+    oldDek.fill(0)
+    await finishRekey(files)
+    const done = await finishRetirement(realProtectorIo(), vaultDir(), vault, all)
+    o.vault = done.vault
+    return { ok: true, removed: done.removed }
+  } finally {
+    if (!committed) h.next.dek.fill(0)
+    h.held.kek.fill(0)
+  }
+}
+
 async function enrolWithNewKey(
   id: ProtectorId, presence: Protector, all: Protector[],
   o: { dek: Uint8Array; kid: string; vault: VaultJson }, ctx: GateContext,
@@ -644,13 +843,11 @@ async function enrolWithNewKey(
     if (!prep.ok) return enrolFailure(id, 'vault-write-failed')
     const files = entropy ? [...prep.files, recFile] : prep.files
     const abandon = async () => { await abandonRekey(files) }
-    // Presence under the NEW key, verified by a real unwrap (the second gesture).
+    // Presence under the NEW key: create/make + ONE sign/assert, the seal checked in memory by the
+    // protector itself (owner decision 2026-10-02 — no verifying gesture; the first real unlock is
+    // the reproducibility check, and its failure is sent to the recovery key in words).
     const w = await presence.wrap(next.dek, next.kid)
     if (!w.ok) { await abandon(); return enrolFailure(id, w.reason) }
-    const back = await presence.unwrap(w.record, next.kid)
-    const same = back.ok && back.dek.length === next.dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(next.dek))
-    if (back.ok) back.dek.fill(0)
-    if (!same) { await presence.remove(w.record, next.kid).catch(() => {}); await abandon(); return enrolFailure(id, back.ok ? 'presence-unavailable: bridge-failed' : back.reason) }
     // Recovery under the NEW key, staged as `dek.recovery.rekey` (FINISH renames it over the old one).
     let recRecord: VaultJson['wrappers'][number] | null = null
     if (entropy) {
@@ -783,6 +980,7 @@ export async function disablePresence(ctx: GateContext, words?: string): Promise
   o.vault = next
   for (const r of gone) await protectorById(r.type)?.remove(r, o.kid).catch(() => {})
   vaultAudit({ type: 'vault.disable-presence', protector: c.protector.id })
+  dropUnlockWindow() // a protector change
   return { ok: true, replacedBy: c.protector.id }
 }
 
@@ -815,6 +1013,37 @@ export async function setAutoLockMinutes(minutes: unknown, ctx: GateContext): Pr
   return g
 }
 
+/**
+ * Owner decision 2026-10-02: choose what an unlock asks besides the gesture (unlock-policy.ts). Gated
+ * by the code AND the gesture. The per-day window already running is kept: it is anchored to a real
+ * gesture+code unlock, and a shorter `hours` applies to it at once.
+ */
+export async function setUnlockPolicy(policy: unknown, ctx: GateContext): Promise<GateResult> {
+  const p = parseUnlockPolicy(policy)
+  if (p === null) return refused('bad-request', vaultLang() === 'pt' ? 'Escolha um dos três modos; a janela diária vai de 1 a 24 horas.' : 'Pick one of the three modes; the daily window is 1 to 24 hours.')
+  const g = await requireVaultStepUp('set-unlock-policy', ctx)
+  if (!g.ok) return g
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const vault: VaultJson = { ...o.vault, v: 2, unlockPolicy: p }
+  await writeVaultJson(vault)
+  o.vault = vault
+  vaultAudit({ type: 'vault.set-unlock-policy' })
+  return g
+}
+
+/** What the screen states about the policy in force: the mode, the hours, and whether the NEXT unlock owes the code. */
+export function unlockPolicyView(v: VaultJson | null): { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null } {
+  const p = effectiveUnlockPolicy(v?.unlockPolicy)
+  const anchor = unlockWindowAnchor()
+  const ends = unlockWindowEndsMs(p, anchor)
+  return {
+    mode: p.mode, hours: p.hours, chosen: Boolean(v?.unlockPolicy),
+    codeNextUnlock: unlockNeedsCode(p, anchor, _now()),
+    windowEndsAt: ends !== null && ends > _now() ? new Date(ends).toISOString() : null,
+  }
+}
+
 /** §4.3: a passphrase wrapper only where the vault has no protector of its own. */
 export function addPassphraseAllowed(v: VaultJson): { ok: true } | Refusal {
   const other = v.wrappers.find(w => w.type !== 'passphrase' && w.type !== 'recovery' && w.type !== 'memory')
@@ -832,6 +1061,9 @@ export function __resetGateForTests(now?: () => number): void {
   dropRecovery()
   _flow = null
   _setup = null
+  _setupProof = null
+  _gestures = null
+  dropHeldPresence()
   _enrolWrong = 0
 }
 

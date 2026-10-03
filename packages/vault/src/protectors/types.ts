@@ -75,7 +75,21 @@ export interface Protector {
   unwrap(record: WrapperRecord, kid: string): Promise<UnwrapResult>
   /** Remove what `wrap` stored (vault reset / rekey). Best-effort, never throws. */
   remove(record: WrapperRecord, kid: string): Promise<void>
+  /**
+   * PRESENCE ONLY — `wrap` in two phases, so an enrolment can take the gestures at one step and
+   * commit at a LATER one (leader decision 2026-10-02: the silent OS wrapper is removed only as the
+   * wizard's very last step, after the recovery key is confirmed). `derive` raises the gestures
+   * (create/make + ONE sign/assert) and returns the KEK; it writes nothing. `sealHeld` seals a DEK
+   * under that KEK with NO gesture, checks the result opens again with the same KEK, then writes the
+   * file. `discardHeld` zeroes the KEK and removes the credential no file will ever refer to.
+   */
+  derive?(kid: string): Promise<{ ok: true; held: HeldPresence } | { ok: false; reason: string }>
+  sealHeld?(held: HeldPresence, dek: Uint8Array, kid: string): Promise<{ ok: true; record: WrapperRecord } | { ok: false; reason: string }>
+  discardHeld?(held: HeldPresence, kid: string): Promise<void>
 }
+
+/** A derived presence KEK waiting for its DEK (memory only) plus the public fields its file needs. */
+export interface HeldPresence { kek: Uint8Array; fields: Record<string, string> }
 
 export const DEK_HEX = /^[0-9a-f]{64}$/
 

@@ -442,7 +442,7 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 
 | Layer | What it changes |
 |---|---|
-| **Presence** (see *Platforms* for what is available where) | The data key opens only after a human gesture. When you enrol, the silent OS wrapper is **removed** and the vault gets a **new data key**: every sealed secret is re-sealed under it, so an earlier copy of the silent wrapper (a backup, a snapshot, a synced folder) opens nothing. The recovery key must follow the new key. That is why setup makes it **last**. When you turn presence on later, you type your 24 words on a terminal (`agentop vault enroll --presence`), or make **new** words (your old words then stop working). After that, the vault is locked at every service start until you confirm with your device **and** type your code. |
+| **Presence** (see *Platforms* for what is available where) | The data key opens only after a human gesture. When you enrol, the silent OS wrapper is **removed** — as the setup's **very last step**, only after your recovery key is confirmed; leaving the setup earlier changes nothing and the vault keeps opening as before — and the vault gets a **new data key**: every sealed secret is re-sealed under it, so an earlier copy of the silent wrapper (a backup, a snapshot, a synced folder) opens nothing. The recovery key must follow the new key. That is why setup makes it **last**. When you turn presence on later, you type your 24 words on a terminal (`agentop vault enroll --presence`), or make **new** words (your old words then stop working). After that, the vault is locked at every service start until you confirm with your device **and** type your code (what later unlocks ask is the **unlock policy** below). |
 | **Authenticator code** (TOTP, RFC 6238) | A gate on the vault's own actions, never key material: nothing is derived from the code or the seed. It applies **once you have enrolled an authenticator**. Before that, no action asks for a code. **Gated actions:** see the next table. **Replay:** a code already used is refused. **Wrong codes:** 5 pause for 30 s (doubling, capped at 15 min) and 20 freeze the gate until you use the recovery key. **The count survives a restart.** |
 | **24-word recovery key** | Losing the phone or the presence device is not losing the vault. `agentop vault recover` opens it from a terminal, and then you re-enrol and receive a **new** key (the words you just typed are treated as exposed). |
 | **Auto-lock** | The vault locks itself after 30 minutes without use (configurable 5–480; there is no "never"). Use means input on the Settings → Vault page, any `agentop vault` command, or any use of a secret, so a long agent run is not cut off at minute 30. Locking from a terminal on this machine never asks for a code. With presence **off**, auto-lock only drops the key from memory: the next use opens it again in silence. |
@@ -450,13 +450,36 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 
 | Action | Code | Presence | Reuse |
 |---|---|---|---|
-| unlock | yes | yes (the gesture opens it; the code must follow within 120 s, and a wrong code drops the key) | — |
+| unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
+| change the unlock policy | yes | yes | none, asked every time |
 | list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. |
 | rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
 | lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 
 Metrics, the board and the dashboard keep working while the vault is locked; only what needs a secret
 is paused.
+
+### The unlock policy — what unlocking asks besides the gesture
+
+Owner decision, 2026-10-02. Settings → Vault offers three modes; changing it asks for your code **and**
+your gesture.
+
+| Mode | An unlock asks | Notes |
+|---|---|---|
+| **Per day** (the default) | gesture + code on the **first** unlock after the computer or the agentop service starts, and once the window has expired; inside the window, re-opening after auto-lock asks the **gesture alone** | The window is **12 hours** by default (1–24, configurable), anchored to the last gesture+code unlock — a gesture-only re-open does not extend it. It lives **only in the service's memory**: a restart or reboot starts without one. It is also dropped by **any** wrong code, a recovery, a reset and a protector change (enrolling or turning off presence, a rekey). |
+| **Gesture + code, always** | both, every time | The strictest. |
+| **Gesture only** | the gesture alone | The code is still asked for everything else in the table above: listing the vault, settings, recovery, presence changes. |
+
+What this trades: inside a per-day window (or always, in *gesture only*), a process running as you that
+can make you approve **one** presence dialog opens the vault without the code. The code still stands
+between that process and every setting, the inventory and recovery. The window never survives a restart,
+so the first unlock of every boot asks for both.
+
+**Presence prompts.** Turning presence on asks the device **twice** (create the key, then one
+signature/assertion that derives the vault's key); the device check before it asks **nothing**; every
+unlock asks **once**. Whether the device reproduces the key is proved by the first real unlock: a
+mismatch is said in words and sent to the recovery key (`agentop vault recover`), and nothing else is
+touched.
 
 ### What a page can and cannot do
 
@@ -502,7 +525,7 @@ macOS; the list below says where it cannot. Kernel, root and administrator compr
 
 | Platform | Presence |
 |---|---|
-| Windows and WSL | **Windows Hello.** Built and tested against a simulated bridge; the check on real hardware (create, sign twice, delete) is pending. **A FIDO2 security key is not available here yet:** the Windows security-key bridge is not verified, so it is refused in words. |
+| Windows and WSL | **Windows Hello.** Setup asks Hello **twice** (create the key, then one signature that derives the vault's key) and every unlock asks **once**; the device check before it asks nothing (`IsSupportedAsync`). Whether Hello reproduces the key is proved by the first real unlock, and a mismatch is said in words and sent to the 24-word recovery key. The dialog is owned by a small topmost window the bridge brings to the foreground, so it opens in front (the owner window taking the foreground is verified on Windows 11 build 26200 from WSL; the dialog itself awaits the owner's check). **A FIDO2 security key is not available here yet:** the Windows security-key bridge is not verified, so it is refused in words. |
 | Linux desktop | **A FIDO2 security key** with `hmac-secret` (e.g. YubiKey 5), through libfido2's tools (`apt install fido2-tools`). Every open asks you to touch the key, and asks for its PIN when one is set. Not yet verified on real hardware, including the PIN prompt, which may need a terminal the background service does not have. |
 | macOS | **No presence by default yet** (Touch ID is deferred): macOS stays on the Keychain wrapper of §7a, so the §7a limit still applies there. The authenticator code, recovery key, auto-lock and hardening do apply. A FIDO2 key (`brew install libfido2`) is an opt-in presence option. |
 | Headless / container | None. The vault stays on its OS protector, or a passphrase where none exists; presence is reported as "not available here". |
@@ -520,7 +543,7 @@ Windows and macOS this is not wired yet, and the 30-minute auto-lock is what clo
 | Command | What it does |
 |---|---|
 | `agentop vault status` | presence, authenticator state (enrolled, failures, paused/frozen), auto-lock countdown, hardening |
-| `agentop vault enroll` | runs what is still missing, in order: the authenticator (QR, then one code), presence (a device check, then the silent wrapper is removed and the data key replaced), then the recovery key **last** (shown once; three of its words typed back). If a recovery key already exists, the presence step asks for your 24 words here. Press Enter with nothing to make new words instead; your old words then stop working. `--authenticator`, `--presence <hello\|fido2>` and `--recovery` run a single step. |
+| `agentop vault enroll` | runs what is still missing, in order: the authenticator (QR, then one code), presence (a device check that asks nothing, then two confirmations; the silent wrapper is removed and the data key replaced), then the recovery key **last** (shown once; three of its words typed back). If a recovery key already exists, the presence step asks for your 24 words here. Press Enter with nothing to make new words instead; your old words then stop working. `--authenticator`, `--presence <hello\|fido2>` and `--recovery` run a single step. |
 | `agentop vault setup-code` | prints, on a terminal only, a new one-time code for the dashboard's first setup (never logged) |
 | `agentop vault unlock` | asks the service to raise the presence prompt, then asks for your code here |
 | `agentop vault lock` | locks immediately (no code needed from a local terminal) |

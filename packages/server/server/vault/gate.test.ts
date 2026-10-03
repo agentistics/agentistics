@@ -77,7 +77,8 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words are
   // made LAST so they wrap the final key and are never kept in memory across steps).
   const p = await enrolPresence('hello', { ...S, code: codeAt() })
-  expect(p).toMatchObject({ ok: true, removed: ['dpapi'], recoveryOwed: true })
+  // Leader decision 2026-10-02: presence is HELD — nothing written, the silent wrapper stays until the words are confirmed.
+  expect(p).toMatchObject({ ok: true, removed: [], recoveryOwed: true })
   next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)
@@ -309,5 +310,128 @@ describe('§5.1 / §12.5 auto-lock', () => {
     expect(autoLockTick(T + 31 * 60_000)).toBe(true)
     expect(await ensureVaultOpen()).toBeNull()
     expect((await vaultStatus()).sentence).toBe(refusalSentence('auto-locked', 'en', { minutes: 30, presence: 'Windows Hello' }))
+  })
+})
+
+// ── the unlock policy (owner decision 2026-10-02): always / hello-only / daily (the default) ─────
+
+import { lockVault, unlockWindowAnchor } from './service'
+import { setUnlockPolicy, unlockPolicyView } from './gate'
+
+const H = 3_600_000
+/** A full gesture+code unlock from a cold (just restarted) service. */
+async function coldUnlock(): Promise<void> {
+  expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'pending-stepup' })
+  expect((await completeUnlock(codeAt())).ok).toBe(true)
+  next()
+}
+/** Auto-lock (NOT a restart): the in-memory window must survive it. */
+const autoLock = () => lockVault('auto-lock')
+
+describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hello alone inside the window', () => {
+  test('absent from vault.json reads as daily / 12 h, and the first unlock after start owes the code', async () => {
+    await ownerMachine()
+    restart()
+    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.unlockPolicy).toBeUndefined()
+    expect(unlockPolicyView(null)).toMatchObject({ mode: 'daily', hours: 12, chosen: false, codeNextUnlock: true })
+    await coldUnlock()
+    expect(unlockWindowAnchor()).not.toBeNull()
+  })
+  test('a re-open after auto-lock inside the window is the gesture ALONE — one Hello, no code', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    autoLock()
+    T += 3 * H
+    const g = hello.gestures
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
+    expect(hello.gestures).toBe(g + 1)
+    expect(pendingUnlock()).toBeNull()
+  })
+  test('the window is anchored to the last gesture+CODE unlock, not to a Hello-only re-open, and expires at N hours', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    autoLock(); T += 11 * H
+    expect(await unlockWithGesture()).toMatchObject({ state: 'open' }) // Hello alone, does NOT move the anchor
+    autoLock(); T += 1 * H + 1_000                                     // 12 h after the code unlock
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+  test('a reboot / service restart drops the window: the code again', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    restart() // the service process is new
+    expect(unlockWindowAnchor()).toBeNull()
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+  test('ANY failed code drops the window', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    const wrong = codeAt() === '000000' ? '111111' : '000000'
+    expect((await requireVaultStepUp('list', { ...S, code: wrong })).ok).toBe(false)
+    expect(unlockWindowAnchor()).toBeNull()
+    autoLock()
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+  test('recovery drops the window', async () => {
+    const { words } = await ownerMachine()
+    restart()
+    await coldUnlock()
+    autoLock()
+    expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
+    expect(unlockWindowAnchor()).toBeNull()
+  })
+  test('a configurable window: 1 hour', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    expect((await setUnlockPolicy({ mode: 'daily', hours: 1 }, { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    autoLock(); T += 30 * 60_000
+    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
+    autoLock(); T += 31 * 60_000
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+})
+
+describe('unlock policy — always (Hello + code every time)', () => {
+  test('every unlock owes the code, auto-lock or not', async () => {
+    await ownerMachine()
+    expect((await setUnlockPolicy({ mode: 'always', hours: 12 }, { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    restart()
+    await coldUnlock()
+    autoLock(); T += 60_000
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+})
+
+describe('unlock policy — Hello only', () => {
+  test('the gesture alone opens it, even cold; the code is still asked for the inventory', async () => {
+    await ownerMachine()
+    expect((await setUnlockPolicy({ mode: 'hello-only', hours: 12 }, { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+    restart()
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
+    const l = await requireVaultStepUp('list', S)
+    expect(!l.ok && l.code).toBe('stepup-required')
+  })
+})
+
+describe('changing the policy is gated by the code AND the gesture, and refuses what is not a policy', () => {
+  test('no code → refused; a bad mode or hours → refused in words; the right code + gesture → written', async () => {
+    await ownerMachine()
+    expect((await setUnlockPolicy({ mode: 'hello-only', hours: 12 }, S)).ok).toBe(false)
+    for (const bad of [{ mode: 'never', hours: 12 }, { mode: 'daily', hours: 0 }, { mode: 'daily', hours: 25 }, { mode: 'daily', hours: 1.5 }]) {
+      const r = await setUnlockPolicy(bad, { ...S, code: codeAt() })
+      expect(!r.ok && r.code).toBe('bad-request')
+    }
+    const g = hello.gestures
+    expect((await setUnlockPolicy({ mode: 'daily', hours: 8 }, { ...S, code: codeAt() })).ok).toBe(true)
+    expect(hello.gestures).toBeGreaterThan(g)
+    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.unlockPolicy).toEqual({ mode: 'daily', hours: 8 })
+    expect(VAULT_ACTION_ROWS['set-unlock-policy']).toEqual({ code: true, gesture: true, grant: null })
   })
 })

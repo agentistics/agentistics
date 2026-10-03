@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows, wizardPlan, askWords, sectionBadge, howNow, howConfirms, primarySection,
+  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, howStep2, parseUnlockHours, askWords, sectionBadge, howNow, howConfirms, primarySection,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -127,6 +127,21 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
   test('a fresh machine runs the device check FIRST, then authenticator → presence → recovery', () => {
     expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
   })
+  test('a first page enrolment asks the setup code FIRST — before the device check and any gesture (owner 2026-10-02)', () => {
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'], true)).toEqual(['setup', 'probe', 'authenticator', 'presence', 'recovery'])
+    expect(wizardPlan(['authenticator', 'recovery'], true)).toEqual(['setup', 'authenticator', 'recovery'])
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'], false)[0]).toBe('probe')
+    expect(wizardPlan([], true)).toEqual([])
+  })
+  test('the setup step is a calm step with its own words, in both languages', () => {
+    for (const lang of ['en', 'pt'] as const) {
+      for (const k of ['wiz_setup_title', 'wiz_setup_intro', 'wiz_setup_run', 'wiz_setup_valid', 'wiz_setup_go', 'wiz_step_setup'] as const) {
+        expect(vt(k, lang).length).toBeGreaterThan(0)
+      }
+    }
+    expect(vt('wiz_setup_intro', 'pt')).toContain('Nada é pedido ao Windows Hello')
+    expect(vt('wiz_setup_intro', 'en')).toContain('Nothing is asked of Windows Hello')
+  })
   test('a resume has no probe (the presence enrolment is its own double gesture); no presence device, no probe', () => {
     expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
     expect(wizardPlan(['authenticator', 'recovery'])).toEqual(['authenticator', 'recovery'])
@@ -228,5 +243,49 @@ describe('VAULT.UX2 — what a glance says', () => {
     expect(primarySection(['recovery', 'presence'], false)).toBe('recovery')
     expect(primarySection(['authenticator'], true)).toBeNull()
     expect(primarySection([], false)).toBeNull()
+  })
+})
+
+describe('live gesture progress (owner 2026-10-02)', () => {
+  test('"confirmation i of n" names the one being asked, never past n', () => {
+    expect(gestureStep({ kind: 'hello', done: 0, total: 2 })).toEqual({ i: 1, n: 2 })
+    expect(gestureStep({ kind: 'hello', done: 1, total: 2 })).toEqual({ i: 2, n: 2 })
+    expect(gestureStep({ kind: 'hello', done: 2, total: 2 })).toEqual({ i: 2, n: 2 })
+    expect(gestureStep(null)).toBeNull()
+    expect(gestureStep({ kind: 'hello', done: 0, total: 0 })).toBeNull()
+  })
+  test('the counts are said with the number, in both languages', () => {
+    expect(vt('wiz_pres_checkHello', 'pt')).toContain('não pede nada')
+    expect(vtf('wiz_pres_enrolHello', 'pt', { n: 2 })).toContain('2 vezes')
+    expect(vtf('wiz_pres_enrolHello', 'pt', { n: 2 })).toContain('cada abertura pede uma vez')
+    expect(vtf('wiz_gesture_progress', 'pt', { i: 1, n: 2 })).toBe('Confirmação 1 de 2')
+    expect(vtf('wiz_gesture_progress', 'en', { i: 2, n: 3 })).toBe('Confirmation 2 of 3')
+    expect(vt('wiz_pres_checkHello', 'pt')).not.toContain('duas vezes')
+  })
+})
+
+describe('the unlock policy on the page (owner decision 2026-10-02)', () => {
+  const both = { authenticator: auth, presence: true }
+  test('step 2 of "how your vault works" states the CURRENT mode', () => {
+    expect(howStep2({ ...both })).toEqual({ key: 'how2_daily', hours: 12 }) // absent = the default
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'daily', hours: 8, chosen: true, codeNextUnlock: true, windowEndsAt: null } })).toEqual({ key: 'how2_daily', hours: 8 })
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'always', hours: 12, chosen: true, codeNextUnlock: true, windowEndsAt: null } }).key).toBe('how2_always')
+    expect(howStep2({ ...both, unlockPolicy: { mode: 'hello-only', hours: 12, chosen: true, codeNextUnlock: false, windowEndsAt: null } }).key).toBe('how2_helloOnly')
+    expect(howStep2({ authenticator: auth, presence: false }).key).toBe('how2_code')
+    expect(howStep2({ authenticator: null, presence: false }).key).toBe('how2_nothing')
+  })
+  test('the copy names the mode in both languages', () => {
+    expect(vtf('how2_daily', 'pt', { presence: 'o Windows Hello', hours: 12 })).toBe('o Windows Hello e o código na primeira abertura do dia; depois disso, por 12 h, só o Windows Hello.')
+    expect(vtf('how2_always', 'en', { presence: 'Windows Hello' })).toContain('every time')
+    expect(vtf('how2_helloOnly', 'pt', { presence: 'o Windows Hello' })).toContain('O código ainda é pedido')
+    for (const k of ['sec_unlock', 'unlock_daily', 'unlock_daily_d', 'unlock_always', 'unlock_always_d', 'unlock_helloOnly', 'unlock_helloOnly_d', 'unlock_hours', 'unlock_reset'] as const) {
+      expect(vt(k, 'en').length).toBeGreaterThan(0); expect(vt(k, 'pt').length).toBeGreaterThan(0)
+    }
+  })
+  test('the window is 1–24 whole hours', () => {
+    expect(parseUnlockHours('12')).toBe(12)
+    expect(parseUnlockHours('1')).toBe(1)
+    expect(parseUnlockHours('24')).toBe(24)
+    for (const bad of ['0', '25', '', 'x', '1.5', '100']) expect(parseUnlockHours(bad)).toBeNull()
   })
 })

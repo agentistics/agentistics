@@ -17,8 +17,8 @@ import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
 import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
-  authenticatorBegin, authenticatorConfirm, cleanCode, cleanSetupCode, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
-  loadVault, lockNow, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
+  authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanCode, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
+  loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, UNLOCK_MODES, type UnlockMode, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, remainingMs, setAutoLock, stepUp, unlockCode, unlockGesture, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   askWords, howConfirms, howNow, presenceProbe, primarySection, sectionBadge, wizardPlan,
   type BadgeKey, type SectionId, type Tone,
@@ -48,7 +48,7 @@ export default function VaultSettings() {
   const [now, setNow] = useState(() => Date.now())
   const [creds, setCreds] = useState<{ credentials: Credential[]; recoveryCreatedAt: string | null } | null>(null)
   const [wizard, setWizard] = useState<WizardStep[] | null>(null)
-  const [dialog, setDialog] = useState<null | { kind: 'lock' | 'autolock' | 'presence-off'; minutes?: number }>(null)
+  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number } }>(null)
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(UPGRADE_DISMISS_KEY) === '1' } catch { return false } })
   const busyUi = wizard !== null || dialog !== null
 
@@ -134,8 +134,9 @@ export default function VaultSettings() {
   }
 
   // An action's proofs: the icons say what it asks; a dialog collects the code (and warns about the gesture).
-  const ask = (kind: 'lock' | 'autolock' | 'presence-off', minutes?: number) => {
-    const action = kind === 'lock' ? 'lock' : kind === 'autolock' ? 'set-auto-lock' : 'disable-presence'
+  const ask = (kind: GateKind, minutes?: number, policy?: { mode: UnlockMode; hours: number }) => {
+    const action = gateActionOf(kind)
+    if (kind === 'unlock-policy') { setDialog({ kind, policy }); return } // always the code AND the gesture
     const gate = g(action)
     if (!needsTypedCode(gate, grantAlive()) && !gate.gesture) {
       // A live grant covers the code and there is no gesture to raise: just do it; if the server
@@ -290,6 +291,12 @@ export default function VaultSettings() {
             <AutoLockRow view={view} lang={lang} isMobile={isMobile} gate={g('set-auto-lock')} tipText={tip('set-auto-lock')} btn={btn} onSave={m => ask('autolock', m)} />
           </Sec>
 
+          {view.presence && view.authenticator && (
+            <Sec icon={FingerprintPattern} title={t('sec_unlock')} desc={vtf('sec_unlock_d', lang, { presence: presWordOf(view, lang) })} badge={{ tone: 'ok', text: vt(unlockModeKey(view.unlockPolicy?.mode ?? 'daily'), lang).replace('{presence}', presWordOf(view, lang)) }}>
+              <UnlockPolicyRow view={view} lang={lang} isMobile={isMobile} gate={g('set-unlock-policy')} btn={btn} onSave={p => ask('unlock-policy', undefined, p)} />
+            </Sec>
+          )}
+
           <Sec icon={ShieldCheck} title={t('sec_hardening')} desc={t('sec_memory_d')} badge={badgeOf('memory')}>
             <HardeningBlock view={view} lang={lang} />
           </Sec>
@@ -352,7 +359,7 @@ export default function VaultSettings() {
 
       {dialog && (
         <GateDialog
-          lang={lang} view={view} isMobile={isMobile} kind={dialog.kind} minutes={dialog.minutes}
+          lang={lang} view={view} isMobile={isMobile} kind={dialog.kind} minutes={dialog.minutes} policy={dialog.policy}
           onCancel={() => setDialog(null)} onDone={() => { setDialog(null); void load() }}
         />
       )}
@@ -408,7 +415,8 @@ function Sec({ icon: Icon, title, desc, badge, children, last }: {
 function HowStrip({ view, lang, isMobile, minutes, presWord }: { view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; minutes: number; presWord: string }) {
   const now = howNow(view)
   const how = howConfirms(view)
-  const confirmBody = how === 'both' ? vtf('how2_both', lang, { presence: presWord }) : how === 'code' ? vt('how2_code', lang) : vt('how2_nothing', lang)
+  const s2 = howStep2(view)
+  const confirmBody = vtf(s2.key, lang, { presence: presWord, hours: s2.hours ?? 12 })
   const steps: { icons: React.ReactNode; title: string; body: string }[] = [
     { icons: <Lock size={16} />, title: vt('how1_t', lang), body: vt('how1_b', lang) },
     {
@@ -464,7 +472,7 @@ function Note({ children, tone }: { children: React.ReactNode; tone?: 'warn' | '
 function SetupCodeField({ value, onChange, label, why }: { value: string; onChange: (v: string) => void; label: string; why: string }) {
   return (
     <label style={{ display: 'block', marginBottom: 10 }}>
-      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{why}</span>
+      {why && <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{why}</span>}
       <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</span>
       <input
         value={value} onChange={e => onChange(cleanSetupCode(e.target.value))} placeholder="1234 5678" style={{ ...input, marginBottom: 0 }}
@@ -611,22 +619,74 @@ function HardeningBlock({ view, lang }: { view: VaultView; lang: 'en' | 'pt' }) 
 
 // ── a gated action: the dialog collects the code and warns about the gesture ─────────────────────
 
-function GateDialog({ lang, view, isMobile, kind, minutes, onCancel, onDone }: {
-  lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: 'lock' | 'autolock' | 'presence-off'; minutes?: number
+type GateKind = 'lock' | 'autolock' | 'presence-off' | 'unlock-policy'
+const gateActionOf = (k: GateKind): string => k === 'lock' ? 'lock' : k === 'autolock' ? 'set-auto-lock' : k === 'unlock-policy' ? 'set-unlock-policy' : 'disable-presence'
+const presWordOf = (v: VaultView, lang: 'en' | 'pt') => vt(presenceKey(v.wrappers), lang)
+const unlockModeKey = (m: UnlockMode): VaultKey => m === 'always' ? 'unlock_always' : m === 'hello-only' ? 'unlock_helloOnly' : 'unlock_daily'
+
+/** Owner decision 2026-10-02: the three unlock modes, the per-day window's hours, and what the NEXT unlock asks. */
+function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
+  view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties
+  onSave: (p: { mode: UnlockMode; hours: number }) => void
+}) {
+  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 12, chosen: false, codeNextUnlock: true, windowEndsAt: null }
+  const pres = presWordOf(view, lang)
+  const [mode, setMode] = useState<UnlockMode>(cur.mode)
+  const [hoursText, setHoursText] = useState(String(cur.hours))
+  useEffect(() => { setMode(cur.mode); setHoursText(String(cur.hours)) }, [cur.mode, cur.hours])
+  const hours = parseUnlockHours(hoursText)
+  const valid = mode !== 'daily' || hours !== null
+  const changed = mode !== cur.mode || (mode === 'daily' && hours !== cur.hours)
+  const save = () => { if (valid && changed) onSave({ mode, hours: mode === 'daily' ? hours! : cur.hours }) }
+  const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleTimeString(lang === 'pt' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) } catch { return iso } }
+  return (
+    <form onSubmit={e => { e.preventDefault(); save() }}>
+      <div role="radiogroup" aria-label={vt('sec_unlock', lang)} style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+        {UNLOCK_MODES.map(m => (
+          <label key={m} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: isMobile ? '10px 12px' : '8px 10px', minHeight: isMobile ? 44 : undefined, border: '1px solid ' + (mode === m ? 'var(--anthropic-orange)' : 'var(--border)'), borderRadius: 10 }}>
+            <input type="radio" name="unlock-mode" checked={mode === m} onChange={() => setMode(m)} style={{ marginTop: 3 }} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{vt(unlockModeKey(m), lang).replace('{presence}', pres)}</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{vt(`${unlockModeKey(m)}_d` as VaultKey, lang).replace(/\{presence\}/g, pres)}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {mode === 'daily' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          <span>{vt('unlock_hours', lang)}</span>
+          <input value={hoursText} onChange={e => setHoursText(e.target.value.replace(/\D/g, '').slice(0, 2))} inputMode="numeric"
+            style={{ ...input, width: 64, marginBottom: 0, letterSpacing: 'normal', textAlign: 'right', minHeight: isMobile ? 44 : undefined }} />
+        </label>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+        <button type="submit" style={btn} disabled={!valid || !changed}>{vt('unlock_save', lang)} <Gate code={gate.code} gesture={gate.gesture} lang={lang} /></button>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+          {cur.windowEndsAt && !cur.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(cur.windowEndsAt), presence: pres }) : cur.codeNextUnlock && cur.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''}
+        </span>
+      </div>
+      {cur.mode === 'daily' && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 6 }}>{vt('unlock_reset', lang)}</div>}
+    </form>
+  )
+}
+
+function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onDone }: {
+  lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }
   onCancel: () => void; onDone: () => void
 }) {
-  const action = kind === 'lock' ? 'lock' : kind === 'autolock' ? 'set-auto-lock' : 'disable-presence'
+  const action = gateActionOf(kind)
   const gate = gateFor(view, action)
   const wantsCode = needsTypedCode(gate, grantAlive())
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : vt('pres_offConfirm', lang)
+  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : kind === 'unlock-policy' ? vt('sec_unlock', lang) : vt('pres_offConfirm', lang)
   const submit = async () => {
     if (busy || (wantsCode && !codeComplete(code))) return
     setBusy(true); setError(null)
     const c = wantsCode ? code : undefined
-    const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c) : await presenceDisable(c)
+    const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c)
+      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c) : await presenceDisable(c)
     setBusy(false)
     if (r.ok) { onDone(); return }
     setError(r.sentence || vt('network', lang)); setCode('')
@@ -659,7 +719,7 @@ function useEscape(onEsc: () => void) {
   }, [onEsc])
 }
 
-// ── the enrolment wizard (§7.3): authenticator → recovery key → presence ─────────────────────────
+// ── the enrolment wizard (§7.3): [setup code] → [device check] → authenticator → presence → recovery key ─────────────────────────
 
 type Phase = 'intro' | 'qr' | 'words' | 'confirm' | 'presence' | 'done'
 
@@ -667,7 +727,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   lang: 'en' | 'pt'; isMobile: boolean; initial: VaultView; steps: WizardStep[]; onClose: () => void
 }) {
   // The whole §7.3 flow: device check → authenticator → recovery key → presence (each only if still missing).
-  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps))
+  const [plan, setPlan] = useState<WizardPhaseStep[]>(() => wizardPlan(steps, initial.setupCode?.owed === true))
   const t = (k: VaultKey) => vt(k, lang)
   const [view, setView] = useState(initial)
   const [i, setI] = useState(0)
@@ -700,6 +760,29 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   useEffect(() => () => { setWords(null) }, [])
   useEscape(() => { if (!busy) onClose() })
 
+  // Live "confirmation i of n" while the service has a Windows Hello / key dialog up (owner 2026-10-02).
+  const [gestureTotal, setGestureTotal] = useState(0)
+  const [gestureNow, setGestureNow] = useState<{ i: number; n: number } | null>(null)
+  useEffect(() => {
+    if (gestureTotal === 0) { setGestureNow(null); return }
+    let alive = true
+    setGestureNow({ i: 1, n: gestureTotal })
+    const tick = async () => {
+      const r = await presenceProgress()
+      const g = r.ok ? gestureStep(r.progress) : null
+      if (alive && g) setGestureNow(g)
+    }
+    const id = setInterval(() => { void tick() }, 500)
+    return () => { alive = false; clearInterval(id) }
+  }, [gestureTotal])
+  const probeGestures = view.gestures?.probe ?? 0
+  const enrolGestures = view.gestures?.enroll ?? 2
+  const gestureLine = gestureNow && (
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
+      <Loader2 size={14} className="ag-spin" /> {vtf('wiz_gesture_progress', lang, { i: gestureNow.i, n: gestureNow.n })}
+    </div>
+  )
+
   const refresh = async (): Promise<VaultView> => {
     const r = await loadVault()
     const v = r.kind === 'view' || r.kind === 'needs-stepup' ? r.view : view
@@ -718,6 +801,17 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const needCodeFor = (action: string) => needsTypedCode({ ...gateOf(action), grant: false }, false)
   const stepNo = Math.min(i + 1, plan.length)
   const presenceCodeNeeded = needCodeFor('enroll-presence') && !flowOk
+
+  // ── setup code: spent FIRST, before any gesture; the server holds the proof for this session
+  const acceptSetup = async () => {
+    if (busy || !setupCodeComplete(setupCode)) return
+    setBusy(true); setError(null)
+    const r = await setupCodeAccept(setupCode)
+    setSetupCode('')
+    if (!r.ok) { setBusy(false); setError(r.sentence || t('network')); return }
+    setBusy(false)
+    await next()
+  }
 
   // ── authenticator
   const showQr = async () => {
@@ -768,7 +862,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const probe = async () => {
     if (busy) return
     setBusy(true); setError(null)
+    setGestureTotal(probeGestures)
     const r = await presenceProbe(kind)
+    setGestureTotal(0)
     if (!r.ok) return fail(r.sentence)
     setBusy(false)
     await next()
@@ -778,7 +874,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
   const enrolPresence = async (replaceRecovery = false) => {
     if (busy) return
     setBusy(true); setError(null)
+    setGestureTotal(enrolGestures)
     const r = await presenceEnrol(kind, presenceCodeNeeded ? presCode : undefined, replaceRecovery)
+    setGestureTotal(0)
     if (!r.ok) {
       setPresCode('')
       if (r.code === 'presence-needs-recovery-words') { setNeedWords(true); setBusy(false); setError(r.sentence); return }
@@ -806,9 +904,23 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: plan.length })}</div>}
         {phase !== 'done' && <Note>{t('wiz_safe')}</Note>}
 
+        {phase === 'intro' && step === 'setup' && (
+          <form onSubmit={e => { e.preventDefault(); void acceptSetup() }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_setup_title')}</div>
+            <Note>{t('wiz_setup_intro')}</Note>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('wiz_setup_run')}</div>
+            <code style={{ ...codeBlock, display: 'block', marginBottom: 6, overflowX: 'auto', whiteSpace: 'pre' }}>{view.setupCode?.command ?? 'agentop vault setup-code'}</code>
+            {view.setupCode?.where && <Note>{view.setupCode.where}</Note>}
+            <Note>{t('wiz_setup_valid')}</Note>
+            <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why="" />
+            {error && <Err text={error} />}
+            <button type="submit" style={cta} disabled={busy || !setupCodeComplete(setupCode)}>{busy ? t('working') : t('wiz_setup_go')}</button>
+          </form>
+        )}
         {phase === 'intro' && step === 'probe' && (
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_probe_title')}</div>
+            {gestureLine}
             <Note>{vtf('wiz_probe_intro', lang, { presence: vt(presenceKey([kind]), lang) })}</Note>
             <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
             {error && <Err text={error} />}
@@ -816,14 +928,14 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
           </div>
         )}
         {phase === 'intro' && step === 'authenticator' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !(needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) && !(needSetup && !setupCodeComplete(setupCode))) void showQr() }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_auth_title')}</div>
             <Note>{t('wiz_auth_intro')}</Note>
             {needCodeFor('enroll-authenticator') && <CodeField value={oldCode} onChange={setOldCode} label={t('wiz_oldCode')} autoFocus />}
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showQr() }}>{busy ? t('working') : t('wiz_auth_show')}</button>
-          </div>
+            <button type="submit" style={cta} disabled={busy || (needCodeFor('enroll-authenticator') && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_auth_show')}</button>
+          </form>
         )}
         {phase === 'qr' && uri && (
           <form onSubmit={e => { e.preventDefault(); void confirmAuth() }}>
@@ -842,7 +954,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         )}
 
         {phase === 'intro' && step === 'recovery' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !((((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode))) && !(needSetup && !setupCodeComplete(setupCode))) void showWords() }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_rec_title')}</div>
             <Note>{t('wiz_rec_intro')}</Note>
             {rotating && <Note tone="warn">{t('wiz_rec_rotate')}</Note>}
@@ -850,8 +962,8 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
             {needSetup && <SetupCodeField value={setupCode} onChange={setSetupCode} label={t('wiz_setup_label')} why={t('wiz_setup_why')} />}
             {rotating && gateOf('rotate-recovery').gesture && <Note>{vtf('gate_dialog_presence', lang, { presence: vt(presenceKey(view.wrappers), lang) })}</Note>}
             {error && <Err text={error} />}
-            <button type="button" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))} onClick={() => { void showWords() }}>{busy ? t('working') : t('wiz_rec_show')}</button>
-          </div>
+            <button type="submit" style={cta} disabled={busy || (((rotating && needCodeFor('rotate-recovery')) || askCode) && !codeComplete(oldCode)) || (needSetup && !setupCodeComplete(setupCode))}>{busy ? t('working') : t('wiz_rec_show')}</button>
+          </form>
         )}
         {phase === 'words' && words && (
           <div>
@@ -896,8 +1008,9 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
         )}
 
         {phase === 'intro' && step === 'presence' && (
-          <div>
+          <form onSubmit={e => { e.preventDefault(); if (!busy && !(presenceCodeNeeded && !codeComplete(presCode))) void enrolPresence(needWords) }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('wiz_pres_title')}</div>
+            {gestureLine}
             <Note>{t('wiz_pres_intro')}</Note>
             {view.presenceAvailable.length > 1 && (
               <div role="radiogroup" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -909,23 +1022,24 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
                 ))}
               </div>
             )}
-            <Note>{t(kind === 'hello' ? 'wiz_pres_checkHello' : 'wiz_pres_checkKey')}</Note>
+            <Note>{vtf(kind === 'hello' ? 'wiz_pres_enrolHello' : 'wiz_pres_enrolKey', lang, { n: enrolGestures })}</Note>
+            {view.wrappers.some(w => w !== 'hello' && w !== 'fido2' && w !== 'recovery' && w !== 'passphrase') && <Note>{t('wiz_pres_heldNote')}</Note>}
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
             {!needWords && (
-              <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence() }}>
+              <button type="submit" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))}>
                 {busy ? t('unlocking') : t('wiz_pres_go')}
               </button>
             )}
             {needWords && (
               <>
                 <Note tone="warn">{t('wiz_pres_newWords_warn')}</Note>
-                <button type="button" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))} onClick={() => { void enrolPresence(true) }}>
+                <button type="submit" style={cta} disabled={busy || (presenceCodeNeeded && !codeComplete(presCode))}>
                   {busy ? t('unlocking') : t('wiz_pres_newWords')}
                 </button>
               </>
             )}
-          </div>
+          </form>
         )}
 
         {phase === 'done' && finished && (

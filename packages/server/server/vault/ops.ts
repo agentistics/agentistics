@@ -31,13 +31,13 @@ import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import {
-  addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, type ProtectorId,
+  addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
 } from '@agentistics/vault'
-import { AGENTISTICS_DATA_DIR } from '../config'
+import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import {
   adoptCreated, chooseAutoProtector, createVault, ensureVaultOpen, lockVault, protectorById, protectorLabel,
   refused, runMigrations, sealBytes, sentence, unlockWithGesture, vaultAudit, vaultDir, vaultExists, vaultLang,
-  vaultRole, vaultStatus, withSecret, noteVaultActivity,
+  vaultRole, vaultStatus, withSecret, noteVaultActivity, dropUnlockWindow,
 } from './service'
 import {
   addPassphraseAllowed, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
@@ -379,6 +379,7 @@ async function opRekey(h: Record<string, unknown>): Promise<OpResult> {
     if (!k.ok) return { reply: refused('rekey-failed', k.reason) }
     r.o.vault = k.vault
     vaultAudit({ type: 'vault.rekey', protector: id })
+    dropUnlockWindow() // a protector change
     return { reply: { ok: true, protectorLabel: protectorLabel(id) } }
   })
 }
@@ -406,6 +407,7 @@ async function opReset(h: Record<string, unknown>): Promise<OpResult> {
     lockVault()
     await destroyVault(realProtectorIo(), vaultDir(), protectors)
     vaultAudit({ type: 'vault.reset' })
+    dropUnlockWindow()
     return { reply: { ok: true } }
   })
 }
@@ -438,7 +440,7 @@ async function opSetupCode(h: Record<string, unknown>): Promise<OpResult> {
   // Leader decision 3: shown ONLY on a terminal. The CLI checks its own stdin/stdout and says so; a
   // caller that does not is refused (a same-user process could claim it — the socket's boundary is the
   // OS account — but no script, pipe or log is ever handed one by accident).
-  if (h.tty !== true) return { reply: refused('tty-only', vaultLang() === 'pt' ? 'O código de configuração só é mostrado num terminal: rode `agentop vault setup-code` num terminal.' : 'The setup code is shown only on a terminal: run `agentop vault setup-code` in a terminal.') }
+  if (h.tty !== true) return { reply: refused('tty-only', setupCodeTtyRefusal(vaultLang(), setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR))) }
   const r = mintSetupCode()
   return { reply: { ok: true, code: r.code, expiresInMs: r.expiresInMs } }
 }
@@ -457,7 +459,7 @@ async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
   // Review S7: the 24 words (typed on the TTY) — only ever from the socket, so the new data key can be
   // wrapped under the recovery key when it was not confirmed in this same setup.
   const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET, ...(typeof h.words === 'string' ? { words: h.words } : {}), ...(h.replaceRecovery === true ? { replaceRecovery: true } : {}) })
-  return { reply: r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed } : r }
+  return { reply: r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed, ...('held' in r && r.held ? { held: true } : {}) } : r }
 }
 /** §7.4: the 24 words are typed on the TTY and arrive here only from the socket (never HTTP). */
 async function opPresenceDisable(h: Record<string, unknown>): Promise<OpResult> {

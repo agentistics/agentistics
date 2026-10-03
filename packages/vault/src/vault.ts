@@ -21,6 +21,7 @@ import { newDataKey } from './seal'
 import { isKid, type VaultScope } from './format'
 import type { ProbeResult, Protector, ProtectorId, ProtectorIo, WrapperRecord } from './protectors/types'
 import { bytes, text } from './protectors/types'
+import { parseUnlockPolicy, type UnlockPolicy } from './unlock-policy'
 
 export const VAULT_FILE = 'vault.json'
 export const VAULT_VERSION = 1
@@ -49,6 +50,8 @@ export interface VaultJson {
   stepup?: { enrolledAt: string; digits: 6; period: 30 }
   /** SECRETS.4 §5.1: the human scope's idle lock, in minutes (5–480). Absent = the default 30. v2 only. */
   autoLock?: { minutes: number }
+  /** Owner decision 2026-10-02: what an unlock asks besides the gesture (unlock-policy.ts). Absent = per day, 12 h. v2 only. */
+  unlockPolicy?: UnlockPolicy
   /** SECRETS.4 §7.4: the owner's machine — presence cannot be turned off without the recovery key. */
   requirePresence?: true
 }
@@ -106,6 +109,12 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     if (r.v !== VAULT_VERSION_SCOPED || !x || typeof x.minutes !== 'number' || !Number.isInteger(x.minutes) || x.minutes < 5 || x.minutes > 480) return null
     autoLock = { minutes: x.minutes }
   }
+  let unlockPolicy: UnlockPolicy | undefined
+  if (r.unlockPolicy !== undefined) {
+    const p = parseUnlockPolicy(r.unlockPolicy)
+    if (r.v !== VAULT_VERSION_SCOPED || !p) return null
+    unlockPolicy = p
+  }
   if (r.requirePresence !== undefined && (r.v !== VAULT_VERSION_SCOPED || r.requirePresence !== true)) return null
   let retired: WrapperRecord[] | undefined
   if (r.retired !== undefined) {
@@ -119,6 +128,7 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     ...(retired && retired.length ? { retired } : {}),
     ...(stepup ? { stepup } : {}),
     ...(autoLock ? { autoLock } : {}),
+    ...(unlockPolicy ? { unlockPolicy } : {}),
     ...(r.requirePresence === true ? { requirePresence: true as const } : {}),
   }
 }
@@ -130,7 +140,7 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
  */
 export function serializeVaultJson(v: VaultJson): Uint8Array {
   const plainV1 = v.scope === 'human' && v.v === VAULT_VERSION && !v.machineId && !v.retired?.length
-    && !v.wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery') && !v.stepup && !v.autoLock && !v.requirePresence
+    && !v.wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery') && !v.stepup && !v.autoLock && !v.unlockPolicy && !v.requirePresence
   const out = plainV1
     ? { v: VAULT_VERSION, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers }
     : {
@@ -139,6 +149,7 @@ export function serializeVaultJson(v: VaultJson): Uint8Array {
         ...(v.retired?.length ? { retired: v.retired } : {}),
         ...(v.stepup ? { stepup: v.stepup } : {}),
         ...(v.autoLock ? { autoLock: v.autoLock } : {}),
+        ...(v.unlockPolicy ? { unlockPolicy: v.unlockPolicy } : {}),
         ...(v.requirePresence ? { requirePresence: true } : {}),
       }
   return bytes(JSON.stringify(out, null, 2) + '\n')
@@ -331,18 +342,19 @@ export type EnrolPresenceResult =
 
 /**
  * SECRETS.4 §1.2 / §7.3 step 4: make `presence` the PRIMARY of the human scope and RETIRE every silent
- * OS wrapper — only after the presence wrapper has been written AND verified by a real unwrap (a
- * second gesture) that yields this very DEK. The order is what keeps every crash recoverable:
+ * OS wrapper — only after the presence wrapper has been written, its seal checked IN MEMORY by the
+ * protector with the key it just derived (owner decision 2026-10-02: no second gesture; the FIRST real
+ * unlock proves the gesture reproduces that key, and a mismatch is sent to the recovery key in words).
+ * The order is what keeps every crash recoverable:
  *
- *   1. presence.wrap(DEK)                        crash → vault.json unchanged, silent wrapper still opens
- *   2. presence.unwrap → must equal DEK          mismatch → presence wrapper removed, nothing else touched
- *   3. ONE write of vault.json v2: presence first, silent wrappers moved to `retired`
+ *   1. presence.wrap(DEK)                        crash / failure → vault.json unchanged, silent wrapper still opens
+ *   2. ONE write of vault.json v2: presence first, silent wrappers moved to `retired`
  *                                                crash before → as 1; after → presence opens, retirement pending
- *   4. each retired key removed through its protector, then vault.json rewritten without `retired`
+ *   3. each retired key removed through its protector, then vault.json rewritten without `retired`
  *                                                crash → finished by `finishRetirement` on the next open
  *
- * The silent stored key is NEVER deleted before step 3 is on disk, and step 3 is never written before
- * step 2 proved the presence wrapper opens the same key. A second presence credential (Hello + a key)
+ * The silent stored key is NEVER deleted before step 2 is on disk, and step 2 is never written before
+ * step 1's wrap (and its in-memory seal check) succeeded. A second presence credential (Hello + a key)
  * is added the same way and keeps the existing one. The recovery and passphrase wrappers are kept.
  */
 export async function enrollPresence(
@@ -350,15 +362,11 @@ export async function enrollPresence(
 ): Promise<EnrolPresenceResult> {
   if (!isPresenceId(presence.id)) return { ok: false, step: 'wrap', reason: `${presence.id} is not a presence protector` }
   if (open.vault.scope !== 'human') return { ok: false, step: 'wrap', reason: 'presence protects the human scope only' }
+  // Create/make + ONE sign/assert; the protector checks its own seal in memory with the key it just
+  // derived (owner decision 2026-10-02: no verifying gesture). Whether the gesture REPRODUCES that key
+  // is proved by the first real unlock, whose failure names the recovery key.
   const w = await presence.wrap(open.dek, open.kid)
   if (!w.ok) return { ok: false, step: 'wrap', reason: w.reason }
-  const back = await presence.unwrap(w.record, open.kid)
-  const same = back.ok && back.dek.length === open.dek.length && back.dek.every((b, i) => b === open.dek[i])
-  if (back.ok) back.dek.fill(0)
-  if (!same) {
-    await presence.remove(w.record, open.kid)
-    return { ok: false, step: 'verify', reason: back.ok ? 'the presence wrapper did not give back the same key' : back.reason }
-  }
   const silent = open.vault.wrappers.filter(x => isSilentId(x.type))
   const kept = open.vault.wrappers.filter(x => !isSilentId(x.type) && x.type !== presence.id)
   const vault: VaultJson = {
