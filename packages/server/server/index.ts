@@ -1,12 +1,14 @@
 // embeddedDist is loaded inside server/sse.ts (conditional on SERVE_STATIC=1)
 
+// FIRST: this process is the vault's holder (SECRETS.4 §5.2) before any module below reads a secret.
+import './vault/holder'
 import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
-import { handleUpgradeRoute } from './upgrade-web'
+import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
 import { buildApiResponse, buildApiResponseStream, invalidateCache } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -718,7 +720,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/version' && req.method === 'GET') {
       try {
         const info = await getVersionInfo()
-        return new Response(JSON.stringify(info), {
+        // `upgradable`: whether THIS machine could press "install now" — the very gate the route
+        // applies, so the update toast is never offered where the route would refuse. Additive.
+        return new Response(JSON.stringify({ ...info, upgradable: upgradableHint(info) }), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
@@ -1031,6 +1035,29 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return new Response(JSON.stringify(safe.body), {
           status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
+      }
+    }
+
+    // Settings → Vault. `capability-guard.ts` (`/api/vault`, localShell) has already refused these on
+    // an exposed profile; a central holds no per-machine vault of its own to show, so it answers 404.
+    // The routes live in `vault/http.ts`; each is a door onto `vault/gate.ts`, which decides what an
+    // action asks (code / gesture / grant). No value ever leaves — only metadata, and the two
+    // show-once secrets of an enrolment (`no-store`).
+    if (url.pathname === '/api/vault' || url.pathname.startsWith('/api/vault/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+      try {
+        const { handleVaultHttp } = await import('./vault/http')
+        const { readSessionCookie } = await import('./auth')
+        // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
+        // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
+        // along on a forged request.
+        const res = await handleVaultHttp(req, url, { cors: CORS_HEADERS, session: readSessionCookie(req) ?? 'local', origins: { allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC } })
+        return res ?? new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), { status: 500, headers: json })
       }
     }
 
@@ -1731,6 +1758,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(engineStatus())
     }
 
+    // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).
+    if (url.pathname === '/api/session-notify' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; notify?: unknown }
+      const { notifyOp, notifyStatus } = await import('./sessions/session-notify-web')
+      const out = await notifyOp({
+        ref: String(body.ref ?? ''),
+        ...(body.notify !== undefined ? { notify: body.notify as 'on' | 'off' } : {}),
+      })
+      return json(out, notifyStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {
@@ -1829,6 +1866,35 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // missing. `no_such_status` stays 404: the id named nothing.
       return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : 422))
     }
+    // The TYPE vocabulary — same door and ordering rule as the status routes above: matched before
+    // the generic `<ref>` routes, or `types` resolves as a task reference.
+    if (url.pathname === '/api/tasks/types' && req.method === 'GET') {
+      const { listTypes } = await import('./sessions/task-web')
+      return json({ types: await listTypes() })
+    }
+    if (url.pathname === '/api/tasks/types' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const { createType } = await import('./sessions/task-web')
+      const out = await createType({ label: String(body.label ?? ''), color: String(body.color ?? '') })
+      return json(out, out.ok ? 200 : 400)
+    }
+    if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'POST') {
+      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const { editType } = await import('./sessions/task-web')
+      const out = await editType(id, {
+        ...(typeof body.label === 'string' ? { label: body.label } : {}),
+        ...(typeof body.color === 'string' ? { color: body.color } : {}),
+      })
+      return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 400))
+    }
+    if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'DELETE') {
+      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const { deleteType } = await import('./sessions/task-web')
+      const out = await deleteType(id)
+      // `in_use` is 422 like the status routes; `no_such_type` stays 404.
+      return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 422))
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -1837,9 +1903,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string }
       const { createTask } = await import('./sessions/task-web')
-      const made = await createTask({ title: body.title ?? '', ...(body.detail !== undefined ? { detail: body.detail } : {}) })
+      const made = await createTask({
+        title: body.title ?? '',
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(typeof body.type === 'string' ? { type: body.type } : {}),
+      })
       if (!made) return json({ error: 'title_required' }, 400)
       return json({ task: made })
     }
@@ -1925,11 +1995,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             : await mod.editComment(body.id, String(body.body ?? ''))
           return json({ ok }, ok ? 200 : 400)
         }
-        const ok = await mod.addComment(ref, {
+        // `subtaskId` (optional) names the subtask or GROUP the comment is left on; absent = the
+        // task. A target that names nothing is refused with a sentence, never filed on the task.
+        const res = await mod.addComment(ref, {
           author: String(body.author ?? 'unknown'),
           body: String(body.body ?? ''),
+          ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
+          ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
         })
-        return json({ ok }, ok ? 200 : 400)
+        if (res.ok) return json({ ok: true, id: res.id })
+        const status = res.reason === 'no_such_task' ? 404 : res.reason === 'empty' ? 400 : 422
+        return json({ ok: false, reason: res.reason, message: res.message }, status)
       }
       if (verb === 'sessions') {
         if (typeof body.detach === 'string') {
@@ -2099,7 +2175,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         })
         return json(out, out.ok ? 200 : 404)
       }
-      const FIELDS = ['title', 'detail', 'priority', 'dueDate', 'startDate'] as const
+      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate'] as const
       // `shared` is a BOOLEAN and is therefore tested separately: it is the one field of this patch
       // whose `false` is a decision rather than an absence, and a truthiness test would make
       // turning sharing OFF indistinguishable from not asking.

@@ -114,6 +114,8 @@ agentop session batch --task "auth-refactor" --cwd ~/app --json \\
   whole task back later — including after a reboot.
 - \`--cwd\`, \`--model\` and \`--effort\` before the sessions are defaults for all of them; \`@<path>\`
   on a session overrides the directory for that one.
+- \`--notify off\` (before the sessions, like \`--model\`) starts them muted: no interruption for them,
+  yet they still show as waiting. Use it for workers so only the leader reaches the person.
 - \`--json\` prints the started ids as data. Read them from there rather than parsing the prose.
 - Every session starts DETACHED. A batch has no single terminal to hand over.
 - A session that fails to start does not abort the rest; the JSON reports \`started\` and \`failed\`

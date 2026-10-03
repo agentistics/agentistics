@@ -17,6 +17,7 @@
  */
 
 import { createPortal } from 'react-dom'
+import { NAY_FAB_EFFECTS_Z, NAY_FAB_Z } from '../../lib/zLayers'
 import { publishFabLanded, publishFabLive } from '../../lib/nayFabLive'
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import {
@@ -367,7 +368,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
         document.body,
       )}
       {effects && (
-        <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 299, pointerEvents: 'none' }}>
+        <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: NAY_FAB_EFFECTS_Z, pointerEvents: 'none' }}>
           {(style === 'shock' || style === 'comet') && (
             <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
           )}
@@ -379,7 +380,7 @@ export function NayFab({ prefs, onPrefs, isMobile, routeKey, children }: NayFabP
           ))}
         </div>
       )}
-      <div ref={anchorRef} style={{ position: 'fixed', left: 0, top: 0, zIndex: 300, width: FAB_SIZE, height: FAB_SIZE, willChange: 'transform' }}>
+      <div ref={anchorRef} style={{ position: 'fixed', left: 0, top: 0, zIndex: NAY_FAB_Z, width: FAB_SIZE, height: FAB_SIZE, willChange: 'transform' }}>
         {children({
           bodyRef,
           onPointerDown, onPointerMove,

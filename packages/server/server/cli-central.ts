@@ -20,7 +20,8 @@
  */
 
 import { existsSync } from 'fs'
-import { mkdir, writeFile, chmod } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
+import { CENTRAL_SECRET_KEYS, centralSecretsFile, isVaultedEnvFile, loadCentralEnv, loadCentralSecrets, writeCentralEnv } from './vault/central-env'
 import { randomBytes } from 'crypto'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
@@ -28,6 +29,7 @@ import { version as APP_VERSION } from '../../../package.json'
 import { input, confirm, select } from './cli-ui'
 import { createChunkSink, pumpStream } from './cli-stream'
 import { parseRebuildFlags } from './rebuild-flags'
+import { vaultRole } from './vault/service'
 import {
   CENTRAL_RUNTIMES,
   centralRuntimeOptions,
@@ -572,6 +574,27 @@ function composeArgs(envFile: string, composeFiles: readonly string[], rest: str
   return ['docker', 'compose', '-p', PROJECT, '--env-file', envFile, ...files, ...rest]
 }
 
+/**
+ * SECRETS.4 §5.2: in a process that is not the agentop service, a command that needs the central's
+ * SEALED env is spawned BY the service (the plaintext never enters this process), its output
+ * streamed back here — to the terminal, or to the control center's pane when streamed.
+ */
+async function viaService(req: Record<string, unknown> & { op: string }, streamed: boolean): Promise<number> {
+  const out = streamed ? createChunkSink() : null
+  const err = streamed ? createChunkSink() : null
+  const { remoteSpawn } = await import('./vault/client')
+  try {
+    const r = await remoteSpawn(req, {
+      out: (d) => (out ? out.write(d) : process.stdout.write(d)),
+      err: (d) => (err ? err.write(d) : process.stderr.write(d)),
+    })
+    if (!r.ok) { process.stderr.write(`${r.sentence}\n`); return 1 }
+    return r.exit
+  } finally {
+    out?.flush(); err?.flush()
+  }
+}
+
 async function runCompose(
   envFile: string,
   composeFiles: readonly string[],
@@ -579,6 +602,17 @@ async function runCompose(
   opts: CentralRunOptions = {},
 ): Promise<number> {
   const streamed = opts.streamed === true
+  if (vaultRole() !== 'holder' && isVaultedEnvFile(envFile)) {
+    return viaService({ op: 'central-compose', envFile, composeFiles: [...composeFiles], rest, image: IMAGE, project: PROJECT, streamed }, streamed)
+  }
+  // The secrets travel to compose through the ENVIRONMENT (they interpolate `${VAR:-}`), never a
+  // file. Bringing a central UP without them would start it with an empty session secret, so a
+  // vault that cannot open stops `up` with its sentence; down/logs/ps need none of them.
+  const secrets = await loadCentralSecrets(envFile)
+  if (!secrets.ok && rest[0] === 'up') {
+    process.stderr.write(`${secrets.sentence}\n`)
+    return 1
+  }
   try {
     const proc = Bun.spawn(composeArgs(envFile, composeFiles, rest), {
       ...childIo(streamed),
@@ -586,6 +620,7 @@ async function runCompose(
       // moves, which a pane cannot hold — see cli-stream.ts.
       env: {
         ...process.env,
+        ...(secrets.ok ? secrets.env : {}),
         AGENTISTICS_IMAGE: IMAGE,
         ...(streamed ? { NO_COLOR: '1', BUILDKIT_PROGRESS: 'plain' } : {}),
       },
@@ -727,10 +762,9 @@ async function initEnv(envFile: string): Promise<void> {
     // the sole way in, and the user may have widened the bind at the prompt above.
     trustProxy: reachSettings.trustProxy && bindWarning(reach, bind) === null,
   })
-  await writeFile(envFile, env, 'utf-8')
-  await chmod(envFile, 0o600).catch(() => {})
+  await writeCentralEnv(envFile, env)
   process.stdout.write(
-    `\nWrote ${envFile} (chmod 600).\n` +
+    `\nWrote ${envFile} (chmod 600)${isVaultedEnvFile(envFile) ? ` — its secrets are sealed in ${centralSecretsFile(envFile)}` : ''}.\n` +
     `  Runs as: ${centralRuntimeLabel(runtime)}\n` +
     `  Change it any time with \`agentop central up --image|--build|--native\`, or re-run this wizard.\n` +
     `  No dashboard password is set here — the first thing you do in the browser is create the\n` +
@@ -739,8 +773,21 @@ async function initEnv(envFile: string): Promise<void> {
   )
 }
 
-/** Read a single KEY=value from central.env (no full dotenv parse needed). */
+/** Read a single KEY=value from central.env — a secret one from the vault (see vault/central-env.ts). */
 async function readEnvValue(envFile: string, key: string): Promise<string | undefined> {
+  if ((CENTRAL_SECRET_KEYS as readonly string[]).includes(key) && isVaultedEnvFile(envFile) && vaultRole() !== 'holder') {
+    // §5.2: this process never reads a sealed value. The one secret this file DECIDES on is
+    // MONGO_URL, and only its KIND matters (bundled Mongo, external, unset) — the service answers
+    // that fact and a non-secret stand-in carrying the same classification is returned.
+    if (key !== 'MONGO_URL') return undefined
+    const { remoteCentralMongoKind } = await import('./vault/client')
+    const kind = await remoteCentralMongoKind(envFile)
+    return kind === 'bundled' ? BUNDLED_MONGO_URL : kind === 'external' ? 'mongodb://external-database.invalid' : kind === 'none' ? '' : undefined
+  }
+  if ((CENTRAL_SECRET_KEYS as readonly string[]).includes(key) && isVaultedEnvFile(envFile)) {
+    const s = await loadCentralSecrets(envFile)
+    if (s.ok && s.env[key] !== undefined) return s.env[key]
+  }
   try {
     const text = await Bun.file(envFile).text()
     for (const line of text.split('\n')) {
@@ -826,19 +873,18 @@ async function needsOwnerSetup(port: string): Promise<boolean> {
   }
 }
 
-/** Parse the KEY=value lines of a central.env into a map (ignores comments/blanks). */
+/**
+ * The KEY=value lines of a central.env as a map (comments/blanks ignored) — WITH the secrets the
+ * vault holds for it (`central/secrets.sealed`), opened in memory. A secrets file that cannot be
+ * opened is said on stderr, once, and the public half is returned.
+ */
 async function loadEnvFile(envFile: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {}
-  try {
-    const text = await Bun.file(envFile).text()
-    for (const line of text.split('\n')) {
-      if (!line || line.startsWith('#')) continue
-      const eq = line.indexOf('=')
-      if (eq === -1) continue
-      out[line.slice(0, eq).trim()] = line.slice(eq + 1)
-    }
-  } catch { /* missing file → empty */ }
-  return out
+  // §5.2: outside the service only the PUBLIC lines are read. A native central's own `agentop
+  // server` is the vault holder of its process and opens its sealed env itself at boot.
+  if (vaultRole() !== 'holder') return (await loadCentralEnv(envFile, { secrets: false })).env
+  const { env, refusal } = await loadCentralEnv(envFile)
+  if (refusal) process.stderr.write(`agentop: ${refusal}\n`)
+  return env
 }
 
 /**
@@ -871,6 +917,9 @@ async function runNativeCentral(
   // A native central has no container to exec into, but this process CAN reach the external DB
   // once it holds central.env — so run the token reissue right here.
   if (action === 'setup-token' || action === 'reset-password') {
+    if (vaultRole() !== 'holder' && isVaultedEnvFile(envFile)) {
+      return viaService({ op: 'central-native-tool', envFile, action, extraArgs }, opts.streamed === true)
+    }
     try {
       const proc = Bun.spawn([process.execPath, action, ...extraArgs], {
         env: { ...process.env, ...env, AGENTISTICS_TEAM_CENTRAL: '1' } as Record<string, string>,

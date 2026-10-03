@@ -54,17 +54,20 @@ if (command === 'mcp') {
  * ~/.agentistics/central.env. Values are trimmed (a stray space in `MONGO_URL= mongodb+srv…` would
  * otherwise break the driver). Never throws.
  */
-function loadCentralEnv(): string | null {
+async function loadCentralEnv(): Promise<string | null> {
   try {
-    const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs')
-    const { join } = require('node:path') as typeof import('node:path')
-    const { homedir } = require('node:os') as typeof import('node:os')
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { homedir } = await import('node:os')
     const candidates = [
       process.env.AGENTISTICS_CENTRAL_ENV,
       join(process.cwd(), 'central.env'),
       join(homedir(), '.agentistics', 'central.env'),
     ].filter((p): p is string => !!p)
-    const file = candidates.find(p => existsSync(p))
+    // Recovery FIRST: a split interrupted between its scrub and its rename leaves only
+    // `central.env.next`, and an exists-check before recovering would start --central without it.
+    const { findCentralEnvFile, loadCentralSecrets } = await import('../server/vault/central-env.ts')
+    const file = await findCentralEnvFile(candidates)
     if (!file) return null
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       const t = line.trim()
@@ -75,6 +78,10 @@ function loadCentralEnv(): string | null {
       const value = t.slice(eq + 1).trim()
       if (key && process.env[key] === undefined) process.env[key] = value
     }
+    // The secret half of a split central.env lives in the vault (vault/central-env.ts).
+    const secrets = await loadCentralSecrets(file)
+    if (!secrets.ok) console.error(`  ✗ ${secrets.sentence}`)
+    else for (const [k, v] of Object.entries(secrets.env)) if (process.env[k] === undefined) process.env[k] = v.trim()
     return file
   } catch {
     return null
@@ -114,6 +121,8 @@ __ENGINE_VERBS__
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
   ci-push       One-shot push of a CI runner's metrics to a central
+  vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset
+                (every secret agentop stores is encrypted — never plain text)
   upgrade       Upgrade agentop to the latest version
   autostart     Start a mode with the system (systemd user service on Linux)
   check-update  Print a notice if a newer version is available (else silent);
@@ -507,6 +516,11 @@ if (command === 'experimental') {
 
 if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
 
+if (command === 'vault') {
+  const { runVault } = await import('../server/cli-vault.ts')
+  process.exit(await runVault(args))
+}
+
 if (command === 'backup') {
   const { runBackupCli } = await import('../server/cli-backup.ts')
   const code = await runBackupCli(args)
@@ -712,6 +726,12 @@ if (command === 'autostart') {
   const modeArg = args[0]
   const actionArg = args[1]
 
+  // The unit's ExecCondition — see autostart-plan.ts `portHeldVerdict`.
+  if (modeArg === 'guard' && actionArg === 'server') {
+    const { guardServerStart } = await import('../server/autostart.ts')
+    process.exit(await guardServerStart())
+  }
+
   // `agentop autostart status` (no mode) lists every service.
   if (modeArg === 'status' && !actionArg) {
     const res = await autostartStatus()
@@ -851,8 +871,14 @@ if (command === 'server' || command === 'start' || !command) {
   // MONGO_URL + secrets. Unlike the Docker central there is NO bundled Mongo, so an external
   // MONGO_URL (Atlas or your own mongod) is required.
   const central = args.includes('--central')
+  // This process is the agentop SERVICE — the vault's only holder (SECRETS.4 §5.2) — and claims it
+  // before anything below reads a secret (a native central's sealed env included).
+  {
+    const { becomeVaultHolder } = await import('../server/vault/service.ts')
+    becomeVaultHolder()
+  }
   if (central) {
-    const envFile = loadCentralEnv()
+    const envFile = await loadCentralEnv()
     process.env.AGENTISTICS_TEAM_CENTRAL = '1'
     if (!process.env.MONGO_URL) {
       console.error('\n  ✗ native central needs MONGO_URL — there is no bundled Mongo without Docker.')
@@ -886,6 +912,12 @@ if (command === 'server' || command === 'start' || !command) {
   }
 
   process.env.SERVE_STATIC = '1'
+  // The vault BEFORE the server: open it (migrating any plaintext secret an earlier version left),
+  // or say in one line why it cannot be — then the unlock socket. See vault/boot.ts.
+  {
+    const { bootVault } = await import('../server/vault/boot.ts')
+    await bootVault()
+  }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
   const { serverDaemonPlan } = await import('../server/daemon-plan.ts')

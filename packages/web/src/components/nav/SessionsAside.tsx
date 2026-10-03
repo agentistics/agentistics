@@ -20,8 +20,8 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
-  PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
+  BellOff, ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  Loader, PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -46,7 +46,10 @@ import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
+import { reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
 import { buildPickRows } from '../../lib/sessionPick'
+import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
@@ -226,12 +229,17 @@ function groupMenuExtras(
   return extras
 }
 
+/** The row menu's notification entry — see `notifyMenuExtras`. Kept beside `groupMenuExtras`, which it
+ *  is modelled on: both are client-side entries `rowMenuEntries` takes as `extra`. */
+const notifyExtras = notifyMenuExtras
+
 export function SessionsAside({
   lang, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
+  const mutedKeys = useMutedKeys()
   const navigate = useNavigate()
   // 44px is the MOBILE figure. Applying it on desktop turns a compact list into a row of buttons.
   const isMobile = useIsMobile()
@@ -606,6 +614,12 @@ export function SessionsAside({
       setMenu(null)
       return
     }
+    if (action === NOTIFY_TOGGLE) {
+      const target = rows.find(r => r.id === id)
+      if (target) toggleSessionMuted(pinKeyOf(target))
+      setMenu(null)
+      return
+    }
     if (action === 'remove-from-group') {
       const target = rows.find(r => r.id === id)
       if (target) removeSessionFromGroup(pinKeyOf(target))
@@ -613,7 +627,8 @@ export function SessionsAside({
       return
     }
     if (!act) return
-    void act({ id, action }).then(out => {
+    const call = () => act({ id, action })
+    void (action === 'resume' ? withReopening([id], call) : call()).then(out => {
       setNotice(out.message)
       // A REOPEN LANDS SOMEWHERE, here too. It retires the row it was asked about, so a reader
       // sitting on that row is left on an id the next poll drops — and this handler kept only the
@@ -1079,7 +1094,8 @@ export function SessionsAside({
                         }}
                         style={{
                           boxShadow: groupRowDragOver === key ? 'inset 0 2px 0 var(--anthropic-orange)' : undefined,
-                          ...(tap ? { touchAction: 'none' as const } : {}),
+                          // No touch-action opt-out here: it made a swipe that STARTS on a row a no-op, so
+                          // the list would not scroll from a session. Native drag starts on long-press.
                         }}
                       >
                         <SessionRow
@@ -1344,7 +1360,8 @@ export function SessionsAside({
              * fleet polls every five seconds, and "all of them" resolved on the server a moment
              * later is not the list this person just read and agreed to.
              */
-            void act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
+            const call = () => act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
+            void (picking === 'reopen' ? withReopening(ids, call) : call())
               .then(out => { setNotice(out.message); setPicking(null) })
               .finally(() => { endDispatch(groupActingRef); setGroupBusy(false) })
           }}
@@ -1509,7 +1526,6 @@ export function SessionsAside({
                       ? 'inset 0 2px 0 var(--anthropic-orange)'
                       : undefined,
                     opacity: dragFrom === key ? 0.45 : 1,
-                    ...(tap ? { touchAction: 'none' as const } : {}),
                   }}
                 >
                   <SessionRow
@@ -1673,6 +1689,7 @@ export function SessionsAside({
               }] : []),
               ...taskMenuEntries(rows.find(r => r.id === menu.id)?.task, pt),
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+              ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
           )}
           onPick={pickMenuAction}
@@ -2290,7 +2307,9 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   /** How this card shows its state — see `sessionCardStyle.ts`. */
   cardColor: AsideCardColor
 }) {
+  const mutedKeys = useMutedKeys()
   const wants = sessionNotify(session)
+  const reopening = useReopening().has(session.id)
   const goTo = useContext(GoToSessionContext)
   const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
@@ -2357,6 +2376,12 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
+      {reopening && (
+        <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
+          <Loader size={12} className="ag-working-spin" />
+          {reopeningLabel(lang !== 'en')}
+        </span>
+      )}
       <SessionFacts
         session={session}
         selected={selected}
@@ -2396,6 +2421,18 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
           </span>
         )
       })()}
+      {mutedKeys.includes(pinKeyOf(session)) && (
+        // Not a control: the toggle lives in the row menu. It states a fact about this row, so it
+        // carries a tooltip and a label, and never changes the row's own state colour.
+        <span
+          role="img"
+          aria-label={mutedTooltip(lang !== 'en')}
+          title={mutedTooltip(lang !== 'en')}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}
+        >
+          <BellOff size={12} />
+        </span>
+      )}
       {onPin && (
         <span
           role="button"

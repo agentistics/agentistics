@@ -29,7 +29,8 @@ import {
   ChevronDown, ChevronRight, ExternalLink, FileText, FileVideo, Link2, MessageSquare, Paperclip,
   Pencil, Plus, Trash2, X, XCircle,
 } from 'lucide-react'
-import { PRIORITY_ORDER, type TaskPriorityId } from '@agentistics/core'
+import { PRIORITY_ORDER, commentThread, type ChatAttachmentRef, type TaskPriorityId } from '@agentistics/core'
+import { CommentAttachments, CommentComposer } from './CommentComposer'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { sessionPath } from '../../lib/sessionRoute'
@@ -54,6 +55,7 @@ import { useStagedFire } from './useStagedFire'
 import { TaskFiles } from './TaskFiles'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
+import { CommentThreadDialog } from './CommentThreadDialog'
 import {
   addComment, addLink, addSubtask, attachSession, clearStagedSession, deleteFile,
   deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration,
@@ -159,7 +161,7 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
         <div style={{ flex: '1 1 120px', display: 'grid', gap: 5, minWidth: 0 }}>
           <span style={{ ...microLabel, fontSize: 9 }}>{copy.priority}</span>
           <ChipSelect
-            value={task.priority ?? 'none'}
+            value={!task.priority || task.priority === 'none' ? 'low' : task.priority}
             disabled={busy}
             options={PRIORITY_ORDER.map(id => ({
               value: id, label: PRIORITY[id]!.label, color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,
@@ -985,15 +987,32 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
   )
 }
 
-export function CommentsTab({ id, detail, onChanged }: {
+/**
+ * One comment THREAD — the task's (`target` absent/null), a subtask GROUP's or a subtask's.
+ *
+ * Which comments a thread shows is `commentThread` (`@agentistics/core`), the one rule every
+ * surface reads: it looks DOWNWARD only — a subtask shows its own, a group its own plus its
+ * members' (each labelled with the member it lives on), the task everything (labelled by target).
+ * Writing always lands on THIS thread's own target, so a reply typed in a group's thread is a
+ * comment on the group; the label on a member's comment is what keeps that from misleading anyone.
+ */
+export function CommentsTab({ id, detail, onChanged, target, lang = 'en' }: {
   id: string
   detail: TaskDetail
   onChanged: () => Promise<void> | void
+  /** The subtask or group whose thread this is; absent/null = the task. */
+  target?: string | null
+  lang?: Lang
 }) {
   const isMobile = useIsMobile()
-  const [dropping, setDropping] = useState(false)
+  const pt = lang === 'pt'
+  const threadId = target ?? null
+  const entries = commentThread(detail.comments, detail.subtasks, threadId)
+  const owner = threadId ? detail.subtasks.find(s => s.id === threadId) : undefined
+  /** The server's own sentence when a write was refused (e.g. the subtask was deleted meanwhile). */
+  const [refusal, setRefusal] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [attached, setAttached] = useState<CommentAttachment[]>([])
+  const [attached, setAttached] = useState<ChatAttachmentRef[]>([])
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1016,34 +1035,18 @@ export function CommentsTab({ id, detail, onChanged }: {
     setBusy(true); await fn(); await onChanged(); setBusy(false)
   }
 
-  /**
-   * A pasted or dropped file lands in the task's Files store AND is held as a pending reference on
-   * the comment being written. Uploading without holding the reference is what made a pasted
-   * screenshot disappear into the Files tab with nothing tying it to what was being said.
-   */
-  const take = (files: File[]) => run(async () => {
-    const minted: CommentAttachment[] = []
-    for (const f of files) {
-      // A screenshot on the clipboard has no filename, so one is minted from the moment and the
-      // mime type. Without it the record carries an empty name, which renders as a blank row you
-      // cannot tell from a broken one.
-      const named = f.name && f.name !== 'image.png'
-        ? f
-        : new File([f], `paste-${new Date().toISOString().replace(/[:.]/g, '-')}.${(f.type.split('/')[1] || 'bin')}`, { type: f.type })
-      const fileId = await uploadFile(id, named, 'you')
-      if (fileId) minted.push({ id: fileId, name: named.name })
-    }
-    if (minted.length > 0) setAttached(a => [...a, ...minted])
-  })
-
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      {detail.comments.length === 0 && (
+      {entries.length === 0 && (
         <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-          Nothing said yet. Assistants can write here too, over the API.
+          {owner
+            ? (pt ? `Nada dito sobre “${owner.title}” ainda. Assistentes também podem escrever aqui, pela API.`
+              : `Nothing said about “${owner.title}” yet. Assistants can write here too, over the API.`)
+            : (pt ? 'Nada dito ainda. Assistentes também podem escrever aqui, pela API.'
+              : 'Nothing said yet. Assistants can write here too, over the API.')}
         </div>
       )}
-      {detail.comments.map(c => {
+      {entries.map(({ comment: c, via }) => {
         const mine = editing?.id === c.id
         // Editing a comment always shows it — collapsing what you are actively rewriting would
         // hide your own draft the moment you started it.
@@ -1068,6 +1071,17 @@ export function CommentsTab({ id, detail, onChanged }: {
                 ? <ChevronDown size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 : <ChevronRight size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
               <span style={pill('var(--accent-blue)')}>{c.author}</span>
+              {/* Where this comment LIVES, when that is not this thread — a member's comment read
+                  from its group, or a subtask's read from the task. */}
+              {via && via.id !== null && (
+                <span
+                  title={via.title}
+                  style={{
+                    ...pill('var(--text-tertiary)'), maxWidth: isMobile ? 120 : 220,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >{via.kind === 'group' ? (pt ? 'grupo · ' : 'group · ') : ''}{via.title}</span>
+              )}
               <span style={{ ...microLabel, textTransform: 'none', letterSpacing: 0 }}>
                 {new Date(c.createdAt).toLocaleString()}
               </span>
@@ -1117,50 +1131,40 @@ export function CommentsTab({ id, detail, onChanged }: {
                 </div>
               )
               : (
-                <CommentBody body={c.body} files={detail.files} />
+                <>
+                  {c.body && <CommentBody body={c.body} files={detail.files} />}
+                  <CommentAttachments attachments={c.attachments ?? []} lang={lang} />
+                </>
               ))}
           </div>
         )
       })}
 
-      <div
-        style={{
-          ...surface, padding: 13, display: 'grid', gap: 9,
-          outline: dropping ? '1px dashed var(--anthropic-orange)' : 'none',
-        }}
-        onDragOver={e => { e.preventDefault(); setDropping(true) }}
-        onDragLeave={() => setDropping(false)}
-        onDrop={e => {
-          e.preventDefault(); setDropping(false)
-          const files = Array.from(e.dataTransfer?.files ?? [])
-          if (files.length > 0) void take(files)
-        }}
-      >
-        <textarea
-          style={{ ...field(isMobile), minHeight: 76, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
-          value={draft}
-          placeholder="Write a comment, or paste a file — an assistant can too, over the API"
-          onChange={e => setDraft(e.target.value)}
-          onPaste={e => {
-            /*
-             * A pasted file becomes an ATTACHMENT on this comment, not text.
-             *
-             * The paste is only intercepted when the clipboard actually holds a FILE; plain text
-             * falls through untouched, or pasting a paragraph would silently upload nothing and
-             * swallow the keystroke.
-             */
-            // `Array.from`, not spread: this lib target types FileList without an iterator.
-            const files = Array.from(e.clipboardData?.files ?? [])
-            if (files.length === 0) return
-            e.preventDefault()
-            void take(files)
-          }}
-        />
-        <AttachmentChips attached={attached} onRemove={fid => setAttached(v => v.filter(x => x.id !== fid))} />
+      <CommentComposer
+        lang={lang}
+        value={draft}
+        onChange={setDraft}
+        attachments={attached}
+        onAttachments={setAttached}
+        busy={busy}
+        refusal={refusal}
+        ariaLabel={owner ? (pt ? `Comentar em ${owner.title}` : `Comment on ${owner.title}`) : (pt ? 'Comentar na tarefa' : 'Comment on the task')}
+        placeholder={owner
+          ? (pt ? `Comentar em “${owner.title}” — ou colar um arquivo` : `Comment on “${owner.title}” — or paste a file`)
+          : (pt ? 'Escreva um comentário, ou cole um arquivo — um assistente também pode, pela API'
+            : 'Write a comment, or paste a file — an assistant can too, over the API')}
+        submitLabel={pt ? 'Comentar' : 'Comment'}
+        onSubmit={() => void run(async () => {
+          const res = await addComment(id, 'you', draft, threadId, attached)
+          if (res.ok) { setDraft(''); setAttached([]); setRefusal(null); return }
+          // Kept: the draft stays in the box, and the server's sentence says why it did not land.
+          setRefusal(res.message ?? (pt ? 'O comentário não foi salvo.' : 'The comment was not saved.'))
+        })}
+      />
         <ConfirmModal
           open={removing !== null}
           title="Delete this comment?"
-          message="It goes for everyone reading this task. Any file pasted into it stays on the task — the Files tab is where those are removed."
+          message="It goes for everyone reading this task. Its attachments are removed from the comment, not from disk."
           confirmLabel="Delete"
           cancelLabel="Cancel"
           onCancel={() => setRemoving(null)}
@@ -1170,21 +1174,6 @@ export function CommentsTab({ id, detail, onChanged }: {
             if (target) void run(() => removeComment(id, target))
           }}
         />
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <AttachButton disabled={busy} onFiles={take} />
-          <span style={{ flex: 1 }} />
-          <button
-            style={button(isMobile, 'primary')}
-            disabled={busy || (!draft.trim() && attached.length === 0)}
-            onClick={() => void run(async () => {
-              await addComment(id, 'you', bodyWithAttachments(draft, attached))
-              setDraft(''); setAttached([])
-            })}
-          >
-            <MessageSquare size={14} /> Comment
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1211,6 +1200,8 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
   // The board's own dialog, never `window.confirm`: the browser's box carries the page's URL and
   // none of the app's words, and on a phone it is a system sheet that reads as a site error.
   const [confirmDelete, setConfirmDelete] = useState(false)
+  /** A subtask's or group's comment thread, opened from its row in the Subtasks tab. */
+  const [subThread, setSubThread] = useState<{ id: string; title: string } | null>(null)
   /** Set while the task is on its way to `blocked` — see the list view's `toStatus`. */
   const [blocking, setBlocking] = useState(false)
   /** Set when a `done` write refused for having no session filed under this delivery yet. */
@@ -1378,10 +1369,12 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
 
           {tab === 'sessions' && <SessionsTab detail={detail} />}
 
-          {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} />}
+          {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} />}
 
           {tab === 'subtasks' && (
             <SubtaskTable
+              comments={detail.comments}
+              onOpenComments={t => setSubThread({ id: t.id, title: t.title })}
               subtasks={detail.subtasks}
               sessions={detail.sessions}
               subtaskRollups={detail.subtaskRollups}
@@ -1526,6 +1519,17 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             setDoneRefusal(false)
             setTab('subtasks')
           }}
+        />
+      )}
+
+      {subThread && (
+        <CommentThreadDialog
+          taskId={id}
+          target={subThread.id}
+          title={subThread.title}
+          lang={lang}
+          onClose={() => setSubThread(null)}
+          onChanged={reload}
         />
       )}
 

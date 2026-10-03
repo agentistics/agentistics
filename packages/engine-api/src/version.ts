@@ -22,7 +22,31 @@
  * `EngineSpawnBudget` carries the swap `alarm` and an explicit `unmeasured` flag. An engine built
  * against 1.2 still loads: `protectedPaths` is kept, and now also carries the globs in absolute form.
  */
-export const ENGINE_API_VERSION = '1.3.0'
+/**
+ * 1.4.0 — LIVE.3: the host's CONFIRMED fleet transitions (`EngineHostServices.fleet`, the event
+ * channel's two-consecutive-polls rule already applied), the contract version the host speaks
+ * (`apiVersion`, so an engine can tell a 1.4 host from an older one before asking it a 1.4 question),
+ * and the `live` flag (`AGENTISTICS_JOURNAL` + `AGENTISTICS_JOURNAL_LIVE`). All optional, so an
+ * engine built against 1.3 still loads and an engine built against 1.4 still runs on a host that
+ * offers none of them.
+ */
+/**
+ * 1.5.0 — the machine's vault: `EngineHostServices.secrets` (optional), through which an engine
+ * seals and opens ITS OWN secrets (purposes `engine/…`) without ever holding the data key. Optional,
+ * so a 1.5 engine still loads on an older host — and refuses to STORE a provider key there rather
+ * than write it in plain text. `EngineAuditAction` gains `vault.migrated`, `vault.plaintext-pending`
+ * and `vault.migration-failed`, so the engine reports its own migration (S1, provider keys — the
+ * engine is that file's ONLY owner; the host never touches `provider-keys/`) through `host.audit`,
+ * which writes them to the machine's `vault/audit.jsonl`.
+ */
+/**
+ * 1.6.0 — SECRETS.4: `EngineSecrets.status()` may carry `lockedBy` and `autoLockInMs`, and
+ * `EngineSecrets.onStateChange` (all optional) lets an engine wait for an unlock instead of polling.
+ * `VaultRefusal` is NOT widened (a wider returned union breaks an exhaustive switch — a major): the
+ * new causes arrive as `code: 'locked'` with the sentence and `lockedBy`. An engine built against 1.5
+ * still loads; a 1.6 engine on a 1.5 host sees `undefined` for each new member and must cope.
+ */
+export const ENGINE_API_VERSION = '1.6.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

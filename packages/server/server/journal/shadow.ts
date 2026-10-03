@@ -80,6 +80,8 @@ export interface ShadowStatusFile {
   updatedAt: string
   runs: number
   skippedBusy: number
+  /** Re-runs the busy arrivals caused — at most one per running ingest (LIVE C5). Absent before LIVE. */
+  coalesced?: number
   /** The last completed run — what the ingest cost, so the ≤10 % budget can be read off a live machine. */
   lastRun: ShadowRun | null
   sinceBoot: ShadowSinceBoot
@@ -261,8 +263,11 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
   let journalPromise: Promise<Journal> | null = null
   let journal: Journal | null = null
   let running = false
+  /** The newest session list that arrived while an ingest ran — one slot (see `ingest`). */
+  let pending: readonly ShadowSession[] | null = null
   let runs = 0
   let skippedBusy = 0
+  let coalesced = 0
   let lastRun: ShadowRun | null = null
   let off: ShadowOffReason | undefined
   const rejectedByReason: Partial<Record<RejectionReason, number>> = {}
@@ -298,7 +303,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     if (statusPath === null) return
     const file: ShadowStatusFile = {
       v: 1, pid: process.pid, bootedAt, updatedAt: new Date(now()).toISOString(),
-      runs, skippedBusy, lastRun, sinceBoot: sinceBoot(),
+      runs, skippedBusy, coalesced, lastRun, sinceBoot: sinceBoot(),
       ...(off ? { off } : {}),
     }
     try {
@@ -419,15 +424,29 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
   return {
     async ingest(sessions) {
       if (!enabled) return { status: 'off' }
-      if (running) { skippedBusy++; return { status: 'busy' } }
+      // COALESCED, never queued (LIVE C5): a call that finds one running keeps only the LATEST session
+      // list, and the running ingest runs exactly once more with it when it ends. However many builds
+      // arrive meanwhile, that is one slot, not a queue — and the newest list is the one that matters.
+      if (running) { skippedBusy++; pending = sessions; return { status: 'busy' } }
       running = true
       try {
-        return await run(sessions)
-      } catch (e) {
-        warn(`[journal] shadow ingest failed: ${String(e)}`)
-        return { status: 'failed' }
+        let next: readonly ShadowSession[] | null = sessions
+        let result: ShadowResult = { status: 'failed' }
+        while (next) {
+          pending = null
+          try {
+            result = await run(next)
+          } catch (e) {
+            warn(`[journal] shadow ingest failed: ${String(e)}`)
+            result = { status: 'failed' }
+          }
+          next = pending
+          if (next) coalesced++
+        }
+        return result
       } finally {
         running = false
+        pending = null
       }
     },
     sinceBoot,

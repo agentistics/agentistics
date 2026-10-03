@@ -39,8 +39,11 @@ export async function runDoctor(argv: string[]): Promise<never> {
   const exposed = argv.includes('--exposed')
 
   const envPath = findEnvFile()
+  // A split central.env keeps its secrets in the vault (vault/central-env.ts); the checks below
+  // need to know they are SET, so they are read back in memory — never printed.
+  const { centralEnvTextWithSecrets } = await import('./vault/central-env')
   const cfg = resolveDeploymentConfig(
-    envPath ? readFileSync(envPath, 'utf8') : null,
+    envPath ? await centralEnvTextWithSecrets(envPath, readFileSync(envPath, 'utf8')) : null,
     process.env as Record<string, string | undefined>,
   )
 
@@ -106,6 +109,17 @@ export async function runDoctor(argv: string[]): Promise<never> {
     const icon = c.status === 'pass' ? `${GREEN}✓${RESET}` : c.status === 'warn' ? `${YELLOW}!${RESET}` : `${RED}✗${RESET}`
     console.log(`  ${icon} ${c.label}`)
     console.log(`    ${DIM}${c.detail}${RESET}`)
+  }
+
+  // The environment sessions start in (login-env.ts): counts and names only, never values.
+  {
+    const { resolveLoginEnv } = await import('./sessions/login-env')
+    const r = await resolveLoginEnv()
+    const icon = r.source === 'login' ? `${GREEN}✓${RESET}` : `${YELLOW}!${RESET}`
+    const segs = (r.env?.PATH ?? '').split(':').filter(Boolean).length
+    const vars = Object.keys(r.env ?? {}).filter(k => k !== 'PATH').join(', ') || 'none'
+    console.log(`\n  ${icon} Session environment (${r.source})`)
+    console.log(`    ${DIM}login-shell PATH: ${segs} entries; toolchain vars: ${vars}${RESET}`)
   }
 
   if (dbError) {

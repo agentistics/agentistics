@@ -52,13 +52,15 @@ export interface AgentToolPolicy {
 
 /** Every tool the MCP exposes today — 38 on `origin/dev` (the spec's §1 said 44; P0.3 re-counted). */
 export const AGENT_TOOL_NAMES = [
-  // ALM (16)
+  // ALM (18)
   'agentistics_tasks',
   'agentistics_task',
   'agentistics_task_create',
   'agentistics_task_status',
   'agentistics_task_statuses',
   'agentistics_task_status_edit',
+  'agentistics_task_types',
+  'agentistics_task_type_edit',
   'agentistics_task_comment',
   'agentistics_task_subtask',
   'agentistics_task_link',
@@ -73,6 +75,8 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_groups',
   'agentistics_session_group_create',
   'agentistics_session_group_edit',
+  // Session notifications (1)
+  'agentistics_session_notify',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -118,6 +122,12 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     routes: ['DELETE /api/tasks/statuses/:id', 'POST /api/tasks/statuses/:id', 'POST /api/tasks/statuses'],
     reason: 'status vocabulary is configuration; the server refuses to remove a protected status (§3.5)',
   },
+  agentistics_task_types: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/types'], reason: 'reads the type vocabulary' },
+  agentistics_task_type_edit: {
+    ...TASKS, risk: 'W',
+    routes: ['DELETE /api/tasks/types/:id', 'POST /api/tasks/types/:id', 'POST /api/tasks/types'],
+    reason: 'type vocabulary is configuration; the server refuses to remove a type still in use',
+  },
   agentistics_task_comment: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/comments'], reason: 'appends a note; additive, destroys nothing' },
   agentistics_task_subtask: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/subtasks'], reason: 'adds or edits a subtask; reversible by another edit' },
   agentistics_task_link: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/links'], reason: 'adds or removes a link; reversible by the inverse call' },
@@ -146,6 +156,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
       'DELETE /api/session-groups/:group',
     ],
     reason: 'folders are labels: deleting one ungroups its sessions and touches no session (§5 defect 3: W, not D)',
+  },
+  // ------------------------------------------------------------------ Session notifications
+  agentistics_session_notify: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/session-notify'],
+    reason: 'a per-session on/off switch for delivery; reversible, and the session state is untouched',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, risk: 'R', routes: ['GET /api/data'], reason: 'reads computed metrics' },

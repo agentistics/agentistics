@@ -62,7 +62,7 @@ export function TaskComposer(p: TaskComposerProps) {
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
   const [status, setStatus] = useState<BoardStatus>('todo')
-  const [priority, setPriority] = useState<TaskPriorityId>('none')
+  const [priority, setPriority] = useState<TaskPriorityId>('low')
   const [subs, setSubs] = useState<string[]>([])
   const [subDraft, setSubDraft] = useState('')
   /**
@@ -106,7 +106,7 @@ export function TaskComposer(p: TaskComposerProps) {
     // the rest is applied to the record it returns rather than invented into its signature.
     // Sequential on purpose — every one of these read-modify-writes the same store.
     if (status !== 'todo') await markTask(task.id, status)
-    if (priority !== 'none') await editTask(task.id, { priority })
+    if (priority !== 'low') await editTask(task.id, { priority })
     for (const s of subs) await addSubtask(task.id, s)
 
     /**

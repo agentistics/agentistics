@@ -22,7 +22,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
+import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
 import { getCentralMachine } from '../../lib/centralMachinePick'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useElementWidth } from '../../hooks/useElementWidth'
@@ -57,6 +58,7 @@ import {
   type BandOverflowEntry,
 } from './bandControls'
 import { PanelGapDots } from './PanelGap'
+import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
 export type SessionView = 'chat' | 'terminal'
 
@@ -74,7 +76,7 @@ export type SessionView = 'chat' | 'terminal'
  * the one bar it most needed to cover looks like. `320` clears the header with room to spare while
  * staying under the first ordinary dialog tier (`SessionDrilldownModal` and friends start at 350).
  */
-export const PANEL_FULLSCREEN_Z = 320
+export { PANEL_FULLSCREEN_Z }
 
 export interface SessionPanelProps {
   session: ControlSession
@@ -207,6 +209,7 @@ export function SessionPanel({
    */
   const relayed = getCentralMachine() !== null
   const pt = lang === 'pt'
+  const muted = useSessionMuted(session)
 
   /**
    * Can this session be read as a conversation at all?
@@ -363,6 +366,12 @@ export function SessionPanel({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {session.title}
+            {muted && (
+              <span role="img" aria-label={mutedTooltip(pt)} title={mutedTooltip(pt)}
+                style={{ display: 'inline-flex', verticalAlign: 'middle', marginLeft: 6, color: 'var(--text-tertiary)' }}>
+                <BellOff size={13} />
+              </span>
+            )}
           </h1>
           <p style={{
             margin: '2px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)',

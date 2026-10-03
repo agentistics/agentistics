@@ -127,8 +127,8 @@ export function planNext(o: {
  * of a busy board. Deterministic to the id, like every other ordering here.
  */
 function rankReady(a: Task, b: Task): number {
-  const pa = PRIORITY_ORDER.indexOf(a.priority ?? 'none')
-  const pb = PRIORITY_ORDER.indexOf(b.priority ?? 'none')
+  const pa = PRIORITY_ORDER.indexOf(a.priority ?? 'low')
+  const pb = PRIORITY_ORDER.indexOf(b.priority ?? 'low')
   if (pa !== pb) return pa - pb
   const ra = a.rank
   const rb = b.rank

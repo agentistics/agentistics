@@ -114,6 +114,12 @@ export interface ServiceSpec {
   command: string
   /** True when the command stays in the foreground for as long as the service runs. */
   keepsRunning: boolean
+  /**
+   * A command that decides whether the unit should start at all (`ExecCondition=`). Exit 0 starts
+   * it, 1–254 SKIPS it without marking the unit failed — which is what stops `Restart=on-failure`
+   * looping when the port is already held. Absent = always start.
+   */
+  condition?: string
 }
 
 /**
@@ -145,6 +151,7 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
     lines.push(systemdPathLine(path))
   }
   if (spec.keepsRunning) {
+    if (spec.condition) lines.push(`ExecCondition=${spec.condition}`)
     lines.push('Type=simple', `ExecStart=${spec.command}`)
     // THE SESSIONS MUST SURVIVE THE SERVICE. A tmux client started by the server starts the tmux
     // SERVER as its own child when none is running, so the whole fleet lands in this unit's
@@ -158,6 +165,12 @@ export function systemdUnit(spec: ServiceSpec, callerPath?: string): string {
     // was gone. `process` stops exactly the one process this unit started; a session is not part
     // of the service, it is what the service is FOR.
     lines.push('KillMode=process')
+    // AN OOM KILL INSIDE THE UNIT MUST NOT STOP THE UNIT. systemd's default `OOMPolicy=stop` stops the
+    // whole service when the kernel OOM-kills ANY process in its cgroup — and a session's heavy child
+    // (a test run, a build) lives there too while the tmux server does. One worker running out of
+    // memory then took the server down with it. `continue` lets the kernel kill that one process and
+    // leaves the service, and the fleet, running.
+    lines.push('OOMPolicy=continue')
     lines.push('Restart=on-failure', 'RestartSec=5')
   } else {
     // The command RETURNS once the thing it started is up. Without RemainAfterExit the unit is
@@ -191,6 +204,22 @@ export function migrateUnitKillMode(text: string): string | null {
   const at = lines.findIndex(l => /^\s*ExecStart\s*=/.test(l))
   if (at < 0) return null
   lines.splice(at + 1, 0, '# A session is not part of the service — see systemdUnit().', 'KillMode=process')
+  return lines.join('\n')
+}
+
+/**
+ * Bring an ALREADY INSTALLED long-running unit up to the `OOMPolicy=continue` rule in `systemdUnit()`.
+ * Same MERGE as `migrateUnitKillMode`: every line the user has is kept, one is inserted, an explicit
+ * `OOMPolicy` is never overwritten. `null` when there is nothing to do.
+ */
+export function migrateUnitOOMPolicy(text: string): string | null {
+  if (!/^\s*\[Service\]\s*$/m.test(text)) return null
+  if (!/^\s*Type\s*=\s*simple\s*$/m.test(text)) return null
+  if (/^\s*OOMPolicy\s*=/m.test(text)) return null
+  const lines = text.split('\n')
+  const at = lines.findIndex(l => /^\s*ExecStart\s*=/.test(l))
+  if (at < 0) return null
+  lines.splice(at + 1, 0, '# An OOM kill of one session process must not stop the service — see systemdUnit().', 'OOMPolicy=continue')
   return lines.join('\n')
 }
 

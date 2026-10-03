@@ -287,6 +287,24 @@ describe('failure isolation — a shadow can only log', () => {
     expect((JSON.parse(readFileSync(w.statusPath, 'utf8')) as ShadowStatusFile).skippedBusy).toBe(1)
     journal.close()
   })
+
+  test('LIVE C5: arrivals while one runs are COALESCED — one re-run with the LATEST list, never a queue', async () => {
+    const w = await world(['a', 'b'])
+    const journal = await openJournal({ path: w.journalPath })
+    const shadow = createShadow({
+      enabled: true, open: async () => journal, replay: w.replay, statusPath: w.statusPath, registerStatus: () => {},
+      stamps: async () => new Map(), // nothing skippable: every run replays what it is handed
+    })
+    const first = shadow.ingest(sessions('a'))
+    const arrivals = await Promise.all([shadow.ingest(sessions('a')), shadow.ingest(sessions('a')), shadow.ingest(sessions('b'))])
+    expect(arrivals.map(r => r.status)).toEqual(['busy', 'busy', 'busy'])
+    expect((await first).status).toBe('ran')
+    const status = JSON.parse(readFileSync(w.statusPath, 'utf8')) as ShadowStatusFile
+    expect(status.runs).toBe(2) // the first, and ONE re-run for three arrivals
+    expect(status.coalesced).toBe(1)
+    expect(status.skippedBusy).toBe(3)
+    journal.close()
+  })
 })
 
 describe('what reaches the journal', () => {

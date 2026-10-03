@@ -86,6 +86,10 @@ describe('dictationLocale', () => {
 })
 
 describe('dictationError', () => {
+  it('aborted is our own stop (mic clicked off, or the send ended it): no sentence at all', () => {
+    expect(dictationError('aborted', 'en')).toBeNull()
+    expect(dictationError('aborted', 'pt')).toBeNull()
+  })
   it('names a refused permission', () => {
     expect(dictationError('not-allowed', 'en')).toContain('permission')
     expect(dictationError('not-allowed', 'pt')).toContain('permissão')
@@ -100,7 +104,7 @@ describe('dictationError', () => {
     expect(dictationError('audio-capture', 'en')).toContain('microphone')
   })
   it('never returns an empty string for a code it has not seen', () => {
-    expect(dictationError('something-new', 'en').length).toBeGreaterThan(0)
+    expect(dictationError('something-new', 'en')?.length ?? 0).toBeGreaterThan(0)
     expect(dictationError('something-new', 'en')).toContain('something-new')
   })
 })

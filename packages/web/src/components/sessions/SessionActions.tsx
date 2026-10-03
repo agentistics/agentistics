@@ -23,6 +23,7 @@ import { StopSessionConfirm } from '../tasks/StopSessionConfirm'
 import { boardCopy } from '../tasks/copy'
 import { BetaTag } from '../BetaTag'
 import type { FleetActionId, FleetRow, FleetVerb } from '../../lib/fleet'
+import { withReopening } from '../../lib/reopeningStore'
 
 export interface SessionActionsProps {
   row: FleetRow
@@ -118,7 +119,8 @@ export function SessionActions({
 
   async function run(action: FleetActionId, text?: string) {
     setBusy(true)
-    const out = await act({ id: row.id, action, ...(text !== undefined ? { text } : {}) })
+    const call = () => act({ id: row.id, action, ...(text !== undefined ? { text } : {}) })
+    const out = await (action === 'resume' ? withReopening([row.id], call) : call())
     setBusy(false)
     setNotice(out.message)
     if (!out.ok) return

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useReducer, lazy, Suspense, useSyncExternalStore } from 'react'
 import type { SessionMeta } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
+import { reopeningLabel } from '../lib/reopeningStore'
 import { formatProjectName, repoShortName, sessionLabel, sessionTokenTotal } from '@agentistics/core'
 import type { SessionActivity } from '../lib/sessionNotifications'
 import type { FleetActionId, FleetRow, FleetVerb } from '../lib/fleet'
@@ -63,6 +64,7 @@ import {
   Send,
   RotateCcw,
   Hand,
+  Loader,
   Keyboard,
   ZoomIn,
   ZoomOut,
@@ -2366,8 +2368,10 @@ const COMPOSER_T = {
 /** The one action the row leads with. 'watch' just opens the terminal; the verbs run through the
  *  shared controller. `Answer its question` is rendered as a HUMAN action — a person answers it, so
  *  it carries a hand glyph and a plain-language note, and (like every verb) it is never automated. */
-function PrimaryButton({ primary, lang, onExpand, onPick }: {
+function PrimaryButton({ primary, lang, onExpand, onPick, busy }: {
   primary: PrimaryAction; lang: 'pt' | 'en'; onExpand: () => void; onPick: (v: FleetVerb) => void
+  /** The shared controller is mid-request: for a reopen the button says so instead of sitting idle. */
+  busy?: boolean
 }) {
   const isMobile = useIsMobile()
   let label: string
@@ -2394,7 +2398,9 @@ function PrimaryButton({ primary, lang, onExpand, onPick }: {
       break
   }
   const filled = primary.kind === 'approve' || primary.kind === 'prompt'
-  const disabled = primary.verb ? !primary.verb.enabled : false
+  const reopening = primary.kind === 'resume' && !!busy
+  if (reopening) { label = reopeningLabel(lang === 'pt'); icon = <Loader size={13} className="ag-working-spin" /> }
+  const disabled = reopening || (primary.verb ? !primary.verb.enabled : false)
   return (
     <button
       onClick={(e) => {
@@ -2625,7 +2631,7 @@ function LiveSessionCard({ s, lang, onSelect, isPinned, state, fleetRow, onFleet
         right={
           <>
             <PinButton sessionId={s.session_id} lang={lang} />
-            {primary && <PrimaryButton primary={primary} lang={lang} onExpand={openCard} onPick={ctrl.pick} />}
+            {primary && <PrimaryButton primary={primary} lang={lang} onExpand={openCard} onPick={ctrl.pick} busy={ctrl.busy} />}
             <SessionActionsMenu
               ctrl={ctrl}
               onActivate={openCard}

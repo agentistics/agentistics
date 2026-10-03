@@ -39,6 +39,21 @@ describe('parseBoardPrefs', () => {
     expect(p.rail).toEqual({ a: true })
   })
 
+  it('groupBy: status unless it is exactly type; typeGroups: strings only, null when absent', () => {
+    expect(parseBoardPrefs({}).groupBy).toBe('status')
+    expect(parseBoardPrefs({ groupBy: 'type' }).groupBy).toBe('type')
+    expect(parseBoardPrefs({ groupBy: 'owner' }).groupBy).toBe('status')
+    expect(parseBoardPrefs({}).typeGroups).toBeNull()
+    expect(parseBoardPrefs({ typeGroups: ['core', 3, '__none__'] }).typeGroups).toEqual(['core', '__none__'])
+    expect(DEFAULT_PREFS.groupBy).toBe('status')
+  })
+
+  it('the table is sorted by priority, most urgent first, by default — and a stored sort wins', () => {
+    expect(DEFAULT_PREFS.sort).toEqual({ key: 'priority', dir: 'asc' })
+    expect(parseBoardPrefs({}).sort).toEqual({ key: 'priority', dir: 'asc' })
+    expect(parseBoardPrefs({ sort: { key: 'cost', dir: 'desc' } }).sort).toEqual({ key: 'cost', dir: 'desc' })
+  })
+
   it('an unknown view or lane falls back', () => {
     const p = parseBoardPrefs({ view: 'gantt', lanes: 'team' })
     expect(p.view).toBe('overview')

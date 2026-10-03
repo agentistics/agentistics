@@ -12,7 +12,7 @@
 
 import type { CSSProperties } from 'react'
 import { HARNESS_COLORS } from '../../lib/harness'
-import { sortTaskStatuses, type HarnessId, type TaskStatusDef } from '@agentistics/core'
+import { sortTaskStatuses, type HarnessId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 
 /**
  * A status id. Used to be a closed seven-value union (`backlog | todo | in_progress | blocked |
@@ -38,7 +38,7 @@ export type BoardStatus = string
 export type ColumnId =
   | 'status' | 'priority' | 'due' | 'claim' | 'progress' | 'attempts' | 'sessions'
   | 'rounds' | 'tokens' | 'cost' | 'harnesses' | 'subtasks' | 'comments' | 'files' | 'links'
-  | 'blockedBy' | 'created' | 'updated'
+  | 'blockedBy' | 'created' | 'updated' | 'type'
 
 /**
  * The fixed seven-status vocabulary the board shipped with — now the LOADING-STATE fallback and
@@ -152,6 +152,22 @@ export function statusStyle(
 ): { label: string; color: string; dim: string } {
   const found = liveStatusMap(list)[id]
   return found ?? { label: id, color: UNKNOWN_STATUS_COLOR, dim: UNKNOWN_STATUS_DIM }
+}
+
+/** The id the table's "No type" band is filed under — a real group key, never a type id. */
+export const NO_TYPE_KEY = '__none__'
+
+/**
+ * Resolve ONE type id against the live type list — `statusStyle`'s sibling. A task with no type
+ * (`id` absent) and a type deleted since both read as neutral rather than being relabelled; the
+ * caller says "No type" for the first in the reader's own words.
+ */
+export function typeStyle(
+  list: readonly TaskTypeDef[] | null, id: string | undefined,
+): { label: string; color: string; dim: string } {
+  const found = id ? list?.find(t => t.id === id) : undefined
+  if (found) return { label: found.label, color: found.color, dim: dimFromHex(found.color) }
+  return { label: id ?? '', color: UNKNOWN_STATUS_COLOR, dim: UNKNOWN_STATUS_DIM }
 }
 
 /** How a live session reads on a task's row — the fleet's own vocabulary, not a second one. */

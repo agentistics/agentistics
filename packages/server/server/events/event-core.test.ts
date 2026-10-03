@@ -4,6 +4,7 @@ import { MAX_TAIL_LINES, parseEvent, parseEvents, serializeEvent } from './event
 import { EMPTY_MEMORY, planEvents, seedMemory, type EventMemory } from './event-plan'
 import { EMPTY_CURSOR, advanceCursor, planRead, planRotation } from './event-rotate'
 import { EVENT_VERSION, type EventCandidate, type EventKind, type SessionEvent } from './event-types'
+import { deliver, eventMuteKey } from './notifier'
 import type { SessionActivity } from '../sessions/types'
 
 const NOW = '2026-08-14T12:00:00.000Z'
@@ -219,5 +220,26 @@ describe('rotation and the cursor', () => {
   test('the empty cursor reads the whole file and is not a rotation', () => {
     expect(planRead(EMPTY_CURSOR, 5000, 9)).toEqual({ from: 0, rotated: false })
     expect(advanceCursor(120, 7)).toEqual({ offset: 120, seq: 7 })
+  })
+})
+
+describe('a muted session is not delivered', () => {
+  const ev = (id: string, conversationId?: string): SessionEvent => ({
+    v: EVENT_VERSION, seq: 1, at: '2026-10-02T10:00:00.000Z', source: 'poll', kind: 'waiting',
+    id, cwd: '/tmp/x', ...(conversationId ? { conversationId } : {}),
+  })
+  // A peer that cannot exist: an attempt shows up as `peersFailed`, so "no attempt" is observable
+  // without touching a desktop.
+  const sub = [{ id: 's1', createdAt: '2026-10-02T10:00:00.000Z', kinds: ['waiting' as const], notify: 'no-such-peer-xyz', desktop: false }]
+
+  test('the mute key is the conversation when known, the id otherwise', () => {
+    expect(eventMuteKey(ev('m1', 'c1'))).toBe('c1')
+    expect(eventMuteKey(ev('m1'))).toBe('m1')
+  })
+  test('a muted key causes no peer delivery attempt; an unmuted one does', async () => {
+    const quiet = await deliver({ events: [ev('m1', 'c1')], subscriptions: sub, muted: new Set(['c1']) })
+    expect(quiet.peersFailed + quiet.peersReached + quiet.toastsShown).toBe(0)
+    const loud = await deliver({ events: [ev('m1', 'c1')], subscriptions: sub, muted: new Set(['other']) })
+    expect(loud.peersFailed + loud.peersReached).toBe(1)
   })
 })

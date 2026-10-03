@@ -152,6 +152,13 @@ function apiMessageFrom(bodyText: string): string | null {
 }
 
 /**
+ * SECRETS.4 §5.2: what a GitHub-backup config's `token` holds in a process that is NOT the agentop
+ * service. Not a secret — a marker. `gh()` recognises it and sends the request through the service,
+ * which adds the real token itself, for the configured repository only. The CLI never sees the value.
+ */
+export const SERVICE_HELD_TOKEN = 'agentistics-vault:held-by-the-service'
+
+/**
  * One authenticated GitHub REST call. Never throws — a thrown network error, a non-2xx status and
  * an unparsable body are all reported as `{ ok: false }`, never propagated, so a caller never has
  * to wrap this in try/catch to stay honest about what happened.
@@ -174,13 +181,17 @@ export async function gh<T = unknown>(
   responseType: 'json' | 'arrayBuffer' | 'none' = 'json',
 ): Promise<GhResult<T>> {
   const url = path.startsWith('http') ? path : `https://api.github.com${path}`
+  // SECRETS.4 §5.2: outside the service the stored token is a marker, and the SERVICE makes the call
+  // with the real one (vault/client.ts). The marker is never sent anywhere as a credential.
+  const viaService = token === SERVICE_HELD_TOKEN
+  if (viaService) fetchImpl = (await import('../vault/client')).serviceGithubFetch as FetchLike
 
   let res: Response
   try {
     res = await fetchImpl(url, {
       ...init,
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(viaService ? {} : { Authorization: `Bearer ${token}` }),
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         ...(init.headers as Record<string, string> | undefined),

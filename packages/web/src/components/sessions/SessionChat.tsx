@@ -27,9 +27,13 @@
  * session's name — a confident wrong answer the reader has no way to detect.
  */
 
+import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
+import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
-import { AlertTriangle, ArrowDown, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
@@ -72,7 +76,7 @@ import {
   locateExcerpt, quotesInOrder, removeQuote, snapCaret, stripQuotes, syncQuotes, QUOTE_CLOSE,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { pendingEchoes } from '@agentistics/core'
+import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 
 import {
@@ -360,6 +364,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const [moreOpen, setMoreOpen] = useState(false)
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  /** This session's notification switch — the mute follows the conversation (`sessionIdentityKey`). */
+  const notifyKey = sessionIdentityKey(session)
+  const notifyMuted = useMutedKeys().includes(notifyKey)
 
   /**
    * Start or stop dictation.
@@ -409,7 +416,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
         // permission, an unreachable recognition service, a missing microphone and a moment of
         // silence all looked identical: the button lit up and went out. A button that fails
         // silently is indistinguishable from a broken one.
-        setNotice(dictationError(e?.error ?? 'unknown', pt ? 'pt' : 'en'))
+        // `aborted` (our own stop, or the send ending it) has no sentence and must not clear another notice.
+        const why = dictationError(e?.error ?? 'unknown', pt ? 'pt' : 'en')
+        if (why) setNotice(why)
       }
       rec.start()
       recognitionRef.current = rec
@@ -1783,7 +1792,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   async function reopenNow() {
     if (!reopen?.enabled || reopening) return
     setReopening(true)
-    const out = await act({ id: session.id, action: 'resume' })
+    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume' }))
     setReopening(false)
     setNotice(out.message)
     // THE NEW ID IS REPORTED UP. The server hands it back precisely so a caller does not stay on
@@ -2642,7 +2651,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     }}
                   >
                     {reopening ? <Loader size={14} className="ag-working-spin" /> : <RotateCcw size={14} />}
-                    {reopen.label}
+                    {reopening ? reopeningLabel(pt) : reopen.label}
                   </button>
                   {/* Why it cannot be reopened, in the row's own words. */}
                   {!reopen.enabled && reopen.reason && (
@@ -2698,31 +2707,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
               {/* Loose on the composer's own surface — no second card behind it. It used to sit in
                   its own `--bg-base` box with a border, which read as a field floating inside the
                   field that holds it; dropping both leaves it the same colour as its container. */}
-              <div style={{
-                // NEVER hidden while the field has the caret — see `showReopen`.
-                display: showReopen ? 'none' : 'flex',
-                // A COLUMN: the text gets the whole width, the controls sit under it.
-                //
-                // As one row the buttons and the field competed for the same line and the buttons
-                // always won — they are `flex-shrink: 0` and the textarea is not. Measured on an
-                // iPhone 12: 174px of typing space against ~180px of chrome, so a sentence wrapped
-                // at roughly half the width of a box that looked twice as wide. Stacking is what
-                // every chat composer does, and it is the only arrangement where the text gets the
-                // room the field appears to promise.
-                flexDirection: 'column', alignItems: 'stretch', gap: 2,
-                // THE FIELD. A rounded, bordered, inset box — the shape a person recognises as
-                // somewhere to type. It was previously borderless and flush to the page edges,
-                // which is why it read as a footer. `--bg-input` (owner, 2026-09-21: "quero o
-                // input... na cor branca") rather than `--bg-elevated` directly — see that token's
-                // own header in `index.css` for why the light theme needed a different existing
-                // surface and the dark theme did not change at all.
-                background: 'var(--bg-input)',
-                border: '1px solid var(--border)',
-                borderRadius: 14,
-                padding: '5px 6px 5px 8px',
-                opacity: canPrompt ? 1 : 0.55,
-                transition: 'border-color 0.15s',
-              }}>
+              <ComposerShell hidden={showReopen} dimmed={!canPrompt}>
                 <input
                   ref={fileRef}
                   type="file"
@@ -2735,81 +2720,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     on a transparent ground, where a pasted screenshot was hard to see and it was not
                     even clear anything was attached (owner, 2026-09-29). Inside the box they read as
                     part of the message being written, which is what they are. */}
-                {attached.length > 0 && (
-                  <div
-                    aria-label={pt ? 'Anexos desta mensagem' : 'Attachments for this message'}
-                    title={pt
-                      ? 'Gravados nesta máquina; o caminho vai na mensagem'
-                      : 'Stored on this machine; the path goes in the message'}
-                    style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '6px 4px 4px' }}
-                  >
-                    {attached.map(a => isImagePath(a.path) ? (
-                      // The same square the sent message will wear (see ChatBubble's AttachmentThumb)
-                      // — what you see here is what the session's reply will show.
-                      <span key={a.path} title={a.name} style={{
-                        position: 'relative', display: 'block', width: 64, height: 64,
-                        borderRadius: 10, overflow: 'hidden', flexShrink: 0,
-                        border: '1px solid var(--border)', background: 'var(--bg-elevated)',
-                      }}>
-                        {/* The picture OPENS. It is a button and not a click handler on the `img`,
-                            so it is reachable by keyboard, and it stays a SIBLING of the remove
-                            control rather than its parent — a button inside a button is invalid. */}
-                        <button
-                          type="button"
-                          onClick={() => setComposerLightbox(composerImages.indexOf(a.path))}
-                          aria-label={pt ? `Ver ${a.name}` : `View ${a.name}`}
-                          style={{
-                            display: 'block', width: '100%', height: '100%', padding: 0,
-                            border: 'none', background: 'transparent', cursor: 'zoom-in',
-                          }}
-                        >
-                          <img
-                            src={attachmentUrl(a.path)} alt=""
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                          />
-                        </button>
-                        <button
-                          onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
-                          aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
-                          title={pt ? 'Remover' : 'Remove'}
-                          className="ag-tap-icon"
-                          style={{
-                            position: 'absolute', top: 4, right: 4,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: 18, height: 18, borderRadius: '50%', padding: 0,
-                            border: '1px solid rgba(255,255,255,0.25)',
-                            background: 'rgba(0,0,0,0.7)', color: '#fff', cursor: 'pointer',
-                          }}
-                        >
-                          <X size={11} />
-                        </button>
-                      </span>
-                    ) : (
-                      <span key={a.path} title={a.path} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
-                        height: 32, padding: '0 8px', borderRadius: 10, minWidth: 0, alignSelf: 'flex-end',
-                        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                        fontSize: 11.5, color: 'var(--text-secondary)',
-                      }}>
-                        <Paperclip size={11} style={{ flexShrink: 0 }} />
-                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {a.name}
-                        </span>
-                        <button
-                          onClick={() => editAttached(list => list.filter(x => x.path !== a.path))}
-                          aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
-                          className="ag-tap-icon"
-                          style={{
-                            display: 'flex', border: 'none', background: 'transparent', padding: 0,
-                            color: 'var(--text-tertiary)', cursor: 'pointer', flexShrink: 0,
-                          }}
-                        >
-                          <X size={11} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <ComposerAttachments
+                  items={attached}
+                  pt={pt}
+                  isImage={isImagePath}
+                  imageSrc={attachmentUrl}
+                  onOpenImage={path => setComposerLightbox(composerImages.indexOf(path))}
+                  onRemove={path => editAttached(list => list.filter(x => x.path !== path))}
+                />
                 {/* THE INVOCATION IS PAINTED LIKE A BUTTON, IN THE FIELD ITSELF.
                     A textarea cannot hold a coloured span, so a FOUND command is drawn by a mirror:
                     a div with the SAME typography, padding and wrapping, behind the field, drawing
@@ -3132,7 +3050,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     The gap is 6 rather than 4, and the two halves are separated by the whole
                     remaining width: asked for a row where the controls "nao fiquem entulhados". A
                     row of touching 34px squares reads as one object with lines in it. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ComposerToolbar>
                 {/* ANSWERING A QUESTION IS NOT WRITING A PROMPT, so the row is not the same row.
                     An answer travels a different route — `answerSession` presses the option's
                     digit, waits for the field to open, then types ONE line and returns — and an
@@ -3142,20 +3060,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     Asked for in these words: the prompt input, "removendo alguns botões APENAS PRA
                     RESPONDER A QUESTAO FEITA PELO LLM". */}
                 {!answeringNow && (
-                <button
+                <ComposerAttachButton
                   onClick={() => fileRef.current?.click()}
-                  disabled={!canPrompt || uploading}
-                  aria-label={pt ? 'Anexar arquivo' : 'Attach file'}
-                  title={pt ? 'Anexar arquivo' : 'Attach file'}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-                    background: 'transparent', color: 'var(--text-tertiary)',
-                    cursor: canPrompt && !uploading ? 'pointer' : 'default',
-                  }}
-                >
-                  {uploading ? <Loader size={15} className="ag-working-spin" /> : <Paperclip size={15} />}
-                </button>
+                  disabled={!canPrompt}
+                  uploading={uploading}
+                  label={pt ? 'Anexar arquivo' : 'Attach file'}
+                />
                 )}
 
                 {/* DICTATION, beside attach — the pair that PREPARES a message, which is what the
@@ -3173,40 +3083,12 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     work it is still in the menu, on a phone exactly as anywhere else, because there
                     is the only place the reason fits. */}
                 {dictation.state === 'ready' && (
-                  <button
+                  <ComposerMicButton
                     onClick={toggleDictation}
                     disabled={!canPrompt}
-                    aria-pressed={listening}
-                    aria-label={listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
-                    title={listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-                      background: listening
-                        ? 'color-mix(in srgb, var(--accent-red) 14%, transparent)'
-                        : 'transparent',
-                      color: listening ? 'var(--accent-red)' : 'var(--text-tertiary)',
-                      cursor: canPrompt ? 'pointer' : 'default',
-                    }}
-                  >
-                    {/* PULSING WHILE IT LISTENS. A microphone button that only changes tint looks
-                        the same as one that did nothing, which is how "o mic não funciona" starts:
-                        the recogniser was running and nothing on screen said so. The ring is the
-                        state, the words below are the evidence. */}
-                    <span style={{ position: 'relative', display: 'flex' }}>
-                      {listening && (
-                        <span
-                          aria-hidden
-                          className="ag-mic-pulse"
-                          style={{
-                            position: 'absolute', inset: -5, borderRadius: 12,
-                            border: '1.5px solid var(--accent-red)', pointerEvents: 'none',
-                          }}
-                        />
-                      )}
-                      <Mic size={15} />
-                    </span>
-                  </button>
+                    listening={listening}
+                    label={listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
+                  />
                 )}
 
                 {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
@@ -3383,20 +3265,13 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                     {stopping ? <Loader size={14} className="ag-working-spin" /> : <Square size={13} fill="currentColor" />}
                   </button>
                 ) : (
-                  <button
+                  <ComposerSendButton
                     onClick={() => void send()}
                     disabled={!canPrompt || sending || !somethingToSend}
-                    aria-label={pt ? 'Enviar' : 'Send'}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-                      background: !somethingToSend || !canPrompt ? 'transparent' : 'var(--anthropic-orange)',
-                      color: !somethingToSend || !canPrompt ? 'var(--text-tertiary)' : '#fff',
-                      cursor: !somethingToSend || !canPrompt ? 'default' : 'pointer',
-                    }}
-                  >
-                    {sending ? <Loader size={15} className="ag-working-spin" /> : <Send size={15} />}
-                  </button>
+                    sending={sending}
+                    active={somethingToSend && canPrompt}
+                    label={pt ? 'Enviar' : 'Send'}
+                  />
                 )}
 
                 {/* Mic and model live behind ONE button. Four controls plus the field on a
@@ -3562,6 +3437,26 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                         </>
                       )}
 
+                      {/* NOTIFICATIONS for THIS session. Delivery only — the session still reads as
+                          waiting. Styled as the model buttons above; the divider is the same 1px
+                          rule the model block opens with. */}
+                      <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
+                      <button
+                        onClick={() => { setMoreOpen(false); toggleSessionMuted(notifyKey) }}
+                        title={notifyMuted ? mutedTooltip(pt) : undefined}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                          minHeight: 36, padding: '6px 8px', borderRadius: 7, border: 'none',
+                          background: 'transparent', color: 'var(--text-primary)',
+                          fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+                        }}
+                      >
+                        {notifyMuted ? <Bell size={14} /> : <BellOff size={14} />}
+                        {notifyMuted
+                          ? (pt ? 'Reativar notificações' : 'Unmute notifications')
+                          : (pt ? 'Silenciar notificações' : 'Mute notifications')}
+                      </button>
+
                       {/* THE SKILLS LIST LIVED HERE AND IS GONE. It was the only place to see
                           them; there is a dedicated view now, and two lists of one thing are two
                           places for them to disagree about what is installed. What stays is the
@@ -3573,8 +3468,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 )}
 
                 </div>
-                </div>
-              </div>
+                </ComposerToolbar>
+              </ComposerShell>
               {notice && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice}

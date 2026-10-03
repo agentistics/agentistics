@@ -75,6 +75,8 @@ describe('routeCapability', () => {
     // The status read walks the metrics layer and the run spawns `git` across every known
     // repository and, depending on layers, copies raw harness directories to disk — the same
     // shell-and-filesystem power /api/exec carries.
+    expect(routeCapability('/api/vault')).toBe('localShell')
+    expect(routeCapability('/api/vault/lock')).toBe('localShell')
     expect(routeCapability('/api/backup/status')).toBe('localShell')
     expect(routeCapability('/api/backup/run')).toBe('localShell')
     // A PREFIX, so a future backup route is guarded by having been added at all.

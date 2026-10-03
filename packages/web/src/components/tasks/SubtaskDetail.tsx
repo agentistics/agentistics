@@ -15,8 +15,8 @@
  *
  * What it reuses UNMODIFIED (exported from `DeliveryDetail.tsx` for exactly this): `Rollup` and
  * `Stat` (the same building blocks the rail draws the whole task's numbers with), and `CommentsTab`
- * — comments carry no `subtaskId` today and stay TASK-WIDE by design (the spec's own §C.5
- * reasoning), so every comment shows here, never a filtered set. `SubtaskSessions` draws the
+ * — scoped to THIS subtask's thread (`target`): its own comments, plus its members' when it is a
+ * GROUP (`commentThread`'s downward rule), and a comment written here lands on this subtask. `SubtaskSessions` draws the
  * sessions filed under this subtask (or its group, see below) exactly as `SubtaskTable.tsx` already
  * does on the board.
  *
@@ -189,7 +189,7 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
         />
       </RailSection>
 
-      <CommentsTab id={p.taskId} detail={p.detail} onChanged={p.reload} />
+      <CommentsTab id={p.taskId} detail={p.detail} onChanged={p.reload} target={p.subtask.id} lang={p.lang} />
 
       {linking && (
         <SessionPicker
