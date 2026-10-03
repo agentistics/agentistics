@@ -169,6 +169,10 @@ export const EVENT_TYPES = [
   'process.started', 'process.ended',
   // human turns (D22) and their close (D25)
   'turn.started', 'turn.ended',
+  // schema-validated structured output (TOOL.1)
+  'structured.attempt', 'structured.exhausted',
+  // the native loop's completion gate (TOOL.3)
+  'completion.blocked', 'completion.released',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -623,6 +627,43 @@ export interface TurnEndedData {
 }
 
 /**
+ * One attempt at a schema-validated result (TOOL.1, runtime `structured/`): a `result.submit` call, or
+ * a model turn that ended without one. Counts only — never the submitted value nor the validation
+ * messages. `invocationId` names the billed model response the attempt came from, so the attempt is
+ * tied to a `model.completed` that carries its cost.
+ */
+export interface StructuredAttemptData {
+  attempt: number
+  ok: boolean
+  errorCount: number
+  /** `false`: the model ended a turn without calling `result.submit` at all. */
+  submitted: boolean
+  invocationId: string
+}
+
+/** The run stopped with no value: every attempt `maxRetries` allowed failed validation. */
+export interface StructuredExhaustedData {
+  attempts: number
+}
+
+/**
+ * The native loop's completion gate (TOOL.3, runtime `completion/gate.ts`) held a run that tried to
+ * end: `openItems` open `task.plan` steps, the `attempt`-th continuation of `rule`. Counts only —
+ * never a plan step's text nor the injected message.
+ */
+export interface CompletionBlockedData {
+  openItems: number
+  attempt: number
+  rule: 'open-plan' | 'verify-after-edit'
+}
+
+/** The completion gate let a run end that it had held, or released one with something still open. */
+export interface CompletionReleasedData {
+  reason: 'satisfied' | 'forced-limit' | 'no-progress' | 'run-budget'
+  openItems: number
+}
+
+/**
  * One data shape per event type. Its keys are checked against `EVENT_TYPES` in BOTH directions
  * below, so a type added without a shape — or a shape for a type that does not exist — fails the
  * build rather than reaching the journal with a payload nobody specified.
@@ -674,6 +715,10 @@ export interface EventData {
   'process.ended': ProcessEndedData
   'turn.started': TurnStartedData
   'turn.ended': TurnEndedData
+  'structured.attempt': StructuredAttemptData
+  'structured.exhausted': StructuredExhaustedData
+  'completion.blocked': CompletionBlockedData
+  'completion.released': CompletionReleasedData
 }
 
 // Compile-time totality. Each alias fails to type-check (`true` is not assignable to `never`) if the
