@@ -248,6 +248,21 @@ describe('retireFallenSessions', () => {
     expect(current.find(s => s.id === 's2')?.endedAt).toBeUndefined()
     expect(current.find(s => s.id === 's3')?.endedAt).toBeUndefined()
   })
+
+  it('retires NOTHING when the backend could not be listed (2026-10-03)', async () => {
+    // Every caller used to pass `backend.list().catch(() => [])`: a tmux that could not be reached
+    // became "nothing is running", and reopening one session retired every LIVE sibling in the
+    // same directory. An unknown backend proves nothing has fallen.
+    const reg = createSessionRegistry(file)
+    await reg.add({ id: 'live1', harness: 'claude', cwd: '/tmp/proj', conversationId: 'c1', createdAt: '2026-08-12T10:00:00.000Z' })
+    await reg.add({ id: 'live2', harness: 'claude', cwd: '/tmp/proj', conversationId: 'c2', createdAt: '2026-08-12T10:00:00.000Z' })
+    const retired = await retireFallenSessions({
+      newSessionId: 'new', conversationId: 'c1', cwd: '/tmp/proj', harness: 'claude', backendIds: null,
+    }, reg)
+    expect(retired).toBe(0)
+    const current = await reg.read()
+    expect(current.every(s => s.endedAt === undefined)).toBe(true)
+  })
 })
 
 describe('retireSession', () => {

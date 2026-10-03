@@ -227,6 +227,8 @@ export interface CliStrings {
   sessAnswerNoField: (label: string) => string
   /** Nothing fell, or everything that did has already been picked back up. */
   sessNoFell: string
+  /** The session backend (tmux) could not be listed, so nothing can be judged fallen or alive. */
+  sessBackendUnreadable: string
   sessFellOpened: (opened: number, skipped: number, held: number) => string
   sessFellNoneOpened: (skipped: number) => string
   /** Every row that was ticked has since left the group — the list the caller acted on has moved. */
@@ -682,6 +684,7 @@ const EN: CliStrings = {
     + 'wherever the session was listening and the return would have submitted whatever was '
     + 'highlighted. Answer it in the session itself (attach).',
   sessNoFell: 'nothing fell — no session was lost with the machine still on record.',
+  sessBackendUnreadable: 'could not list the running sessions (tmux did not answer), so nothing was reopened — a session that is still running would have been started twice. Try again in a moment.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) that fell.`
     + (held > 0 ? ` ${held} already open in another session.` : '')
@@ -1109,6 +1112,7 @@ const PT: CliStrings = {
     + 'onde a sessão estivesse ouvindo e o enter submeteria o que estivesse em foco. Responda na '
     + 'própria sessão (attach).',
   sessNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
+  sessBackendUnreadable: 'não foi possível listar as sessões em execução (o tmux não respondeu), então nada foi reaberto — uma sessão ainda viva seria iniciada duas vezes. Tente de novo em instantes.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) que caíram reabertas.`
     + (held > 0 ? ` ${held} já estava(m) aberta(s) em outra sessão.` : '')
