@@ -113,7 +113,7 @@ describe('words', () => {
   test('the presence word follows the wrapper the vault holds', () => {
     expect(vt(presenceKey(['hello', 'recovery']), 'en')).toBe('Windows Hello')
     expect(vt(presenceKey(['fido2']), 'pt')).toBe('sua chave de segurança')
-    expect(vt(presenceKey(['dpapi']), 'en')).toBe('your presence device')
+    expect(vt(presenceKey(['dpapi']), 'en')).toBe('your personal confirmation')
   })
   test('the recovery screen says the two things it must: keep it offline, and no copy', () => {
     expect(vt('wiz_rec_warn', 'en')).toContain('Keep it offline')
@@ -161,7 +161,7 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
     expect(vt('rec_new', 'pt')).toBe('Gerar uma nova (a antiga para de valer)')
     expect(vt('sec_hardening', 'pt')).toBe('Proteção da memória')
     expect(vt('auth_explain', 'pt')).toBe('O código do app é pedido para abrir o cofre e para mudar estas configurações.')
-    expect(vt('rec_lost', 'pt')).toContain('agentop vault recover')
+    expect(vt('rec_lost', 'pt')).toContain('Recuperar com as 24 palavras')
     expect(vt('rec_create', 'en')).not.toBe(vt('rec_create', 'pt'))
   })
 })
@@ -287,5 +287,30 @@ describe('the unlock policy on the page (owner decision 2026-10-02)', () => {
     expect(parseUnlockHours('1')).toBe(1)
     expect(parseUnlockHours('24')).toBe(24)
     for (const bad of ['0', '25', '', 'x', '1.5', '100']) expect(parseUnlockHours(bad)).toBeNull()
+  })
+})
+
+// ── v2.98.1 ─────────────────────────────────────────────────────────────────────────────────
+import { addableKinds, recoverySteps, splitWords } from './vaultApi'
+
+describe('v2.98.1: what the page offers', () => {
+  test('a loopback page with a presence device starts with ONE gesture instead of the setup code', () => {
+    expect(wizardPlan(['authenticator', 'presence', 'recovery'], true, true)).toEqual(['local', 'probe', 'authenticator', 'presence', 'recovery'])
+    expect(wizardPlan(['authenticator', 'recovery'], true, false)[0]).toBe('setup')
+    expect(wizardPlan(['authenticator'], false, true)).toEqual(['authenticator'])
+  })
+  test('presence ON: only kinds that are offered AND not enrolled can be added — never Hello again', () => {
+    expect(addableKinds({ presenceAvailable: ['hello'], wrappers: ['hello', 'recovery'] })).toEqual([])
+    expect(addableKinds({ presenceAvailable: ['hello', 'fido2'], wrappers: ['hello'] })).toEqual(['fido2'])
+    expect(addableKinds({ presenceAvailable: ['fido2'], wrappers: ['fido2'] })).toEqual([])
+  })
+  test('the 24 words from a paste, numbered or not', () => {
+    expect(splitWords('1. Abandon 2. ability\n3) able')).toEqual(['abandon', 'ability', 'able'])
+    expect(splitWords('a, b; c   d')).toEqual(['a', 'b', 'c', 'd'])
+    expect(splitWords('x '.repeat(30)).length).toBe(24)
+  })
+  test('after a page recovery the wizard runs what the server still owes, in order', () => {
+    expect(recoverySteps(['recovery', 'authenticator', 'presence'])).toEqual(['authenticator', 'presence', 'recovery'])
+    expect(recoverySteps(null)).toEqual([])
   })
 })

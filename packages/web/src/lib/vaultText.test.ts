@@ -27,3 +27,21 @@ test('how-it-works says the limit in both languages', () => {
 test('pending leads, then unreadable, then sealed', () => {
   expect(orderItems([{ state: 'sealed' }, { state: 'pending' }, { state: 'unreadable' }]).map(i => i.state)).toEqual(['pending', 'unreadable', 'sealed'])
 })
+
+// v2.98.1 — owner rule: users never run commands. No page text names an `agentop` command, except the
+// setup-code fallback (a first setup from off this computer, or one with no presence device).
+test('no vault text tells the person to run a command (setup-code is the one fallback)', () => {
+  for (const [k, v] of Object.entries(VAULT_TEXT)) {
+    for (const s of [v.en, v.pt]) {
+      if (k === 'wiz_setup_why') continue
+      expect(s, k).not.toMatch(/`agentop /)
+    }
+  }
+})
+
+test('"Presence" is called "Personal confirmation" everywhere the page says it', () => {
+  expect(vt('sec_presence', 'pt')).toBe('Confirmação pessoal')
+  expect(vt('sec_presence', 'en')).toBe('Personal confirmation')
+  expect(vt('sec_presence_d', 'pt')).toBe('Windows Hello (PIN, digital ou rosto) ou uma chave de segurança: prova que é você mesmo no computador.')
+  for (const [k, v] of Object.entries(VAULT_TEXT)) expect(v.pt, k).not.toMatch(/[Pp]resença/)
+})

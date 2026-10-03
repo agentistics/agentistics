@@ -202,3 +202,64 @@ describe('the Hello dialog opens IN FRONT (owner 2026-10-02: it opened minimized
     expect(HELLO_SCRIPT).toContain('if ($sw.ElapsedMilliseconds -gt 60000) { Fail "timeout" "" "" }')
   })
 })
+
+/**
+ * v2.98.1 — the owner's machine: with Windows Hello ALREADY protecting the vault, "turn on presence"
+ * ran again and failed with "já existe uma credencial com este nome" (the FailIfExists create on
+ * agentistics-vault-<kid>). An existing credential is now REUSED, and a reused credential is never
+ * deleted by an enrolment that fails afterwards — a wrapper of this vault may depend on it.
+ */
+describe('a credential that already exists is reused, never a failure and never deleted', () => {
+  const sig = Buffer.from(new Uint8Array(256).fill(7)).toString('base64')
+  function bridge(opts: { createOut: 'ok' | 'exists'; signFails?: boolean }) {
+    const verbs: string[] = []
+    const io: ProtectorIo = {
+      async run(_c, _a, stdin): Promise<RunResult> {
+        const verb = text(stdin ?? new Uint8Array()).split('\n')[0]!
+        verbs.push(verb)
+        if (verb === 'create') return { code: 0, stdout: bytes(opts.createOut), stderr: '' }
+        if (verb === 'sign') return opts.signFails ? { code: 3, stdout: new Uint8Array(), stderr: 'PRESENCE-ERROR cancelled' } : { code: 0, stdout: bytes(sig), stderr: '' }
+        return { code: 0, stdout: bytes('ok'), stderr: '' }
+      },
+      async readFile() { return null }, async writeFile() {}, async removeFile() {}, async createExclusive() { return true },
+      async firstExisting(c) { return c.find(x => x === WSL_INTEROP || x === WSL_POWERSHELL) ?? null },
+      async which() { return null },
+    }
+    return { p: helloProtector({ io, vaultDir: '/v', wsl: true, log: () => {} }), verbs }
+  }
+
+  it('the script opens an existing credential BEFORE it tries to create one', () => {
+    const i = HELLO_SCRIPT.indexOf('if ($verb -eq "create")')
+    const create = HELLO_SCRIPT.slice(i, HELLO_SCRIPT.indexOf('if ($verb -eq "sign")'))
+    expect(create.indexOf('OpenAsync($name)')).toBeGreaterThan(-1)
+    expect(create.indexOf('OpenAsync($name)')).toBeLessThan(create.indexOf('RequestCreate'))
+    expect(create).toContain('[Console]::Out.Write("exists")')
+  })
+  it('reused: the enrolment succeeds and is marked, so a later discard keeps the credential', async () => {
+    const { p, verbs } = bridge({ createOut: 'exists' })
+    const d = await p.derive!('k1')
+    expect(d.ok).toBe(true)
+    if (!d.ok) return
+    expect(d.held.fields.reused).toBe('1')
+    await p.discardHeld!(d.held, 'k1')
+    expect(verbs).not.toContain('delete')
+  })
+  it('reused: a sign that fails afterwards does NOT delete the existing credential', async () => {
+    const { p, verbs } = bridge({ createOut: 'exists', signFails: true })
+    const w = await p.wrap(new Uint8Array(32), 'k1')
+    expect(w.ok).toBe(false)
+    expect(verbs).not.toContain('delete')
+  })
+  it('freshly created: a failure still cleans up the credential it made', async () => {
+    const { p, verbs } = bridge({ createOut: 'ok', signFails: true })
+    expect((await p.wrap(new Uint8Array(32), 'k1')).ok).toBe(false)
+    expect(verbs).toContain('delete')
+  })
+  it('proveHuman: one create of a throwaway name, deleted at once; an "exists" proves nothing', async () => {
+    const a = bridge({ createOut: 'ok' })
+    expect(await a.p.proveHuman!()).toEqual({ ok: true })
+    expect(a.verbs).toEqual(['create', 'delete'])
+    const b = bridge({ createOut: 'exists' })
+    expect((await b.p.proveHuman!()).ok).toBe(false)
+  })
+})

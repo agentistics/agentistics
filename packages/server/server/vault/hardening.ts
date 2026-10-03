@@ -141,7 +141,7 @@ export function hardeningLines(h: HardeningReport, lang: 'en' | 'pt'): string[] 
   if (h.state === 'failed') return [] // the vault's own `hardening-failed` sentence says it where it matters
   if (h.state === 'limited') {
     return [h.reason === 'windows-same-user'
-      ? (pt ? 'Windows: outro programa rodando como você pode ler a memória do serviço enquanto o cofre está aberto (o Windows não tem um equivalente por processo); a presença mantém a chave fora da memória enquanto trancado.'
+      ? (pt ? 'Windows: outro programa rodando como você pode ler a memória do serviço enquanto o cofre está aberto (o Windows não tem um equivalente por processo); a confirmação pessoal mantém a chave fora da memória enquanto trancado.'
         : 'Windows: another program running as you can read the service\'s memory while the vault is open (Windows has no per-process equivalent); presence keeps the key out of memory while it is locked.')
       : (pt ? 'Nesta plataforma o Agentistics não consegue tornar a própria memória privada.' : 'On this platform Agentistics cannot make its own memory private.')]
   }

@@ -1052,7 +1052,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
         // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
         // along on a forged request.
-        const res = await handleVaultHttp(req, url, { cors: CORS_HEADERS, session: readSessionCookie(req) ?? 'local', origins: { allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC } })
+        const res = await handleVaultHttp(req, url, { cors: CORS_HEADERS, session: readSessionCookie(req) ?? 'local', origins: { allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }, peer: server.requestIP(req)?.address ?? null })
         return res ?? new Response('Not found', { status: 404, headers: CORS_HEADERS })
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })

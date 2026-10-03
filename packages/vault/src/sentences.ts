@@ -105,14 +105,14 @@ const EN: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   'hardening-failed': (a) =>
     `Agentistics could not make its own memory private (${a.reason ?? 'no reason given'}), so it will not open the vault in this process. Nothing was opened.`,
   'presence-required': (a) =>
-    `The vault is locked. Confirm with ${a.presence ?? 'your presence device'} to open it — no program can open it without you.`,
+    `The vault is locked. Confirm with ${a.presence ?? 'your personal confirmation'} to open it — no program can open it without you.`,
   'stepup-required': () => 'This needs your authenticator code.',
   'stepup-wrong': (a) => `That code is not right. ${a.left ?? 0} more tries before a pause.`,
   'stepup-clock': (a) => `That code is from ${a.n ?? 0} minutes ${a.direction ?? 'off'} — this computer's clock (or your phone's) is off. Fix the clock and try again.`,
   'stepup-replayed': () => 'That code was already used. Wait for the next one.',
   'stepup-paused': (a) => `Too many wrong codes. Try again in ${a.duration ?? 'a moment'}.`,
   'stepup-frozen': () => 'Too many wrong codes. The authenticator is frozen; open the vault with your 24-word recovery key (`agentop vault recover`) and set it up again.',
-  'auto-locked': (a) => `The vault locked itself after ${a.minutes ?? 30} minutes without use. Confirm with ${a.presence ?? 'your presence device'} to open it again.`,
+  'auto-locked': (a) => `The vault locked itself after ${a.minutes ?? 30} minutes without use. Confirm with ${a.presence ?? 'your personal confirmation'} to open it again.`,
   'recovery-mode': () => 'The vault was opened with the recovery key. Until you set up presence and the authenticator again and receive a new recovery key, nothing else can be done with it.',
   'passphrase-replaced': (a) => `This machine protects the vault with ${a.protector ?? 'its system keychain'}; the recovery key replaces the recovery passphrase.`,
 }
@@ -147,15 +147,15 @@ const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   'hardening-failed': (a) =>
     `O Agentistics não conseguiu tornar a própria memória privada (${a.reason ?? 'sem motivo informado'}), então não vai abrir o cofre neste processo. Nada foi aberto.`,
   'presence-required': (a) =>
-    `O cofre está trancado. Confirme com ${a.presence ?? 'seu dispositivo de presença'} para abri-lo — nenhum programa consegue abri-lo sem você.`,
+    `O cofre está trancado. Confirme com ${a.presence ?? 'a sua confirmação pessoal'} para abri-lo — nenhum programa consegue abri-lo sem você.`,
   'stepup-required': () => 'Isto precisa do código do seu autenticador.',
   'stepup-wrong': (a) => `Esse código não está certo. Mais ${a.left ?? 0} tentativas antes de uma pausa.`,
   'stepup-clock': (a) => `Esse código é de ${a.n ?? 0} minutos ${a.direction ?? 'fora'} — o relógio deste computador (ou do seu celular) está errado. Acerte o relógio e tente de novo.`,
   'stepup-replayed': () => 'Esse código já foi usado. Espere o próximo.',
   'stepup-paused': (a) => `Códigos errados demais. Tente de novo em ${a.duration ?? 'instantes'}.`,
   'stepup-frozen': () => 'Códigos errados demais. O autenticador está congelado; abra o cofre com sua chave de recuperação de 24 palavras (`agentop vault recover`) e configure-o de novo.',
-  'auto-locked': (a) => `O cofre se trancou sozinho depois de ${a.minutes ?? 30} minutos sem uso. Confirme com ${a.presence ?? 'seu dispositivo de presença'} para abri-lo de novo.`,
-  'recovery-mode': () => 'O cofre foi aberto com a chave de recuperação. Até você configurar de novo a presença e o autenticador e receber uma nova chave de recuperação, nada mais pode ser feito com ele.',
+  'auto-locked': (a) => `O cofre se trancou sozinho depois de ${a.minutes ?? 30} minutos sem uso. Confirme com ${a.presence ?? 'a sua confirmação pessoal'} para abri-lo de novo.`,
+  'recovery-mode': () => 'O cofre foi aberto com a chave de recuperação. Até você configurar de novo a confirmação pessoal e o autenticador e receber uma nova chave de recuperação, nada mais pode ser feito com ele.',
   'passphrase-replaced': (a) => `Esta máquina protege o cofre com ${a.protector ?? 'o chaveiro do sistema'}; a chave de recuperação substitui a frase-senha de recuperação.`,
 }
 
