@@ -426,6 +426,20 @@ export async function pidUnderUnit(
   return false
 }
 
+/**
+ * HOW LONG A RESTART MAY TAKE TO ANSWER. The fixed 15 s window reported a false failure for a big
+ * service (~950 tasks under the unit) that came up a few seconds AFTER the window closed — the
+ * message said it "may have failed to start" about a server that was fine. A restart is reported
+ * failed only when it really did not come up, so the window is long and the polling backs off:
+ * quick ticks while a small service answers at once, ≤3 s ticks while a heavy one loads.
+ */
+export const RESTART_WINDOW_MS = 60_000
+const BACKOFF_CAP_MS = 3_000
+/** Grows ×1.5 from the base interval up to the cap; with a base above the cap it stays put. */
+export function nextBackoff(current: number, base: number): number {
+  return Math.min(Math.max(base, BACKOFF_CAP_MS), Math.ceil(current * 1.5))
+}
+
 export type RestartVerdict =
   | { kind: 'replaced'; before: number | null; after: number }
   | { kind: 'unchanged'; pid: number }
@@ -442,13 +456,23 @@ export type RestartVerdict =
 export async function awaitReplacement(
   before: ServingObservation,
   observe: () => Promise<ServingObservation>,
-  opts: { timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+  opts: {
+    timeoutMs?: number
+    intervalMs?: number
+    sleep?: (ms: number) => Promise<void>
+    now?: () => number
+    /** Called after each unanswered tick with the seconds waited so far — the caller decides
+     *  whether a person is watching (a progress line) or not (the cockpit must print nothing). */
+    onWait?: (elapsedSec: number) => void
+  } = {},
 ): Promise<RestartVerdict> {
-  const timeoutMs = opts.timeoutMs ?? 15_000
+  const timeoutMs = opts.timeoutMs ?? RESTART_WINDOW_MS
   const intervalMs = opts.intervalMs ?? 500
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   const now = opts.now ?? Date.now
-  const deadline = now() + timeoutMs
+  const started = now()
+  const deadline = started + timeoutMs
+  let wait = intervalMs
   let last: ServingObservation = { pid: null, answering: false }
   for (;;) {
     last = await observe()
@@ -456,7 +480,9 @@ export async function awaitReplacement(
       return { kind: 'replaced', before: before.pid, after: last.pid }
     }
     if (now() >= deadline) break
-    await sleep(intervalMs)
+    opts.onWait?.(Math.round((now() - started) / 1000))
+    await sleep(wait)
+    wait = nextBackoff(wait, intervalMs)
   }
   return last.pid !== null && last.pid === before.pid && before.pid !== null
     ? { kind: 'unchanged', pid: before.pid }

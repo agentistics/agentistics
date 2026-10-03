@@ -1,6 +1,8 @@
 import { test, expect, describe } from 'bun:test'
 import {
   awaitReplacement,
+  nextBackoff,
+  RESTART_WINDOW_MS,
   managerUnreachable,
   parseUnitShow,
   pidUnderUnit,
@@ -287,6 +289,35 @@ describe('pidUnderUnit', () => {
   test('a unit with no main process owns nothing, and a cyclic table cannot loop', async () => {
     expect(await pidUnderUnit(555, null, async () => 1)).toBe(false)
     expect(await pidUnderUnit(1, 200, async (p) => (p === 1 ? 2 : 1))).toBe(false)
+  })
+})
+
+describe('awaitReplacement — a slow start is not a failure', () => {
+  const clock = () => { let t = 0; return { sleep: async (ms: number) => { t += ms }, now: () => t } }
+  test('a service that answers 40 s in is reported replaced (the old 15 s window said silent)', async () => {
+    const c = clock()
+    const v = await awaitReplacement({ pid: 200, answering: true },
+      async () => (c.now() < 40_000 ? { pid: null, answering: false } : { pid: 300, answering: true }), { ...c })
+    expect(v).toEqual({ kind: 'replaced', before: 200, after: 300 })
+  })
+  test('really never up: silent only after the whole 60 s window', async () => {
+    const c = clock()
+    const v = await awaitReplacement({ pid: 200, answering: true }, async () => ({ pid: null, answering: false }), { ...c })
+    expect(v.kind).toBe('silent')
+    expect(c.now()).toBeGreaterThanOrEqual(RESTART_WINDOW_MS)
+  })
+  test('polling backs off, capped at 3 s, and reports progress', async () => {
+    const c = clock(); const sleeps: number[] = []; const waits: number[] = []
+    await awaitReplacement({ pid: 200, answering: true }, async () => ({ pid: null, answering: false }),
+      { now: c.now, sleep: async ms => { sleeps.push(ms); await c.sleep(ms) }, onWait: s => waits.push(s) })
+    expect(sleeps[0]).toBe(500)
+    expect(sleeps[1]!).toBeGreaterThan(sleeps[0]!)
+    expect(Math.max(...sleeps)).toBe(3_000)
+    expect(waits.length).toBe(sleeps.length)
+  })
+  test('nextBackoff', () => {
+    expect(nextBackoff(500, 500)).toBe(750)
+    expect(nextBackoff(3000, 500)).toBe(3000)
   })
 })
 
