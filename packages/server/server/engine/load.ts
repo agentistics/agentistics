@@ -251,6 +251,25 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
         const j = journal
         return j.status().state === 'open' ? { append: events => j.append([...events]) } : null
       },
+      // ART.2: rare events (the artifact store's metadata), paged through the side table.
+      async readRare(types, opts) {
+        if (!config.JOURNAL_ENABLED) return []
+        if (!journal) {
+          const { openJournal } = await import('../journal/journal')
+          journal = await openJournal()
+        }
+        const j = journal
+        if (!j.readTypes || j.status().state !== 'open') return []
+        const out: AgentisticsEvent[] = []
+        let cursor = 0
+        for (let page = 0; page < 1000; page++) {
+          const r = await j.readTypes(types, cursor, 1000)
+          for (const e of r.events) if (!opts?.sessionId || e.sessionId === opts.sessionId) out.push(e)
+          if (r.events.length === 0 || r.cursor === cursor) break
+          cursor = r.cursor
+        }
+        return out
+      },
       status() {
         if (!journal) return config.JOURNAL_ENABLED ? { state: 'closed' } : { state: 'disabled', reason: 'flag-off' }
         const s = journal.status()

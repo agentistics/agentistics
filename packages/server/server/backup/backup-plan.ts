@@ -512,6 +512,10 @@ const ALWAYS: string[] = [
   // for good if the machine is. It grows, which is an argument for watching it in the size
   // accounting rather than for leaving it behind.
   '.agentistics/task-files',
+  // ART.2: what native agents produced into the artifact store (documents, diagrams, tables, review
+  // findings, screenshots) — content-addressed blobs the journal's artifact.* events reference.
+  // Nothing regenerates them; the journal that names them travels too.
+  '.agentistics/artifacts',
   // The index that makes those attachments findable again: which session each was typed
   // into, and when (`attachment-web.ts`'s ATTACHMENT_LOG). It travels WITH them for the
   // obvious reason — restoring the images and losing the record would put every

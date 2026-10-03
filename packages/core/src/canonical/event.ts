@@ -45,6 +45,7 @@ import type {
   AgentKind,
   AgentStatus,
   ArtifactKind,
+  WorkArtifactKind,
   BrowserActionKind,
   BrowserImplementation,
   ConversationLink,
@@ -173,6 +174,8 @@ export const EVENT_TYPES = [
   'session.model.changed',
   // B6.6: memory — a fact noted (by the person, the model, or derived), and a fact forgotten
   'memory.noted', 'memory.forgotten',
+  // ART.2: the artifact store's metadata (the content is a blob, never in an event)
+  'artifact.created', 'artifact.versioned', 'artifact.blocked', 'artifact.pinned', 'artifact.unpinned', 'artifact.expired',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -581,6 +584,34 @@ export interface MemoryNotedData {
 /** B6.6: a fact forgotten — every version of the chain leaves memory, and its statements are deleted. */
 export interface MemoryForgottenData { chainId: string }
 
+/** ART.2: an artifact came to exist (its first version follows as `artifact.versioned`). No content. */
+export interface ArtifactCreatedData {
+  artifactId: string
+  kind: WorkArtifactKind
+  title: string
+  slug: string
+  createdBy: 'agent' | 'person'
+}
+
+/** ART.2: an immutable version — its blob by sha256, the event that produced it. No content. */
+export interface ArtifactVersionedData {
+  artifactId: string
+  n: number
+  sha256: string
+  size: number
+  mime: string
+  basedOn?: number
+  sourceEventId: string
+  note?: string
+}
+
+/** ART.2: a version's remote references were blocked (ART.1's scan) — how many and of what kind, never the URLs. */
+export interface ArtifactBlockedData { artifactId: string; n: number; count: number; kinds: string[] }
+export interface ArtifactPinnedData { artifactId: string; n: number; reason: string }
+export interface ArtifactUnpinnedData { artifactId: string; n: number }
+/** ART.2: a version's blob was pruned under the disk budget — it reads back as expired, in words. */
+export interface ArtifactExpiredData { artifactId: string; n: number; reason: string }
+
 export interface PolicyRequestedData {
   /** The policy that was consulted. */
   policy: string
@@ -681,6 +712,12 @@ export interface EventData {
   'session.model.changed': SessionModelChangedData
   'memory.noted': MemoryNotedData
   'memory.forgotten': MemoryForgottenData
+  'artifact.created': ArtifactCreatedData
+  'artifact.versioned': ArtifactVersionedData
+  'artifact.blocked': ArtifactBlockedData
+  'artifact.pinned': ArtifactPinnedData
+  'artifact.unpinned': ArtifactUnpinnedData
+  'artifact.expired': ArtifactExpiredData
   'run.started': RunStartedData
   'run.ended': RunEndedData
   'agent.started': AgentStartedData

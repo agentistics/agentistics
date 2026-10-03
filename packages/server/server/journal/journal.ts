@@ -130,7 +130,11 @@ const INSERT_SQL =
  * on open, outside the numbered migrations: an older build ignores an extra table, while a
  * `user_version` bump would make it refuse the whole journal.
  */
-export const RARE_EVENT_TYPES: readonly string[] = ['memory.noted', 'memory.forgotten']
+export const RARE_EVENT_TYPES: readonly string[] = [
+  'memory.noted', 'memory.forgotten',
+  // ART.2: the artifact store's metadata — a handful per session, read back by kind.
+  'artifact.created', 'artifact.versioned', 'artifact.blocked', 'artifact.pinned', 'artifact.unpinned', 'artifact.expired',
+]
 const RARE_DDL = 'CREATE TABLE IF NOT EXISTS rare_events (rowid INTEGER PRIMARY KEY, type TEXT NOT NULL)'
 
 const PAGE_SQL =

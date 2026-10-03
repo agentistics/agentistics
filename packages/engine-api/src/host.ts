@@ -443,7 +443,16 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
     opencodeDbPath: string
   }
   /** The public journal. `null` = journal off or unwritable — the engine must cope. */
-  journal: { sink(): Promise<ProviderJournalSink<E> | null>; status(): JournalStatus }
+  journal: {
+    sink(): Promise<ProviderJournalSink<E> | null>
+    status(): JournalStatus
+    /**
+     * ART.2 (1.7, optional): the journal's RARE events of these types (the artifact store's metadata),
+     * oldest first, for one session when `sessionId` is given — read through the host's rare-event
+     * side table, never a walk of the whole journal. Absent: the engine keeps no artifact index.
+     */
+    readRare?(types: readonly string[], opts?: { sessionId?: string }): Promise<readonly unknown[]>
+  }
   /**
    * The machine's policy floor as GLOBS (1.3): `protectedGlobs(rules)` over the backup plan's
    * `secret` rows, in the dialect `floor.ts` defines (`~/`, `*`, `**`). This is the floor an engine
