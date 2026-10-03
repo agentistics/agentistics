@@ -2,7 +2,8 @@
  * hello.ts — Windows Hello (WinRT `KeyCredentialManager`), natively on Windows and from WSL through
  * interop. SECRETS.4 §3.1.
  *
- * Enrol: `RequestCreateAsync("agentistics-vault-<kid>", FailIfExists)` — a per-user, non-exportable RSA
+ * Enrol: `OpenAsync` first (an existing credential of that name is REUSED — v2.98.1), else
+ * `RequestCreateAsync("agentistics-vault-<kid>", FailIfExists)` — a per-user, non-exportable RSA
  * key in the Passport KSP, every use gated by Hello. KEK: `RequestSignAsync(challenge)` over a fixed
  * 32-byte random challenge kept in `dek.hello`; RSASSA-PKCS1-v1_5/SHA-256 is deterministic, so the same
  * credential over the same challenge yields the same bytes, and `KEK = HKDF(signature, kid)` (presence.ts).
@@ -74,7 +75,11 @@ export const HELLO_SCRIPT =
   'if ($verb -eq "check") { if (AwaitOp ($KCM::IsSupportedAsync()) ([bool])) { [Console]::Out.Write("ok"); exit 0 } else { Fail "unavailable" "hello-not-set-up" "" } } ' +
   // NTE_NO_KEY (0x8009000D): the credential is already gone — a delete is done, not failed.
   'if ($verb -eq "delete") { try { $t=$asAct.Invoke($null,@($KCM::DeleteAsync($name))); Wait $t } catch { $x=$_.Exception; while ($x.InnerException) { $x=$x.InnerException }; if ($x.HResult -ne 0x8009000D) { throw } }; [Console]::Out.Write("ok"); exit 0 } ' +
+  // v2.98.1: a credential that ALREADY exists under this name is REUSED, never a failure ("já existe uma
+  // credencial com este nome" on the owner's machine). OpenAsync raises no dialog; the caller signs with
+  // it, and must not delete it on a later failure (another wrapper may depend on it).
   'if ($verb -eq "create") { ' +
+  '$e=AwaitOp ($KCM::OpenAsync($name)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]); if ([string]$e.Status -eq "Success") { [Console]::Out.Write("exists"); exit 0 }; ' +
   '$wid=Front; $opt=[Windows.Security.Credentials.KeyCredentialCreationOption]::FailIfExists; ' +
   'if ($wid) { $r=AwaitOp ($KCM::RequestCreateForWindowAsync($wid,$name,$opt)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]) } else { $r=AwaitOp ($KCM::RequestCreateAsync($name,$opt)) ([Windows.Security.Credentials.KeyCredentialRetrievalResult]) }; ' +
   'switch ([string]$r.Status) { "Success" { [Console]::Out.Write("ok"); exit 0 } "UserCanceled" { Fail "cancelled" "" "" } "CredentialAlreadyExists" { Fail "unavailable" "credential-exists" "" } default { Fail "unavailable" "hello-status" ([string]$r.Status) } } } ' +
@@ -130,13 +135,13 @@ export function helloProtector(o: HelloOptions): Protector {
   async function call(verb: HelloVerb, kid: string, challenge?: Uint8Array): Promise<Call> {
     const ps = await powershell()
     if (!ps) {
-      return { ok: false, code: 'presence-unavailable', reason: o.wsl ? 'Windows interop is off or powershell.exe was not found' : 'powershell.exe was not found' }
+      return { ok: false, code: 'presence-unavailable', reason: o.wsl ? 'interop-off' : 'powershell-missing' }
     }
     let r
     try {
       r = await o.io.run(ps, HELLO_ARGS, helloStdin(verb, kid, challenge), { timeoutMs: HELLO_TIMEOUT_MS + 5_000 })
     } catch (err) {
-      return { ok: false, code: describeThrown(err), reason: 'powershell.exe did not answer' }
+      return { ok: false, code: describeThrown(err), reason: 'no-answer' }
     }
     if (r.code !== 0) {
       const e = parseBridgeError(r.stderr)
@@ -152,7 +157,7 @@ export function helloProtector(o: HelloOptions): Protector {
     const s = await call('sign', kid, challenge)
     if (!s.ok) return s
     const sig = new Uint8Array(Buffer.from(s.out, 'base64'))
-    if (sig.length === 0) return { ok: false, code: 'presence-unavailable', reason: 'Windows Hello returned no signature' }
+    if (sig.length === 0) return { ok: false, code: 'presence-unavailable', reason: 'no-signature' }
     return { ok: true, sig }
   }
 
@@ -175,15 +180,18 @@ export function helloProtector(o: HelloOptions): Protector {
     async derive(kid) {
       const c = await call('create', kid)
       if (!c.ok) return { ok: false, reason: presenceReason(c.code, c.reason) }
+      // REUSED: the credential was already there (a wrapper of this vault may depend on it) — it is never
+      // deleted by this enrolment, whatever happens next.
+      const reused = c.out === 'exists'
       const challenge = new Uint8Array(randomBytes(32))
       const s = await signature(kid, challenge)
       if (!s.ok) {
-        await call('delete', kid) // never leave a credential no file refers to
+        if (!reused) await call('delete', kid) // never leave a credential no file refers to
         return { ok: false, reason: presenceReason(s.code, s.reason) }
       }
       const kek = deriveKek(s.sig, kid, 'hello')
       zero(s.sig)
-      return { ok: true, held: { kek, fields: { challenge: Buffer.from(challenge).toString('base64') } } }
+      return { ok: true, held: { kek, fields: { challenge: Buffer.from(challenge).toString('base64'), ...(reused ? { reused: '1' } : {}) } } }
     },
     async sealHeld(held, dek, kid) {
       const challenge = held.fields.challenge
@@ -201,26 +209,35 @@ export function helloProtector(o: HelloOptions): Protector {
     },
     async discardHeld(held, kid) {
       zero(held.kek)
-      await call('delete', kid).catch(() => {})
+      if (held.fields.reused !== '1') await call('delete', kid).catch(() => {})
     },
     async wrap(dek, kid) {
       const d = await self.derive!(kid)
       if (!d.ok) return d
       try {
         const s = await self.sealHeld!(d.held, dek, kid)
-        if (!s.ok) await call('delete', kid)
+        if (!s.ok && d.held.fields.reused !== '1') await call('delete', kid)
         return s
       } finally { zero(d.held.kek) }
     },
+    /** ONE gesture, nothing kept: a throwaway credential is created (Hello asks) and deleted at once. */
+    async proveHuman() {
+      const k = `proof-${randomBytes(6).toString('hex')}`
+      const c = await call('create', k)
+      if (!c.ok) return { ok: false, reason: presenceReason(c.code, c.reason) }
+      await call('delete', k).catch(() => {})
+      // A random name that already existed raised no dialog — it proves nothing.
+      return c.out === 'exists' ? { ok: false, reason: presenceReason('presence-unavailable', 'hello-status') } : { ok: true }
+    },
     async unwrap(_record: WrapperRecord, kid: string): Promise<UnwrapResult> {
       const raw = await o.io.readFile(file)
-      if (!raw) return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', `${HELLO_FILE} is missing`) }
+      if (!raw) return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'file-missing') }
       let f: HelloFile
       try {
         f = JSON.parse(text(raw)) as HelloFile
         if (f.v !== 1 || typeof f.challenge !== 'string' || typeof f.wrapped !== 'string') throw new Error('shape')
       } catch {
-        return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', `${HELLO_FILE} is damaged`) }
+        return { ok: false, kind: 'missing', reason: presenceReason('presence-lost', 'file-damaged') }
       }
       const s = await signature(kid, new Uint8Array(Buffer.from(f.challenge, 'base64')))
       if (!s.ok) return { ok: false, kind: kindOf(s.code), reason: presenceReason(s.code, s.reason) }

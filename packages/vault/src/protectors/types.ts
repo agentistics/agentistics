@@ -86,6 +86,13 @@ export interface Protector {
   derive?(kid: string): Promise<{ ok: true; held: HeldPresence } | { ok: false; reason: string }>
   sealHeld?(held: HeldPresence, dek: Uint8Array, kid: string): Promise<{ ok: true; record: WrapperRecord } | { ok: false; reason: string }>
   discardHeld?(held: HeldPresence, kid: string): Promise<void>
+  /**
+   * PRESENCE ONLY (v2.98.1) — ONE human gesture that proves a person is at THIS computer, touching
+   * nothing in the vault: Windows Hello creates a throwaway credential and deletes it at once; a
+   * security key makes a credential nobody keeps. The page's FIRST enrolment from a loopback origin
+   * uses it in place of the terminal's setup code (docs/security.md §7b).
+   */
+  proveHuman?(): Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 /** A derived presence KEK waiting for its DEK (memory only) plus the public fields its file needs. */

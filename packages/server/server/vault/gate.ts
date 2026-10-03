@@ -32,13 +32,13 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
   type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
 } from '@agentistics/vault'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
-  presenceWord, presenceCandidates, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
+  presenceWord, presenceCandidates, presenceSoon, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -185,6 +185,14 @@ async function checkCodeWith(dek: Uint8Array, kid: string, code: string): Promis
 
 function enrolled(v: VaultJson): boolean { return Boolean(v.stepup) }
 
+/** v2.98.1: a kind this platform has but this build never offers (the page shows it as "coming soon"). */
+function presenceSoonRefusal(id: ProtectorId): Refusal | null {
+  if (!presenceSoon().includes(id)) return null
+  return refused('presence-soon', vaultLang() === 'pt'
+    ? 'A chave de segurança pelo Windows chega em breve. Por enquanto, use o Windows Hello neste computador. Nada foi alterado.'
+    : 'Security keys through Windows are coming soon. For now, use Windows Hello on this computer. Nothing was changed.')
+}
+
 /** §2.4: prove a human gesture NOW, against the open key (a presence unwrap must give the same DEK). */
 async function proveGesture(open: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<{ ok: true } | Refusal> {
   for (const w of open.vault.wrappers.filter(x => isPresenceId(x.type))) {
@@ -211,6 +219,12 @@ export interface GateContext {
   session: string
   /** Review S2: the one-time code the service printed locally — the proof a FIRST enrolment over HTTP needs. */
   setupCode?: string
+  /**
+   * v2.98.1: this HTTP request came from a page opened ON this computer — the socket peer, `Host` and
+   * `Origin` all loopback, no proxy header (http.ts `loopbackRequest`). Only http.ts sets it; the local
+   * proof and the page recovery are honoured ONLY while it is true, request by request.
+   */
+  loopback?: boolean
   /** Review S7: the 24 words, typed on a TTY and passed ONLY by the socket — never read from an HTTP body. */
   words?: string
   /**
@@ -235,7 +249,7 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   const todo = recoveryTodo()
   if (todo) {
     if (!RECOVERY_ALLOWED.has(action)) return refused('recovery-mode', sentence('recovery-mode'))
-    if (action !== 'lock' && action !== 'lock-local' && !fromSocket(ctx)) return recoveryTtyOnly()
+    if (action !== 'lock' && action !== 'lock-local' && !fromSocket(ctx) && !recoverPageHeld(ctx)) return recoveryTtyOnly()
     return { ok: true }
   }
   const state = await loadState()
@@ -398,13 +412,96 @@ const setupProofHeld = (ctx: { session: string }): boolean => _setupProof !== nu
 
 /** A first enrolment (nothing to ask a code for yet): the socket, this session's proof, or the setup code. */
 function firstEnrolProof(ctx: GateContext): { ok: true } | Refusal {
-  if (fromSocket(ctx) || setupProofHeld(ctx)) return { ok: true }
+  if (fromSocket(ctx) || setupProofHeld(ctx) || localProofHeld(ctx)) return { ok: true }
   return spendSetupCode(ctx.setupCode) ? { ok: true } : setupRequired()
 }
 
 /** Over the vault file + this session: does a page starting the setup still owe the setup code? */
-export function setupCodeOwed(stepupEnrolled: boolean, ctx: { session: string }): boolean {
-  return !stepupEnrolled && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx)
+export function setupCodeOwed(stepupEnrolled: boolean, ctx: { session: string; loopback?: boolean }): boolean {
+  return !stepupEnrolled && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx) && !localProofHeld(ctx)
+}
+
+// ── v2.98.1: the FIRST enrolment from a page ON this computer — a gesture instead of the setup code ──
+//
+// Owner rule: users never run commands. The setup code exists because, before an authenticator, a page
+// reaching this API (an XSS, a mistaken exposure) could enrol ITS authenticator. Two facts now stand
+// for "a person at this computer" without a terminal:
+//  - the request is LOOPBACK (socket peer, Host and Origin all localhost, no proxy header) — so the LAN,
+//    a tunnel and remote access are out: they cannot produce that combination (docs/security.md §7b);
+//  - ONE presence gesture (Windows Hello / a key touch) that the OS draws and a script cannot answer.
+// Held in memory for THIS session, 10 minutes, and honoured only on loopback requests. Without a
+// presence device, or from anywhere else, the setup code from the terminal remains the proof.
+
+const LOCAL_PROOF_TTL_MS = 10 * 60_000
+let _localProof: { session: string; until: number } | null = null
+function localProofHeld(ctx: { session: string; loopback?: boolean }): boolean {
+  return ctx.loopback === true && _localProof !== null && _now() < _localProof.until && _localProof.session === ctx.session
+}
+
+/** The presence kind that can give the local proof on this machine, or null (then the setup code stays). */
+export function localProofKind(): ProtectorId | null {
+  return presenceCandidates().find(p => typeof p.proveHuman === 'function')?.id ?? null
+}
+
+function notLoopback(): Refusal {
+  return refused('not-loopback', vaultLang() === 'pt'
+    ? 'Isto só pode ser feito numa página aberta no próprio computador (endereço localhost), não pela rede, por um túnel ou por acesso remoto.'
+    : 'This can only be done from a page opened on this computer itself (a localhost address), not over the network, a tunnel or remote access.')
+}
+
+/** `POST /api/vault/local-proof`: ONE gesture on a loopback page; the first enrolment then needs no setup code. */
+export async function proveLocalHuman(ctx: GateContext): Promise<{ ok: true; kind: ProtectorId | null } | Refusal> {
+  if (!ctx.loopback || fromSocket(ctx)) return notLoopback()
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!setupCodeOwed(enrolled(o.vault), ctx)) return { ok: true, kind: null }
+  const p = presenceCandidates().find(x => typeof x.proveHuman === 'function')
+  if (!p) {
+    return refused('no-local-proof', vaultLang() === 'pt'
+      ? 'Este computador não tem Windows Hello nem chave de segurança para confirmar que é você. Use o código de configuração.'
+      : 'This computer has no Windows Hello or security key to confirm it is you. Use the setup code.')
+  }
+  const r = await countGestures(ctx, p.id, 1, () => p.proveHuman!())
+  if (!r.ok) return enrolFailure(p.id, r.reason)
+  _localProof = { session: ctx.session, until: _now() + LOCAL_PROOF_TTL_MS }
+  vaultAudit({ type: 'vault.local-proof', protector: p.id })
+  return { ok: true, kind: p.id }
+}
+
+// ── v2.98.1: recovery from a page ON this computer (the same checks as `agentop vault recover`) ─────
+//
+// The 24 words arrive in ONE loopback request, go straight into `recoverWithWords` (the very function
+// the terminal's `vault recover` calls), and their entropy is zeroed there; the route never logs or
+// echoes them. The session that recovered may then finish the re-enrolment from the same loopback page
+// (review M2's "the proof is the channel" — the channel is now this computer, not only its terminal).
+// Five wrong tries pause it for ten minutes: 256 bits are not guessable, the pause is for the noise.
+
+const RECOVER_PAGE_TTL_MS = 30 * 60_000
+const RECOVER_PAGE_MAX_WRONG = 5
+const RECOVER_PAGE_PAUSE_MS = 10 * 60_000
+let _recoverPage: { session: string; until: number } | null = null
+let _recoverWrong: { n: number; pausedUntil: number } = { n: 0, pausedUntil: 0 }
+function recoverPageHeld(ctx: { session: string; loopback?: boolean }): boolean {
+  return ctx.loopback === true && _recoverPage !== null && _now() < _recoverPage.until && _recoverPage.session === ctx.session
+}
+
+export async function recoverFromPage(words: string, ctx: GateContext): Promise<{ ok: true; todo: string[] } | Refusal> {
+  if (!ctx.loopback || fromSocket(ctx)) return notLoopback()
+  const lang = vaultLang()
+  if (_now() < _recoverWrong.pausedUntil) {
+    return refused('recover-paused', sentence('stepup-paused', { duration: durationWords(_recoverWrong.pausedUntil - _now(), lang) }))
+  }
+  const r = await recoverWithWords(words)
+  if (!r.ok) {
+    if (r.code === 'recovery-denied' || r.code === 'recovery-words') {
+      if (++_recoverWrong.n >= RECOVER_PAGE_MAX_WRONG) _recoverWrong = { n: 0, pausedUntil: _now() + RECOVER_PAGE_PAUSE_MS }
+    }
+    return r
+  }
+  _recoverWrong = { n: 0, pausedUntil: 0 }
+  _recoverPage = { session: ctx.session, until: _now() + RECOVER_PAGE_TTL_MS }
+  vaultAudit({ type: 'vault.recover-page' })
+  return r
 }
 
 /**
@@ -467,6 +564,8 @@ export async function confirmAuthenticator(code: string, ctx: { session: string 
 export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true } | Refusal> {
   const lang = vaultLang()
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
+  const soon = presenceSoonRefusal(id)
+  if (soon) return soon
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
   if (o.vault.stepup && !flowActive(ctx) && !recoveryTodo()) {
@@ -481,7 +580,7 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
     if (!p.ok) return p
   }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
-  if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
+  if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de confirmação não existe nesta plataforma.' : 'That kind of confirmation does not exist on this platform.')
   // NO gesture (PRESENCE_GESTURES.probe = 0, owner decision 2026-10-02): the presence protector's own
   // probe is `IsSupportedAsync` / "the key is here and offers hmac-secret". The enrolment proves it
   // works; the first real unlock proves it reproduces.
@@ -626,9 +725,11 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
 export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean } | Refusal> {
   const lang = vaultLang()
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
+  const soon = presenceSoonRefusal(id)
+  if (soon) return soon
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (recoveryTodo() && !fromSocket(ctx)) return recoveryTtyOnly()
+  if (recoveryTodo() && !fromSocket(ctx) && !recoverPageHeld(ctx)) return recoveryTtyOnly()
   if (!recoveryTodo()) {
     if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
     // Review S7: known BEFORE the code is spent — otherwise the terminal would ask for a code, learn the
@@ -641,8 +742,14 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
       if (!g.ok) return g
     }
   }
+  // v2.98.1 (the owner's machine): this kind ALREADY protects the vault and nothing silent is left to
+  // retire — there is nothing to enrol. The gate above has just proved the gesture works, so say so and
+  // touch nothing (re-running the enrolment is what failed with "a credential with this name already exists").
+  if (!recoveryTodo() && o.vault.wrappers.some(w => w.type === id) && !o.vault.wrappers.some(w => isSilentId(w.type))) {
+    return { ok: true, removed: [], recoveryOwed: afterPresence(o.vault) }
+  }
   const presence = presenceCandidates().find(p => p.id === id) ?? protectorById(id)
-  if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de presença não existe nesta plataforma.' : 'That kind of presence does not exist on this platform.')
+  if (!presence) return refused('presence-unavailable', lang === 'pt' ? 'Esse tipo de confirmação não existe nesta plataforma.' : 'That kind of confirmation does not exist on this platform.')
   const all: Protector[] = [presence, ...o.vault.wrappers.map(w => protectorById(w.type)).filter((p): p is Protector => p !== null)]
   // Review S7: retiring a SILENT wrapper means a NEW data key — the old one survives in every earlier
   // copy of that wrapper. A second presence credential (no silent wrapper left) keeps the key.
@@ -964,15 +1071,15 @@ export async function disablePresence(ctx: GateContext, words?: string): Promise
   const c = await chooseAutoProtector()
   if (!c.ok) {
     return refused('no-protector', c.kind === 'unavailable'
-      ? (lang === 'pt' ? `Não há protetor do sistema para assumir (${c.reason}). A presença continua ligada.` : `There is no system protector to take over (${c.reason}). Presence stays on.`)
-      : (lang === 'pt' ? 'Nenhum protetor do sistema respondeu. A presença continua ligada.' : 'No system protector answered. Presence stays on.'))
+      ? (lang === 'pt' ? `Não há protetor do sistema para assumir (${presenceDetailWords(c.reason, 'pt')}). A confirmação pessoal continua ligada.` : `There is no system protector to take over (${presenceDetailWords(c.reason, 'en')}). Personal confirmation stays on.`)
+      : (lang === 'pt' ? 'Nenhum protetor do sistema respondeu. A confirmação pessoal continua ligada.' : 'No system protector answered. Personal confirmation stays on.'))
   }
   const w = await c.protector.wrap(o.dek, o.kid)
-  if (!w.ok) return refused('presence-disable-failed', w.reason)
+  if (!w.ok) return disableFailed()
   const back = await c.protector.unwrap(w.record, o.kid)
   const same = back.ok && back.dek.length === o.dek.length && timingSafeEqual(Buffer.from(back.dek), Buffer.from(o.dek))
   if (back.ok) back.dek.fill(0)
-  if (!same) { await c.protector.remove(w.record, o.kid); return refused('presence-disable-failed', 'the replacement wrapper did not give back the same key') }
+  if (!same) { await c.protector.remove(w.record, o.kid); return disableFailed() }
   const gone = o.vault.wrappers.filter(x => isPresenceId(x.type))
   const next: VaultJson = { ...o.vault, v: 2, wrappers: [w.record, ...o.vault.wrappers.filter(x => !isPresenceId(x.type) && !isSilentId(x.type))] }
   delete next.requirePresence
@@ -982,6 +1089,13 @@ export async function disablePresence(ctx: GateContext, words?: string): Promise
   vaultAudit({ type: 'vault.disable-presence', protector: c.protector.id })
   dropUnlockWindow() // a protector change
   return { ok: true, replacedBy: c.protector.id }
+}
+
+/** A failed "turn off" said to a PERSON — the protector's own reason is a fact for the log, never a sentence. */
+function disableFailed(): Refusal {
+  return refused('presence-disable-failed', vaultLang() === 'pt'
+    ? 'Não foi possível desligar a confirmação pessoal: o protetor do sistema não devolveu a mesma chave. Nada foi alterado; ela continua ligada.'
+    : 'Personal confirmation could not be turned off: the system protector did not give back the same key. Nothing was changed; it stays on.')
 }
 
 /** §7.4 `agentop vault enroll --require-presence`: mark THIS machine as the owner's. Only ever strengthens. */
@@ -1062,6 +1176,9 @@ export function __resetGateForTests(now?: () => number): void {
   _flow = null
   _setup = null
   _setupProof = null
+  _localProof = null
+  _recoverPage = null
+  _recoverWrong = { n: 0, pausedUntil: 0 }
   _gestures = null
   dropHeldPresence()
   _enrolWrong = 0

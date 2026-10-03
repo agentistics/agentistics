@@ -46,6 +46,11 @@ export function presenceCode(reason: string): PresenceCode | null {
 export const PRESENCE_DETAILS = [
   'bridge-failed', 'hello-not-set-up', 'credential-exists', 'credential-deleted', 'hello-status', 'bad-request',
   'not-reproducible',
+  // v2.98.1 (owner's real use): every reason a presence protector can produce is a KEY. The fido2 and
+  // hello protectors used to put English sentences here, and `presenceSentence` repeated them inside the
+  // Portuguese UI ("the Windows security-key bridge (webauthn.dll) is not verified…").
+  'bridge-unverified', 'interop-off', 'powershell-missing', 'no-answer', 'no-signature', 'no-key', 'fido2-tools-missing',
+  'device-error', 'no-credential-id', 'not-touched', 'no-hmac-output', 'file-missing', 'file-damaged',
 ] as const
 export type PresenceDetail = typeof PRESENCE_DETAILS[number]
 
@@ -57,6 +62,25 @@ const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
   'hello-status': { en: 'Windows Hello gave an unexpected answer; the details are in the agentop log', pt: 'o Windows Hello deu uma resposta inesperada; os detalhes estão no log do agentop' },
   'bad-request': { en: 'the Windows bridge did not understand the request', pt: 'a ponte do Windows não entendeu o pedido' },
   'not-reproducible': { en: 'it answered, but not with the key it gave when the vault was set up', pt: 'respondeu, mas não com a chave que deu quando o cofre foi configurado' },
+  'bridge-unverified': { en: 'security keys through Windows are coming soon; use Windows Hello on this computer for now', pt: 'a chave de segurança pelo Windows chega em breve; por enquanto, use o Windows Hello neste computador' },
+  'interop-off': { en: 'this Linux (WSL) cannot reach Windows right now', pt: 'este Linux (WSL) não consegue falar com o Windows agora' },
+  'powershell-missing': { en: 'a Windows component (PowerShell) was not found', pt: 'um componente do Windows (PowerShell) não foi encontrado' },
+  'no-answer': { en: 'Windows did not answer in time', pt: 'o Windows não respondeu a tempo' },
+  'no-signature': { en: 'Windows Hello did not give its answer back', pt: 'o Windows Hello não devolveu a resposta' },
+  'no-key': { en: 'no security key is plugged in', pt: 'nenhuma chave de segurança está conectada' },
+  'fido2-tools-missing': { en: 'the security-key tools are not installed on this computer (the libfido2 package, fido2-tools)', pt: 'as ferramentas de chave de segurança não estão instaladas neste computador (o pacote libfido2, fido2-tools)' },
+  'device-error': { en: 'the security key answered with an error; the details are in the agentop log', pt: 'a chave de segurança respondeu com um erro; os detalhes estão no log do agentop' },
+  'no-credential-id': { en: 'the security key did not return its credential', pt: 'a chave de segurança não devolveu a credencial' },
+  'not-touched': { en: 'the security key did not confirm it was touched', pt: 'a chave de segurança não confirmou o toque' },
+  'no-hmac-output': { en: 'the security key did not return its secret', pt: 'a chave de segurança não devolveu o segredo' },
+  'file-missing': { en: 'the file that links it to the vault is missing', pt: 'o arquivo que a liga ao cofre sumiu' },
+  'file-damaged': { en: 'the file that links it to the vault is damaged', pt: 'o arquivo que a liga ao cofre está danificado' },
+}
+
+/** PURE. A reason as words for a PERSON: a key is translated, anything else is the generic line — never repeated. */
+export function presenceDetailWords(reason: string, lang: Lang): string {
+  const r = reason.replace(/^(presence-[a-z]+|no-hmac-secret):\s*/, '').trim()
+  return isDetail(r) ? DETAIL_TEXT[r][lang] : DETAIL_TEXT['bridge-failed'][lang]
 }
 
 function isDetail(s: string): s is PresenceDetail { return (PRESENCE_DETAILS as readonly string[]).includes(s) }
@@ -82,11 +106,14 @@ export function logBridge(line: string): void {
   try { process.stderr.write(`agentop: presence bridge: ${line.replace(/[\r\n]+/g, ' ').slice(0, 300)}\n`) } catch { /* a log line never breaks the vault */ }
 }
 
-/** The detail part of a reason, as words: a key is translated; a raw .NET type is never repeated. */
+/**
+ * The detail part of a reason, as words: a key is translated, and ANYTHING ELSE — a .NET type, an
+ * English sentence some tool printed, a path — is never repeated to a person (v2.98.1: the owner's
+ * Portuguese screen quoted an internal English sentence). Empty stays empty (no "()" in the sentence).
+ */
 function detailWords(r: string, lang: Lang): string {
-  if (isDetail(r)) return DETAIL_TEXT[r][lang]
-  if (/\bSystem\.[A-Za-z]/.test(r) || /\b0x[0-9A-Fa-f]{8}\b/.test(r)) return DETAIL_TEXT['bridge-failed'][lang]
-  return r
+  if (r === '') return ''
+  return isDetail(r) ? DETAIL_TEXT[r][lang] : DETAIL_TEXT['bridge-failed'][lang]
 }
 
 export function presenceSentence(code: PresenceCode, lang: Lang, presence: string, reason = ''): string {
@@ -102,15 +129,15 @@ export function presenceSentence(code: PresenceCode, lang: Lang, presence: strin
     switch (code) {
       case 'presence-cancelled': return `${presence} foi cancelado, então o cofre continuou trancado. Nada foi aberto.`
       case 'presence-timeout': return `${presence} não recebeu resposta em 60 segundos, então o cofre continuou trancado. Rode \`agentop vault unlock\` quando estiver no computador.`
-      case 'presence-unavailable': return `${presence} não pode ser acessado agora (${r}). O cofre continua trancado; nada foi alterado. Se este dispositivo sumiu de vez, rode \`agentop vault recover\` com suas 24 palavras.`
-      case 'presence-lost': return `A credencial de ${presence} que protege o cofre não existe mais nesta máquina (${r}). Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`.`
+      case 'presence-unavailable': return `${presence} não pode ser acessado agora${r ? ` (${r})` : ''}. O cofre continua trancado; nada foi alterado. Se este dispositivo sumiu de vez, rode \`agentop vault recover\` com suas 24 palavras.`
+      case 'presence-lost': return `A credencial de ${presence} que protege o cofre não existe mais nesta máquina${r ? ` (${r})` : ''}. Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`.`
     }
   }
   switch (code) {
     case 'presence-cancelled': return `${presence} was cancelled, so the vault stayed locked. Nothing was opened.`
     case 'presence-timeout': return `${presence} did not get an answer within 60 seconds, so the vault stayed locked. Run \`agentop vault unlock\` when you are at the computer.`
-    case 'presence-unavailable': return `${presence} cannot be reached right now (${r}). The vault stays locked; nothing was changed. If this device is gone for good, run \`agentop vault recover\` with your 24 words.`
-    case 'presence-lost': return `The ${presence} credential that protects the vault no longer exists on this machine (${r}). Your secrets are intact. Open the vault with your 24-word recovery key: \`agentop vault recover\`.`
+    case 'presence-unavailable': return `${presence} cannot be reached right now${r ? ` (${r})` : ''}. The vault stays locked; nothing was changed. If this device is gone for good, run \`agentop vault recover\` with your 24 words.`
+    case 'presence-lost': return `The ${presence} credential that protects the vault no longer exists on this machine${r ? ` (${r})` : ''}. Your secrets are intact. Open the vault with your 24-word recovery key: \`agentop vault recover\`.`
   }
 }
 

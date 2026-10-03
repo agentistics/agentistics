@@ -17,6 +17,8 @@ import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
 import { noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
+import { isLoopbackAddress } from '../native-bind'
+import { uiReply } from './ui-sentence'
 
 export interface VaultHttpEnv {
   /** CORS headers the host adds to every answer. */
@@ -25,6 +27,35 @@ export interface VaultHttpEnv {
   session: string
   /** The extra origins this server accepts (AGENTISTICS_ALLOWED_ORIGINS) and whether it is the dev server. */
   origins?: { allowlist: string[]; dev: boolean }
+  /** v2.98.1: the TCP peer's address (`server.requestIP`). Absent = unknown = never loopback. */
+  peer?: string | null
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+/** Any of these means a proxy stood between the browser and this server — a tunnel, a remote-access relay. */
+const PROXY_HEADERS = ['forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'x-original-host']
+
+function hostOf(h: string): string | null {
+  try { return new URL(h.includes('://') ? h : `http://${h}`).hostname.toLowerCase() } catch { return null }
+}
+
+/**
+ * PURE. v2.98.1: did this request come from a page opened ON this computer? ALL of: the TCP peer is a
+ * loopback address, the `Host` header names localhost / 127.0.0.1 / [::1], no proxy header is present,
+ * and — for an action (`requireOrigin`) — the browser-set `Origin` is loopback too. The LAN fails the
+ * peer; a tunnel or a remote-access relay fails the Host (it names the public name) or carries a
+ * proxy header; a hostile site in this browser fails the Origin (a browser never lets a page forge it)
+ * and DNS rebinding fails the Host. docs/security.md §7b states what this does NOT exclude.
+ */
+export function loopbackRequest(req: { headers: Headers }, peer: string | null | undefined, opts: { requireOrigin: boolean }): boolean {
+  if (!peer || !isLoopbackAddress(peer)) return false
+  if (PROXY_HEADERS.some(h => req.headers.has(h))) return false
+  const host = hostOf(req.headers.get('host') ?? '')
+  if (!host || !LOOPBACK_HOSTS.has(host)) return false
+  const origin = req.headers.get('origin')
+  if (origin === null) return !opts.requireOrigin
+  const o = hostOf(origin)
+  return o !== null && LOOPBACK_HOSTS.has(o)
 }
 
 /**
@@ -57,6 +88,11 @@ export function vaultRequestAllowed(
 
 const statusOf = (code: unknown): number => (code === 'stepup-required' ? 401 : code === 'bad-request' ? 400 : 403)
 
+/** v2.98.1: the ONE way a vault JSON body leaves this module — every sentence made page-safe (ui-sentence.ts). */
+function send(body: Record<string, unknown>, status: number, headers: Record<string, string>): Response {
+  return new Response(JSON.stringify(uiReply(body, vaultLang() === 'pt' ? 'pt' : 'en')), { status, headers })
+}
+
 /** Answers a `/api/vault*` request, or `null` for a path that is not one of ours. */
 export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
   const json = { ...env.cors, 'Content-Type': 'application/json' }
@@ -70,10 +106,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (!allowed.ok) {
     await req.body?.cancel().catch(() => {})
     const pt = vaultLang() === 'pt'
-    return new Response(JSON.stringify({
+    return send({
       ok: false, code: allowed.code,
       sentence: pt ? 'Esta ação do cofre só pode vir do painel do agentop nesta máquina.' : 'This vault action can only come from the agentop dashboard on this machine.',
-    }), { status: 403, headers: noStore })
+    }, 403, noStore)
   }
   const body = async (): Promise<Record<string, unknown>> => {
     const r = await readJsonLimited<Record<string, unknown>>(req, 4096)
@@ -82,22 +118,24 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
   const codeOf = (b: Record<string, unknown>): string | undefined => (str(b.code, 16) ? b.code : undefined)
   const reply = (r: { ok: boolean } & Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-    new Response(JSON.stringify({ ...r, ...extra }), { status: r.ok ? 200 : statusOf(r.code), headers: noStore })
+    send({ ...r, ...extra }, r.ok ? 200 : statusOf(r.code), noStore)
+  // v2.98.1: whether THIS request is a page on this computer (actions need the browser's Origin too).
+  const loopback = loopbackRequest(req, env.peer, { requireOrigin: req.method !== 'GET' })
   const bad = () => reply({ ok: false, code: 'bad-request', sentence: vaultLang() === 'pt' ? 'Requisição inválida.' : 'Bad request.' })
 
   if (path === '/api/vault' && req.method === 'GET') {
     // The inventory only after a step-up (`list`); the state alone is always readable.
     const s = await vaultStatus()
-    if (s.state !== 'open') return new Response(JSON.stringify({ ...(await readVaultView([], async () => [], session)), locked: true }), { headers: noStore })
+    if (s.state !== 'open') return send({ ...(await readVaultView([], async () => [], session, loopback)), locked: true }, 200, noStore)
     const g = await gate.requireVaultStepUp('list', { grant, session })
     if (!g.ok) {
-      return new Response(JSON.stringify({
+      return send({
         needsStepUp: true, code: g.code, sentence: g.sentence, state: s.state, lockedBy: s.lockedBy ?? null,
         // What the screen needs to draw the step-up prompt itself — facts only, never an inventory.
-        view: { ...(await readVaultView([], async () => [], session)), locked: false },
-      }), { status: statusOf(g.code), headers: noStore })
+        view: { ...(await readVaultView([], async () => [], session, loopback)), locked: false },
+      }, statusOf(g.code), noStore)
     }
-    return new Response(JSON.stringify(await readVaultView(undefined, undefined, session)), { headers: noStore })
+    return send({ ...(await readVaultView(undefined, undefined, session, loopback)) }, 200, noStore)
   }
   if (path === '/api/vault/stepup' && req.method === 'POST') {
     const b = await body()
@@ -107,7 +145,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
     const r = await lockVaultNow({ grant, session, code: codeOf(b) })
-    return new Response(JSON.stringify(r.ok ? { ok: true, vault: await readVaultView([], async () => []) } : { error: r.error, code: r.code, sentence: r.error }), { status: r.ok ? 200 : statusOf(r.code), headers: noStore })
+    return send(r.ok ? { ok: true, vault: await readVaultView([], async () => []) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
   }
   if (path === '/api/vault/unlock' && req.method === 'POST') {
     // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2).
@@ -131,7 +169,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/activity' && req.method === 'POST') {
     // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
     noteVaultActivity()
-    return new Response(JSON.stringify({ ok: true }), { headers: noStore })
+    return send({ ok: true }, 200, noStore)
   }
 
   // ── SECRETS.4 §7.1: the enrolment wizard and the sections' actions ────────────────────────────
@@ -141,13 +179,13 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // gesture, and the proof is held for this session for the rest of the wizard.
     const b = await body()
     if (!str(b.setupCode, 16)) return bad()
-    return reply(await gate.acceptSetupCode({ session, setupCode: b.setupCode }))
+    return reply(await gate.acceptSetupCode({ session, loopback, setupCode: b.setupCode }))
   }
   if (path === '/api/vault/authenticator/begin' && req.method === 'POST') {
     // Re-enrolment is gated by the OLD code inside `beginAuthenticator`; the URI is served once.
     const b = await body()
     const label = typeof b.label === 'string' && /^[\w .@-]{1,64}$/.test(b.label) ? b.label : (hostname().replace(/[^\w.-]/g, '') || 'this machine').slice(0, 64)
-    const r = await gate.beginAuthenticator({ code: codeOf(b), session, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) }, label)
+    const r = await gate.beginAuthenticator({ code: codeOf(b), session, loopback, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) }, label)
     return reply(r.ok ? { ok: true, uri: r.uri, secret: r.secret } : r)
   }
   if (path === '/api/vault/authenticator/confirm' && req.method === 'POST') {
@@ -160,7 +198,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/recovery/begin' && req.method === 'POST') {
     // The FIRST recovery key needs only the open vault; a rotation is gated (code + gesture).
     const b = await body()
-    const r = await gate.beginRecoveryKey({ code: codeOf(b), session, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) })
+    const r = await gate.beginRecoveryKey({ code: codeOf(b), session, loopback, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) })
     return reply(r.ok ? { ok: true, words: r.words, positions: r.positions } : r)
   }
   if (path === '/api/vault/recovery/confirm' && req.method === 'POST') {
@@ -169,39 +207,45 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return reply(await gate.confirmRecoveryKey(b.typed as string[], { session }))
   }
   if (path === '/api/vault/recover' && req.method === 'POST') {
-    // §4.3: the 24 words are typed on a terminal, never into a web form. The page hands off.
-    await req.body?.cancel().catch(() => {})
-    return reply({
-      ok: false, code: 'recover-tty-only',
-      sentence: vaultLang() === 'pt'
-        ? 'A chave de recuperação é digitada só em um terminal, nesta máquina: rode `agentop vault recover`. Ela nunca é digitada em uma página.'
-        : 'The recovery key is typed only on a terminal, on this machine: run `agentop vault recover`. It is never typed into a page.',
-    })
+    // v2.98.1: the 24 words from a page ON this computer only. Refused BEFORE the body is read when the
+    // request is not loopback, so the words never even reach this process from the network. They are
+    // never logged and never echoed; their entropy is zeroed inside recoverWithWords.
+    if (!loopback) { await req.body?.cancel().catch(() => {}); return reply(await gate.recoverFromPage('', { session, loopback })) }
+    const b = await body()
+    if (!str(b.words, 400)) return bad()
+    const r = await gate.recoverFromPage(b.words, { session, loopback })
+    b.words = ''
+    return reply(r.ok ? { ok: true, todo: r.todo } : r)
+  }
+  if (path === '/api/vault/local-proof' && req.method === 'POST') {
+    const r = await gate.proveLocalHuman({ session, loopback })
+    return reply(r.ok ? { ok: true, kind: r.kind } : r)
   }
   if (path === '/api/vault/presence/probe' && req.method === 'POST') {
     const b = await body()
     if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
-    return reply(await gate.probePresence(b.protector, { code: codeOf(b), session }))
+    return reply(await gate.probePresence(b.protector, { code: codeOf(b), session, loopback }))
   }
   if (path === '/api/vault/presence/progress' && req.method === 'GET') {
     // Polled by the page while its probe / enrolment request is in flight: "confirmation i of n".
-    return new Response(JSON.stringify({ ok: true, progress: gate.gestureProgress({ session }) }), { headers: noStore })
+    return send({ ok: true, progress: gate.gestureProgress({ session }) }, 200, noStore)
   }
   if (path === '/api/vault/presence/enroll' && req.method === 'POST') {
     const b = await body()
     if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
     // The 24 words are never accepted here; a page may only choose NEW words (leader decision 2).
-    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session, ...(b.replaceRecovery === true ? { replaceRecovery: true } : {}) })
+    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session, loopback, ...(b.replaceRecovery === true ? { replaceRecovery: true } : {}) })
     return reply(r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed, ...('held' in r && r.held ? { held: true } : {}) } : r)
   }
   if (path === '/api/vault/presence/disable' && req.method === 'POST') {
-    // Never takes the 24 words: on the owner's machine it refuses and points at the terminal verb.
     const b = await body()
-    const r = await gate.disablePresence({ code: codeOf(b), session })
+    // v2.98.1: the main machine's 24 words may come from a page ON this computer (never from elsewhere).
+    const words = loopback && str(b.words, 400) ? b.words : undefined
+    const r = await gate.disablePresence({ code: codeOf(b), session, loopback }, words)
     return reply(r.ok ? { ok: true, replacedBy: r.replacedBy } : r)
   }
   if (path === '/api/vault/credentials' && req.method === 'GET') {
-    const r = await gate.listCredentials({ grant, session })
+    const r = await gate.listCredentials({ grant, session, loopback })
     return reply(r)
   }
   return null

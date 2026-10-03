@@ -11,10 +11,10 @@ import { basename } from 'node:path'
 import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, stepUpState, unlockPolicyView, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
-  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
+  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
   type LockedBy, type RecoveryStep, type VaultState,
 } from './service'
 
@@ -71,6 +71,15 @@ export interface VaultView {
    * real terminal. `owed` is false once this session has spent one.
    */
   setupCode: { owed: boolean; command: string; where: string }
+  /**
+   * v2.98.1: is THIS page open on this computer (loopback — http.ts `loopbackRequest`)? Only then does
+   * the page offer the local gesture in place of the setup code, and the recovery with the 24 words.
+   */
+  loopback: boolean
+  /** v2.98.1: the presence kind whose ONE gesture can stand for the setup code here, or null. */
+  localProofKind: string | null
+  /** v2.98.1: presence kinds this platform has but this build does not offer yet ("coming soon"). */
+  presenceSoon: string[]
   /** How many prompts the device check / the enrolment raise (presence.ts `PRESENCE_GESTURES`) — the page states these numbers, never its own. */
   gestures: { probe: number; enroll: number }
   /** Owner decision 2026-10-02: what an unlock asks besides the gesture, and whether the NEXT one owes the code. */
@@ -93,7 +102,7 @@ export function kindOfPendingFile(file: string): VaultItem['kind'] {
 }
 
 /** `files` / `pendingFiles` are seams for tests; production reads the host's own lists. */
-export async function readVaultView(files: string[] = sealedFiles(), pendingFiles?: () => Promise<string[]>, session = ''): Promise<VaultView> {
+export async function readVaultView(files: string[] = sealedFiles(), pendingFiles?: () => Promise<string[]>, session = '', loopback = false): Promise<VaultView> {
   const s = await vaultStatus()
   let createdAt: string | null = null
   let kid = s.kid
@@ -143,10 +152,13 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
     unlockPolicy: unlockPolicyView(stored),
     setupCode: {
-      owed: setupCodeOwed(Boolean(stored?.stepup), { session }),
+      owed: setupCodeOwed(Boolean(stored?.stepup), { session, loopback }),
       command: setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR),
       where: setupCodeWhere(vaultLang()),
     },
+    loopback,
+    localProofKind: loopback ? localProofKind() : null,
+    presenceSoon: presenceSoon(),
     hardening: s.hardening ? { state: s.hardening.state, private: s.hardening.private, coreDumps: s.hardening.coreDumps, yama: s.hardening.yama, lines: hardeningLines(s.hardening, vaultLang()) } : null,
   }
 }

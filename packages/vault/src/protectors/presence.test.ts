@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import { helloProtector, HELLO_ARGS, HELLO_FILE, HELLO_SCRIPT, helloCredentialName } from './hello'
 import { fido2Protector, FIDO2_FILE, WEBAUTHN_ARGS, WEBAUTHN_SCRIPT, WEBAUTHN_BRIDGE_VERIFIED, cliFailure } from './fido2'
 import { WSL_INTEROP, WSL_POWERSHELL } from './dpapi'
-import { presenceCode, presenceSentence, kindOf, deriveKek, sealDek, openDek } from './presence'
+import { presenceCode, presenceSentence, presenceDetailWords, PRESENCE_DETAILS, kindOf, deriveKek, sealDek, openDek } from './presence'
 import { bytes, text, type ProtectorIo, type RunResult, type WrapperRecord } from './types'
 
 interface Call { cmd: string; args: readonly string[]; stdin: string }
@@ -187,7 +187,49 @@ describe('sentences', () => {
       expect(presenceSentence(c, 'en', 'Windows Hello', `${c}: why`)).toContain('Windows Hello')
       expect(presenceSentence(c, 'pt', 'o Windows Hello', 'why')).toContain('o Windows Hello')
     }
-    expect(presenceSentence('presence-lost', 'en', 'your security key', 'presence-lost: gone')).toContain('(gone)')
+    expect(presenceSentence('presence-lost', 'en', 'your security key', 'presence-lost: credential-deleted')).toContain('(the credential was deleted)')
+  })
+
+  // v2.98.1: the owner's Portuguese screen quoted an internal English sentence verbatim.
+  it('never repeats a reason that is not one of the closed keys — in either language', () => {
+    const raw = 'the Windows security-key bridge (webauthn.dll) is not verified on real hardware yet'
+    for (const c of ['presence-cancelled', 'presence-timeout', 'presence-unavailable', 'presence-lost'] as const) {
+      for (const lang of ['en', 'pt'] as const) {
+        const s = presenceSentence(c, lang, 'X', `${c}: ${raw}`)
+        expect(s).not.toContain('webauthn')
+        expect(s).not.toContain('not verified')
+      }
+    }
+    expect(presenceSentence('presence-unavailable', 'pt', 'X', 'presence-unavailable')).not.toContain('()')
+  })
+
+  it('every closed key has en + pt words, and the PT words are not the EN ones', () => {
+    for (const k of PRESENCE_DETAILS) {
+      const en = presenceDetailWords(k, 'en'), pt = presenceDetailWords(k, 'pt')
+      expect(en.length, k).toBeGreaterThan(0)
+      expect(pt, k).not.toBe(en)
+    }
+    expect(presenceDetailWords('presence-unavailable: something English', 'pt')).toBe(presenceDetailWords('bridge-failed', 'pt'))
+  })
+
+  /**
+   * THE LINT (v2.98.1): every reason a presence protector produces is a closed KEY. A literal written
+   * into a `reason:` / `presenceReason(…)` in hello.ts or fido2.ts that is not one fails here, before
+   * it can reach a page.
+   */
+  it('hello.ts and fido2.ts produce only closed reason keys', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const { join } = require('node:path') as typeof import('node:path')
+    const allowed = new Set<string>([...PRESENCE_DETAILS, ''])
+    for (const f of ['hello.ts', 'fido2.ts']) {
+      const src = readFileSync(join(import.meta.dir, f), 'utf8')
+      const lits = [...src.matchAll(/presenceReason\('presence-[a-z]+',\s*(['"`])([^'"`]*)\1\)/g)].map(m => m[2]!)
+        .concat([...src.matchAll(/\breason:\s*(['"`])([^'"`]*)\1/g)].map(m => m[2]!))
+        .concat([...src.matchAll(/reason:\s*o\.wsl\s*\?\s*'([^']*)'\s*:\s*'([^']*)'/g)].flatMap(m => [m[1]!, m[2]!]))
+      expect(lits.length, f).toBeGreaterThan(3)
+      for (const l of lits) expect(allowed.has(l), `${f}: "${l}"`).toBe(true)
+      expect(src, f).not.toMatch(/reason:\s*`/) // no template-built reason
+    }
   })
 })
 
@@ -239,7 +281,8 @@ describe('fido2 (libfido2 CLIs)', () => {
 
   it('missing tools say how to install them; no key plugged in is unavailable', async () => {
     const a = await fido2Protector({ io: fakeIo(() => ok()).io, vaultDir: '/v', transport: 'cli' }).probe()
-    expect(!a.ok && a.reason).toContain('apt install fido2-tools')
+    expect(!a.ok && a.reason).toBe('presence-unavailable: fido2-tools-missing')
+    expect(presenceSentence('presence-unavailable', 'en', 'your security key', !a.ok ? a.reason : '')).toContain('fido2-tools')
     const b = await fido2Protector({ io: fakeIo(cliMachine({ devices: false }).answer, { exists: TOOLS }).io, vaultDir: '/v', transport: 'cli' }).probe()
     expect(!b.ok && presenceCode(b.reason)).toBe('presence-unavailable')
   })
@@ -305,7 +348,7 @@ describe('fido2 (webauthn.dll bridge, Windows / WSL)', () => {
     const p = fido2Protector({ io, vaultDir: '/v', transport: 'webauthn', wsl: true })
     const w = await p.wrap(DEK, 'k1')
     expect(!w.ok && presenceCode(w.reason)).toBe('presence-unavailable')
-    expect(!w.ok && w.reason).toContain('not verified')
+    expect(!w.ok && w.reason).toBe('presence-unavailable: bridge-unverified')
     expect((await p.probe()).ok).toBe(false)
     expect(calls).toHaveLength(0)
   })
