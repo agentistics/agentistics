@@ -36,6 +36,8 @@ export interface WizardHarness {
    */
   modelFreeText?: boolean
   supportsModel: boolean
+  /** A model must be chosen (the native harness: the engine has no default model to fall back on). */
+  modelRequired?: boolean
   efforts: string[]
   /** What the CLI itself publishes as its default, where it publishes one. See `unsetAnswer`. */
   defaultModel?: string
@@ -62,7 +64,7 @@ export interface WizardDraft {
 }
 
 /** What a blocked step is waiting for. A closed set: the footer owns a sentence for each. */
-export type MissingAnswer = 'assistant' | 'title' | 'cwd'
+export type MissingAnswer = 'assistant' | 'model' | 'title' | 'cwd'
 
 export interface StepState {
   ok: boolean
@@ -84,6 +86,7 @@ export function stepReady(step: StepId, draft: WizardDraft, harness: WizardHarne
   switch (step) {
     case 'assistant':
       if (!harness || draft.harness === '') return { ok: false, missing: 'assistant' }
+      if (harness.modelRequired && draft.model.trim() === '') return { ok: false, missing: 'model' }
       // Trimmed: a title of spaces is a title nobody can search for, and it would pass a bare
       // emptiness test while reading as blank everywhere it is drawn.
       return draft.label.trim() !== '' ? { ok: true } : { ok: false, missing: 'title' }
@@ -162,6 +165,8 @@ export interface HarnessAnswer {
   /** Where `models` came from — see `WizardHarness.modelFreeText`. Absent on an older server. */
   modelFreeText?: boolean
   supportsModel: boolean
+  /** A model must be chosen — the native harness (`nativeSession.ts`). */
+  modelRequired?: boolean
   efforts: string[]
   /** What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it. */
   defaultModel?: string
@@ -185,6 +190,7 @@ export function toWizardHarness(h: HarnessAnswer): WizardHarness {
     models: h.models ?? h.modelSuggestions.map(m => ({ id: m, label: m })),
     ...(h.modelFreeText ? { modelFreeText: true } : {}),
     supportsModel: h.supportsModel,
+    ...(h.modelRequired ? { modelRequired: true } : {}),
     efforts: h.efforts,
     ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}),
     ...(h.defaultEffort ? { defaultEffort: h.defaultEffort } : {}),

@@ -34,6 +34,9 @@ import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
 import { HARNESS_LABELS } from '../../lib/harness'
+import { useEngineCaps } from '../../hooks/useEngineCaps'
+import { useNativeProviders } from '../../hooks/useNativeProviders'
+import { CREATE_URL, NATIVE_HARNESS_ID, createBody, messagesUrl, refusalSentence, withNativeHarness } from '../../lib/nativeSession'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { HarnessMark } from './HarnessMark'
 import { TaskPicker } from '../tasks/TaskPicker'
@@ -120,7 +123,24 @@ export function NewSessionModal({
   // The wizard's own data source — harnesses, matching projects, and the search that drives them
   // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
   // see `useFleetNewOptions`'s own header.
-  const { harnesses, projects, projectTotals, query, setQuery, searching, unavailable } = useFleetNewOptions(lang)
+  const { harnesses: fleetHarnesses, projects, projectTotals, query, setQuery, searching, unavailable } = useFleetNewOptions(lang)
+  /**
+   * The NATIVE harness (UI.2): offered only when the loaded engine provides the native runtime
+   * (`GET /api/engine` — a community build has none). Its model list is the chosen PROVIDER's, so the
+   * provider is its own answer on the first step; see `lib/nativeSession.ts`.
+   */
+  const { nativeRuntime } = useEngineCaps()
+  const [nativeProvider, setNativeProvider] = useState('')
+  const [providerOpen, setProviderOpen] = useState(false)
+  const nativeOptions = useNativeProviders(nativeRuntime === true, nativeProvider, lang)
+  const harnesses = useMemo(
+    () => withNativeHarness(fleetHarnesses, nativeRuntime === true, nativeOptions.models),
+    [fleetHarnesses, nativeRuntime, nativeOptions.models],
+  )
+  useEffect(() => {
+    const first = nativeOptions.providers?.[0]
+    if (first && nativeProvider === '') setNativeProvider(first.id)
+  }, [nativeOptions.providers, nativeProvider])
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
@@ -231,7 +251,14 @@ export function NewSessionModal({
 
   /** The selected assistant in the pure module's shape. One mapping, read by everything below —
    *  see `toWizardHarness`, shared with `StagedSessionCompose`. */
-  const wizardHarness: WizardHarness | null = useMemo(() => harness ? toWizardHarness(harness) : null, [harness])
+  const isNative = harness?.id === NATIVE_HARNESS_ID
+  // The native entry is rebuilt whenever its provider's models arrive; the CURRENT one is read from
+  // the list, so a selection made before the models landed still sees them.
+  const current = useMemo(
+    () => (isNative ? harnesses?.find(h => h.id === NATIVE_HARNESS_ID) ?? harness : harness),
+    [isNative, harnesses, harness],
+  )
+  const wizardHarness: WizardHarness | null = useMemo(() => current ? toWizardHarness(current) : null, [current])
 
   /**
    * The answers so far. Rebuilt each render rather than held as state: one source for each answer,
@@ -252,7 +279,9 @@ export function NewSessionModal({
   // What survives a change of assistant: a model or an effort the NEW assistant also names is KEPT,
   // and anything it cannot accept is dropped rather than sent as a flag the CLI rejects at spawn.
   useEffect(() => {
-    setModel(m => (wizardHarness && wizardHarness.models.some(x => x.id === m)) ? m : '')
+    // The native harness takes a typed id (its provider's list is only what the endpoint publishes),
+    // so a typed model survives its list arriving.
+    setModel(m => (wizardHarness && (wizardHarness.models.some(x => x.id === m) || (wizardHarness.id === NATIVE_HARNESS_ID && wizardHarness.modelFreeText))) ? m : '')
     setEffort(e => (wizardHarness && wizardHarness.efforts.includes(e)) ? e : '')
   }, [wizardHarness])
 
@@ -269,6 +298,7 @@ export function NewSessionModal({
    */
   const BLOCKED_BECAUSE: Record<MissingAnswer, string> = {
     assistant: pt ? 'Escolha um assistente para continuar.' : 'Pick an assistant to continue.',
+    model: pt ? 'Escolha um modelo para continuar.' : 'Pick a model to continue.',
     title: pt ? 'Dê um título à sessão para continuar.' : 'Give the session a title to continue.',
     cwd: pt ? 'Escolha uma pasta para continuar.' : 'Pick a folder to continue.',
   }
@@ -292,11 +322,12 @@ export function NewSessionModal({
       // Innermost first. Closing the whole wizard because a dropdown was open loses every answer
       // already given, over a keypress the user meant for the dropdown.
       if (modelOpen) setModelOpen(false)
+      else if (providerOpen) setProviderOpen(false)
       else onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, modelOpen])
+  }, [onClose, modelOpen, providerOpen])
 
   /**
    * Wait for the row to exist before handing the caller its id.
@@ -413,6 +444,7 @@ export function NewSessionModal({
           </span>
         ) : null
       } />
+      {isNative && <ReviewRow label={pt ? 'Provedor' : 'Provider'} value={nativeOptions.providers?.find(p => p.id === nativeProvider)?.label ?? (nativeProvider || null)} />}
       {visibleQuestions(wizardHarness).model && (() => {
         // The SAME pure rule the picker renders, so the review cannot name the choice differently
         // one step after it was made.
@@ -469,8 +501,46 @@ export function NewSessionModal({
    * The ordinary "Start session" button never passes it; only a prior memory-budget refusal on THIS
    * exact request offers the option at all.
    */
+  /**
+   * A NATIVE session (UI.2): created by the engine (`POST /api/runtime/sessions`) — no process, no
+   * tmux, so no fleet row to wait for — and the first message, when there is one, sent straight to
+   * it. Filing under a task is a fleet-session act and is not offered for a native one (see the
+   * "where" step). A refusal is the engine's own sentence (no stored key, the BETA flag off, …).
+   */
+  async function startNative() {
+    setBusy(true)
+    setNotice(null)
+    try {
+      const res = await fetch(CREATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createBody({ cwd, model, provider: nativeProvider, title: label })),
+      })
+      const json = await res.json().catch(() => null) as { session?: { sessionId: string } } | null
+      const id = json?.session?.sessionId
+      if (!res.ok || !id) {
+        setBusy(false)
+        setNotice(refusalSentence(json, res.status, lang))
+        return
+      }
+      if (promptWithAttachments) {
+        await fetch(messagesUrl(id), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientRef: `wizard-${Date.now()}`, text: promptWithAttachments }),
+        }).catch(() => null)
+      }
+      setBusy(false)
+      onStarted(id, { harness: NATIVE_HARNESS_ID, ...(label ? { label } : {}) })
+    } catch {
+      setBusy(false)
+      setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
+    }
+  }
+
   async function start(force = false) {
     if (!canStart) return
+    if (isNative) return startNative()
     setBusy(true)
     setNotice(null)
     try {
@@ -698,6 +768,22 @@ export function NewSessionModal({
             />
           </Field>
 
+          {isNative && (
+            <Field label={pt ? 'Provedor' : 'Provider'} hint={nativeOptions.unavailable ?? (pt
+              ? 'Onde o modelo roda, com a chave guardada nesta máquina.'
+              : 'Where the model runs, with the key stored on this machine.')}>
+              <ModelSelect
+                lang={lang}
+                open={providerOpen}
+                onOpenChange={setProviderOpen}
+                value={nativeProvider}
+                onChange={id => { setNativeProvider(id); setModel('') }}
+                options={nativeOptions.providers ?? []}
+                unsetLabel={nativeOptions.providers === null ? (pt ? 'Carregando…' : 'Loading…') : (pt ? 'Nenhum' : 'None')}
+              />
+            </Field>
+          )}
+
           {/* SKIPPED, not disabled, when the CLI has no such flag — see the header. Skipped for the
               same reason when the harness offers NO names: `modelSuggestions` is empty exactly
               where that CLI publishes no list of its own (see `spawn-spec.ts`), and a closed
@@ -778,6 +864,8 @@ export function NewSessionModal({
             * metrics split between the two and nothing on screen saying so. The row menu had
             * already been fixed this way; the form that files most sessions had not.
             */}
+          {/* Filing under a task is a fleet-session act; a native session is not filed (UI.2). */}
+          {!isNative && (<>
           <Field label={pt ? 'Tarefa (opcional)' : 'Task (optional)'} hint={pt
             ? 'Agrupa várias sessões como um trabalho só, e é o que permite reabrir todas de uma vez.'
             : 'Groups several sessions as one piece of work, and is what lets you reopen them all at once.'}>
@@ -837,6 +925,7 @@ export function NewSessionModal({
               onClose={() => setPickingTask(false)}
             />
           )}
+          </>)}
           </>)}
 
           {/* STEP 3 — WHAT. The first message, and the files it points at. */}
