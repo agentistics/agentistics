@@ -43,7 +43,8 @@ import { TaskProgressBar } from './TaskProgressBar'
 import { SubtaskSessions } from './SubtaskSessions'
 import { SessionPicker } from './SessionPicker'
 import { CommentsTab, Rollup, Stat } from './DeliveryDetail'
-import { subtaskRollupOf, subtaskStatsOf } from './subtaskRollup'
+import { effectiveTimes, subtaskRollupOf, subtaskStatsOf } from './subtaskRollup'
+import { DurationCellView } from './SubtaskDurationCell'
 import { isGroupSubtask } from './subtaskGroups'
 import {
   attachSession, detachSession, fmtDuration, patchSubtask, useTaskStatuses,
@@ -77,6 +78,8 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
   const rollup = subtaskRollupOf(p.detail.subtaskRollups, p.subtask)
   const stats = subtaskStatsOf(p.detail.subtaskRollups, p.subtask)
   const duration = stats ? fmtDuration(stats.deliveryMs) : null
+  // The sessions' own start/finish/active time win over the status stamps (task-times.ts).
+  const times = effectiveTimes(p.detail.subtaskRollups, p.subtask)
 
   // §F.1 supersedes §B's shared-bucket model: a MEMBER can never hold a session (refused
   // server-side, `subtask_in_group`), so this panel is only ever reached for a loose subtask or a
@@ -119,23 +122,29 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.started}</span>
             <span
-              title={p.subtask.startedAt ? fmtStamp(p.subtask.startedAt, p.lang) : undefined}
+              title={times.startedAt ? fmtStamp(times.startedAt, p.lang) : undefined}
               style={{
                 fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: p.subtask.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                color: times.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateTime(p.subtask.startedAt, p.lang, Date.now())}</span>
+            >{fmtDateTime(times.startedAt, p.lang, Date.now())}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
             <span
-              title={p.subtask.deliveredAt ? fmtStamp(p.subtask.deliveredAt, p.lang) : undefined}
+              title={times.completedAt ? fmtStamp(times.completedAt, p.lang) : undefined}
               style={{
                 fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: p.subtask.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                color: times.completedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateTime(p.subtask.deliveredAt, p.lang, Date.now())}</span>
+            >{fmtDateTime(times.completedAt, p.lang, Date.now())}</span>
           </span>
+          {(times.startedAt && times.completedAt) || times.activeMinutes !== null ? (
+            <span style={{ minWidth: 0 }}>
+              <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.duration}</span>
+              <DurationCellView startedAt={times.startedAt} deliveredAt={times.completedAt} activeMinutes={times.activeMinutes} lang={p.lang} />
+            </span>
+          ) : null}
         </div>
       </div>
 

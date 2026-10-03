@@ -269,7 +269,7 @@ export function backfillLine(p: import('./journal/backfill').BackfillProgress | 
   const written = ` · ${p.written.toLocaleString('en-US')} events written`
   switch (p.state) {
     case 'running': return `running${where}${written} (updated ${p.updatedAt})`
-    case 'paused': return `PAUSED — the memory gate refuses (${p.pausedReason ?? 'pressure'})${where}${written}; it resumes by itself`
+    case 'paused': return `PAUSED — memory pressure (${p.pausedReason === 'ram' ? 'RAM available under the reserve' : p.pausedReason === 'swap' ? 'swap over its alarm' : 'pressure'})${where}${written}; it resumes by itself`
     case 'interrupted': return `interrupted${where}${written} — it resumes on the next server start, or run \`agentop journal import\``
     case 'failed': return `failed: ${p.error ?? 'unknown error'} — run \`agentop journal import\` to see why`
     case 'done': return 'done, but for another journal file — it runs again for this one'

@@ -229,3 +229,56 @@ test('ticks that DIFFER mean the pid was reused — debris, whatever the wall cl
   const claim = await claimInstanceLock(file, 7777, probe)
   expect(claim.ok).toBe(true)
 })
+
+import { waitForInstanceLock } from './single-instance'
+
+test('waitForInstanceLock: a service start WAITS for the holder to let go, then claims (no outage after a refusal)', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const waits: number[] = []
+  setTimeout(() => { void first.release() }, 30)
+  const second = await waitForInstanceLock(file, { timeoutMs: 5_000, pollMs: 10, pid: 999_999_1, onWait: holder => { waits.push(holder ?? -1) } })
+  expect(second.ok).toBe(true)
+  expect(waits.length).toBe(1) // said once that it is waiting, not on every poll
+  if (second.ok) await second.release()
+})
+
+test('waitForInstanceLock: bounded — a holder that never lets go is still refused at the deadline', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const t0 = Date.now()
+  const second = await waitForInstanceLock(file, { timeoutMs: 60, pollMs: 10, pid: 999_999_2 })
+  expect(second.ok).toBe(false)
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
+  await first.release()
+})
+
+// The CLI's early check (`agentop server`, before anything loads) under the service manager: the
+// same bounded wait as index.ts's claim, so a unit start is not refused before that wait runs.
+import { waitForInstanceFree } from './single-instance'
+
+test('waitForInstanceFree: waits for the holder to let go, claims nothing, then answers free', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const waits: number[] = []
+  setTimeout(() => { void first.release() }, 30)
+  expect(await waitForInstanceFree(file, { timeoutMs: 5_000, pollMs: 10, onWait: h => { waits.push(h) } })).toBeNull()
+  expect(waits).toEqual([process.pid])
+  // A probe claims nothing: the data dir is still free for index.ts's claim.
+  const claim = await claimInstanceLock(file, 4242)
+  expect(claim.ok).toBe(true)
+  if (claim.ok) await claim.release()
+})
+
+test('waitForInstanceFree: bounded — a holder that never lets go is still reported at the deadline', async () => {
+  const file = await lockPath()
+  const first = await claimInstanceLock(file)
+  if (!first.ok) throw new Error('first claim failed')
+  const t0 = Date.now()
+  expect(await waitForInstanceFree(file, { timeoutMs: 60, pollMs: 10 })).toBe(process.pid)
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
+  await first.release()
+})

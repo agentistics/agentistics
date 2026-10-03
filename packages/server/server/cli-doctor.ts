@@ -38,6 +38,13 @@ function findEnvFile(): string | null {
 export async function runDoctor(argv: string[]): Promise<never> {
   const exposed = argv.includes('--exposed')
 
+  // WSL: a missing/stale logon entry means the distro (and agentop) is down until a terminal opens.
+  try {
+    const { repairWslAutostart } = await import('./autostart')
+    const line = await repairWslAutostart({ enableIfMissing: false })
+    if (line) process.stdout.write(`  ${line}\n`)
+  } catch { /* best-effort: the doctor's own checks must still run */ }
+
   const envPath = findEnvFile()
   // A split central.env keeps its secrets in the vault (vault/central-env.ts); the checks below
   // need to know they are SET, so they are read back in memory — never printed.

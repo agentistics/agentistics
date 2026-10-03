@@ -8,6 +8,10 @@
  */
 import type { EngineCommand, EngineStatus } from '@agentistics/engine-api'
 import { cliStrings, ENGINE_VERB_HELP, ENGINE_VERBS, type CliLang, type EngineVerb } from '../cli-i18n'
+import { EXPERIMENTAL_SENTENCE, nativeExperimentalOn } from '../native-gate'
+
+/** The verbs that belong to the native harness and the providers — experimental. */
+export const NATIVE_VERBS: readonly EngineVerb[] = ['code', 'provider']
 
 /** Exit code of a verb this build cannot run. Not 1 (a failure of the verb) — it never ran. */
 export const ENGINE_ABSENT_EXIT = 2
@@ -22,8 +26,13 @@ export function resolveEngineVerb(
   status: EngineStatus,
   commands: readonly EngineCommand[],
   lang: CliLang,
+  /** The native harness and providers may be used here (`native-gate.ts`, the experimental flag). */
+  nativeOn = true,
 ): { run: EngineCommand } | { refuse: string } {
   const s = cliStrings(lang)
+  // `code` and `provider` ARE the native harness and the providers: experimental (owner decision
+  // 2026-10-03), refused in one sentence naming the command that turns them on. `ingest` is not.
+  if (!nativeOn && NATIVE_VERBS.includes(verb)) return { refuse: EXPERIMENTAL_SENTENCE[lang] }
   if (!status.present) return { refuse: s.engineVerbAbsent(verb, status.reason) }
   const cmd = commands.find(c => c.verb === verb)
   return cmd ? { run: cmd } : { refuse: s.engineVerbNotProvided(verb) }
@@ -36,7 +45,10 @@ export async function runEngineVerb(verb: EngineVerb, args: string[], lang: CliL
   // `agentop code` with a terminal on both ends IS the control center's `code` tab (D-TUI-3) when the
   // engine offers one (1.8 `codeTab`); its line mode stays for a pipe, `ls`, `--help`. A refusal
   // (the flag off, a bad argument) is printed HERE, before the alternate screen is entered.
-  const codeTab = verb === 'code' ? engine()?.codeTab : undefined
+  // The native harness is EXPERIMENTAL (owner decision 2026-10-03): with the flag off, `code` is
+  // refused in one sentence before anything else — the tab included (`resolveEngineVerb` below).
+  const nativeOn = nativeExperimentalOn()
+  const codeTab = verb === 'code' && nativeOn ? engine()?.codeTab : undefined
   if (codeTab) {
     const decision = codeTab.launch(args, { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }, lang)
     if (decision.kind === 'refuse') {
@@ -53,7 +65,7 @@ export async function runEngineVerb(verb: EngineVerb, args: string[], lang: CliL
       return out === 'foreground' ? 0 : out
     }
   }
-  const decided = resolveEngineVerb(verb, engineStatus(), engine()?.commands ?? [], lang)
+  const decided = resolveEngineVerb(verb, engineStatus(), engine()?.commands ?? [], lang, nativeOn)
   if ('refuse' in decided) {
     console.error(decided.refuse)
     return ENGINE_ABSENT_EXIT

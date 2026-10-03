@@ -127,3 +127,23 @@ describe('LIVE C5 — the projection catch-up is single-flight, coalesced and bo
     closeRuntimeMetricsStore()
   })
 })
+
+describe('the native harness is experimental (owner, 2026-10-03)', () => {
+  const facts = [costFact({ costUSD: 2 }), costFact({ harness: 'agentistics', costUSD: 5, eventId: 'n1' } as never)]
+  it('off: its figures are left out of every answer; asking for it by name is a 403 "experimental"', async () => {
+    const url = new URL('http://x/api/runtime/metrics?groupBy=harness&metrics=cost')
+    const hidden = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: false })
+    expect(hidden.status).toBe(200)
+    const keys = (hidden.body as { groups: { key: { harness: string } }[] }).groups.map(g => g.key.harness)
+    expect(keys).toEqual(['claude'])
+    const named = new URL('http://x/api/runtime/metrics?harness=agentistics&metrics=cost')
+    const refused = await handleRuntimeMetricsRequest(new Request(named), named, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: false })
+    expect(refused).toMatchObject({ status: 403, body: { error: 'experimental' } })
+  })
+  it('on: shown as before', async () => {
+    const url = new URL('http://x/api/runtime/metrics?groupBy=harness&metrics=cost')
+    const out = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: true })
+    const keys = (out.body as { groups: { key: { harness: string } }[] }).groups.map(g => g.key.harness).sort()
+    expect(keys).toEqual(['agentistics', 'claude'])
+  })
+})

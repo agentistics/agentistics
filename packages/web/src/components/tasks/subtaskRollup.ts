@@ -112,3 +112,45 @@ export function costCaveat(r: AttemptRollup | undefined): string | undefined {
   if (!r || r.sessionsLinked >= r.sessionsUsed) return undefined
   return `cost covers ${r.sessionsLinked} of ${r.sessionsUsed} sessions`
 }
+
+/** What the Started / Completed / Duration cells show for one subtask. */
+export interface EffectiveTimes {
+  startedAt?: string
+  completedAt?: string
+  /** Minutes of ACTIVE work, from the union of its sessions; null when no session measured any. */
+  activeMinutes: number | null
+}
+
+/**
+ * The times a subtask row shows: the SESSIONS' (`SubtaskView.times`, computed on the server by
+ * `task-times.ts`) win, and the subtask's own status stamps are the fallback — for no linked
+ * session, or for a server too old to send `times`. The status stamps are never mixed with the
+ * sessions' ones: the server already made that choice per piece.
+ */
+export function effectiveTimes(
+  views: readonly SubtaskView[],
+  subtask: Pick<Subtask, 'id' | 'startedAt' | 'deliveredAt'>,
+): EffectiveTimes {
+  const t = views.find(v => v.id === rollupKeyOf(subtask))?.times
+  if (!t) {
+    return {
+      ...(subtask.startedAt ? { startedAt: subtask.startedAt } : {}),
+      ...(subtask.deliveredAt ? { completedAt: subtask.deliveredAt } : {}),
+      activeMinutes: null,
+    }
+  }
+  return {
+    ...(t.startedAt ? { startedAt: t.startedAt } : {}),
+    ...(t.completedAt ? { completedAt: t.completedAt } : {}),
+    activeMinutes: t.activeMinutes,
+  }
+}
+
+/** "ativo 42min" / "active 1h 5m" — the second figure beside the wall-clock duration. */
+export function fmtActive(minutes: number, lang: 'pt' | 'en'): string {
+  const total = Math.round(minutes)
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  const body = h === 0 ? (lang === 'pt' ? `${m}min` : `${m}m`) : m === 0 ? `${h}h` : lang === 'pt' ? `${h}h ${m}min` : `${h}h ${m}m`
+  return lang === 'pt' ? `ativo ${body}` : `active ${body}`
+}

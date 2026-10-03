@@ -282,6 +282,15 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
+    // H17: a native session's own state change, into the `agentop events` channel and its desktop
+    // delivery — the same inbox and notifier the fleet's poll uses. Fire-and-forget, never throws.
+    events: {
+      nativeSession: e => {
+        void import('../events/native')
+          .then(async m => m.recordNativeEvent(e, await m.liveNativeEventDeps()))
+          .catch(() => {})
+      },
+    },
     lang: () => lang,
     // Filing a native session on the board: the ONE write into a public store an engine makes
     // (engine-interface spec §4.6), judged by the board exactly like a fleet session's filing.

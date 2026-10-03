@@ -49,6 +49,7 @@ import { BlockedDialog } from './BlockedDialog'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { RailSection } from './RailSection'
 import { StatusChip } from './StatusChip'
+import { DurationCellView } from './SubtaskDurationCell'
 import { SubtaskTable } from './SubtaskTable'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
 import { useStagedFire } from './useStagedFire'
@@ -61,7 +62,7 @@ import {
   deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration,
   markTask, patchSubtask, removeComment, removeLink, removeSubtask, saveStagedSession, setBlockedBy,
   uploadFile, useTaskActivity, useTaskDetail, useTaskList, useTaskStatuses,
-  type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskFieldPatch,
+  type AttemptRollup, type AttemptView, type PieceTimes, type Subtask, type TaskDetail, type TaskFieldPatch,
   type TaskFile, type TaskListRow, type TaskRecord, type TaskStatus,
 } from '../../lib/tasks'
 
@@ -123,8 +124,10 @@ function ActivityTab({ id }: { id: string }) {
 /** `startedAt`/`deliveredAt` are system facts, not a date somebody typed — see their own note on
  *  `Task.startedAt` — so they are read as a full moment (date AND time), the same way the activity
  *  log already reads `TaskEvent.at`, never as a bare `yyyy-MM-dd` day. */
-function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
+function PlanCard({ task, times, busy, lang, statuses, onPatch, onStatus }: {
   task: TaskRecord
+  /** Session-derived times (`TaskDetail.times`); absent from an older server, then the stamps answer. */
+  times?: PieceTimes
   busy: boolean
   onPatch: (patch: TaskFieldPatch) => void | Promise<void>
   lang: 'pt' | 'en'
@@ -133,6 +136,8 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
   onStatus: (s: TaskStatus) => void | Promise<void>
 }) {
   const copy = boardCopy(lang)
+  const startedAt = times ? times.startedAt ?? undefined : task.startedAt
+  const completedAt = times ? times.completedAt ?? undefined : task.deliveredAt
 
   return (
     <div style={{ ...surface, padding: 14, display: 'grid', gap: 11 }}>
@@ -182,23 +187,29 @@ function PlanCard({ task, busy, lang, statuses, onPatch, onStatus }: {
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.started}</span>
             <span
-              title={task.startedAt ? fmtStamp(task.startedAt, lang) : undefined}
+              title={startedAt ? fmtStamp(startedAt, lang) : undefined}
               style={{
                 fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: task.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                color: startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateTime(task.startedAt, lang, Date.now())}</span>
+            >{fmtDateTime(startedAt, lang, Date.now())}</span>
           </span>
           <span style={{ minWidth: 0 }}>
             <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
             <span
-              title={task.deliveredAt ? fmtStamp(task.deliveredAt, lang) : undefined}
+              title={completedAt ? fmtStamp(completedAt, lang) : undefined}
               style={{
                 fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: task.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                color: completedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
               }}
-            >{fmtDateTime(task.deliveredAt, lang, Date.now())}</span>
+            >{fmtDateTime(completedAt, lang, Date.now())}</span>
           </span>
+          {(startedAt && completedAt) || (times && times.activeMinutes !== null) ? (
+            <span style={{ minWidth: 0 }}>
+              <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.duration}</span>
+              <DurationCellView startedAt={startedAt} deliveredAt={completedAt} activeMinutes={times?.activeMinutes ?? null} lang={lang} />
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -1450,6 +1461,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
         <aside style={{ display: 'grid', gap: 10, minWidth: 0 }}>
           <PlanCard
             task={detail.task}
+            {...(detail.times ? { times: detail.times } : {})}
             busy={busy}
             lang={lang}
             statuses={statuses}

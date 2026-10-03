@@ -66,6 +66,8 @@
  * Also (INV.1): `invocationCache` (optional) — the host's held answers by deterministic invocation id,
  * asked before a resumed run re-sends a model call; a hit is journaled `model.completed {replayed}`.
  * Absent on every host today, and then every call is simply made.
+ * Also (H17): `events.nativeSession` (optional) — a native session's own state change (asked the
+ * person / a run ended / a run started) into the host's event channel and its desktop delivery.
  */
 /**
  * 1.8.0 — the control center's `code` tab joins the contract (`code.ts`): `Engine.codeTab` decides

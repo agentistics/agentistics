@@ -18,9 +18,12 @@ import { isNativeSessionId } from './sessionRoute'
 import { stepReady, toWizardHarness, type WizardDraft } from './wizardSteps'
 
 describe('nativeRuntimeFrom — the engine gate (GET /api/engine)', () => {
-  test('only a present engine that provides the native runtime opens it', () => {
-    expect(nativeRuntimeFrom({ present: true, manifest: { provides: { nativeRuntime: true } } })).toBe(true)
-    expect(nativeRuntimeFrom({ present: true, manifest: { provides: { nativeRuntime: false } } })).toBe(false)
+  test('only a present engine that provides the native runtime, with the experimental flag on, opens it', () => {
+    expect(nativeRuntimeFrom({ present: true, nativeExperimental: true, manifest: { provides: { nativeRuntime: true } } })).toBe(true)
+    // v2.101.0's answer (no flag field): hidden — the native harness is experimental.
+    expect(nativeRuntimeFrom({ present: true, manifest: { provides: { nativeRuntime: true } } })).toBe(false)
+    expect(nativeRuntimeFrom({ present: true, nativeExperimental: false, manifest: { provides: { nativeRuntime: true } } })).toBe(false)
+    expect(nativeRuntimeFrom({ present: true, nativeExperimental: true, manifest: { provides: { nativeRuntime: false } } })).toBe(false)
     expect(nativeRuntimeFrom({ present: false, reason: 'community-build' })).toBe(false)
     expect(nativeRuntimeFrom(null)).toBe(false)
     expect(nativeRuntimeFrom('garbage')).toBe(false)

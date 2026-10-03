@@ -15,7 +15,7 @@ import { DurationCellView } from './SubtaskDurationCell'
 import { SubtaskSessions } from './SubtaskSessions'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { ModelCellView } from './SubtaskModelCell'
-import { costCellFor, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
+import { costCellFor, effectiveTimes, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
 import type { Money } from './money'
 import type { Lang } from './copy'
 import type { Subtask, SubtaskView, TaskSessionRow } from '../../lib/tasks'
@@ -45,29 +45,30 @@ export function subtaskColumnCell(
   ctx: SubtaskColumnContext,
 ): React.ReactNode {
   const t = ctx.subtask
+  const times = effectiveTimes(ctx.subtaskRollups, t)
   switch (col) {
     case 'started':
       return (
         <span
-          title={t.startedAt ? fmtStamp(t.startedAt, ctx.lang) : undefined}
+          title={times.startedAt ? fmtStamp(times.startedAt, ctx.lang) : undefined}
           style={{
             fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-            color: t.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+            color: times.startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
           }}
-        >{fmtDateTime(t.startedAt, ctx.lang, ctx.nowMs)}</span>
+        >{fmtDateTime(times.startedAt, ctx.lang, ctx.nowMs)}</span>
       )
     case 'completed':
       return (
         <span
-          title={t.deliveredAt ? fmtStamp(t.deliveredAt, ctx.lang) : undefined}
+          title={times.completedAt ? fmtStamp(times.completedAt, ctx.lang) : undefined}
           style={{
             fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-            color: t.deliveredAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+            color: times.completedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
           }}
-        >{fmtDateTime(t.deliveredAt, ctx.lang, ctx.nowMs)}</span>
+        >{fmtDateTime(times.completedAt, ctx.lang, ctx.nowMs)}</span>
       )
     case 'duration':
-      return <DurationCellView startedAt={t.startedAt} deliveredAt={t.deliveredAt} lang={ctx.lang} />
+      return <DurationCellView startedAt={times.startedAt} deliveredAt={times.completedAt} activeMinutes={times.activeMinutes} lang={ctx.lang} />
     case 'sessions':
       return ctx.isMember ? null : (
         <SubtaskSessions

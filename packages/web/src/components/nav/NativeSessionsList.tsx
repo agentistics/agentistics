@@ -1,39 +1,20 @@
 /**
  * NativeSessionsList — the NATIVE Agentistics sessions in the sessions aside (UI.3): a way back to
  * one after leaving it. A native session is not a fleet row (no process, no tmux), so the fleet's
- * own list never shows it; this reads the engine's list (`GET /api/runtime/sessions`) instead, only
- * where the engine provides the native runtime, and renders nothing when there are none.
+ * own list never shows it; the aside reads the engine's list (`useNativeSessionRows`) — once, so its
+ * summary line counts the same rows (H17) — and hands them here. Renders nothing when there are none.
  */
-import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { HarnessMark } from '../sessions/HarnessMark'
-import { useEngineCaps } from '../../hooks/useEngineCaps'
-import { CREATE_URL, NATIVE_HARNESS_ID, NATIVE_HARNESS_LABEL } from '../../lib/nativeSession'
+import { NATIVE_HARNESS_ID, NATIVE_HARNESS_LABEL } from '../../lib/nativeSession'
 import { sessionPath } from '../../lib/sessionRoute'
+import type { NativeSessionRow } from '../../hooks/useNativeSessionRows'
 
-interface Row { sessionId: string; title?: string; model: string; status: string; updatedAt: string }
-
-const REFRESH_MS = 15_000
-
-export function NativeSessionsList({ lang, activeId, tap }: { lang: 'pt' | 'en'; activeId?: string; tap?: number }) {
+export function NativeSessionsList({ lang, rows, activeId, tap }: { lang: 'pt' | 'en'; rows: readonly NativeSessionRow[]; activeId?: string; tap?: number }) {
   const pt = lang === 'pt'
-  const { nativeRuntime } = useEngineCaps()
   const navigate = useNavigate()
-  const [rows, setRows] = useState<Row[]>([])
 
-  useEffect(() => {
-    if (nativeRuntime !== true) return
-    let live = true
-    const read = () => fetch(`${CREATE_URL}?limit=20`)
-      .then(r => (r.ok ? r.json() : null))
-      .then((b: { sessions?: Row[] } | null) => { if (live && b?.sessions) setRows(b.sessions) })
-      .catch(() => {})
-    void read()
-    const t = setInterval(read, REFRESH_MS)
-    return () => { live = false; clearInterval(t) }
-  }, [nativeRuntime, activeId])
-
-  if (nativeRuntime !== true || rows.length === 0) return null
+  if (rows.length === 0) return null
   return (
     <div data-testid="native-sessions" style={{ marginBottom: 14 }}>
       <div style={{ padding: '6px 2px 6px 9px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)' }}>

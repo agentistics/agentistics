@@ -132,6 +132,19 @@ describe('the engine verbs at the command line', () => {
     expect(ENGINE_ABSENT_EXIT).toBe(2)
   })
 
+  it('the native harness and providers are experimental: `code` and `provider` refuse with the flag off, `ingest` does not', () => {
+    const present = { present: true } as never
+    const cmds = [{ verb: 'code', run: async () => 0 }, { verb: 'provider', run: async () => 0 }, { verb: 'ingest', run: async () => 0 }] as never
+    for (const verb of ['code', 'provider'] as const) {
+      const en = resolveEngineVerb(verb, present, cmds, 'en', false)
+      expect('refuse' in en && en.refuse).toContain('agentop experimental enable')
+      const pt = resolveEngineVerb(verb, present, cmds, 'pt', false)
+      expect('refuse' in pt && pt.refuse).toContain('experimentais')
+      expect('run' in resolveEngineVerb(verb, present, cmds, 'en', true)).toBe(true)
+    }
+    expect('run' in resolveEngineVerb('ingest', present, cmds, 'en', false)).toBe(true)
+  })
+
   it('each absent reason is a different sentence', () => {
     const reasons = ['community-build', 'disabled', 'api-mismatch', 'load-failed'] as const
     const said = reasons.map(reason => {

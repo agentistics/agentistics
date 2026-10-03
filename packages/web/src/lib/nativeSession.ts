@@ -23,11 +23,22 @@ import type { HarnessAnswer } from './wizardSteps'
 export const NATIVE_HARNESS_ID = 'agentistics'
 export const NATIVE_HARNESS_LABEL = 'Agentistics'
 
+/**
+ * Whether the native harness (and the providers) may be SHOWN: an engine that provides the native
+ * runtime AND the experimental flag on (`nativeExperimental` on `GET /api/engine`, the server's
+ * `native-gate.ts`; owner decision 2026-10-03). Either one missing hides every native surface.
+ */
 export function nativeRuntimeFrom(status: unknown): boolean {
   if (!status || typeof status !== 'object') return false
-  const s = status as { present?: unknown; manifest?: { provides?: { nativeRuntime?: unknown } } }
-  return s.present === true && s.manifest?.provides?.nativeRuntime === true
+  const s = status as { present?: unknown; nativeExperimental?: unknown; manifest?: { provides?: { nativeRuntime?: unknown } } }
+  return s.present === true && s.manifest?.provides?.nativeRuntime === true && s.nativeExperimental === true
 }
+
+/** The sentence every hidden native surface points to (the server's `EXPERIMENTAL_SENTENCE`). */
+export const NATIVE_EXPERIMENTAL_SENTENCE = {
+  en: 'The native Agentistics harness and model providers are experimental — turn them on with `agentop experimental enable`.',
+  pt: 'O harness nativo do Agentistics e os provedores de modelo são experimentais — ative com `agentop experimental enable`.',
+} as const
 
 export function nativeHarnessAnswer(models: { id: string; label: string }[]): HarnessAnswer {
   return {
@@ -70,6 +81,8 @@ export function configuredProviders(list: readonly { id: string; label: string; 
 const base = (id: string) => `/api/runtime/sessions/${encodeURIComponent(id)}`
 
 export const windowUrl = (id: string) => `${base(id)}/messages?limit=200`
+/** H6: one line per run (tokens, cost, cache share, the context gauge). */
+export const runsUrl = (id: string) => `${base(id)}/runs`
 export const messagesUrl = (id: string) => `${base(id)}/messages`
 export const streamUrl = (id: string, from?: number) => `${base(id)}/stream${from !== undefined ? `?from=${from}` : ''}`
 export const approveUrl = (id: string, execId: string) => `${base(id)}/tools/${encodeURIComponent(execId)}/approve`

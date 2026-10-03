@@ -7,6 +7,7 @@
  * written to have fixed once.
  */
 
+import { pieceTimes, spanOf, type PieceTimes, type SessionSpan } from './task-times'
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
 import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
 import type {
@@ -128,6 +129,8 @@ export interface TaskDetail {
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
+  /** The whole delivery's times, from every session under it (`task-times.ts`). */
+  times: PieceTimes
 }
 
 /**
@@ -311,6 +314,12 @@ export interface SubtaskView {
    * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md §C.5.
    */
   stats: TaskStats | null
+  /**
+   * When this piece started / finished and how long it was ACTIVE, read from its sessions
+   * (`task-times.ts`) — the status stamps answer only when no session is linked. A GROUP aggregates
+   * its members' own times, since a member never holds a session itself.
+   */
+  times: PieceTimes
 }
 
 /**
@@ -336,6 +345,50 @@ export interface SubtaskView {
  * `parentGroupId`) is bucketed by its own id, completely unaffected by any of this — exactly
  * today's pre-§B behaviour.
  */
+/** The spans of the conversations behind these rows — meta first, the registry row as the fallback. */
+function spansOfRows(rows: readonly BoardRow[], metas: ReadonlyMap<string, SessionMeta>): SessionSpan[] {
+  const out: SessionSpan[] = []
+  for (const r of rows) {
+    const m = r.conversationId ? metas.get(r.conversationId) : undefined
+    const span = spanOf({
+      ...(m?.start_time ? { metaStart: m.start_time } : {}),
+      ...(m?.end_time ? { metaEnd: m.end_time } : {}),
+      ...(typeof m?.active_minutes === 'number' ? { activeMin: m.active_minutes } : {}),
+      rowCreatedAt: r.createdAt,
+      ...(r.endedAt ? { rowEndedAt: r.endedAt } : {}),
+    })
+    if (span) out.push(span)
+  }
+  return out
+}
+
+/** A group's times: its own sessions plus its members' pieces (a member holds none, so theirs are status-derived). */
+function groupTimes(group: Subtask, members: readonly Subtask[], ownSpans: SessionSpan[]): PieceTimes {
+  const own = pieceTimes({
+    spans: ownSpans, done: group.done,
+    ...(group.startedAt ? { statusStartedAt: group.startedAt } : {}),
+    ...(group.deliveredAt ? { statusDeliveredAt: group.deliveredAt } : {}),
+  })
+  if (own.source === 'sessions' || members.length === 0) return own
+  const parts = members.map(m => pieceTimes({
+    spans: [], done: m.done,
+    ...(m.startedAt ? { statusStartedAt: m.startedAt } : {}),
+    ...(m.deliveredAt ? { statusDeliveredAt: m.deliveredAt } : {}),
+  }))
+  const starts = parts.map(p => p.startedAt).filter((x): x is string => !!x).sort()
+  const ends = parts.map(p => p.completedAt).filter((x): x is string => !!x).sort()
+  const startedAt = own.startedAt ?? starts[0] ?? null
+  const completedAt = group.done ? (own.completedAt ?? (ends.length === members.length ? ends.at(-1)! : null)) : null
+  const a = startedAt ? Date.parse(startedAt) : NaN
+  const b = completedAt ? Date.parse(completedAt) : NaN
+  return {
+    startedAt, completedAt,
+    durationMs: Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : null,
+    activeMinutes: null,
+    source: startedAt || completedAt ? 'status' : null,
+  }
+}
+
 export function subtaskViews(
   task: Task,
   subtasks: readonly Subtask[],
@@ -377,6 +430,11 @@ export function subtaskViews(
       ...(isGroupSubtask(s)
         ? { groupProgress: groupProgress((membersByGroup.get(s.id) ?? []).map(m => m.done)) }
         : {}),
+      times: isGroupSubtask(s) ? groupTimes(s, membersByGroup.get(s.id) ?? [], spansOfRows(mineRows, metas)) : pieceTimes({
+        spans: spansOfRows(mineRows, metas), done: s.done,
+        ...(s.startedAt ? { statusStartedAt: s.startedAt } : {}),
+        ...(s.deliveredAt ? { statusDeliveredAt: s.deliveredAt } : {}),
+      }),
     }
   })
   const direct = rows.filter(r => !r.subtaskId)
@@ -388,6 +446,7 @@ export function subtaskViews(
         rows: direct, metas, createdAt: task.createdAt,
         ...(task.deliveredAt ? { deliveredAt: task.deliveredAt } : {}),
       }),
+      times: pieceTimes({ spans: spansOfRows(direct, metas), done: Boolean(task.deliveredAt) }),
     })
   }
   return views
@@ -494,6 +553,11 @@ export function buildTaskDetail(o: {
     // a session filed under no attempt belongs to the task all the same, and summing the views
     // would either double it or drop it depending on which list it landed in.
     rollup: rollupAttempt({ sessions: rollupSessionsFor(mine, o.metas, o.costOf) }),
+    times: pieceTimes({
+      spans: spansOfRows(mine, o.metas), done: Boolean(o.task.deliveredAt),
+      ...(o.task.startedAt ? { statusStartedAt: o.task.startedAt } : {}),
+      ...(o.task.deliveredAt ? { statusDeliveredAt: o.task.deliveredAt } : {}),
+    }),
     stats: taskStats({
       metas,
       createdAt: o.task.createdAt,

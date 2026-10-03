@@ -172,10 +172,18 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
 // megabytes. And two processes started in the same second both pass a "is the port free?" check,
 // which is precisely how two of those four arrived.
 {
-  const { claimInstanceLock } = await import('./single-instance')
+  const { claimInstanceLock, waitForInstanceLock, SERVICE_LOCK_WAIT } = await import('./single-instance')
   const { serverLockFile } = await import('./config')
   const { AGENTISTICS_DATA_DIR: LOCK_DIR } = await import('./config')
-  const lock = await claimInstanceLock(serverLockFile())
+  // Started by the service manager (systemd sets INVOCATION_ID): WAIT, bounded, for a server started
+  // elsewhere to let go of the data dir instead of leaving the machine with no server once it does
+  // (2026-10-03: ten minutes after a reboot). A start by hand still exits at once, with the sentence.
+  const lock = process.env.INVOCATION_ID
+    ? await waitForInstanceLock(serverLockFile(), {
+        ...SERVICE_LOCK_WAIT,
+        onWait: holder => console.log(`[startup] another agentop server${holder ? ` (pid ${holder})` : ''} holds ${LOCK_DIR} — waiting for it to stop (up to 10 min), then starting`),
+      })
+    : await claimInstanceLock(serverLockFile())
   if (!lock.ok) {
     console.error(
       `[startup] another agentop server is already using ${LOCK_DIR}` +
@@ -193,6 +201,7 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   // release never got past its first `await`, so every clean stop left the lock on disk. A lock left
   // behind by a hard kill (or a reboot) is still reclaimed as stale by the next start —
   // `claimInstanceLock` checks that the holder is the process that WROTE it, not merely a live pid.
+  console.log(`[boot] +${Math.round(performance.now())} ms data dir claimed`)
   const release = () => { lock.releaseSync() }
   process.on('exit', release)
   process.on('SIGINT', () => { release(); process.exit(130) })
@@ -210,7 +219,10 @@ void (async () => {
   // Warm the response cache at boot so the FIRST user request is served instantly instead of paying
   // the full cold build (tens of seconds on a busy central). Runs for every mode — non-'off' modes
   // also persist the consolidated per-session store as a side effect; 'off' just warms the cache.
-  buildApiResponse().catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
+  const warmStart = performance.now()
+  buildApiResponse()
+    .then(() => console.log(`[boot] +${Math.round(performance.now())} ms first /api/data built (${Math.round(performance.now() - warmStart)} ms)`))
+    .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
 })()
 
 // Once-per-install move of the legacy single-connection team state files into the
@@ -1736,6 +1748,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     {
       const reserved = RESERVED_PREFIXES.find(p => url.pathname === p || url.pathname.startsWith(p + '/'))
       if (reserved) {
+        // The native harness and the providers are EXPERIMENTAL (`native-gate.ts`): with the flag
+        // off their routes are a 403 that names the command, even though the engine is present.
+        const { nativeGateRefusal, nativeExperimentalOn } = await import('./native-gate')
+        const gated = nativeGateRefusal(url.pathname, nativeExperimentalOn())
+        if (gated) return json(gated.body, gated.status)
         await loadEngine()
         const live = engine()
         if (live) {
@@ -1758,7 +1775,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // to SAY which build it is when it does not.
     if (url.pathname === '/api/engine' && req.method === 'GET') {
       await loadEngine()
-      return json(engineStatus())
+      // `nativeExperimental`: whether the native harness and the providers may be SHOWN here — the
+      // experimental flag (`native-gate.ts`). An engine that provides them is not enough.
+      const { nativeExperimentalOn } = await import('./native-gate')
+      return json({ ...engineStatus(), nativeExperimental: nativeExperimentalOn() })
     }
 
     // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).
@@ -2902,6 +2922,50 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             'Content-Security-Policy': OPAQUE_MEDIA_CSP,
             // A session rewrites the file it is working on; a cached copy would show the old one.
             'Cache-Control': 'no-store',
+          },
+        })
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
+    // THE BYTES of a file the session VIEWED or wrote, for the gallery. Admitted only by what this
+    // session's own transcript named (`viewed-file.ts`), never by the query. Rides the `/api/fleet`
+    // prefix in `capability-guard.ts`, so it is `localShell` and refused on a central or public profile.
+    if (url.pathname === '/api/fleet/viewed' && req.method === 'GET') {
+      const id = url.searchParams.get('id')
+      const path = url.searchParams.get('path')
+      if (!id || !path) {
+        return new Response(JSON.stringify({ ok: false, message: 'bad_request' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const { readFleetViewedMedia, fleetLang } = await import('./sessions/fleet-web')
+        const out = await readFleetViewedMedia(fleetLang(url.searchParams.get('lang')), id, path)
+        if (!out.ok) {
+          return new Response(JSON.stringify({ ok: false, message: out.message }), {
+            status: out.status,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(out.bytes as unknown as BodyInit, {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': out.mime,
+            'Content-Disposition': `inline; filename="${out.name.replace(/[^\w.-]/g, '_')}"`,
+            'X-Content-Type-Options': 'nosniff',
+            // The media marker: `applyBaselineHeaders` recognises it and REPLACES it with the media
+            // policy (this plus `frame-ancestors 'self'`, and `vscode-webview:` on an embedding
+            // profile), instead of the dashboard baseline — which is why this panel's PDF frame no
+            // longer draws the browser's "cannot display" glyph. See `response-policy.ts`.
+            'Content-Security-Policy': OPAQUE_MEDIA_CSP,
+            // A session rewrites the file it is working on; a cached copy would show the old one.
+            'Cache-Control': 'private, no-store',
           },
         })
       } catch (err) {
@@ -4375,6 +4439,8 @@ const scheduleBackfillCheck = () => {
     if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
   })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
 }
+// One line with the boot's own clock, so a slow start can be read off the service's journal.
+console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
 setTimeout(scheduleBackfillCheck, 120_000).unref()
 setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
 } catch (err: unknown) {
