@@ -57,6 +57,8 @@ export interface BoardPrefs {
    * fixed order the grid shipped with before this picker existed.
    */
   subtaskColumns: SubtaskColumnId[] | null
+  /** Saved widths of the delivery table's columns, by column id — only the ones the person dragged. */
+  columnWidths: Record<string, number>
   /** Which status groups the table renders at all. `null` = every one of them. */
   groups: BoardStatus[] | null
   /** What the table's bands are: the status columns or the task type. Default `status`. */
@@ -72,7 +74,7 @@ export interface BoardPrefs {
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
   view: 'overview', sort: { key: 'priority', dir: 'asc' }, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, subtaskColumns: null, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], rail: {},
+  columns: null, subtaskColumns: null, columnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], rail: {},
 }
 
 /**
@@ -154,6 +156,10 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
     // an EMPTY stored list is a real choice ("show me only the names") and is kept.
     columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
     subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
+    columnWidths: p.columnWidths && typeof p.columnWidths === 'object' && !Array.isArray(p.columnWidths)
+      ? Object.fromEntries(Object.entries(p.columnWidths as Record<string, unknown>)
+        .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
+      : {},
     groups: statuses(p.groups),
     groupBy: isGroupBy(p.groupBy) ? p.groupBy : 'status',
     typeGroups: Array.isArray(p.typeGroups) ? p.typeGroups.filter((x): x is string => typeof x === 'string') : null,

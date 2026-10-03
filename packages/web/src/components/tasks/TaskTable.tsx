@@ -25,7 +25,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Bot, CheckSquare, ChevronDown, ChevronRight, Columns3, MessageSquare, Paperclip, Plus,
-  Rows3, SquareArrowOutUpRight, Trash2, X,
+  Rows3, RotateCcw, SquareArrowOutUpRight, Trash2, X,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -39,6 +39,8 @@ import {
   type TaskStatusDef, type TaskTypeDef, sortTaskTypes,
 } from '@agentistics/core'
 import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
+import { ColResizeHandle } from './ColResizeHandle'
+import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
@@ -147,6 +149,8 @@ export const DEFAULT_COLUMNS: ColumnId[] =
 // ------------------------------------------------------------------------------- cells
 
 const cellPad = '7px 10px'
+/** A cell never spills into its neighbour: what does not fit is cut (text gets an ellipsis). */
+const cellBox: React.CSSProperties = { padding: cellPad, overflow: 'hidden', textOverflow: 'ellipsis' }
 
 /**
  * A phone's thumb over a table cell.
@@ -443,7 +447,7 @@ function SubtaskRows({
               HERE, on the subtask, never on the task row) and remove. The inset left bar
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
-          <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
+          <td style={{ ...cellBox, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <SubtaskActionsMenu
               subtask={t}
@@ -472,7 +476,7 @@ function SubtaskRows({
               leaving a ~50px gap between the gear button and the title nobody asked for); the
               member's own +20 offset is unchanged, so a member still sits exactly as far under its
               group as it always did. */}
-          <td style={{ padding: cellPad, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
+          <td style={{ ...cellBox, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {/* Same accordion toggle as `SubtaskTable`'s inline view — collapsed by default. */}
               {isGroupHeader && (
@@ -539,7 +543,7 @@ function SubtaskRows({
           {subtaskCols.map(id => {
             const def = SUBTASK_COLUMNS.find(c => c.id === id)!
             return (
-              <td key={id} style={{ padding: cellPad, textAlign: def.numeric ? 'right' : 'left', ...tint }}>
+              <td key={id} style={{ ...cellBox, textAlign: def.numeric ? 'right' : 'left', ...tint }}>
                 {id === 'status'
                   ? (
                     <ChipSelect
@@ -562,9 +566,9 @@ function SubtaskRows({
       })}
       {directView && (
         <tr style={{ background: 'var(--bg-surface)' }}>
-          <td style={{ padding: cellPad }} />
+          <td style={{ ...cellBox }} />
           <td style={{
-            padding: cellPad, paddingLeft: indent, color: 'var(--text-tertiary)',
+            ...cellBox, paddingLeft: indent, color: 'var(--text-tertiary)',
             fontStyle: 'italic', fontSize: 12,
           }}>
             {boardCopy(lang).directSessions}
@@ -572,7 +576,7 @@ function SubtaskRows({
           {subtaskCols.map(id => {
             const def = SUBTASK_COLUMNS.find(c => c.id === id)!
             return (
-              <td key={id} style={{ padding: cellPad, textAlign: def.numeric ? 'right' : 'left' }}>
+              <td key={id} style={{ ...cellBox, textAlign: def.numeric ? 'right' : 'left' }}>
                 {id === 'sessions' && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
                     {directSessions.map(s => (
@@ -768,6 +772,31 @@ export function TaskTable(p: TaskTableProps) {
     () => COLUMNS.filter(c => shown.includes(c.id)).sort(
       (a, b) => shown.indexOf(a.id) - shown.indexOf(b.id)),
     [shown],
+  )
+  // COLUMN WIDTHS: the saved ones over the defaults, with the width being dragged laid on top while
+  // the pointer is down (one saved write per drag — see `ColResizeHandle`).
+  const [savedWidths, setSavedWidths] = useBoardPref('columnWidths')
+  const [dragging, setDragging] = useState<{ id: string; w: number } | null>(null)
+  const widths = useMemo(() => {
+    const w = resolveWidths(cols, savedWidths)
+    if (dragging) w[dragging.id] = dragging.w
+    return w
+  }, [cols, savedWidths, dragging])
+  const leadWidth = isMobile ? 100 : 62
+  const fitColumn = (id: string) => {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-col="${id}"]`))
+    // The header is measured with the cells: a column never fits narrower than its own title.
+    setSavedWidths({ ...savedWidths, [id]: fitContentWidth(nodes.map(contentWidthOf)) })
+  }
+  const resizeHandle = (id: string) => (
+    <ColResizeHandle
+      width={widths[id]!}
+      mobile={isMobile}
+      title={L.resizeColumn}
+      onChange={w => setDragging({ id, w })}
+      onCommit={w => { setDragging(null); setSavedWidths({ ...savedWidths, [id]: w }) }}
+      onFit={() => fitColumn(id)}
+    />
   )
   // How few shown columns it takes before an expanded delivery's subtasks no longer fit as rows of
   // THIS table without overshooting the main row's own width — see `subtaskGridLayout.ts`. Every
@@ -994,6 +1023,15 @@ export function TaskTable(p: TaskTableProps) {
         </PickerMenu>
         <button
           type="button"
+          onClick={() => setSavedWidths({})}
+          disabled={!hasCustomWidths(savedWidths)}
+          title={L.resetColumnWidths} aria-label={L.resetColumnWidths}
+          style={{ ...TRIGGER, ...(hasCustomWidths(savedWidths) ? {} : { opacity: 0.5, cursor: 'default' }) }}
+        >
+          <RotateCcw size={13} /> {isMobile ? '' : L.resetColumnWidths}
+        </button>
+        <button
+          type="button"
           onClick={() => setSel(toggleMode)}
           aria-pressed={sel.on}
           title={L.selectTitle}
@@ -1042,7 +1080,17 @@ export function TaskTable(p: TaskTableProps) {
 
             {!isFolded && (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: g.rows.length === 0 ? 0 : 760 }}>
+                <table style={{
+                  width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed',
+                  minWidth: g.rows.length === 0 ? 0 : tableMinWidth(leadWidth, 240, widths, cols.map(c => c.id)),
+                }}>
+                  {/* One width per column, the SAME in every group's table, so the bands line up and
+                      a dragged border moves the whole column. The title column takes the rest. */}
+                  <colgroup>
+                    <col style={{ width: leadWidth }} />
+                    <col />
+                    {cols.map(c => <col key={c.id} style={{ width: widths[c.id] }} />)}
+                  </colgroup>
                   {/* No heading row over an EMPTY group: eight column names above nothing is eight
                       names for a table that is not there, repeated once per empty status. */}
                   {g.rows.length > 0 && (
@@ -1050,7 +1098,7 @@ export function TaskTable(p: TaskTableProps) {
                       <tr>
                         {/* The leading column holds [checkbox — Select mode only][open][chevron].
                             In Select mode its header carries the group's own select-all. */}
-                        <th style={{ ...th, width: 1 }}>
+                        <th style={{ ...th, }}>
                           {sel.on && (
                             <GroupCheck
                               state={groupCheck(sel, g.rows.map(r => r.task.id))}
@@ -1073,7 +1121,9 @@ export function TaskTable(p: TaskTableProps) {
                             key={c.id} label={colLabel(c.id)} sortKey={c.sort} current={sort} mobile={isMobile}
                             onSort={k => setSort(nextSort(sort, k))}
                             title={L.sortByColumn.replace('{column}', colLabel(c.id))}
-                            style={{ ...th, width: c.width, textAlign: c.numeric ? 'right' : 'left' }}
+                            style={{ ...th, textAlign: c.numeric ? 'right' : 'left' }}
+                            dataCol={c.id}
+                            handle={resizeHandle(c.id)}
                           />
                         ))}
                       </tr>
@@ -1217,7 +1267,7 @@ export function TaskTable(p: TaskTableProps) {
                               * because expanding is also how a first subtask gets added — so the
                               * columns never shift between rows.
                               */}
-                            <td style={{ padding: cellPad, whiteSpace: 'nowrap' }}>
+                            <td style={{ ...cellBox, whiteSpace: 'nowrap' }}>
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: isMobile ? 0 : 4 }}>
                                 {sel.on && (
                                   <label
@@ -1260,7 +1310,7 @@ export function TaskTable(p: TaskTableProps) {
                             {/* The NAME still opens the subitems, as it always did — the row's name
                                 belongs to the row, and pressing it never leaves the board. It is a
                                 pointer convenience over the chevron's button, not a second tab stop. */}
-                            <td style={{ padding: cellPad }}>
+                            <td style={{ ...cellBox }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                               <span
                                 role="presentation"
@@ -1291,7 +1341,8 @@ export function TaskTable(p: TaskTableProps) {
                             {cols.map(c => (
                               <td
                                 key={c.id}
-                                style={{ padding: cellPad, textAlign: c.numeric ? 'right' : 'left' }}
+                                data-col={c.id}
+                                style={{ ...cellBox, textAlign: c.numeric ? 'right' : 'left' }}
                               >
                                 {cellFor(
                                   c.id, row,
@@ -1342,8 +1393,8 @@ export function TaskTable(p: TaskTableProps) {
                     })}
 
                     <tr style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ padding: cellPad }} />
-                      <td colSpan={cols.length + 1} style={{ padding: cellPad }}>
+                      <td style={{ ...cellBox }} />
+                      <td colSpan={cols.length + 1} style={{ ...cellBox }}>
                         {adding === g.key ? (
                           <input
                             autoFocus value={draft} placeholder="Task name, then Enter"

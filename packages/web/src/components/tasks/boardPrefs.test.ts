@@ -74,3 +74,11 @@ describe('readBoardPrefs / writeBoardPrefs', () => {
     expect(() => writeBoardPrefs({ columnSort: {} })).not.toThrow()
   })
 })
+
+import { parseBoardPrefs as parseW } from './boardPrefs'
+import { test as testW, expect as expectW } from 'bun:test'
+testW('columnWidths: kept when numeric, junk dropped, absent = {}', () => {
+  expectW(parseW({ columnWidths: { cost: 140, bad: 'x', neg: -3 } }).columnWidths).toEqual({ cost: 140 })
+  expectW(parseW({}).columnWidths).toEqual({})
+  expectW(parseW({ columnWidths: [1] }).columnWidths).toEqual({})
+})

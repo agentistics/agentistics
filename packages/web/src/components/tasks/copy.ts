@@ -218,6 +218,8 @@ export interface BoardCopy {
    * word onto an English frame is the bug this file exists to end.
    */
   list: {
+    resetColumnWidths: string
+    resizeColumn: string
     select: string
     selectTitle: string
     selectAllInGroup: string
@@ -466,6 +468,8 @@ const EN: BoardCopy = {
     attachNetworkError: 'Network error uploading the attachment.',
   },
   list: {
+    resetColumnWidths: 'Reset column widths',
+    resizeColumn: 'Drag to resize · double-click to fit the content',
     select: 'Select',
     selectTitle: 'Show checkboxes to pick several tasks at once',
     selectAllInGroup: 'Select every task in this group',
@@ -697,6 +701,8 @@ const PT: BoardCopy = {
     attachNetworkError: 'Erro de rede ao enviar o anexo.',
   },
   list: {
+    resetColumnWidths: 'Restaurar largura das colunas',
+    resizeColumn: 'Arraste para redimensionar · clique duplo ajusta ao conteúdo',
     select: 'Selecionar',
     selectTitle: 'Mostrar as caixas de seleção para escolher várias tarefas de uma vez',
     selectAllInGroup: 'Selecionar todas as tarefas deste grupo',
