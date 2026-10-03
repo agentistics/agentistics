@@ -43,6 +43,8 @@ import { Sessions } from './tabs/Sessions'
 import { Dashboard } from './tabs/Dashboard'
 import { HardwareTab } from './tabs/HardwareTab'
 import { Code } from './tabs/Code'
+import { Home } from './tabs/Home'
+import { Tasks } from './tabs/Tasks'
 import type { CodeLaunch } from './code-types'
 import { writeFrame } from './altScreen'
 
@@ -155,7 +157,15 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const [lang, setLang] = useState<CliLang>(initialLang)
   const s = controlStrings(lang)
 
-  const [tab, setTab] = useState<TabId>(initial?.tab ?? 'services')
+  // GL-01: bare `agentop` opens on `home`; `agentop code` asks for `code` explicitly.
+  const [tab, setTab] = useState<TabId>(initial?.tab ?? 'home')
+  // The `code` tab's launch: `agentop code …` on the first mount, then whatever `home` asks for
+  // (HM-02 the first prompt, HM-04 a session to resume). A NEW object each time, so the tab acts on it.
+  const [codeLaunch, setCodeLaunch] = useState<CodeLaunch | undefined>(initial?.code)
+  const openCode = useCallback((launch: CodeLaunch) => {
+    setCodeLaunch({ ...launch })
+    setTab('code')
+  }, [])
   // Seeded from what the host already knows, so a REMOUNT does not open on the defaults. Detaching
   // from a session remounts this app, `refresh()` takes about a second to probe systemd and docker,
   // and for that second the sessions list was drawn with the shipped arrangement instead of the
@@ -425,6 +435,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // the status line and the footer. The update notice costs no row of its own — it is a dot on the
   // header's right-hand tag.
   const header = headerLayout({
+    compact: tab === 'home',
     mode: status?.mode ?? '',
     version: status?.version ?? '',
     latestVersion: status?.latestVersion,
@@ -672,10 +683,44 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* The native session. It frames its own regions (the conversation, the permission card, the
             composer, the session panel) like the two cockpits do, so the one that needs the person
             can wear the accent border. */}
+        <Screen visible={tab === 'home' && !helpOpen}>
+          <Home
+            host={host}
+            status={status}
+            fleet={fleet ?? null}
+            lang={lang}
+            width={width}
+            height={height}
+            isActive={tab === 'home' && !helpOpen}
+            nonce={nonce}
+            onChrome={reportChrome}
+            onSay={say}
+            onTab={stepTab}
+            onGoto={setTab}
+            onOpenCode={openCode}
+            onExit={onExit}
+            onHelp={openHelp}
+          />
+        </Screen>
+
+        <Screen visible={tab === 'tasks' && !helpOpen}>
+          <Tasks
+            host={host}
+            status={status}
+            lang={lang}
+            width={width}
+            height={height}
+            isActive={tab === 'tasks' && !helpOpen}
+            nonce={nonce}
+            onChrome={reportChrome}
+            onSay={say}
+          />
+        </Screen>
+
         <Screen visible={tab === 'code' && !helpOpen}>
           <Code
             code={host.code}
-            launch={initial?.code}
+            launch={codeLaunch}
             lang={lang}
             strings={s}
             width={width}

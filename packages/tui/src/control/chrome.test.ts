@@ -78,11 +78,27 @@ describe('fitTabs', () => {
     expect(layout.cells[0]!.width).toBe('Help'.length + 2)
   })
 
-  test('the full strip is kept at exactly its measured width and collapses one column below it', () => {
+  test('the full strip is kept at exactly its measured width; one column below it becomes a WINDOW', () => {
     const t = tabs()
     const exact = tabStripWidth(t)
-    expect(fitTabs(t, 'services', exact).kind).toBe('full')
-    expect(fitTabs(t, 'services', exact - 1).kind).toBe('collapsed')
+    const whole = fitTabs(t, 'services', exact)
+    expect(whole.kind === 'full' && whole.window).toBeUndefined()
+    const below = fitTabs(t, 'services', exact - 1)
+    if (below.kind !== 'full' || !below.window) throw new Error('expected a window')
+    // the active tab is always in the window, and the window is a contiguous run of the strip
+    expect(below.cells.some(c => c.id === 'services' && c.active)).toBe(true)
+    const ids = t.map(x => x.id)
+    const at = ids.indexOf(below.cells[0]!.id)
+    expect(below.cells.map(c => c.id)).toEqual(ids.slice(at, at + below.cells.length))
+  })
+
+  test('GL-01: at 106 columns the window shows most of the twelve tabs and says there is more', () => {
+    const w = fitTabs(tabs(), 'home', 106)
+    if (w.kind !== 'full' || !w.window) throw new Error('expected a window')
+    expect(w.cells.map(c => c.id).slice(0, 6)).toEqual(['home', 'code', 'sessions', 'tasks', 'dashboard', 'services'])
+    expect(w.window).toEqual({ prev: false, next: true })
+    // the drawn row (arrows included) fits
+    expect(2 + w.cells.reduce((n, c) => n + c.width + 1, 0) + 2).toBeLessThanOrEqual(106)
   })
 
   test('the threshold follows the translated labels rather than a fixed column count', () => {
@@ -91,8 +107,8 @@ describe('fitTabs', () => {
     expect(tabStripWidth(tabs('pt'))).not.toBe(tabStripWidth(tabs('en')))
   })
 
-  test('the collapsed form names the ACTIVE tab', () => {
-    const layout = fitTabs(tabs(), 'contribute', 30)
+  test('the collapsed form (only one name fits) names the ACTIVE tab', () => {
+    const layout = fitTabs(tabs(), 'contribute', 16)
     expect(layout.kind).toBe('collapsed')
     if (layout.kind !== 'collapsed') throw new Error('unreachable')
     expect(layout.id).toBe('contribute')
@@ -102,9 +118,9 @@ describe('fitTabs', () => {
   test('collapsed affordances report the position in the strip', () => {
     // The FIRST tab is whatever leads `TAB_ORDER` — named through it, so reordering the strip does
     // not turn this into a test of which tab happens to be first today.
-    const first = fitTabs(tabs(), TAB_ORDER[0]!, 30)
-    const middle = fitTabs(tabs(), 'logs', 30)
-    const last = fitTabs(tabs(), 'contribute', 30)
+    const first = fitTabs(tabs(), TAB_ORDER[0]!, 12)
+    const middle = fitTabs(tabs(), 'logs', 12)
+    const last = fitTabs(tabs(), 'contribute', 16)
     if (first.kind !== 'collapsed' || middle.kind !== 'collapsed' || last.kind !== 'collapsed') {
       throw new Error('expected collapsed')
     }
@@ -120,7 +136,7 @@ describe('fitTabs', () => {
   })
 
   test('an unknown active id still names a tab instead of rendering nameless', () => {
-    const layout = fitTabs(tabs(), 'nope' as never, 20)
+    const layout = fitTabs(tabs(), 'nope' as never, 10)
     if (layout.kind !== 'collapsed') throw new Error('expected collapsed')
     expect(layout.id).toBe(TAB_ORDER[0]!)
   })
@@ -176,9 +192,21 @@ describe('tabUnderline', () => {
   })
 
   test('collapsed, it underlines the one name on the row and not its affordances', () => {
-    const layout = fitTabs(t, 'contribute', 30)
+    const layout = fitTabs(t, 'contribute', 16)
     if (layout.kind !== 'collapsed') throw new Error('expected collapsed')
     expect(tabUnderline(layout)).toBe('  ' + '━'.repeat(layout.label.length))
+  })
+
+  test('windowed, the rule starts after the reserved `‹ ` and still sits under the active cell', () => {
+    const layout = fitTabs(t, 'tasks', 60)
+    if (layout.kind !== 'full' || !layout.window) throw new Error('expected a window')
+    const rule = tabUnderline(layout)
+    let x = 2
+    for (const c of layout.cells) {
+      if (c.active) { expect(rule.slice(x, x + c.width)).toBe('━'.repeat(c.width)); expect(tabAtColumn(layout, x)).toEqual({ kind: 'tab', id: 'tasks' }) }
+      x += c.width + 1
+    }
+    expect(tabAtColumn(layout, 0)).toEqual(layout.window.prev ? { kind: 'prev' } : null)
   })
 
   test('a strip with no tabs underlines nothing rather than throwing', () => {

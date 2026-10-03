@@ -192,6 +192,7 @@ export function TabBar({ layout, width, dim }: {
         </Text>
       ) : (
         <Box flexDirection="row" width={width}>
+          {layout.window && <Text dimColor>{layout.window.prev ? '‹ ' : '  '}</Text>}
           {layout.cells.map(cell => (
             <Box key={cell.id} marginRight={1}>
               <Text
@@ -207,6 +208,7 @@ export function TabBar({ layout, width, dim }: {
               </Text>
             </Box>
           ))}
+          {layout.window?.next && <Text dimColor>›</Text>}
         </Box>
       )}
       <Text color={dim ? COLORS.border : COLORS.accent}>{rule}</Text>

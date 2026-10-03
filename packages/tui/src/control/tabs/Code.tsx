@@ -268,12 +268,13 @@ export function Code({
     void code.defaults().then(d => setWizard(w => (w ? { ...w, defaults: d } : w)))
   }, [code])
 
-  // `agentop code "…"` / `agentop code --resume <id>`: acted on ONCE, on the first mount. The host
-  // clears the launch before a remount, and the ref makes a re-render harmless too.
-  const launched = useRef(false)
+  // `agentop code "…"` / `agentop code --resume <id>`, and the `home` tab's prompt / resume (HM-02,
+  // HM-04): each LAUNCH OBJECT is acted on once. A new launch (a new object) is acted on again; a
+  // re-render with the same one is harmless.
+  const launched = useRef<CodeLaunch | undefined>(undefined)
   useEffect(() => {
-    if (launched.current || !launch || !code || !available) return
-    launched.current = true
+    if (!launch || launched.current === launch || !code || !available) return
+    launched.current = launch
     if (launch.resume) {
       void code.resume(launch.resume).then(r => {
         if (!r.ok) { say(false, r.sentence); return }

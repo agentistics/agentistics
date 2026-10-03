@@ -3001,6 +3001,73 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * to go: on a headless box every candidate fails, we say so in one line, and the cockpit stops
      * offering the action rather than leaving a key that does nothing.
      */
+    /**
+     * HM-05 / TK-01: "your tasks" (spec §5) — the tasks you claimed or that one of your sessions is
+     * filed under, read in-process from the same board the web reads (`listTasks`). On a solo box
+     * every session on the board is yours, so "filed by your sessions" is "has a session". Status
+     * labels and order are the board's own vocabulary; the cost is the rollup's, N/A when none.
+     */
+    async homeTasks() {
+      try {
+        const [{ listTasks }, { loadTaskBoard }, { sortTaskStatuses }] = await Promise.all([
+          import('./sessions/task-web'), import('./sessions/task-source'), import('@agentistics/core'),
+        ])
+        const [reply, board] = await Promise.all([listTasks(), loadTaskBoard()])
+        const statuses = sortTaskStatuses(board.book.statuses)
+        const label = new Map(statuses.map(st => [st.id, st.label]))
+        const rank = new Map(statuses.map((st, i) => [st.id, i]))
+        const mine = reply.tasks.filter(r => r.task.claim !== undefined || r.rollup.sessionsUsed > 0)
+        const active = (st: string) => (st === 'in_progress' ? 0 : st === 'blocked' ? 1 : 2)
+        const tasks = mine
+          .sort((a, b) => (rank.get(a.task.status) ?? 99) - (rank.get(b.task.status) ?? 99) || active(a.task.status) - active(b.task.status))
+          .map(r => {
+            const closed = r.task.status === 'done' || r.task.status === 'abandoned'
+            const m = /^t-([0-9a-f]{4})/.exec(r.task.id)
+            const cost = r.rollup.costUSD
+            return {
+              id: r.task.id,
+              ref: m ? `t-${m[1]}` : r.task.id,
+              title: r.task.title,
+              status: r.task.status,
+              statusLabel: label.get(r.task.status) ?? r.task.status,
+              ...(r.counts.subtasks > 0 ? { progress: { done: r.counts.subtasksDone, total: r.counts.subtasks } } : {}),
+              cost: cost === null ? 'N/A' : cost > 0 && cost < 0.01 ? '<$0.01' : `$${cost.toFixed(2)}`,
+              ...(closed ? { closed: true } : {}),
+            }
+          })
+        return { tasks }
+      } catch {
+        return { unavailable: S().lang === 'pt' ? 'O board de tarefas não pôde ser lido.' : 'The task board could not be read.' }
+      }
+    },
+
+    /**
+     * HM-06: the providers this machine has a credential for, from the ENGINE's own provider route
+     * (called in-process — the same answer the web's settings read). A community build has none.
+     */
+    async homeProviders() {
+      const pt = S().lang === 'pt'
+      try {
+        const { loadEngine, engine } = await import('./engine/load')
+        await loadEngine()
+        const route = engine()?.routes.find(r => r.prefix === '/api/provider')
+        if (!route) return { unavailable: pt ? 'Esta versão não tem provedores nativos.' : 'This build has no native providers.' }
+        const url = new URL('http://127.0.0.1/api/provider')
+        const res = await route.handle(new Request(url), url, { clientIp: '127.0.0.1' })
+        const body = (res ? await res.json() : null) as { enabled?: boolean; sentence?: string; providers?: { id: string; label: string; state: string; keyless?: boolean; last4?: string }[] } | null
+        if (!body) return { unavailable: pt ? 'Os provedores não responderam.' : 'The providers did not answer.' }
+        if (body.enabled === false) return { unavailable: body.sentence ?? (pt ? 'O runtime nativo está desligado (BETA).' : 'The native runtime is off (BETA).') }
+        const providers = (body.providers ?? [])
+          .filter(p => p.state === 'present')
+          .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
+        return providers.length > 0
+          ? { providers }
+          : { unavailable: pt ? 'Nenhum provedor configurado — ctrl+, para adicionar.' : 'No provider configured — ctrl+, adds one.' }
+      } catch {
+        return { unavailable: pt ? 'Os provedores não puderam ser lidos.' : 'The providers could not be read.' }
+      }
+    },
+
     async openUrl(url: string): Promise<ActionResult> {
       const s = S()
       const candidates: string[][] = [
@@ -4235,7 +4302,9 @@ async function runControlLoop(
   // history-preservation consent behind something they have no reason to look for.
   // An explicit `agentop code` is not a request to configure the machine: it goes straight to the tab.
   const setup = codeLaunch ? false : await isUnconfigured()
-  let tab: TabId | undefined = codeLaunch && host.code ? 'code' : undefined
+  // `home` is the default (GL-01), but a machine that has never been configured opens where the setup
+  // question is asked — `services` — or the question would wait on a tab nobody is looking at.
+  let tab: TabId | undefined = codeLaunch && host.code ? 'code' : setup ? 'services' : undefined
   let launch: CodeLaunch | undefined = codeLaunch?.launch
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink

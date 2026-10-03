@@ -38,7 +38,12 @@ export interface TabCell extends TabSpec {
  * has no layout decision left to make: it renders one branch or the other.
  */
 export type TabStripLayout =
-  | { kind: 'full'; cells: TabCell[] }
+  /**
+   * `window` is set when only SOME tabs fit (12 tabs since GL-01 do not fit 108 columns): `cells`
+   * is a contiguous run of the strip that includes the active tab, and `‹`/`›` (two columns each,
+   * always reserved so the cells never shift) say there is more on that side.
+   */
+  | { kind: 'full'; cells: TabCell[]; window?: { prev: boolean; next: boolean } }
   | { kind: 'collapsed'; id: TabId; label: string; hasPrev: boolean; hasNext: boolean }
 
 /** One space either side of the label, so the active cell's underline has room to breathe. */
@@ -92,6 +97,27 @@ export function fitTabs(tabs: TabSpec[], active: TabId, width: number): TabStrip
   const i = Math.max(0, tabs.findIndex(t => t.id === active))
   const tab = tabs[i]!
 
+  // GL-01: as many tabs as fit, around the active one — a strip that drops to ONE name loses the
+  // orientation the bar exists for. The window starts as EARLY as it can while still holding the
+  // active tab, so the strip reads from its beginning whenever that is possible.
+  const room = width - AFFORDANCE
+  const cellW = (t: TabSpec) => t.label.length + CELL_PAD + CELL_GAP
+  let a = i, b = i
+  if (cellW(tab) <= room) {
+    for (let start = 0; start <= i; start++) {
+      let used = 0, end = start - 1
+      while (end + 1 < tabs.length && used + cellW(tabs[end + 1]!) <= room) { end++; used += cellW(tabs[end]!) }
+      if (end >= i) { a = start; b = end; break }
+    }
+    if (b > a) {
+      return {
+        kind: 'full',
+        cells: tabs.slice(a, b + 1).map(t => ({ ...t, active: t.id === active, width: t.label.length + CELL_PAD })),
+        window: { prev: a > 0, next: b < tabs.length - 1 },
+      }
+    }
+  }
+
   return {
     kind: 'collapsed',
     id: tab.id,
@@ -119,7 +145,7 @@ export function tabUnderline(layout: TabStripLayout): string {
     // `‹ ` is two columns before the label; the affordances themselves are not underlined.
     return ' '.repeat(2) + TAB_RULE.repeat(layout.label.length)
   }
-  return layout.cells
+  return (layout.window ? '  ' : '') + layout.cells
     .map(cell => (cell.active ? TAB_RULE : ' ').repeat(cell.width) + ' '.repeat(CELL_GAP))
     .join('')
 }
@@ -161,10 +187,15 @@ export function tabAtColumn(layout: TabStripLayout, x: number): TabHit {
   }
 
   let left = 0
+  if (layout.window) {
+    if (x < 2) return layout.window.prev ? { kind: 'prev' } : null
+    left = 2
+  }
   for (const cell of layout.cells) {
     left += cell.width + CELL_GAP
     if (x < left) return { kind: 'tab', id: cell.id }
   }
+  if (layout.window && x < left + 2) return layout.window.next ? { kind: 'next' } : null
   return null
 }
 
@@ -176,6 +207,11 @@ const SEP = ' · '
 // ---------------------------------------------------------------------------
 
 export interface HeaderMetaInput {
+  /**
+   * The one-line mark even where the block wordmark would fit — the `home` tab draws the wordmark
+   * itself beside the icon (HM-01), and the same art twice on one screen is a fact in two places.
+   */
+  compact?: boolean
   /** The SHORT mode token — `solo` / `central` / `member`, never the sentence. */
   mode: string
   version: string
@@ -509,7 +545,7 @@ export function headerLayout(input: HeaderMetaInput): HeaderLayout {
   // art branch has to be affordable at the tag's real width, not at whatever a squeezed one shrank
   // to — otherwise the header would take the art and then quietly drop the version to pay for it.
   const full = headerMeta({ ...input, width: Number.MAX_SAFE_INTEGER })
-  if (input.width >= artWidth(art) + HEADER_GAP + headerMetaWidth(full)) {
+  if (!input.compact && input.width >= artWidth(art) + HEADER_GAP + headerMetaWidth(full)) {
     return { kind: 'art', art, meta: full, rows: art.length }
   }
   // The mark's columns are RESERVED before the tag is fitted — see `Header`. Without that the tag

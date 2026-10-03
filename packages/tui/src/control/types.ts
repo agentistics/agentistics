@@ -12,6 +12,7 @@ import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
 import type { CodeHost } from './code-types'
+import type { HomeProvider, HomeTask } from './home'
 // The default ARRANGEMENT is derived from the dimension vocabulary rather than written out beside
 // it. `session-dimensions.ts` imports this file for TYPES only, so this is the one value direction.
 import {
@@ -20,8 +21,12 @@ import {
 } from './session-dimensions'
 
 export type TabId =
+  /** The front door (HM-01…HM-07): the logo, the first prompt, today / resume / your tasks / providers. */
+  | 'home'
   /** The native session — see `tabs/Code.tsx` and docs/superpowers/specs/2026-09-28-harness-tui-design.md. */
   | 'code'
+  /** Your tasks, read-only (TK-01…): the ALM as the terminal needs to SEE it. */
+  | 'tasks'
   | 'services'
   | 'sessions'
   /** Configure, run, and watch a backup — see `control/backup.ts`. Between sessions and the
@@ -46,16 +51,18 @@ export type TabId =
 // from the config pane's mode row. `agentop setup` still exists as the non-interactive command —
 // one implementation, two entrances.
 //
-// `code` leads (GL-01: the spec's order is `home code sessions tasks dashboard services`, and `home`
-// and `tasks` are later phases — no placeholder tabs stand in for them). Leading the ORDER is not
-// leading the LAUNCH: bare `agentop` still opens on `services` (`ControlCenter`'s default), and
-// `agentop code` asks for `tab: 'code'` explicitly.
+// GL-01: the spec's order — `home code sessions tasks dashboard services` — then the screens that
+// were already here (backup, hardware, logs and the documentation). Bare `agentop` opens on `home`;
+// `agentop code` asks for `tab: 'code'` explicitly. Every tab in the bar has real content: `home` its
+// cards, `tasks` your tasks — no placeholder stands in for a later phase.
 export const TAB_ORDER: readonly TabId[] = [
+  'home',
   'code',
-  'services',
   'sessions',
-  'backup',
+  'tasks',
   'dashboard',
+  'services',
+  'backup',
   'hardware',
   'logs',
   'cheatsheet',
@@ -1312,6 +1319,14 @@ export interface ControlHost {
    * one — the preview, a build with no runtime — gets a tab that says so in words.
    */
   code?: CodeHost
+  /**
+   * HM-05 / TK-01: the person's tasks — open tasks they claimed or that one of their sessions is filed
+   * under (spec §5), most active first, with subtask progress and the rollup cost. A refusal is a
+   * sentence (no board here), never an empty list alone.
+   */
+  homeTasks?(): Promise<{ tasks: HomeTask[] } | { unavailable: string }>
+  /** HM-06: the configured providers and their state, from the real credential state. */
+  homeProviders?(): Promise<{ providers: HomeProvider[] } | { unavailable: string }>
 
   /** Re-detect config + services. Must never throw; failures come back as `unknown` services. */
   refresh(): Promise<ControlStatus>
