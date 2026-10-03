@@ -354,6 +354,8 @@ export interface CodeTabHost {
    * resume card offers next to the fleet's rows. Optional: a host without it lists none.
    */
   recentSessions?(limit: number): Promise<CodeResult<{ sessions: CodeRecentSession[] }>>
+  /** SS-08: rename a native session (its title in the engine's store — the harness's own name). */
+  rename?(sessionId: string, title: string): Promise<CodeResult<{ sentence: string }>>
   /** CD-18: this machine's earlier prompts, newest first, identical texts once (the newest kept). */
   promptHistory(): Promise<CodeResult<{ prompts: CodePromptRecord[] }>>
   /**

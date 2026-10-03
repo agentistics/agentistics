@@ -4312,6 +4312,16 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
         return { ...snap, sessions: [...snap.sessions, ...rows] }
       }
     }
+    // SS-08: a NATIVE session has one name — its title in the engine's store — renamed there.
+    const renameTmux = host.renameSession?.bind(host)
+    host.renameSession = async (id, label) => {
+      if (!id.startsWith('ses_')) {
+        return renameTmux ? renameTmux(id, label) : { ok: false, message: cliStrings(host.lang === 'pt' ? 'pt' : 'en').sessNoRegistryEntry }
+      }
+      if (!code.rename) return { ok: false, message: cliStrings(host.lang === 'pt' ? 'pt' : 'en').sessNoRegistryEntry }
+      const r = await code.rename(id, label)
+      return r.ok ? { ok: true, message: r.sentence } : { ok: false, message: r.sentence }
+    }
     // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
     // re-reading that the SAME question is still pending (a stale list must not answer a new one).
     const answerTmux = host.answerSession?.bind(host)
