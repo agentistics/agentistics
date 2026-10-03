@@ -45,7 +45,7 @@ describe('journal status: the first import in one line', () => {
   test('each state says what the surfaces do and what happens next', () => {
     expect(backfillLine(null, false)).toContain('not run yet')
     expect(backfillLine({ ...base, state: 'running', harness: 'codex', phase: 'artifacts', done: 3, total: 19 }, false)).toContain('running · codex artifacts 3/19 · 1,234 events written')
-    expect(backfillLine({ ...base, state: 'paused', pausedReason: 'swap' }, false)).toContain('PAUSED — the memory gate refuses (swap)')
+    expect(backfillLine({ ...base, state: 'paused', pausedReason: 'swap' }, false)).toContain('PAUSED — memory pressure (swap over its alarm)')
     expect(backfillLine({ ...base, state: 'interrupted' }, false)).toContain('resumes on the next server start')
     expect(backfillLine({ ...base, state: 'done', completedAt: 'c' }, true)).toContain('complete (c)')
   })

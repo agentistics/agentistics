@@ -11,10 +11,10 @@
  *   an unref'd timer. Startup is already slow; this adds nothing to it.
  * - **Low priority.** It runs as a CHILD process (`agentop journal import --background`) under
  *   `nice -n 19` and `ionice -c 3` where those exist, with small batches and one replay at a time.
- * - **It pauses under memory pressure.** Before every batch it asks the memory admission gate
- *   (`admitSpawn`, the rule every session spawn obeys). A refusal (swap alarm, no room) means it waits
- *   and re-asks every `PAUSE_RECHECK_MS`, saying `paused` in its progress. An unmeasurable machine is
- *   admitted, as the gate does everywhere.
+ * - **It pauses under REAL memory pressure.** Before every batch it reads memory (`memoryPressure`):
+ *   RAM available under the gate's reserve, or swap over its alarm, means it waits and re-asks every
+ *   `PAUSE_RECHECK_MS`, saying `paused` in its progress. The assistant-session count plays no part.
+ *   An unmeasurable machine is admitted, as the gate does everywhere.
  * - **Resumable and idempotent**, because the import is: a record per source, `UNIQUE(event_id)`. A
  *   server that stops mid-import resumes it on its next start.
  * - **It says how far it got:** a progress file beside the journal, which `agentop journal status`
@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileIdentity } from './shadow'
+import { RESERVED_BYTES, SWAP_ALARM_FRACTION, type MemorySample } from '../sessions/memory-budget'
 
 export interface BackfillProgress {
   v: 1
@@ -130,13 +131,23 @@ export function memoryPause(o: {
   }
 }
 
-/** The real gate: the one `admitSpawn` rule, asked for ONE more slot. */
+/**
+ * Is this machine under REAL memory pressure: RAM available under the gate's reserve, or swap over its
+ * alarm? The same two thresholds the session gate uses (`RESERVED_BYTES`, `SWAP_ALARM_FRACTION`), but
+ * NOT its session count: a machine busy with assistant sessions and plenty of free memory would
+ * otherwise never import (the leader's answer on the backfill item). Unmeasurable means admitted.
+ */
+export function memoryPressure(sample: MemorySample | null): MemoryVerdict {
+  if (!sample) return { admit: true }
+  if (sample.available < RESERVED_BYTES) return { admit: false, reason: 'ram' }
+  if (sample.swapTotal > 0 && sample.swapUsed / sample.swapTotal >= SWAP_ALARM_FRACTION) return { admit: false, reason: 'swap' }
+  return { admit: true }
+}
+
+/** The real reading, from `/proc/meminfo`. */
 export async function askMemoryGate(): Promise<MemoryVerdict> {
-  const [{ readSpawnBudget }, { admitSpawn }] = await Promise.all([
-    import('../sessions/memory-probe'), import('../sessions/spawn-admission'),
-  ])
-  const a = admitSpawn(await readSpawnBudget(), 1)
-  return a.admit ? { admit: true } : { admit: false, reason: a.refusal.reason }
+  const { readMemory } = await import('../sessions/memory-probe')
+  return memoryPressure(await readMemory())
 }
 
 // ── The child process ───────────────────────────────────────────────────────────────────────────

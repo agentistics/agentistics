@@ -96,3 +96,20 @@ describe('the child process', () => {
     expect(spawned).toHaveLength(1)
   })
 })
+
+import { memoryPressure } from './backfill'
+
+describe('memoryPressure: the import pauses on REAL pressure only, never on the session count', () => {
+  const GiB = 1024 ** 3
+  test('RAM available under the reserve, or swap over its alarm: pressure, with the reason', () => {
+    expect(memoryPressure({ total: 16 * GiB, available: 1 * GiB, swapTotal: 4 * GiB, swapUsed: 0 })).toEqual({ admit: false, reason: 'ram' })
+    expect(memoryPressure({ total: 16 * GiB, available: 8 * GiB, swapTotal: 4 * GiB, swapUsed: 3.6 * GiB })).toEqual({ admit: false, reason: 'swap' })
+  })
+  test('plenty of RAM and swap: admitted, however many sessions run', () => {
+    expect(memoryPressure({ total: 16 * GiB, available: 3 * GiB, swapTotal: 4 * GiB, swapUsed: 1 * GiB })).toEqual({ admit: true })
+    expect(memoryPressure({ total: 16 * GiB, available: 3 * GiB, swapTotal: 0, swapUsed: 0 })).toEqual({ admit: true })
+  })
+  test('an unmeasurable machine is admitted', () => {
+    expect(memoryPressure(null)).toEqual({ admit: true })
+  })
+})
