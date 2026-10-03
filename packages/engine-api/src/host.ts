@@ -375,6 +375,28 @@ export interface EngineSecrets {
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
 }
 
+export interface EngineMemoryFact {
+  chainId: string
+  factId: string
+  scope: 'repo' | 'person'
+  repoKey?: string
+  category: 'decision' | 'convention' | 'pitfall' | 'preference' | 'other'
+  /** `null` when the statement is no longer in the content store. */
+  statement: string | null
+  origin: 'person' | 'model' | 'derived'
+  validFrom: string
+  /** `null` = current; set when a later version closed it. */
+  validTo: string | null
+  sessionId: string | null
+  supersedes?: string
+}
+
+export interface EngineMemory {
+  recall(q: { repoKey: string | null }): Promise<EngineMemoryFact[]>
+  list(): Promise<EngineMemoryFact[]>
+  forget(chainId: string): Promise<{ ok: true; versions: number } | { ok: false; reason: 'not-found' | 'journal-unavailable' }>
+}
+
 /**
  * An answer the host already holds for a model call, by its deterministic invocation id (INV.1).
  * Only what the loop needs to carry on; never a raw body or a credential.
@@ -452,6 +474,13 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * native session is then simply not in that channel.
    */
   events?: { nativeSession(e: EngineNativeSessionEvent): void }
+  /**
+   * B6.6 (1.7, optional): memory — facts folded from the journal's `memory.*` events. The HOST enforces
+   * the scope on the read path (`recall` answers one repository's facts and the person's, §24.6 rule 3)
+   * and forgetting deletes the statements. Writes are the engine's own `memory.noted` events through
+   * `journal.sink()`, their statements in `paths.contentDir`. Absent on an older host: no memory.
+   */
+  memory?: EngineMemory
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {

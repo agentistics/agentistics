@@ -171,6 +171,8 @@ export const EVENT_TYPES = [
   'turn.started', 'turn.ended',
   // H24: a native session switched model (same provider) between runs
   'session.model.changed',
+  // B6.6: memory — a fact noted (by the person, the model, or derived), and a fact forgotten
+  'memory.noted', 'memory.forgotten',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -548,6 +550,37 @@ export interface SessionModelChangedData {
   to: string
 }
 
+/** B6.6 (§24.6): which memory a fact belongs to — a repository's, or the person's own. */
+export type MemoryScope = 'repo' | 'person'
+export type MemoryCategory = 'decision' | 'convention' | 'pitfall' | 'preference' | 'other'
+
+/**
+ * B6.6: a fact noted. The STATEMENT is not in the event: it lives in the content store by reference,
+ * so forgetting can delete it (§24.6 rule 6) while the journal keeps only a hash. A new version of a
+ * fact names the one it `supersedes` and shares its `chainId`; the older one is closed, never
+ * overwritten (rule 7).
+ */
+export interface MemoryNotedData {
+  /** This version. */
+  factId: string
+  /** The fact across its versions: the first version's `factId`. */
+  chainId: string
+  /** The version this one closes. */
+  supersedes?: string
+  scope: MemoryScope
+  /** `scope: 'repo'`: `memoryRepoKey()` — the normalised remote, or `path:<root>` without one. */
+  repoKey?: string
+  category: MemoryCategory
+  statement: { sha256: string; bytes: number }
+  /** Who noted it: the person (`/remember`), the model (`memory.note`, approved), or a derivation. */
+  origin: 'person' | 'model' | 'derived'
+  /** `derived`: the events it was derived from (rule 8: at least two). */
+  derivedFrom?: string[]
+}
+
+/** B6.6: a fact forgotten — every version of the chain leaves memory, and its statements are deleted. */
+export interface MemoryForgottenData { chainId: string }
+
 export interface PolicyRequestedData {
   /** The policy that was consulted. */
   policy: string
@@ -646,6 +679,8 @@ export interface EventData {
   'session.started': SessionStartedData
   'session.ended': NoData
   'session.model.changed': SessionModelChangedData
+  'memory.noted': MemoryNotedData
+  'memory.forgotten': MemoryForgottenData
   'run.started': RunStartedData
   'run.ended': RunEndedData
   'agent.started': AgentStartedData

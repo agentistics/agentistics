@@ -629,3 +629,18 @@ describe('schema v1 -> v2 migration (A1.7)', () => {
     db.close()
   })
 })
+
+describe('readTypes — B6.6', () => {
+  test('only the named types, in journal order, paged by cursor', async () => {
+    const j = await open()
+    const mem = (id: string, i: number) => ev(id, i, { type: 'memory.noted', data: { chainId: 'c', factId: id } as never })
+    await j.append([ev('x0', 0), mem('m1', 1), ev('x2', 2), mem('m3', 3), ev('x4', 4), { ...mem('f5', 5), type: 'memory.forgotten' }])
+    const first = await j.readTypes!(['memory.noted', 'memory.forgotten'], 0, 2)
+    expect(first.events.map(e => e.eventId)).toEqual(['m1', 'm3'])
+    const next = await j.readTypes!(['memory.noted', 'memory.forgotten'], first.cursor, 10)
+    expect(next.events.map(e => [e.eventId, e.type])).toEqual([['f5', 'memory.forgotten']])
+    expect((await j.readTypes!([], 0, 10)).events).toEqual([])
+    expect((await j.readTypes!(['never.written'], 0, 10)).events).toEqual([])
+    j.close()
+  })
+})

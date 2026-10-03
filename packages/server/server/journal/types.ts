@@ -123,6 +123,12 @@ export interface JournalStatus {
 export interface Journal {
   append(events: readonly AgentisticsEvent[]): Promise<AppendResult>
   readFrom(cursor: number, limit: number): Promise<ReadPage>
+  /**
+   * B6.6: the events of these RARE types only (`RARE_EVENT_TYPES`: memory), after `cursor`, read
+   * through the `rare_events` side table — folded on read instead of walking the whole journal. Any
+   * other type reads nothing. Same page rules as `readFrom`. Optional so an older fake still fits.
+   */
+  readTypes?(types: readonly string[], cursor: number, limit: number): Promise<ReadPage>
   stats(): Promise<JournalStats>
   /**
    * The largest rowid in the journal (0 when empty) — the HEAD a cursor is compared against. Added for

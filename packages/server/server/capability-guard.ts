@@ -140,6 +140,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   //  - `/api/ingest` and the OTLP routes (logs, metrics, traces) receive a harness's live record of this machine's
   //    conversations — transcript data by another road, so the transcript readers' gate.
   ['/api/runtime/sessions', 'localShell'],
+  // B6.6: the native runtime's memory — facts derived from this person's sessions; forgetting writes
+  // the journal. Host state, the native sessions' own capability.
+  ['/api/memory', 'localShell'],
   ['/api/ingest', 'localTranscripts'],
   ['/v1/logs', 'localTranscripts'],
   ['/v1/metrics', 'localTranscripts'],

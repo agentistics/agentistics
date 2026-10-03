@@ -282,6 +282,32 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
+    // B6.6: memory, folded from the same journal the engine writes its `memory.noted` events to.
+    memory: (() => {
+      let svc: import('../memory-service').MemoryService | null = null
+      const get = async () => {
+        if (svc) return svc
+        const { createMemoryService } = await import('../memory-service')
+        svc = createMemoryService({
+          journal: async () => {
+            if (!config.JOURNAL_ENABLED) return null
+            if (!journal) {
+              const { openJournal } = await import('../journal/journal')
+              journal = await openJournal()
+            }
+            return journal.status().state === 'open' ? journal : null
+          },
+          contentDir: config.CONTENT_DIR,
+          adapterVersion: `agentistics-server@${(await import('../version')).CURRENT_VERSION}`,
+        })
+        return svc
+      }
+      return {
+        recall: async q => (await get()).recall(q),
+        list: async () => (await get()).list(),
+        forget: async chainId => (await get()).forget(chainId),
+      }
+    })(),
     // H17: a native session's own state change, into the `agentop events` channel and its desktop
     // delivery — the same inbox and notifier the fleet's poll uses. Fire-and-forget, never throws.
     events: {

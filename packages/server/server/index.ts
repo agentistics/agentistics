@@ -1035,6 +1035,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    // B6.6: the native runtime's memory — inspect and forget (`memory-web.ts`).
+    if (url.pathname === '/api/memory' || url.pathname.startsWith('/api/memory/')) {
+      const { handleMemoryRequest, liveMemoryDeps } = await import('./memory-web')
+      const out = await handleMemoryRequest(req, url, await liveMemoryDeps(TEAM_CENTRAL))
+      return json(out.body, out.status)
+    }
     if (url.pathname === '/api/experimental' && req.method === 'GET') {
       // Read-only: `agentop experimental status` and the post-restart confirmation ask the RUNNING
       // server what it booted with. There is deliberately no write route and no Settings switch.
