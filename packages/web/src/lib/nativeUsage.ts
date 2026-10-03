@@ -79,22 +79,38 @@ export function nativeUsageOf(body: { groups?: MetricsGroupWire[] } | null | und
   }
 }
 
-/** The card's data, refreshed once a minute; `null` while there is nothing to show (or no projections). */
-export function useNativeUsage(): NativeUsage | null {
-  const [state, setState] = useState<NativeUsage | null>(null)
+/**
+ * PURE. Whether the card is drawn, and with what. The card belongs to the ENGINE, not to having
+ * calls: with the engine present and no native call yet it shows an empty state instead of
+ * vanishing (v2.98.0 hid it, so a fresh install could not tell "nothing yet" from "no such
+ * feature"). Without an engine there is nothing to show — unless usage exists anyway (a journal
+ * left by an engine that was later switched off still counts).
+ */
+export function nativeCard(engine: boolean, usage: NativeUsage | null): { show: boolean; usage: NativeUsage | null } {
+  return { show: engine || usage !== null, usage }
+}
+
+/** The card's data, refreshed once a minute. */
+export function useNativeUsage(): { show: boolean; usage: NativeUsage | null } {
+  const [state, setState] = useState<{ engine: boolean; usage: NativeUsage | null }>({ engine: false, usage: null })
   useEffect(() => {
     let alive = true
     const load = async () => {
+      let engine = false
+      try {
+        const e = await fetch('/api/engine', { cache: 'no-store' })
+        if (e.ok) engine = (await e.json())?.present === true
+      } catch { /* engine unknown: treated as absent */ }
+      let usage: NativeUsage | null = null
       try {
         const res = await fetch(NATIVE_USAGE_URL, { cache: 'no-store' })
-        if (!res.ok) { if (alive) setState(null); return }
-        const next = nativeUsageOf(await res.json())
-        if (alive) setState(next)
-      } catch { if (alive) setState(null) }
+        if (res.ok) usage = nativeUsageOf(await res.json())
+      } catch { /* no projections: no rows */ }
+      if (alive) setState({ engine, usage })
     }
     void load()
     const t = window.setInterval(load, 60_000)
     return () => { alive = false; window.clearInterval(t) }
   }, [])
-  return state
+  return nativeCard(state.engine, state.usage)
 }

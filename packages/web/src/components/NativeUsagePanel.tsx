@@ -15,7 +15,7 @@ const PROVIDER_LABEL: Record<string, string> = {
 }
 
 export function NativeUsagePanel({ usage, currency = 'USD', brlRate = 1, lang = 'en' }: {
-  usage: NativeUsage
+  usage: NativeUsage | null
   currency?: 'USD' | 'BRL'
   brlRate?: number
   lang?: 'en' | 'pt'
@@ -24,6 +24,16 @@ export function NativeUsagePanel({ usage, currency = 'USD', brlRate = 1, lang = 
   const pt = lang === 'pt'
   const money = (v: number | null, partial: boolean) =>
     v === null ? (pt ? 'sem preço' : 'unpriced') : `${partial ? '≥ ' : ''}${fmtCost(v, currency, brlRate)}`
+
+  if (usage === null) {
+    return (
+      <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.5, padding: '6px 4px' }}>
+        {pt
+          ? 'Nenhuma chamada nativa ainda. As chamadas do harness nativo (agentop code, agentop provider try) aparecem aqui.'
+          : 'No native calls yet. Calls made by the native harness (agentop code, agentop provider try) will appear here.'}
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
