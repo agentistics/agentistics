@@ -19,6 +19,7 @@ import { readVaultView, lockVaultNow } from './inventory'
 import { noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { uiReply } from './ui-sentence'
+import { handlePersonalHttp } from './personal-http'
 
 export interface VaultHttpEnv {
   /** CORS headers the host adds to every answer. */
@@ -248,5 +249,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const r = await gate.listCredentials({ grant, session, loopback })
     return reply(r)
   }
+  // VAULT.PERSONAL: answered through THIS module's `reply` (the one JSON exit, page filter included).
+  const personal = await handlePersonalHttp({ req, path, url, session, grant, loopback, reply })
+  if (personal) return personal
   return null
 }

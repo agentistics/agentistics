@@ -64,6 +64,10 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _recoverWrong: 'a wrong-words counter and a pause deadline for the page recovery (v2.98.1)',
   },
   'server/server/vault/http.ts': { LOOPBACK_HOSTS: 'host names that mean "this computer"' },
+  'server/server/vault/personal.ts': {
+    _now: 'a clock',
+    _imports: 'a parsed .env import between its preview and its commit (VAULT.PERSONAL): <= 10 min, bound to one session, single use, every value blanked on commit/expiry',
+  },
   'server/server/vault/rekey.ts': { SKIP_DIRS: 'directory names the rotation scan skips', _crashAt: 'a test seam: the name of a point to inject a crash at' },
   'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle' },
   'server/server/vault/socket.ts': { _handler: 'the op dispatcher', _server: 'the listening socket' },

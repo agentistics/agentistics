@@ -32,7 +32,7 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic,
+  parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic, revealAsks,
   type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
 } from '@agentistics/vault'
 import {
@@ -50,6 +50,9 @@ export type VaultAction =
   | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock' | 'set-unlock-policy'
   | 'change-protector' | 'rekey' | 'enroll-presence' | 'disable-presence' | 'reset' | 'rotate-recovery'
   | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase' | 'create-recovery'
+  // VAULT.PERSONAL (spec 2026-10-03-vault-personal.md §3)
+  | 'personal-list' | 'personal-create' | 'personal-reveal' | 'personal-edit' | 'personal-trash' | 'personal-restore'
+  | 'personal-restore-version' | 'personal-purge' | 'personal-group-write' | 'personal-group-delete' | 'personal-import-env'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -75,6 +78,21 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   // Review S2: the FIRST recovery key, asked by a page outside its own wizard — it hands out the root
   // key, so it costs the code (no grant reuse); the gesture is not owed because nothing is replaced.
   'create-recovery': { code: true, gesture: false, grant: null },
+  // VAULT.PERSONAL §3. Metadata work rides the 5-minute 'read' grant. Everything that changes or deletes
+  // a secret asks the gesture FRESH (owner, 2026-10-03: editing and deleting are dangerous and need
+  // Windows Hello); the code may come from the grant there. Restoring a version and deleting for good
+  // ask both, fresh. Reveal is its own rule (`requirePersonalReveal`): this row only draws its icons.
+  'personal-list': { code: true, gesture: false, grant: 'read' },
+  'personal-create': { code: true, gesture: false, grant: 'read' },
+  'personal-reveal': { code: true, gesture: true, grant: null },
+  'personal-edit': { code: true, gesture: true, grant: 'read' },
+  'personal-trash': { code: true, gesture: true, grant: 'read' },
+  'personal-restore': { code: true, gesture: true, grant: 'read' },
+  'personal-restore-version': { code: true, gesture: true, grant: null },
+  'personal-purge': { code: true, gesture: true, grant: null },
+  'personal-group-write': { code: true, gesture: false, grant: 'read' },
+  'personal-group-delete': { code: true, gesture: true, grant: 'read' },
+  'personal-import-env': { code: true, gesture: false, grant: 'read' },
 }
 
 /**
@@ -295,6 +313,34 @@ async function resetUnopenable(ctx: GateContext): Promise<GateResult> {
   return refused('reset-needs-unlock', vaultLang() === 'pt'
     ? 'O cofre está trancado. Destranque-o primeiro (`agentop vault unlock`): apagar o cofre pede o seu código e a confirmação pessoal. Se a chave dele sumiu de vez, o terminal pode apagá-lo sem isso.'
     : 'The vault is locked. Unlock it first (`agentop vault unlock`): resetting it asks for your code and your presence. If its key is gone for good, the terminal can reset it without them.')
+}
+
+/**
+ * VAULT.PERSONAL §3 — REVEAL. The gesture EVERY time (no grant ever stands for it); the code too when
+ * the unlock policy is `always`; with no presence enrolled, the code alone, fresh; with neither, refused
+ * (a reveal that asks nothing is not a gate). Frozen, recovery mode and a locked vault refuse as the
+ * table does.
+ */
+export async function requirePersonalReveal(ctx: GateContext): Promise<GateResult> {
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  const state = await loadState()
+  if (state.frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const asks = revealAsks({ hasPresence: hasPresence(o.vault), hasAuthenticator: enrolled(o.vault), unlockMode: effectiveUnlockPolicy(o.vault.unlockPolicy).mode })
+  if (asks.blocked) {
+    return refused('reveal-needs-setup', vaultLang() === 'pt'
+      ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
+      : 'To see a secret, the vault must ask you to confirm. Set up the authenticator (and, where you can, personal confirmation) first.')
+  }
+  if (asks.code) {
+    if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
+    const c = await checkCodeWith(o.dek, o.kid, ctx.code)
+    if (!c.ok) return c
+  }
+  if (asks.gesture) { const g = await proveGesture(o); if (!g.ok) return g }
+  noteVaultActivity()
+  return { ok: true }
 }
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */
