@@ -1,0 +1,4 @@
+# Test files the pre-commit hook skips (profiled 2026-10-02: each spawns a server or is a perf
+# benchmark). CI and `bun test` still run them — this list only narrows the HOOK.
+packages/server/server/claude-chat-removed.test.ts   # ~28s, spawns a server
+packages/server/server/runtime-metrics-perf.test.ts  # ~23s, perf benchmark

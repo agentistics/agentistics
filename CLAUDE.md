@@ -3478,7 +3478,13 @@ Do not mock the filesystem — the tested functions are pure and have no side ef
 
 ## Git hooks (husky)
 
-- **pre-commit**: `bun tsc --noEmit` + `bun test`
+- **pre-commit** (`scripts/precommit.ts`): an incremental `tsc` plus only the tests the staged change
+  touches — `scripts/affected-tests.ts` (pure, tested) picks the changed tests and the tests beside each
+  changed source file, and falls back to the whole suite when shared code/config changes
+  (`packages/core`, `engine-api`, `vault`, root configs, `bun.lock`, `scripts/`, `.husky/`).
+- The hook is **fast and partial**: the slow set in `scripts/slow-tests.txt` (server-spawning/perf files)
+  is skipped by the hook only. The FULL suite + `tsc` run in CI and at the leader's integration before
+  every release. WIP commits may use `--no-verify`; the final commit must not.
 - **commit-msg**: commitlint enforces Conventional Commits (`feat:`, `fix:`, `chore:`, etc.)
 
 ## The release's version bump — `versionBump.ts`, and the read that feeds it
