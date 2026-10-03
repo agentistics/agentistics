@@ -11,6 +11,7 @@ import { Err, card, input, overlay, primaryBtn } from '../MfaSetup'
 import { cleanCode, codeComplete, loadVault, stepUp, unlockCode, unlockGesture } from '../../lib/vaultApi'
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
 import type { VaultSelection } from '../../lib/vaultChip'
+import { pt_, type PKey } from '../../lib/personalText'
 
 type Lang = 'en' | 'pt'
 const T = {
@@ -139,7 +140,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
                   <input type="checkbox" checked={pick.has(i.id)} onChange={() => toggle(pick, i.id, setPick)} />
                   <KeyRound size={14} style={{ color: 'var(--anthropic-orange)' }} />
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, overflowWrap: 'anywhere' }}>{i.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{i.kind}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt_(`kind_${i.kind}` as PKey, lang)}</span>
                 </label>
               ))}
             </>

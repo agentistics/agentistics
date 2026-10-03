@@ -636,8 +636,32 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
 **Limits, stated:** a revealed value is in the browser's memory and the page's DOM for 30 seconds; a
 copy is in the clipboard for 30 seconds, readable by any program of yours, and longer in a clipboard
 history tool — the page says so. Names and notes are metadata: shown in the list without a gesture,
-sealed at rest. Agents using these secrets (references, scrubbing, grants) and the backup each get
-their own section when they ship.
+sealed at rest. The backup gets its own section when it ships.
+
+**Agents use a secret without seeing it** (spec §8). The person picks credentials or groups with the
+`:vault` chip in a session's composer; sending GRANTS exactly those to that session — the gesture,
+fresh — and the message carries `vault://` references plus a briefing, never a value. A grant lives in
+memory only, dies when the vault locks or the person revokes it, and holds ids and reference names.
+- **Native sessions** (the engine, engine-api 1.7 `vaultRefs`): after the policy allows a tool call, the
+  session's granted values reach THAT call's process as `VAULT_<KEY>` env (a shell call carrying them
+  runs in its own bash, never the shared one), and every tool output is scrubbed before the content
+  store, the history, the journal, the stream or the model sees it.
+- **Claude Code** (hooks, installed by `agentop hooks install`): `PreToolUse` rewrites a granted
+  `vault://key` in a Bash command into `$(agentop vault ref key)`, which fetches the value over
+  `vault.sock` when the command runs — the one op that returns a personal value, only for a granted
+  reference, audited per use; `PostToolUse` replaces every tool output through the scrubber.
+  **Unverified:** the Claude Code docs do not say whether the transcript JSONL keeps the hook-replaced
+  output or the original; treat the on-disk transcript as possibly holding the value.
+- **Other harnesses**: no hook to rewrite or scrub — only the copies agentop SERVES are scrubbed.
+- **Every copy agentop serves** of a granted session — chat turns, pending prompts, terminal frames, the
+  fleet's tails — has the value and its base64 / url / hex forms replaced by `«vault:NAME»`.
+
+**What scrubbing is NOT:** containment. A process that holds the value can print it in pieces, encode
+it twice, hash it, or send it over the network; scrubbing stops the accidental exposure (a program
+printing its config, `env`, `curl -v`, an error that echoes a key), not a determined exfiltration. A
+value shorter than 6 characters is not scrubbed (it would blank ordinary words). The session id a hook
+uses is a non-secret env var set at spawn; another process running as the user could claim it — the
+same-user limit of SECRETS.4 §0, and every use is audited.
 
 **The phone** (spec §7). A request that is not loopback never makes the service raise Windows Hello
 for a personal-secret action — a prompt on an empty desk, approved later by whoever sits down, is the
