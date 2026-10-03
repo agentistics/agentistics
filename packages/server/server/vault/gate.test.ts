@@ -77,7 +77,8 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words are
   // made LAST so they wrap the final key and are never kept in memory across steps).
   const p = await enrolPresence('hello', { ...S, code: codeAt() })
-  expect(p).toMatchObject({ ok: true, removed: ['dpapi'], recoveryOwed: true })
+  // Leader decision 2026-10-02: presence is HELD — nothing written, the silent wrapper stays until the words are confirmed.
+  expect(p).toMatchObject({ ok: true, removed: [], recoveryOwed: true })
   next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)

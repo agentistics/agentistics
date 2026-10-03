@@ -1023,6 +1023,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose }: {
               </div>
             )}
             <Note>{vtf(kind === 'hello' ? 'wiz_pres_enrolHello' : 'wiz_pres_enrolKey', lang, { n: enrolGestures })}</Note>
+            {view.wrappers.some(w => w !== 'hello' && w !== 'fido2' && w !== 'recovery' && w !== 'passphrase') && <Note>{t('wiz_pres_heldNote')}</Note>}
             {presenceCodeNeeded && <CodeField value={presCode} onChange={setPresCode} label={t('wiz_oldCode')} autoFocus />}
             {error && <Err text={error} />}
             {!needWords && (

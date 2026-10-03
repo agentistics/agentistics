@@ -241,7 +241,12 @@ describe('POST /api/vault/presence/enroll', () => {
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: wrongCode() })).status).toBe(403)
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).not.toContain('hello')
     const ok = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
-    expect(ok).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'] } })
+    // Leader decision 2026-10-02: presence is HELD; the silent wrapper stays until the recovery key is confirmed.
+    expect(ok).toMatchObject({ status: 200, json: { ok: true, removed: [], recoveryOwed: true } })
+    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toEqual(['dpapi'])
+    const r = await http('POST', '/api/vault/recovery/begin', {})
+    expect((await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })).status).toBe(200)
+    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
   })
 
   test('review S7: presence on a silent vault, long after the recovery key was made, asks for the words on a terminal', async () => {
@@ -425,7 +430,7 @@ describe('owner decision 2026-10-02 — ONE code, no second code after the wizar
     seed = base32Decode(a.json.secret)
     await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
     const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' }) // no code
-    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: ['dpapi'], recoveryOwed: true } })
+    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: [], recoveryOwed: true } }) // held until the words
     const r = await http('POST', '/api/vault/recovery/begin', {}) // no code: still inside the wizard
     expect(r.status).toBe(200)
     await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })

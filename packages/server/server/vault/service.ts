@@ -715,8 +715,13 @@ export async function unlockVault(passphrase: string): Promise<{ ok: true } | { 
   return refused('locked', sentence('locked'))
 }
 
+/** Whatever else holds key material for the open vault (the gate's held presence key) drops it on lock. */
+const _lockHooks: (() => void)[] = []
+export function onVaultLock(fn: () => void): void { _lockHooks.push(fn) }
+
 /** Drop the key from this process — the open one AND any pending one. */
 export function lockVault(reason: LockedBy = 'user'): void {
+  for (const h of _lockHooks) { try { h() } catch { /* a hook never keeps the vault open */ } }
   const was = _opened !== null
   if (_opened) _opened.dek.fill(0)
   _opened = null
@@ -926,7 +931,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
 
 export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
   try {

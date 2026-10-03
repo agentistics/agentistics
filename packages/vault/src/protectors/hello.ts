@@ -156,7 +156,7 @@ export function helloProtector(o: HelloOptions): Protector {
     return { ok: true, sig }
   }
 
-  return {
+  const self: Protector = {
     id: 'hello',
     label(lang: Lang) {
       if (lang === 'pt') return o.wsl ? 'o Windows Hello (acessado a partir do WSL): cada abertura pede o seu PIN, rosto ou digital' : 'o Windows Hello: cada abertura pede o seu PIN, rosto ou digital'
@@ -172,7 +172,7 @@ export function helloProtector(o: HelloOptions): Protector {
       const sup = await call('check', 'probe')
       return sup.ok ? { ok: true } : { ok: false, reason: presenceReason(sup.code, sup.reason) }
     },
-    async wrap(dek, kid) {
+    async derive(kid) {
       const c = await call('create', kid)
       if (!c.ok) return { ok: false, reason: presenceReason(c.code, c.reason) }
       const challenge = new Uint8Array(randomBytes(32))
@@ -182,19 +182,35 @@ export function helloProtector(o: HelloOptions): Protector {
         return { ok: false, reason: presenceReason(s.code, s.reason) }
       }
       const kek = deriveKek(s.sig, kid, 'hello')
-      const wrapped = sealDek(kek, dek, 'hello', kid)
-      // The seal is checked here, in memory, with the key just derived — never with a second gesture.
-      const back = openDek(kek, wrapped, 'hello', kid)
+      zero(s.sig)
+      return { ok: true, held: { kek, fields: { challenge: Buffer.from(challenge).toString('base64') } } }
+    },
+    async sealHeld(held, dek, kid) {
+      const challenge = held.fields.challenge
+      if (!challenge || held.kek.length !== 32) return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
+      const wrapped = sealDek(held.kek, dek, 'hello', kid)
+      // Leader decision 2026-10-02: the wrapped DEK must open again with the KEK already derived — checked
+      // here, in memory, before anything is written or retired. Never a second gesture.
+      const back = openDek(held.kek, wrapped, 'hello', kid)
       const same = back !== null && Buffer.compare(Buffer.from(back), Buffer.from(dek)) === 0
       if (back) zero(back)
-      zero(kek); zero(s.sig)
-      if (!same) {
-        await call('delete', kid)
-        return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
-      }
-      const f: HelloFile = { v: 1, challenge: Buffer.from(challenge).toString('base64'), wrapped: Buffer.from(wrapped).toString('base64') }
+      if (!same) return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
+      const f: HelloFile = { v: 1, challenge, wrapped: Buffer.from(wrapped).toString('base64') }
       await o.io.writeFile(file, bytes(JSON.stringify(f) + '\n'))
       return { ok: true, record: { type: 'hello', createdAt: new Date().toISOString(), params: { file: HELLO_FILE, credential: helloCredentialName(kid) } } }
+    },
+    async discardHeld(held, kid) {
+      zero(held.kek)
+      await call('delete', kid).catch(() => {})
+    },
+    async wrap(dek, kid) {
+      const d = await self.derive!(kid)
+      if (!d.ok) return d
+      try {
+        const s = await self.sealHeld!(d.held, dek, kid)
+        if (!s.ok) await call('delete', kid)
+        return s
+      } finally { zero(d.held.kek) }
     },
     async unwrap(_record: WrapperRecord, kid: string): Promise<UnwrapResult> {
       const raw = await o.io.readFile(file)
@@ -221,4 +237,5 @@ export function helloProtector(o: HelloOptions): Protector {
       await o.io.removeFile(file).catch(() => {})
     },
   }
+  return self
 }

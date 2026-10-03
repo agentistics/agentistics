@@ -459,7 +459,7 @@ async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
   // Review S7: the 24 words (typed on the TTY) — only ever from the socket, so the new data key can be
   // wrapped under the recovery key when it was not confirmed in this same setup.
   const r = await enrolPresence(h.protector, { code: codeOf(h), session: SOCKET, ...(typeof h.words === 'string' ? { words: h.words } : {}), ...(h.replaceRecovery === true ? { replaceRecovery: true } : {}) })
-  return { reply: r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed } : r }
+  return { reply: r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed, ...('held' in r && r.held ? { held: true } : {}) } : r }
 }
 /** §7.4: the 24 words are typed on the TTY and arrive here only from the socket (never HTTP). */
 async function opPresenceDisable(h: Record<string, unknown>): Promise<OpResult> {

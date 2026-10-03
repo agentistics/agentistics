@@ -461,7 +461,7 @@ async function enrolRecovery(): Promise<number> {
 
 async function enrolPresence(kind: 'hello' | 'fido2', recoveryPlanned = false): Promise<number> {
   process.stdout.write('\n' + (kind === 'hello'
-    ? t('Agentistics is checking that Windows Hello can protect your vault — confirm twice.\n', 'O Agentistics está verificando se o Windows Hello pode proteger o seu cofre — confirme duas vezes.\n')
+    ? t('Windows Hello will ask you twice: once to create the vault\'s key, once to use it.\n', 'O Windows Hello vai pedir duas vezes: uma para criar a chave do cofre e uma para usá-la.\n')
     : t('Agentistics is checking that your security key can protect your vault — touch it when it blinks (twice).\n', 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela quando piscar (duas vezes).\n')))
   let r = await askGated({ op: 'presence-enroll', protector: kind })
   if (r && !r.ok && r.code === 'presence-needs-recovery-words' && process.stdin.isTTY && process.stdout.isTTY) {
@@ -479,7 +479,10 @@ async function enrolPresence(kind: 'hello' | 'fido2', recoveryPlanned = false): 
   }
   if (!r) return down()
   if (!r.ok) return said(r)
-  process.stdout.write(t('Presence enrolled; the silent system wrapper was removed and the vault key replaced.\n', 'Presença configurada; o invólucro silencioso do sistema foi removido e a chave do cofre trocada.\n'))
+  process.stdout.write(r.held === true
+    // Leader decision 2026-10-02: nothing changes until the recovery key is confirmed — the LAST step.
+    ? t('Presence is ready. It takes over when your recovery key is confirmed, in the next step; until then the vault is unchanged.\n', 'A presença está pronta. Ela assume quando a sua chave de recuperação for confirmada, no próximo passo; até lá o cofre não muda.\n')
+    : t('Presence enrolled; the silent system wrapper was removed and the vault key replaced.\n', 'Presença configurada; o invólucro silencioso do sistema foi removido e a chave do cofre trocada.\n'))
   // The recovery key is owed now (none yet, or the old words were replaced): made right here, LAST.
   if (r.recoveryOwed === true && !recoveryPlanned) return enrolRecovery()
   return 0

@@ -36,6 +36,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
+    _lockHooks: 'callbacks run on lock (they DROP key material, they hold none)',
     _unlockWindowAnchorMs: 'a timestamp (ms) of the last gesture+code unlock — the per-day window; no key material',
     _vaultDir: 'a path', _role: 'holder|client', _lang: 'a language reader', _io: 'the IO adapter', _fs: 'the fs adapter',
     _scryptForTests: 'KDF cost parameters', _override: 'test protectors', _autoInit: 'test init policy',
@@ -53,6 +54,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _grantKey: 'the in-memory HMAC key that signs 5-minute read grants (§2.4: minted at start, never on disk); signs, decrypts nothing',
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',
     _flow: 'a deadline (ms) + the session it belongs to, after which the wizard\'s one verified code stops standing for later steps; no key material', _enrolWrong: 'a wrong-code counter for one enrolment',
+    _heldPresence: 'the presence KEK + the NEXT data key between the wizard\'s presence step and its confirmed recovery key (leader decision 2026-10-02): ≤ 10 min, bound to one session, zeroed on lock/expiry/commit',
     _setupProof: 'a deadline (ms) + the session that already spent the setup code; never the code itself',
     _gestures: 'how many presence prompts of one request were answered (counts only, for the page\'s progress line)',
     _setup: 'the one-time SETUP code a page needs for a FIRST enrolment (review S2): 8 digits, 10 min, single use; authorises, decrypts nothing',

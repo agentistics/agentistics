@@ -267,7 +267,7 @@ export function fido2Protector(o: Fido2Options): Protector {
   const fail = (f: { code: PresenceCode | 'no-hmac-secret'; reason: string }) =>
     ({ ok: false as const, reason: f.code === 'no-hmac-secret' ? `no-hmac-secret: ${f.reason}` : presenceReason(f.code, f.reason) })
 
-  return {
+  const self: Protector = {
     id: 'fido2',
     label(lang: Lang) {
       if (lang === 'pt') return web ? 'uma chave de segurança FIDO2 (pelo Windows): cada abertura pede o toque na chave' : 'uma chave de segurança FIDO2: cada abertura pede o toque na chave'
@@ -286,24 +286,36 @@ export function fido2Protector(o: Fido2Options): Protector {
       if (!k.hmac) return fail({ code: 'no-hmac-secret', reason: NO_HMAC })
       return { ok: true }
     },
-    async wrap(dek, kid) {
+    async derive() {
       const m = await counted(make())
       if (!m.ok) return fail(m)
       const salt = new Uint8Array(randomBytes(32))
       const s = await counted(secret(m.out, salt))
       if (!s.ok) return fail(s)
       const key = new Uint8Array(Buffer.from(s.out, 'base64'))
-      const kek = deriveKek(key, kid, 'fido2')
+      return { ok: true as const, held: { kek: key, fields: { credential: m.out, salt: Buffer.from(salt).toString('base64') } } }
+    },
+    async sealHeld(held, dek, kid) {
+      const { credential, salt } = held.fields
+      if (!credential || !salt) return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
+      // `held.kek` is the key's hmac-secret output; the KEK proper is derived from it per kid.
+      const kek = deriveKek(held.kek, kid, 'fido2')
       const wrapped = sealDek(kek, dek, 'fido2', kid)
-      // The seal is checked here, in memory, with the key just derived — never with a second touch.
+      // The wrapped DEK must open again with the key already derived — checked in memory, never a second touch.
       const back = openDek(kek, wrapped, 'fido2', kid)
       const same = back !== null && Buffer.compare(Buffer.from(back), Buffer.from(dek)) === 0
       if (back) zero(back)
-      zero(kek); zero(key)
+      zero(kek)
       if (!same) return { ok: false, reason: presenceReason('presence-unavailable', 'bridge-failed') }
-      const f: Fido2File = { v: 1, credential: m.out, salt: Buffer.from(salt).toString('base64'), wrapped: Buffer.from(wrapped).toString('base64') }
+      const f: Fido2File = { v: 1, credential, salt, wrapped: Buffer.from(wrapped).toString('base64') }
       await o.io.writeFile(file, bytes(JSON.stringify(f) + '\n'))
       return { ok: true, record: { type: 'fido2', createdAt: new Date().toISOString(), params: { file: FIDO2_FILE, transport: o.transport } } }
+    },
+    async discardHeld(held) { zero(held.kek) }, // a resident-less credential needs no removal
+    async wrap(dek, kid) {
+      const d = await self.derive!(kid)
+      if (!d.ok) return d
+      try { return await self.sealHeld!(d.held, dek, kid) } finally { zero(d.held.kek) }
     },
     async unwrap(_record: WrapperRecord, kid: string): Promise<UnwrapResult> {
       const raw = await o.io.readFile(file)
@@ -330,6 +342,7 @@ export function fido2Protector(o: Fido2Options): Protector {
       await o.io.removeFile(file).catch(() => {})
     },
   }
+  return self
 }
 
 /**

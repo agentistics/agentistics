@@ -235,6 +235,10 @@ export const VAULT_TEXT = {
     en: 'Touch your key {n} times: once to register it, once to use it. After that, each unlock asks once.',
     pt: 'Toque na chave {n} vezes: uma para registrá-la e uma para usá-la. Depois disso, cada abertura pede uma vez.',
   },
+  wiz_pres_heldNote: {
+    en: 'Nothing in your vault changes until you confirm the recovery key, in the last step. Leaving before that keeps everything as it is now.',
+    pt: 'Nada no seu cofre muda até você confirmar a chave de recuperação, no último passo. Se sair antes disso, tudo fica como está agora.',
+  },
   wiz_gesture_progress: { en: 'Confirmation {i} of {n}', pt: 'Confirmação {i} de {n}' },
   wiz_pres_go: { en: 'Turn on presence', pt: 'Ligar a presença' },
   wiz_next: { en: 'Next', pt: 'Próximo' },

@@ -29,6 +29,17 @@ function fake(id: ProtectorId): Fake {
       return d ? { ok: true, dek: new Uint8Array(d) } : { ok: false, kind: 'missing', reason: 'gone' }
     },
     async remove(_r: unknown, kid: string) { STORE.delete(`${id}:${kid}`) },
+    // The two-phase presence API (leader decision 2026-10-02): the gestures at `derive`, nothing written.
+    ...(id === 'hello' ? {
+      async derive() {
+        if (self.wrapFails) return { ok: false as const, reason: self.wrapFails }
+        return { ok: true as const, held: { kek: new Uint8Array(32).fill(7), fields: { marker: 'held' } } }
+      },
+      async sealHeld(_h: unknown, dek: Uint8Array, kid: string) {
+        STORE.set(`${id}:${kid}`, new Uint8Array(dek)); return { ok: true as const, record: { type: id, createdAt: 'x' } }
+      },
+      async discardHeld() {},
+    } : {}),
   }
   return self
 }
@@ -361,6 +372,7 @@ describe('S3 — reset when the vault cannot open: allowed from the terminal, wi
   test('a vault that is merely LOCKED behind presence is not reset that way — the sentence says unlock first', async () => {
     await authVault()
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await makeRecovery() // presence commits as the wizard's LAST step
     next()
     restart(); installVaultOps()
     const r = await op({ op: 'vault-reset' })
@@ -466,7 +478,9 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
     await authVault()
     const old = await silentCopy()
     __rekeyCrashAtForTests('prepare-mid')
-    await expect(enrolPresence('hello', { ...S, code: codeAt() })).rejects.toThrow('injected crash')
+    // Presence is HELD (nothing written); the rekey runs when the recovery key is confirmed — the crash lands there.
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await expect(makeRecovery()).rejects.toThrow('injected crash')
     restart()
     const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
     expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
@@ -711,12 +725,12 @@ describe('the device check asks nothing; the enrolment reports live "confirmatio
   test('enrolment progress is visible to the asking session while the dialogs are up, to nobody else, and gone after', async () => {
     await authVault()
     const seen: unknown[] = []
-    const wrap = hello.wrap.bind(hello)
-    hello.wrap = async (dek, kid) => {
+    const derive = hello.derive!.bind(hello)
+    hello.derive = async (kid: string) => {
       seen.push(gestureProgress(S)); gestureDone()
       seen.push(gestureProgress(S)); seen.push(gestureProgress(OTHER)); gestureDone(); gestureDone()
       seen.push(gestureProgress(S))
-      return wrap(dek, kid)
+      return derive(kid)
     }
     expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
     expect(seen).toEqual([
@@ -730,5 +744,80 @@ describe('the device check asks nothing; the enrolment reports live "confirmatio
   test('the view states the counts the page prints', async () => {
     await silentVault()
     expect((await readVaultView([], async () => [], SWEB.session)).gestures).toEqual({ probe: 0, enroll: 2 })
+  })
+})
+
+// ── leader decision 2026-10-02: the silent OS wrapper is removed ONLY as the wizard's very last step ──
+
+import { presenceHeldFor } from './gate'
+
+describe('the silent wrapper goes LAST — after the recovery key is confirmed, never at the presence step', () => {
+  const vj = () => parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+  const mark = async () => {
+    const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+    return r.ok ? new TextDecoder().decode(r.plaintext) : null
+  }
+
+  test('QUIT after presence and before recovery → the vault still opens silently and nothing is lost', async () => {
+    await authVault()
+    const before = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
+    const kid = vj().kid
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    // Nothing on disk changed: no presence wrapper, no hello file, the silent wrapper and its stored key intact.
+    expect(readFileSync(join(vaultDir(), 'vault.json'), 'utf8')).toBe(before)
+    expect(vj().wrappers.map(w => w.type)).toEqual(['dpapi'])
+    expect(STORE.has(`dpapi:${kid}`)).toBe(true)
+    expect(STORE.has(`hello:${kid}`)).toBe(false)
+    // The person quits: the service restarts (or the page is simply closed and the vault locks).
+    restart()
+    const g = hello.gestures
+    expect(await ensureVaultOpen()).not.toBeNull() // opens in SILENCE, as before the wizard
+    expect(hello.gestures).toBe(g)
+    expect(await mark()).toBe('MARK')
+    expect(vj().kid).toBe(kid)
+  })
+
+  test('the same quit without a restart: a lock drops the held key, and the next open is still silent', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    expect(presenceHeldFor(S)).toBe('hello')
+    lockVault('user')
+    expect(presenceHeldFor(S)).toBeNull()
+    expect(await ensureVaultOpen()).not.toBeNull()
+    expect(await mark()).toBe('MARK')
+    // and a recovery key made now is a plain recovery key: presence did not sneak in
+    await makeRecovery()
+    expect(vj().wrappers.map(w => w.type).sort()).toEqual(['dpapi', 'recovery'])
+  })
+
+  test('the held key expires with the wizard window (10 min): presence is not committed by a late recovery key', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    T += 11 * 60_000
+    expect(presenceHeldFor(S)).toBeNull()
+    await makeRecovery().catch(() => {}) // the wizard's window is over; whatever it says, presence stays off
+    expect(vj().wrappers.map(w => w.type)).toContain('dpapi')
+    expect(vj().wrappers.map(w => w.type)).not.toContain('hello')
+  })
+
+  test('confirming the recovery key is what commits: presence on, the silent wrapper retired, a new key, everything readable', async () => {
+    await authVault()
+    const old = vj().kid
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    await makeRecovery()
+    const v = vj()
+    expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
+    expect(v.kid).not.toBe(old)
+    expect(v.retired).toBeUndefined()
+    expect(STORE.has(`dpapi:${old}`)).toBe(false)
+    expect(STORE.has(`hello:${v.kid}`)).toBe(true) // sealed with the HELD key, at the end
+    expect(await mark()).toBe('MARK')
+    expect(presenceHeldFor(S)).toBeNull()
+  })
+
+  test('another session cannot commit a presence it did not take', async () => {
+    await authVault()
+    expect((await enrolPresence('hello', { ...S, code: codeAt() })).ok).toBe(true)
+    expect(presenceHeldFor({ session: 'http:someone-else' })).toBeNull()
   })
 })

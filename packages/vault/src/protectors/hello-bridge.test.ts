@@ -136,6 +136,37 @@ describe('the gesture count the page states is the count the bridge raises (owne
       expect(ticks).toBe(PRESENCE_GESTURES.enroll + PRESENCE_GESTURES.unlock)
     } finally { setGestureListener(null) }
   })
+  it('two-phase enrolment: derive takes the 2 prompts and writes nothing; sealHeld takes NONE, checks the held KEK opens it, then writes', async () => {
+    const calls: string[] = []
+    const io = okIo(calls)
+    const written: string[] = []
+    const w = io.writeFile.bind(io)
+    io.writeFile = async (f, b) => { written.push(f); return w(f, b) }
+    let ticks = 0
+    setGestureListener(() => { ticks++ })
+    try {
+      const p = helloProtector({ io, vaultDir: '/v', wsl: true })
+      const d = await p.derive!('k1')
+      expect(d.ok).toBe(true)
+      if (!d.ok) return
+      expect(ticks).toBe(2)
+      expect(written).toEqual([]) // nothing on disk until the LAST step
+      const before = calls.length
+      const dek = new Uint8Array(32).fill(9)
+      const s = await p.sealHeld!(d.held, dek, 'k1')
+      expect(s.ok).toBe(true)
+      expect(calls.length).toBe(before) // no bridge call at all: no gesture
+      expect(ticks).toBe(2)
+      expect(written).toEqual(['/v/dek.hello'])
+      if (!s.ok) return
+      const u = await p.unwrap(s.record, 'k1') // the first real unlock: ONE sign, same key
+      expect(u.ok && Buffer.from(u.dek).equals(Buffer.from(dek))).toBe(true)
+      // A held key that is not 32 bytes (zeroed / damaged) is refused before anything is written.
+      const bad = await p.sealHeld!({ kek: new Uint8Array(3), fields: d.held.fields }, dek, 'k1')
+      expect(bad.ok).toBe(false)
+      expect(written).toEqual(['/v/dek.hello'])
+    } finally { setGestureListener(null) }
+  })
   it('a failed or cancelled prompt does not count as one answered', async () => {
     let ticks = 0
     setGestureListener(() => { ticks++ })
