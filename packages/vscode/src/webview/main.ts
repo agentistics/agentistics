@@ -68,6 +68,7 @@ const state = {
   attention: 0,
   unavailable: undefined as string | undefined,
   tasks: [] as string[],
+  native: [] as import('../native').NativeRow[],
   /** The sessions that fell together, when some did — the "reopen what fell" offer. */
   fell: undefined as { count: number; atMs: number } | undefined,
   options: null as NewOptions | null,
@@ -353,6 +354,9 @@ function renderList(): HTMLElement {
     box.append(fell)
   }
 
+  // H22: the native Agentistics sessions, in their own band (open ones first).
+  if (state.native.length > 0) box.append(renderNative())
+
   if (!view) {
     box.append(el('div', 'empty', '…'))
     return box
@@ -386,6 +390,22 @@ function renderList(): HTMLElement {
  * They live on the band rather than on a row because a task is not a session: finishing one is a
  * statement about the work, and deleting one removes a name, not a conversation.
  */
+function renderNative(): HTMLElement {
+  const band = el('div', 'native')
+  const rows = [...state.native].sort((a, b) => (a.status === 'open') === (b.status === 'open') ? b.updatedAt.localeCompare(a.updatedAt) : a.status === 'open' ? -1 : 1).slice(0, 10)
+  band.append(groupHeading(s('nativeGroup'), state.native.length))
+  for (const r of rows) {
+    const row = el('button', 'native-row')
+    row.setAttribute('title', s('nativeOpenHint'))
+    row.append(el('span', 'native-title', r.title))
+    const meta = [r.model, r.status === 'open' ? (r.activity === 'waiting' || r.activity === 'waiting-approval' ? s('nativeWaiting') : r.activity === 'working' ? s('nativeWorking') : '') : r.status].filter(Boolean).join(' · ')
+    row.append(el('span', 'native-meta', meta))
+    row.addEventListener('click', () => post({ type: 'openNative', id: r.id }))
+    band.append(row)
+  }
+  return band
+}
+
 function groupHeading(
   name: string,
   count: number,
@@ -1294,6 +1314,7 @@ window.addEventListener('message', event => {
     state.attention = msg.fleet.attention
     state.unavailable = msg.fleet.unavailable
     state.tasks = msg.fleet.tasks
+    state.native = msg.fleet.native ?? []
     state.fell = msg.fleet.fell
     state.view = msg.fleet.view ?? null
     state.arrangement = msg.arrangement

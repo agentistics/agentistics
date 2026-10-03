@@ -81,6 +81,8 @@ export interface FleetPayload {
   fell?: { count: number; atMs: number }
   /** The same fleet, arranged. Present because the extension always asks for it. */
   view?: FleetView
+  /** H22: the native Agentistics sessions — present only where the native runtime may be shown. */
+  native?: import('./native').NativeRow[]
 }
 
 export interface HarnessOption {
@@ -265,6 +267,8 @@ export type ViewMessage =
   | { type: 'unwatch'; id: string }
   /** Open this session as its own editor tab — several may be open at once. */
   | { type: 'openTab'; id: string }
+  /** H22: open a native session's chat in the web app. */
+  | { type: 'openNative'; id: string }
   /**
    * Change how the fleet is arranged.
    *

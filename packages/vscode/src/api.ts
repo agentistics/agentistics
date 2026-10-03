@@ -12,6 +12,7 @@
  * cockpit's poller does, because the last known truth beats a confident empty list.
  */
 
+import { nativeRowsFrom, nativeVisible, type NativeRow } from './native'
 import type { SessionMeta } from '@agentistics/core'
 import type {
   Arrangement, FleetActionId, FleetPayload, LinkStatus, NewOptions, SpawnRequest,
@@ -85,6 +86,22 @@ export class AgentopClient {
       return { link: { state: 'ok', url: this.api }, payload: await res.json() as FleetPayload }
     } catch (err) {
       return { link: { state: isTimeout(err) ? 'slow' : 'down', url: this.api } }
+    }
+  }
+
+  /**
+   * H22: the native sessions, or `null` where the native runtime may not be shown here (no engine,
+   * the experimental flag off, an older server, or the server unreachable) — never an error.
+   */
+  async native(): Promise<NativeRow[] | null> {
+    try {
+      const status = await fetch(this.url('/api/engine'), { signal: AbortSignal.timeout(TIMEOUT_MS) })
+      if (!status.ok || !nativeVisible(await status.json())) return null
+      const res = await fetch(this.url('/api/runtime/sessions', { limit: '30' }), { signal: AbortSignal.timeout(TIMEOUT_MS) })
+      if (!res.ok) return null
+      return nativeRowsFrom(await res.json())
+    } catch {
+      return null
     }
   }
 
