@@ -605,6 +605,40 @@ A machine paired as an unattended runner will keep its runner credentials in a *
 with its own key, that can never read your personal secrets. The storage for it exists. Pairing, the
 unattended open at service start, and the `agentop vault runner` commands are **not built yet**.
 
+## 7c. Personal secrets — the person's own passwords, logins, keys and notes
+
+Settings → Vault protects the secrets Agentistics needs; `/vault` holds the ones the PERSON keeps
+(spec: engine repo `docs/superpowers/specs/2026-10-03-vault-personal.md`). It changes no cryptography
+of §7a/§7b: every record is sealed in the human scope, under the one purpose `vault/personal`.
+
+- **Names are sealed too.** Each secret is a directory named by an opaque id, holding one sealed
+  METADATA record and one sealed VALUE record per version. The disk, a backup or a future Cloud sees
+  ids, sizes, version counters and times — never a name (Cloud decision C36). The sealed name binds
+  each file to its id and version, so a file moved between secrets does not open.
+- **The list never decrypts a value.** Only `POST /api/vault/personal/reveal` returns one; a test seals
+  a marker value, drives every route, and fails if the marker appears in any other body, in
+  `audit.jsonl`, on stdout/stderr, or anywhere on disk in the clear. The audit records the ACT and the
+  opaque id — never the name or the value.
+- **What each action asks** (rows in `VAULT_ACTION_ROWS`, every one tested server-side): listing,
+  creating, groups and the `.env` import ride the 5-minute read grant (the code once). **Revealing asks
+  the gesture every time** (Windows Hello) and the code too when the unlock policy is "always"; with no
+  presence enrolled it asks the code, fresh; with neither it is refused. **Editing, moving to the trash
+  and restoring ask the gesture fresh** (owner rule: they are dangerous). **Restoring a version and
+  deleting for good ask code and gesture, fresh.**
+- **Versions** are append-only (the newest 10 kept) with a version counter: an edit based on an old
+  version is refused as a conflict. **The trash** keeps an item 30 days, then removes it from disk.
+- **The `.env` import** sends the file text once; the server parses it, holds the pairs in memory for
+  10 minutes under a single-use token bound to the session, and answers the KEYS only. A name that
+  already exists is never overwritten unless the person picks "replace" (a new version).
+- **Key rotation carries them**: enrolling presence re-seals every `*.sealed` under the data dir, these
+  included (tested).
+
+**Limits, stated:** a revealed value is in the browser's memory and the page's DOM for 30 seconds; a
+copy is in the clipboard for 30 seconds, readable by any program of yours, and longer in a clipboard
+history tool — the page says so. Names and notes are metadata: shown in the list without a gesture,
+sealed at rest. Agents using these secrets (references, scrubbing, grants), the phone, and the backup
+each get their own section when they ship.
+
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 
 A member can restrict what each central connection receives, across **two dimensions** —
