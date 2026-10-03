@@ -122,7 +122,7 @@ export function presenceSentence(code: PresenceCode, lang: Lang, presence: strin
   // is its own sentence: the credential exists, it simply did not give back the setup's key.
   if (code === 'presence-lost' && /^presence-lost:\s*not-reproducible$/.test(reason)) {
     return lang === 'pt'
-      ? `${presence} respondeu, mas não com a mesma chave da configuração — então não abre este cofre. Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`; depois ligue a presença de novo.`
+      ? `${presence} respondeu, mas não com a mesma chave da configuração — então não abre este cofre. Seus segredos estão intactos. Abra o cofre com a chave de recuperação de 24 palavras: \`agentop vault recover\`; depois ligue a confirmação pessoal de novo.`
       : `${presence} answered, but not with the key it gave at setup — so it cannot open this vault. Your secrets are intact. Open the vault with your 24-word recovery key: \`agentop vault recover\`, then turn presence on again.`
   }
   if (lang === 'pt') {

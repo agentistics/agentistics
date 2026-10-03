@@ -345,7 +345,7 @@ function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string
 export function presenceWord(id: ProtectorId | null | undefined, lang: Lang = vaultLang()): string {
   if (id === 'hello') return 'Windows Hello'
   if (id === 'fido2') return lang === 'pt' ? 'sua chave de segurança' : 'your security key'
-  return lang === 'pt' ? 'seu dispositivo de presença' : 'your presence device'
+  return lang === 'pt' ? 'a sua confirmação pessoal' : 'your personal confirmation'
 }
 
 export function protectorLabel(id: ProtectorId | null): string | null {

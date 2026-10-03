@@ -293,7 +293,7 @@ async function resetUnopenable(ctx: GateContext): Promise<GateResult> {
   const st = (await vaultStatus()).state
   if ((st === 'protector-lost' || st === 'corrupt') && fromSocket(ctx)) return { ok: true }
   return refused('reset-needs-unlock', vaultLang() === 'pt'
-    ? 'O cofre está trancado. Destranque-o primeiro (`agentop vault unlock`): apagar o cofre pede o seu código e a confirmação de presença. Se a chave dele sumiu de vez, o terminal pode apagá-lo sem isso.'
+    ? 'O cofre está trancado. Destranque-o primeiro (`agentop vault unlock`): apagar o cofre pede o seu código e a confirmação pessoal. Se a chave dele sumiu de vez, o terminal pode apagá-lo sem isso.'
     : 'The vault is locked. Unlock it first (`agentop vault unlock`): resetting it asks for your code and your presence. If its key is gone for good, the terminal can reset it without them.')
 }
 
@@ -660,7 +660,7 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
   if (h) {
     _heldPresence = null
     try {
-      if (h.oldKid !== o.kid) return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa de presença. Nada foi alterado; ligue a presença de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
+      if (h.oldKid !== o.kid) return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa da confirmação pessoal. Nada foi alterado; ligue a confirmação pessoal de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
       const c = await commitHeldPresence(h, r.entropy, o)
       if (!c.ok) return c
     } finally { dropRecovery() }
@@ -731,7 +731,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!o) return refused('locked', sentence('locked'))
   if (recoveryTodo() && !fromSocket(ctx) && !recoverPageHeld(ctx)) return recoveryTtyOnly()
   if (!recoveryTodo()) {
-    if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da presença (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
+    if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da confirmação pessoal (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
     // Review S7: known BEFORE the code is spent — otherwise the terminal would ask for a code, learn the
     // words are needed, and ask again for a code the replay floor has just burned.
     if (o.vault.wrappers.some(w => isSilentId(w.type)) && o.vault.wrappers.some(w => w.type === 'recovery')
@@ -789,7 +789,7 @@ function afterPresence(v: VaultJson): boolean {
 
 function needsRecoveryWords(): Refusal {
   return refused('presence-needs-recovery-words', vaultLang() === 'pt'
-    ? 'Ligar a presença troca a chave do cofre, e a chave de recuperação precisa acompanhar. Digite as suas 24 palavras num terminal (`agentop vault enroll --presence`), ou crie palavras de recuperação novas agora — as antigas deixam de funcionar. Nada foi alterado.'
+    ? 'Ligar a confirmação pessoal troca a chave do cofre, e a chave de recuperação precisa acompanhar. Digite as suas 24 palavras num terminal (`agentop vault enroll --presence`), ou crie palavras de recuperação novas agora — as antigas deixam de funcionar. Nada foi alterado.'
     : 'Turning presence on replaces the vault key, and the recovery key has to follow it. Type your 24 words in a terminal (`agentop vault enroll --presence`), or make new recovery words now — your old words will stop working. Nothing was changed.')
 }
 
@@ -841,7 +841,7 @@ async function maybeHoldPresence(
   const lang = vaultLang()
   if (o.vault.wrappers.some(w => w.type === 'passphrase')) {
     return refused('presence-passphrase-wrapper', lang === 'pt'
-      ? 'Este cofre também abre com uma senha, e ligar a presença troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
+      ? 'Este cofre também abre com uma senha, e ligar a confirmação pessoal troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
       : 'This vault also opens with a passphrase, and turning presence on replaces the vault key — the passphrase cannot follow it. Nothing was changed.')
   }
   const inRecovery = recoveryTodo()?.includes('recovery') === true
@@ -919,7 +919,7 @@ async function enrolWithNewKey(
   const lang = vaultLang()
   if (o.vault.wrappers.some(w => w.type === 'passphrase')) {
     return refused('presence-passphrase-wrapper', lang === 'pt'
-      ? 'Este cofre também abre com uma senha, e ligar a presença troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
+      ? 'Este cofre também abre com uma senha, e ligar a confirmação pessoal troca a chave do cofre — a senha não pode acompanhar. Nada foi alterado.'
       : 'This vault also opens with a passphrase, and turning presence on replaces the vault key — the passphrase cannot follow it. Nothing was changed.')
   }
   // The recovery wrapper must follow the new key. Leader decision 2: words are NEVER kept across steps,
@@ -1057,10 +1057,10 @@ export async function disablePresence(ctx: GateContext, words?: string): Promise
   const lang = vaultLang()
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (!hasPresence(o.vault)) return refused('no-presence', lang === 'pt' ? 'Este cofre não usa presença.' : 'This vault does not use presence.')
+  if (!hasPresence(o.vault)) return refused('no-presence', lang === 'pt' ? 'Este cofre não usa a confirmação pessoal.' : 'This vault does not use presence.')
   if (o.vault.requirePresence && !words) {
     return refused('recovery-required', lang === 'pt'
-      ? 'Esta é a máquina principal: desligar a presença exige a chave de recuperação, digitada em um terminal (`agentop vault disable-presence`).'
+      ? 'Esta é a máquina principal: desligar a confirmação pessoal exige a chave de recuperação, digitada em um terminal (`agentop vault disable-presence`).'
       : 'This is the main machine: turning presence off needs the recovery key, typed on a terminal (`agentop vault disable-presence`).')
   }
   const g = await requireVaultStepUp('disable-presence', ctx)

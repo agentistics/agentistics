@@ -96,7 +96,7 @@ export const VAULT_TEXT = {
   presenceWord_fido2: { en: 'your security key', pt: 'sua chave de segurança' },
   presenceName_hello: { en: 'Windows Hello', pt: 'Windows Hello' },
   presenceName_fido2: { en: 'Security key', pt: 'Chave de segurança' },
-  presenceWord_any: { en: 'your presence device', pt: 'seu dispositivo de presença' },
+  presenceWord_any: { en: 'your personal confirmation', pt: 'a sua confirmação pessoal' },
   lockedIntro_presence: {
     en: 'Your secrets are encrypted. Opening them needs {presence} and your authenticator code.',
     pt: 'Seus segredos estão criptografados. Abri-los exige {presence} e o código do seu autenticador.',
@@ -120,7 +120,7 @@ export const VAULT_TEXT = {
   openLocksIn: { en: 'Open · locks in {n} min', pt: 'Aberto · trava em {n} min' },
   sec_status: { en: 'Status', pt: 'Status' },
   gate_code: { en: 'Needs your authenticator code', pt: 'Exige o código do seu autenticador' },
-  gate_presence: { en: 'Needs your presence (Windows Hello or security key)', pt: 'Exige a sua presença (Windows Hello ou chave de segurança)' },
+  gate_presence: { en: 'Needs your personal confirmation (Windows Hello or security key)', pt: 'Exige a sua confirmação pessoal (Windows Hello ou chave de segurança)' },
   gate_dialog_code: { en: 'Type your current authenticator code to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   gate_dialog_presence: { en: '{presence} will ask you to confirm on the device.', pt: '{presence} vai pedir a sua confirmação no dispositivo.' },
   gate_continue: { en: 'Continue', pt: 'Continuar' },
@@ -139,26 +139,26 @@ export const VAULT_TEXT = {
   auth_never: { en: 'not used yet', pt: 'ainda não usado' },
   auth_paused: { en: 'Paused until {date} after wrong codes.', pt: 'Pausado até {date} depois de códigos errados.' },
   auth_frozen: {
-    en: 'Frozen after too many wrong codes. Use your recovery key: run `agentop vault recover` on this machine.',
-    pt: 'Congelado depois de muitos códigos errados. Use a chave de recuperação: rode `agentop vault recover` nesta máquina.',
+    en: 'Frozen after too many wrong codes. Use your recovery key: "Recover with the 24 words", on this page, on this computer.',
+    pt: 'Congelado depois de muitos códigos errados. Use a chave de recuperação: “Recuperar com as 24 palavras”, nesta página, no próprio computador.',
   },
   auth_setup: { en: 'Set up authenticator', pt: 'Configurar o autenticador' },
   auth_replace: { en: 'Replace phone', pt: 'Trocar de celular' },
-  sec_presence: { en: 'Presence', pt: 'Presença' },
+  sec_presence: { en: 'Personal confirmation', pt: 'Confirmação pessoal' },
   pres_unavailable: {
     en: 'Not available on this machine (no Windows Hello and no security-key support here). The vault stays on the system protector.',
     pt: 'Indisponível nesta máquina (sem Windows Hello e sem suporte a chave de segurança). O cofre fica no protetor do sistema.',
   },
   pres_addKey: { en: 'Add a security key', pt: 'Adicionar uma chave de segurança' },
-  pres_turnOff: { en: 'Turn presence off', pt: 'Desligar a presença' },
+  pres_turnOff: { en: 'Turn personal confirmation off', pt: 'Desligar a confirmação pessoal' },
   pres_offConsequence: {
     en: 'Any program running as you could open the vault without asking.',
     pt: 'Qualquer programa rodando como você poderia abrir o cofre sem perguntar.',
   },
-  pres_offConfirm: { en: 'Turn presence off?', pt: 'Desligar a presença?' },
+  pres_offConfirm: { en: 'Turn personal confirmation off?', pt: 'Desligar a confirmação pessoal?' },
   pres_mainMachine: {
-    en: 'This is your main machine: turning presence off needs your 24 words, typed on a terminal — run `agentop vault disable-presence`.',
-    pt: 'Esta é a sua máquina principal: desligar a presença exige as suas 24 palavras, digitadas em um terminal — rode `agentop vault disable-presence`.',
+    en: 'This is your main machine: turning personal confirmation off also asks for your 24 words, typed on this page on this computer.',
+    pt: 'Esta é a sua máquina principal: desligar a confirmação pessoal também pede as suas 24 palavras, digitadas nesta página, no próprio computador.',
   },
   pres_since: { en: 'enrolled {date}', pt: 'configurada em {date}' },
   sec_recovery: { en: 'Recovery key', pt: 'Chave de recuperação' },
@@ -218,7 +218,7 @@ export const VAULT_TEXT = {
   wiz_rec_confirmBody: { en: 'To prove you have them, type the words at these positions.', pt: 'Para provar que você as tem, digite as palavras destas posições.' },
   wiz_rec_rotate: { en: 'The old recovery key stops working once you confirm this one.', pt: 'A chave de recuperação antiga deixa de funcionar quando você confirmar esta.' },
   wiz_word: { en: 'Word #{n}', pt: 'Palavra nº {n}' },
-  wiz_pres_title: { en: 'Turn on presence', pt: 'Ligue a presença' },
+  wiz_pres_title: { en: 'Turn on personal confirmation', pt: 'Ligue a confirmação pessoal' },
   wiz_pres_checkHello: {
     en: 'Agentistics checks that Windows Hello is set up on this computer. This check asks you nothing.',
     pt: 'O Agentistics confere se o Windows Hello está configurado neste computador. Este teste não pede nada a você.',
@@ -240,7 +240,7 @@ export const VAULT_TEXT = {
     pt: 'Nada no seu cofre muda até você confirmar a chave de recuperação, no último passo. Se sair antes disso, tudo fica como está agora.',
   },
   wiz_gesture_progress: { en: 'Confirmation {i} of {n}', pt: 'Confirmação {i} de {n}' },
-  wiz_pres_go: { en: 'Turn on presence', pt: 'Ligar a presença' },
+  wiz_pres_go: { en: 'Turn on personal confirmation', pt: 'Ligar a confirmação pessoal' },
   wiz_next: { en: 'Next', pt: 'Próximo' },
   wiz_done: { en: 'Done', pt: 'Pronto' },
   wiz_done_presence: {
@@ -259,8 +259,8 @@ export const VAULT_TEXT = {
   rec_create: { en: 'Create recovery key', pt: 'Criar chave de recuperação' },
   rec_new: { en: 'Make a new one (the old one stops working)', pt: 'Gerar uma nova (a antiga para de valer)' },
   rec_lost: {
-    en: 'Lost your phone and Windows Hello? Run `agentop vault recover` in a terminal on this machine and type the 24 words.',
-    pt: 'Perdeu o celular e o Windows Hello? Rode `agentop vault recover` num terminal desta máquina e digite as 24 palavras.',
+    en: 'Lost your phone and Windows Hello? Use "Recover with the 24 words" on this page, opened on this computer.',
+    pt: 'Perdeu o celular e o Windows Hello? Use “Recuperar com as 24 palavras” nesta página, aberta no próprio computador.',
   },
   sec_hardening: { en: 'Memory protection', pt: 'Proteção da memória' },
   hard_plain1: { en: 'Other programs cannot read Agentistics’ memory', pt: 'Outros programas não conseguem ler a memória do agentistics' },
@@ -286,10 +286,10 @@ export const VAULT_TEXT = {
   wiz_code: { en: 'Code from the app', pt: 'Código do app' },
   wiz_oldCode: { en: 'Type the current code from your authenticator to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   wiz_setup_label: { en: 'Setup code (8 digits)', pt: 'Código de configuração (8 dígitos)' },
-  wiz_pres_newWords: { en: 'Turn presence on and make new recovery words', pt: 'Ligar a presença e criar palavras de recuperação novas' },
+  wiz_pres_newWords: { en: 'Turn personal confirmation on and make new recovery words', pt: 'Ligar a confirmação pessoal e criar palavras de recuperação novas' },
   wiz_pres_newWords_warn: {
-    en: 'Your current 24 words will stop working: turning presence on replaces the vault key. New words are made right after. To keep your words instead, run `agentop vault enroll --presence` in a terminal and type them there.',
-    pt: 'As suas 24 palavras atuais deixarão de funcionar: ligar a presença troca a chave do cofre. Palavras novas são criadas logo em seguida. Para manter as suas palavras, rode `agentop vault enroll --presence` num terminal e digite-as lá.',
+    en: 'Your current 24 words will stop working: turning personal confirmation on replaces the vault key. New words are made right after.',
+    pt: 'As suas 24 palavras atuais deixarão de funcionar: ligar a confirmação pessoal troca a chave do cofre. Palavras novas são criadas logo em seguida.',
   },
   wiz_setup_why: {
     en: 'The first setup from this page needs a code only this computer can show: run `agentop vault setup-code` in a terminal here. It works once, for 10 minutes.',
@@ -314,7 +314,7 @@ export const VAULT_TEXT = {
   wiz_step_probe: { en: 'device check', pt: 'teste do dispositivo' },
   wiz_step_authenticator: { en: 'authenticator', pt: 'autenticador' },
   wiz_step_recovery: { en: 'recovery key', pt: 'chave de recuperação' },
-  wiz_step_presence: { en: 'presence', pt: 'presença' },
+  wiz_step_presence: { en: 'personal confirmation', pt: 'confirmação pessoal' },
   wiz_pres_intro: {
     en: 'From now on the vault opens only with your gesture. The silent system wrapper is removed — after the new one is checked.',
     pt: 'A partir de agora o cofre só abre com um gesto seu. O invólucro silencioso do sistema é removido — depois que o novo for conferido.',
@@ -344,8 +344,8 @@ export const VAULT_TEXT = {
   hero_locked: { en: 'Your vault is locked', pt: 'Seu cofre está trancado' },
   sec_status_d: { en: 'Whether your secrets can be read right now, and who guards the key.', pt: 'Se os seus segredos podem ser lidos agora e quem guarda a chave.' },
   sec_presence_d: {
-    en: 'Windows Hello (or a security key) proves you are really here, so no other program can open the vault without you.',
-    pt: 'O Windows Hello (ou uma chave de segurança) prova que você está mesmo aí, então nenhum outro programa abre o cofre sem você.',
+    en: 'Windows Hello (PIN, fingerprint or face) or a security key: proves it is really you at the computer.',
+    pt: 'Windows Hello (PIN, digital ou rosto) ou uma chave de segurança: prova que é você mesmo no computador.',
   },
   sec_recovery_d: { en: 'Your way back in if you lose your phone and Windows Hello: 24 words, shown once.', pt: 'Seu caminho de volta se você perder o celular e o Windows Hello: 24 palavras, mostradas uma vez.' },
   rec_offline: { en: 'Keep it offline — on paper, never in a file or a photo.', pt: 'Guarde offline — no papel, nunca em arquivo ou foto.' },
@@ -363,6 +363,50 @@ export const VAULT_TEXT = {
   badge_minutes: { en: '✓ {n} min', pt: '✓ {n} min' },
   badge_sealed: { en: '✓ {n} sealed', pt: '✓ {n} cifrados' },
   badge_pending: { en: '! {n} waiting', pt: '! {n} aguardando' },
+
+  // ── v2.98.1: a second kind, "coming soon", the local gesture, recovery on the page ──────────────
+  pres_addOther: { en: 'Add another way', pt: 'Adicionar outra forma' },
+  pres_add_hello: { en: 'Add Windows Hello', pt: 'Adicionar Windows Hello' },
+  pres_add_fido2: { en: 'Add a security key', pt: 'Adicionar uma chave de segurança' },
+  pres_soon: { en: 'coming soon', pt: 'em breve' },
+  pres_soon_fido2: {
+    en: 'Security keys through Windows are not ready yet. Windows Hello does the same job today.',
+    pt: 'A chave de segurança pelo Windows ainda não está pronta. O Windows Hello faz o mesmo papel hoje.',
+  },
+  wiz_step_local: { en: 'confirm it is you', pt: 'confirmar que é você' },
+  wiz_local_title: { en: 'First, confirm it is you', pt: 'Primeiro, confirme que é você' },
+  wiz_local_intro: {
+    en: 'This page is open on this computer, so one confirmation is enough to prove the setup comes from you and not from some other page. Nothing in the vault changes with it.',
+    pt: 'Esta página está aberta no próprio computador, então uma confirmação basta para provar que a configuração vem de você, e não de outra página. Nada no cofre muda com ela.',
+  },
+  wiz_local_go_hello: { en: 'Confirm with Windows Hello', pt: 'Confirmar com o Windows Hello' },
+  wiz_local_go_fido2: { en: 'Confirm with your security key', pt: 'Confirmar com a chave de segurança' },
+  wiz_setup_remote: {
+    en: 'This page is not open on the computer itself (or the computer has no Windows Hello / security key), so the first setup needs the setup code from that computer.',
+    pt: 'Esta página não está aberta no próprio computador (ou ele não tem Windows Hello / chave de segurança), então a primeira configuração precisa do código de configuração daquele computador.',
+  },
+  rec_recover: { en: 'Recover with the 24 words', pt: 'Recuperar com as 24 palavras' },
+  rec_recover_title: { en: 'Recover with your 24 words', pt: 'Recuperar com as suas 24 palavras' },
+  rec_recover_intro: {
+    en: 'Type or paste your 24 words. They are sent once to this computer, used to open the vault and dropped — never saved and never logged.',
+    pt: 'Digite ou cole as suas 24 palavras. Elas vão uma vez para este computador, abrem o cofre e são descartadas — nunca salvas, nunca registradas.',
+  },
+  rec_recover_after: {
+    en: 'The vault is open in recovery mode. Next: set up the authenticator, your personal confirmation and NEW recovery words — the old ones count as exposed.',
+    pt: 'O cofre abriu em modo de recuperação. Agora: configure o autenticador, a sua confirmação pessoal e palavras de recuperação NOVAS — as antigas contam como expostas.',
+  },
+  rec_recover_go: { en: 'Open the vault', pt: 'Abrir o cofre' },
+  rec_recover_count: { en: '{n} of 24 words', pt: '{n} de 24 palavras' },
+  rec_recover_local: {
+    en: 'Recovery is only accepted from a page opened on this computer (a localhost address).',
+    pt: 'A recuperação só é aceita numa página aberta no próprio computador (endereço localhost).',
+  },
+  rec_continue: { en: 'Continue the setup', pt: 'Continuar a configuração' },
+  act_recover: { en: 'Recover with the 24 words', pt: 'Recuperar com as 24 palavras' },
+  act_unlock: { en: 'Unlock', pt: 'Destrancar' },
+  act_enroll: { en: 'Open the setup', pt: 'Abrir a configuração' },
+  act_disable: { en: 'Type the 24 words', pt: 'Digitar as 24 palavras' },
+  pres_offWords: { en: 'Your 24 words (main machine)', pt: 'As suas 24 palavras (máquina principal)' },
 } as const satisfies Record<string, Pair>
 
 export type VaultKey = keyof typeof VAULT_TEXT

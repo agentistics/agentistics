@@ -47,6 +47,12 @@ export interface VaultView {
   gestures?: { probe: number; enroll: number }
   /** Owner decision 2026-10-02: what an unlock asks besides the gesture. Absent on an older server. */
   unlockPolicy?: UnlockPolicyView
+  /** v2.98.1: this page is open ON this computer (loopback). Absent on an older server = false. */
+  loopback?: boolean
+  /** v2.98.1: the kind whose ONE gesture stands for the setup code here (loopback only), or null. */
+  localProofKind?: string | null
+  /** v2.98.1: kinds this platform has but this build does not offer yet ("coming soon"). */
+  presenceSoon?: string[]
 }
 export type UnlockMode = 'always' | 'hello-only' | 'daily'
 export interface UnlockPolicyView { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
@@ -55,7 +61,9 @@ export const UNLOCK_HOURS_MIN = 1
 export const UNLOCK_HOURS_MAX = 24
 
 /** A refusal, exactly as the server words it (already in the user's language). */
-export interface Refusal { ok: false; code: string; sentence: string; status: number }
+export interface Refusal { ok: false; code: string; sentence: string; status: number; action?: UiAction }
+/** v2.98.1: the page control a refusal points at (the server swapped the terminal command for it). */
+export type UiAction = 'recover' | 'unlock' | 'enroll' | 'disable-presence'
 export type Reply<T = Record<string, never>> = ({ ok: true } & T) | Refusal
 
 export type LoadResult =
@@ -93,7 +101,9 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
 const reply = <T,>(r: { status: number; json: Record<string, unknown> } | null): Reply<T> => {
   if (!r) return { ok: false, code: 'network', sentence: '', status: 0 }
   if (r.json.ok === true) return r.json as unknown as Reply<T>
-  return { ok: false, code: String(r.json.code ?? 'failed'), sentence: String(r.json.sentence ?? r.json.error ?? ''), status: r.status }
+  const a = r.json.action
+  const action = a === 'recover' || a === 'unlock' || a === 'enroll' || a === 'disable-presence' ? a : undefined
+  return { ok: false, code: String(r.json.code ?? 'failed'), sentence: String(r.json.sentence ?? r.json.error ?? ''), status: r.status, ...(action ? { action } : {}) }
 }
 
 // ── the calls ────────────────────────────────────────────────────────────────────────────────
@@ -155,7 +165,20 @@ export const recoveryBegin = (code?: string, setupCode?: string) => call('POST',
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
 /** `replaceRecovery`: no words at hand — make NEW words after presence (the old ones stop working). */
 export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string, replaceRecovery?: boolean) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}), ...(replaceRecovery ? { replaceRecovery: true } : {}) }).then(r => reply<{ removed: string[]; recoveryOwed: boolean }>(r))
-export const presenceDisable = (code?: string) => call('POST', '/api/vault/presence/disable', code ? { code } : {}).then(r => reply(r))
+export const presenceDisable = (code?: string, words?: string) => call('POST', '/api/vault/presence/disable', { ...(code ? { code } : {}), ...(words ? { words } : {}) }).then(r => reply(r))
+/** v2.98.1: ONE presence gesture on a loopback page stands for the setup code of a FIRST enrolment. */
+export const localProof = () => call('POST', '/api/vault/local-proof').then(r => reply<{ kind: string | null }>(r))
+/** v2.98.1: recovery with the 24 words, from a loopback page only. The caller drops the words right after. */
+export const recoverWithWords = (words: string) => call('POST', '/api/vault/recover', { words }).then(r => reply<{ todo: string[] }>(r))
+
+/** PURE. 24 boxes from whatever was pasted or typed: lower-cased, split on any whitespace/comma/number. */
+export function splitWords(s: string): string[] {
+  return s.toLowerCase().replace(/\d+[.)]/g, ' ').split(/[\s,;]+/).filter(Boolean).slice(0, 24)
+}
+/** PURE. The kinds a vault with presence ON may still ADD: offered here, and not already enrolled. */
+export function addableKinds(v: Pick<VaultView, 'presenceAvailable' | 'wrappers'>): ('hello' | 'fido2')[] {
+  return (['hello', 'fido2'] as const).filter(k => v.presenceAvailable.includes(k) && !v.wrappers.includes(k))
+}
 export interface Credential { type: string; label: string; createdAt: string }
 export const credentials = () => call('GET', '/api/vault/credentials').then(r => reply<{ credentials: Credential[]; recoveryCreatedAt: string | null; requirePresence: boolean }>(r))
 
@@ -201,16 +224,23 @@ export type WizardStep = 'authenticator' | 'recovery' | 'presence'
  * What the wizard runs: the setup code leads whenever the server says a page's first enrolment owes
  * it, then the device check whenever a fresh enrolment will end in presence.
  */
-export type WizardPhaseStep = 'setup' | 'probe' | WizardStep
+export type WizardPhaseStep = 'setup' | 'local' | 'probe' | WizardStep
 
 /**
  * PURE. The whole §7.3 flow for what is missing: setup code → probe → authenticator → presence →
  * recovery. The setup code is FIRST, before any gesture (owner, 2026-10-02: it used to surface only
  * after the Hello dialogs, as a red failure on the authenticator step).
  */
-export function wizardPlan(missing: readonly WizardStep[], setupOwed = false): WizardPhaseStep[] {
+export function wizardPlan(missing: readonly WizardStep[], setupOwed = false, localProof = false): WizardPhaseStep[] {
   const steps: WizardPhaseStep[] = missing.includes('presence') && missing.includes('authenticator') ? ['probe', ...missing] : [...missing]
-  return setupOwed && steps.length > 0 ? ['setup', ...steps] : steps
+  // v2.98.1: on a page ON this computer with a presence device, ONE gesture replaces the setup code.
+  return setupOwed && steps.length > 0 ? [localProof ? 'local' : 'setup', ...steps] : steps
+}
+
+/** PURE. After a page recovery: the re-enrolment the server still owes, in the wizard's safe order. */
+export function recoverySteps(todo: readonly string[] | null | undefined): WizardStep[] {
+  if (!todo) return []
+  return (['authenticator', 'presence', 'recovery'] as const).filter(s => todo.includes(s))
 }
 
 /** PURE. What an action will ask, as words for a tooltip — from the gate row, narrowed by this vault. */
