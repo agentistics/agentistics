@@ -990,6 +990,12 @@ export function Sessions({
       else void run(async () => ({ ok: false, message: s.sessionsNotActionable }))
       return
     }
+    // SS-07: an EXTERNAL session is running in someone else's terminal — opening it here would be a
+    // second process on the same conversation. Refused in words, with what does work.
+    if (kind === 'attach' && selected.state === 'unknown') {
+      void run(async () => ({ ok: false, message: s.sessionsExternalOpen }))
+      return
+    }
     // Asking to ATTACH to something with nothing running is asking to pick that conversation back
     // up — so it is answered with the reopen question rather than refused. Pressing the one key
     // that means "get me into this" and being told no, while a verb three rows down would have
