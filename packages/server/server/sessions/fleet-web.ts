@@ -1069,6 +1069,74 @@ export async function readFleetArtifactMedia(
 }
 
 /**
+ * The bytes of a file this session VIEWED (or wrote) — the gallery's "viewed by the session" tile.
+ * The allowlist is the session's own transcript, looked up HERE, never taken from the query; every
+ * other rule is `viewed-file.ts`'s. "No longer on disk" is said only when the file really is gone.
+ */
+export async function readFleetViewedMedia(
+  lang: CliLang, id: string, path: string,
+): Promise<
+  | { ok: true; bytes: Uint8Array; mime: string; name: string }
+  | { ok: false; message: string; status: number }
+> {
+  const pt = lang === 'pt'
+  const host = await hostFor(lang)
+  if (!host.sessions) return { ok: false, status: 404, message: controlStrings(lang).sessionsNoHost }
+  const fleet = await host.sessions()
+  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  if (!row?.cwd) {
+    return { ok: false, status: 404, message: pt ? 'Essa sessão não está na lista desta máquina.' : 'That session is not in this machine’s list.' }
+  }
+  const { readSessionChat } = await import('./chat-web')
+  const chat = await readSessionChat(host, lang, row.id)
+  const { realpath, stat, readFile } = await import('node:fs/promises')
+  const { resolveArtifactPath } = await import('./artifact-list')
+  const { planViewedRead, readPathsFromTurns } = await import('./viewed-file')
+  const { MAX_MEDIA_BYTES } = await import('./artifact-media')
+  const { AGENTISTICS_DATA_DIR } = await import('../config')
+  const real = async (p: string): Promise<string | null> => { try { return await realpath(p) } catch { return null } }
+
+  const cwdReal = (await real(row.cwd)) ?? row.cwd
+  const allowed: { named: string; real: string }[] = []
+  for (const raw of [...readPathsFromTurns(chat.turns), ...artifactPathsFromTurns(chat.turns)]) {
+    const named = resolveArtifactPath(raw, cwdReal)
+    if (!named) continue
+    const r = await real(named)
+    if (r !== null) allowed.push({ named, real: r })
+  }
+  const askedNamed = resolveArtifactPath(path, cwdReal) ?? path
+  const askedReal = await real(askedNamed)
+  // A path that is simply gone is "gone" only when the transcript did name it.
+  if (askedReal === null) {
+    const named = [...readPathsFromTurns(chat.turns), ...artifactPathsFromTurns(chat.turns)]
+      .some(raw => resolveArtifactPath(raw, cwdReal) === askedNamed)
+    return named
+      ? { ok: false, status: 404, message: pt ? 'Esse arquivo não está mais no disco.' : 'That file is no longer on disk.' }
+      : { ok: false, status: 403, message: pt ? 'Esse arquivo não foi aberto por esta sessão.' : 'This session did not open that file.' }
+  }
+  const plan = planViewedRead({ path: askedReal, asked: askedNamed, allowed, dataDir: AGENTISTICS_DATA_DIR })
+  if (!plan.ok) {
+    const msg = plan.reason === 'not-in-transcript'
+      ? (pt ? 'Esse arquivo não foi aberto por esta sessão.' : 'This session did not open that file.')
+      : plan.reason === 'forbidden'
+        ? (pt ? 'Esse arquivo não pode ser exibido.' : 'That file cannot be displayed.')
+        : (pt ? 'Esse arquivo não é uma imagem, vídeo ou PDF.' : 'That file is not an image, video or PDF.')
+    return { ok: false, status: plan.reason === 'wrong-type' ? 415 : 403, message: msg }
+  }
+  try {
+    const st = await stat(plan.path)
+    if (!st.isFile()) return { ok: false, status: 404, message: pt ? 'Não é um arquivo.' : 'Not a file.' }
+    if (st.size > MAX_MEDIA_BYTES) {
+      return { ok: false, status: 413, message: pt ? 'Esse arquivo é grande demais para ser exibido aqui.' : 'That file is too large to display here.' }
+    }
+    const buf = await readFile(plan.path)
+    return { ok: true, bytes: new Uint8Array(buf), mime: plan.type.mime, name: plan.path.split('/').pop() ?? 'file' }
+  } catch {
+    return { ok: false, status: 404, message: pt ? 'Esse arquivo não está mais no disco.' : 'That file is no longer on disk.' }
+  }
+}
+
+/**
  * The panel's LIST: what this session wrote that is still a readable file with content.
  *
  * Answered by the server because only it can look at the disk. The browser keeps deriving the kind,

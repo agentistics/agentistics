@@ -67,6 +67,14 @@ export function sessionMediaUrl(sessionId: string, path: string): string {
 }
 
 /**
+ * The URL that reads back a file the session VIEWED — see `GET /api/fleet/viewed` and `viewed-file.ts`.
+ * The server decides from the session's own transcript; the path in the query is only a name to look up.
+ */
+export function sessionViewedUrl(sessionId: string, path: string): string {
+  return `/api/fleet/viewed?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`
+}
+
+/**
  * The URL that reads back one image, video or PDF in the session's REPOSITORY — see
  * `GET /api/fleet/tree/media`.
  *
@@ -87,16 +95,11 @@ export function galleryFileUrl(
 ): string {
   if (file.origin === 'produced') return sessionMediaUrl(sessionId, file.path)
   if (file.origin === 'viewed') {
-    // A VIEWED file was never sent and never (necessarily) written, so neither existing route's
-    // rule can be assumed — each is simply TRIED under its own, unwidened rule, and whichever
-    // actually applies is what serves it: a re-read attachment resolves by the same containment
-    // check a sent one does, one the session also wrote resolves through the write-allowlist a
-    // produced one does, and anything else 404s into the gallery's ordinary broken-image fallback.
-    // See `viewedGroups`'s own header for why this may never be widened to "anything the session
-    // read".
+    // A VIEWED file lives anywhere the session read it. Inside the attachments directory the
+    // attachment route serves it as before; everywhere else the dedicated, transcript-bound route.
     return isAttachmentPath(file.path)
       ? attachmentUrl(file.path)
-      : sessionMediaUrl(sessionId, file.path)
+      : sessionViewedUrl(sessionId, file.path)
   }
   return attachmentNameUrl(file.name)
 }
