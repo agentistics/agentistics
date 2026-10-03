@@ -291,19 +291,19 @@ describe('the reader', () => {
   })
 })
 
-describe('the flag (absent = OFF) and the open discipline', () => {
+describe('the flag (absent = ON, explicit 0 = OFF) and the open discipline', () => {
   const poisoned = new Proxy({}, { get() { throw new Error('the journal must not be touched while the flag is off') } }) as Journal
 
-  test('projectionsEnabled reads only an explicit affirmative', () => {
-    expect(projectionsEnabled({})).toBe(false)
-    expect(projectionsEnabled({ AGENTISTICS_PROJECTIONS: '' })).toBe(false)
+  test('projectionsEnabled: on by default, off only on an explicit negative', () => {
+    expect(projectionsEnabled({})).toBe(true)
+    expect(projectionsEnabled({ AGENTISTICS_PROJECTIONS: '' })).toBe(true)
     expect(projectionsEnabled({ AGENTISTICS_PROJECTIONS: '0' })).toBe(false)
     expect(projectionsEnabled({ AGENTISTICS_PROJECTIONS: ' ON ' })).toBe(true)
   })
 
   test('flag off: the catch-up opens nothing, creates nothing, touches no journal', async () => {
     const dir = freshDir()
-    const r = await runProjectionCatchUp({ journal: poisoned, env: {}, storeOptions: { path: join(dir, 'projections.db') } })
+    const r = await runProjectionCatchUp({ journal: poisoned, env: { AGENTISTICS_PROJECTIONS: '0' }, storeOptions: { path: join(dir, 'projections.db') } })
     expect(r.state).toBe('disabled')
     expect(r.reason).toContain('flag-off')
     expect(existsSync(dir)).toBe(false)
@@ -311,7 +311,7 @@ describe('the flag (absent = OFF) and the open discipline', () => {
 
   test('flag off: the reader factory opens nothing and yields nothing', async () => {
     const dir = freshDir()
-    const { reader, store, close } = await openProjectionReader({ env: {}, storeOptions: { path: join(dir, 'projections.db') } })
+    const { reader, store, close } = await openProjectionReader({ env: { AGENTISTICS_PROJECTIONS: '0' }, storeOptions: { path: join(dir, 'projections.db') } })
     expect(store.state).toBe('disabled')
     const rows: unknown[] = []
     for await (const f of reader.costFacts({})) rows.push(f)

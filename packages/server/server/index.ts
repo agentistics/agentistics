@@ -4352,6 +4352,22 @@ process.stdout.write(
   `  ${_WH}mcp${_R}  ${_DOT}  ${_D}agentistics (stdio → http://localhost:${PORT})${_R}\n` +
   `${_SEP}\n\n`
 )
+
+// The journal's FIRST import (`journal/backfill.ts`): started by the server itself, but never on the
+// startup path. It waits until the server has been answering for a while, runs as a low-priority
+// child, and is re-checked every half hour so an import that died resumes. Unref'd timers: they
+// never keep the process alive.
+const scheduleBackfillCheck = () => {
+  void (async () => {
+    const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
+      import('./config'), import('./journal/backfill'),
+    ])
+    const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH })
+    if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
+  })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
+}
+setTimeout(scheduleBackfillCheck, 120_000).unref()
+setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
 } catch (err: unknown) {
   const msg = err instanceof Error ? err.message : String(err)
   if (msg.includes('EADDRINUSE') || msg.includes('already in use')) {

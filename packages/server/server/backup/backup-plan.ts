@@ -323,6 +323,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'ingested there; absent, it re-reads and the journal dedupes.',
   },
   {
+    pattern: '.agentistics/journal.db.backfill.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the automatic first import writes it again as it runs',
+    why: "The automatic first import's progress (state, counts, when it completed), bound to the "
+      + 'identity of the journal file it describes. Restored beside a different journal it is ignored, '
+      + 'and the import runs again; the journal dedupes.',
+  },
+  {
     pattern: '.agentistics/journal.db.import.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — `agentop journal import` re-derives it by re-reading its sources',
     why: "`agentop journal import`'s resume state: a cursor per replayed source and the store entries "

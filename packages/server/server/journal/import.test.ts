@@ -192,6 +192,21 @@ describe('journal import — artifacts then the store', () => {
     expect(total(first, 'written') + total(second, 'written')).toBe(expected)
   })
 
+  test('beforeBatch is awaited before EVERY batch of both halves (the background import pauses there)', async () => {
+    const w = await world()
+    let calls = 0
+    let open = false
+    const r = await ok(opts(w, {
+      batchSize: 1, concurrency: 1,
+      beforeBatch: async () => { calls++; open = true; await Bun.sleep(1); open = false },
+      onProgress: () => { expect(open).toBe(false) },
+    }))
+    // At size 1: claude 1 artifact + codex 5 artifacts, then the store's planned entries (claude: the
+    // orphan and the one with no start, which fails at read; codex: its orphan) = 9 batches
+    expect(calls).toBe(9)
+    expect(r.interrupted).toBe(false)
+  })
+
   test('--dry-run writes nothing, and predicts exactly what a real run writes', async () => {
     const w = await world()
     const dry = await ok(opts(w, { dryRun: true }))

@@ -48,6 +48,11 @@ export interface ImportArgs {
   json: boolean
   batchSize?: number
   concurrency?: number
+  /**
+   * The server's automatic first import (`backfill.ts`): small batches, one replay at a time, a pause
+   * while the memory gate refuses, and a stop on SIGTERM. A person may pass it too.
+   */
+  background?: boolean
 }
 
 export type ParsedImportArgs = { ok: true; args: ImportArgs } | { ok: false; error: string }
@@ -69,6 +74,7 @@ export function parseImportArgs(argv: readonly string[]): ParsedImportArgs {
     const [flag, inline] = a.startsWith('--') && a.includes('=') ? [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)] : [a, undefined]
     const value = (): string | undefined => inline ?? argv[++i]
     if (flag === '--dry-run') args.dryRun = true
+    else if (flag === '--background') args.background = true
     else if (flag === '--json') args.json = true
     else if (flag === '--harness') {
       const v = value()

@@ -25,7 +25,7 @@ import { shellAllowedNow } from './sessions/shell-gate'
 import { getShellOverride } from './sessions/shell-override-store'
 import { editorAllowed } from './sessions/editor-gate'
 import { readPreferences } from './preferences'
-import { EXPERIMENTAL_FEATURES, projectionSurfaceOn } from '@agentistics/core'
+import { featureOn, projectionSurfaceOn } from '@agentistics/core'
 import type { Principal } from './iam-types'
 
 // ---------------------------------------------------------------------------
@@ -322,8 +322,25 @@ export function handleLogout(_req: Request): Response {
  * may read local transcripts (the route's capability).
  */
 export function projectionsWebOn(env: Record<string, string | undefined>, central: boolean, localTranscripts: boolean): boolean {
-  const projections = EXPERIMENTAL_FEATURES.find(f => f.id === 'projections')!
-  return !central && localTranscripts && projections.isOn(env[projections.env]) && projectionSurfaceOn('web', env)
+  return !central && localTranscripts && featureOn('projections', env) && projectionSurfaceOn('web', env)
+}
+
+/** The first import's state for the web, or `null` when there is nothing to say. Never throws. */
+export async function journalBackfillSummary(): Promise<{
+  state: string; written: number; harness: string | null; done: number | null; total: number | null
+} | null> {
+  try {
+    const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { backfillComplete, readBackfillProgress }, { fileIdentity }] = await Promise.all([
+      import('./config'), import('./journal/backfill'), import('./journal/shadow'),
+    ])
+    if (!JOURNAL_ENABLED || TEAM_CENTRAL) return null
+    const p = readBackfillProgress(JOURNAL_BACKFILL_PATH)
+    if (backfillComplete(p, fileIdentity(JOURNAL_PATH))) return null
+    if (!p) return { state: 'pending', written: 0, harness: null, done: null, total: null }
+    return { state: p.state, written: p.written, harness: p.harness ?? null, done: p.done ?? null, total: p.total ?? null }
+  } catch {
+    return null
+  }
 }
 
 export async function handleSession(req: Request): Promise<Response> {
@@ -381,6 +398,9 @@ export async function handleSession(req: Request): Promise<Response> {
       // browser has no environment, so the server says it. A UI hint like the rest: the route still
       // refuses on its own terms, and the web falls back to /api/data when it does.
       projectionsWeb: projectionsWebOn(process.env, TEAM_CENTRAL, CAPS.localTranscripts),
+      // The journal's first import, for the web's one-line note (`journal/backfill.ts`); `null` when
+      // there is nothing to say (complete, journal off, a central).
+      journalBackfill: await journalBackfillSummary(),
     }),
     { status: 200, headers: JSON_CT },
   )

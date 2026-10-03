@@ -450,11 +450,11 @@ async function child(script: string, env: Record<string, string>): Promise<{ cod
 }
 
 describe('the real flag and the real data.ts call', () => {
-  test('flag absent: shadowIngest answers off and no journal file is created', async () => {
+  test('flag explicitly off (=0): shadowIngest answers off and no journal file is created', async () => {
     const dir = join(root, `iso-${++seq}`)
     const r = await child(
       `import { shadowIngest } from './journal/shadow'; console.log(JSON.stringify(await shadowIngest([{ session_id: 'x' }])))`,
-      { AGENTISTICS_DIR: dir, CLAUDE_DIR: join(dir, 'claude') },
+      { AGENTISTICS_DIR: dir, CLAUDE_DIR: join(dir, 'claude'), AGENTISTICS_JOURNAL: '0' },
     )
     expect(r.out).toBe('{"status":"off"}')
     // (other modules may create the data dir on import; the journal and its status file must not exist)

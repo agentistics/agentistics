@@ -194,6 +194,14 @@ describe('handleSession', () => {
     // on nothing but its arguments.
   })
 
+  it('reports journalBackfill: the first import\'s state for the web, or null', async () => {
+    const res = await handleSession(new Request('http://x/api/team/session'))
+    const body = await res.json() as Record<string, unknown>
+    expect('journalBackfill' in body).toBe(true)
+    const b = body['journalBackfill'] as { state: string } | null
+    if (b !== null) expect(typeof b.state).toBe('string')
+  })
+
   it('reports projectionsWeb as a boolean (A4.7)', async () => {
     const res = await handleSession(new Request('http://x/api/team/session'))
     const body = await res.json() as Record<string, unknown>
@@ -205,9 +213,11 @@ describe('handleSession', () => {
     expect(projectionsWebOn(on, false, true)).toBe(true)
     expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS: '0' }, false, true)).toBe(false)
     expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS_SURFACES: 'mcp' }, false, true)).toBe(false)
+    expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: 'off' }, false, true)).toBe(false)
     expect(projectionsWebOn(on, true, true)).toBe(false)
     expect(projectionsWebOn(on, false, false)).toBe(false)
-    expect(projectionsWebOn({}, false, true)).toBe(false)
+    // The default (the backfill item): nothing set reads the projections on the web.
+    expect(projectionsWebOn({}, false, true)).toBe(true)
     // The default: the projections on and no surface list reads them on the web too; "legacy" is the fallback.
     expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: '1' }, false, true)).toBe(true)
     expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: '1', AGENTISTICS_PROJECTIONS_SURFACES: 'legacy' }, false, true)).toBe(false)

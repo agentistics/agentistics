@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import type { Database } from 'bun:sqlite'
+import { featureOn } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { withRecoveryRetry } from '../journal/journal'
 import { JournalOpenError, classifyJournalPath, configureConnection, defaultPathProbe, type PathProbe } from '../journal/schema'
@@ -58,8 +59,9 @@ export const PROJECTIONS_PATH = process.env.AGENTISTICS_JOURNAL_DIR
  * machine must not start writing a database because it was upgraded. Read per call, never cached, so
  * flipping it back is immediate (P3 §7).
  */
+/** `AGENTISTICS_PROJECTIONS`: ON by default since the journal-backfill item; only an explicit negative turns it off. */
 export function projectionsEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  return ['1', 'true', 'on', 'yes'].includes((env.AGENTISTICS_PROJECTIONS ?? '').trim().toLowerCase())
+  return featureOn('projections', env)
 }
 
 /** The store's own layout, in `PRAGMA user_version`. Bumping it drops and rebuilds everything. */
