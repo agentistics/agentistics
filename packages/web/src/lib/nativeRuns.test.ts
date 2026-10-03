@@ -21,3 +21,10 @@ describe('H6 in the native chat', () => {
     expect(parseRuns({ runs: [{ runId: 1 }, run()] })).toHaveLength(1)
   })
 })
+
+describe('H24 in the native chat', () => {
+  test('each run\'s line names the model it was priced on', () => {
+    expect(runLineText({ runId: 'r', responses: 1, tokens: null, costUSD: null, costMeasured: false, cacheShare: null, context: null, model: 'claude-sonnet-4-6' }, 'en'))
+      .toBe('claude-sonnet-4-6 · tokens not measured · no price')
+  })
+})

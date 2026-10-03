@@ -286,6 +286,11 @@ export interface NativeSessionUsage {
   model?: string
   /** When this snapshot was taken, ISO. */
   updatedAt: string
+  /**
+   * H24 (optional): per model, when the session ran on more than one (a mid-session switch). Same
+   * money rules per model as the total; an unpriceable model reads `costUSD: null`.
+   */
+  byModel?: Record<string, { responses: number; tokens: number | null; costUSD: number | null }>
 }
 
 /** A native session filed on the task board. */

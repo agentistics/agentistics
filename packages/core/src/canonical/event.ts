@@ -169,6 +169,8 @@ export const EVENT_TYPES = [
   'process.started', 'process.ended',
   // human turns (D22) and their close (D25)
   'turn.started', 'turn.ended',
+  // H24: a native session switched model (same provider) between runs
+  'session.model.changed',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -533,6 +535,17 @@ export interface ContextWindowObservedData {
   model?: string
 }
 
+/**
+ * H24: a session switched model between runs, on the SAME provider. The runs before it were priced on
+ * `from`, the runs after it on `to`: every `model.completed` already names its own model, so cost per
+ * model needs nothing else. Facts only.
+ */
+export interface SessionModelChangedData {
+  provider: string
+  from: string
+  to: string
+}
+
 export interface PolicyRequestedData {
   /** The policy that was consulted. */
   policy: string
@@ -630,6 +643,7 @@ export interface TurnEndedData {
 export interface EventData {
   'session.started': SessionStartedData
   'session.ended': NoData
+  'session.model.changed': SessionModelChangedData
   'run.started': RunStartedData
   'run.ended': RunEndedData
   'agent.started': AgentStartedData

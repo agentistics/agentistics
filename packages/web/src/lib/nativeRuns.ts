@@ -31,6 +31,8 @@ const pct = (f: number) => `${Math.floor(f * 100)}%`
 export function runLineText(r: RunLineView, lang: 'pt' | 'en'): string {
   const pt = lang === 'pt'
   const parts: string[] = []
+  // H24: the model the run was priced on — after a switch, the cost per model reads run by run.
+  if (r.model) parts.push(r.model)
   parts.push(r.tokens ? `${fmt(r.tokens.total)} tokens` : (pt ? 'tokens não medidos' : 'tokens not measured'))
   parts.push(r.costUSD === null
     ? (pt ? 'sem preço' : 'no price')
