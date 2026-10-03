@@ -400,6 +400,14 @@ const RUNTIME: ExcludeRule[] = [
   },
   // Written by the ENGINE, not by this tree, so `backup-coverage.lint.test.ts` (a grep over the
   // server's own source) cannot see it — `backup-plan.test.ts` pins this row instead.
+  // Written by the ENGINE (A5.1 live-ingestion hooks), like `.agentistics/runtime` below — pinned by
+  // `backup-plan.test.ts`, since the coverage grep reads only this tree.
+  {
+    pattern: '.agentistics/ingest', match: 'prefix', reason: 'runtime',
+    why: 'The hook spool (`ingest/hooks.jsonl`, 0600, and its one rotation): ids of sessions on THIS '
+      + 'machine that just ended a turn, consumed by the live feeder within seconds. Restored elsewhere '
+      + 'it would wake nothing; the transcripts themselves are what a backup carries.',
+  },
   {
     pattern: '.agentistics/runtime', match: 'prefix', reason: 'runtime',
     why: 'The native session store (`runtime/sessions.db` and its -wal/-shm). Not `secret`: a session '
