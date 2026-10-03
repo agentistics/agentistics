@@ -13,7 +13,7 @@
  */
 
 import { isNativeRow } from '../session-native'
-import { nextCycleGrouping } from '../sessions'
+import { nextCycleGrouping, stateCell } from '../sessions'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSessionsMenuHidden, setSessionsMenuHidden } from '../ephemeral'
 import { Box, Text, useInput } from 'ink'
@@ -2429,7 +2429,7 @@ function SessionRowView({ session, selected, marked, stopping, notify, ages, col
         underline={selected}
         bold={selected || session.state === 'waiting-approval'}
       >
-        {padCell(session.stateLabel, columns.state)}
+        {padCell(stateCell(session), columns.state)}
       </Text>
       {columns.title > 0 ? (
         <Text

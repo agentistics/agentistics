@@ -4307,8 +4307,8 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
         const { nativeFleetRows } = await import('@agentistics/tui/control/session-native')
         const pt = host.lang === 'pt'
         const rows = nativeFleetRows(recent.sessions, pt
-          ? { working: 'trabalhando', idle: 'parada · reabre no código', ended: 'encerrada' }
-          : { working: 'working', idle: 'idle · reopens in code', ended: 'ended' })
+          ? { working: 'trabalhando', idle: 'encerrada', ended: 'encerrada' }
+          : { working: 'working', idle: 'ended', ended: 'ended' })
         return { ...snap, sessions: [...snap.sessions, ...rows] }
       }
     }

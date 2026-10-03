@@ -623,7 +623,7 @@ const EN: CliStrings = {
 
   sessState: {
     working: 'working',
-    waitingApproval: 'needs approval',
+    waitingApproval: 'approve',
     // Named for what it means to the READER. `waiting` and `working` differ by two letters in the
     // middle of a narrow column, so the state that needs a person was being read as the one that
     // does not — and `needs you` sits beside `needs approval` as the pair they are.
@@ -633,9 +633,9 @@ const EN: CliStrings = {
     // running?") and one move available ("reopen it"), so three answers to it was noise dressed as
     // precision. The distinction still exists in the state and is still said by the DETAIL pane;
     // the column stops spending three vocabularies on one bit.
-    exited: 'off',
-    lost: 'off',
-    closed: 'off',
+    exited: 'ended',
+    lost: 'ended',
+    closed: 'ended',
     external: 'external',
   },
   sessBackground: 'subagent',
@@ -1060,13 +1060,14 @@ const PT: CliStrings = {
 
   sessState: {
     working: 'trabalhando',
-    waitingApproval: 'precisa de aprovação',
+    waitingApproval: 'aprovar',
     // Named for what it means to the READER rather than for what the machine is doing, and it
     // pairs with `precisa de aprovação` above as the distinction it is.
     waiting: 'precisa de você',
+    // One word for every way it is not running, as in English (the detail pane says which).
     exited: 'encerrada',
-    lost: 'desconectada',
-    closed: 'fechada',
+    lost: 'encerrada',
+    closed: 'encerrada',
     external: 'externa',
   },
   sessBackground: 'subagente',

@@ -386,7 +386,7 @@ export function sessionColumns(
   }
 
   const id = widest('id', sessionHandle)
-  const state = widest('state', s => s.stateLabel)
+  const state = widest('state', stateCell)
   const title = widest('title', s => s.title)
 
   /**
@@ -1288,8 +1288,8 @@ export function sessionKeyHelp(w: {
 }): KeyHelp[] {
   return [
     { keys: '↑ ↓ / j k', what: w.move },
-    { keys: 'enter', what: w.menu },
-    { keys: 'o', what: w.attach },
+    // SS-07: enter OPENS (native → code, running → attach, closed → reopen); the menu is on `tab`.
+    { keys: 'enter', what: w.attach },
     // The two that act on a session WITHOUT entering it, listed right under the one that enters it:
     // they answer the same question ("this one needs me") in the two cheaper ways. `y` is kept as an
     // alias and left out of the list — the reference names ONE key per verb or it stops being read.
@@ -1451,6 +1451,22 @@ export function resolveSessionsKey(key: KeyPress, ctx: {
     return { kind: 'move' }
   }
   return null
+}
+
+/**
+ * SS-02: the dot beside the state word, as the prototype draws it — `●` for a session that is live
+ * (approve · needs you · working), `○` for one that ended, `◌` for one agentop did not start. The
+ * dot wears the state's colour; the word beside it is what says the state (never colour alone).
+ */
+export function stateGlyph(state: ControlSession['state']): string {
+  if (state === 'unknown') return '◌'
+  if (state === 'closed' || state === 'exited' || state === 'lost') return '○'
+  return '●'
+}
+
+/** The state cell: dot + word — PURE. */
+export function stateCell(s: Pick<ControlSession, 'state' | 'stateLabel'>): string {
+  return `${stateGlyph(s.state)} ${s.stateLabel}`
 }
 
 /** SS-01: the groupings `g` cycles through, in the spec's order (task · harness · state). */

@@ -1158,7 +1158,7 @@ const EN: ControlStrings = {
     usage: 'usage', project: 'project',
   },
   sessionsStates: {
-    'waiting-approval': 'needs approval',
+    'waiting-approval': 'approve',
     // Named for what it means to the READER, not for what the machine is doing. `waiting` and
     // `working` differ by two letters in the middle of a narrow column, and the one that needs a
     // person was the one being read as the one that does not.
@@ -1166,9 +1166,9 @@ const EN: ControlStrings = {
     working: 'working',
     // ONE word for every way a session is not running — see `cli-i18n.ts`'s `sessState`, which this
     // table has to agree with or a row reads `off` under a band called `closed`.
-    exited: 'off',
-    lost: 'off',
-    closed: 'off',
+    exited: 'ended',
+    lost: 'ended',
+    closed: 'ended',
     unknown: 'external',
   },
   sessionsSearching: q => `search: ${q} · esc clears`,
@@ -1205,7 +1205,7 @@ const EN: ControlStrings = {
   spawnUnknownEffort: e => `${e} is not a reasoning effort this CLI accepts.`,
   spawnModelUnsupported: h => `${h} has no model flag — a model was asked for and it could not be honoured.`,
   keySessionsGroup: 'v group',
-  keySessionsAttach: 'o attach',
+  keySessionsAttach: 'enter open',
   keySessionsReset: '^r reset view',
   keySessionsKill: 'x kill',
   keySessionsDeleteTask: 'x delete task',
@@ -1741,7 +1741,7 @@ const PT: ControlStrings = {
     usage: 'uso', project: 'projeto',
   },
   sessionsStates: {
-    'waiting-approval': 'precisa aprovação',
+    'waiting-approval': 'aprovar',
     // The same word the state COLUMN shows (`cli-i18n.ts`'s `sessState.waiting`). Two tables of one
     // vocabulary, and the sessions screen draws from both at once — the column from the host, the
     // band heading and the filter row from here. They have to say the same thing or the row reads
@@ -1749,8 +1749,8 @@ const PT: ControlStrings = {
     waiting: 'precisa de você',
     working: 'trabalhando',
     exited: 'encerrada',
-    lost: 'desconectada',
-    closed: 'fechada',
+    lost: 'encerrada',
+    closed: 'encerrada',
     unknown: 'externa',
   },
   sessionsSearching: q => `busca: ${q} · esc limpa`,
@@ -1787,7 +1787,7 @@ const PT: ControlStrings = {
   spawnUnknownEffort: e => `${e} não é um nível de esforço que esta CLI aceite.`,
   spawnModelUnsupported: h => `${h} não tem flag de modelo — um modelo foi pedido e não teria como ser aplicado.`,
   keySessionsGroup: 'v agrupar',
-  keySessionsAttach: 'o anexar',
+  keySessionsAttach: 'enter abrir',
   keySessionsReset: '^r restaurar view',
   keySessionsKill: 'x encerrar',
   keySessionsDeleteTask: 'x apagar tarefa',
