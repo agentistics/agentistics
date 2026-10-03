@@ -512,9 +512,7 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * a hit is journaled `model.completed {replayed: true}`.
    */
   invocationCache?: EngineInvocationCache
-}
-
-/**
+  /**
    * 1.8 — grants of the person's own secrets to native sessions (VAULT.PERSONAL §8.3). OPTIONAL: a host
    * before 1.8 has none, and an engine then offers no vault references to its sessions (a `vault://`
    * reference in a command stays literal and fails visibly) — it never resolves one itself.
