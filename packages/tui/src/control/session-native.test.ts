@@ -59,3 +59,19 @@ describe('a native session waiting on the policy (SS-06)', () => {
     ])
   })
 })
+
+describe('stop → finish the task? (SS-10)', () => {
+  test('asked only when the stopped session was the task\'s last live one', async () => {
+    const { lastLiveOfTask } = await import('./sessions')
+    const fleet = [
+      { id: 'a', task: 'T', state: 'working' as const },
+      { id: 'b', task: 'T', state: 'waiting' as const },
+      { id: 'c', task: 'T', state: 'closed' as const },
+      { id: 'd', task: 'U', state: 'working' as const },
+    ]
+    expect(lastLiveOfTask(fleet, { id: 'a', task: 'T' })).toBe(false)
+    expect(lastLiveOfTask(fleet.filter(f => f.id !== 'b'), { id: 'a', task: 'T' })).toBe(true)
+    expect(lastLiveOfTask(fleet, { id: 'd', task: 'U' })).toBe(true)
+    expect(lastLiveOfTask(fleet, { id: 'x' })).toBe(false)
+  })
+})

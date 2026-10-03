@@ -17,7 +17,7 @@ import { filePickerLines, openWizard, wizardHints, wizardKey, type WizardState }
 import { codeStrings } from '../code-i18n'
 import type { CliLang } from '../lang'
 import { isNativeRow } from '../session-native'
-import { nextCycleGrouping, stateCell } from '../sessions'
+import { lastLiveOfTask, nextCycleGrouping, stateCell } from '../sessions'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSessionsMenuHidden, setSessionsMenuHidden } from '../ephemeral'
 import { Box, Text, useInput, type Key } from 'ink'
@@ -184,7 +184,7 @@ type Ask =
    * knows the answer. It carries the task NAME rather than a session, because by the time it is
    * asked the session it came from has already ended.
    */
-  | { kind: 'finishTask'; task: string }
+  | { kind: 'finishTask'; task: string; afterStop?: boolean }
   | { kind: 'deleteTask'; name: string; count: number }
   | { kind: 'task'; session: ControlSession }
   | { kind: 'resume'; session: ControlSession }
@@ -2240,7 +2240,7 @@ export function Sessions({
             // The mode ENDS with the act it exists for. Nobody has to remember a second keystroke
             // to disarm, which is the state this screen must never leave a person in.
             onStopped={() => setBulk(BULK_STOP_OFF)}
-            onAskFinish={task => setAsk({ kind: 'finishTask', task })}
+            onAskFinish={task => setAsk({ kind: 'finishTask', task, afterStop: true })}
           />
         ) : (
           detail.length > 0
@@ -3120,7 +3120,9 @@ function Question({
         // something the code does not do: a warning that claims to end everything, over an action
         // that ends nothing, is worse than no warning, because it teaches people that the warnings
         // on this screen can be ignored.
-        label={s.sessionsFinishConfirm(task, mine.length, running)}
+        // SS-10: asked right after the task's LAST live session stopped — the poll has not caught up,
+        // so counting "its sessions still running" here would describe the one just stopped.
+        label={ask.afterStop ? s.sessionsFinishAfterStop(task) : s.sessionsFinishConfirm(task, mine.length, running)}
         yesLabel={s.yes}
         noLabel={s.no}
         width={width}
@@ -3282,7 +3284,9 @@ function Question({
            * The kill is not held up by the question: it runs first and the delivery is asked about
            * after, so an answer nobody gives leaves the session stopped rather than running.
            */
-          if (task && !(fleet?.finishedTasks ?? []).includes(task)) {
+          // SS-10: asked only when this was the task's LAST live session — with another one still
+          // working on it, "is the task done?" has an obvious answer and asking it is noise.
+          if (task && !(fleet?.finishedTasks ?? []).includes(task) && lastLiveOfTask(fleet?.sessions ?? [], session)) {
             onRun(() => kill.call(host, session.id), s.actSessions.kill, () => onAskFinish(task))
             return
           }

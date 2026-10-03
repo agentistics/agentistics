@@ -1473,6 +1473,19 @@ export function stateCell(s: Pick<ControlSession, 'state' | 'stateLabel'>): stri
   return `${stateGlyph(s.state)} ${s.stateLabel}`
 }
 
+/**
+ * SS-10: stopping `session` leaves its task with no LIVE session — the one moment to ask whether the
+ * task is done. PURE. A session with no task never asks.
+ */
+export function lastLiveOfTask(
+  fleet: readonly Pick<ControlSession, 'id' | 'task' | 'state'>[],
+  session: Pick<ControlSession, 'id' | 'task'>,
+): boolean {
+  if (!session.task) return false
+  const live = (st: ControlSession['state']) => st === 'working' || st === 'waiting' || st === 'waiting-approval'
+  return !fleet.some(f => f.id !== session.id && f.task === session.task && live(f.state))
+}
+
 /** SS-01: the groupings `g` cycles through, in the spec's order (task · harness · state). */
 export const CYCLE_GROUPINGS = ['task', 'harness', 'status'] as const
 

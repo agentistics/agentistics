@@ -385,6 +385,8 @@ export interface ControlStrings {
    * `cli-start.ts`.
    */
   sessionsFinishConfirm: (task: string, count: number, running: number) => string
+  /** SS-10: the question after a task's last live session was stopped. */
+  sessionsFinishAfterStop: (task: string) => string
   sessionsReopenConfirm: (task: string) => string
   /** The heading over the sessions the machine took at once. */
   sessionsFellWord: string
@@ -1135,6 +1137,8 @@ const EN: ControlStrings = {
   // Says what finishing ACTUALLY does. It marks the task and hides its sessions behind a switch —
   // it stops nothing — so the sentence names the count, calls out the ones still running, and names
   // the switch that brings them back.
+  sessionsFinishAfterStop: task =>
+    `That was the last session working on "${task}". Is the task done? Yes marks it done on the board.`,
   sessionsFinishConfirm: (task, count, running) =>
     `Mark "${task}" finished? Its ${count} session${count === 1 ? '' : 's'}`
     + `${running > 0 ? ` (${running} still running)` : ''}`
@@ -1740,6 +1744,8 @@ const PT: ControlStrings = {
     prompt: 'envia uma linha para ela sem anexar',
     reopenFell: 'reabre tudo que a máquina levou de uma vez',
   },
+  sessionsFinishAfterStop: task =>
+    `Essa era a última sessão trabalhando em "${task}". A tarefa terminou? Sim marca como concluída no board.`,
   sessionsFinishConfirm: (task, count, running) =>
     `Finalizar "${task}"? ${count === 1 ? 'A sessão dela' : `As ${count} sessões dela`}`
     + `${running > 0 ? ` (${running} ainda rodando)` : ''}`
