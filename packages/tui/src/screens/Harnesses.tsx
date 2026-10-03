@@ -1,3 +1,4 @@
+import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { AppData, HarnessId } from '@agentistics/core'
@@ -18,14 +19,16 @@ function capable(harness: HarnessId, metric: 'tokens' | 'cost' | 'agents'): bool
   return HARNESS_CAPABILITIES[harness]?.[metric] ?? false
 }
 
-export function Harnesses({ data, s, width, height }: {
+export function Harnesses({ data, figures = null, s, width, height }: {
   data: AppData
+  /** Projected figures (A4.6); absent → the selectors over `data`. */
+  figures?: DashboardFigures | null
   s: TuiStrings
   width: number
   /** Rows this screen may use — its table draws a header before the first harness. */
   height: number
 }) {
-  const rows = harnessRows(data)
+  const rows = figures?.harnesses ?? harnessRows(data)
   if (rows.length === 0) return <Empty message={s.empty} />
 
   const nameWidth = 14
@@ -45,7 +48,7 @@ export function Harnesses({ data, s, width, height }: {
       // Only Claude records Agent invocations. Everywhere else this is structurally 0, and a
       // confident 0 would read as "no agents used" rather than "not measurable here".
       key: 'agents', header: s.agents, width: 9, align: 'right',
-      render: r => (capable(r.harness, 'agents') ? fmt(r.agents) : 'N/A'),
+      render: r => (capable(r.harness, 'agents') && r.agents !== null ? fmt(r.agents) : 'N/A'),
     },
   ]
 

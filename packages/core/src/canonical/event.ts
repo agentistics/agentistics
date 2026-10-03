@@ -367,7 +367,8 @@ export interface AttentionRaisedData {
   toolExecutionId?: Id
   optionCount?: number
   hasFreeText?: boolean
-  via: 'screen'
+  /** `screen`: read off a terminal frame. `acp`: stated by the agent itself over ACP (A5.4). */
+  via: 'screen' | 'acp'
 }
 
 export interface AttentionClearedData {

@@ -322,3 +322,19 @@ describe('the Stop hook alongside SessionStart', () => {
     expect(() => hookCommand('agentop', HOOK_VERSION, 'PreToolUse')).toThrow()
   })
 })
+
+describe('the engine\'s live-ingestion hooks (A5.1) are not ours to administer', () => {
+  const INGEST = 'agentop ingest emit --harness claude --event Stop --hook-version 1'
+  test('an `ingest emit` entry is never recognised as one of `agentop hooks`\' own', () => {
+    expect(isAgentopHookCommand(INGEST)).toBe(false)
+    expect(isAgentopHookCommand(INGEST, 'Stop')).toBe(false)
+  })
+  test('`agentop hooks uninstall` leaves an ingest entry on Stop exactly where it was', () => {
+    const before = { hooks: { Stop: [{ hooks: [{ type: 'command', command: INGEST, timeout: 5 }] }] } }
+    const installed = planHookInstall(structuredClone(before), CMD)
+    if (!installed.ok) throw new Error('unreachable')
+    const removed = planHookRemoval(installed.settings)
+    if (!removed.ok) throw new Error('unreachable')
+    expect(removed.settings).toEqual(before)
+  })
+})

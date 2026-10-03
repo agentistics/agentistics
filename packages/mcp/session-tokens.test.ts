@@ -115,3 +115,14 @@ test("filterSessions passes everything through for undefined/'all'", () => {
   expect(filterSessions(sessions, "all")).toHaveLength(2);
   expect(filterSessions(sessions, "codex")).toHaveLength(1);
 });
+
+test("sessionTokens prices 1h cache writes at the 1h rate (the same figure as the dashboards' Costs)", () => {
+  const s = {
+    model: "claude-opus-5-5", input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 300,
+    cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 1_000_000, cache_creation_5m_input_tokens: 0,
+  };
+  const t = sessionTokens(s);
+  expect(t.cost).toBeCloseTo(sessionCostUSD(s)!, 10);
+  const without1h = sessionCostUSD({ ...s, cache_creation_1h_input_tokens: undefined, cache_creation_5m_input_tokens: undefined })!;
+  expect(t.cost).toBeGreaterThan(without1h);
+});

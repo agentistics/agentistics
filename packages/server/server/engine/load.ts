@@ -35,6 +35,8 @@ import type { AgentisticsEvent } from '@agentistics/core'
 import type { SpawnBudget } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
+import { hostEngineBoard } from './engine-board'
+import { hostDelegateMembers } from './engine-delegate'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -286,6 +288,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     tasks: {
       fileNative: async () => ({ ok: false, reason: 'this build has no native sessions to file' }),
       unfileNative: async () => {},
+      // 1.7 (B6.5): the board's own operations in process for a native session's board tools.
+      board: hostEngineBoard(() => lang),
     },
     readers,
     // `SERVE_STATIC` is `sse.ts`'s own reading of the same variable; importing `sse` here would load
@@ -297,6 +301,9 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     // 1.4: which contract this host speaks, and the fleet's confirmed transitions. The hub is fed by
     // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.
     apiVersion: ENGINE_API_VERSION,
-    fleet: { subscribe: cb => fleetHub.subscribe(cb) },
+    // 1.7 (B6.2): delegation to another harness — consent (default deny), admission and filing are the host's.
+    fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
+    // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.
+    serverPort: () => config.PORT,
   }
 }

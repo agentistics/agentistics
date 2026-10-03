@@ -46,7 +46,21 @@
  * new causes arrive as `code: 'locked'` with the sentence and `lockedBy`. An engine built against 1.5
  * still loads; a 1.6 engine on a 1.5 host sees `undefined` for each new member and must cope.
  */
-export const ENGINE_API_VERSION = '1.6.0'
+/**
+ * 1.7.0 — B6.5: `tasks.board` (optional), the task board's own operations in process — list, get,
+ * next, activity, create, subtask, comment, status, claim and attach — so a native session's board
+ * tools reach the board without an HTTP loopback or a second auth path. An engine built against 1.6
+ * still loads; a 1.7 engine on an older host finds `board` absent and offers no board tools.
+ * Also (B6.2): `fleet.delegateHarnesses / delegateSpawn / lastReply / stop` (optional) — an engine's
+ * agent may run as a session of another harness, started by the HOST, which alone decides whether the
+ * person allowed that harness (default deny) and files the session on the board.
+ * Also (A5.2): \`/v1/traces\` joins \`RESERVED_PREFIXES\` (guarded \`localTranscripts\` like the other OTLP
+ * routes). An engine registers it only on a host that speaks 1.7 — an older host refuses an
+ * unreserved prefix at load.
+ * Also (A5.4): `Engine.acp` (optional) drives an ACP-speaking harness for the host's fleet, and the host
+ * offers `serverPort()` (optional) for an engine to write into a harness's exporter config.
+ */
+export const ENGINE_API_VERSION = '1.7.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

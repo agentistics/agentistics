@@ -48,8 +48,11 @@ describe('applyExperimental — on', () => {
 })
 
 describe('resolveExperimental', () => {
-  test('default: off with source default', () => {
-    for (const r of resolveExperimental(undefined, {})) expect(r).toMatchObject({ on: false, source: 'default', overridden: false })
+  test('default: each feature at its own default, with source default', () => {
+    for (const r of resolveExperimental(undefined, {})) {
+      const f = EXPERIMENTAL_FEATURES.find(x => x.id === r.id)!
+      expect(r).toMatchObject({ on: f.defaultOn === true, source: 'default', overridden: false })
+    }
   })
   test('preference on, nothing exported: source preference', () => {
     for (const r of resolveExperimental(true, {})) expect(r).toMatchObject({ on: true, source: 'preference' })
@@ -73,5 +76,27 @@ describe('resolveExperimental', () => {
   })
   test('a blank variable is not explicit', () => {
     expect(resolveExperimental(true, { AGENTISTICS_JOURNAL: '  ' }).find(r => r.id === 'journal')!.source).toBe('preference')
+  })
+})
+
+import { featureOn } from './experimental'
+
+describe('journal and projections are ON by default (the backfill item)', () => {
+  test('absent or blank: on; resolveExperimental says so with source "default"', () => {
+    expect(featureOn('journal', {})).toBe(true)
+    expect(featureOn('projections', { AGENTISTICS_PROJECTIONS: '  ' })).toBe(true)
+    const s = resolveExperimental(undefined, {})
+    expect(s.find(x => x.id === 'journal')).toMatchObject({ on: true, source: 'default' })
+    expect(s.find(x => x.id === 'projections')).toMatchObject({ on: true, source: 'default' })
+  })
+  test('an explicit negative turns either off', () => {
+    for (const v of ['0', 'false', 'off', 'no', 'OFF']) {
+      expect(featureOn('journal', { AGENTISTICS_JOURNAL: v })).toBe(false)
+      expect(featureOn('projections', { AGENTISTICS_PROJECTIONS: v })).toBe(false)
+    }
+  })
+  test('the provider feature is still opt-in', () => {
+    expect(featureOn('provider', {})).toBe(false)
+    expect(resolveExperimental(undefined, {}).find(x => x.id === 'provider')).toMatchObject({ on: false, source: 'default' })
   })
 })

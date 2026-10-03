@@ -128,6 +128,11 @@
           "minimum": 15,
           "markdownDescription": "How often to re-read today's totals. The fleet list refreshes every 5 seconds regardless — this timer is for `/api/data`, which is megabytes on a well-used machine, so it is deliberately slow."
         },
+        "agentistics.readProjections": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Read today's totals from the projections (`/api/runtime/metrics`, the journal): a few hundred bytes instead of the whole `/api/data`. On by default; turn it off to read `/api/data` instead. When the server serves no projections (`AGENTISTICS_PROJECTIONS` off, a central), the extension reads `/api/data` by itself. `AGENTISTICS_PROJECTIONS_SURFACES=legacy` in the editor's environment also turns it off."
+        },
         "agentistics.currency": {
           "type": "string",
           "enum": [

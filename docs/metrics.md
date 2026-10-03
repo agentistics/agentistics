@@ -91,6 +91,12 @@ parser that wrote `daily`. **Two day rules exist in this repo** — the other is
 `format(parseISO(...))` used for the session-gap count — and mixing them drifts a session across a
 boundary. At UTC-3 the two disagree for roughly 15% of sessions.
 
+## What "project" means
+
+A project is the **root of the repository a session ran in**. A git worktree is a checkout of a project, not a project of its own, so a session started in `<project>/.claude/worktrees/<name>` (Claude Code's worktrees) or `<project>/.worktrees/<name>` (the convention for concurrent work) is counted under `<project>`. Every surface uses the same rule, `canonicalProjectPath` in `@agentistics/core`: the projections (`cost-by-dimension`, `run-metrics`), the web, the TUI and the MCP. So a project's sessions, tokens and cost include all its worktrees.
+
+The rule is **lexical** on purpose. The projections are folds over journal events and must give the same answer on every machine and on every replay, so no git call decides it. The one case it does not see is a worktree created **outside** its repository (`git worktree add ../elsewhere`), which stays a project of its own.
+
 ## Pricing table
 
 All prices are in USD per **1 million tokens**:

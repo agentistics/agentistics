@@ -650,17 +650,26 @@ export interface MemberPresence {
 
 /**
  * A git worktree is not a project of its own — it is a checkout of one. Claude Code puts them under
- * `<project>/.claude/worktrees/<name>`, so every worktree showed up in the project list as if it
- * were a separate codebase, splitting one project's metrics across a handful of near-identical
- * paths and offering each of them as a taggable source.
+ * `<project>/.claude/worktrees/<name>`, and the convention these repositories use for concurrent work
+ * puts them under `<project>/.worktrees/<name>`. Either way every worktree showed up in the project
+ * list as if it were a separate codebase, splitting one project's metrics across a handful of
+ * near-identical paths and offering each of them as a taggable source.
  *
- * Returns the owning project's path, or the input unchanged when it is not a worktree. The
- * double-slash variant appears because the project directory name is decoded heuristically and a
+ * Returns the owning project's ROOT — the repository the worktree belongs to — or the input unchanged
+ * when it is not a worktree. EVERY surface keys "project" on this (the projections, the web, the TUI,
+ * the MCP), so a worktree's spend always rolls up to its repository (the leader's A4.4 decision 2).
+ * The OUTERMOST marker wins, so a worktree nested in a worktree still lands on the project.
+ *
+ * It is LEXICAL on purpose: the projections are folds over journal events and must give the same
+ * answer on every machine and every replay, so no git call decides it. The one case it cannot see is
+ * a worktree created OUTSIDE its repository (`git worktree add ../elsewhere`): that stays its own row.
+ *
+ * The double-slash variant appears because the project directory name is decoded heuristically and a
  * leading dot can be lost along the way (`/proj//claude/worktrees/x`).
  */
 export function canonicalProjectPath(path: string): string {
   if (!path) return path
-  const m = /^(.*?)\/{1,2}\.?claude\/worktrees\//.exec(path)
+  const m = /^(.*?)\/{1,2}(?:\.?claude\/worktrees|\.worktrees)\//.exec(path)
   return m && m[1] ? m[1] : path
 }
 

@@ -84,6 +84,8 @@ export interface JournalReport {
    * build carries no engine (or has it switched off). The normal state of a community build.
    */
   noIntegrations: boolean
+  /** The first import's progress (`journal/backfill.ts`); `null` when none has ever run. */
+  backfill?: { progress: import('./journal/backfill').BackfillProgress | null; complete: boolean }
 }
 
 export interface JournalCliDeps {
@@ -103,6 +105,8 @@ export interface JournalCliDeps {
   alive?: (pid: number) => boolean
   /** Default: whether this build's engine slot holds an engine (`engine/load.ts`). */
   buildHasEngine?: () => boolean
+  /** The first import's progress file. Default `<journal path>.backfill.json`. */
+  backfillPath?: string
 }
 
 function pidAlive(pid: number): boolean {
@@ -188,6 +192,12 @@ export async function collectJournalReport(deps: JournalCliDeps = {}): Promise<J
   report.present = present
   const statusPath = deps.statusPath ?? `${path}.status.json`
   report.sinceBoot = readSinceBoot(statusPath, deps.alive ?? pidAlive)
+  {
+    const { readBackfillProgress, backfillComplete } = await import('./journal/backfill')
+    const { fileIdentity } = await import('./journal/shadow')
+    const progress = readBackfillProgress(deps.backfillPath ?? `${path}.backfill.json`)
+    report.backfill = { progress, complete: backfillComplete(progress, fileIdentity(path)) }
+  }
   report.noIntegrations = readWriterOff(statusPath, deps.alive ?? pidAlive) === 'no-integrations'
     || !(await (async () => {
       if (deps.buildHasEngine) return deps.buildHasEngine()
@@ -251,6 +261,21 @@ function humanBytes(n: number): string {
   return `${v >= 10 ? Math.round(v) : Math.round(v * 10) / 10} ${units[u]}`
 }
 
+/** PURE. One line on the first import: what the projections are waiting for, and how far it got. */
+export function backfillLine(p: import('./journal/backfill').BackfillProgress | null, complete: boolean): string {
+  if (complete) return `complete (${p?.completedAt ?? 'recorded'}) — the surfaces read the projections`
+  if (!p) return 'not run yet — the server starts it in the background; until it completes, the surfaces read /api/data'
+  const where = p.harness ? ` · ${p.harness} ${p.phase ?? ''} ${p.done ?? 0}/${p.total ?? '?'}`.replace(/ {2,}/g, ' ') : ''
+  const written = ` · ${p.written.toLocaleString('en-US')} events written`
+  switch (p.state) {
+    case 'running': return `running${where}${written} (updated ${p.updatedAt})`
+    case 'paused': return `PAUSED — the memory gate refuses (${p.pausedReason ?? 'pressure'})${where}${written}; it resumes by itself`
+    case 'interrupted': return `interrupted${where}${written} — it resumes on the next server start, or run \`agentop journal import\``
+    case 'failed': return `failed: ${p.error ?? 'unknown error'} — run \`agentop journal import\` to see why`
+    case 'done': return 'done, but for another journal file — it runs again for this one'
+  }
+}
+
 /** PURE. Human text, English. Answers in every case — never silent, never a confident 0 for
  *  something this process does not know. */
 export function renderJournalStatus(r: JournalReport): string {
@@ -260,6 +285,7 @@ export function renderJournalStatus(r: JournalReport): string {
   lines.push(`  Path: ${pathKindText(r.pathKind, r.fsType)}`)
   lines.push(`  AGENTISTICS_JOURNAL (this shell): ${r.flag ?? '(unset)'}`)
   if (r.noIntegrations) lines.push(`  Feeder: none — ${NO_INTEGRATIONS_TEXT}`)
+  if (r.backfill) lines.push(`  First import: ${backfillLine(r.backfill.progress, r.backfill.complete)}`)
   lines.push('')
 
   if (!r.present) {
@@ -331,7 +357,7 @@ export function renderJournalStatus(r: JournalReport): string {
 
 const USAGE = `Usage:
   agentop journal status [--json]
-  agentop journal import [--harness <id>…] [--from <yyyy-MM-dd>] [--dry-run] [--json]
+  agentop journal import [--harness <id>…] [--from <yyyy-MM-dd>] [--dry-run] [--background] [--json]
                          [--batch-size <n>] [--concurrency <n>]
 
 status  A read-only look at the durable event journal from outside the process that writes it. It
@@ -370,7 +396,12 @@ export async function runJournal(argv: string[], deps?: JournalCliDeps): Promise
  */
 export async function runJournalImport(
   argv: string[],
-  deps: { run?: typeof import('./journal/import').runImport; integrations?: import('./journal/shadow').JournalRegistry } = {},
+  deps: {
+    run?: typeof import('./journal/import').runImport
+    integrations?: import('./journal/shadow').JournalRegistry
+    /** Default `JOURNAL_BACKFILL_PATH`. */
+    progressPath?: string
+  } = {},
 ): Promise<number> {
   const { parseImportArgs, renderImportReport } = await import('./journal/import-plan')
   const parsed = parseImportArgs(argv)
@@ -396,17 +427,26 @@ export async function runJournalImport(
     process.stderr.write('\n[import] stopping after the current batch — progress is saved (Ctrl-C again to exit now)\n')
   }
   process.on('SIGINT', onSigint)
+  // The background import is a child of the server: a stopping server stops it between batches.
+  if (args.background) process.on('SIGTERM', onSigint)
   const tty = process.stderr.isTTY === true
+  // Every REAL import records its progress beside the journal (`backfill.ts`): its completion is what
+  // the projections wait for, whether the server started it or a person did.
+  const progress = args.dryRun ? null : await importProgressRecorder(deps.progressPath)
   try {
     const result = await run({
       harnesses: args.harnesses,
       integrations,
       ...(args.from !== undefined ? { from: args.from } : {}),
       dryRun: args.dryRun,
-      ...(args.batchSize !== undefined ? { batchSize: args.batchSize } : {}),
-      ...(args.concurrency !== undefined ? { concurrency: args.concurrency } : {}),
+      // The background import's constraints: small batches, one replay at a time, small flushes.
+      ...(args.background ? { batchSize: args.batchSize ?? 4, concurrency: args.concurrency ?? 1, flushEvents: 200 } : {}),
+      ...(!args.background && args.batchSize !== undefined ? { batchSize: args.batchSize } : {}),
+      ...(!args.background && args.concurrency !== undefined ? { concurrency: args.concurrency } : {}),
+      ...(args.background && progress ? { beforeBatch: progress.memoryPause(controller.signal) } : {}),
       signal: controller.signal,
       onProgress: p => {
+        progress?.onProgress(p)
         const mb = p.bytes !== undefined ? ` · ${(p.bytes / 1e6).toFixed(1)} MB (${(p.bytes / 1e6 / Math.max(0.001, p.ms / 1000)).toFixed(1)} MB/s)` : ''
         const line = `[import] ${p.harness} ${p.phase} ${p.done}/${p.total} · ${p.events.toLocaleString('en-US')} events · ${p.written.toLocaleString('en-US')} ${args.dryRun ? 'would write' : 'written'}${mb} · ${(p.ms / 1000).toFixed(1)} s`
         process.stderr.write(tty ? `\r\x1b[2K${line}` : `${line}\n`)
@@ -414,12 +454,59 @@ export async function runJournalImport(
     })
     if (tty) process.stderr.write('\n')
     if (!result.ok) {
+      await progress?.finish({ state: 'failed', error: result.error })
       console.error(`agentop journal import: ${result.error}`)
       return 1
     }
+    await progress?.finish(result.report.interrupted ? { state: 'interrupted' } : { state: 'done', complete: true })
     console.log(args.json ? JSON.stringify(result.report, null, 2) : renderImportReport(result.report))
     return result.report.interrupted ? 130 : 0
   } finally {
     process.off('SIGINT', onSigint)
+    process.off('SIGTERM', onSigint)
+  }
+}
+
+/**
+ * The progress file a real import keeps up to date: `running` with its counts (at most every 2 s),
+ * `paused` while the memory gate refuses, and the end state, `completedAt` only for an import that ran
+ * to its end. Bound to the journal file's identity, read when written (the import creates the file).
+ */
+async function importProgressRecorder(path?: string) {
+  const [{ JOURNAL_BACKFILL_PATH, JOURNAL_PATH: journalPath }, backfill, { fileIdentity }] = await Promise.all([
+    import('./config'), import('./journal/backfill'), import('./journal/shadow'),
+  ])
+  const file = path ?? JOURNAL_BACKFILL_PATH
+  const startedAt = new Date().toISOString()
+  let rec: import('./journal/backfill').BackfillProgress = {
+    v: 1, identity: fileIdentity(journalPath), state: 'running', startedAt, updatedAt: startedAt, written: 0,
+  }
+  let lastWrite = 0
+  const save = async (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastWrite < 2_000) return
+    lastWrite = now
+    rec = { ...rec, identity: fileIdentity(journalPath), updatedAt: new Date(now).toISOString() }
+    await backfill.writeBackfillProgress(file, rec).catch(() => {})
+  }
+  await save(true)
+  return {
+    onProgress(p: { harness: string; phase: 'artifacts' | 'store'; done: number; total: number; written: number }) {
+      rec = { ...rec, state: 'running', harness: p.harness, phase: p.phase, done: p.done, total: p.total, written: p.written }
+      void save()
+    },
+    memoryPause(signal: AbortSignal) {
+      return backfill.memoryPause({
+        ask: backfill.askMemoryGate,
+        onPause: async reason => { rec = { ...rec, state: 'paused', pausedReason: reason }; await save(true) },
+        onResume: async () => { const { pausedReason: _r, ...rest } = rec; rec = { ...rest, state: 'running' }; await save(true) },
+        signal,
+      })
+    },
+    async finish(end: { state: 'done' | 'interrupted' | 'failed'; complete?: boolean; error?: string }) {
+      const { pausedReason: _r, ...rest } = rec
+      rec = { ...rest, state: end.state, ...(end.complete ? { completedAt: new Date().toISOString() } : {}), ...(end.error ? { error: end.error } : {}) }
+      await save(true)
+    },
   }
 }

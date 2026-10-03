@@ -525,6 +525,13 @@ export interface SessionBackend {
   detachHint(): Promise<string>
   /** Map of managed session ID to OS pane process ID, where available. */
   listPanePids?(): Promise<Map<string, number>>
+  /**
+   * A5.4 — the session's state as the BACKEND knows it (an ACP agent states it; a terminal does not).
+   * When it answers, the poller uses it instead of reading the frame. Absent / undefined: read the frame.
+   */
+  activityOf?(id: string): SessionActivity | undefined
+  /** A5.4 — the open dialog's option labels, numbered from 1, when the backend knows them. */
+  dialogOf?(id: string): string[] | undefined
 }
 
 /** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a

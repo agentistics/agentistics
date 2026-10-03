@@ -17,7 +17,7 @@
 import type { AnyAgentisticsEvent, Confidence, Projection, ProviderId } from '@agentistics/core'
 import type { RunFact } from './facts'
 import {
-  dimensionsOf, emptyDimensionFacts, foldConfidence, foldDimensionFacts, foldProvider, foldToolEvent, toolFigures, utcDay,
+  dimensionsOf, emptyDimensionFacts, foldAgentKind, subagentRule, type AgentKinds, foldConfidence, foldDimensionFacts, foldProvider, foldToolEvent, toolFigures, utcDay,
   type DimensionFacts, type ToolAcc,
 } from './kit'
 import { sessionMetaProjection, type Caveat, type SessionMetaState } from './session-meta'
@@ -25,6 +25,8 @@ import { sessionMetaProjection, type Caveat, type SessionMetaState } from './ses
 export interface RunMetricsState {
   sm: SessionMetaState
   tools: ToolAcc
+  /** Which agents are main (`agent.started`), so each tool's subagent share can be told apart. */
+  agentKinds: AgentKinds
   dims: DimensionFacts
   providers: Map<string, ProviderId>
   conf: Confidence | null
@@ -53,6 +55,7 @@ function foldOne(s: RunMetricsState, e: AnyAgentisticsEvent): void {
   if (Number.isFinite(Date.parse(e.occurredAt)) && (s.firstAt === undefined || e.occurredAt < s.firstAt)) s.firstAt = e.occurredAt
   foldDimensionFacts(s.dims, e)
   foldToolEvent(s.tools, e)
+  foldAgentKind(s.agentKinds ??= new Map(), e)
   if (e.type === 'model.completed' && e.data.model) foldProvider(s.providers, e.data.model, e.data.provider)
   sessionMetaProjection.fold(s.sm, [e])
 }
@@ -69,9 +72,17 @@ function finish(s: RunMetricsState): RunMetricsResult {
     return { fact: null, withheld: 'no harness is named for this run (its run.started names none this product tracks)', caveats, eventsFolded }
   }
   const model = sm.meta.model ?? null
+  // Each tool's subagent share, by the SAME main-agent rule as the cost facts (A4.7 decision 2), so
+  // the tool figures can be read for the main agent alone, as the per-session figures are.
+  const isSub = subagentRule(s.agentKinds ?? new Map())
+  const bySub = toolFigures(s.tools, 'canonical', x => isSub(x.req?.agentId))
   const tools: RunFact['tools'] = {}
   for (const [name, f] of Object.entries(toolFigures(s.tools))) {
-    tools[name] = { calls: f.calls, errors: f.errors, durationMs: f.durationMs, durationCalls: f.durationCalls }
+    const sub = bySub[name]
+    tools[name] = {
+      calls: f.calls, errors: f.errors, durationMs: f.durationMs, durationCalls: f.durationCalls,
+      ...(sub ? { subagent: { calls: sub.calls, errors: sub.errors, durationMs: sub.durationMs, durationCalls: sub.durationCalls } } : {}),
+    }
   }
   const fact: RunFact = {
     runId: s.runId,
@@ -95,9 +106,11 @@ function finish(s: RunMetricsState): RunMetricsResult {
 
 export const runMetricsProjection: Projection<RunMetricsState, RunMetricsResult> = {
   name: 'run-metrics',
-  version: 1,
+  // 2: `project` is the project root (`canonicalProjectPath`), so worktrees roll up (A4.4 decision 2).
+  // 3: each tool carries its subagent share (`tools[name].subagent`, A4.7 decision 2).
+  version: 3,
   empty: () => ({
-    sm: sessionMetaProjection.empty(), tools: new Map(), dims: emptyDimensionFacts(), providers: new Map(), conf: null,
+    sm: sessionMetaProjection.empty(), tools: new Map(), agentKinds: new Map(), dims: emptyDimensionFacts(), providers: new Map(), conf: null,
   }),
   fold(state, events) {
     for (const e of events) foldOne(state, e)

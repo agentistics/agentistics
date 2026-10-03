@@ -1,7 +1,14 @@
 /**
  * today.ts — PURE. What today has cost, for the status bar.
  *
- * **The day rule is `start_time.slice(0, 10)` — UTC**, and the choice is deliberate. Two day rules
+ * **Today is the spend INCURRED today, by event time** (the leader's A4.5 decision): each session's
+ * own per-day usage (`daily`) for today's UTC date, priced through `cutSessionUsage`, which is the
+ * rule the dashboard's Costs applies to a day range and the rule the projections file responses by.
+ * A session with no `daily` (written by an older build, or a harness that records none) keeps the
+ * old rule, its whole figure on its start day, because a record that cannot be split did not do
+ * nothing. Below, the reasons for UTC.
+ *
+ * **The day key is UTC**, and the choice is deliberate. Two day rules
  * exist in this repo: the UTC slice (`tagSessionDay`, and the dashboard's own date presets, which
  * bound their ranges with `utcStartOfDay`) and a local-clock one used for the session-gap streak. A
  * status bar sitting beside a dashboard MUST agree with the dashboard, and at UTC-3 the two rules
@@ -18,7 +25,7 @@
  * not slightly low, it is off by roughly 300x while the cost beside it disagrees by 10x.
  */
 
-import { sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
+import { cutSessionUsage, sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
 
 export interface TodayTotals {
   costUSD: number
@@ -37,10 +44,23 @@ export function todayTotals(sessions: readonly SessionMeta[], now: Date): TodayT
   let tokens = 0
   let count = 0
   for (const s of sessions) {
-    if ((s.start_time ?? '').slice(0, 10) !== key) continue
+    let day: SessionMeta
+    if (s.daily) {
+      const d = s.daily[key]
+      if (!d) continue
+      day = cutSessionUsage(s, {
+        input_tokens: d.input_tokens || 0,
+        output_tokens: d.output_tokens || 0,
+        cache_read_input_tokens: d.cache_read_input_tokens || 0,
+        cache_creation_input_tokens: d.cache_creation_input_tokens || 0,
+      })
+    } else {
+      if ((s.start_time ?? '').slice(0, 10) !== key) continue
+      day = s
+    }
     count += 1
-    tokens += sessionTokenTotal(s)
-    costUSD += sessionCostUSD(s) ?? 0
+    tokens += sessionTokenTotal(day)
+    costUSD += sessionCostUSD(day) ?? 0
   }
   return { costUSD, tokens, sessions: count }
 }

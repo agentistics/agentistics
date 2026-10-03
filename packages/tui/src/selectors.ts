@@ -11,24 +11,26 @@
  */
 
 import type { AppData, HarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
-import { calcCost, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
+import { calcCost, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
 
 export interface HarnessRow {
   harness: HarnessId
   sessions: number
-  messages: number
+  /** `null` on the projected path: the journal counts the person's turns, not transcript lines. */
+  messages: number | null
   tokens: number
   costUSD: number
   /** Recorded Agent-tool invocations. Only Claude reports these (HARNESS_CAPABILITIES.agents),
    *  so for every other harness this is structurally 0 and must render as N/A, not as a count. */
-  agents: number
+  /** `null` on the projected path: no agent-invocation count is projected. */
+  agents: number | null
 }
 
 export interface Totals {
   sessions: number
   tokens: number
   costUSD: number
-  messages: number
+  messages: number | null
 }
 
 export interface ProjectRow {
@@ -93,7 +95,7 @@ function agentCount(sessions: SessionMeta[]): number {
 /** Claude's authoritative totals. Read ONLY from the statsCache — see the file header.
  *  Agent invocations are the exception: the cache has no agent data, so they are counted from
  *  whatever sessions still exist individually. */
-function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> {
+function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & { messages: number; agents: number } {
   let tokens = 0
   let costUSD = 0
   for (const [model, usage] of Object.entries(sc.modelUsage ?? {})) {
@@ -111,7 +113,7 @@ function claudeTotals(sc: StatsCache, sessions: SessionMeta[]): Omit<HarnessRow,
 }
 
 /** Any non-Claude harness: per-session sums, because no cache covers them. */
-function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> {
+function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & { messages: number; agents: number } {
   let tokens = 0
   let costUSD = 0
   let messages = 0
@@ -138,7 +140,7 @@ export function overviewTotals(data: AppData): Totals {
       sessions: acc.sessions + r.sessions,
       tokens: acc.tokens + r.tokens,
       costUSD: acc.costUSD + r.costUSD,
-      messages: acc.messages + r.messages,
+      messages: acc.messages === null || r.messages === null ? null : acc.messages + r.messages,
     }),
     { sessions: 0, tokens: 0, costUSD: 0, messages: 0 },
   )
@@ -177,7 +179,8 @@ function basename(path: string): string {
 export function projectRows(data: AppData): ProjectRow[] {
   const acc = new Map<string, ProjectRow>()
   for (const s of data.sessions ?? []) {
-    const path = s.project_path || ''
+    // The project ROOT: a worktree's sessions roll up to its repository, as on every surface.
+    const path = canonicalProjectPath(s.project_path || '')
     let row = acc.get(path)
     if (!row) {
       row = { name: basename(path), path, sessions: 0, tokens: 0, costUSD: 0, lastActivity: '' }
