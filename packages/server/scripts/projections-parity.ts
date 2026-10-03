@@ -85,7 +85,10 @@ if (journalPath) {
   console.error(`catch-up on the journal copy: ${r.state}, ${r.eventsRead} events, ${Math.round(performance.now() - t0)} ms; ${r.projections.map(p => `${p.name} ${p.mode}`).join(', ')}`)
   await journal.close?.()
 }
-const reader = createProjectionReader(store)
+// The same read-time repository attribution the server applies (`repo-attribution.ts`).
+const { memoRepoResolver } = await import('../server/projections/repo-attribution')
+const { getGitRemote } = await import('../server/git')
+const reader = createProjectionReader(store, { repoOf: memoRepoResolver(getGitRemote) })
 const query: import('../../mcp/projected-analytics').MetricsQueryFn = async (p) => {
   const parsed = parseMetricsQuery(p)
   if (!parsed.ok) return { ok: false, status: 400, error: JSON.stringify(parsed) }

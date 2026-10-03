@@ -117,11 +117,14 @@ async function openLive(): Promise<LiveStore | null> {
   if (live) return live
   opening ??= (async () => {
     try {
-      const [{ openJournal }, { openProjectionReader }, { runProjectionCatchUp }] = await Promise.all([
+      const [{ openJournal }, { openProjectionReader }, { runProjectionCatchUp }, { memoRepoResolver }, { getGitRemote }] = await Promise.all([
         import('./journal/journal'), import('./projections/reader'), import('./projections/catch-up'),
+        import('./projections/repo-attribution'), import('./git'),
       ])
       const journal = await openJournal()
-      const opened = await openProjectionReader({ journal })
+      // The repository of a fact the journal left without one: its project root's `origin`, read
+      // once per root, the same git read the legacy `/api/data` makes.
+      const opened = await openProjectionReader({ journal, repoOf: memoRepoResolver(getGitRemote) })
       live = {
         reader: opened.reader,
         close: () => { opened.close(); journal.close() },
