@@ -9,6 +9,8 @@
     ".": "./src/control/index.ts",
     "./control": "./src/control/index.ts",
     "./control/altScreen": "./src/control/altScreen.ts",
+    "./control/code-types": "./src/control/code-types.ts",
+    "./control/ControlCenter": "./src/control/ControlCenter.tsx",
     "./control/stream": "./src/control/stream.ts",
     "./control/sessions": "./src/control/sessions.ts",
     "./control/session-fleet": "./src/control/session-fleet.ts",
@@ -25,6 +27,7 @@
   },
   "dependencies": {
     "@agentistics/core": "workspace:*",
+    "@agentistics/engine-api": "workspace:*",
     "es-toolkit": "^1.50.0",
     "ink": "^7.1.1",
     "react": "^19.2.5",

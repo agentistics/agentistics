@@ -301,6 +301,17 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
       },
       // 1.7 (B6.5): the board's own operations in process for a native session's board tools.
       board: hostEngineBoard(() => lang),
+      // 1.8 — the `code` tab's two reads of the board.
+      nativeFiling: async sessionId => {
+        const { nativeFilingOf } = await import('../sessions/task-web')
+        const f = await nativeFilingOf(sessionId)
+        return f ? { taskId: f.taskId, title: f.taskTitle, ...(f.subtaskId ? { subtaskId: f.subtaskId } : {}) } : null
+      },
+      statuses: async () => {
+        const [{ loadTaskBoard }, { sortTaskStatuses }] = await Promise.all([import('../sessions/task-source'), import('@agentistics/core')])
+        const { book } = await loadTaskBoard()
+        return sortTaskStatuses(book.statuses).map(st => ({ id: st.id, label: st.label }))
+      },
     },
     readers,
     // `SERVE_STATIC` is `sse.ts`'s own reading of the same variable; importing `sse` here would load

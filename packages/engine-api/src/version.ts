@@ -67,7 +67,14 @@
  * asked before a resumed run re-sends a model call; a hit is journaled `model.completed {replayed}`.
  * Absent on every host today, and then every call is simply made.
  */
-export const ENGINE_API_VERSION = '1.7.0'
+/**
+ * 1.8.0 — the control center's `code` tab joins the contract (`code.ts`): `Engine.codeTab` decides
+ * whether `agentop code <args>` opens the tab (`launch`) and builds the host the tab drives
+ * (`host` → `CodeTabHost`, the tab's former `code-types.ts`). The opaque `CodeHost`/`codeHost`
+ * placeholder is deprecated, not removed. `tasks.nativeFiling` / `tasks.statuses` give the tab its two
+ * reads of the board. All optional: a 1.7 engine still loads (no `code` tab).
+ */
+export const ENGINE_API_VERSION = '1.8.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

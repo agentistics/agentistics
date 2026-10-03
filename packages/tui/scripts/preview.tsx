@@ -52,6 +52,7 @@ import type { HarnessId } from '@agentistics/core'
 import { countPerKind, projectKind } from '@agentistics/core'
 import { GROUPINGS, type SessionGroupingId } from '../src/control/sessions'
 import type { CliLang } from '../src/control/lang'
+import type { CodeAsk, CodeDiff, CodeEvent, CodeHost, CodeLaunch, CodeSessionFacts, CodeTaskOption } from '../src/control/code-types'
 // The real string table, not a copy of it. Every label on this screen arrives from the host already
 // localized, so a preview that invented its own words would be previewing a different screen —
 // and `--lang pt` would prove nothing. `cli-i18n.ts` is a dependency-free table of strings; reading
@@ -121,7 +122,21 @@ interface Options {
    * to check would be the only one anybody could ever see.
    */
   restore: boolean
+  /** Give the host a scripted native-runtime fake, in one of these states — see `CODE_SCENARIOS`. */
+  code?: CodeScenario
 }
+
+/**
+ * The `code` tab's states worth looking at. None of them runs a model: the fake emits a scripted
+ * sequence of `CodeEvent`s the way `code-host.ts` translates the runtime's frames, so the frame is
+ * the one the real fold of those events produces.
+ */
+type CodeScenario = 'empty' | 'wizard' | 'review' | 'streaming' | 'ask-patch' | 'ask-shell' | 'full-diff'
+  | 'folded' | 'inspector' | 'timeline' | 'history'
+
+const CODE_SCENARIOS: readonly CodeScenario[] = [
+  'empty', 'wizard', 'review', 'streaming', 'ask-patch', 'ask-shell', 'full-diff', 'folded', 'inspector', 'timeline', 'history',
+] as const
 
 const USAGE = `
   preview — render one control-center frame to stdout
@@ -152,11 +167,24 @@ const USAGE = `
                             path is drawn: --fail-spawn --keys a,enter,enter,enter,enter,enter,enter
     --restore               the machine lost its fleet, so the "start these again?"
                             offer is drawn in front of the list
+    --tab    <screen>       an alias for --screen
+    --code   ${CODE_SCENARIOS.join('|')}
+                            give the host a scripted native-runtime fake in that state
+                            (opens on --tab code unless another screen is named):
+                            empty = no session; wizard = \`agentop code "…"\` at the task
+                            step; review = its review step; streaming = mid-answer with
+                            tool rows and an inline diff; ask-patch / ask-shell = the
+                            permission card; full-diff = the patch's whole diff;
+                            folded = finished turns folded, a receipt and a long
+                            output fold; inspector = the panel on the picked turn
+                            (tab, up); timeline = a live run waiting on you (ctrl-t);
+                            history = the ctrl+r prompt history
     --group <arrangement>   open the sessions list already arranged this way, e.g.
                             \`--screen sessions --group tree\` for the cascade
 `
 
 function parseArgs(argv: string[]): Options {
+  let screenNamed = false
   const opts: Options = {
     cols: 100, rows: 34, lang: 'en', screen: 'services', mode: 'solo', keys: [], task: 'off',
     pending: false, failSpawn: false, refuseMemory: false, restore: false,
@@ -194,6 +222,17 @@ function parseArgs(argv: string[]): Options {
         opts.mode = CASES.find(c => c === value) ?? 'solo'
         i++
         break
+      case '--code': {
+        const found = CODE_SCENARIOS.find(c => c === value)
+        if (!found) {
+          process.stderr.write(`unknown code scenario: ${value} (${CODE_SCENARIOS.join(', ')})\n${USAGE}`)
+          process.exit(2)
+        }
+        opts.code = found
+        i++
+        break
+      }
+      case '--tab':
       case '--screen': {
         const tab = TAB_ORDER.find(t => t === value)
         if (!tab) {
@@ -201,6 +240,7 @@ function parseArgs(argv: string[]): Options {
           process.exit(2)
         }
         opts.screen = tab
+        screenNamed = true
         i++
         break
       }
@@ -214,6 +254,14 @@ function parseArgs(argv: string[]): Options {
         process.exit(2)
     }
   }
+  // `--code` is about the code tab; asking for it and then looking at services would be a mistake.
+  if (opts.code && !screenNamed) opts.screen = 'code'
+  // The review and the full diff are one keypress past what the host opens on.
+  if (opts.code === 'review') opts.keys = ['enter', ...opts.keys]
+  if (opts.code === 'full-diff') opts.keys = ['d', ...opts.keys]
+  if (opts.code === 'inspector') opts.keys = ['tab', 'up', ...opts.keys]
+  if (opts.code === 'timeline') opts.keys = ['ctrl-t', ...opts.keys]
+  if (opts.code === 'history') opts.keys = ['ctrl-r', ...opts.keys]
   return opts
 }
 
@@ -437,6 +485,7 @@ function fakeHost(opts: Options, apiUrl?: string): ControlHost {
   })
 
   return {
+    ...(opts.code ? { code: fakeCodeHost(opts.code) } : {}),
     refresh: async () => fakeStatus(opts, apiUrl),
     start: act,
     connect: done,
@@ -954,6 +1003,238 @@ const KEYS: Record<string, string> = {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+// ---------------------------------------------------------------------------
+// the fake native runtime (`--code`)
+// ---------------------------------------------------------------------------
+
+const CODE_TASKS: CodeTaskOption[] = [
+  { id: 'task-0539', ref: 't-0539', title: 'Parser: off-by-one on the last byte', status: 'in_progress', statusLabel: 'In progress' },
+  { id: 'task-0412', ref: 't-0412', title: 'Sessions aside: floating panels', status: 'in_progress', statusLabel: 'In progress' },
+  { id: 'task-0601', ref: 't-0601', title: 'Billing export as CSV', status: 'todo', statusLabel: 'To do' },
+]
+
+const CODE_FACTS: CodeSessionFacts = {
+  sessionId: 'ses_3f5f9a21c0',
+  shortId: '3f5f',
+  title: 'parser fix',
+  task: { id: 'task-0539', ref: 't-0539', title: 'Parser: off-by-one on the last byte' },
+  cwd: '~/agentistics/.claude/worktrees/parser-fix',
+  workspaceRoot: '~/agentistics',
+  model: 'claude-sonnet-5',
+  provider: 'anthropic',
+  mode: 'default',
+}
+
+const CODE_DIFF: CodeDiff = {
+  files: [{
+    path: 'packages/core/src/tokens.ts',
+    op: 'update',
+    added: 3,
+    removed: 1,
+    hunks: [{
+      header: '@@ -39,7 +39,9 @@ export function slice',
+      lines: [
+        { op: ' ', text: 'export function slice(buf, start, len) {' },
+        { op: ' ', text: '  if (len <= 0) return []' },
+        { op: ' ', text: '  const end = start + len' },
+        { op: '-', text: '  if (end > buf.length - 1) return null' },
+        { op: '+', text: '  if (end > buf.length) return null' },
+        { op: '+', text: '  // end is exclusive: a slice ending on the last byte is valid' },
+        { op: '+', text: '  // (regression: tokens.test.ts "last byte")' },
+        { op: ' ', text: '  return buf.subarray(start, end)' },
+      ],
+    }],
+  }],
+}
+
+const TEST_DIFF: CodeDiff = {
+  files: [{
+    path: 'packages/core/src/tokens.test.ts',
+    op: 'update',
+    added: 15,
+    removed: 3,
+    hunks: [{ lines: [
+      { op: '-', text: "test('slice', () => {" },
+      { op: '+', text: "test('a slice ending on the last byte is valid', () => {" },
+      { op: '+', text: '  expect(slice(buf, 0, buf.length)).toEqual(buf)' },
+      { op: '+', text: '  expect(slice(buf, 2, buf.length - 2)).not.toBeNull()' },
+      { op: '+', text: '})' },
+    ] }],
+  }],
+}
+
+/** What the runtime said up to the point each scenario is captured at. */
+function codeScript(scenario: CodeScenario): CodeEvent[] {
+  // Relative to now, so a wait that is still open (the timeline scenario) is a plausible length.
+  const T0 = Date.now() - 45_000
+  const ts = (s: number) => new Date(T0 + s * 1000).toISOString()
+  const at = ts(0)
+  const floor = { decision: 'allowed' as const, by: 'policy' as const, rule: 'floor: read-only tools', asked: false }
+  const askedYou = { decision: 'allowed' as const, by: 'user' as const, rule: 'asked', asked: true }
+  const base: CodeEvent[] = [
+    { kind: 'history', turns: [
+      { role: 'user', text: 'why does the parser drop the last byte of a buffer?', tools: [] },
+      { role: 'assistant', text: 'sliceEnd treats the end as inclusive, so a slice that ends on the last byte is rejected. That is the off-by-one.', tools: [
+        { name: 'file.read', verb: 'read', target: 'core/src/tokens.ts' },
+        { name: 'file.read', verb: 'read', target: 'core/src/tokens.test.ts' },
+      ] },
+    ] },
+    { kind: 'user', text: 'add a failing test first, then fix it and run the core tests', at },
+    { kind: 'run-started', runId: 'run-7', at },
+    { kind: 'delta', runId: 'run-7', text: "I'll add the regression test, " },
+    { kind: 'delta', runId: 'run-7', text: 'patch the boundary check, then run the core tests.' },
+    { kind: 'usage', usage: { runId: 'run-7', model: 'claude-sonnet-5', input: 12_300, output: 90, cacheRead: 61_000, cacheWrite: 4_200, costUSD: 0.0725, costs: { input: 0.037, output: 0.0014, cacheRead: 0.018, cacheWrite: 0.016 }, startedAt: ts(0), endedAt: ts(3), ttftMs: 700, stopReason: 'tool_use', contextTokens: 82_000, contextWindow: 200_000 } },
+    { kind: 'tool', call: { id: 't1', name: 'file.read', verb: 'read', target: 'core/src/tokens.ts', state: 'done', durationMs: 40, result: '212 lines', requestedAt: ts(3), endedAt: ts(3.04), policy: floor } },
+    { kind: 'tool', call: { id: 't2', name: 'grep', verb: 'grep', target: '"sliceEnd" in packages/core', state: 'done', durationMs: 18, result: '3 matches', requestedAt: ts(3.1), endedAt: ts(3.12), policy: floor } },
+    { kind: 'ask', ask: { id: 'q-test', kind: 'permission', toolId: 't3', toolName: 'file.patch', title: 'Allow this patch to be applied?', why: [], diff: TEST_DIFF, checkpoint: false, options: [{ label: 'Apply once' }, { label: 'Reject' }], denyIndex: 1 } },
+    { kind: 'ask-closed', id: 'q-test', outcome: 'answered', choiceLabel: 'Apply once' },
+    { kind: 'tool', call: { id: 't3', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.test.ts', state: 'done', durationMs: 14, diff: TEST_DIFF, requestedAt: ts(3.2), endedAt: ts(9.02), waited: { openedAt: ts(3.2), closedAt: ts(9) }, policy: askedYou } },
+    { kind: 'tool', call: { id: 't4', name: 'shell', verb: 'shell', target: 'bun test tokens.test.ts', state: 'failed', durationMs: 2400, failure: 'exit 1 — 1 test failed: "a slice ending on the last byte is valid"', requestedAt: ts(9.5), endedAt: ts(14.4), waited: { openedAt: ts(9.5), closedAt: ts(12) }, policy: askedYou, output: { lines: ['bun test v1.3.2', 'tokens.test.ts:', '✗ a slice ending on the last byte is valid', '  expected buf, received null', ' 0 pass', ' 1 fail'], total: 6 } } },
+    { kind: 'usage', usage: { runId: 'run-7', model: 'claude-sonnet-5', input: 900, output: 600, cacheRead: 70_000, cacheWrite: 800, costUSD: 0.035, costs: { input: 0.003, output: 0.009, cacheRead: 0.021, cacheWrite: 0.002 }, startedAt: ts(14.5), endedAt: ts(17), ttftMs: 640, stopReason: 'tool_use', contextTokens: 86_000, contextWindow: 200_000 } },
+    { kind: 'plan', items: [
+      { text: 'add a failing regression test', status: 'done' },
+      { text: 'patch the boundary check', status: 'active' },
+      { text: 'run the core tests', status: 'todo' },
+      { text: 'summarize', status: 'todo' },
+    ] },
+  ]
+  /** The rest of run 7, finished: the patch under a session rule, the suite's long output, the answer. */
+  const finished: CodeEvent[] = [
+    { kind: 'rules', rules: [{ label: 'patches under packages/core/', at: ts(17) }] },
+    { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF, requestedAt: ts(17.1), endedAt: ts(17.12), policy: { decision: 'allowed', by: 'user', rule: 'session rule: patches under packages/core/', asked: false } } },
+    { kind: 'tool', call: { id: 't6', name: 'shell', verb: 'shell', target: 'bun test packages/core', state: 'done', durationMs: 3100, result: '214 pass · 0 fail', requestedAt: ts(17.2), endedAt: ts(28.1), waited: { openedAt: ts(17.2), closedAt: ts(25) }, policy: askedYou, output: { lines: Array.from({ length: 30 }, (_, i) => (i === 0 ? 'bun test v1.3.2' : `✓ core test ${i} [0.${i}ms]`)), total: 216 } } },
+    { kind: 'delta', runId: 'run-7', text: 'Fixed. end is exclusive, so a slice that ends on the last byte is valid. The regression test passes, and so do the other 213 core tests.' },
+    { kind: 'usage', usage: { runId: 'run-7', model: 'claude-sonnet-5', input: 700, output: 1_000, cacheRead: 72_000, cacheWrite: 400, costUSD: 0.04, costs: { input: 0.002, output: 0.015, cacheRead: 0.022, cacheWrite: 0.001 }, startedAt: ts(28.2), endedAt: ts(30.4), ttftMs: 610, stopReason: 'end_turn', contextTokens: 88_000, contextWindow: 200_000 } },
+    { kind: 'plan', items: [
+      { text: 'add a failing regression test', status: 'done' },
+      { text: 'patch the boundary check', status: 'done' },
+      { text: 'run the core tests', status: 'done' },
+      { text: 'summarize', status: 'done' },
+    ] },
+    { kind: 'run-ended', runId: 'run-7', status: 'completed', sentence: '', at: ts(30.5) },
+  ]
+  if (scenario === 'folded') return [...base, ...finished]
+  if (scenario === 'inspector') {
+    return [...base, ...finished,
+      { kind: 'user', text: 'summarize the change for the PR', at: ts(35) },
+      { kind: 'run-started', runId: 'run-8', at: ts(35) },
+      { kind: 'delta', runId: 'run-8', text: 'sliceEnd now treats end as exclusive; a regression test covers a slice ending on the last byte.' },
+      { kind: 'usage', usage: { runId: 'run-8', model: 'claude-sonnet-5', input: 300, output: 180, cacheRead: 88_000, cacheWrite: 0, costUSD: 0.03, costs: { input: 0.001, output: 0.003, cacheRead: 0.026, cacheWrite: 0 }, startedAt: ts(35), endedAt: ts(37.4), ttftMs: 590, stopReason: 'end_turn', contextTokens: 88_500, contextWindow: 200_000 } },
+      { kind: 'run-ended', runId: 'run-8', status: 'completed', sentence: '', at: ts(37.5) },
+    ]
+  }
+  if (scenario === 'timeline') {
+    // Run 7 still live, waiting on you for the suite: the wait bar runs to now.
+    const ask: CodeAsk = {
+      id: 'q-shell', kind: 'permission', toolId: 't6', toolName: 'shell', title: 'Allow this command to run?',
+      why: ['no allow rule matches "bun test"'],
+      command: { command: 'bun test packages/core', cwd: '~/agentistics/.claude/worktrees/parser-fix' },
+      checkpoint: false,
+      options: [{ label: 'Allow once' }, { label: 'Allow bun test * for this session' }, { label: 'Deny' }],
+      denyIndex: 2,
+    }
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF, requestedAt: ts(17.1), endedAt: ts(17.12), policy: askedYou } },
+      { kind: 'tool', call: { id: 't6', name: 'shell', verb: 'shell', target: 'bun test packages/core', state: 'asking', requestedAt: ts(17.2), waited: { openedAt: ts(17.2) } } },
+      { kind: 'ask', ask },
+    ]
+  }
+  if (scenario === 'streaming') {
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF } },
+      { kind: 'delta', runId: 'run-7', text: 'The test fails as expected. The patch makes the end exclusive; running the core suite now so the other 213 tests confirm nothing else relied on the old boundary' },
+    ]
+  }
+  if (scenario === 'ask-shell') {
+    const ask: CodeAsk = {
+      id: 'q-shell',
+      kind: 'permission',
+      toolId: 't6',
+      toolName: 'shell',
+      title: 'Allow this command to run?',
+      why: ['no allow rule matches "bun test"'],
+      command: { command: 'bun test packages/core --timeout 20000', cwd: '~/agentistics/.claude/worktrees/parser-fix' },
+      checkpoint: false,
+      options: [
+        { label: 'Allow once' },
+        { label: 'Allow bun test * for this session' },
+        { label: 'Deny' },
+      ],
+      denyIndex: 2,
+    }
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF } },
+      { kind: 'tool', call: { id: 't6', name: 'shell', verb: 'shell', target: 'bun test packages/core', state: 'asking' } },
+      { kind: 'ask', ask },
+    ]
+  }
+  if (scenario === 'ask-patch' || scenario === 'full-diff') {
+    const ask: CodeAsk = {
+      id: 'q-patch',
+      kind: 'permission',
+      toolId: 't5',
+      toolName: 'file.patch',
+      title: 'Allow this patch to be applied?',
+      why: ['mode ask and no allow rule covers file.patch'],
+      diff: CODE_DIFF,
+      // Always false in P1: the runtime records its checkpoint AFTER the write, so no note is drawn.
+      checkpoint: false,
+      options: [
+        { label: 'Apply once' },
+        { label: 'Apply, and allow patches under packages/core/ for this session' },
+        { label: 'Reject' },
+      ],
+      denyIndex: 2,
+    }
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'asking' } },
+      { kind: 'ask', ask },
+    ]
+  }
+  return base
+}
+
+/** How the scenario was "launched" — the tab acts on this exactly once, like `agentop code …`. */
+function codeLaunch(scenario: CodeScenario): CodeLaunch | undefined {
+  if (scenario === 'empty') return undefined
+  if (scenario === 'wizard' || scenario === 'review') return { prompt: 'fix the off-by-one in the parser and run the core tests' }
+  return { resume: CODE_FACTS.sessionId }
+}
+
+function fakeCodeHost(scenario: CodeScenario): CodeHost {
+  const nothing = { ok: true as const, sentence: 'preview — nothing was performed' }
+  return {
+    dispose: async () => {},
+    availability: () => ({ ok: true }),
+    defaults: async () => ({
+      model: { id: 'claude-sonnet-5', source: 'flag' },
+      cwd: '~/agentistics/.claude/worktrees/parser-fix',
+      workspaceRoot: '~/agentistics',
+      provider: 'anthropic',
+    }),
+    openTasks: async () => ({ ok: true, tasks: CODE_TASKS }),
+    createTask: async title => ({ ok: true, task: { id: 'task-new', ref: 't-0700', title, status: 'todo', statusLabel: 'To do' } }),
+    start: async () => ({ ok: true, facts: CODE_FACTS, sentence: 'preview — started nothing' }),
+    resume: async () => ({ ok: true, facts: CODE_FACTS, sentence: 'Resumed "parser fix" (t-0539).' }),
+    subscribe: (_id, listener) => {
+      for (const e of codeScript(scenario)) listener(e)
+      return () => {}
+    },
+    submit: () => ({ ok: true }),
+    answer: () => nothing,
+    cancel: () => nothing,
+    end: async () => {},
+    cycleMode: () => ({ ok: true, mode: 'accept-edits', sentence: 'preview — mode edits: file writes inside the workspace are allowed; the shell still asks.' }),
+    promptHistory: async () => ({ ok: true, prompts: [
+      { text: 'add a failing test first, then fix it and run the core tests', at: new Date(Date.now() - 3 * 60_000).toISOString(), sessionId: 'ses_3f5f9a21c0' },
+      { text: 'why does the parser drop the last byte of a buffer?', at: new Date(Date.now() - 20 * 60_000).toISOString(), sessionId: 'ses_3f5f9a21c0' },
+      { text: 'refactor sliceEnd to take an exclusive end everywhere', at: new Date(Date.now() - 26 * 60 * 60_000).toISOString(), sessionId: 'ses_a91c00' },
+      { text: 'summarize the change for the PR', at: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString(), sessionId: 'ses_c2d800' },
+    ] }),
+    editDraft: async draft => ({ ok: true, text: draft, sentence: 'preview — no editor was opened' }),
+  }
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
 
@@ -971,7 +1252,7 @@ async function main(): Promise<void> {
     <ControlCenter
       host={fakeHost(opts, fixture?.apiBase)}
       lang={opts.lang}
-      initial={{ tab: opts.screen }}
+      initial={{ tab: opts.screen, ...(opts.code ? { code: codeLaunch(opts.code) } : {}) }}
       onExit={() => {}}
     />
   )
@@ -1013,7 +1294,7 @@ async function main(): Promise<void> {
   const tall = lines.length - opts.rows
 
   const out = [
-    `  ${opts.mode} · ${opts.screen} · ${opts.lang} · ${opts.cols}x${opts.rows}`,
+    `  ${opts.mode} · ${opts.screen}${opts.code ? ` (${opts.code})` : ''} · ${opts.lang} · ${opts.cols}x${opts.rows}`,
     tens,
     units,
     ...lines,

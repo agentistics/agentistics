@@ -21,8 +21,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, useInput } from 'ink'
 import { useTerminalSize } from '../useTerminalSize'
-import { bodyHeight, resolveScrollKey, resolveTabKey, scrollBy, type NavKey } from './nav'
-import { fitTabs, headerLayout, tabAtColumn } from './chrome.ts'
+import { bodyHeight, isQuitChord, resolveScrollKey, resolveShellKey, scrollBy, type NavKey } from './nav'
+import { attentionRings, fitTabs, headerLayout, tabAtColumn } from './chrome.ts'
+import { helpLines } from './keymap'
+import { HelpOverlay, helpMaxTop } from './HelpOverlay'
 import { paneHit, shellHit } from './hit'
 import { isActivation, trackClick, wheelDelta, type ClickTrack, type MouseReport, type Pointer } from './mouse'
 import { createPointerBus, PointerProvider, type MouseChannel } from './pointer'
@@ -40,6 +42,8 @@ import { Backup } from './tabs/Backup'
 import { Sessions } from './tabs/Sessions'
 import { Dashboard } from './tabs/Dashboard'
 import { HardwareTab } from './tabs/HardwareTab'
+import { Code } from './tabs/Code'
+import type { CodeLaunch } from './code-types'
 import { writeFrame } from './altScreen'
 
 /**
@@ -62,6 +66,12 @@ import { writeFrame } from './altScreen'
 export interface ScreenChrome {
   capture: boolean
   claimArrows?: boolean
+  /**
+   * Single keys the SCREEN answers that the shell answers too (`r`, `m`, `q`, `?`). While claimed
+   * the shell stands down on exactly these, so one press does one thing: the sessions list's `m`
+   * writes a note there, and used to switch the mouse off in the same keystroke.
+   */
+  claimKeys?: readonly string[]
   hints: string[]
 }
 
@@ -127,6 +137,8 @@ export interface ControlCenterProps {
     tab?: TabId
     /** Open with the setup wizard up — what "bare `agentop` opens on Setup" became. */
     setup?: boolean
+    /** `agentop code …`'s launch, handed to the `code` tab on its first mount. */
+    code?: CodeLaunch
   }
   onExit: (exit: ControlExit) => void
   /**
@@ -240,6 +252,20 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     if (next.rang.length > 0) writeFrame(BEL)
   }, [host])
 
+  /**
+   * The native session's open questions, as the `code` tab reports them (GL-02). They count toward
+   * the header's `● N need you` beside the fleet's, and a NEW one rings the bell — on the transition
+   * from none to some, never on the level, exactly like the fleet's `rang`. The tab reports whether
+   * or not it is the one on screen: a question waiting on a hidden tab is the case this is for.
+   */
+  const [codeAttention, setCodeAttention] = useState(0)
+  const codeAttentionRef = useRef(0)
+  const onCodeAttention = useCallback((count: number) => {
+    if (attentionRings(codeAttentionRef.current, count)) writeFrame(BEL)
+    codeAttentionRef.current = count
+    setCodeAttention(count)
+  }, [])
+
   useEffect(() => {
     if (!host.sessions) return
     void pollFleet()
@@ -318,10 +344,29 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     setChrome(prev =>
       prev.capture === next.capture
       && Boolean(prev.claimArrows) === Boolean(next.claimArrows)
+      && (prev.claimKeys ?? []).join('') === (next.claimKeys ?? []).join('')
       && prev.hints.join('\u0000') === next.hints.join('\u0000')
         ? prev
         : next,
     )
+  }, [])
+
+  /**
+   * One sentence on the status row, and nothing else (GL-06).
+   *
+   * The `code` tab answers most keys itself — a prompt queued, a permission answered, a command that
+   * does not exist — and routing each of those through `run()` would spin the spinner and re-probe
+   * systemd and docker for a keypress. It still has to leave its sentence where every other screen
+   * leaves one, or those keys would be silently inert.
+   */
+  const say = useCallback((res: ActionResult) => { setResult(res) }, [])
+
+  /**
+   * Change tab by one step, for a screen that CAPTURES the keyboard. While it captures, the shell's
+   * own `[`/`]` stand down with every other global key, so the screen forwards them itself.
+   */
+  const stepTab = useCallback((step: 1 | -1) => {
+    setTab(prev => TAB_ORDER[(TAB_ORDER.indexOf(prev) + step + TAB_ORDER.length) % TAB_ORDER.length]!)
   }, [])
 
   const switchLang = useCallback((next: CliLang) => {
@@ -371,7 +416,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // SIGINT is generated and this is the ONLY way out of a screen that is capturing input — without
   // it, a half-typed prompt would be a trap.
   useInput((_input, key) => {
-    if (key.ctrl && _input === 'c') onExit({ kind: 'quit', code: 130 })
+    if (isQuitChord({ input: _input, ctrl: key.ctrl })) onExit({ kind: 'quit', code: 130 })
   })
 
   // The header is the block wordmark when the terminal can carry it beside the machine's tag and
@@ -384,8 +429,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     version: status?.version ?? '',
     latestVersion: status?.latestVersion,
     // Drawn in the header so it is readable from every tab — a counter you have to navigate to in
-    // order to see cannot tell you to navigate there.
-    attention: fleet?.attention ?? 0,
+    // order to see cannot tell you to navigate there. The fleet's rows that need a person (an
+    // approval and a plain "needs you" alike) plus the native session's open questions.
+    attention: (fleet?.attention ?? 0) + codeAttention,
+    lang,
     // Absent on a machine whose memory cannot be read, and then no gauge is drawn at all — never a
     // zero. The host decides `red`, from the distance to the ceiling AND from swap pressure; the
     // TUI owns no logic here either.
@@ -406,9 +453,18 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // every claim to them means a screen that never reports cannot inherit a stale `true` and lock
   // the global keys with no owner left to release them.
   const reports = tab === 'services' || tab === 'sessions' || tab === 'backup' || tab === 'dashboard'
-    || tab === 'logs'
-  const capturing = chrome.capture && reports
+    || tab === 'logs' || tab === 'code'
+  /**
+   * The key reference (`?`, GL-04). While it is open it owns the keyboard: every screen stands down
+   * (`isActive` below), the global keys stand down, and the footer names only its own keys.
+   */
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpTop, setHelpTop] = useState(0)
+  const openHelp = useCallback(() => { setHelpTop(0); setHelpOpen(true) }, [])
+
+  const capturing = (chrome.capture && reports) || helpOpen
   const arrowsClaimed = Boolean(chrome.claimArrows) && reports
+  const claimedKeys = reports ? (chrome.claimKeys ?? []) : []
 
   useInput((input, key) => {
     const nav: NavKey = {
@@ -426,15 +482,22 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     }
 
     // `tab` belongs to the panes and the digits belong to the screens' own lists; changing screen
-    // is `←`/`→`, and the only thing that can take those is a pane that is itself a horizontal list.
-    const next = resolveTabKey(nav, tab, !arrowsClaimed)
-    if (next && next !== tab) { setTab(next); return }
+    // is `[`/`]` always and `←`/`→` unless a pane claims them. Which key means what is the pure
+    // `resolveShellKey`, which the help overlay's EVERYWHERE table is tested against.
+    const intent = resolveShellKey({ ...nav, ctrl: key.ctrl }, { tab, arrows: !arrowsClaimed, mouse: Boolean(mouse) })
+    if (intent && intent.kind !== 'tab' && claimedKeys.includes(input)) return
+    if (intent) {
+      switch (intent.kind) {
+        case 'tab': return setTab(intent.tab)
+        case 'quit': return onExit({ kind: 'quit', code: 0 })
+        case 'refresh': return void refresh()
+        case 'mouse': return toggleMouse()
+        case 'help': return openHelp()
+      }
+    }
 
-    if (input === 'q') { onExit({ kind: 'quit', code: 0 }); return }
-    if (input === 'r') { void refresh(); return }
-    if (input === 'm' && mouse) { toggleMouse(); return }
-
-    if (isStatic) {
+    // A `ctrl` chord is not a scroll key: `ctrl+g` must not jump a document to its top.
+    if (isStatic && !key.ctrl) {
       const id = tab as StaticTabId
       // The shell does not know how the content wrapped at this width, so it scrolls against an
       // OPEN-ENDED length and the screen clamps to its own line count and reports the corrected
@@ -443,6 +506,22 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       if (next !== null) return setScrollFor(id, next)
     }
   }, { isActive: !capturing })
+
+  // The overlay's lines, at the width its pane gives them. `helpTop` is clamped against them on
+  // every read, so a resize can never leave the page scrolled past its own end.
+  const help = helpOpen ? helpLines(lang, tab, paneBody(width)) : []
+  const helpMax = helpMaxTop(help.length, paneRows(height))
+
+  useInput((input, key) => {
+    // `esc` and `?` close it — the key that opened it closes it, like every toggle here.
+    if (key.escape || input === '?') { setHelpOpen(false); return }
+    if (key.ctrl) return
+    const next = resolveScrollKey(
+      { input, upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, home: key.home, end: key.end },
+      Math.min(helpTop, helpMax), helpMax + 1, Math.max(1, paneRows(height) - 1),
+    )
+    if (next !== null) setHelpTop(next)
+  }, { isActive: helpOpen })
 
   const tabs = tabBarTabs(TAB_ORDER, s.tabsShort)
   // Computed HERE and handed to the bar, rather than measured again inside it: the strip's cell
@@ -476,6 +555,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
     const hit = shellHit({ headerRows: header.rows, bodyRows: height }, report.column, report.row)
     if (hit.region === 'chrome') return
+
+    // The key reference owns the body while it is up: the wheel reads it, and nothing under it is
+    // live — a click must not act on a screen the overlay is covering.
+    if (helpOpen) {
+      const delta = wheelDelta(report.button)
+      if (delta !== 0) setHelpTop(prev => scrollBy(Math.min(prev, helpMax), delta, helpMax + 1))
+      return
+    }
 
     const track = report.kind === 'press'
       ? (clicks.current = trackClick(clicks.current, report, Date.now()))
@@ -521,7 +608,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       : paneHit(width, height, hit.x, hit.y)
     if (!frame) return
     mouse?.pointer.emit({ ...local, x: frame.x, y: frame.y })
-  }, [mouseOn, header.rows, height, width, tab, tabLayout, capturing, isStatic, scroll, setScrollFor, mouse])
+  }, [mouseOn, header.rows, height, width, tab, tabLayout, capturing, isStatic, scroll, setScrollFor, mouse, helpOpen, helpMax])
 
   const onReportRef = useRef(onReport)
   onReportRef.current = onReport
@@ -544,7 +631,11 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
    * gesture back to the terminal. A workaround nobody can discover is not one.
    */
   const mouseHints = mouse ? (mouseOn ? [s.keyMouseCopy, s.keyMouse] : [s.keyMouse]) : []
-  const hints = [...(isStatic ? staticHints : chrome.hints), ...mouseHints]
+  // While the key reference is up the footer names ITS keys and nothing else — every other key on
+  // this frame stands down, and a hint for one of them would be the lie the footer exists to avoid.
+  const hints = helpOpen
+    ? [s.keyHelpClose, s.keyScroll, s.keyEnds]
+    : [...(isStatic ? [...staticHints, s.keyHelp] : chrome.hints), ...mouseHints]
   // Same correction on the read-only screens' own footer: while the mouse reports, "select with the
   // mouse to copy" is no longer true on its own.
   const copyHint = mouse && mouseOn ? s.copyHintShift : s.copyHint
@@ -578,7 +669,29 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           corrupted frame rather than as a cramped one. Every screen budgets itself against
           `height`; this is the guarantee that a miscount degrades into a missing row instead. */}
       <Box flexDirection="column" height={height} overflowY="hidden">
-        <Screen visible={tab === 'services'}>
+        {/* The native session. It frames its own regions (the conversation, the permission card, the
+            composer, the session panel) like the two cockpits do, so the one that needs the person
+            can wear the accent border. */}
+        <Screen visible={tab === 'code' && !helpOpen}>
+          <Code
+            code={host.code}
+            launch={initial?.code}
+            lang={lang}
+            strings={s}
+            width={width}
+            height={height}
+            isActive={tab === 'code' && !helpOpen}
+            onChrome={reportChrome}
+            onSay={say}
+            onTab={stepTab}
+            // GL-02: the native session's open questions join the header's counter (and ring the
+            // bell on the transition); GL-04: the tab captures the keyboard, so it forwards `?`.
+            onAttention={onCodeAttention}
+            onHelp={openHelp}
+          />
+        </Screen>
+
+        <Screen visible={tab === 'services' && !helpOpen}>
           <Services
             host={host}
             status={status}
@@ -586,7 +699,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             lang={lang}
             width={width}
             height={height}
-            isActive={tab === 'services'}
+            isActive={tab === 'services' && !helpOpen}
             run={run}
             // The output of whatever was last performed, and the way back to the facts. The cockpit
             // draws it into the detail region — the big pane the user pointed at.
@@ -610,7 +723,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* Like the services cockpit, the sessions screen frames its OWN regions — a menu, the
             list and the detail — so the one holding the keyboard can wear the accent border. One
             frame around all three said nothing about which of them the arrows were talking to. */}
-        <Screen visible={tab === 'sessions'}>
+        <Screen visible={tab === 'sessions' && !helpOpen}>
             <Sessions
               host={host}
               // Polled by the shell, not by this screen — the counter it feeds is in the header,
@@ -619,7 +732,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               strings={s}
               width={width}
               height={height}
-              isActive={tab === 'sessions'}
+              isActive={tab === 'sessions' && !helpOpen}
               run={run}
               onChrome={reportChrome}
               onExit={onExit}
@@ -637,13 +750,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             are the selection, and the detail pane is a fuller view of the same facts or the place
             a running backup streams into. It is its own tab rather than a corner of Services —
             an operation over the data, and operations come before the numbers. */}
-        <Screen visible={tab === 'backup'}>
+        <Screen visible={tab === 'backup' && !helpOpen}>
           <Backup
             host={host}
             strings={s}
             width={width}
             height={height}
-            isActive={tab === 'backup'}
+            isActive={tab === 'backup' && !helpOpen}
             run={run}
             task={task}
             onDismissTask={dismissTask}
@@ -656,7 +769,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             selector over it, not a cockpit of related panes. The connection state that used to sit
             in the standalone app's header rides on its screen strip instead of on a pane badge, so
             the same row says where you are and whether the numbers under it are live. */}
-        <Screen visible={tab === 'dashboard'}>
+        <Screen visible={tab === 'dashboard' && !helpOpen}>
           <Pane title={s.tabsShort.dashboard} width={width} height={height}>
             <Dashboard
               status={status}
@@ -664,14 +777,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'dashboard'}
+              isActive={tab === 'dashboard' && !helpOpen}
               nonce={nonce}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'hardware'}>
+        <Screen visible={tab === 'hardware' && !helpOpen}>
           <Pane title={s.tabsShort.hardware} width={width} height={height}>
             <HardwareTab
               status={status}
@@ -680,14 +793,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'hardware'}
+              isActive={tab === 'hardware' && !helpOpen}
               nonce={nonce}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'logs'}>
+        <Screen visible={tab === 'logs' && !helpOpen}>
           <Pane title={s.tabsShort.logs} width={width} height={height}>
             <Logs
               host={host}
@@ -699,13 +812,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'logs'}
+              isActive={tab === 'logs' && !helpOpen}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'cheatsheet'}>
+        <Screen visible={tab === 'cheatsheet' && !helpOpen}>
           <Pane title={s.tabsShort.cheatsheet} width={width} height={height}>
             <StaticTab
               sections={cheatContent(lang)}
@@ -719,7 +832,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'help'}>
+        <Screen visible={tab === 'help' && !helpOpen}>
           <Pane title={s.tabsShort.help} width={width} height={height}>
             <StaticTab
               sections={helpContent(lang)}
@@ -733,7 +846,18 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'contribute'}>
+        {helpOpen ? (
+          <HelpOverlay
+            lines={help}
+            current={tab}
+            top={Math.min(helpTop, helpMax)}
+            title={s.helpOverlayTitle}
+            width={width}
+            height={height}
+          />
+        ) : null}
+
+        <Screen visible={tab === 'contribute' && !helpOpen}>
           <Pane title={s.tabsShort.contribute} width={width} height={height}>
             <StaticTab
               sections={contributeContent(lang)}

@@ -32,7 +32,7 @@ import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 import { homedir, platform } from 'node:os'
 import {
   DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
@@ -75,6 +75,7 @@ import type {
   RestoreCandidate,
 } from '@agentistics/tui/control'
 import { DEFAULT_SESSION_VIEW } from '@agentistics/tui/control'
+import type { CodeHost, CodeLaunch } from '@agentistics/tui/control/code-types'
 import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT } from './config'
 import {
   readPreferences, writePreferences, resolveArchiveMode, type ArchiveMode,
@@ -1452,6 +1453,29 @@ function makeSuspend(altScreen: Suspendable, strings: () => CliStrings): Suspend
           await pauseForEnter(strings().pauseMsg)
         }
       }))
+    } finally {
+      if (wasRaw) stdin.setRawMode(true)
+      for (const listener of listeners) stdin.on('data', listener)
+    }
+  }
+}
+
+/**
+ * The suspend an EDITOR gets (CD-17, `code-editor.ts`): `makeSuspend` without the pause. An editor
+ * is interactive and returns on its own when the person saves and quits, so a "press Enter" after it
+ * would be one keypress too many; everything else — Ink's stdin listeners detached, raw mode off,
+ * the alternate screen left, JS-level stdout muted so Ink frames cannot land on the editor's screen —
+ * is the same, and restored in `finally`.
+ */
+function makeEditorSuspend(altScreen: Suspendable): Suspend {
+  return async function suspend<T>(fn: () => Promise<T>): Promise<T> {
+    const stdin = process.stdin
+    const listeners = stdin.rawListeners('data') as Array<(chunk: Buffer) => void>
+    stdin.removeAllListeners('data')
+    const wasRaw = stdin.isRaw === true
+    if (wasRaw) stdin.setRawMode(false)
+    try {
+      return await altScreen.suspend(() => muteStdout(fn))
     } finally {
       if (wasRaw) stdin.setRawMode(true)
       for (const listener of listeners) stdin.on('data', listener)
@@ -4156,7 +4180,14 @@ export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
   return snap
 }
 
-export async function runStart(): Promise<StartResult> {
+/** How `agentop code …` opened the control center (D-TUI-3): the tab, with the launch the engine read. */
+export interface CodeStartLaunch {
+  launch: CodeLaunch
+  model?: string
+  cwd?: string
+}
+
+export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResult> {
   if (!process.stdin.isTTY) return 'foreground'
 
   const lang = await resolveLang()
@@ -4165,15 +4196,47 @@ export async function runStart(): Promise<StartResult> {
     import('@agentistics/tui/control/altScreen'),
   ])
 
-  const host = createControlHost(lang, altScreen)
+  const host: StartHost & { code?: CodeHost } = createControlHost(lang, altScreen)
+
+  // The `code` tab exists when the loaded engine offers one (engine-api 1.8 `codeTab`); a community
+  // build has none and the tab is simply not there. ONE host for the whole process: the loop below
+  // REMOUNTS the app after every attach/detach, and a host built per mount would drop a session's
+  // lease and its reader between two visits to the tab. It reads `host.lang` on every sentence — the
+  // language is a closure variable the in-app toggle reassigns.
+  const { loadEngine, engine } = await import('./engine/load')
+  await loadEngine()
+  const codeTab = engine()?.codeTab
+  if (codeTab) {
+    const { createDraftEditor } = await import('./code-editor')
+    host.code = await codeTab.host({
+      lang: () => host.lang,
+      editDraft: createDraftEditor({ suspend: makeEditorSuspend(altScreen), lang: () => host.lang }),
+      ...(codeLaunch?.model ? { model: codeLaunch.model } : {}),
+      cwd: resolvePath(codeLaunch?.cwd ?? process.cwd()),
+    })
+  }
+  try {
+    return await runControlLoop(host, runControlCenter, codeLaunch)
+  } finally {
+    await host.code?.dispose().catch(() => {})
+  }
+}
+
+async function runControlLoop(
+  host: StartHost & { code?: CodeHost },
+  runControlCenter: (typeof import('@agentistics/tui/control'))['runControlCenter'],
+  codeLaunch: CodeStartLaunch | undefined,
+): Promise<StartResult> {
 
   // A machine that has never been configured still opens on the WIZARD — it is just no longer a tab
   // of its own. Setup is a question the cockpit asks, drawn in the detail region like every other
   // one, so "open on setup" is now "open the cockpit with the question up": `initial.setup`. Landing
   // an unconfigured user on a list of services to start would still leave the mode and the
   // history-preservation consent behind something they have no reason to look for.
-  const setup = await isUnconfigured()
-  let tab: TabId | undefined
+  // An explicit `agentop code` is not a request to configure the machine: it goes straight to the tab.
+  const setup = codeLaunch ? false : await isUnconfigured()
+  let tab: TabId | undefined = codeLaunch && host.code ? 'code' : undefined
+  let launch: CodeLaunch | undefined = codeLaunch?.launch
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink
   // app never execs anything: it unmounts, the session gets the real tty here, and when the user
@@ -4189,9 +4252,12 @@ export async function runStart(): Promise<StartResult> {
     // detaching was enough to put the whole cockpit back into the previous language, with nothing
     // on screen to explain it and nothing to do about it but restart the application, which is how
     // it was reported. `execAttachTicket` below already read it correctly.
-    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening })
+    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening, ...(launch ? { code: launch } : {}) })
     opening = false
-    if (exit.kind === 'foreground') break
+    // The launch is a first-mount instruction: a remount after an attach must not restart the wizard
+    // or resume the session a second time.
+    launch = undefined
+    if (exit.kind === 'foreground') { if (codeLaunch) return 0; break }
     if (exit.kind === 'quit') return exit.code
     await execAttachTicket(exit.ticket, cliStrings(host.lang))
     tab = 'sessions'

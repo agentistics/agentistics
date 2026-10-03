@@ -5,6 +5,7 @@
  * is a DECLARED absence in its manifest, never a crash, and a failed or mismatched engine never
  * takes the product down: the host logs it and runs as a community build (`EngineStatus`).
  */
+import type { EngineCodeTab } from './code'
 import type { HarnessId, ProviderId, CapabilityName, EngineEvent, EngineHealthIssue } from './mirrors'
 import type { IntegrationRegistry } from './integration'
 import type { EngineHostServices, PersonAsker } from './host'
@@ -70,8 +71,9 @@ export interface EngineCommand {
 }
 
 /**
- * The control center's `code` tab. Opaque in this version: its event types join the contract when
- * the tab does (a minor bump). The host only ever passes it back to the renderer it came with.
+ * DEPRECATED (1.8): the opaque placeholder the `code` tab started as. The tab's real contract is
+ * `EngineCodeTab` / `CodeTabHost` (`code.ts`); a host built against 1.8 reads `codeTab` and never
+ * calls this. Kept so an engine built against an older contract still type-checks.
  */
 export interface CodeHost {
   readonly kind: 'code-host'
@@ -108,8 +110,10 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   integrations: IntegrationRegistry<E>
   routes: EngineRoute[]
   commands: EngineCommand[]
-  /** Absent = no `code` tab. */
+  /** DEPRECATED (1.8) — see `codeTab`. */
   codeHost?: (askerFor: (sessionId: string) => PersonAsker) => Promise<CodeHost>
+  /** 1.8 — the control center's `code` tab (`code.ts`). Absent = no `code` tab. */
+  codeTab?: EngineCodeTab
   /** 1.7 — drive a harness over ACP instead of a terminal. Absent: every session is a terminal one. */
   acp?: EngineAcp
   /** Health checks the engine contributes. */

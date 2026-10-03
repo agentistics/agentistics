@@ -33,8 +33,9 @@ import { DEFAULT_SESSION_VIEW } from '../types'
 import { resolveListKey, resolveScrollKey, windowOffset, type NavKey } from '../nav'
 import { ACTION_SEP, actionAtColumn, fitActionRow } from '../chrome.ts'
 import { Divider } from '../Surface'
-import { PANE_MIN_ROWS, paneBadgeRoom, paneTitleRoom } from '../chrome.ts'
+import { narrowTerminal, PANE_MIN_ROWS, paneBadgeRoom, paneTitleRoom } from '../chrome.ts'
 import { Pane, paneBody, paneRows } from '../Pane'
+import { PaneStrip } from '../Chrome'
 import { profileLines } from '../profile-lines'
 
 /** Columns a pane spends on its left edge: one of border, one of padding. */
@@ -91,6 +92,7 @@ import {
   enabledActionIndexes, filterSessions,
   actionWords as ACTION_WORDS,
   sessionActions, sessionsCockpit, summaryCells, sessionColumns, padCell,
+  resolveSessionsKey, nextSessionsPane, SESSIONS_PANES, type SessionsPane,
   taskCounts, projectCounts, sessionMetric, sessionContext, contextLevel,
   sessionHandle, worktreeName, sessionRunning,
   sessionAge, sessionKeyHelp, keyHelpColumn, keyHelpLines, closeCellWidth, canClose, CLOSE_CELL,
@@ -135,6 +137,14 @@ const CONTEXT_COLOR: Record<ContextLevel, string | undefined> = {
 }
 
 const SESSION_FOCUS_ACCENT = COLORS.info
+
+/**
+ * The letters the LIST answers that the shell would otherwise answer too: `r` renames here and
+ * refreshes everywhere else, `m` writes a note here and toggles the mouse everywhere else. A key
+ * answered by both did both — pressing `m` to write a note also switched the mouse off — so while
+ * the list has the keyboard the shell stands down on exactly these two.
+ */
+const CLAIMED_KEYS: readonly string[] = ['r', 'm']
 
 /** The colour each state wears. Paired with a WORD everywhere it is drawn — a fleet state announced
  *  in colour alone is unreadable on a terminal with a flattened palette, and this is the one screen
@@ -441,6 +451,14 @@ export function Sessions({
   const [actionIndex, setActionIndex] = useState(0)
   /** Which pane has the keyboard. The aside is a real pane, not a strip of hints. */
   const [focus, setFocus] = useState<'list' | 'aside'>('list')
+  /**
+   * On a NARROW terminal the list and its detail are two panes shown one at a time, and this says
+   * which of the two is up while the keyboard is on the list side (the menu is `focus === 'aside'`).
+   */
+  const [narrowDetail, setNarrowDetail] = useState(false)
+  // Reaching the menu by ANY path (a digit, a click, `enter`) leaves the detail behind, so `esc` out
+  // of the menu lands on the list rather than on a detail nobody asked to return to.
+  useEffect(() => { if (focus === 'aside') setNarrowDetail(false) }, [focus])
   /**
    * WHICH ROW the menu cursor is on, by name rather than by position.
    *
@@ -753,9 +771,23 @@ export function Sessions({
   // `hideAside` is passed to BOTH, or the probe answers with an aside the real layout will not draw
   // and the action row is budgeted against a menu that is not there.
   const fold = { asideLabel, hideAside: menuHidden }
+  /**
+   * A NARROW terminal (D-TUI-10) shows ONE pane — the menu, the list or the detail — under a strip
+   * naming all three. The pane shown follows the keyboard: the menu while it has focus, the detail
+   * while a question is open there (the keys are going to it) or while `tab` asked for it, the list
+   * otherwise. The menu is never folded away here: it is a pane of its own, one `tab` off.
+   */
+  const narrow = narrowTerminal(width)
+  const shownPane: SessionsPane | null = !narrow ? null
+    : askDetail ? 'detail'
+    : focus === 'aside' ? 'menu'
+    : narrowDetail ? 'detail'
+    : 'sessions'
   const probe = sessionsCockpit({ width, height, detailWanted, ...fold })
-  const actionRows = probe.aside > 0 ? 0 : height >= 12 ? 2 : height >= 8 ? 1 : 0
-  const cockpit = actionRows === 0
+  const actionRows = narrow || probe.aside > 0 ? 0 : height >= 12 ? 2 : height >= 8 ? 1 : 0
+  const cockpit = narrow
+    ? sessionsCockpit({ width, height, detailWanted, asideLabel, single: shownPane ?? 'sessions' })
+    : actionRows === 0
     ? probe
     : sessionsCockpit({ width, height: Math.max(1, height - actionRows), detailWanted, ...fold })
 
@@ -992,6 +1024,14 @@ export function Sessions({
     setAsideRow(target)
   }, [sections, setAsideRow])
 
+  /** Show one pane of a NARROW cockpit — the one setter `tab`, `esc` and `enter` go through. */
+  const showPane = useCallback((pane: SessionsPane) => {
+    setActionsFocused(false)
+    if (pane === 'menu') { setNarrowDetail(false); setFocus('aside'); return }
+    setFocus('list')
+    setNarrowDetail(pane === 'detail')
+  }, [])
+
   /**
    * Put the arrangement back to how the app opens on a fresh machine.
    *
@@ -1089,212 +1129,140 @@ export function Sessions({
       shift: key.shift,
     }
 
-    // `tab` moves between the list and the MENU, which is what makes every verb and every switch
-    // reachable without knowing a single letter. The menu is a real pane, so it keeps its own
-    // cursor while the list keeps its selection.
-    if (key.tab) {
-      if (cockpit.aside > 0) setFocus(f => (f === 'list' ? 'aside' : 'list'))
-      else setActionsFocused(f => !f)
-      return
-    }
+    // WHICH key means WHAT is decided by the pure `resolveSessionsKey` — the function the help
+    // overlay's key table is tested against. What follows is only the effects, in the order and
+    // with the guards the if-chain this replaced had, each one explained where it is performed.
+    const intent = resolveSessionsKey(
+      { ...nav, leftArrow: key.leftArrow, rightArrow: key.rightArrow, return: key.return, escape: key.escape, tab: key.tab, ctrl: key.ctrl },
+      {
+        focus,
+        aside: cockpit.aside > 0,
+        actionsFocused,
+        grid: Boolean(grid),
+        detailPane: shownPane === 'detail',
+      },
+    )
+    if (!intent) return
 
-    // The DIGITS jump straight to a menu section, from the list as well as from the menu — every
-    // section wears its number, so this is a key the screen documents itself rather than one you
-    // have to be told about. They work where the arrows are not available at all.
-    // A digit brings the menu BACK as well as jumping to a section: the keys that reach the menu
-    // are the way out of having hidden it, so there is nothing extra to remember.
-    if (input >= '1' && input <= '9') {
-      const n = Number(input) - 1
-      if (n < sections.length) { setMenuHidden(false); gotoSection(n); return }
-    }
-
-    // `ctrl+x` is the door to the bulk-stop mode, IN and OUT, and it is answered BEFORE the menu
-    // gets the keyboard — the menu's own `x` deletes a task, and a chord that meant one thing on the
-    // list and another in the menu is exactly the collision this journey exists to remove.
-    //
-    // The same chord both ways rather than `esc` on the way out: `esc` here already drops the
-    // search, then the project, then the task, so a key that both un-narrows the list and disarms a
-    // selection would do the wrong one of the two at the moment it matters most. See
-    // `bulkStopToggle`.
-    if (key.ctrl && input === 'x') {
-      setBulk(bulkStopToggle)
-      // The mode selects LIST rows, so it hands the keyboard back to the list rather than leaving
-      // it in a menu where `space` means nothing.
-      setFocus('list')
-      setActionsFocused(false)
-      return
-    }
-
-    if (focus === 'aside' && cockpit.aside > 0) {
-      if (key.escape) { setFocus('list'); return }
-      if (key.return) return runAside(asideRow)
-      // `x` on a TASK row removes the name. The list grows without bound otherwise — reported with
-      // dozens of entries, some naming work that is over and some whose sessions no longer exist —
-      // and `finishTask` only hides them. Same key as closing a session, because it is the same
-      // gesture applied to whatever the cursor is on; `all` is refused, since "every task" names no
-      // task to remove.
-      if (input === 'x') {
+    switch (intent.kind) {
+      // `tab` moves between the list and the MENU, which is what makes every verb and every switch
+      // reachable without knowing a single letter. On a NARROW terminal it walks the three panes,
+      // one at a time — the list, its detail, the menu.
+      case 'tab': {
+        if (narrow) return showPane(nextSessionsPane(shownPane ?? 'sessions', Boolean(key.shift)))
+        if (cockpit.aside > 0) setFocus(f => (f === 'list' ? 'aside' : 'list'))
+        else setActionsFocused(f => !f)
+        return
+      }
+      // The DIGITS jump straight to a menu section, from the list as well as from the menu. A digit
+      // brings the menu BACK as well — the keys that reach the menu are the way out of having
+      // hidden it.
+      case 'section':
+        if (intent.n < sections.length) { setMenuHidden(false); gotoSection(intent.n) }
+        return
+      // `ctrl+x` is the door to the bulk-stop mode, IN and OUT, answered before the menu gets the
+      // keyboard — the menu's own `x` deletes a task. See `bulkStopToggle`.
+      case 'bulk':
+        setBulk(bulkStopToggle)
+        // The mode selects LIST rows, so it hands the keyboard back to the list.
+        setFocus('list')
+        setActionsFocused(false)
+        return
+      case 'asideBack':
+        setFocus('list')
+        return
+      case 'asideRun':
+        return runAside(asideRow)
+      case 'asideDeleteTask': {
+        // `x` on a TASK row removes the name; `all` is refused, since "every task" names no task.
         const row = asideList[asideRow]
         if (row?.kind === 'task' && !row.all && row.name) {
           setAsk({ kind: 'deleteTask', name: row.name, count: row.count })
-          return
         }
-      }
-      // `←`/`→` JUMP between sections. Reaching the next one by pressing down through every row of
-      // this one is the whole of what made the menu tedious — and with the accordion it is also the
-      // gesture that opens a section, so the arrows that do nothing else here are the right keys
-      // for it. The cursor lands on the section's first row, which is what a person wants next.
-      if (key.leftArrow || key.rightArrow) {
-        if (sections.length === 0) return
-        const step = key.rightArrow ? 1 : -1
-        return gotoSection((activeSection + step + sections.length) % sections.length)
-      }
-      if (key.upArrow || input === 'k') return setAsideRow(asidePicks[Math.max(0, asideAt - 1)] ?? asideRow)
-      if (key.downArrow || input === 'j') return setAsideRow(asidePicks[Math.min(asidePicks.length - 1, asideAt + 1)] ?? asideRow)
-      return
-    }
-
-    if (actionsFocused) {
-      if (key.escape) { setActionsFocused(false); return }
-      if (key.return) return runAction(actions[at2]?.action ?? 'new')
-      if (key.leftArrow) return setActionIndex(Math.max(0, liveAt - 1))
-      if (key.rightArrow) return setActionIndex(Math.min(liveActions.length - 1, liveAt + 1))
-      return
-    }
-
-    // `enter` on a session opens its MANAGEMENT rather than attaching to it.
-    //
-    // Attaching is the most drastic thing this screen does — it hands the whole terminal away — and
-    // making it the default answer to "I want to look at this" meant there was no way to reach the
-    // other verbs without already knowing where they were. Now enter moves to the menu, with the
-    // cursor on the first verb this row can take; attaching is the verb at the top of it.
-    if (key.return) {
-      if (cockpit.aside > 0 && selected) {
-        setFocus('aside')
-        // The first verb this row can actually take, by name — the row-specific verb is `attach`
-        // on a running session and `resume` on everything else, so a fixed index would land on
-        // whichever happened to be first.
-        setAsideRow(asidePicks[0] ?? 0)
         return
       }
-      // No menu to move to on a narrow terminal, so enter keeps its old meaning there.
-      return runAction(actions[liveActions[0] ?? 0]?.action ?? 'new')
+      // `←`/`→` JUMP between sections, landing on the section's first row.
+      case 'asideSection':
+        if (sections.length === 0) return
+        return gotoSection((activeSection + intent.step + sections.length) % sections.length)
+      case 'asideMove':
+        return setAsideRow(
+          intent.step < 0
+            ? asidePicks[Math.max(0, asideAt - 1)] ?? asideRow
+            : asidePicks[Math.min(asidePicks.length - 1, asideAt + 1)] ?? asideRow,
+        )
+      case 'actionsBack':
+        setActionsFocused(false)
+        return
+      case 'actionsRun':
+        return runAction(actions[at2]?.action ?? 'new')
+      case 'actionsMove':
+        return setActionIndex(
+          intent.step < 0 ? Math.max(0, liveAt - 1) : Math.min(liveActions.length - 1, liveAt + 1),
+        )
+      // A narrow terminal showing the detail: `esc` has no other meaning there, so it walks back.
+      case 'paneBack':
+        return showPane('sessions')
+      // `enter` on a session opens its MANAGEMENT rather than attaching to it — the menu, with the
+      // cursor on the first verb this row can take. A narrow terminal HAS the menu, as a pane.
+      case 'enter':
+        if ((cockpit.aside > 0 || narrow) && selected) {
+          if (narrow) showPane('menu')
+          else setFocus('aside')
+          setAsideRow(asidePicks[0] ?? 0)
+          return
+        }
+        // No menu to move to (a narrow wide-mode fallback), so enter keeps its old meaning there.
+        return runAction(actions[liveActions[0] ?? 0]?.action ?? 'new')
+      // `esc` DROPS whatever is narrowing the list, one layer at a time, most-recent first.
+      case 'esc':
+        if (query) { setQuery(''); toTop(); return }
+        if (projectFilter !== null) { scopeTo('project', null); return }
+        if (taskFilter !== null) { scopeTo('task', null); return }
+        return
+      // `ctrl+r` puts the arrangement back to how the app opens on a fresh machine.
+      case 'reset':
+        return resetView()
+      case 'active':
+        return pressShortcut('active')
+      // `b` as well as `ctrl+b`: `ctrl+b` is tmux's default prefix and never reaches this app inside
+      // a tmux, so the plain letter is the one that always works.
+      case 'fold':
+        return setMenuHidden(v => !v)
+      case 'keys':
+        return setAsk({ kind: 'keys' })
+      // The LAST CONVERSATIONS, flat and by recency — a view, reached by one key.
+      case 'recent':
+        return showRecentlyClosed()
+      // ONE key for one question (`c`, with `l`/`e` kept as aliases of the same call).
+      case 'closed':
+        return pressShortcut(onlyActive ? 'history' : 'active')
+      case 'detail':
+        return setHideDetail(v => !v)
+      // `ctrl+g` for the GRID, not `g`: `g` is "top of the list".
+      case 'layout':
+        return setLayout(l => (l === 'list' ? 'cards' : 'list'))
+      // The HIGHLIGHTER: inside the bulk-stop mode `space` picks a row to be STOPPED, outside it
+      // pins. The key did not move; the second meaning is reachable only from a chord typed on
+      // purpose.
+      case 'pin':
+        if (!selected) return
+        if (bulk.on) { setBulk(b => bulkStopPick(b, selected.id)); return }
+        setMarked(prev => {
+          const next = new Set(prev)
+          if (next.has(selected.id)) next.delete(selected.id)
+          else next.add(selected.id)
+          return next
+        })
+        return
+      // The verbs are named after what they DO. `k` stays out of all of it: it is `up` in this
+      // list, and a key that moves the cursor on one screen and destroys work on another is a real
+      // accident waiting.
+      case 'verb':
+        return runAction(intent.action)
+      case 'move':
+        break
     }
-    // `esc` DROPS whatever is narrowing the list, one layer at a time, most-recent first. A search
-    // could only be undone by opening the field and clearing it, and the field re-submitted the old
-    // query on an empty enter — so a typo in the search box was a list that could not be got back.
-    if (key.escape) {
-      if (query) { setQuery(''); toTop(); return }
-      if (projectFilter !== null) { scopeTo('project', null); return }
-      if (taskFilter !== null) { scopeTo('task', null); return }
-      return
-    }
-    // `ctrl+r` puts the arrangement back to how the app opens on a fresh machine. Every switch on
-    // this screen is remembered, which is what people asked for and also what makes an arrangement
-    // you fiddled with three weeks ago follow you around — and finding your way out of it one
-    // toggle at a time means knowing what the defaults were.
-    if (key.ctrl && input === 'r') { resetView(); return }
-    // `ctrl+a` beside `l`, and `ctrl+h` for the list of everything. Two keys for one switch is not
-    // duplication here: `l` is what the footer has room to name, and a chord is what someone
-    // reaches for without having read the footer at all.
-    if (key.ctrl && input === 'a') { pressShortcut('active'); return }
-    // Folding the menu answers TWO keys, and the second one is not a convenience.
-    //
-    // `ctrl+b` is tmux's DEFAULT PREFIX. Run in a plain terminal the cockpit receives it and this
-    // works — measured through the preview, which writes the real 0x02 byte. Run inside the user's
-    // own tmux it never arrives at all: intercepting the prefix is what a prefix IS, so the client
-    // consumes it and the pane is never told. This app already knows that, which is why it reads
-    // the real prefix from `show-options -g prefix` to tell people how to detach.
-    //
-    // A chord that silently does nothing for everyone who works inside tmux is exactly the "the
-    // command to hide the aside menu is not working" this was reported as. So plain `b` does it
-    // too, and it is the one the footer and the key list name.
-    if (input === 'b' || (key.ctrl && input === 'b')) { setMenuHidden(v => !v); return }
-    // `?` is the key, and `ctrl+h` is accepted where the terminal can tell it apart from backspace.
-    // It usually cannot: `ctrl+h` IS ASCII 8, which is the backspace byte, so Ink reports it as
-    // `key.backspace` and a binding on it would either never fire or fire on backspace. Measured
-    // here, not assumed. `?` has no such collision and is what every list-shaped TUI already uses.
-    // `h` is the letter people try first and it was unbound; `?` is what every list-shaped TUI
-    // answers and stays. `ctrl+h` is accepted where the terminal can tell it apart from backspace —
-    // it usually cannot, since `ctrl+h` IS ASCII 8, so Ink reports it as `key.backspace` and a
-    // binding on it would either never fire or fire on backspace. Measured here, not assumed.
-    if (input === 'h' || input === '?' || (key.ctrl && input === 'h')) { setAsk({ kind: 'keys' }); return }
-    if (input === 'v') return runAction('group')
-    // One key, because there is one switch. `c` and `e` toggled two halves of the same question.
-    // ONE key for one question. `active` and `history` partition `SESSION_STATES`, so the two
-    // shortcuts are one boolean read from either end — and it had THREE keys: `l` narrowed to the
-    // active states, while `c` and `e` (literally the same call) widened back. Pressing any of them
-    // did the same visible thing, which is a keyboard that lies about how many controls exist.
-    // `c` for CLOSED — one key for one switch. `l` and `e` are kept as aliases of the same call
-    // rather than as controls of their own: they were three keys doing one visible thing, which is
-    // a keyboard that lies about how many controls exist, and dropping them outright would break
-    // the hands that already learned `l`.
-    // The LAST CONVERSATIONS, flat and by recency — a view, reached by one key, because the ordinary
-    // way to it was four separate switches (lift the filter, drop the grouping, change the sort,
-    // clear the scope) and by then you are arranging a screen instead of finding the thing you
-    // closed twenty minutes ago. Capital, like the other verbs that act on more than the row.
-    if (input === 'C') { showRecentlyClosed(); return }
-    if (input === 'c' || input === 'l' || input === 'e') {
-      pressShortcut(onlyActive ? 'history' : 'active')
-      return
-    }
-    if (input === 'd') { setHideDetail(v => !v); return }
-    // `ctrl+g` for the GRID, not `g`: `g` is "top of the list" two lines down and in
-    // `resolveListKey`'s menus, and a key answered by the screen AND by the list does two things at
-    // once. `v` — the design's fallback — is already the grouping picker. The chord keeps the
-    // mnemonic, collides with nothing, and pairs with `ctrl+f` beside it.
-    if (key.ctrl && input === 'g') { setLayout(l => (l === 'list' ? 'cards' : 'list')); return }
-    // The HIGHLIGHTER. `space` because it is the mark key of every list that has one, and because
-    // it is the only unclaimed key on this screen that a person reaches for without being told.
-    //
-    // It answers TWO questions, and which one depends on a mode the screen announces in its own
-    // title: inside the bulk-stop mode it picks a row to be STOPPED, outside it pins. The key did
-    // not move — pinning is still `space`, which is what people already have in their fingers —
-    // and the second meaning is only reachable from a chord somebody typed on purpose.
-    if (input === ' ') {
-      if (!selected) return
-      if (bulk.on) { setBulk(b => bulkStopPick(b, selected.id)); return }
-      setMarked(prev => {
-        const next = new Set(prev)
-        if (next.has(selected.id)) next.delete(selected.id)
-        else next.add(selected.id)
-        return next
-      })
-      return
-    }
-    // `u` used to hide the unfiled band while grouping by task. That is now the task section's own
-    // "no task" row, selectable like every other value on every dimension, so the key is gone with
-    // the switch — a key whose control no longer exists is a key nothing on screen explains.
-    // The verbs are named after what they DO, in the language of the menu they open. They were
-    // handed out in the order they were written — `a` started a session, `n` renamed one, `t` wrote
-    // a note — so the letter and the verb had nothing to do with each other and the only way to
-    // learn one was to read the list. `k` stays out of all of it: it is `up` in this list, and a key
-    // that moves the cursor on one screen and destroys work on another is a real accident waiting.
-    if (input === 'n') return runAction('new')
-    if (input === 'r') return runAction('rename')
-    // The note is `m` for memo: `t` belongs to the TASK, which is the verb people reach for it with.
-    if (input === 'm') return runAction('note')
-    if (input === 't') return runAction('task')
-    // `T` and `F` are GONE with the verbs they ran — see `session-verbs.ts`. Reopening a whole task
-    // is `agentop session open`, and finishing one is now asked at the moment a session is stopped,
-    // where somebody actually knows the answer.
-    // Attaching has its OWN key because `enter` deliberately does not do it any more: enter opens
-    // the menu, which is what made every other verb reachable, and the cost of that was three
-    // keystrokes for the thing this screen is most often opened to do.
-    if (input === 'o') return runAction('attach')
-    // `ctrl+f` is what people already type for find; `/` stays as an alias for the vi hands, and is
-    // deliberately not in the key help — the footer names ONE key per verb or it stops being read.
-    if ((key.ctrl && input === 'f') || input === '/') return runAction('search')
-    if (input === 'x') return runAction('kill')
-    // The two that act on a session WITHOUT entering it. `a` for approve, with `y` kept as the alias
-    // every yes/no prompt has taught — neither is a navigation key, which is the rule `x` exists
-    // for: a key that moves the cursor on one screen and writes into somebody's session on another
-    // is the shape of a real accident.
-    if (input === 'a' || input === 'y') return runAction('approve')
-    if (input === 'p') return runAction('prompt')
-    // Capital `R`, so it cannot be hit while reaching for anything else. It is the one verb here
-    // that acts on the whole fleet.
-    if (input === 'R') return runAction('reopenFell')
 
     // A grid has two axes, so the arrows mean what they mean in a grid: `←`/`→` step one card,
     // `↑`/`↓` step a whole BAND of them. The list's own reducer wraps a single column, which in a
@@ -1421,6 +1389,7 @@ export function Sessions({
             claimArrows: true,
             hints: [
               s.keyQuit,
+              ...(narrow ? [s.keyPane] : []),
               s.keyAsideSection,
               s.keyMove,
               s.keyRun,
@@ -1435,6 +1404,15 @@ export function Sessions({
         // While the action row has the keyboard it is a horizontal list, so it claims the arrows —
         // and the footer stops saying they change screen for exactly as long as that is true.
         ? { capture: false, claimArrows: true, hints: [s.keyQuit, s.keyActionMove, s.keyRun, s.keyBack, s.keyTabsAlt] }
+        // A narrow terminal showing the DETAIL: a read-only view of the selection, so the keys that
+        // work are the way back, the pane key, the cursor (the detail follows it) and the verbs.
+        : shownPane === 'detail'
+        ? {
+            capture: false,
+            claimArrows: true,
+            claimKeys: CLAIMED_KEYS,
+            hints: [s.keyQuit, s.keyTabsAlt, s.keyPane, s.keyBack, s.keyMove, s.keySessionsAttach],
+          }
         : {
             // The LIST claims the arrows too, which is the whole reason `[`/`]` exist. `←`/`→` had
             // no meaning inside this screen and every meaning outside it, so reading down a list
@@ -1442,12 +1420,13 @@ export function Sessions({
             // you are reading must not also be the way out of it.
             capture: false,
             claimArrows: true,
+            claimKeys: CLAIMED_KEYS,
             hints: bulk.on
               // While the mode is on the footer says ONLY the three keys the mode answers. A strip
               // of ordinary verbs under a red list would be the footer contradicting the screen.
               ? [s.keySessionsStopPick, s.keySessionsStopRun, s.keySessionsStopLeave, s.keyMove]
               : [
-              s.keyQuit, s.keyTabsAlt, s.keySessionsActions, s.keyAsideSection,
+              s.keyQuit, s.keyTabsAlt, narrow ? s.keyPane : s.keySessionsActions, s.keyAsideSection,
               s.keySessionsAttach, s.keyMove,
               // Named only where the key actually does something on the selected row. The footer is
               // the only documentation this screen has, and a hint for an inert key is the one bug
@@ -1459,15 +1438,19 @@ export function Sessions({
               // Named only while the menu is THERE to fold: on a narrow terminal the aside is
               // dropped anyway, and a hint for a key with nothing to act on is the one bug this
               // footer exists to prevent.
-              ...(cockpit.aside > 0 || menuHidden ? [s.keySessionsFold] : []),
+              ...(!narrow && (cockpit.aside > 0 || menuHidden) ? [s.keySessionsFold] : []),
               s.keySessionsReset,
             ],
           })
   }, [isActive, onChrome, s, ask, actionsFocused, focus, cockpit.aside, grouping,
       selected?.canApprove, selected?.canChoose, canPrompt, menuHidden, restoring, asideList, asideRow,
-      bulk.on])
+      bulk.on, narrow, shownPane])
 
-  usePointer(p => {
+  usePointer(pointer => {
+    // A NARROW cockpit draws its one pane under the pane strip, so every hit test below — written
+    // against the band starting at row 0 — is handed coordinates that start under the strip.
+    if (narrow && (cockpit.strip ?? 0) > 0 && pointer.y < (cockpit.strip ?? 0)) return
+    const p = narrow ? { ...pointer, y: pointer.y - (cockpit.strip ?? 0) } : pointer
     const wheel = wheelDelta(p.button)
     if (wheel !== 0) {
       if (selectable.length === 0) return
@@ -1821,346 +1804,389 @@ export function Sessions({
   // be a single frame with two unmarked columns inside it, so there was nothing on the screen that
   // said which of them the arrows were talking to — "I'm lost, I don't know what is selected" is
   // the exact failure, and it is the same one the services cockpit solved by framing its regions.
+  // Built as nodes first, so the WIDE cockpit (all three) and the NARROW one (one at a time)
+  // draw the very same panes rather than two copies of each.
+  const menuNode = cockpit.aside > 0 ? (
+    <>
+    {foldRows ? (
+      // Each block its OWN framed pane, titled with its own heading. One scrolling pane
+      // titled "menu" showed its first section and nothing else, so every switch and every
+      // task sat below the fold — and the honest reading of that screen is that all of it
+      // lives inside "Actions".
+      <Box flexDirection="column" width={cockpit.aside} flexShrink={0}>
+        {sections.map((section, i) => {
+          const h = foldRows[i]!
+          // COLLAPSED: the name and how many rows are inside it, and nothing else. What it
+          // gives up is its contents, never the fact that it exists.
+          if (h < PANE_MIN_ROWS) {
+            const open = focus === 'aside' && i === activeSection
+            const count = ` ${section.rows.length}`
+            const label = truncate(
+              section.title.toLowerCase(),
+              Math.max(1, cockpit.aside - 5 - count.length),
+            )
+            return (
+              <Text key={section.title} wrap="truncate">
+                <Text color={COLORS.secondary}>{`${i + 1} `}</Text>
+                <Text color={open ? COLORS.accent : COLORS.label}>{`▸ ${label}`}</Text>
+                <Text dimColor>{count}</Text>
+              </Text>
+            )
+          }
+          const inner = paneRows(h)
+          const cursorIn = section.indexes.indexOf(asideRow)
+          const off = windowOffset(Math.max(0, cursorIn), section.rows.length, inner)
+          const bar = scrollBar({ offset: off, total: section.rows.length, rows: inner })
+          return (
+            <Pane
+              key={section.title}
+              title={`${i + 1} ${section.title.toLowerCase()}`}
+              focused={focus === 'aside' && i === activeSection}
+              width={cockpit.aside}
+              height={h}
+            >
+              <Box flexDirection="row" flexShrink={0}>
+                <AsideMenu
+                  rows={section.rows}
+                  cursor={cursorIn}
+                  focused={focus === 'aside'}
+                  width={paneBody(cockpit.aside) - (bar.length > 0 ? 1 : 0)}
+                  height={inner}
+                  offset={off}
+                  allTasksLabel={s.asideAllTasks}
+                  allProjectsLabel={s.asideAllProjects}
+                />
+                <ScrollBar cells={bar} />
+              </Box>
+            </Pane>
+          )
+        })}
+      </Box>
+    ) : (
+      // Too short to frame each block: one pane, scrolling, with the headings inline.
+      <Pane
+        title={s.sessionsPaneMenu}
+        focused={focus === 'aside'}
+        width={cockpit.aside}
+        height={cockpit.band}
+      >
+        <AsideMenu
+          rows={asideList}
+          cursor={asideRow}
+          focused={focus === 'aside'}
+          width={paneBody(cockpit.aside)}
+          height={paneRows(cockpit.band)}
+          offset={asideOffset}
+          allTasksLabel={s.asideAllTasks}
+          allProjectsLabel={s.asideAllProjects}
+        />
+      </Pane>
+    )}
+    </>
+  ) : null
+
+  const listNode = (
+    <Pane
+      // The TITLE says the mode, because the title is the one part of this pane drawn at every
+      // width and every height. The banner below it is dropped on a short terminal along with the
+      // summary row it replaces, and a mode you can be in without the screen saying so is exactly
+      // the state this design exists to make impossible.
+      title={bulk.on ? s.sessionsPaneStopMode : s.tabsShort.sessions}
+      focused={focus === 'list' && !actionsFocused}
+      width={cockpit.list}
+      height={cockpit.band}
+    >
+    {bulk.on && cockpit.summary ? (
+      // In PLACE of the summary, not above it: the mode costs no extra row, so a frame that fit
+      // before still fits. Red, and it names every key that works while it is on — the person who
+      // walked away and came back reads what to do rather than remembering what they pressed.
+      <Text color={COLORS.danger} bold wrap="truncate">
+        {truncate(s.sessionsStopBanner(bulk.picks.size), listBody)}
+      </Text>
+    ) : cockpit.summary ? (
+      <SummaryRow
+        fleet={fleet}
+        grouping={grouping}
+        strings={s}
+        width={listBody}
+        showHistory={showHistory}
+        showNamed={showNamed}
+        onlyActive={onlyActive}
+        // How many rows are ON SCREEN, counted from the very list being drawn. The header used to
+        // read the fleet's length, so with `only active` on it announced 44 over a screen showing
+        // ten — a number describing a screen nobody is looking at.
+        shown={rows.reduce((n, r) => n + (r.kind === 'session' ? 1 : 0), 0)}
+        // Counted from the SAME drawn rows, for the same reason `shown` is.
+        waitingShown={rows.reduce((n, r) => n + (r.kind === 'session'
+          && (r.session.state === 'waiting' || r.session.state === 'waiting-approval') ? 1 : 0), 0)}
+        query={query}
+        depth={depth}
+        scope={projectFilter ?? taskFilter ?? ''}
+        fell={fleet?.fell && fellAgo ? s.sessionsFellNote(fleet.fell.count, fellAgo) : ''}
+      />
+    ) : null}
+
+    {/* What each cell IS. The row was six aligned columns of unlabelled text — the alignment made
+        it scannable and the labels are what make it readable, and they are drawn from the very
+        same measured widths so the heading can never sit over the wrong column. */}
+    {cockpit.header && rows.length > 0 && !grid ? (
+      <Text dimColor wrap="truncate">
+        {/* Shifted by the cascade's guide column, or the headings sit over the wrong cells the
+            moment the tree is on. */}
+        {' '.repeat(guideWidth)}
+        {'  ' + ' '.repeat(notifyWidth) + (columns.id > 0 ? padCell(s.sessionsCols.id, columns.id) + '  ' : '')}
+        {columns.harness > 0 ? padCell(s.sessionsCols.harness, columns.harness) + '  ' : ''}
+        {padCell(s.sessionsCols.state, columns.state)}
+        {columns.title > 0 ? '  ' + padCell(s.sessionsCols.title, columns.title) : ''}
+        {columns.age > 0 ? '  ' + padCell(s.sessionsCols.age, columns.age) : ''}
+        {columns.worktree > 0 ? '  ' + padCell(s.sessionsCols.worktree, columns.worktree) : ''}
+        {columns.task > 0 ? '  ' + padCell(s.sessionsCols.task, columns.task) : ''}
+        {columns.metrics > 0 ? '  ' + padCell(s.sessionsCols.metrics, columns.metrics) : ''}
+        {columns.context > 0 ? '  ' + padCell(s.sessionsCols.context, columns.context) : ''}
+        {columns.where > 0 ? '  ' + padCell(s.sessionsCols.where, columns.where) : ''}
+      </Text>
+    ) : null}
+
+    {fleet === undefined ? (
+      <Text dimColor>{s.sessionsUnsupported}</Text>
+    ) : fleet === null ? (
+      <Text dimColor>{s.sessionsLoading}</Text>
+    ) : rows.length === 0 ? (
+      // An empty fleet is only ever reported as empty when the poll actually worked. When it did
+      // not, the host's own sentence is what the summary row is already showing. And a list
+      // emptied by a FILTER says which filter and which key lifts it: the sessions a reboot
+      // turned into `lost` rows are still there, still named and still reopenable, so "no
+      // sessions" would be false — and a blank pane under a strict filter is indistinguishable
+      // from a broken one.
+      //
+      // The behaviour profile fills the space an empty list leaves dead — BELOW that sentence,
+      // never instead of it. Sliced to the rows this pane actually has: an Ink screen that
+      // overflows its `height` is composited over the rows below it, not clipped, and the
+      // sentence above already spends one row of the same budget.
+      <Box flexDirection="column" flexShrink={0}>
+        <Text dimColor wrap="truncate">
+          {fleet.unavailable ? ''
+            : truncate(emptyReason, listBody)}
+        </Text>
+        {/* A failed poll can still hand back a baseline — the store read that builds it sits on
+            a path with no early return before `unavailable` is checked. So the profile is gated
+            on the SAME condition as the sentence above it, not on `baseline` alone: rendering it
+            under a blanked sentence is the exact thing that sentence's own blanking exists to
+            prevent. */}
+        {fleet.unavailable ? null : profileLines(fleet.baseline, listBody, s)
+          .slice(0, Math.max(0, cockpit.listRows - 1))
+          .map((line, i) => (
+            <Text key={i} dimColor>{line}</Text>
+          ))}
+      </Box>
+    ) : grid && page ? (
+      <Box flexDirection="column" width={cardsBody} flexShrink={0}>
+        {/* One band per group, and the air to the right of a short group is DELIBERATE: it is
+            what separates one group from the next, and filling it with the following group's
+            cards is exactly how this grid used to ignore the grouping it was drawn under. */}
+        {page.bands.map((b, i) => (b.kind === 'heading' ? (
+          <GroupHeading key={`h${i}`} band={b} width={cardsBody} />
+        ) : (
+          <Box key={`b${i}`} flexDirection="row" height={b.height} flexShrink={0}>
+            {b.items.map((index, c) => {
+              const card = cards[index]
+              if (!card) return null
+              return (
+                <Box key={card.id} flexDirection="row" flexShrink={0}>
+                  {c > 0 ? <Box width={grid.gap} flexShrink={0} /> : null}
+                  <SessionCard
+                    session={card}
+                    // The group is named ONCE: by the heading over the band when there is one,
+                    // and by the card's own title when there is not. The card is told both which
+                    // group it is in and whether the band already said so — the same rule that
+                    // drops the list's `task` cell while grouping by task.
+                    group={badges[index] ?? ''}
+                    headed={headed}
+                    selected={selected?.id === card.id}
+                    marked={marked.has(card.id)}
+                    stopping={bulk.picks.has(card.id)}
+                    width={grid.cardWidth}
+                    height={b.height}
+                    words={cardWords}
+                  />
+                </Box>
+              )
+            })}
+          </Box>
+        )))}
+        {pager ? <Pager cells={pager} /> : null}
+      </Box>
+    ) : (
+      // NO fixed height: the rows pack upward so nothing sits at the bottom of a tall pane with a
+      // field of blank above it. The leftover space belongs at the very bottom of the frame.
+      <Box flexDirection="row" flexShrink={0}>
+      <Box flexDirection="column" flexShrink={0} width={listBody}>
+        {visible.map((row, i) => {
+          const index = offset + i
+          // The cascade's guides, measured over the SAME window the columns are measured over, so
+          // the two agree about how much room is left. Empty for every flat arrangement, which
+          // then pays no columns at all.
+          const guide = guides[i] ?? ''
+          if (row.kind === 'spacer') return <Text key={`s${index}`}> </Text>
+          if (row.kind === 'heading') {
+            // A heading is drawn as a HEADING: accented, bold, with a rule running out to the
+            // edge. Dim grey at the same weight as its rows is not a hierarchy — it is a list that
+            // happens to be sorted, which is what this screen was.
+            //
+            // The cascade indents by its branch DEPTH, which is the whole of what the list has to
+            // learn about the tree — the rest of this screen never finds out one exists. The card
+            // grid, which has no indentation to spend, breadcrumbs the same branch instead.
+            // The guide REPLACES the old two-spaces-per-level indent: it says the same thing
+            // about depth and also says which node this hangs off and whether the branch ends
+            // here, neither of which a column position can carry.
+            const indent = guide || INDENT.repeat(row.depth ?? 0)
+            const head = `${row.label}  ${row.count}`
+            const rule = Math.max(0, listBody - indent.length - head.length - 3)
+            return (
+              <Text key={`h${index}`} wrap="truncate">
+                <Text dimColor>{indent}</Text>
+                <Text color={row.muted ? COLORS.muted : COLORS.secondary} bold={!row.muted}>
+                  {truncate(head, Math.max(1, listBody - indent.length))}
+                </Text>
+                <Text dimColor>{rule > 0 ? `  ${'─'.repeat(rule)}` : ''}</Text>
+              </Text>
+            )
+          }
+          const rowView = (
+            <SessionRowView
+              key={row.session.id}
+              session={row.session}
+              selected={selected?.id === row.session.id}
+              marked={marked.has(row.session.id)}
+              stopping={bulk.picks.has(row.session.id)}
+              notify={notifyWidth}
+              ages={ages}
+              columns={columns}
+              width={listBody - guide.length}
+              closeCell={closeCell}
+            />
+          )
+          // A session is a CHILD of its heading, so it carries the same bars one level deeper —
+          // a heading joined to its parent above rows that are not is a tree drawn half way.
+          if (!guide) return rowView
+          return (
+            <Box key={row.session.id} flexDirection="row" flexShrink={0}>
+              <Text dimColor>{guide}</Text>
+              {rowView}
+            </Box>
+          )
+        })}
+      </Box>
+      <ScrollBar cells={listBar} />
+      </Box>
+    )}
+    </Pane>
+  )
+
+  const actionRowNode = (
+    <>
+    {/* The action row stays as the KEYBOARD path for a narrow terminal that has no menu. Drawn
+        full width, under the band, because it acts on the selection rather than on either pane. */}
+    {actionRows > 0 ? (
+      <>
+        {actionRows > 1 ? <Text> </Text> : null}
+        <SessionActionRow
+          labels={actionWords}
+          actions={actions}
+          selected={at2}
+          focused={actionsFocused}
+          width={width}
+        />
+      </>
+    ) : null}
+
+    </>
+  )
+
+  // In a NARROW cockpit the detail is a pane the user ASKED for with `tab`, so it is drawn even
+  // when there is nothing to describe (it says so) and even when `d` folded it on a wide one.
+  const showDetail = cockpit.detail > 0 && (askDetail || narrow || (!hideDetail && detail.length > 0))
+  const detailNode = (
+    <>
+    {/* The third pane: what you selected, or the question you were just asked. A question owns the
+        keyboard, so the frame says so — the accent is where the keys go, everywhere, always. */}
+    {showDetail ? (
+      <Pane
+        title={askDetail ? s.sessionsPaneAsk : s.sessionsPaneDetail}
+        // The key that puts this pane away, written ON the pane. It lives as a row in the `show`
+        // block too, but that block is collapsed by default and five rows deep — a control for a
+        // thing you are looking straight at belongs on the thing.
+        badge={askDetail || narrow ? '' : s.sessionsDetailHide}
+        focused={Boolean(askDetail)}
+        width={width}
+        height={cockpit.detail}
+      >
+        {askDetail ? (
+          <Question
+            ask={askDetail as Exclude<Ask, { kind: 'new' } | { kind: 'view' } | { kind: 'keys' }>}
+            strings={s}
+            width={paneBody(width)}
+            rows={paneRows(cockpit.detail)}
+            fellAgo={fellAgo}
+            onClose={() => setAsk(null)}
+            onRun={(fn, label, then) => {
+              setAsk(null)
+              void run(fn, label).then(onRefreshFleet).then(() => then?.())
+            }}
+            host={host}
+            query={query}
+            // The cursor goes home on every change. That is the actual answer to the objection
+            // that stopped this being live: a narrowing list moves rows out from under the
+            // selection, so keeping the old index points at whatever slid into that slot. Row 0
+            // is the best match to look at anyway.
+            onQuery={q => { setQuery(q); toTop() }}
+            fleet={fleet}
+            // The mode ENDS with the act it exists for. Nobody has to remember a second keystroke
+            // to disarm, which is the state this screen must never leave a person in.
+            onStopped={() => setBulk(BULK_STOP_OFF)}
+            onAskFinish={task => setAsk({ kind: 'finishTask', task })}
+          />
+        ) : (
+          detail.length > 0
+            ? <Detail lines={detail} width={paneBody(width)} rows={paneRows(cockpit.detail)} />
+            : <Text dimColor wrap="truncate">{truncate(s.sessionsNoneSelected, paneBody(width))}</Text>
+        )}
+      </Pane>
+    ) : null}
+    </>
+  )
+
+  // NARROW (D-TUI-10): one pane over the body, under the strip that names all three.
+  if (narrow && shownPane) {
+    return (
+      <Box flexDirection="column" width={width} flexShrink={0}>
+        {cockpit.strip ? (
+          <PaneStrip
+            labels={[s.sessionsPaneMenu, s.tabsShort.sessions, s.sessionsPaneDetail]}
+            active={SESSIONS_PANES.indexOf(shownPane)}
+            width={width}
+          />
+        ) : null}
+        {shownPane === 'menu' ? menuNode : shownPane === 'sessions' ? listNode : detailNode}
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column" width={width} flexShrink={0}>
       <Box flexDirection="row" width={width} flexShrink={0}>
-      {cockpit.aside > 0 ? (
-        <>
-          {foldRows ? (
-            // Each block its OWN framed pane, titled with its own heading. One scrolling pane
-            // titled "menu" showed its first section and nothing else, so every switch and every
-            // task sat below the fold — and the honest reading of that screen is that all of it
-            // lives inside "Actions".
-            <Box flexDirection="column" width={cockpit.aside} flexShrink={0}>
-              {sections.map((section, i) => {
-                const h = foldRows[i]!
-                // COLLAPSED: the name and how many rows are inside it, and nothing else. What it
-                // gives up is its contents, never the fact that it exists.
-                if (h < PANE_MIN_ROWS) {
-                  const open = focus === 'aside' && i === activeSection
-                  const count = ` ${section.rows.length}`
-                  const label = truncate(
-                    section.title.toLowerCase(),
-                    Math.max(1, cockpit.aside - 5 - count.length),
-                  )
-                  return (
-                    <Text key={section.title} wrap="truncate">
-                      <Text color={COLORS.secondary}>{`${i + 1} `}</Text>
-                      <Text color={open ? COLORS.accent : COLORS.label}>{`▸ ${label}`}</Text>
-                      <Text dimColor>{count}</Text>
-                    </Text>
-                  )
-                }
-                const inner = paneRows(h)
-                const cursorIn = section.indexes.indexOf(asideRow)
-                const off = windowOffset(Math.max(0, cursorIn), section.rows.length, inner)
-                const bar = scrollBar({ offset: off, total: section.rows.length, rows: inner })
-                return (
-                  <Pane
-                    key={section.title}
-                    title={`${i + 1} ${section.title.toLowerCase()}`}
-                    focused={focus === 'aside' && i === activeSection}
-                    width={cockpit.aside}
-                    height={h}
-                  >
-                    <Box flexDirection="row" flexShrink={0}>
-                      <AsideMenu
-                        rows={section.rows}
-                        cursor={cursorIn}
-                        focused={focus === 'aside'}
-                        width={paneBody(cockpit.aside) - (bar.length > 0 ? 1 : 0)}
-                        height={inner}
-                        offset={off}
-                        allTasksLabel={s.asideAllTasks}
-                        allProjectsLabel={s.asideAllProjects}
-                      />
-                      <ScrollBar cells={bar} />
-                    </Box>
-                  </Pane>
-                )
-              })}
-            </Box>
-          ) : (
-            // Too short to frame each block: one pane, scrolling, with the headings inline.
-            <Pane
-              title={s.sessionsPaneMenu}
-              focused={focus === 'aside'}
-              width={cockpit.aside}
-              height={cockpit.band}
-            >
-              <AsideMenu
-                rows={asideList}
-                cursor={asideRow}
-                focused={focus === 'aside'}
-                width={paneBody(cockpit.aside)}
-                height={paneRows(cockpit.band)}
-                offset={asideOffset}
-                allTasksLabel={s.asideAllTasks}
-                allProjectsLabel={s.asideAllProjects}
-              />
-            </Pane>
-          )}
-          {/* The frames provide the separation the drawn divider used to; the gap is the column
-              `sessionsCockpit` already withheld from the list. */}
-          <Box width={1} flexShrink={0} />
-        </>
-      ) : null}
-
-      <Pane
-        // The TITLE says the mode, because the title is the one part of this pane drawn at every
-        // width and every height. The banner below it is dropped on a short terminal along with the
-        // summary row it replaces, and a mode you can be in without the screen saying so is exactly
-        // the state this design exists to make impossible.
-        title={bulk.on ? s.sessionsPaneStopMode : s.tabsShort.sessions}
-        focused={focus === 'list' && !actionsFocused}
-        width={cockpit.list}
-        height={cockpit.band}
-      >
-      {bulk.on && cockpit.summary ? (
-        // In PLACE of the summary, not above it: the mode costs no extra row, so a frame that fit
-        // before still fits. Red, and it names every key that works while it is on — the person who
-        // walked away and came back reads what to do rather than remembering what they pressed.
-        <Text color={COLORS.danger} bold wrap="truncate">
-          {truncate(s.sessionsStopBanner(bulk.picks.size), listBody)}
-        </Text>
-      ) : cockpit.summary ? (
-        <SummaryRow
-          fleet={fleet}
-          grouping={grouping}
-          strings={s}
-          width={listBody}
-          showHistory={showHistory}
-          showNamed={showNamed}
-          onlyActive={onlyActive}
-          // How many rows are ON SCREEN, counted from the very list being drawn. The header used to
-          // read the fleet's length, so with `only active` on it announced 44 over a screen showing
-          // ten — a number describing a screen nobody is looking at.
-          shown={rows.reduce((n, r) => n + (r.kind === 'session' ? 1 : 0), 0)}
-          // Counted from the SAME drawn rows, for the same reason `shown` is.
-          waitingShown={rows.reduce((n, r) => n + (r.kind === 'session'
-            && (r.session.state === 'waiting' || r.session.state === 'waiting-approval') ? 1 : 0), 0)}
-          query={query}
-          depth={depth}
-          scope={projectFilter ?? taskFilter ?? ''}
-          fell={fleet?.fell && fellAgo ? s.sessionsFellNote(fleet.fell.count, fellAgo) : ''}
-        />
-      ) : null}
-
-      {/* What each cell IS. The row was six aligned columns of unlabelled text — the alignment made
-          it scannable and the labels are what make it readable, and they are drawn from the very
-          same measured widths so the heading can never sit over the wrong column. */}
-      {cockpit.header && rows.length > 0 && !grid ? (
-        <Text dimColor wrap="truncate">
-          {/* Shifted by the cascade's guide column, or the headings sit over the wrong cells the
-              moment the tree is on. */}
-          {' '.repeat(guideWidth)}
-          {'  ' + ' '.repeat(notifyWidth) + (columns.id > 0 ? padCell(s.sessionsCols.id, columns.id) + '  ' : '')}
-          {columns.harness > 0 ? padCell(s.sessionsCols.harness, columns.harness) + '  ' : ''}
-          {padCell(s.sessionsCols.state, columns.state)}
-          {columns.title > 0 ? '  ' + padCell(s.sessionsCols.title, columns.title) : ''}
-          {columns.age > 0 ? '  ' + padCell(s.sessionsCols.age, columns.age) : ''}
-          {columns.worktree > 0 ? '  ' + padCell(s.sessionsCols.worktree, columns.worktree) : ''}
-          {columns.task > 0 ? '  ' + padCell(s.sessionsCols.task, columns.task) : ''}
-          {columns.metrics > 0 ? '  ' + padCell(s.sessionsCols.metrics, columns.metrics) : ''}
-          {columns.context > 0 ? '  ' + padCell(s.sessionsCols.context, columns.context) : ''}
-          {columns.where > 0 ? '  ' + padCell(s.sessionsCols.where, columns.where) : ''}
-        </Text>
-      ) : null}
-
-      {fleet === undefined ? (
-        <Text dimColor>{s.sessionsUnsupported}</Text>
-      ) : fleet === null ? (
-        <Text dimColor>{s.sessionsLoading}</Text>
-      ) : rows.length === 0 ? (
-        // An empty fleet is only ever reported as empty when the poll actually worked. When it did
-        // not, the host's own sentence is what the summary row is already showing. And a list
-        // emptied by a FILTER says which filter and which key lifts it: the sessions a reboot
-        // turned into `lost` rows are still there, still named and still reopenable, so "no
-        // sessions" would be false — and a blank pane under a strict filter is indistinguishable
-        // from a broken one.
-        //
-        // The behaviour profile fills the space an empty list leaves dead — BELOW that sentence,
-        // never instead of it. Sliced to the rows this pane actually has: an Ink screen that
-        // overflows its `height` is composited over the rows below it, not clipped, and the
-        // sentence above already spends one row of the same budget.
-        <Box flexDirection="column" flexShrink={0}>
-          <Text dimColor wrap="truncate">
-            {fleet.unavailable ? ''
-              : truncate(emptyReason, listBody)}
-          </Text>
-          {/* A failed poll can still hand back a baseline — the store read that builds it sits on
-              a path with no early return before `unavailable` is checked. So the profile is gated
-              on the SAME condition as the sentence above it, not on `baseline` alone: rendering it
-              under a blanked sentence is the exact thing that sentence's own blanking exists to
-              prevent. */}
-          {fleet.unavailable ? null : profileLines(fleet.baseline, listBody, s)
-            .slice(0, Math.max(0, cockpit.listRows - 1))
-            .map((line, i) => (
-              <Text key={i} dimColor>{line}</Text>
-            ))}
-        </Box>
-      ) : grid && page ? (
-        <Box flexDirection="column" width={cardsBody} flexShrink={0}>
-          {/* One band per group, and the air to the right of a short group is DELIBERATE: it is
-              what separates one group from the next, and filling it with the following group's
-              cards is exactly how this grid used to ignore the grouping it was drawn under. */}
-          {page.bands.map((b, i) => (b.kind === 'heading' ? (
-            <GroupHeading key={`h${i}`} band={b} width={cardsBody} />
-          ) : (
-            <Box key={`b${i}`} flexDirection="row" height={b.height} flexShrink={0}>
-              {b.items.map((index, c) => {
-                const card = cards[index]
-                if (!card) return null
-                return (
-                  <Box key={card.id} flexDirection="row" flexShrink={0}>
-                    {c > 0 ? <Box width={grid.gap} flexShrink={0} /> : null}
-                    <SessionCard
-                      session={card}
-                      // The group is named ONCE: by the heading over the band when there is one,
-                      // and by the card's own title when there is not. The card is told both which
-                      // group it is in and whether the band already said so — the same rule that
-                      // drops the list's `task` cell while grouping by task.
-                      group={badges[index] ?? ''}
-                      headed={headed}
-                      selected={selected?.id === card.id}
-                      marked={marked.has(card.id)}
-                      stopping={bulk.picks.has(card.id)}
-                      width={grid.cardWidth}
-                      height={b.height}
-                      words={cardWords}
-                    />
-                  </Box>
-                )
-              })}
-            </Box>
-          )))}
-          {pager ? <Pager cells={pager} /> : null}
-        </Box>
-      ) : (
-        // NO fixed height: the rows pack upward so nothing sits at the bottom of a tall pane with a
-        // field of blank above it. The leftover space belongs at the very bottom of the frame.
-        <Box flexDirection="row" flexShrink={0}>
-        <Box flexDirection="column" flexShrink={0} width={listBody}>
-          {visible.map((row, i) => {
-            const index = offset + i
-            // The cascade's guides, measured over the SAME window the columns are measured over, so
-            // the two agree about how much room is left. Empty for every flat arrangement, which
-            // then pays no columns at all.
-            const guide = guides[i] ?? ''
-            if (row.kind === 'spacer') return <Text key={`s${index}`}> </Text>
-            if (row.kind === 'heading') {
-              // A heading is drawn as a HEADING: accented, bold, with a rule running out to the
-              // edge. Dim grey at the same weight as its rows is not a hierarchy — it is a list that
-              // happens to be sorted, which is what this screen was.
-              //
-              // The cascade indents by its branch DEPTH, which is the whole of what the list has to
-              // learn about the tree — the rest of this screen never finds out one exists. The card
-              // grid, which has no indentation to spend, breadcrumbs the same branch instead.
-              // The guide REPLACES the old two-spaces-per-level indent: it says the same thing
-              // about depth and also says which node this hangs off and whether the branch ends
-              // here, neither of which a column position can carry.
-              const indent = guide || INDENT.repeat(row.depth ?? 0)
-              const head = `${row.label}  ${row.count}`
-              const rule = Math.max(0, listBody - indent.length - head.length - 3)
-              return (
-                <Text key={`h${index}`} wrap="truncate">
-                  <Text dimColor>{indent}</Text>
-                  <Text color={row.muted ? COLORS.muted : COLORS.secondary} bold={!row.muted}>
-                    {truncate(head, Math.max(1, listBody - indent.length))}
-                  </Text>
-                  <Text dimColor>{rule > 0 ? `  ${'─'.repeat(rule)}` : ''}</Text>
-                </Text>
-              )
-            }
-            const rowView = (
-              <SessionRowView
-                key={row.session.id}
-                session={row.session}
-                selected={selected?.id === row.session.id}
-                marked={marked.has(row.session.id)}
-                stopping={bulk.picks.has(row.session.id)}
-                notify={notifyWidth}
-                ages={ages}
-                columns={columns}
-                width={listBody - guide.length}
-                closeCell={closeCell}
-              />
-            )
-            // A session is a CHILD of its heading, so it carries the same bars one level deeper —
-            // a heading joined to its parent above rows that are not is a tree drawn half way.
-            if (!guide) return rowView
-            return (
-              <Box key={row.session.id} flexDirection="row" flexShrink={0}>
-                <Text dimColor>{guide}</Text>
-                {rowView}
-              </Box>
-            )
-          })}
-        </Box>
-        <ScrollBar cells={listBar} />
-        </Box>
-      )}
-      </Pane>
+        {menuNode ? (
+          <>
+            {menuNode}
+            {/* The frames provide the separation the drawn divider used to; the gap is the column
+                `sessionsCockpit` already withheld from the list. */}
+            <Box width={1} flexShrink={0} />
+          </>
+        ) : null}
+        {listNode}
       </Box>
-
-      {/* The action row stays as the KEYBOARD path for a narrow terminal that has no menu. Drawn
-          full width, under the band, because it acts on the selection rather than on either pane. */}
-      {actionRows > 0 ? (
-        <>
-          {actionRows > 1 ? <Text> </Text> : null}
-          <SessionActionRow
-            labels={actionWords}
-            actions={actions}
-            selected={at2}
-            focused={actionsFocused}
-            width={width}
-          />
-        </>
-      ) : null}
-
-      {/* The third pane: what you selected, or the question you were just asked. A question owns the
-          keyboard, so the frame says so — the accent is where the keys go, everywhere, always. */}
-      {cockpit.detail > 0 && (askDetail || (!hideDetail && detail.length > 0)) ? (
-        <Pane
-          title={askDetail ? s.sessionsPaneAsk : s.sessionsPaneDetail}
-          // The key that puts this pane away, written ON the pane. It lives as a row in the `show`
-          // block too, but that block is collapsed by default and five rows deep — a control for a
-          // thing you are looking straight at belongs on the thing.
-          badge={askDetail ? '' : s.sessionsDetailHide}
-          focused={Boolean(askDetail)}
-          width={width}
-          height={cockpit.detail}
-        >
-          {askDetail ? (
-            <Question
-              ask={askDetail as Exclude<Ask, { kind: 'new' } | { kind: 'view' } | { kind: 'keys' }>}
-              strings={s}
-              width={paneBody(width)}
-              rows={paneRows(cockpit.detail)}
-              fellAgo={fellAgo}
-              onClose={() => setAsk(null)}
-              onRun={(fn, label, then) => {
-                setAsk(null)
-                void run(fn, label).then(onRefreshFleet).then(() => then?.())
-              }}
-              host={host}
-              query={query}
-              // The cursor goes home on every change. That is the actual answer to the objection
-              // that stopped this being live: a narrowing list moves rows out from under the
-              // selection, so keeping the old index points at whatever slid into that slot. Row 0
-              // is the best match to look at anyway.
-              onQuery={q => { setQuery(q); toTop() }}
-              fleet={fleet}
-              // The mode ENDS with the act it exists for. Nobody has to remember a second keystroke
-              // to disarm, which is the state this screen must never leave a person in.
-              onStopped={() => setBulk(BULK_STOP_OFF)}
-              onAskFinish={task => setAsk({ kind: 'finishTask', task })}
-            />
-          ) : (
-            <Detail lines={detail} width={paneBody(width)} rows={paneRows(cockpit.detail)} />
-          )}
-        </Pane>
-      ) : null}
+      {actionRowNode}
+      {detailNode}
     </Box>
   )
 }

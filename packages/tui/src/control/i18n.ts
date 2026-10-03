@@ -338,6 +338,14 @@ export interface ControlStrings {
   /** Pane titles — the SHORT lowercase names, the same words the tab bar prints. */
   sessionsPaneMenu: string
   sessionsPaneDetail: string
+  /** A narrow cockpit's detail pane with no session selected — said, never a blank frame. */
+  sessionsNoneSelected: string
+  /** The help overlay's frame title (GL-04). */
+  helpOverlayTitle: string
+  /** The help overlay's own footer: the two keys that close it. */
+  keyHelpClose: string
+  /** The footer hint that opens the help overlay. */
+  keyHelp: string
   sessionsPaneAsk: string
   sessionsPaneKeys: string
   /** Said only while the reference has more below the fold: `12 of 34  ·  ↑↓ scroll`. */
@@ -811,6 +819,7 @@ const EN: ControlStrings = {
   tagline: 'AI coding-assistant analytics',
 
   tabs: {
+    code: 'Code',
     services: 'Services',
     sessions: 'Sessions',
     backup: 'Backup',
@@ -823,6 +832,7 @@ const EN: ControlStrings = {
   },
 
   tabsShort: {
+    code: 'code',
     services: 'services',
     sessions: 'sessions',
     backup: 'backup',
@@ -850,7 +860,7 @@ const EN: ControlStrings = {
   keyScroll: '↑↓/pg scroll',
   keyEnds: 'g/G ends',
   keyRefresh: 'r refresh',
-  keyLogSource: '[ ] source',
+  keyLogSource: '1-9 source',
   dashView: '1-6/tab view',
   dashFilter: 'f harness',
   dashPage: ', . page',
@@ -1044,6 +1054,10 @@ const EN: ControlStrings = {
   sessionsDoneWord: 'finished',
   sessionsPaneMenu: 'menu',
   sessionsPaneDetail: 'detail',
+  sessionsNoneSelected: 'no session selected — tab back to the list and pick one',
+  helpOverlayTitle: 'help · every key',
+  keyHelpClose: 'esc/? close',
+  keyHelp: '? keys',
   sessionsPaneAsk: 'question',
   sessionsPaneKeys: 'keys',
   sessionsKeysMore: (shown, total) => `${shown} of ${total}  ·  ↑↓ scroll`,
@@ -1397,6 +1411,7 @@ const PT: ControlStrings = {
   tagline: 'Analytics de assistentes de código IA',
 
   tabs: {
+    code: 'Código',
     services: 'Serviços',
     sessions: 'Sessões',
     backup: 'Backup',
@@ -1409,6 +1424,7 @@ const PT: ControlStrings = {
   },
 
   tabsShort: {
+    code: 'código',
     services: 'serviços',
     sessions: 'sessões',
     backup: 'backup',
@@ -1436,7 +1452,7 @@ const PT: ControlStrings = {
   keyScroll: '↑↓/pg rolar',
   keyEnds: 'g/G extremos',
   keyRefresh: 'r atualizar',
-  keyLogSource: '[ ] fonte',
+  keyLogSource: '1-9 fonte',
   dashView: '1-6/tab tela',
   dashFilter: 'f assistente',
   dashPage: ', . paginar',
@@ -1617,6 +1633,10 @@ const PT: ControlStrings = {
   sessionsDoneWord: 'finalizada',
   sessionsPaneMenu: 'menu',
   sessionsPaneDetail: 'detalhe',
+  sessionsNoneSelected: 'nenhuma sessão selecionada — tab volta à lista para escolher uma',
+  helpOverlayTitle: 'ajuda · todas as teclas',
+  keyHelpClose: 'esc/? fechar',
+  keyHelp: '? teclas',
   sessionsPaneAsk: 'pergunta',
   sessionsPaneKeys: 'teclas',
   sessionsKeysMore: (shown, total) => `${shown} de ${total}  ·  ↑↓ rolar`,

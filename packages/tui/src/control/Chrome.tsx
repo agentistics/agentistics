@@ -16,6 +16,8 @@ import {
   fitActionRow,
   footerHints,
   headerMetaWidth,
+  paneStrip,
+  STRIP_SEP,
   tabUnderline,
   type CentralLinkState,
   type ConfigCells,
@@ -224,6 +226,32 @@ export function Footer({ hints, width }: { hints: string[]; width: number }) {
  * shift every row under it, and the eye reads that as the screen redrawing rather than as an
  * answer to what was just pressed.
  */
+/**
+ * The narrow cockpit's one-line strip: every pane's name, the shown one accented and underlined, in
+ * the order `tab` walks them. The names that are not drawn are the whole point — a one-pane screen
+ * that did not say what else it holds would be a screen that hides two thirds of itself.
+ */
+export function PaneStrip({ labels, active, width }: {
+  labels: readonly string[]
+  active: number
+  width: number
+}) {
+  const cells = paneStrip(labels, active, width)
+  return (
+    <Text wrap="truncate">
+      <Text> </Text>
+      {cells.map((c, i) => (
+        <Text key={c.label}>
+          {i > 0 ? <Text dimColor>{STRIP_SEP}</Text> : null}
+          <Text color={c.active ? COLORS.accent : undefined} dimColor={!c.active} bold={c.active} underline={c.active}>
+            {c.label}
+          </Text>
+        </Text>
+      ))}
+    </Text>
+  )
+}
+
 export function StatusLine({ message, ok, width }: {
   message?: string
   ok?: boolean

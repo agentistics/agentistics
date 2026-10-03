@@ -25,6 +25,26 @@ export interface NavKey {
   shift?: boolean
 }
 
+/**
+ * A keypress as every resolver in the app sees it — `NavKey` plus the modifier the screens' letter
+ * chains read. It is what the help overlay's key table is PROBED with (`keymap.test.ts`): each entry
+ * names the presses it stands for, and each screen's resolver must answer them.
+ */
+export interface KeyPress extends NavKey {
+  ctrl?: boolean
+}
+
+/** `↑↓` / `j k` / `g G` — the keys `resolveListKey` answers. */
+export function isListKey(key: NavKey): boolean {
+  return Boolean(key.upArrow || key.downArrow)
+    || key.input === 'j' || key.input === 'k' || key.input === 'g' || key.input === 'G'
+}
+
+/** `↑↓` / `j k`, page up/down, home/end, `g G` — the keys `resolveScrollKey` answers. */
+export function isScrollKey(key: NavKey): boolean {
+  return isListKey(key) || Boolean(key.pageUp || key.pageDown || key.home || key.end)
+}
+
 export type NavAction =
   | { kind: 'tab'; tab: TabId }
   | { kind: 'move'; delta: -1 | 1 }
@@ -276,4 +296,143 @@ export const CHROME_ROWS = CHROME_ROWS_AROUND + 1
 
 export function bodyHeight(rows: number, headerRows = 1): number {
   return Math.max(1, rows - CHROME_ROWS_AROUND - Math.max(1, headerRows))
+}
+
+// ---------------------------------------------------------------------------
+// the SHELL's keys — what works on every screen that is not capturing
+// ---------------------------------------------------------------------------
+
+/** What a keypress means to the shell itself, before any screen sees it. */
+export type ShellIntent =
+  | { kind: 'tab'; tab: TabId }
+  | { kind: 'quit' }
+  | { kind: 'refresh' }
+  | { kind: 'mouse' }
+  | { kind: 'help' }
+
+/**
+ * The shell's own keys — PURE, and the ONE place they are decided.
+ *
+ * `[`/`]` (and `←`/`→` when no pane claims them) change screen, `q` quits, `r` re-reads, `m` toggles
+ * the mouse (only when there IS one), and `?` opens the key reference. `ctrl+c` is not here: it is
+ * answered by its own always-live handler, because it is the way out of a screen that captures.
+ */
+export function resolveShellKey(
+  key: KeyPress,
+  ctx: { tab: TabId; arrows: boolean; mouse: boolean },
+): ShellIntent | null {
+  const next = resolveTabKey(key, ctx.tab, ctx.arrows)
+  if (next && next !== ctx.tab) return { kind: 'tab', tab: next }
+  if (key.ctrl) return null
+  if (key.input === 'q') return { kind: 'quit' }
+  if (key.input === 'r') return { kind: 'refresh' }
+  if (key.input === 'm' && ctx.mouse) return { kind: 'mouse' }
+  if (key.input === '?') return { kind: 'help' }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// the services cockpit's keys
+// ---------------------------------------------------------------------------
+
+export type ServicesIntent =
+  | { kind: 'focus'; pane: PaneId }
+  | { kind: 'configRun' }
+  | { kind: 'configMove' }
+  | { kind: 'actionRun' }
+  | { kind: 'actionMove'; step: 1 | -1 }
+  | { kind: 'openActions' }
+  | { kind: 'stop' }
+  | { kind: 'restart' }
+  | { kind: 'open' }
+  | { kind: 'move' }
+
+/**
+ * The services cockpit's keys, by focused pane — PURE.
+ *
+ * It CLASSIFIES and leaves the index arithmetic to the caller (`resolveListKey`), so the rule of
+ * which key means what in which pane lives here, where the help overlay's table is tested against
+ * it. `narrow` is the one-pane layout: `esc` on the config pane walks back to the first pane there,
+ * because nothing else on that pane answers it.
+ */
+export function resolveServicesKey(
+  key: KeyPress,
+  ctx: { focus: PaneId; panes: readonly PaneId[]; narrow: boolean; hasActions: boolean },
+): ServicesIntent | null {
+  if (key.tab) {
+    const pane = resolveFocusKey(key, ctx.focus, ctx.panes)
+    return pane ? { kind: 'focus', pane } : null
+  }
+  if (key.ctrl) return null
+  if (ctx.focus === 'config') {
+    if (key.escape && ctx.narrow) return { kind: 'focus', pane: 'services' }
+    if (key.return) return { kind: 'configRun' }
+    if (isListKey(key)) return { kind: 'configMove' }
+    return null
+  }
+  if (ctx.focus === 'actions') {
+    if (key.escape) return { kind: 'focus', pane: 'services' }
+    if (!ctx.hasActions) return null
+    if (key.return) return { kind: 'actionRun' }
+    if (key.leftArrow) return { kind: 'actionMove', step: -1 }
+    if (key.rightArrow) return { kind: 'actionMove', step: 1 }
+    return null
+  }
+  if (key.return) return ctx.hasActions ? { kind: 'openActions' } : null
+  if (key.input === 's') return { kind: 'stop' }
+  if (key.input === 'R') return { kind: 'restart' }
+  if (key.input === 'o') return { kind: 'open' }
+  if (isListKey(key)) return { kind: 'move' }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// the Logs screen, and the output pane a streaming task owns
+// ---------------------------------------------------------------------------
+
+export type LogsIntent =
+  | { kind: 'source'; index: number }
+  | { kind: 'tail'; state: TailState }
+
+/**
+ * The Logs screen's keys — PURE. The digits pick a source (they are drawn on the selector), and
+ * every scroll key plus `f` goes through `resolveTailKey`.
+ *
+ * `[`/`]` are NOT here any more. They used to step the source too, and the shell answers them on
+ * every screen for the TABS — so one press switched the source AND left the screen, the double
+ * booking this app's rules forbid. The digits already reach every source.
+ */
+export function resolveLogsKey(
+  key: KeyPress,
+  ctx: { sources: number; state: TailState; length: number; page: number },
+): LogsIntent | null {
+  if (key.ctrl) return null
+  const digit = resolveDigit(key, ctx.sources)
+  if (digit !== null) return { kind: 'source', index: digit }
+  const next = resolveTailKey(key, ctx.state, ctx.length, ctx.page)
+  return next ? { kind: 'tail', state: next } : null
+}
+
+export type OutputIntent =
+  | { kind: 'close' }
+  | { kind: 'tail'; state: TailState }
+
+/**
+ * The keys of the pane a streaming task owns (a build, a backup) — PURE. `esc` puts the facts back;
+ * everything else reads the output through the same tail reducer the Logs screen uses.
+ */
+export function resolveOutputKey(key: KeyPress, state: TailState, length: number, page: number): OutputIntent | null {
+  if (key.escape) return { kind: 'close' }
+  if (key.ctrl) return null
+  const next = resolveTailKey(key, state, length, page)
+  return next ? { kind: 'tail', state: next } : null
+}
+
+/**
+ * `ctrl+c` — the way out of everything. Answered by its own always-live handler in the shell, NOT
+ * by `resolveShellKey`, because it has to work while a screen captures the keyboard (a half-typed
+ * prompt must never be a trap). Named here so the help overlay's table can be tested against it.
+ */
+export function isQuitChord(key: KeyPress): boolean {
+  return Boolean(key.ctrl) && key.input === 'c'
 }

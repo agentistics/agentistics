@@ -428,6 +428,10 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
      * free, writes under the session's grant), and every write lands in the board's own activity log under its actor.
      */
     board?: EngineBoard
+    /** 1.8 — where a native session is filed (the `code` tab's header), or null when it is not. */
+    nativeFiling?(sessionId: string): Promise<{ taskId: string; title: string; subtaskId?: string } | null>
+    /** 1.8 — the board's status vocabulary, in the board's order (labels for the task picker). */
+    statuses?(): Promise<{ id: string; label: string }[]>
     /**
      * 1.7 — refresh the usage snapshot of a session ALREADY filed; never files, moves or unfiles one
      * (a person's filing is not the engine's to change). Absent on an older host.

@@ -82,6 +82,41 @@ export function resolveDashboardScreen(
   return null
 }
 
+/** What a keypress means to the dashboard — the classification half of `useDashboardNav`. */
+export type DashboardIntent =
+  | { kind: 'filterClose' }
+  | { kind: 'filterMove'; step: 1 | -1 }
+  | { kind: 'filterPick' }
+  | { kind: 'filterOpen' }
+  | { kind: 'page'; step: 1 | -1 }
+  | { kind: 'screen'; screen: DashboardScreenId }
+
+/**
+ * The dashboard's keys — PURE, and what the help overlay's table is tested against.
+ *
+ * While the harness picker is open it owns the keyboard (`↑↓`, `enter`, `esc`); otherwise `f` opens
+ * it, `pgup`/`pgdn` (or `,`/`.` where the terminal keeps those for its scrollback) page the list, and
+ * the digits / `tab` change screen through `resolveDashboardScreen`.
+ */
+export function resolveDashboardKey(
+  key: NavKey & { ctrl?: boolean },
+  ctx: { open: boolean; screen: DashboardScreenId },
+): DashboardIntent | null {
+  if (ctx.open) {
+    if (key.escape) return { kind: 'filterClose' }
+    if (key.upArrow) return { kind: 'filterMove', step: -1 }
+    if (key.downArrow) return { kind: 'filterMove', step: 1 }
+    if (key.return) return { kind: 'filterPick' }
+    return null
+  }
+  if (key.ctrl) return null
+  if (key.input === 'f') return { kind: 'filterOpen' }
+  if (key.pageUp || key.input === ',') return { kind: 'page', step: -1 }
+  if (key.pageDown || key.input === '.') return { kind: 'page', step: 1 }
+  const next = resolveDashboardScreen(key, ctx.screen)
+  return next ? { kind: 'screen', screen: next } : null
+}
+
 /** The screen names, in strip order. */
 export function screenLabels(s: TuiStrings): Record<DashboardScreenId, string> {
   return {

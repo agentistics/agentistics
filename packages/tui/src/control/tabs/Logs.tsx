@@ -26,8 +26,7 @@ import type { CliLang } from '../lang'
 import type { TabChrome } from '../ControlCenter'
 import { controlStrings } from '../i18n'
 import {
-  resolveDigit,
-  resolveTailKey,
+  resolveLogsKey,
   scrollTailBy,
   windowOffset,
   type NavKey,
@@ -153,22 +152,16 @@ export function Logs({ host, status, lang, width, height, isActive, onChrome }: 
       shift: key.shift,
     }
 
-    // `←`/`→` belong to the screen switcher, so sources move on `[` / `]` — the pager convention
-    // for "previous/next buffer" — with the digits as direct jumps, mirrored by the digit prefixes
-    // drawn on the selector so the keys need no footer hint to be discoverable.
-    const digit = resolveDigit(nav, sources.length)
-    if (digit !== null) return pick(sources[digit]!.source)
-    if (sources.length > 0) {
-      const i = Math.max(0, sources.findIndex(o => o.source === active))
-      if (input === ']') return pick(sources[(i + 1) % sources.length]!.source)
-      if (input === '[') return pick(sources[(i + sources.length - 1) % sources.length]!.source)
-    }
-
-    // Every scroll key a document should answer — arrows and vi keys by a row, page up/down by a
-    // screenful, home/end and g/G to the ends — in one pure reducer, which is also where the rule
-    // that any movement unpins the tail lives.
-    const next = resolveTailKey(nav, { index: anchor, follow: view.follow }, len, page)
-    if (next) setView(next)
+    // The DIGITS pick a source (they are drawn on the selector, so they need no hint), and every
+    // scroll key a document should answer — plus `f` to re-follow — goes through one pure reducer,
+    // which is also where the rule that any movement unpins the tail lives. `[`/`]` used to step the
+    // source as well, while the shell answered the same two keys for the TABS: one press did both.
+    const intent = resolveLogsKey({ ...nav, ctrl: key.ctrl }, {
+      sources: sources.length, state: { index: anchor, follow: view.follow }, length: len, page,
+    })
+    if (!intent) return
+    if (intent.kind === 'source') return pick(sources[intent.index]!.source)
+    setView(intent.state)
   }, { isActive })
 
   // Nothing to claim: the digits are this screen's outright, because the screens stopped answering

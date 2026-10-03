@@ -98,6 +98,7 @@
       "version": "2.72.0",
       "dependencies": {
         "@agentistics/core": "workspace:*",
+        "@agentistics/engine-api": "workspace:*",
         "es-toolkit": "^1.50.0",
         "ink": "^7.1.1",
         "react": "^19.2.5",

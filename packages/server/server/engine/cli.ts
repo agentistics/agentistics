@@ -33,6 +33,26 @@ export function resolveEngineVerb(
 export async function runEngineVerb(verb: EngineVerb, args: string[], lang: CliLang): Promise<number> {
   const { engine, engineStatus, loadEngine } = await import('./load')
   await loadEngine()
+  // `agentop code` with a terminal on both ends IS the control center's `code` tab (D-TUI-3) when the
+  // engine offers one (1.8 `codeTab`); its line mode stays for a pipe, `ls`, `--help`. A refusal
+  // (the flag off, a bad argument) is printed HERE, before the alternate screen is entered.
+  const codeTab = verb === 'code' ? engine()?.codeTab : undefined
+  if (codeTab) {
+    const decision = codeTab.launch(args, { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }, lang)
+    if (decision.kind === 'refuse') {
+      console.error(decision.sentence)
+      return decision.exit
+    }
+    if (decision.kind === 'tab') {
+      const { runStart } = await import('../cli-start')
+      const out = await runStart({
+        launch: decision.launch,
+        ...(decision.model ? { model: decision.model } : {}),
+        ...(decision.cwd ? { cwd: decision.cwd } : {}),
+      })
+      return out === 'foreground' ? 0 : out
+    }
+  }
   const decided = resolveEngineVerb(verb, engineStatus(), engine()?.commands ?? [], lang)
   if ('refuse' in decided) {
     console.error(decided.refuse)
