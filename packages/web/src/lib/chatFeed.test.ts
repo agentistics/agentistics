@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import {
+  streamHealthy,
+  STREAM_SILENT_MS,
   feedDue,
   feedExpired,
   firstFrameStale,
@@ -140,5 +142,14 @@ describe('stampsToDrop', () => {
     // A stamp is a number; the frame it describes is hundreds of KB. They do not deserve the same
     // budget, and a stamp for a conversation the cache has released is still the right answer.
     expect(MAX_STAMPS).toBeGreaterThan(10)
+  })
+})
+
+describe('streamHealthy (PERF.1: no interval reads while the push stream carries the chat)', () => {
+  it('open and recently heard: healthy; silent, closed or absent: not', () => {
+    expect(streamHealthy({ stream: { readyState: 1 }, streamAt: 1000 }, 1000 + STREAM_SILENT_MS - 1)).toBe(true)
+    expect(streamHealthy({ stream: { readyState: 1 }, streamAt: 1000 }, 1000 + STREAM_SILENT_MS)).toBe(false)
+    expect(streamHealthy({ stream: { readyState: 0 }, streamAt: 1000 }, 1001)).toBe(false)
+    expect(streamHealthy({ stream: null, streamAt: 1000 }, 1001)).toBe(false)
   })
 })

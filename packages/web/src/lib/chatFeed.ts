@@ -30,10 +30,14 @@
  * whole module is answering.
  */
 
+import { applyChatDelta } from '@agentistics/core'
 import { sessionScratch, type CachedChat } from './sessionScratch'
 import { setAttachmentsDir } from './attachmentUrl'
 
-/** Matches the fleet poll. The transcript only changes when a turn lands, so faster buys nothing. */
+/**
+ * The FALLBACK cadence: a watched conversation is pushed (`/api/fleet/chat-stream`, PERF.1), and this
+ * interval only runs while that stream is not healthy.
+ */
 export const FOREGROUND_POLL_MS = 3000
 
 /**
@@ -168,6 +172,27 @@ interface LiveEntry extends FeedEntry {
    * holds ten parsed conversations by design.
    */
   raw: string | null
+  /**
+   * The PUSHED chat (PERF.1): `/api/fleet/chat-stream` sends the conversation once, then only what
+   * changed. While it is healthy the interval reads stop; when it fails the interval is back at once.
+   */
+  stream: EventSource | null
+  /** When the stream last said anything (a frame or its `ping`). */
+  streamAt: number
+  /** Not before this time is a failed stream opened again. */
+  streamRetryAt: number
+  /** The turns of the frame the STREAM sent — what its deltas are relative to. Only on a watched entry. */
+  streamTurns: CachedChat['turns'] | null
+}
+
+/** A stream that has said nothing for this long is treated as gone (its `ping` is every 15 s). */
+export const STREAM_SILENT_MS = 35_000
+/** After a stream fails, how long the interval alone is used before the stream is tried again. */
+export const STREAM_RETRY_MS = 10_000
+
+/** PURE: is this entry's push stream carrying the conversation right now? */
+export function streamHealthy(e: { stream: { readyState: number } | null; streamAt: number }, now: number): boolean {
+  return e.stream !== null && e.stream.readyState === 1 && now - e.streamAt < STREAM_SILENT_MS
 }
 
 const entries = new Map<string, LiveEntry>()
@@ -229,7 +254,43 @@ function tick(): void {
   }
   for (const key of warmToDrop([...entries].map(([k, e]) => [k, e] as const))) entries.delete(key)
   if (entries.size === 0) { stopTicker(); return }
-  for (const e of [...entries.values()]) if (feedDue(e, now, vis)) void read(e)
+  for (const e of [...entries.values()]) {
+    if (e.watchers > 0) openStream(e, now)
+    if (streamHealthy(e, now)) continue
+    if (feedDue(e, now, vis)) void read(e)
+  }
+}
+
+function openStream(e: LiveEntry, now: number): void {
+  if (e.stream !== null || typeof EventSource === 'undefined' || now < e.streamRetryAt) return
+  const es = new EventSource(`/api/fleet/chat-stream?id=${encodeURIComponent(e.id)}&lang=${e.lang}`)
+  e.stream = es
+  e.streamAt = now
+  es.onopen = () => { e.streamAt = Date.now() }
+  es.addEventListener('ping', () => { e.streamAt = Date.now() })
+  es.addEventListener('chat', ev => {
+    e.streamAt = Date.now()
+    const text = (ev as MessageEvent<string>).data
+    try { e.streamTurns = (JSON.parse(text) as CachedChat).turns } catch { return }
+    accept(e, text)
+  })
+  es.addEventListener('chat-delta', ev => {
+    e.streamAt = Date.now()
+    if (e.streamTurns === null) { closeStream(e); return }
+    try {
+      const d = JSON.parse((ev as MessageEvent<string>).data) as { drop: number; keep: number; append: unknown[]; meta: Omit<CachedChat, 'turns'> }
+      const turns = applyChatDelta(e.streamTurns, d)
+      e.streamTurns = turns
+      accept(e, JSON.stringify({ ...d.meta, turns }))
+    } catch { closeStream(e) }
+  })
+  es.onerror = () => { closeStream(e); e.streamRetryAt = Date.now() + STREAM_RETRY_MS }
+}
+
+function closeStream(e: LiveEntry): void {
+  e.stream?.close()
+  e.stream = null
+  e.streamTurns = null
 }
 
 async function read(e: LiveEntry): Promise<void> {
@@ -239,7 +300,17 @@ async function read(e: LiveEntry): Promise<void> {
   try {
     const res = await fetch(`/api/fleet/chat?id=${encodeURIComponent(e.id)}&lang=${e.lang}`)
     if (!res.ok) return
-    const text = await res.text()
+    accept(e, await res.text())
+  } catch {
+    /* transient — keep the last conversation rather than blanking it */
+  } finally {
+    e.inFlight = false
+  }
+}
+
+/** One answer, from a read or from the stream: the same bytes keep the same instance. */
+function accept(e: LiveEntry, text: string): void {
+  try {
     // The frame is CURRENT as of now whether or not it changed — freshness is when the answer was
     // last confirmed, not when it last differed.
     stampRead(e.key, Date.now())
@@ -262,9 +333,7 @@ async function read(e: LiveEntry): Promise<void> {
     sessionScratch.writeChat(e.key, next)
     for (const cb of [...e.listeners]) cb(next)
   } catch {
-    /* transient — keep the last conversation rather than blanking it */
-  } finally {
-    e.inFlight = false
+    /* a frame that does not parse is dropped; the next one, or the interval, replaces it */
   }
 }
 
@@ -284,6 +353,7 @@ export function subscribeChat(
       ...newEntry(),
       id: opts.id, key: opts.key, lang: opts.lang,
       listeners: new Set(), inFlight: false, raw: null,
+      stream: null, streamAt: 0, streamRetryAt: 0, streamTurns: null,
     }
     entries.set(opts.id, e)
   }
@@ -293,7 +363,7 @@ export function subscribeChat(
   entry.key = opts.key
   // A language change is a DIFFERENT answer from the same route (the harness labels are localized),
   // so the bytes it last saw no longer describe what it would get back.
-  if (entry.lang !== opts.lang) { entry.lang = opts.lang; entry.raw = null }
+  if (entry.lang !== opts.lang) { entry.lang = opts.lang; entry.raw = null; closeStream(entry) }
   entry.watchers += 1
   entry.leftAt = null
   entry.listeners.add(onPayload)
@@ -301,10 +371,12 @@ export function subscribeChat(
   // The mount's own read. Whatever the cache holds, the view asks once for itself — that has always
   // been the rule here, and it is what makes the cache "the first frame, never the answer".
   void read(entry)
+  openStream(entry, Date.now())
   return () => {
     entry.listeners.delete(onPayload)
     entry.watchers = Math.max(0, entry.watchers - 1)
-    if (entry.watchers === 0) entry.leftAt = Date.now()
+    // Left: the stream goes (a warm conversation is read on the slow interval, as before).
+    if (entry.watchers === 0) { entry.leftAt = Date.now(); closeStream(entry) }
   }
 }
 
@@ -316,7 +388,8 @@ export function subscribeChat(
  */
 export function refreshChat(id: string): void {
   const e = entries.get(id)
-  if (e) void read(e)
+  // A healthy stream already carries the send and the end of a turn; a read would only repeat it.
+  if (e && !streamHealthy(e, Date.now())) void read(e)
 }
 
 /** When the cached frame for this conversation was read, or null if this session never read it. */
@@ -326,6 +399,7 @@ export function chatReadAt(key: string): number | null {
 
 /** Testing seam: forget everything, including the timer. */
 export function resetChatFeed(): void {
+  for (const e of entries.values()) closeStream(e)
   entries.clear()
   readStamps.clear()
   stopTicker()

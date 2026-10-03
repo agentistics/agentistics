@@ -129,6 +129,8 @@ async function readSessionChatCore(
   // untested long enough to become a blank pane in front of a user.
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
   onRow: (row: { link?: SessionConversationLink | null }) => void = () => undefined,
+  /** The transcript file this read resolved (the chat stream watches it). */
+  onPath: (path: string) => void = () => undefined,
 ): Promise<ChatPayload> {
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
@@ -272,6 +274,7 @@ async function readSessionChatCore(
   // one step later than the link and format refusals above. The cause behind the report was the
   // stale memo in `transcript-path-memo.ts`; this is the symptom guard beside it, so the next cause
   // says something instead of drawing a blank pane.
+  onPath(path)
   const read = await reader.read(path, MAX_TURNS).catch(() => null)
   if (read === null) {
     const availability = transcriptAvailability({
@@ -326,9 +329,10 @@ export async function readSessionChat(
   lang: CliLang,
   id: string,
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+  onPath?: (path: string) => void,
 ): Promise<ChatPayload> {
   let link: SessionConversationLink | null | undefined
-  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link })
+  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link }, onPath)
   const transcript: TranscriptAvailability | undefined = p.transcript
     ?? (p.unavailable === undefined && p.turns.length > 0 ? { state: 'present', reason: 'resolved' } : undefined)
   return {

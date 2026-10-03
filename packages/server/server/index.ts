@@ -2811,6 +2811,45 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // One hosted session's conversation, for the workspace's chat view. Which harnesses can be read
     // is `harness-transcript.ts`; the module refuses IN WORDS wherever the conversation link is not
     // exact or nothing here parses that harness's transcript format.
+    // The same conversation, PUSHED (PERF.1): the payload once, then deltas as the transcript file
+    // changes. 503 past the stream cap — the client then reads `/api/fleet/chat` on its interval.
+    if (url.pathname === '/api/fleet/chat-stream' && req.method === 'GET') {
+      const id = url.searchParams.get('id')
+      if (!id) {
+        return new Response(JSON.stringify({ error: 'bad_request' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      const { readSessionChat } = await import('./sessions/chat-web')
+      const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+      const { chatStreamResponse, ROW_TTL_MS } = await import('./sessions/chat-stream')
+      const lang = fleetLang(url.searchParams.get('lang'))
+      const host = await hostForFleet(lang)
+      // The row is reused between changes: a transcript append does not move the session in the
+      // fleet, and re-walking every pane per appended line is the cost being removed.
+      const memo = Object.create(host) as typeof host
+      let rowAt = 0
+      let rows: ReturnType<NonNullable<typeof host.sessions>> | null = null
+      if (host.sessions) {
+        memo.sessions = () => {
+          if (!rows || Date.now() - rowAt >= ROW_TTL_MS) { rowAt = Date.now(); rows = host.sessions!.call(host); void rows.catch(() => { rows = null }) }
+          return rows
+        }
+      }
+      const res = chatStreamResponse(id, {
+        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath) },
+      }, req.signal)
+      if (!res) {
+        return new Response(JSON.stringify({ error: 'too_many_streams' }), {
+          status: 503,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
+      return res
+    }
+
     if (url.pathname === '/api/fleet/chat' && req.method === 'GET') {
       const id = url.searchParams.get('id')
       if (!id) {
