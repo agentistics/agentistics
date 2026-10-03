@@ -1911,8 +1911,8 @@ async function spawnManaged(req: {
   }
 
   const convId = planned.plan.conversationId ?? req.resumeId
-  const liveBackend = await backend.list().catch(() => [])
-  const backendIds = new Set(liveBackend.map(b => b.id))
+  const liveBackend = await backend.list().catch(() => null)
+  const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
   await retireFallenSessions({
     newSessionId: id,
     conversationId: convId,
@@ -2015,12 +2015,15 @@ async function reopenEntries(
   entries: readonly ManagedSession[],
   s: CliStrings,
   lang: CliLang,
-): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal }> {
-  const conversations = await loadConversations()
+): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal; backendUnreadable?: true }> {
   const backend = await resolveBackend()
-  const live = new Set(
-    (await backend.list().catch(() => [])).filter(b => b.alive).map(b => b.id),
-  )
+  // A backend that cannot be LISTED is not one with nothing running: reading it as empty made every
+  // live row of the set look fallen, and a reopen started a second assistant inside each live
+  // conversation (2026-10-03). Refuse the whole set instead.
+  const listed = await backend.list().catch(() => null)
+  if (!listed) return { plan: planTaskReopen({ entries: [], liveIds: new Set(), conversationFor: () => null }), opened: 0, skipped: 0, backendUnreadable: true }
+  const conversations = await loadConversations()
+  const live = new Set(listed.filter(b => b.alive).map(b => b.id))
   // What is already being driven, so a task reopen cannot put a second assistant into a conversation
   // that has one. `live` above cannot answer this: it is keyed by ROW, and the twin case is a row
   // that is down while another row drives its conversation.
@@ -2087,7 +2090,9 @@ async function reopenEntries(
         const freshBackend = await resolveBackend()
         const [freshEntries, freshAlive] = await Promise.all([
           readRegistry().catch(() => [] as ManagedSession[]),
-          freshBackend.list().catch(() => []).then(l => new Set(l.filter(b => b.alive).map(b => b.id))),
+          // A failed list THROWS here rather than reading as "nothing alive": the attempt then
+          // counts as failed instead of spawning a twin into a session that is still running.
+          freshBackend.list().then(l => new Set(l.filter(b => b.alive).map(b => b.id))),
         ])
         return { entries: freshEntries, aliveIds: freshAlive }
       },
@@ -2636,8 +2641,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // stops standing beside its own continuation with the same name on it.
       if (previous) await patchSession(previous.id, { endedAt: new Date().toISOString() })
 
-      const liveBackend = await (await resolveBackend()).list().catch(() => [])
-      const backendIds = new Set(liveBackend.map(b => b.id))
+      const liveBackend = await (await resolveBackend()).list().catch(() => null)
+      const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
       await retireFallenSessions({
         newSessionId: spawned.id,
         conversationId: req.sessionId,
@@ -3529,7 +3534,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: true, message: s.sessRestoreDeclined(wanted.length) }
       }
 
-      const { opened, skipped, admissionRefusal } = await reopenEntries(wanted, s, lang)
+      const { opened, skipped, admissionRefusal, backendUnreadable } = await reopenEntries(wanted, s, lang)
+      if (backendUnreadable) return { ok: false, message: s.sessBackendUnreadable }
       if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
       return opened > 0
         ? { ok: true, message: s.sessRestored(opened, skipped) }
@@ -3689,7 +3695,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const blocked = await backend.unavailable()
       if (blocked) return { ok: false, message: blocked }
 
-      const backendIds = new Set((await backend.list().catch(() => [])).map(b => b.id))
+      const listed = await backend.list().catch(() => null)
+      if (!listed) return { ok: false, message: s.sessBackendUnreadable }
+      const backendIds = new Set(listed.map(b => b.id))
       const group = planCrashGroup({ entries: await readRegistry(), backendIds })
       if (!group || group.entries.length === 0) return { ok: false, message: s.sessNoFell }
 
@@ -3704,7 +3712,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: unknown.length > 0 ? s.sessFellGone(unknown.length) : s.sessFellNonePicked }
       }
 
-      const { plan, opened, skipped, admissionRefusal } = await reopenEntries(chosen, s, lang)
+      const { plan, opened, skipped, admissionRefusal, backendUnreadable } = await reopenEntries(chosen, s, lang)
+      if (backendUnreadable) return { ok: false, message: s.sessBackendUnreadable }
       if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
       return taskReopenSucceeded(plan, opened)
         ? { ok: true, message: s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length) }

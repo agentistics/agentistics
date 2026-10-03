@@ -96,3 +96,17 @@ describe('attemptReopenRow, driven through the real resume lock', () => {
     expect(r2.kind).toBe('opened')
   })
 })
+
+describe('attemptReopenRow — a backend that cannot be read (2026-10-03)', () => {
+  it('fails the attempt and spawns NOTHING when the fresh state cannot be read', async () => {
+    let spawned = 0
+    const deps: ReopenAttemptDeps = {
+      freshState: async () => { throw new Error('error connecting to /tmp/tmux-1000/agentop (Permission denied)') },
+      holderOf: async () => undefined,
+      spawn: async () => { spawned++; return { ok: true, id: 'twin' } },
+      onSpawned: async () => {},
+    }
+    expect(await attemptReopenRow('conv-1', 'row-1', deps)).toEqual({ kind: 'failed' })
+    expect(spawned).toBe(0)
+  })
+})

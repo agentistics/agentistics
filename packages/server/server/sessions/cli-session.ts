@@ -297,8 +297,8 @@ async function start(
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
 
-  const liveBackend = await backend.list().catch(() => [])
-  const backendIds = new Set(liveBackend.map(b => b.id))
+  const liveBackend = await backend.list().catch(() => null)
+  const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
   await retireFallenSessions({
     newSessionId: id,
     conversationId: planned.plan.conversationId,
@@ -488,8 +488,8 @@ async function batch(
       ...(await recordedRepo(cwd)),
     })
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
-    const liveBackend = await backend.list().catch(() => [])
-    const backendIds = new Set(liveBackend.map(b => b.id))
+    const liveBackend = await backend.list().catch(() => null)
+    const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
     await retireFallenSessions({
       newSessionId: id,
       conversationId: planned.plan.conversationId,
@@ -519,7 +519,14 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     return 1
   }
   const conversations = await loadConversations()
-  const live = new Set((await backend.list().catch(() => [])).filter(b => b.alive).map(b => b.id))
+  // A backend that cannot be listed is not one with nothing running — reading it as empty would
+  // reopen a second assistant into every live session of the task (2026-10-03).
+  const listed = await backend.list().catch(() => null)
+  if (!listed) {
+    console.error('Could not list the running sessions (tmux did not answer); nothing was reopened. Try again in a moment.')
+    return 1
+  }
+  const live = new Set(listed.filter(b => b.alive).map(b => b.id))
   // What is already being driven, so this cannot put a second assistant into a conversation that has
   // one. `live` above cannot answer it: it is keyed by ROW, and the twin case is a row that is down
   // while a DIFFERENT row drives its conversation. Same collector the cockpit's verb uses.

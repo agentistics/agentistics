@@ -372,17 +372,22 @@ export async function retireFallenSessions(
     conversationId?: string
     cwd: string
     harness: string
-    backendIds: ReadonlySet<string>
+    /** What the backend is hosting right now, or `null` when it could not be listed. `null`
+     *  retires nothing: an unreachable tmux proves nothing has fallen, and reading it as "nothing
+     *  is running" retired every live sibling in the directory (2026-10-03). */
+    backendIds: ReadonlySet<string> | null
   },
   registry: SessionRegistry = defaultRegistry,
 ): Promise<number> {
+  if (o.backendIds === null) return 0
+  const backendIds = o.backendIds
   const list = await registry.read()
   const nowIso = new Date().toISOString()
   let retired = 0
   for (const m of list) {
     if (m.endedAt) continue
     if (o.newSessionId && m.id === o.newSessionId) continue
-    if (o.backendIds.has(m.id)) continue
+    if (backendIds.has(m.id)) continue
     const sameConv = Boolean(o.conversationId && m.conversationId === o.conversationId)
     const sameCwd = m.cwd === o.cwd && m.harness === o.harness
     if (sameConv || sameCwd) {

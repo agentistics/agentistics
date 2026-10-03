@@ -184,7 +184,10 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
       '          To run a second one anyway, give it its own data directory: ' +
       'AGENTISTICS_DIR=/path/to/dir agentop server'
     )
-    process.exit(1)
+    // Not 1: a refusal is not a crash, and the unit's `RestartPreventExitStatus=` names this code
+    // so systemd stops instead of restarting into the same refusal (service-exit.ts).
+    const { EXIT_INSTANCE_HELD } = await import('./service-exit')
+    process.exit(EXIT_INSTANCE_HELD)
   }
   // SYNCHRONOUS release: both signal handlers call `process.exit` on the next line, and an async
   // release never got past its first `await`, so every clean stop left the lock on disk. A lock left
@@ -4353,10 +4356,13 @@ process.stdout.write(
   `${_SEP}\n\n`
 )
 } catch (err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err)
-  if (msg.includes('EADDRINUSE') || msg.includes('already in use')) {
-    console.log(`[server] Port ${PORT} already in use — reusing existing instance.`)
-    process.exit(0)
+  const { isAddressInUse, EXIT_INSTANCE_HELD } = await import('./service-exit')
+  if (isAddressInUse(err)) {
+    // Another server answers on this port. The dedicated code, not 0 and not 1: a service manager
+    // must neither restart this (it is not a crash — see service-exit.ts) nor record it as a clean
+    // stop of a server that never ran.
+    console.error(`[server] Port ${PORT} is already in use by another agentop server — exiting (${EXIT_INSTANCE_HELD}).`)
+    process.exit(EXIT_INSTANCE_HELD)
   }
   throw err
 }

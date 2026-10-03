@@ -122,6 +122,32 @@ export async function runDoctor(argv: string[]): Promise<never> {
     console.log(`    ${DIM}login-shell PATH: ${segs} entries; toolchain vars: ${vars}${RESET}`)
   }
 
+  // The service (Linux, solo/member machines): is the server that holds the data dir the one the
+  // unit started? Informational — it does not decide the exposure verdict below.
+  if (process.platform === 'linux') {
+    const { serviceFindings, parseIsActive } = await import('./server-restart-plan')
+    const { unitPath } = await import('./autostart')
+    const { probeInstanceLock } = await import('./single-instance')
+    const { serverLockFile } = await import('./config')
+    const unitFile = unitPath('server')
+    const unitText = existsSync(unitFile) ? readFileSync(unitFile, 'utf8') : null
+    if (unitText !== null) {
+      const pid = await probeInstanceLock(serverLockFile())
+      let cgroup = ''
+      if (pid !== null) { try { cgroup = readFileSync(`/proc/${pid}/cgroup`, 'utf8') } catch { /* gone */ } }
+      let unitActive: boolean | null = null
+      try {
+        const p = Bun.spawnSync(['systemctl', '--user', 'is-active', 'agentop-server'], { stderr: 'ignore' })
+        unitActive = parseIsActive(p.stdout.toString())
+      } catch { /* no systemctl */ }
+      for (const f of serviceFindings({ unitText, unitActive, holder: pid === null ? null : { pid, cgroup } })) {
+        const icon = f.status === 'pass' ? `${GREEN}✓${RESET}` : `${YELLOW}!${RESET}`
+        console.log(`\n  ${icon} ${f.label}`)
+        console.log(`    ${DIM}${f.detail}${RESET}`)
+      }
+    }
+  }
+
   if (dbError) {
     console.log(`\n  ${YELLOW}!${RESET} Database unreachable — owner-MFA and machine-token checks could not run.`)
     console.log(`    ${DIM}${dbError}${RESET}`)

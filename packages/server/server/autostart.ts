@@ -43,6 +43,7 @@ import {
   systemdUnit,
   migrateUnitKillMode,
   migrateUnitOOMPolicy,
+  migrateUnitRestartGuards,
   migrateUnitPath,
   type RestartVerdict,
   type ServingObservation,
@@ -263,7 +264,7 @@ export function unitName(mode: AutostartMode): string {
   return `agentop-${mode}.service`
 }
 
-function unitPath(mode: AutostartMode): string {
+export function unitPath(mode: AutostartMode): string {
   return join(homedir(), '.config', 'systemd', 'user', unitName(mode))
 }
 
@@ -862,6 +863,8 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   if (killMode) { next = killMode; done.push('a restart no longer stops your sessions') }
   const oom = migrateUnitOOMPolicy(next)
   if (oom) { next = oom; done.push('a session running out of memory no longer stops the server') }
+  const guards = migrateUnitRestartGuards(next)
+  if (guards) { next = guards; done.push('a refused start can no longer turn into a restart loop') }
   const pathFixed = process.env.INVOCATION_ID ? null : migrateUnitPath(next, process.env.PATH)
   if (pathFixed) { next = pathFixed; done.push('sessions it starts can find the coding assistants on your PATH') }
   if (next !== unitText) {

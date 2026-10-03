@@ -15,6 +15,7 @@
  * Secrets: the bearer token is NEVER logged.
  */
 
+import { authStopFingerprint, authStopGate, type AuthStop } from './uploader-auth-stop'
 import { createHash } from 'node:crypto'
 import { writeFile, unlink } from 'node:fs/promises'
 import type { SessionMeta, SharedTask, StatsCache, WorkflowRun, TeamConnection, TeamConfig } from '@agentistics/core'
@@ -114,6 +115,24 @@ const _pushErrKind = new Map<string, 'auth' | 'net'>()
  *  this in-flight clock. A restart mid-streak simply restarts the clock, which only delays
  *  marking the connection — it can never cause a spurious mark, so it is not a correctness gap. */
 const _authErrSince = new Map<string, number>()
+/** Connections STOPPED by a 401/403 (uploader-auth-stop.ts): no ingest, no log line, until the
+ *  configuration changes or a throttled whoami probe sees the central accept the token again. */
+const _authStop = new Map<string, AuthStop>()
+
+/** Test-only: make the next push of a stopped connection probe now instead of in a minute. */
+export function __expireAuthStopProbeForTests(connId: string): void {
+  const st = _authStop.get(connId)
+  if (st) _authStop.set(connId, { ...st, probedAtMs: 0 })
+}
+
+/** Enter the stop — ONE log line, on the transition only. */
+function stopOnAuthRejection(conn: TeamConnection, status: number): void {
+  const fingerprint = authStopFingerprint(conn.endpoint, conn.token)
+  if (_authStop.get(conn.id)?.fingerprint === fingerprint) return
+  _authStop.set(conn.id, { fingerprint, probedAtMs: Date.now() })
+  console.warn(`[team-uploader] ${conn.id} (${hostOf(conn.endpoint)}) ingest returned ${status} — pushes to this ` +
+    'central are stopped until it accepts the token again or the connection is changed')
+}
 /** The interval (seconds) most recently learned from each central's policy. */
 const _centralIntervalSec = new Map<string, number>()
 /** ms round-trip of the most recent SUCCESSFUL policy fetch, per connection — the status route
@@ -935,6 +954,16 @@ export async function pushOnceDetailed(
   if (!conn.endpoint) {
     return { count: 0 }
   }
+  {
+    const gate = authStopGate(_authStop.get(conn.id), authStopFingerprint(conn.endpoint, conn.token), Date.now())
+    if (gate === 'cleared') _authStop.delete(conn.id)
+    else if (gate === 'skip') return { count: 0 }
+    else if (gate === 'probe') {
+      _authStop.set(conn.id, { ..._authStop.get(conn.id)!, probedAtMs: Date.now() })
+      if (!(await probeAuthRecovered(conn))) return { count: 0 }
+      _authStop.delete(conn.id)
+    }
+  }
   if (conn.authFailedAt) {
     // Sustained auth failure already marked durable — do not hammer a central that is still
     // rejecting this token with the full push payload. A cheap whoami probe, on the connection's
@@ -1084,7 +1113,10 @@ export async function pushOnceDetailed(
             // Same rule, same moment: the runs this payload carried are now held by the central,
             // so they become withdrawable.
             await recordSentRunIds(conn.id, workflows)
-          } else if (res.status === 401 || res.status === 403) fireHandleAuthError(conn, res.status, deps)
+          } else if (res.status === 401 || res.status === 403) {
+            stopOnAuthRejection(conn, res.status)
+            fireHandleAuthError(conn, res.status, deps)
+          }
         } catch (e) {
           warnPushError(conn.id, e instanceof Error ? e.message : String(e))
           void notifyPushError(conn, 'net')
@@ -1124,7 +1156,10 @@ export async function pushOnceDetailed(
 
       if (!res.ok) {
         const msg = `ingest returned ${res.status}`
-        console.warn(`[team-uploader] ${conn.id} ${msg}; stopping push`)
+        // A 401/403 STOPS the connection with one line (`stopOnAuthRejection`, below); anything else
+        // is this one push stopping.
+        if (res.status !== 401 && res.status !== 403) console.warn(`[team-uploader] ${conn.id} ${msg}; stopping push`)
+        else stopOnAuthRejection(conn, res.status)
         // 401/403 = the central is rejecting the token → actionable auth notification immediately;
         // a DURABLE "needs attention" mark (and the pushes-paused behavior above) only lands once
         // the failure has been sustained past AUTH_FAIL_SUSTAIN_MS — the connection is never
@@ -1413,6 +1448,7 @@ function teardownConnection(connId: string): void {
   _lastSuccessAt.delete(connId)
   _pushErrKind.delete(connId)
   _authErrSince.delete(connId)
+  _authStop.delete(connId)
   _netErrStreak.delete(connId)
   _centralIntervalSec.delete(connId)
   _latencyMs.delete(connId)

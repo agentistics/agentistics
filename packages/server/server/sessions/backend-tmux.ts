@@ -122,9 +122,10 @@ export function coldStartArgv(args: string[], env: { platform: string; runtimeDi
 /** Is a tmux server already up on the fleet socket? A server that is up keeps its own cgroup. */
 async function tmuxServerUp(): Promise<boolean> {
   const { code, out, err } = await tmux(listSessionsArgs())
-  if (code === 0) return true
-  const text = `${out}\n${err}`.toLowerCase()
-  return !(text.includes('no server running') || text.includes('error connecting'))
+  // The same rule `list()` uses: only "no such socket" / "no server running" is a server that is
+  // down. A socket this process cannot connect to is a server that is UP and unreachable, and
+  // cold-starting a second one over it is the wrong answer.
+  return !tmuxListIsEmptyState(code, out, err) || code === 0
 }
 
 /** Runs `tmux <args>`, starting the server in its own scope when this call is what starts it. */

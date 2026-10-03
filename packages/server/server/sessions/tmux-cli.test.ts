@@ -400,6 +400,17 @@ describe('tmuxListIsEmptyState — an unreachable tmux is not an empty fleet', (
     expect(tmuxListIsEmptyState(1, 'server exited unexpectedly')).toBe(false)
   })
 
+  it('a socket that EXISTS but cannot be reached is a failure, not an empty fleet (2026-10-03)', () => {
+    // tmux 3.2a prints `error connecting to <socket> (<strerror>)` for EVERY connect failure, and
+    // only ENOENT means "no server". Measured: a socket chmod 000 answers `(Permission denied)`. A
+    // process that cannot open the socket (a sandbox, a starved machine) read the whole live fleet
+    // as gone, and every session was shown as ended while tmux was still hosting all of them.
+    expect(tmuxListIsEmptyState(1, '', 'error connecting to /tmp/tmux-1000/agentop (Permission denied)')).toBe(false)
+    expect(tmuxListIsEmptyState(1, '', 'error connecting to /tmp/tmux-1000/agentop (Operation not permitted)')).toBe(false)
+    expect(tmuxListIsEmptyState(1, '', 'error connecting to /tmp/tmux-1000/agentop (Resource temporarily unavailable)')).toBe(false)
+    expect(tmuxListIsEmptyState(1, '', 'error connecting to /tmp/tmux-1000/agentop')).toBe(false)
+  })
+
   it('is case-insensitive — the message is the only signal there is', () => {
     expect(tmuxListIsEmptyState(1, 'No server running on /tmp/x')).toBe(true)
   })

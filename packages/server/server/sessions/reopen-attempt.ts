@@ -50,7 +50,11 @@ export async function attemptReopenRow(
   excludeId: string,
   deps: ReopenAttemptDeps,
 ): Promise<ReopenAttemptOutcome> {
-  const { entries, aliveIds } = await deps.freshState()
+  // A state that cannot be read proves nothing about whether the conversation is open, and
+  // spawning on that "nothing" put a twin into a session that was still running (2026-10-03).
+  let fresh: Awaited<ReturnType<ReopenAttemptDeps['freshState']>>
+  try { fresh = await deps.freshState() } catch { return { kind: 'failed' } }
+  const { entries, aliveIds } = fresh
   if (conversationAlreadyOpen(entries, aliveIds, resumeId, excludeId)) {
     return { kind: 'held', holder: await deps.holderOf() }
   }
