@@ -76,6 +76,10 @@ export const modelUrl = (id: string) => `${base(id)}/model`
 export const effortUrl = (id: string) => `${base(id)}/effort`
 /** H20: `/add-dir` — an extra folder for the session (POST {path}). */
 export const dirsUrl = (id: string) => `${base(id)}/dirs`
+/** H21: fork the session at its last finished turn (POST {atSeq?, title?}). */
+export const forkUrl = (id: string) => `${base(id)}/fork`
+/** H21: the session as a download — sensitive executions withheld, secrets redacted (by the engine). */
+export const exportUrl = (id: string, format: 'md' | 'json') => `${base(id)}/export?format=${format}`
 /** H6: one line per run (tokens, cost, cache share, the context gauge). */
 export const runsUrl = (id: string) => `${base(id)}/runs`
 export const messagesUrl = (id: string) => `${base(id)}/messages`

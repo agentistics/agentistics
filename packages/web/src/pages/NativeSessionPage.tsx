@@ -11,6 +11,7 @@ import type { AppContext } from '../lib/app-context'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { NativeSessionChat } from '../components/sessions/NativeSessionChat'
 import { NativeFilingButton } from '../components/sessions/NativeFilingButton'
+import { NativeSessionActions } from '../components/sessions/NativeSessionActions'
 import { useNativeSession } from '../hooks/useNativeSession'
 import { NATIVE_HARNESS_ID, NATIVE_HARNESS_LABEL } from '../lib/nativeSession'
 
@@ -44,6 +45,7 @@ export default function NativeSessionPage() {
           </span>
         </div>
         <NativeFilingButton sessionId={sessionId} title={s?.title || NATIVE_HARNESS_LABEL} lang={lang} />
+        <NativeSessionActions sessionId={sessionId} running={live.state.running} lang={lang} />
         <span
           data-testid="native-state"
           style={{

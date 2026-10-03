@@ -202,6 +202,8 @@ export interface SessionStartedData {
   /** `normalizeGitRemote()`; `''` is the "no linked repository" bucket, a real value. */
   repoKey?: string
   projectPath?: string
+  /** H21: a native session forked from another — the source and the last message copied. */
+  forkedFrom?: { sessionId: string; seq: number }
 }
 
 export interface RunStartedData {
