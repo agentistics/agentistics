@@ -1,0 +1,109 @@
+/**
+ * UPD.ANIM regressions: the animation restarted endlessly, never closed, and had to be clicked away.
+ * Root causes (all pinned here): `useStageRefs` rebuilt its ref object every render (a dependency of the
+ * scene effects, so every poll re-render recreated the scene); `UpdateFinale` reset its timers whenever its
+ * `onDone` prop changed (a fresh arrow each render, so it never closed); `consumeRestore` left the snapshot
+ * in place so every reload replayed the finale.
+ */
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { RESTORE_KEY, encodeRestore } from './updateToast'
+import { IDLE_FLOW, consumeRestore, dismissFlow, getFlow, resetFlow, setFlowForTest, startUpgrade } from './upgradeFlow'
+
+const src = (rel: string) => readFileSync(join(import.meta.dir, '..', rel), 'utf8')
+
+const store = new Map<string, string>()
+let reloads = 0
+let cachesCleared = 0
+const real = { fetch: globalThis.fetch, window: (globalThis as any).window, sessionStorage: (globalThis as any).sessionStorage, caches: (globalThis as any).caches, navigator: (globalThis as any).navigator }
+
+function install(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+  store.clear(); reloads = 0; cachesCleared = 0
+  ;(globalThis as any).sessionStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) }, removeItem: (k: string) => { store.delete(k) } }
+  ;(globalThis as any).window = { location: { pathname: '/', search: '', hash: '', reload: () => { reloads++ } }, scrollY: 0 }
+  ;(globalThis as any).caches = { keys: async () => ['c1'], delete: async () => { cachesCleared++; return true } }
+  globalThis.fetch = fetchImpl as typeof fetch
+}
+beforeEach(() => resetFlow())
+afterEach(() => {
+  globalThis.fetch = real.fetch
+  for (const k of ['window', 'sessionStorage', 'caches'] as const) (globalThis as any)[k] = real[k]
+  resetFlow()
+})
+
+const json = (o: unknown, ok = true) => new Response(JSON.stringify(o), { status: ok ? 200 : 500, headers: { 'content-type': 'application/json' } })
+
+describe('the scene is created once per run, not once per render', () => {
+  test('useStageRefs returns ONE object for the life of the component', () => {
+    const s = src('components/UpdateStage.tsx')
+    expect(s).toMatch(/export function useStageRefs\(\): StageRefs \{[\s\S]*useMemo\(/)
+  })
+  test('UpdateFinale keeps onDone in a ref: its timers do not depend on the callback identity', () => {
+    const s = src('components/UpdateFinale.tsx')
+    expect(s).toContain('doneRef.current()')
+    expect(s).not.toMatch(/\}, \[onDone\]\)/)
+  })
+})
+
+describe('the overlay cannot be dismissed from outside while the upgrade runs', () => {
+  test('no outside-click or Escape handler on the overlay; dismissFlow ignores a running or arrived flow', () => {
+    const s = src('components/UpgradeOverlay.tsx')
+    expect(s).not.toMatch(/onClick=\{[^}]*dismissFlow[^}]*\}\s*\n?\s*style=\{\{ position: 'fixed'/)
+    expect(s).not.toContain("'Escape'")
+    expect(s).toContain('aria-modal="true"')
+    for (const phase of ['running', 'arrived'] as const) {
+      setFlowForTest({ ...IDLE_FLOW, phase, target: '2.0.0' })
+      dismissFlow()
+      expect(getFlow().phase).toBe(phase)
+    }
+    setFlowForTest({ ...IDLE_FLOW, phase: 'failed', target: '2.0.0' })
+    dismissFlow()
+    expect(getFlow().phase).toBe('idle')
+  })
+})
+
+describe('one run: no restart loop; the server being down is part of it; arrival reloads once', () => {
+  test('POST once; refused/unreachable server polls do not fail the run; the new version reloads exactly once and empties the caches', async () => {
+    let posts = 0, polls = 0
+    install(async (url, init) => {
+      if (url.startsWith('/api/upgrade?') && init?.method === 'POST') { posts++; return json({ ok: true }) }
+      if (url === '/api/version') {
+        polls++
+        if (polls === 1) return json({ current: '1.0.0' })       // the "before" read
+        if (polls <= 4) throw new Error('ECONNREFUSED')          // the server restarting
+        return json({ current: '2.0.0' })
+      }
+      if (url === '/api/upgrade/status') { if (polls <= 4) throw new Error('ECONNREFUSED'); return json({ progress: null }) }
+      return json({}, false)
+    })
+    await startUpgrade('2.0.0', 'en')
+    expect(posts).toBe(1)
+    expect(reloads).toBe(1)
+    expect(cachesCleared).toBeGreaterThan(0)
+    expect(getFlow().phase).toBe('arrived')
+    // pressing again while arrived/running is a no-op: no second POST
+    await startUpgrade('2.0.0', 'en')
+    expect(posts).toBe(1)
+  }, 20000)
+
+  test('a refusal is a clear failed state (with the server\'s sentence) — never a loop', async () => {
+    install(async (url, init) => {
+      if (init?.method === 'POST') return json({ ok: false, message: 'busy' }, false)
+      return json({ current: '1.0.0' })
+    })
+    await startUpgrade('2.0.0', 'en')
+    expect(getFlow()).toMatchObject({ phase: 'failed', message: 'busy' })
+    expect(reloads).toBe(0)
+  })
+})
+
+describe('the finale plays once', () => {
+  test('consumeRestore reads the snapshot once and removes it', () => {
+    install(async () => json({}))
+    store.set(RESTORE_KEY, encodeRestore({ url: '/sessions/x', scrollY: 10, target: '2.0.0', from: '1.0.0', savedAt: Date.now() }))
+    expect(consumeRestore('2.0.0')?.url).toBe('/sessions/x')
+    expect(store.has(RESTORE_KEY)).toBe(false)
+    expect(consumeRestore('2.0.0')).toBeNull()
+  })
+})
