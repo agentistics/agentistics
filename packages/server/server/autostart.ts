@@ -264,7 +264,7 @@ export function unitName(mode: AutostartMode): string {
   return `agentop-${mode}.service`
 }
 
-function unitPath(mode: AutostartMode): string {
+export function unitPath(mode: AutostartMode): string {
   return join(homedir(), '.config', 'systemd', 'user', unitName(mode))
 }
 

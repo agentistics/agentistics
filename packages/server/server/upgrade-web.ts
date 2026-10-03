@@ -5,13 +5,11 @@
  * point of this route is that they do not have to — and the whole reason it is its own module is
  * that running it correctly is NOT "spawn the command".
  *
- * **THE UPGRADE MUST NOT BE THIS PROCESS'S CHILD.** `upgrade.ts` restarts whatever `agentop server`
- * it can find, and it finds them with `pgrep -f 'agentop.*(server|start)'` while excluding its own
- * `pid` and its `ppid` — the exclusion that makes running it from a terminal safe. Spawned as a
- * child of the server, the server IS the `ppid`: it would be skipped, the upgrade would report
- * success, and the machine would go on serving the old bundle with a new binary on disk. So the
- * child is DETACHED and `unref`'d — its parent becomes init, nothing is excluded, and the server it
- * restarts is the one that started it.
+ * **THE UPGRADE IS DETACHED** (its own session, no inherited handles) so it outlives the restart of
+ * the server that started it. Which server it restarts, and how, is `server-restart-plan.ts`'s
+ * decision: through the service manager whenever a unit is installed — never by killing a pid a
+ * pattern matched, which is what took the fleet down on 2026-10-03
+ * (docs/incidents/2026-10-03-restart-loop.md).
  *
  * That restart is also why there is no "and then tell the browser it worked": the process answering
  * would be killed mid-sentence. The route answers `started` and the PAGE watches `/api/version`
