@@ -22,7 +22,7 @@ import {
   type NativeChatState,
   type NativeWindow,
 } from '../lib/nativeChat'
-import { approveUrl, cancelUrl, dirsUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
+import { approveUrl, browserUrl, cancelUrl, dirsUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
 import { parseRuns, type RunLineView } from '../lib/nativeRuns'
 
 const REFRESH_DEBOUNCE_MS = 250
@@ -47,6 +47,8 @@ export interface NativeSession {
   setEffort: (effort: 'low' | 'medium' | 'high' | 'off') => Promise<string | null>
   /** H20: add an extra folder (`/add-dir`); `null` when done, else the engine's sentence. */
   addDir: (path: string) => Promise<string | null>
+  /** B6.4: switch the gated browser for the session; `null` when done, else the engine's sentence. */
+  setBrowser: (on: boolean) => Promise<string | null>
 }
 
 export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
@@ -204,5 +206,16 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     }
   }, [id, lang, readWindow])
 
-  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel, setEffort, addDir }
+  const setBrowser = useCallback(async (on: boolean): Promise<string | null> => {
+    try {
+      const res = await fetch(browserUrl(id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) })
+      if (!res.ok) return refusalSentence(await res.json().catch(() => null), res.status, lang)
+      void readWindow()
+      return null
+    } catch {
+      return lang === 'pt' ? 'Erro de rede ao mudar o navegador.' : 'Network error switching the browser.'
+    }
+  }, [id, lang, readWindow])
+
+  return { state, runs: runsRef.current, loadError: loadErrorRef.current, send, answer, stop, switchModel, setEffort, addDir, setBrowser }
 }

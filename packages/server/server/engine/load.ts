@@ -282,6 +282,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
+    // B6.4: the origins this server answers on — the browser runtime never drives them.
+    serverOrigins: [`http://127.0.0.1:${config.PORT}`, `http://localhost:${config.PORT}`, `http://[::1]:${config.PORT}`],
     // B6.6: memory, folded from the same journal the engine writes its `memory.noted` events to.
     memory: (() => {
       let svc: import('../memory-service').MemoryService | null = null

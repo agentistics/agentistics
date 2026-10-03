@@ -76,6 +76,8 @@ export const modelUrl = (id: string) => `${base(id)}/model`
 export const effortUrl = (id: string) => `${base(id)}/effort`
 /** H20: `/add-dir` — an extra folder for the session (POST {path}). */
 export const dirsUrl = (id: string) => `${base(id)}/dirs`
+/** B6.4: the gated browser, on or off for the session (POST {on}). */
+export const browserUrl = (id: string) => `${base(id)}/browser`
 /** H21: fork the session at its last finished turn (POST {atSeq?, title?}). */
 export const forkUrl = (id: string) => `${base(id)}/fork`
 /** H21: the session as a download — sensitive executions withheld, secrets redacted (by the engine). */

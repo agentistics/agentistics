@@ -481,6 +481,12 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * `journal.sink()`, their statements in `paths.contentDir`. Absent on an older host: no memory.
    */
   memory?: EngineMemory
+  /**
+   * B6.4 (1.7, optional): the origins this host's own server answers on (`http://127.0.0.1:<port>`, …).
+   * The engine's browser runtime never drives them — a page the model opens must not reach the
+   * product's own API. Absent: the engine assumes the default port.
+   */
+  serverOrigins?: readonly string[]
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {
