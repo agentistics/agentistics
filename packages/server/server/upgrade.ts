@@ -508,48 +508,74 @@ export interface VersionPollResult {
   ok: boolean
   /** The version last seen answering, or `null` if nothing ever answered. */
   observed: string | null
+  /**
+   * Why it ended: `matched` (ok), `stale` (something answers with ANOTHER version), `busy` (something is
+   * bound but never answered in time — a server still starting), `down` (nothing was bound: connections refused).
+   */
+  state: 'matched' | 'stale' | 'busy' | 'down'
+}
+
+/** A timeout or an abort: the port is bound, the process is just not answering yet. Anything else (refused, reset) is "nothing there". */
+function isBusyError(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name
+  return name === 'TimeoutError' || name === 'AbortError'
 }
 
 /**
  * Poll this machine's own `/api/version` until it reports `want`, or the bounded time runs out.
  *
- * `fetchImpl`/`sleepImpl`/`nowImpl` are injectable so the bounded-time behavior (stop polling once
- * matched; stop polling once the budget is spent; never claim success on a persistent mismatch) is
- * testable without a real clock, a real socket, or a real 15-second wait.
+ * **The window is adaptive.** A freshly restarted server spends its first moments (up to a minute and
+ * more on a big machine) building its first data, and a request meanwhile TIMES OUT rather than being
+ * refused. A fixed window then called a server that was simply still starting a failure. So: a refused
+ * connection (nothing bound) never extends the window — it ends at `timeoutMs`; a timeout or a non-OK
+ * answer (something IS bound, busy) keeps it open — each such tick holds the deadline at least half the
+ * base window ahead — up to the hard cap `maxMs`. An ANSWER with another version is not "starting": the
+ * fixed window applies and the result is `stale`.
+ *
+ * `fetchImpl`/`sleepImpl`/`nowImpl` are injectable so the bounded-time behavior is testable without a
+ * real clock, a real socket, or a real wait.
  */
 export async function pollRunningVersion(
   port: number,
   want: string,
   opts: {
     timeoutMs?: number
+    maxMs?: number
     intervalMs?: number
     fetchImpl?: (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>
     sleepImpl?: (ms: number) => Promise<void>
     nowImpl?: () => number
   } = {},
 ): Promise<VersionPollResult> {
-  const timeoutMs = opts.timeoutMs ?? 60_000
+  const baseMs = opts.timeoutMs ?? 60_000
+  const maxMs = Math.max(baseMs, opts.maxMs ?? 180_000)
   const intervalMs = opts.intervalMs ?? 1_000
-  const doFetch = opts.fetchImpl ?? ((url: string) => fetch(url, { signal: AbortSignal.timeout(2_000) }))
+  const doFetch = opts.fetchImpl ?? ((url: string) => fetch(url, { signal: AbortSignal.timeout(5_000) }))
   const sleep = opts.sleepImpl ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   const now = opts.nowImpl ?? Date.now
-  const deadline = now() + timeoutMs
+  const start = now()
+  const hardDeadline = start + maxMs
+  let deadline = start + baseMs
 
   let observed: string | null = null
+  let busy = false
   for (;;) {
+    let tickBusy = false
     try {
       const res = await doFetch(`http://127.0.0.1:${port}/api/version`)
       if (res.ok) {
         const body = await res.json() as { current?: unknown }
         if (typeof body.current === 'string') {
           observed = body.current
-          if (observed === want) return { ok: true, observed }
+          if (observed === want) return { ok: true, observed, state: 'matched' }
         }
-      }
-    } catch {
-      // Unreachable this tick (connecting, or nothing is listening yet) — keep polling.
+      } else tickBusy = true // bound, but answering 5xx while it boots
+    } catch (e) {
+      tickBusy = isBusyError(e)
     }
-    if (now() >= deadline) return { ok: false, observed }
+    busy = tickBusy
+    if (tickBusy) deadline = Math.min(hardDeadline, Math.max(deadline, now() + baseMs / 2))
+    if (now() >= deadline) return { ok: false, observed, state: observed !== null ? 'stale' : busy ? 'busy' : 'down' }
     await sleep(intervalMs)
   }
 }
@@ -606,12 +632,12 @@ export function describeStaleServer(o: PortHolderFacts & { port: number; want: s
  * state it does not have; `portHolderFacts.unitState` carries systemd's own word (`failed`,
  * `activating (auto-restart)`, `inactive`, …) when systemd is available.
  */
-export function describeUnconfirmedRestart(o: PortHolderFacts & { port: number; want: string }): string[] {
+export function describeUnconfirmedRestart(o: PortHolderFacts & { port: number; want: string; busy?: boolean }): string[] {
   const lines: string[] = []
-  lines.push(
-    `A server was restarted, but nothing answered on port ${o.port} within the check window — ` +
-    `v${o.want} may have failed to start.`,
-  )
+  lines.push(o.busy
+    ? `The restarted server is up on port ${o.port} but is still starting — it had not answered /api/version by the end of the check window. v${o.want} is probably fine; check again shortly.`
+    : `A server was restarted, but nothing answered on port ${o.port} within the check window — ` +
+      `v${o.want} may have failed to start.`)
   if (o.pid) lines.push(`  pid ${o.pid} is holding the port${o.cmd ? `: \`${o.cmd}\`` : ''}`)
   lines.push(`  agentop-server unit: ${o.unitState ?? 'unknown (systemd unavailable, or not a systemd service)'}`)
   lines.push('  Inspect it: `systemctl --user status agentop-server`')
@@ -1099,7 +1125,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     const facts = await portHolderFacts(PORT)
     const lines = decision.reason === 'mismatch'
       ? describeStaleServer({ port: PORT, want: info.latest, observed: verified.observed, ...facts })
-      : describeUnconfirmedRestart({ port: PORT, want: info.latest, ...facts })
+      : describeUnconfirmedRestart({ port: PORT, want: info.latest, busy: verified.state === 'busy', ...facts })
     process.stderr.write(
       `\n  ${_Y}${_B}${s.upgradeVersionUnconfirmed(info.latest)}${_R}\n` +
       lines.map(l => `    ${l}\n`).join('') +
@@ -1109,7 +1135,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
       info.latest,
       decision.reason === 'mismatch'
         ? `server still answering as v${verified.observed}`
-        : 'restarted server never answered /api/version',
+        : verified.state === 'busy' ? 'restarted server was still starting at the end of the check window' : 'restarted server never answered /api/version',
     )
     return 1
   }

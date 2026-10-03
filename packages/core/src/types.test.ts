@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { calcCost, getModelPrice, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, HARNESS_ORDER, sessionDay, normalizeSessionTimes } from './types'
+import { calcCost, getModelPrice, UNPRICED_PRICE, modelCostUSD, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, HARNESS_ORDER, sessionDay, normalizeSessionTimes } from './types'
 import type { ModelUsage, StatsCache } from './types'
 
 describe('sanitizeStatsCache', () => {
@@ -154,14 +154,9 @@ describe('getModelPrice', () => {
     expect(price.output).toBe(5)
   })
 
-  test('fallback para sonnet quando modelo desconhecido', () => {
-    expect(getModelPrice('modelo-inexistente')).toEqual({
-      input: 3,
-      output: 15,
-      cacheRead: 0.3,
-      cacheWrite: 3.75,
-      cacheWrite1h: 6,
-    })
+  test('modelo desconhecido NÃO tem preço — nunca chutado (PRICE.UNKNOWN)', () => {
+    expect(getModelPrice('modelo-inexistente')).toBe(UNPRICED_PRICE)
+    expect(isUnpricedModel('modelo-inexistente')).toBe(true)
   })
 
   test('match parcial por prefixo — modelId começa com chave conhecida', () => {
@@ -209,9 +204,11 @@ describe('calcCost', () => {
     expect(calcCost(u, 'claude-opus-4-6')).toBeGreaterThan(calcCost(u, 'claude-haiku-4-5-20251001'))
   })
 
-  test('modelo desconhecido usa preço de fallback (sonnet)', () => {
+  test('modelo desconhecido não custa nada inventado: modelCostUSD é null (tokens seguem contados), calcCost contribui 0', () => {
     const u = usage({ inputTokens: 1_000_000 })
-    expect(calcCost(u, 'modelo-desconhecido')).toBe(calcCost(u, 'claude-sonnet-4-6'))
+    expect(modelCostUSD(u, 'modelo-desconhecido')).toBeNull()
+    expect(calcCost(u, 'modelo-desconhecido')).toBe(0)
+    expect(modelCostUSD(u, 'claude-sonnet-4-6')).toBe(3)
   })
 
   test('custo proporcional — dobrar tokens dobra custo', () => {
@@ -579,9 +576,9 @@ describe('getModelPrice prefix resolution', () => {
     expect(getModelPrice('claude-haiku-4-5')).toEqual(MODEL_PRICING['claude-haiku-4-5-20251001']!)
   })
 
-  test('a partial word is not a match — it falls back', () => {
-    expect(getModelPrice('gemini-3.5-fl')).toEqual(FALLBACK)
-    expect(getModelPrice('')).toEqual(FALLBACK)
+  test('a partial word is not a match — it is unpriced', () => {
+    expect(isUnpricedModel('gemini-3.5-fl')).toBe(true)
+    expect(isUnpricedModel('')).toBe(true)
   })
 })
 
@@ -687,10 +684,9 @@ test('current Anthropic models are priced as themselves, not as the fallback', (
   expect(getModelPrice('claude-fable-5').output).toBe(50)
   // Sonnet 5 introductory pricing, in effect through 2026-08-31.
   expect(getModelPrice('claude-sonnet-5').output).toBe(10)
-  // None of them may collide with the fallback rate.
-  const fallback = getModelPrice('a-model-that-does-not-exist')
-  expect(fallback.output).toBe(15)
-  expect(getModelPrice('claude-opus-5').output).not.toBe(fallback.output)
+  // None of them is the unpriced marker.
+  expect(isUnpricedModel('a-model-that-does-not-exist')).toBe(true)
+  expect(isUnpricedModel('claude-opus-5')).toBe(false)
 })
 
 test('sessionDay tolerates a start_time an adapter got wrong', () => {
@@ -719,4 +715,31 @@ test('normalizeSessionTimes leaves a correct session untouched', () => {
 test('normalizeSessionTimes turns junk into the empty string the pipeline already handles', () => {
   expect(normalizeSessionTimes({ start_time: {} as unknown as string }).start_time).toBe('')
   expect(normalizeSessionTimes({ start_time: NaN as unknown as string }).start_time).toBe('')
+})
+
+
+// PRICE.UNKNOWN — an unknown model is UNPRICED on every harness: tokens are counted, cost is null, the
+// number is never guessed, and a total that includes such usage says so.
+describe('PRICE.UNKNOWN', () => {
+  const u = (input: number, output = 0): ModelUsage => ({ inputTokens: input, outputTokens: output, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 })
+  test('the words the owner chose, in both languages', () => {
+    expect(UNPRICED_MODEL_LABEL).toEqual({ pt: 'desconhecido', en: 'unknown' })
+    expect(UNPRICED_TOTAL_MARKER).toEqual({ pt: '+ uso sem preço', en: '+ unpriced usage' })
+  })
+  test('a session of ONE unknown model has no cost (null), not a guess and not zero', () => {
+    const s = { model: 'some-new-model', input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    expect(sessionCostUSD(s)).toBeNull()
+  })
+  test('a mixed session prices what it can; the unknown model\'s tokens are reported, not priced', () => {
+    const s = { model: 'x', model_usage: { 'claude-sonnet-4-6': u(1_000_000), 'some-new-model': u(2_000, 300) }, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    expect(sessionCostUSD(s)).toBe(3)
+    expect(unpricedTokens(s)).toBe(2_300)
+    expect(unpricedTokens({ ...s, model_usage: { 'claude-sonnet-4-6': u(10) } })).toBe(0)
+  })
+  test('a session that names no model has no price: all its tokens are unpriced', () => {
+    expect(unpricedTokens({ input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 })).toBe(20)
+  })
+  test('unpricedTokens over per-model usage entries (cache tokens count)', () => {
+    expect(unpricedTokens([['ghost', { ...u(10, 5), cacheReadInputTokens: 100, cacheCreationInputTokens: 7 }], ['claude-opus-4-6', u(99)]])).toBe(122)
+  })
 })

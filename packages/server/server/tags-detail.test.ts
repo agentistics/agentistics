@@ -35,8 +35,8 @@ test('buckets count sessions and sum tokens per key', () => {
 
 test('buckets rank by cost, highest first', () => {
   const d = aggregateTagDetail([
-    s({ project_path: '/cheap', output_tokens: 1 }),
-    s({ project_path: '/pricey', output_tokens: 100000 }),
+    s({ project_path: '/cheap', output_tokens: 1, model: 'claude-opus-4-6' }),
+    s({ project_path: '/pricey', output_tokens: 100000, model: 'claude-opus-4-6' }),
   ])
   expect(d.projects[0]!.key).toBe('/pricey')
 })

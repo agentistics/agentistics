@@ -28,7 +28,7 @@ export function Costs({ data, figures = null, s, width, height, page }: {
 
   const columns: Column<ModelRow>[] = [
     { key: 'model', header: s.model, width: nameWidth, render: r => formatModel(r.model) || r.model },
-    { key: 'cost', header: s.cost, width: 14, align: 'right', render: r => fmtCost(r.costUSD), color: () => COLORS.accent },
+    { key: 'cost', header: s.cost, width: 14, align: 'right', render: r => (r.unpriced ? s.unpricedModel : fmtCost(r.costUSD)), color: () => COLORS.accent },
     { key: 'tokens', header: s.tokens, width: 10, align: 'right', render: r => fmt(r.tokens) },
     { key: 'share', header: s.share, width: 8, align: 'right', render: r => total > 0 ? `${Math.round((r.costUSD / total) * 100)}%` : '0%' },
   ]
@@ -49,7 +49,7 @@ export function Costs({ data, figures = null, s, width, height, page }: {
               key={r.model}
               label={formatModel(r.model) || r.model}
               pct={total > 0 ? r.costUSD / total : 0}
-              value={fmtCost(r.costUSD)}
+              value={r.unpriced ? s.unpricedModel : fmtCost(r.costUSD)}
               color={COLORS.accent}
               labelWidth={Math.min(22, Math.max(12, nameWidth))}
               barWidth={barWidth}

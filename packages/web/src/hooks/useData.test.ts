@@ -284,7 +284,7 @@ describe('computeHarnessSummaries', () => {
           assistant_message_count: 2,
           input_tokens: 1000,
           output_tokens: 400,
-          model: 'gpt-4o',
+          model: 'gpt-5.5',
           project_path: '/q',
           duration_minutes: 3,
           tool_counts: {},
@@ -316,7 +316,7 @@ describe('computeHarnessSummaries', () => {
           assistant_message_count: 1,
           input_tokens: 500,
           output_tokens: 200,
-          model: 'gpt-4o',
+          model: 'gpt-5.5',
           project_path: '/q',
           duration_minutes: 2,
           tool_counts: {},
@@ -437,7 +437,7 @@ describe('computeHarnessSummaries — hourCounts and peakHour', () => {
       files_modified: 0,
       message_hours: [],
       user_message_timestamps: [],
-      model: 'gpt-4o',
+      model: 'gpt-5.5',
       ...overrides,
     }
   }
@@ -529,7 +529,7 @@ describe('computeHarnessSummaries — dowCounts and peakDow', () => {
       files_modified: 0,
       message_hours: hours,
       user_message_timestamps: [],
-      model: 'gpt-4o',
+      model: 'gpt-5.5',
     }
   }
 
@@ -606,7 +606,7 @@ describe('computeHarnessSummaries — peakTokenDay and peakSessionCost', () => {
     startTime: string,
     input: number,
     output: number,
-    model = 'gpt-4o',
+    model = 'gpt-5.5',
   ): import('@agentistics/core').SessionMeta {
     return {
       session_id: id,
@@ -710,7 +710,7 @@ describe('computeHarnessSummaries — peakTokenDay and peakSessionCost', () => {
     expect(summaries['codex']!.peakSessionCost).toBeGreaterThan(0)
     // s2 cost should be smaller — verify indirectly that peak > s2 cost
     const { calcCost: cc } = require('@agentistics/core')
-    const s2Cost = cc({ inputTokens: 500, outputTokens: 100, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 }, 'gpt-4o')
+    const s2Cost = cc({ inputTokens: 500, outputTokens: 100, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 }, 'gpt-5.5')
     expect(summaries['codex']!.peakSessionCost).toBeGreaterThan(s2Cost)
   })
 
@@ -782,7 +782,7 @@ describe('computeHarnessSummaries — dailyActivity', () => {
         files_modified: 0,
         message_hours: [],
         user_message_timestamps: [],
-        model: 'gpt-4o',
+        model: 'gpt-5.5',
       }
     }
     const data: import('@agentistics/core').AppData = {
@@ -859,7 +859,7 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
     id: string,
     input: number,
     output: number,
-    model: string | undefined = 'gpt-4o',
+    model: string | undefined = 'gpt-5.5',
   ): import('@agentistics/core').SessionMeta {
     return {
       session_id: id,
@@ -919,13 +919,13 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
 
   test('codex: models[] groups sessions by model and sums tokens', () => {
     const sessions = [
-      makeSession('s1', 1000, 400, 'gpt-4o'),
-      makeSession('s2', 500, 200, 'gpt-4o'),
+      makeSession('s1', 1000, 400, 'gpt-5.5'),
+      makeSession('s2', 500, 200, 'gpt-5.5'),
     ]
     const summaries = computeHarnessSummaries(makeData(sessions))
     const models = summaries['codex']!.models
     expect(models.length).toBe(1)
-    expect(models[0]!.model).toBe('gpt-4o')
+    expect(models[0]!.model).toBe('gpt-5.5')
     expect(models[0]!.inputTokens).toBe(1500)
     expect(models[0]!.outputTokens).toBe(600)
     expect(models[0]!.costUSD).toBeGreaterThan(0)
@@ -933,21 +933,21 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
 
   test('codex: models[] sorted by costUSD descending', () => {
     const sessions = [
-      makeSession('s1', 100, 50, 'gpt-4o-mini'),
-      makeSession('s2', 100_000, 50_000, 'gpt-4o'),
+      makeSession('s1', 100, 50, 'gpt-5.4-mini'),
+      makeSession('s2', 100_000, 50_000, 'gpt-5.5'),
     ]
     const summaries = computeHarnessSummaries(makeData(sessions))
     const models = summaries['codex']!.models
     expect(models.length).toBe(2)
-    // gpt-4o has far more tokens → higher cost → first
-    expect(models[0]!.model).toBe('gpt-4o')
+    // gpt-5.5 has far more tokens → higher cost → first
+    expect(models[0]!.model).toBe('gpt-5.5')
     expect(models[0]!.costUSD).toBeGreaterThanOrEqual(models[1]!.costUSD)
   })
 
   test('codex: sessions without model are excluded from models[] but aggregate totals are unchanged', () => {
     const sessions = [
       { ...makeSession('s1', 1000, 400), model: undefined },  // no model — excluded from models[]
-      makeSession('s2', 500, 200, 'gpt-4o'),                  // known model — included
+      makeSession('s2', 500, 200, 'gpt-5.5'),                  // known model — included
     ]
     const summaries = computeHarnessSummaries(makeData(sessions))
     const s = summaries['codex']!
@@ -956,7 +956,7 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
     expect(s.models.every(m => m.model && m.model !== 'unknown')).toBe(true)
     // only the session with a known model appears
     expect(s.models.length).toBe(1)
-    expect(s.models[0]!.model).toBe('gpt-4o')
+    expect(s.models[0]!.model).toBe('gpt-5.5')
 
     // aggregate totals include BOTH sessions (unknown-model session still counts)
     expect(s.sessions).toBe(2)
@@ -965,7 +965,7 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
   })
 
   test('codex: costPerMTokens equals costUSD / ((input+output)/1e6)', () => {
-    const sessions = [makeSession('s1', 1_000_000, 0, 'gpt-4o')]
+    const sessions = [makeSession('s1', 1_000_000, 0, 'gpt-5.5')]
     const summaries = computeHarnessSummaries(makeData(sessions))
     const s = summaries['codex']!
     const expected = s.costUSD / ((s.inputTokens + s.outputTokens) / 1e6)
@@ -973,7 +973,7 @@ describe('computeHarnessSummaries — models[] and costPerMTokens', () => {
   })
 
   test('codex: costPerMTokens is null when there are 0 tokens', () => {
-    const sessions = [makeSession('s1', 0, 0, 'gpt-4o')]
+    const sessions = [makeSession('s1', 0, 0, 'gpt-5.5')]
     const summaries = computeHarnessSummaries(makeData(sessions))
     expect(summaries['codex']!.costPerMTokens).toBeNull()
   })

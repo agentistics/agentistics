@@ -294,3 +294,24 @@ describe('harnessRows agent counts', () => {
     expect(harnessRows(data).find(r => r.harness === 'codex')!.agents).toBe(0)
   })
 })
+
+describe('PRICE.UNKNOWN in the TUI selectors', () => {
+  const sess = (model: string, i = 1000, o = 100) => ({
+    session_id: `s-${model}`, project_path: '/p', start_time: '2026-10-01T10:00:00.000Z', duration_minutes: 1,
+    user_message_count: 1, assistant_message_count: 1, tool_counts: {}, languages: {}, git_commits: 0, git_pushes: 0,
+    input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model, harness: 'codex',
+  }) as never
+  test('an unknown model is a row marked unpriced, with tokens and no invented cost; the totals say how much they left out', () => {
+    const data = { sessions: [sess('gpt-5.5'), sess('some-new-model', 400, 100)], statsCache: undefined, projects: [], harnesses: ['codex'] } as never
+    const rows = modelRows(data)
+    const ghost = rows.find(r => r.model === 'some-new-model')!
+    expect(ghost).toMatchObject({ tokens: 500, costUSD: 0, unpriced: true })
+    expect(rows.find(r => r.model === 'gpt-5.5')!.unpriced).toBeUndefined()
+    const t = overviewTotals(data)
+    expect(t.unpricedTokens).toBe(500)
+    expect(t.costUSD).toBeGreaterThan(0)
+  })
+  test('nothing unpriced: the field is absent, not 0', () => {
+    expect(overviewTotals({ sessions: [sess('gpt-5.5')], projects: [], harnesses: ['codex'] } as never).unpricedTokens).toBeUndefined()
+  })
+})

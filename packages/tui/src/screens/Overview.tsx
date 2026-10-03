@@ -66,7 +66,7 @@ export function Overview({ data, figures = null, s, width, height, streak }: {
   // row pushes everything below it down and misaligns the whole screen. Cost is never dropped.
   const visibleKpis = fitKpis(
     [
-      { label: s.cost, value: fmtCost(totals.costUSD), color: COLORS.accent, width: 18 },
+      { label: s.cost, value: `${fmtCost(totals.costUSD)}${(totals.unpricedTokens ?? 0) > 0 ? ' ' + s.unpricedTotal : ''}`, color: COLORS.accent, width: (totals.unpricedTokens ?? 0) > 0 ? 18 + s.unpricedTotal.length + 1 : 18 },
       { label: s.tokens, value: fmt(totals.tokens), color: COLORS.info, width: 12 },
       { label: s.sessionsCount, value: fmt(totals.sessions), width: 12 },
       { label: s.messages, value: totals.messages === null ? '—' : fmt(totals.messages), width: 12 },

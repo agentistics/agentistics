@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import type { ModelUsage } from '@agentistics/core'
-import { fmt, formatModel, calcCost, getModelColor, fmtCost, usageTokenTotal } from '@agentistics/core'
+import { fmt, formatModel, calcCost, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, getModelColor, fmtCost, usageTokenTotal } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { resolveProvider, providerOrder } from '@agentistics/core'
 import { MetricNote } from './MetricNote'
@@ -58,7 +58,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
     return [...filtered].sort(([aId, a], [bId, b]) =>
       sortKey === 'model' ? aId.localeCompare(bId)
       : sortKey === 'tokens' ? tokensOf(b) - tokensOf(a)
-      : calcCost(b, bId) - calcCost(a, aId))
+      : calcCost(b, bId) - calcCost(a, aId)) // an unpriced model sorts as 0: last by cost, never guessed
   }, [allEntries, query, sortKey])
 
   /** Grouping reorders rather than nesting: the table keeps one column grid, so a provider heading
@@ -134,6 +134,8 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
   const alloc = planFactor !== null && planFactor !== undefined && Number.isFinite(planFactor) ? planFactor : 1
   const showAlloc = alloc !== 1
   const totalCost = entries.reduce((s, [id, u]) => s + calcCost(u, id), 0) * alloc
+  // PRICE.UNKNOWN: tokens of models with no price are counted above but not priced — the total says so.
+  const unpricedTotal = unpricedTokens(entries)
   const totalTokens = entries.reduce((s, [, u]) => s + u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens, 0)
   const totalInput = entries.reduce((s, [, u]) => s + u.inputTokens, 0)
   const totalOutput = entries.reduce((s, [, u]) => s + u.outputTokens, 0)
@@ -273,7 +275,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
                 padding: '2px 7px', borderRadius: 5,
                 whiteSpace: 'nowrap',
               }}>
-                {fmtCost(costUSD, currency, brlRate)}
+                {isUnpricedModel(modelId) ? UNPRICED_MODEL_LABEL[lang] : fmtCost(costUSD, currency, brlRate)}
               </span>
             </div>
           </div>
@@ -309,6 +311,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
           <div style={{ textAlign: 'right' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--anthropic-orange)' }}>
               {fmtCost(totalCost, currency, brlRate)}
+              {unpricedTotal > 0 && <span data-unpriced-marker style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginLeft: 6 }}>{UNPRICED_TOTAL_MARKER[lang]}</span>}
             </span>
           </div>
         </div>

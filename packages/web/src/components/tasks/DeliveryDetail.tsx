@@ -323,6 +323,7 @@ function Caveats({ r }: { r: AttemptRollup }) {
   if (r.costMeasuredSessions > 0 && r.costEstimatedSessions > 0) {
     lines.push(`${r.costMeasuredSessions} measured, ${r.costEstimatedSessions} estimated`)
   }
+  if ((r.costUnpricedSessions ?? 0) > 0) lines.push(`${r.costUnpricedSessions} with usage of a model that has no price (+ unpriced usage / + uso sem preço) — the cost is a floor`)
   if (r.mixedCurrency) lines.push('mixes dollars and Copilot credits — there is no single total')
   if (lines.length === 0) return null
   return (
