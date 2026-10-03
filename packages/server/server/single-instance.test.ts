@@ -184,7 +184,7 @@ test('probe: a live holder is reported, and the probe claims nothing', async () 
   expect(first.ok).toBe(true)
   expect(await probeInstanceLock(file)).toBe(process.pid)
   // Still the first claimant's file: a probe must never take or remove it.
-  expect((await readFile(file, 'utf-8')).trim()).toBe(String(process.pid))
+  expect((await readFile(file, 'utf-8')).trim().split(/\s+/)[0]).toBe(String(process.pid))
 })
 
 test('probe: no lock, or a lock left by a dead process, is "free" — and is left in place', async () => {
@@ -194,4 +194,38 @@ test('probe: no lock, or a lock left by a dead process, is "free" — and is lef
   expect(await probeInstanceLock(file)).toBeNull()
   // Stale-lock cleanup belongs to the claim, under O_EXCL; a probe deleting it would race it.
   expect((await readFile(file, 'utf-8')).trim()).toBe('999999')
+})
+
+// ---------------------------------------------------------------------------
+// 2026-10-03, measured on WSL: `ps` reported the live service's server as started at 01:02:44 while
+// systemd had started it at 01:00:10 and its lock was written at 01:00:11. WSL STEPS the wall clock,
+// so "started after the lock's mtime" read the LIVE holder as a recycled pid: the probe said
+// "free", and the claim would have deleted a live server's lock. The writer now records its own
+// start in BOOT-CLOCK ticks (/proc/<pid>/stat field 22), and identity is ticks == ticks — a
+// comparison no wall-clock step can touch.
+// ---------------------------------------------------------------------------
+test('the claim records the writer\'s start ticks beside its pid', async () => {
+  const file = await lockPath()
+  const claim = await claimInstanceLock(file, process.pid, { processStartMs: () => undefined, processStartTicks: () => 4377050 })
+  expect(claim.ok).toBe(true)
+  expect((await readFile(file, 'utf-8')).trim()).toBe(`${process.pid} 4377050`)
+})
+
+test('a WALL-CLOCK STEP does not make a live holder look stale when its ticks match', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 4377050`)
+  // The wall clock now places this process's start 153 s AFTER the lock was written.
+  const stepped = { processStartMs: () => Date.now() + 153_000, processStartTicks: () => 4377050 }
+  expect(await probeInstanceLock(file, stepped)).toBe(process.pid)
+  const second = await claimInstanceLock(file, 5555, stepped)
+  expect(second.ok).toBe(false)
+})
+
+test('ticks that DIFFER mean the pid was reused — debris, whatever the wall clock says', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 111`)
+  const probe = { processStartMs: () => 0, processStartTicks: () => 999 }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+  const claim = await claimInstanceLock(file, 7777, probe)
+  expect(claim.ok).toBe(true)
 })

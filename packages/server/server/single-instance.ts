@@ -98,9 +98,37 @@ const START_SKEW_MS = 2_000
 /** Seams for the facts this module reads off the OS, so the decision can be tested exactly. */
 export interface LockProbe {
   processStartMs(pid: number): number | undefined
+  /**
+   * The process's start in BOOT-CLOCK ticks (`/proc/<pid>/stat` field 22), or `undefined` off
+   * Linux. Recorded in the lock by the writer and compared ticks-to-ticks — exact, and immune to the
+   * wall-clock steps WSL makes (2026-10-03: a live holder read as recycled, 153 s "too young").
+   */
+  processStartTicks?(pid: number): number | undefined
 }
 
-const OS_PROBE: LockProbe = { processStartMs: linuxProcessStartMs }
+/** `/proc/<pid>/stat` field 22 — never rewritten by a wall-clock step. */
+export function linuxProcessStartTicks(pid: number): number | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8')
+    const ticks = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19])
+    return Number.isFinite(ticks) ? ticks : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const OS_PROBE: LockProbe = { processStartMs: linuxProcessStartMs, processStartTicks: linuxProcessStartTicks }
+
+/** A lock's contents: `<pid>` (older writers) or `<pid> <startTicks>`. */
+function parseLock(raw: string): { pid?: number; ticks?: number } {
+  const [a, b] = raw.trim().split(/\s+/)
+  const pid = parseInt(a ?? '', 10)
+  const ticks = b === undefined ? NaN : Number(b)
+  return {
+    ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}),
+    ...(Number.isFinite(ticks) ? { ticks } : {}),
+  }
+}
 
 /**
  * Is the process holding this pid the one that WROTE the lock?
@@ -116,8 +144,14 @@ const OS_PROBE: LockProbe = { processStartMs: linuxProcessStartMs }
  * have started before the write — pids are not reused while their owner lives. A holder that
  * started after the lock's mtime therefore cannot be the writer, whoever it is — including us.
  */
-async function holdsLock(file: string, holder: number, probe: LockProbe): Promise<boolean> {
+async function holdsLock(file: string, holder: number, probe: LockProbe, recordedTicks?: number): Promise<boolean> {
   if (!isAlive(holder)) return false
+  // EXACT when the writer recorded its start ticks: same pid AND same boot-clock start is the same
+  // process, and nothing else is. The mtime comparison below is only for locks written without them.
+  if (recordedTicks !== undefined) {
+    const now = probe.processStartTicks?.(holder)
+    if (now !== undefined) return now === recordedTicks
+  }
   const started = probe.processStartMs(holder)
   if (started === undefined) return true // cannot tell — keep the pid-only answer
   let writtenMs: number
@@ -159,7 +193,8 @@ export async function claimInstanceLock(
       // 'wx' — create, and FAIL if it exists. The atomicity this whole module rests on.
       const handle = await open(file, 'wx')
       try {
-        await handle.writeFile(String(pid))
+        const ticks = probe.processStartTicks?.(pid)
+        await handle.writeFile(ticks === undefined ? String(pid) : `${pid} ${ticks}`)
       } finally {
         await handle.close()
       }
@@ -187,14 +222,15 @@ export async function claimInstanceLock(
         return { ok: true, async release() { /* nothing was claimed */ }, releaseSync() { /* nothing was claimed */ } }
       }
       let holder: number | undefined
+      let ticks: number | undefined
       try {
-        const raw = (await readFile(file, 'utf-8')).trim()
-        const parsed = parseInt(raw, 10)
-        if (Number.isInteger(parsed) && parsed > 0) holder = parsed
+        const parsed = parseLock(await readFile(file, 'utf-8'))
+        holder = parsed.pid
+        ticks = parsed.ticks
       } catch { /* unreadable — handled with the same grace as an empty file */ }
 
       if (holder !== undefined) {
-        if (await holdsLock(file, holder, probe)) return { ok: false, holder }
+        if (await holdsLock(file, holder, probe, ticks)) return { ok: false, holder }
       } else if (await isFresh(file)) {
         // Empty or unparseable, but new: almost certainly a winner mid-write. Yield to it.
         return { ok: false }
@@ -226,7 +262,7 @@ export async function probeInstanceLock(file: string, probe: LockProbe = OS_PROB
   } catch {
     return null
   }
-  const holder = parseInt(raw, 10)
-  if (!Number.isInteger(holder) || holder <= 0) return null
-  return (await holdsLock(file, holder, probe)) ? holder : null
+  const { pid: holder, ticks } = parseLock(raw)
+  if (holder === undefined) return null
+  return (await holdsLock(file, holder, probe, ticks)) ? holder : null
 }
