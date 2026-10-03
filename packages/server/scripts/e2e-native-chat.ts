@@ -180,6 +180,8 @@ try {
   await shot(page, 'task-page')
   await page.goto(`${BASE}/sessions/${sessionId}`)
   await page.getByTestId('native-session').waitFor()
+  await page.waitForTimeout(1500)
+  await dismissFirstRun(page) // a fresh page load can raise the first-run prompts again
 
   // 7c. attachments (UI follow-up 3): an image and a PDF go with a message; a text file is refused
   const png = join(OUT, 'e2e-shot.png')
