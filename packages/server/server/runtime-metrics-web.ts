@@ -21,6 +21,7 @@
  * already required a session wherever there is one (the path is not in AUTH_PUBLIC). An unexpected
  * failure is the CALLER's `safeError`.
  */
+import { EXPERIMENTAL_REFUSAL, NATIVE_HARNESS, nativeExperimentalOn } from './native-gate'
 import type { ProjectionReader } from './projections/facts'
 import { projectionsEnabled as storeProjectionsEnabled } from './projections/store'
 import { parseMetricsQuery, runMetricsQuery } from './runtime-metrics-query'
@@ -48,6 +49,11 @@ export interface RuntimeMetricsDeps {
   reader: ProjectionReader | null
   /** The journal's first import (`journal/backfill.ts`): while it is pending, no projected answer. */
   backfill?: { pending: boolean; progress: import('./journal/backfill').BackfillProgress | null }
+  /**
+   * Whether the native harness may be shown (`native-gate.ts`). `false`: its figures are left out of
+   * every answer, and asking for it by name is a 403 `experimental`. Absent reads as shown (tests).
+   */
+  nativeVisible?: boolean
 }
 
 /**
@@ -102,6 +108,10 @@ export async function handleRuntimeMetricsRequest(
   }
   const parsed = parseMetricsQuery(url.searchParams)
   if (!parsed.ok) return { status: 400, body: { error: parsed.error.code, ...parsed.error } }
+  if (deps.nativeVisible === false) {
+    if (parsed.query.filters.harness?.includes(NATIVE_HARNESS)) return { status: 403, body: { ...EXPERIMENTAL_REFUSAL } }
+    parsed.query.hiddenHarnesses = [NATIVE_HARNESS]
+  }
   const st = await reader.status()
   const lag = st.journalHead >= 0 ? st.journalHead - st.cursor : 0
   if (lag > MAX_ANSWER_LAG) {
@@ -207,7 +217,8 @@ export function catchUpStateForTests(): { running: boolean; dirty: boolean } {
  *  (`setRuntimeMetricsReader`) wins, which is what tests use. */
 export async function liveRuntimeMetricsDeps(central: boolean): Promise<RuntimeMetricsDeps> {
   const flag = process.env.AGENTISTICS_PROJECTIONS
-  if (injectedReader || central || !projectionsEnabled(flag)) return { flag, central, reader: injectedReader }
+  const nativeVisible = nativeExperimentalOn()
+  if (injectedReader || central || !projectionsEnabled(flag)) return { flag, central, reader: injectedReader, nativeVisible }
   const store = await openLive()
   // The catch-up keeps going while the route refuses (first import, a large lag), so the projections
   // are ready when it stops refusing.
@@ -216,7 +227,7 @@ export async function liveRuntimeMetricsDeps(central: boolean): Promise<RuntimeM
     import('./config'), import('./journal/backfill'),
   ])
   const backfill = { pending: backfillPending(JOURNAL_PATH, JOURNAL_BACKFILL_PATH), progress: readBackfillProgress(JOURNAL_BACKFILL_PATH) }
-  return { flag, central, reader: store?.reader ?? null, backfill }
+  return { flag, central, reader: store?.reader ?? null, backfill, nativeVisible }
 }
 
 /** Test/teardown hook: close the lazily opened store. */

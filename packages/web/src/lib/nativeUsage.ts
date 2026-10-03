@@ -8,6 +8,7 @@
  * A machine without projections (the flag off, a central) answers 404/409: no card, not a zero.
  */
 import { useEffect, useState } from 'react'
+import { nativeRuntimeFrom } from './nativeSession'
 
 export interface NativeUsageRow {
   model: string
@@ -80,14 +81,14 @@ export function nativeUsageOf(body: { groups?: MetricsGroupWire[] } | null | und
 }
 
 /**
- * PURE. Whether the card is drawn, and with what. The card belongs to the ENGINE, not to having
- * calls: with the engine present and no native call yet it shows an empty state instead of
- * vanishing (v2.98.0 hid it, so a fresh install could not tell "nothing yet" from "no such
- * feature"). Without an engine there is nothing to show — unless usage exists anyway (a journal
- * left by an engine that was later switched off still counts).
+ * PURE. Whether the card is drawn, and with what. The card belongs to the NATIVE RUNTIME being shown
+ * here (`nativeRuntimeFrom`: an engine that provides it, and the experimental flag on), not to having
+ * calls: shown, with no native call yet it is an empty state instead of vanishing (v2.98.0 hid it, so
+ * a fresh install could not tell "nothing yet" from "no such feature"). Not shown — a community build,
+ * or the flag off (owner decision 2026-10-03) — there is no card, whatever the journal holds.
  */
 export function nativeCard(engine: boolean, usage: NativeUsage | null): { show: boolean; usage: NativeUsage | null } {
-  return { show: engine || usage !== null, usage }
+  return { show: engine, usage: engine ? usage : null }
 }
 
 /** The card's data, refreshed once a minute. */
@@ -99,7 +100,8 @@ export function useNativeUsage(): { show: boolean; usage: NativeUsage | null } {
       let engine = false
       try {
         const e = await fetch('/api/engine', { cache: 'no-store' })
-        if (e.ok) engine = (await e.json())?.present === true
+        // The card is a native surface: shown only where the native runtime may be (the experimental flag).
+        if (e.ok) engine = nativeRuntimeFrom(await e.json())
       } catch { /* engine unknown: treated as absent */ }
       let usage: NativeUsage | null = null
       try {
