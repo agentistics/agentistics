@@ -18,7 +18,7 @@ const query = (): MetricsQueryFn => {
       costFact({ sessionId: 's2', harness: 'codex', model: 'gpt-5.5', project: '/home/u/other', costUSD: 2 }),
     ],
     [
-      runFact({ sessionId: 's1', runId: 'r1', messages: 3, tools: { Bash: { calls: 2, errors: 0, durationMs: 10 } } }),
+      runFact({ sessionId: 's1', runId: 'r1', messages: 3, tools: { Bash: { calls: 2, errors: 0, durationMs: 10, subagent: { calls: 1, errors: 0, durationMs: 4 } } } }),
       runFact({ sessionId: 's2', runId: 'r2', harness: 'codex', model: 'gpt-5.5', project: '/home/u/other', messages: 1, tools: { Read: { calls: 5, errors: 0, durationMs: 1 } } }),
     ],
   )
@@ -50,7 +50,7 @@ describe('projectedScope: the filters the API can express', () => {
 })
 
 describe('projectedDerived (A4.7)', () => {
-  test('sessions, and main-agent cost and tokens per model; tools and projects stay legacy', async () => {
+  test('sessions, and the main agent\'s cost and tokens per model, tools and projects', async () => {
     const d = await projectedDerived(query(), { to: '2026-09-30' }, blended)
     expect(d.figuresSource).toBe('projections')
     expect(d.totalSessions).toBe(2)
@@ -58,9 +58,10 @@ describe('projectedDerived (A4.7)', () => {
     expect(Object.keys(d.modelUsage).sort()).toEqual(['claude-sonnet-5', 'gpt-5.5'])
     expect(d.modelUsage['claude-sonnet-5']).toMatchObject({ inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 300, cacheCreationInputTokens: 40, costUSD: 1 })
     expect(d.tokenTotals).toMatchObject({ input: 20, output: 40, cacheRead: 600, cacheWrite: 80 })
-    // Tools and projectStats are NOT overlaid: the projection's tool counts include subagents.
-    expect('toolCounts' in d).toBe(false)
-    expect('projectStats' in d).toBe(false)
+    // Tools are the MAIN agent's: Bash's subagent call is not in them.
+    expect(d.toolCounts).toEqual({ Bash: 1, Read: 5 })
+    expect(d.totalToolCalls).toBe(6)
+    expect(d.projectStats).toEqual({ '/home/u/app': { sessions: 1, messages: 3, tools: 1 }, '/home/u/other': { sessions: 1, messages: 1, tools: 5 } })
     expect(d.cacheHitRate).toBeCloseTo(600 / (20 + 600 + 80), 10)
   })
 })

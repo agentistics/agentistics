@@ -76,6 +76,11 @@ export interface RunFact {
     durationMs: number | null
     /** ADDED (A4.1, optional): how many of `calls` `durationMs` covers — fewer means the sum is partial. */
     durationCalls?: number
+    /**
+     * ADDED (A4.7 decision 2, optional): the part of the figures above made by SUBAGENTS, by the cost
+     * facts' main-agent rule. Absent means none. The main agent's share is the total minus this.
+     */
+    subagent?: { calls: number; errors: number; durationMs: number | null; durationCalls?: number }
   }>
   /** Agent invocations whose transcript was missing — excluded from totals, counted apart. */
   unmeasuredAgents: number

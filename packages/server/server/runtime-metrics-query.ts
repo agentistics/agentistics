@@ -254,8 +254,12 @@ export function parseMetricsQuery(params: URLSearchParams): ParseResult {
   const costOnly = subagent !== undefined
     || groupBy.some(d => COST_ONLY_DIMENSIONS.includes(d))
     || Object.keys(filters).some(d => COST_ONLY_DIMENSIONS.includes(d))
+  // `subagent` (with no agent dimension) still admits `tools`: the run facts carry each tool's
+  // subagent share (A4.7 decision 2). Every other per-run figure has no such split.
+  const agentDimension = groupBy.some(d => COST_ONLY_DIMENSIONS.includes(d))
+    || Object.keys(filters).some(d => COST_ONLY_DIMENSIONS.includes(d))
   if (costOnly) {
-    const bad = metrics.find(m => METRIC_STREAM[m] === 'run')
+    const bad = metrics.find(m => METRIC_STREAM[m] === 'run' && !(m === 'tools' && subagent !== undefined && !agentDimension))
     if (bad) {
       return refuse('metric_dimension_mismatch', `"${bad}" is a per-run figure and cannot be split by agent; drop it, or drop the agent/subagent dimension.`, 'metrics', bad)
     }
@@ -369,7 +373,9 @@ function compileFilter(q: MetricsQuery): (f: Fact) => boolean {
   const sub = q.subagent
   if (active.length === 0 && !from && !to && sub === undefined) return () => true
   return (f: Fact) => {
-    if (sub !== undefined && (!('subagent' in f) || f.subagent !== sub)) return false
+    // A cost fact is one agent's, so it passes or not. A run fact has both sides; it passes, and
+    // the run loop cuts its tools to the selected side (`toolSide`).
+    if (sub !== undefined && 'subagent' in f && f.subagent !== sub) return false
     for (const [d, allowed] of active) {
       if (!allowed.has(dimValue(f, d) ?? '')) return false
     }
@@ -455,6 +461,33 @@ function foldCost(a: HarnessAcc, f: CostFact): void {
     for (const k of f.partialCounters) pc.add(k)
   }
   a.responses += f.responses
+}
+
+/**
+ * A run's tools cut to one side of the main/subagent split: `true` keeps the subagents' share,
+ * `false` the main agent's (the total minus that share). A tool with no call on the side is dropped.
+ */
+export function toolSide(tools: RunFact['tools'], subagent: boolean): RunFact['tools'] {
+  const out: RunFact['tools'] = {}
+  for (const name in tools) {
+    const t = tools[name]!
+    const sub = t.subagent
+    if (subagent) {
+      if (!sub || sub.calls === 0) continue
+      out[name] = { calls: sub.calls, errors: sub.errors, durationMs: sub.durationMs, ...(sub.durationCalls !== undefined ? { durationCalls: sub.durationCalls } : {}) }
+      continue
+    }
+    const calls = t.calls - (sub?.calls ?? 0)
+    if (calls <= 0) continue
+    const durationMs = t.durationMs === null ? null : t.durationMs - (sub?.durationMs ?? 0)
+    const durationCalls = t.durationCalls === undefined ? undefined : t.durationCalls - (sub?.durationCalls ?? 0)
+    out[name] = {
+      calls, errors: t.errors - (sub?.errors ?? 0),
+      durationMs: durationCalls === 0 ? null : durationMs,
+      ...(durationCalls !== undefined ? { durationCalls } : {}),
+    }
+  }
+  return out
 }
 
 function foldRun(a: HarnessAcc, f: RunFact): void {
@@ -782,7 +815,12 @@ export async function runMetricsQuery(
   const costOnly = q.subagent !== undefined
     || q.groupBy.some(d => COST_ONLY_DIMENSIONS.includes(d))
     || Object.keys(q.filters).some(d => COST_ONLY_DIMENSIONS.includes(d))
-  const readRun = !costOnly && (streams.has('run') || streams.has('both'))
+  // A subagent filter with no agent dimension reads the run stream for TOOLS only, each tool cut to
+  // the selected side (`toolSide`); those run facts count no session or run (the cost facts do).
+  const toolSplit = q.subagent !== undefined && q.metrics.includes('tools')
+    && !q.groupBy.some(d => COST_ONLY_DIMENSIONS.includes(d))
+    && !Object.keys(q.filters).some(d => COST_ONLY_DIMENSIONS.includes(d))
+  const readRun = (!costOnly && (streams.has('run') || streams.has('both'))) || toolSplit
   const range = { ...(q.from ? { from: q.from } : {}), ...(q.to ? { to: q.to } : {}) }
 
   const groups = new Map<string, GroupAcc>()
@@ -800,7 +838,7 @@ export async function runMetricsQuery(
   const idOf = (key: (string | null)[]): string =>
     key.length === 0 ? '' : key.length === 1 ? (key[0] ?? '\u0001') : key.map(v => (v === null ? '\u0001' : v)).join('\u0000')
 
-  const groupOf = (f: Fact): GroupAcc => {
+  const groupOf = (f: Fact, countIds = true): GroupAcc => {
     const key = dims.length === 0 ? [] : dims.map(d => dimValue(f, d))
     const id = idOf(key)
     let g = groups.get(id)
@@ -817,8 +855,8 @@ export async function runMetricsQuery(
     }
     g.rows++
     if (f.confidence !== 'exact') g.weakest = weaker(g.weakest, f.confidence)
-    if (g.sessions && f.sessionId !== g.lastSession) { g.sessions.add(f.sessionId); g.lastSession = f.sessionId }
-    if (g.runs && f.runId !== null && f.runId !== g.lastRun) { g.runs.add(f.runId); g.lastRun = f.runId }
+    if (countIds && g.sessions && f.sessionId !== g.lastSession) { g.sessions.add(f.sessionId); g.lastSession = f.sessionId }
+    if (countIds && g.runs && f.runId !== null && f.runId !== g.lastRun) { g.runs.add(f.runId); g.lastRun = f.runId }
     conf[f.confidence]++
     return g
   }
@@ -832,9 +870,11 @@ export async function runMetricsQuery(
     }
   }
   if (readRun) {
-    for await (const f of reader.runFacts(range)) {
-      if (!passes(f)) continue
-      foldRun(harnessAcc(groupOf(f), f.harness), f)
+    for await (const raw of reader.runFacts(range)) {
+      if (!passes(raw)) continue
+      const f = toolSplit ? { ...raw, tools: toolSide(raw.tools, q.subagent!) } : raw
+      if (toolSplit && Object.keys(f.tools).length === 0) continue
+      foldRun(harnessAcc(groupOf(f, !toolSplit), f.harness), f)
       un.unmeasuredAgents += f.unmeasuredAgents
       if (f.messages === null) un.runsWithoutMessages++
       if (f.activeMinutes === null) un.runsWithoutActiveMinutes++

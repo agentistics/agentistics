@@ -158,6 +158,8 @@ if (surface === 'web' || surface === 'all') {
       { sessions: projected.totalSessions, costUSD: projected.totalCostUSD, tokens: projected.tokenTotals.input + projected.tokenTotals.output + projected.tokenTotals.cacheRead + projected.tokenTotals.cacheWrite },
       ['sessions', 'costUSD', 'tokens']))
     reports.push(parity.compareRows(`web models${scopeTag}`, rowsOf(legacy.modelUsage, 'model', tokens), rowsOf(projected.modelUsage, 'model', tokens), 'model', ['tokens']))
+    reports.push(parity.compareRows(`web projects${scopeTag}`, rowsOf(legacy.projectStats, 'project', v => ({ sessions: v.sessions, tools: v.tools })), rowsOf(projected.projectStats, 'project', v => ({ sessions: v.sessions, tools: v.tools })), 'project', ['sessions', 'tools']))
+    reports.push(parity.compareRows(`web tools${scopeTag}`, rowsOf(legacy.toolCounts, 'tool', v => ({ calls: v })), rowsOf(projected.toolCounts, 'tool', v => ({ calls: v })), 'tool', ['calls']))
   }
 }
 

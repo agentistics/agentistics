@@ -8,14 +8,15 @@
  * `componentCatalog.tsx`) read for sessions, costs and tools:
  * - `totalSessions` and `totalCostUSD`;
  * - `modelUsage`, `tokenTotals`, `inputTokens` and `outputTokens`;
- * - the cache figures, through the same `cacheFiguresOf`.
+ * - the cache figures, through the same `cacheFiguresOf`;
+ * - `toolCounts` and `totalToolCalls`, the MAIN agent's (`subagent=false`). The legacy `tool_counts`
+ *   are the main transcript's alone, and the run facts carry each tool's subagent share (A4.7
+ *   decision 2), so the same quantity sits under the same name;
+ * - `projectStats`, keyed by project root: sessions, the person's messages (`user_message_count` on
+ *   both paths) and the main agent's tool calls.
  *
  * Everything else (streaks, the heatmap, hours, git, languages, agents, the session list) stays on
- * `/api/data`. So do the **tool counts and `projectStats`**: the projection's tool figures count
- * every agent of a run, subagents included, while the legacy `tool_counts` are the main transcript's
- * alone. On this machine that is 58,800 subagent calls beside 120,302 main ones. The API cannot split
- * tools by agent (`subagent` does not combine with `tools`), so overlaying them would put a different
- * quantity under the old name. They move when the run facts carry that split.
+ * `/api/data`.
  *
  * Tokens and cost are the MAIN agent's (`subagent=false`), which is the per-session figures' meaning.
  * The web reports subagent spend apart (`totalAgentCostUSD`).
@@ -45,6 +46,9 @@ export interface ProjectedDerived {
   cacheWriteOverheadUSD: number
   cacheNetSavedUSD: number
   cachePerModel: ReturnType<typeof cacheFiguresOf>['cachePerModel']
+  toolCounts: Record<string, number>
+  totalToolCalls: number
+  projectStats: Record<string, { sessions: number; messages: number; tools: number }>
   /** Marks the overlay, so a page can say where its numbers came from. */
   figuresSource: 'projections'
 }
@@ -80,15 +84,21 @@ const usageOf = (g: MetricsGroupLike): ModelUsage => ({
   costUSD: g.metrics.cost?.usd ?? 0,
 })
 
+interface ToolsCellLike { byTool?: { name: string; calls: number }[]; calls?: number }
+const toolsOf = (g: MetricsGroupLike | undefined) => (g?.metrics as { tools?: ToolsCellLike } | undefined)?.tools
+
 export async function projectedDerived(
   q: MetricsQueryFn,
   scope: MetricsParams,
   /** The blended rate the cache-savings estimate uses: `blendedCostPerToken` over all-time usage. */
   blendedOf: (usage: Record<string, ModelUsage>) => BlendedRate,
 ): Promise<ProjectedDerived> {
-  const [byModel, whole] = await Promise.all([
+  const [byModel, whole, mainTools, byProject, projectTools] = await Promise.all([
     allMetricGroups(q, { ...scope, groupBy: 'model', subagent: 'false', metrics: 'tokens,cost' }),
     allMetricGroups(q, { ...scope, metrics: 'sessions' }),
+    allMetricGroups(q, { ...scope, subagent: 'false', metrics: 'tools' }),
+    allMetricGroups(q, { ...scope, groupBy: 'project', metrics: 'sessions,messages' }),
+    allMetricGroups(q, { ...scope, groupBy: 'project', subagent: 'false', metrics: 'tools' }),
   ])
   const modelUsage: Record<string, ModelUsage> = {}
   let totalCostUSD = 0
@@ -100,6 +110,17 @@ export async function projectedDerived(
   }
   const tokenTotals = sumTokens(Object.values(modelUsage).map(usageTokens))
   const t = whole.groups[0]
+  const toolCounts: Record<string, number> = {}
+  for (const row of toolsOf(mainTools.groups[0])?.byTool ?? []) toolCounts[row.name] = row.calls
+  const projectStats: ProjectedDerived['projectStats'] = {}
+  const projectKey = (g: MetricsGroupLike) => g.key.project || 'Unknown'
+  for (const g of byProject.groups) {
+    projectStats[projectKey(g)] = { sessions: g.metrics.sessions?.count ?? 0, messages: g.metrics.messages?.value ?? 0, tools: 0 }
+  }
+  for (const g of projectTools.groups) {
+    const p = (projectStats[projectKey(g)] ??= { sessions: 0, messages: 0, tools: 0 })
+    p.tools = toolsOf(g)?.calls ?? 0
+  }
   return {
     totalSessions: t?.metrics.sessions?.count ?? 0,
     totalCostUSD,
@@ -108,6 +129,9 @@ export async function projectedDerived(
     inputTokens: tokenTotals.input,
     outputTokens: tokenTotals.output,
     ...cacheFiguresOf(modelUsage, blendedOf(modelUsage)),
+    toolCounts,
+    totalToolCalls: toolsOf(mainTools.groups[0])?.calls ?? 0,
+    projectStats,
     figuresSource: 'projections',
   }
 }
