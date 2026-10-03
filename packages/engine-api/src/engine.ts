@@ -48,6 +48,8 @@ export const RESERVED_PREFIXES = [
   '/api/ingest',
   '/v1/logs',
   '/v1/metrics',
+  /** 1.7 (A5.2): OTLP spans — a harness's traces reach the engine's receiver like its logs. */
+  '/v1/traces',
 ] as const
 
 export type ReservedPrefix = (typeof RESERVED_PREFIXES)[number]

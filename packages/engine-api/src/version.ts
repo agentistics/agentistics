@@ -54,6 +54,9 @@
  * Also (B6.2): `fleet.delegateHarnesses / delegateSpawn / lastReply / stop` (optional) — an engine's
  * agent may run as a session of another harness, started by the HOST, which alone decides whether the
  * person allowed that harness (default deny) and files the session on the board.
+ * Also (A5.2): \`/v1/traces\` joins \`RESERVED_PREFIXES\` (guarded \`localTranscripts\` like the other OTLP
+ * routes). An engine registers it only on a host that speaks 1.7 — an older host refuses an
+ * unreserved prefix at load.
  */
 export const ENGINE_API_VERSION = '1.7.0'
 
