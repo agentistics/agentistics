@@ -83,6 +83,12 @@ export interface Preferences {
    * own. Absent or empty: none — delegation to another harness is DENIED by default (superskill R2).
    */
   delegation?: { harnesses?: string[] }
+  /**
+   * A5.4 (engine-api 1.7): harnesses the fleet starts over ACP — driven by the engine, no terminal —
+   * instead of tmux. Absent or empty: none, every session is a tmux one. A harness the engine cannot
+   * drive, or an ACP start that fails, falls back to tmux.
+   */
+  acpHarnesses?: string[]
   customLayout?: CustomGridItem[]
   monthlyBudgetUSD?: number | null
   cardOrder?: string[]

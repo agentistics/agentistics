@@ -406,4 +406,10 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   apiVersion?: string
   /** The fleet's confirmed transitions (1.4). Absent = the host offers none (an engine copes). */
   fleet?: EngineFleet
+  /**
+   * 1.7 — the port this host's own API server listens on (`PORT`), so an engine can WRITE it into a
+   * harness's exporter configuration (`agentop ingest install claude --channel otlp`). Never for the
+   * engine to call the host over loopback: the host's services are this object.
+   */
+  serverPort?(): number | null
 }

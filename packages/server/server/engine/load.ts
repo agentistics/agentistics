@@ -303,5 +303,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     apiVersion: ENGINE_API_VERSION,
     // 1.7 (B6.2): delegation to another harness — consent (default deny), admission and filing are the host's.
     fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
+    // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.
+    serverPort: () => config.PORT,
   }
 }

@@ -78,6 +78,30 @@ export interface CodeHost {
   dispose(): Promise<void>
 }
 
+/** One harness session driven over ACP for the host's fleet (1.7, A5.4). */
+export interface EngineAcpSession {
+  readonly id: string
+  readonly acpSessionId: string
+  activity(): 'starting' | 'working' | 'waiting' | 'waiting-approval' | 'exited'
+  /** The open permission's option labels, numbered from 1 in this order; null when none is open. */
+  dialog(): { options: string[] } | null
+  /** The person's own view of the session (never journaled). */
+  screen(lines: number): string[]
+  lastActivityMs(): number
+  /** Queues a prompt. False when not running or the queue is full. */
+  prompt(text: string): boolean
+  /** Answers the open permission with its 1-based option number. */
+  answer(choice: number): boolean
+  cancel(): void
+  dispose(): void
+}
+
+/** ACP spawn mode (1.7, A5.4). A refusal means: start it the usual way (tmux). */
+export interface EngineAcp {
+  harnesses(): readonly HarnessId[]
+  start(req: { id: string; harness: HarnessId; cwd: string; initialPrompt?: string }): Promise<{ ok: true; session: EngineAcpSession } | { ok: false; reason: string }>
+}
+
 export interface Engine<E extends EngineEvent = EngineEvent> {
   manifest: EngineManifest
   /** Replay + live per harness. PARTIAL on purpose. */
@@ -86,6 +110,8 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   commands: EngineCommand[]
   /** Absent = no `code` tab. */
   codeHost?: (askerFor: (sessionId: string) => PersonAsker) => Promise<CodeHost>
+  /** 1.7 — drive a harness over ACP instead of a terminal. Absent: every session is a terminal one. */
+  acp?: EngineAcp
   /** Health checks the engine contributes. */
   health?: () => Promise<EngineHealthIssue[]>
   dispose(): Promise<void>
