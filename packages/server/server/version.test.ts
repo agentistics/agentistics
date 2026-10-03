@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
 import {
   compareVersions,
   isCriticalRelease,
@@ -11,6 +11,7 @@ import {
   VERSION_CACHE_TTL_MS,
   VERSION_NEGATIVE_TTL_MS,
   VERSION_RETRY_MS,
+  isInProcessFresh,
 } from './version'
 // The unattended-upgrade lock lives in upgrade.ts, but its pure helpers are part of the
 // same "smart auto-update" surface, so they are covered here alongside the version logic.
@@ -225,4 +226,29 @@ test('unattended install is opt-in: only an explicit AGENTISTICS_AUTO_UPGRADE=1 
   expect(autoInstallAllowed({ AGENTISTICS_AUTO_UPGRADE: 'true' })).toBe(false)
   expect(autoInstallAllowed({ AGENTISTICS_AUTO_UPGRADE: 'yes' })).toBe(false)
   expect(autoInstallAllowed({ AGENTISTICS_AUTO_UPGRADE: '1' })).toBe(true)
+})
+
+
+// UPD.NOTIFY — a release must reach the popup within MINUTES. The owner never saw v2.99–v2.101.1:
+// the in-process layer answered "up to date" for a full hour (it ignored the negative TTL the disk cache
+// has), on top of a 30-minute negative TTL and a 15-minute retry floor.
+describe('UPD.NOTIFY: how soon a release is noticed', () => {
+  const upToDate = { current: '1.0.0', latest: '1.0.0', hasUpdate: false, critical: false, fetchedAt: 1_000_000 }
+  const available = { ...upToDate, latest: '1.1.0', hasUpdate: true }
+
+  test('the up-to-date verdict is stale after 10 minutes and a refresh is allowed every 5', () => {
+    expect(VERSION_NEGATIVE_TTL_MS).toBe(10 * 60_000)
+    expect(VERSION_RETRY_MS).toBe(5 * 60_000)
+  })
+
+  test('the in-process cache honours the SAME negative TTL as the disk cache (it used to hold "up to date" for an hour)', () => {
+    expect(isInProcessFresh(upToDate, upToDate.fetchedAt + VERSION_NEGATIVE_TTL_MS - 1, '1.0.0')).toBe(true)
+    expect(isInProcessFresh(upToDate, upToDate.fetchedAt + VERSION_NEGATIVE_TTL_MS, '1.0.0')).toBe(false)
+  })
+
+  test('a known update keeps the long TTL (a stale "update available" costs nothing); another installed version never applies', () => {
+    expect(isInProcessFresh(available, available.fetchedAt + 60 * 60_000, '1.0.0')).toBe(true)
+    expect(isInProcessFresh(upToDate, upToDate.fetchedAt + 1, '1.0.1')).toBe(false)
+    expect(isInProcessFresh(null, 5, '1.0.0')).toBe(false)
+  })
 })
