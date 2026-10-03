@@ -137,6 +137,15 @@ for (let b = 0; b < BOOTS; b++) {
         if (r.status !== 200) throw new Error(`historic open answered ${r.status}: ${r.text.slice(0, 200)}`)
         xs.push(r.ms); bytes = r.bytes
       }
+      // PERF.1 step 3: the paged open (the END first), when the server has it.
+      const paged: number[] = []
+      let pagedBytes = 0
+      for (let i = 0; i < 5; i++) {
+        const r = await get(s, `/api/claude-sessions/${t.id}?encodedDir=${encodeURIComponent(encodedDir)}&limit=150`)
+        paged.push(r.ms); pagedBytes = r.bytes
+      }
+      const pagedOk = pagedBytes > 0 && !pagedBytes.toString().startsWith('[')
+      open[`${k}_paged`] = pagedOk ? { firstMs: Math.round(paged[0]!), responseKB: Math.round(pagedBytes / 1024), ...quantiles(paged.slice(1)) } : null
       open[k] = { transcriptMB: +(t.size / 1048576).toFixed(1), responseMB: +(bytes / 1048576).toFixed(1), ...quantiles(xs) }
     }
     out.historic_open = open

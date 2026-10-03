@@ -1426,6 +1426,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
+      // PERF.1: `limit` asks for a PAGE from the end (`before` = index for older ones); without it the
+      // whole conversation, as before, for any reader that has not moved to pages.
+      const limit = Number(url.searchParams.get('limit'))
+      if (Number.isInteger(limit) && limit > 0) {
+        const { getClaudeSessionPage } = await import('./claude-sessions')
+        const beforeRaw = url.searchParams.get('before')
+        const before = beforeRaw !== null && Number.isInteger(Number(beforeRaw)) ? Number(beforeRaw) : undefined
+        return new Response(JSON.stringify(await getClaudeSessionPage(encodedDir, id, Math.min(limit, 1000), before)), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
       const msgs: ClaudeSessionMessage[] = await getClaudeSessionMessages(encodedDir, id)
       return new Response(JSON.stringify(msgs), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
