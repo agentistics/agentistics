@@ -116,6 +116,7 @@ import { SessionPickModal } from './SessionPickModal'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
+import type { ChatSource } from './chatSource'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
@@ -217,6 +218,11 @@ export interface SessionChatProps {
    *  only: mobile keeps its existing header metrics button (`SessionsPage.tsx`'s own `touch`
    *  variant), so this is never a second, redundant control on a phone. */
   metrics?: SessionComposerMetrics
+  /**
+   * WHERE THE CONVERSATION COMES FROM (UI.UNIFY, `chatSource.ts`). Absent = the harness transcript,
+   * the terminal screen and the fleet's verbs, exactly as before. The native runtime passes one.
+   */
+  source?: ChatSource
 }
 
 // How often the conversation is re-read — and for how long it keeps being read after you leave —
@@ -241,7 +247,9 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, metrics }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, metrics, source }: SessionChatProps) {
+  // Every verb goes through the source when there is one (the native runtime's send/stop/answer).
+  const act = source?.act ?? actProp
   const pt = lang === 'pt'
   /** Touch targets grow on a phone and nowhere else — 44px on a desktop is a row of buttons. */
   const isMobile = useIsMobile()
@@ -1047,7 +1055,19 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * a minute, and the warm read stands down there too — so coming back into view asks immediately,
    * which is the exact moment somebody wants what they missed.
    */
+  // A SOURCE replaces the feed: its turns ARE the payload (`chatSource.ts`).
+  const sourceTurns = source?.turns
+  const sourceUnavailable = source?.unavailable
+  const hasSource = source !== undefined
   useEffect(() => {
+    if (!hasSource) return
+    setPayload(sourceTurns === null || sourceTurns === undefined
+      ? (sourceUnavailable ? { turns: [], live: true, unavailable: sourceUnavailable } : null)
+      : { turns: sourceTurns, live: true })
+    setRefreshing(false)
+  }, [hasSource, sourceTurns, sourceUnavailable])
+  useEffect(() => {
+    if (hasSource) return
     const stop = subscribeChat({ id: session.id, key: scratchId, lang }, next => {
       setPayload(next as unknown as ChatPayload)
       setRefreshing(false)
@@ -1060,7 +1080,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       document.removeEventListener('visibilitychange', onVisible)
       stop()
     }
-  }, [session.id, lang, scratchId])
+  }, [session.id, lang, scratchId, hasSource])
 
   /**
    * THE MARKER WAITS, and that is what keeps it from being noise.
@@ -1093,8 +1113,9 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * leak a capture loop — and the case where it holds longest, a message sitting in the harness's
    * queue, is precisely the one somebody is watching the screen to understand.
    */
-  const working = session.state === 'working'
-  const { state: term } = useTerminalStream(session.id)
+  const working = source ? source.working : session.state === 'working'
+  // No screen behind a source: the stream is never opened (a null id is the hook's "off").
+  const { state: term } = useTerminalStream(source ? null : session.id)
 
   // A turn just ENDED. The live bubble is gone the moment `working` drops, and the real one is up
   // to `CHAT_POLL_MS` away — a gap where neither source is showing the answer that just finished.
@@ -1215,6 +1236,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     .find(t => t.role === 'assistant' && !t.pending && !t.task && t.text.trim() !== '')
 
   const live = useMemo(() => {
+    if (source) return source.liveText
     if (!term.frame) return null
     return liveTurnText({
       // The frame carries the emulator's escape sequences; the chat wants the words.
@@ -1222,7 +1244,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
       ...(lastAssistant ? { lastCommitted: lastAssistant.text } : {}),
       working,
     })
-  }, [term.frame, lastAssistant, working])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [term.frame, lastAssistant, working, source?.liveText])
 
   /**
    * Whether the frame is showing Claude Code's OWN compaction screen right now — see
@@ -1519,7 +1542,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    */
   const [typing, setTyping] = useState(false)
 
-  const blocked = (session.approvalLines?.length ?? 0) > 0
+  // A source's questions are its own slot (`approvals`), never the fleet row's dialog.
+  const blocked = !source && (session.approvalLines?.length ?? 0) > 0
   const loading = payload === null
 
   /**
@@ -1772,9 +1796,10 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * thing left to do to a working session is stop it; a single character means the opposite.
    * Attachments count as something written — a message that is only files is still a message.
    */
+  const stopEnabled = source ? source.canStop : !!stopVerb?.enabled
   const stopShown = isStopShown({
     working,
-    stopEnabled: !!stopVerb?.enabled,
+    stopEnabled,
     draft,
     attachments: attached.length,
   })
@@ -1782,7 +1807,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const somethingToSend = hasSomethingToSend({ draft: stripQuotes(draft), attachments: attached.length })
   const [stopping, setStopping] = useState(false)
   async function stopNow() {
-    if (!stopVerb?.enabled || stopping) return
+    if (!stopEnabled || stopping) return
     setStopping(true)
     const out = await act({ id: session.id, action: 'interrupt' })
     setStopping(false)
@@ -1968,7 +1993,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
      */
     const restore = { draft, attached, replyTo }
     setSending(true)
-    editEcho(list => [...list, full])
+    // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
+    if (!source) editEcho(list => [...list, full])
     setDraft('')
     sessionScratch.clearDraft(scratchId)
     setAttached([])
@@ -2191,10 +2217,16 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           {/* The quiet line saying the session is busy. AFTER the messages, deliberately not styled
               as one — it is the only place the reasoning and the tool calls surface, and rendering
               those as chat entries buried the sentences actually addressed to the user. */}
+          {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
+              is drawn as the bubble it will become (`chatSource.ts`). */}
+          {source?.liveText && (
+            <ChatBubble turn={{ role: 'assistant', text: source.liveText }} lang={lang} harness={session.harness} />
+          )}
+
           {showWorking && (
             <WorkingNote
               lang={lang}
-              {...(newestAssistant?.tools ? { tools: newestAssistant.tools } : {})}
+              {...(source?.runningTools?.length ? { tools: source.runningTools } : newestAssistant?.tools ? { tools: newestAssistant.tools } : {})}
               thinking={Boolean(newestAssistant?.thinking)}
               {...(compacting ? { compacting } : {})}
             />
@@ -2218,6 +2250,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
               }}
             />
           )}
+          {/* A SOURCE's questions, in the same place (`chatSource.ts`'s `approvals` slot). */}
+          {source?.approvals}
         </div>
       </div>
 
@@ -3470,11 +3504,13 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 </div>
                 </ComposerToolbar>
               </ComposerShell>
-              {notice && (
+              {(notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                  {notice}
+                  {notice ?? source?.notice}
                 </p>
               )}
+              {/* A SOURCE's run line (tokens, cost, context) — the bottom bar's slot. */}
+              {source?.status}
             </>
           )}
         </div>
