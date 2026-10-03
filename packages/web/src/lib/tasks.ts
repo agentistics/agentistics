@@ -9,9 +9,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  sortTaskStatuses, type Filters, type StagedSessionDraft, type TaskPriorityId, type TaskProgress,
+  sortTaskStatuses, sortTaskTypes, type Filters, type StagedSessionDraft, type TaskPriorityId, type TaskProgress,
 } from '@agentistics/core'
 import { getDateRangeFilter } from '../hooks/useData'
+import type { ChatAttachmentRef, CommentTarget } from '@agentistics/core'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
 /**
@@ -84,6 +85,8 @@ export interface TaskRecord {
   links?: TaskLink[]
   /** Absent reads as `none` — "nobody has said", which is not the same as `low`. */
   priority?: TaskPriorityId
+  /** A type id from the board's type vocabulary; absent = unclassified. */
+  type?: string
   /** SUPERSEDED by `startedAt`/`deliveredAt` — kept only so old records round-trip; no UI sets it. */
   dueDate?: string
   startDate?: string
@@ -175,7 +178,12 @@ export interface TaskListRow {
   task: TaskRecord
   attempts: number
   rollup: AttemptRollup
-  counts: { comments: number; subtasks: number; subtasksDone: number; files: number }
+  /** `commentsBySubtask` is each subtask's/group's THREAD size (a group includes its members');
+   *  optional because an older server does not send it — read it as "no per-row count known". */
+  counts: {
+    comments: number; subtasks: number; subtasksDone: number; files: number
+    commentsBySubtask?: Record<string, number>
+  }
   harnesses: string[]
   /**
    * The repositories this task's sessions touched — normalized remotes, `''` for the "no linked
@@ -230,6 +238,12 @@ export interface TaskSessionRow {
 
 export interface TaskComment {
   id: string; taskId: string; author: string; body: string; createdAt: string
+  /** The subtask or GROUP it was left on; absent = the task (and every pre-thread comment). See
+   *  `@agentistics/core`'s `commentThreads.ts` for which thread shows it. */
+  subtaskId?: string
+  /** Files left with the comment — references into the chat's attachment store (`url` is added by
+   *  the detail reply for assistants; the UI builds its own from `path`). */
+  attachments?: ChatAttachmentRef[]
 }
 export interface Subtask {
   id: string
@@ -321,6 +335,9 @@ export interface TaskDetail {
   stats: TaskStats
   sessions: TaskSessionRow[]
   comments: TaskComment[]
+  /** The same comments grouped by their own target — the API's shape for assistants. The UI reads
+   *  threads through `commentThread` instead, which also aggregates a group's members. */
+  commentThreads?: { target: CommentTarget; comments: TaskComment[] }[]
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
@@ -530,12 +547,12 @@ async function post(path: string, body: unknown): Promise<boolean> {
   }
 }
 
-export async function createTask(title: string, detail?: string): Promise<TaskRecord | null> {
+export async function createTask(title: string, detail?: string, type?: string): Promise<TaskRecord | null> {
   try {
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, detail }),
+      body: JSON.stringify({ title, detail, ...(type ? { type } : {}) }),
     })
     if (!res.ok) return null
     return (await res.json() as { task: TaskRecord }).task
@@ -548,6 +565,8 @@ export interface TaskFieldPatch {
   title?: string
   detail?: string
   priority?: TaskPriorityId
+  /** A type id; an empty string clears it. */
+  type?: string
   dueDate?: string
   startDate?: string
   labels?: string[]
@@ -566,8 +585,32 @@ export interface TaskFieldPatch {
 export const editTask = (ref: string, patch: TaskFieldPatch) =>
   post(`/api/tasks/${encodeURIComponent(ref)}`, patch)
 
-export const addComment = (ref: string, author: string, body: string) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { author, body })
+/**
+ * Leave a comment on the task, or — with `subtaskId` — on one of its subtasks or GROUPS. A refusal
+ * carries the server's own sentence (an unknown or deleted subtask is refused in words, never filed
+ * on the task), which the composer shows as it is.
+ */
+export async function addComment(
+  ref: string, author: string, body: string, subtaskId?: string | null,
+  attachments?: readonly ChatAttachmentRef[],
+): Promise<{ ok: true } | { ok: false; message: string | null }> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        author, body,
+        ...(subtaskId ? { subtaskId } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      }),
+    })
+    if (res.ok) return { ok: true }
+    const refused = await res.json().catch(() => null) as { message?: string } | null
+    return { ok: false, message: typeof refused?.message === 'string' ? refused.message : null }
+  } catch {
+    return { ok: false, message: null }
+  }
+}
 
 /**
  * Add a subtask — loose by default, or a GROUP (§F.1) when `isGroup` is true — and return its new
@@ -1006,6 +1049,91 @@ export async function deleteTaskStatus(id: string): Promise<
     const res = await fetch(`/api/tasks/statuses/${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (res.ok) return { ok: true }
     const body = await res.json().catch(() => ({})) as { message?: StatusDeleteRefusal; usageCount?: number }
+    return { ok: false, ...(body.message ? { message: body.message } : {}), ...(body.usageCount !== undefined ? { usageCount: body.usageCount } : {}) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * The TYPE vocabulary — the same shape and the same fetch/CRUD contract as the status one above
+ * (`@agentistics/core`'s `TaskTypeDef`; the server's `TaskTypeRow`). No `protected` flag: the only
+ * delete refusal is `in_use`.
+ */
+export interface TaskTypeRow {
+  id: string
+  label: string
+  color: string
+  order: number
+  usageCount: number
+}
+
+export type TypeDeleteRefusal = 'in_use' | 'no_such_type'
+
+export async function fetchTaskTypes(): Promise<TaskTypeRow[]> {
+  try {
+    const res = await fetch('/api/tasks/types')
+    if (!res.ok) return []
+    const body = await res.json().catch(() => null) as { types?: TaskTypeRow[] } | null
+    return body?.types ?? []
+  } catch {
+    return []
+  }
+}
+
+/** The board's LIVE type list. `null` = still loading; an empty list is a REAL answer here (a person
+ *  may delete every type), so unlike statuses a reachable empty reply is kept. */
+export function useTaskTypes() {
+  const [types, setTypes] = useState<TaskTypeRow[] | null>(null)
+  const reload = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tasks/types')
+      if (!res.ok) return
+      const body = await res.json().catch(() => null) as { types?: TaskTypeRow[] } | null
+      if (body?.types) setTypes(sortTaskTypes(body.types) as TaskTypeRow[])
+    } catch { /* keep the last list: nobody answered is not "nothing changed" */ }
+  }, [])
+  useEffect(() => { void reload() }, [reload])
+  return { types, reload }
+}
+
+export async function createTaskType(label: string, color: string): Promise<
+  { ok: true; type: TaskTypeRow } | { ok: false; message?: string }
+> {
+  try {
+    const res = await fetch('/api/tasks/types', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, color }),
+    })
+    const body = await res.json().catch(() => ({})) as { type?: TaskTypeRow; message?: string }
+    if (!res.ok || !body.type) return { ok: false, ...(body.message ? { message: body.message } : {}) }
+    return { ok: true, type: { ...body.type, usageCount: 0 } }
+  } catch {
+    return { ok: false }
+  }
+}
+
+export async function editTaskType(id: string, patch: { label?: string; color?: string }): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/tasks/types/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function deleteTaskType(id: string): Promise<
+  { ok: true } | { ok: false; message?: TypeDeleteRefusal; usageCount?: number }
+> {
+  try {
+    const res = await fetch(`/api/tasks/types/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (res.ok) return { ok: true }
+    const body = await res.json().catch(() => ({})) as { message?: TypeDeleteRefusal; usageCount?: number }
     return { ok: false, ...(body.message ? { message: body.message } : {}), ...(body.usageCount !== undefined ? { usageCount: body.usageCount } : {}) }
   } catch {
     return { ok: false }

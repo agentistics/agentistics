@@ -65,7 +65,7 @@ import {
   attachSession, detachSession, fmtDuration, markTask, patchSubtask, removeComment, removeLink,
   removeSubtask,
   editTask, moveTask, setBlockedBy, uploadFile,
-  useCentralTasks, useTaskDetail, useTaskList, useTaskStatuses,
+  useCentralTasks, useTaskDetail, useTaskList, useTaskStatuses, useTaskTypes,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
@@ -142,6 +142,7 @@ function TaskList() {
   const { filters, lang } = useOutletContext<AppContext>()
   const { rows, overview, excluded, error, reload } = useTaskList(filters)
   const { statuses, reload: reloadStatuses } = useTaskStatuses()
+  const { types, reload: reloadTypes } = useTaskTypes()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   // Metrics FIRST. The kanban answers "which column is full"; this answers "what is it costing me",
@@ -185,6 +186,8 @@ function TaskList() {
    *  rename, a recolour or a new/deleted status reaches the board immediately without a page
    *  refresh. */
   const [managingStatuses, setManagingStatuses] = useState(false)
+  /** The task TYPE vocabulary editor — the same modal, over the other list. */
+  const [managingTypes, setManagingTypes] = useState(false)
   /** The task whose session wizard is up — see `onCreateSession`. */
   const [starting, setStarting] = useState<{ taskId: string; title: string } | null>(null)
   /** Details fetched for the rows the table has expanded — subtasks live there. */
@@ -268,6 +271,14 @@ function TaskList() {
         >
           <Settings2 size={14} />
         </button>
+        <button
+          style={{ ...button(isMobile), padding: '0 9px', gap: 6 }}
+          onClick={() => setManagingTypes(true)}
+          title={boardCopy(lang).types.manage}
+          aria-label={boardCopy(lang).types.manage}
+        >
+          <Settings2 size={14} />{!isMobile && <span style={{ fontSize: 12 }}>{boardCopy(lang).types.manage}</span>}
+        </button>
         <button style={button(isMobile, 'primary')} onClick={() => setOpen(v => !v)}>
           <Plus size={15} /> New task
         </button>
@@ -277,6 +288,14 @@ function TaskList() {
         <ManageStatusesModal
           lang={lang}
           onClose={() => { setManagingStatuses(false); void reloadStatuses() }}
+        />
+      )}
+
+      {managingTypes && (
+        <ManageStatusesModal
+          kind="type"
+          lang={lang}
+          onClose={() => { setManagingTypes(false); void reloadTypes() }}
         />
       )}
 
@@ -377,12 +396,14 @@ function TaskList() {
           rows={shown}
           lang={lang}
           statuses={statuses}
+          types={types}
           details={details}
           onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
           onStatus={(ref, status) => void toStatus([ref], status)}
           onPriority={async (ref, priority) => { await editTask(ref, { priority }); await reload() }}
-          onCreate={async (title, status) => {
-            const made = await createTask(title)
+          onType={async (ref, type) => { await editTask(ref, { type }); await reload() }}
+          onCreate={async (title, status, type) => {
+            const made = await createTask(title, undefined, type)
             // Created straight into the group it was typed in — the "+ Add" row of a status column
             // is a statement about where the work stands, not just where the row goes.
             if (made && status !== 'todo') await markTask(made.id, status)
@@ -396,6 +417,7 @@ function TaskList() {
             setDetails(m => new Map(m).set(id, body.task))
           }}
           onRefreshDetail={refreshDetail}
+          onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
           toolbarStart={searchBox}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
           onPatchSubtask={async (ref, sid, patch) => {

@@ -5,6 +5,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { setupGithubBackup } from './github-setup'
 import { readGithubConfig } from './github-store'
+import { sealedPathFor } from '../vault/whole-file'
+import { readFileSync, existsSync } from 'fs'
 import type { FetchLike } from './github-api'
 
 const TOKEN = 'ghp_setupFlowTestToken1234567890abcdef'
@@ -125,7 +127,7 @@ describe('setupGithubBackup — the happy path', () => {
         expect(result.config.repo).toBe('agentistics-backups')
         expect(result.config.token).toBe(TOKEN)
       }
-      const mode = statSync(file).mode & 0o777
+      const mode = statSync(sealedPathFor(file)).mode & 0o777
       expect(mode).toBe(0o600)
       const stored = await readGithubConfig(file)
       expect(stored?.owner).toBe('someone')

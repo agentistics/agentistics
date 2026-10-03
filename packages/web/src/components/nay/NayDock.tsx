@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
-import { isNayCwd, nayPlacementRows, planNayPlacement, type Filters, type SessionMeta } from '@agentistics/core'
+import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { AppContext } from '../../lib/app-context'
@@ -34,6 +34,8 @@ import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { detachSession as unfileSession } from '../../lib/tasks'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
+import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
@@ -47,7 +49,8 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
-import { setOpenSession, setVisibleSessions } from '../../lib/nayNotifyStore'
+import type { UpdateCardPlacement } from './NayUpdateCard'
+import { setOpenSession, setVisibleSessions, useNayAlerts } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { sessionPath } from '../../lib/sessionRoute'
@@ -106,11 +109,18 @@ export interface NayDockProps {
   /** The sidebar's own session filters, so the "Sessões" tab lists what the sidebar lists. */
   filters: Filters
   activeOnly: boolean
+  /**
+   * The "new version" popup (`NayUpdateCard`), when the app has one to say. The dock decides only
+   * WHERE: inside the open window, under its header, or spoken by the button while it is closed —
+   * and then only when no session card is up, so the two never stack on the button.
+   */
+  renderUpdatePrompt?: (placement: UpdateCardPlacement) => ReactNode
 }
 
-export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockProps) {
+export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdatePrompt }: NayDockProps) {
   const pt = lang === 'pt'
   const { fleet, loading, unsupported, stale, act } = useFleet(lang)
+  const sessionAlerts = useNayAlerts()
   const rowIndex = useFleetIndex(fleet.sessions)
 
   const [dock, setDock] = useState<DockState>(() => ({
@@ -521,6 +531,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
         </IconButton>
       </header>
 
+      {!settingsOpen && renderUpdatePrompt?.('dock')}
+
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {settingsOpen ? (
           <DockSettingsScreen
@@ -580,6 +592,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly }: NayDockPro
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1} />
+      {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
         <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
@@ -728,6 +741,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
   picker: ReactNode
 }) {
   const pt = lang === 'pt'
+  const mutedKeys = useMutedKeys()
   const [confirming, setConfirming] = useState<string | null>(null)
   const [ending, setEnding] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -741,6 +755,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
     if (action === 'kill') { setConfirming(id); return }
     if (action === 'rename') { setRenaming({ id, title: menuRow.title }); return }
     if (action === NAY_GO_TO) { onGoTo(id); return }
+    if (action === NOTIFY_TOGGLE) { toggleSessionMuted(sessionIdentityKey(menuRow)); setMenu(null); return }
     if (action === LINK_TASK) { setFiling(id); return }
     if (action === UNLINK_TASK) {
       void unfileSession(id, id).then(() => onNotice(boardCopy(lang).unfiled))
@@ -882,10 +897,13 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
       {menu && menuRow && (
         <SessionRowMenu
           x={Math.max(4, menu.x)} y={menu.y}
-          entries={nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
-            running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
-            task: menuRow.task,
-          })}
+          entries={[
+            ...nayRowMenuEntries(rowsById.get(menuRow.id)?.verbs ?? [], {
+              running: naySectionOf(menuRow.state) !== 'ended', conversationId: menuRow.conversationId, pt,
+              task: menuRow.task,
+            }),
+            ...notifyMenuExtras(menuRow, mutedKeys, pt),
+          ]}
           onPick={pickMenu}
           onClose={() => setMenu(null)}
         />

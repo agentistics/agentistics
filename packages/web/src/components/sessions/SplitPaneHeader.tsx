@@ -12,7 +12,8 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { MessagesSquare, TerminalSquare, X } from 'lucide-react'
+import { BellOff, MessagesSquare, TerminalSquare, X } from 'lucide-react'
+import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
 import type { CostBasis, SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
@@ -49,6 +50,7 @@ export function SplitPaneHeader(p: SplitPaneHeaderProps) {
   const pt = p.lang === 'pt'
   const active = useSyncExternalStore(subscribeActivePane, getActivePane, () => 'main') === p.pane
   const s = p.session
+  const muted = useSessionMuted(s)
   return (
     <div
       data-split-pane-header={p.pane}
@@ -65,6 +67,12 @@ export function SplitPaneHeader(p: SplitPaneHeaderProps) {
             fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{s.title}</span>
+          {muted && (
+            <span role="img" aria-label={mutedTooltip(p.lang === 'pt')} title={mutedTooltip(p.lang === 'pt')}
+              style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>
+              <BellOff size={13} />
+            </span>
+          )}
           <SessionTitleFlag
             session={{
               id: s.id, title: s.title,

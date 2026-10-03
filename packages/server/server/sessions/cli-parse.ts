@@ -29,6 +29,9 @@ export type SessionCommand =
       /** See `ManagedSession.taskId`. Resolved from the task book before the spawn. */
       taskId?: string
       attemptId?: string
+      /** `--notify off` starts the session with its notifications muted (delivery only — it still
+       *  shows as waiting). Absent = on. */
+      notify?: NotifySwitch
       /** Start anyway when the memory gate would refuse — see `spawn-admission.ts`. */
       force?: boolean
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
@@ -98,10 +101,19 @@ export interface BatchSpec {
   model?: string
   effort?: string
   name?: string
+  /** See `start.notify`. */
+  notify?: NotifySwitch
+}
+
+export type NotifySwitch = 'on' | 'off'
+
+/** `--notify` takes exactly on|off; anything else is refused rather than read as "on". */
+function notifyValue(v: string): NotifySwitch | null {
+  return v === 'on' || v === 'off' ? v : null
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--session', '--attempt',
+  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--session', '--attempt', '--notify',
 ])
 
 function isHarness(v: string): v is HarnessId {
@@ -184,6 +196,12 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
     i++
+    if (arg === '--notify') {
+      const n = notifyValue(value)
+      if (n === null) return { kind: 'error', message: `--notify takes "on" or "off", not "${value}".` }
+      cmd.notify = n
+      continue
+    }
     if (arg === '-p' || arg === '--prompt') cmd.prompt = value
     else if (arg === '--model') cmd.model = value
     else if (arg === '--effort') cmd.effort = value
@@ -267,7 +285,7 @@ function parseLs(argv: string[], json: boolean): SessionCommand {
 function parseBatch(argv: string[], json: boolean): SessionCommand {
   let task = ''
   const specs: BatchSpec[] = []
-  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string } = {}
+  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch } = {}
 
   let force = false
 
@@ -295,6 +313,14 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     // that FOLLOWS it, until the next one. That is what lets one attempt hold several sessions,
     // which is the case the middle level of the model exists for.
     if (arg === '--attempt') { shared.attempt = value; continue }
+    // A positional default like the others: it applies to the `--session`s that follow, so a batch
+    // can mute the workers and leave the leader audible (or the reverse).
+    if (arg === '--notify') {
+      const n = notifyValue(value)
+      if (n === null) return { kind: 'error', message: `--notify takes "on" or "off", not "${value}".` }
+      shared.notify = n
+      continue
+    }
     if (arg === '--session') {
       const spec = parseBatchSpec(value, shared)
       if ('error' in spec) return { kind: 'error', message: spec.error }
@@ -312,7 +338,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */
 export function parseBatchSpec(
   value: string,
-  shared: { cwd?: string; model?: string; effort?: string; attempt?: string } = {},
+  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch } = {},
 ): { spec: BatchSpec } | { error: string } {
   const colon = value.indexOf(':')
   const head = (colon === -1 ? value : value.slice(0, colon)).trim()
@@ -333,6 +359,7 @@ export function parseBatchSpec(
       ...(shared.model ? { model: shared.model } : {}),
       ...(shared.effort ? { effort: shared.effort } : {}),
       ...(shared.attempt ? { attempt: shared.attempt } : {}),
+      ...(shared.notify ? { notify: shared.notify } : {}),
     },
   }
 }

@@ -30,15 +30,15 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
-  liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus, type ColumnId,
+  liveStatusOrder, microLabel, NO_TYPE_KEY, numeric, pill, statusStyle, surface, typeStyle, type BoardStatus, type ColumnId,
 } from './board'
 import { useMoney, type Money } from './money'
 import {
-  DEFAULT_SORT, nextSort, PRIORITY_ORDER, sortRows,
+  nextSort, PRIORITY_ORDER, sortRows,
   type SortKey, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
-  type TaskStatusDef,
+  type TaskStatusDef, type TaskTypeDef, sortTaskTypes,
 } from '@agentistics/core'
-import { useBoardPref } from './boardPrefs'
+import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { SortTh } from './SortHeader'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
@@ -67,6 +67,7 @@ import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
 import { subtaskGridLayout } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
+import { CommentCountButton, CommentThreadDialog } from './CommentThreadDialog'
 import { HarnessBadges } from './HarnessBadges'
 import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
 import { useStagedFire } from './useStagedFire'
@@ -119,6 +120,8 @@ export const COLUMNS: ColumnDef[] = [
   // has the same one and a sort by it would reorder nothing while its arrow lit up — a control that
   // looks like it works and does not. The order of the bands themselves is the Groups picker's.
   { id: 'status', width: 116 },
+  // Sortable, unlike Status: the table is only grouped by type when the person asks for it.
+  { id: 'type', width: 104, sort: 'type' },
   { id: 'priority', width: 96, sort: 'priority' },
   { id: 'claim', width: 132 },
   { id: 'progress', width: 132, sort: 'progress' },
@@ -212,6 +215,12 @@ function cellFor(
   lang: 'pt' | 'en',
   money: Money,
   statuses: readonly TaskStatusDef[] | null,
+  /** Opens the task's own comment thread over the table — see `CommentThreadDialog`. */
+  onOpenComments: () => void,
+  isMobile: boolean,
+  types: readonly TaskTypeDef[] | null,
+  onType: (t: string) => void,
+  noTypeLabel: string,
 ): React.ReactNode {
   const r = row.rollup
   switch (col) {
@@ -227,10 +236,23 @@ function cellFor(
         onPick={v => onStatus(v as TaskStatus)}
       />
     )
+    // The priority cell's own control, over the type vocabulary. An unclassified task carries the
+    // reserved `NO_TYPE_KEY` as its value and picking it again is what clears a type.
+    case 'type': return (
+      <ChipSelect
+        compact
+        value={row.task.type ?? NO_TYPE_KEY}
+        options={[
+          { value: NO_TYPE_KEY, ...typeStyle(null, undefined), label: noTypeLabel },
+          ...sortTaskTypes(types ?? []).map(t => ({ value: t.id, ...typeStyle(types, t.id) })),
+        ]}
+        onPick={v => onType(v === NO_TYPE_KEY ? '' : v)}
+      />
+    )
     case 'priority': return (
       <ChipSelect
         compact
-        value={row.task.priority ?? 'none'}
+        value={!row.task.priority || row.task.priority === 'none' ? 'low' : row.task.priority}
         options={PRIORITY_ORDER.map(id => ({
           value: id, label: PRIORITY[id]!.label, color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,
         }))}
@@ -280,11 +302,16 @@ function cellFor(
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
       : <span style={{ ...numeric, fontSize: 12 }}>{row.counts.subtasksDone}/{row.counts.subtasks}</span>
     case 'attempts': return <Num v={row.attempts} />
-    case 'comments': return row.counts.comments === 0
-      ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-      : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...numeric, fontSize: 12 }}>
-          <MessageSquare size={11} />{row.counts.comments}
-        </span>
+    // The task's thread shows EVERY comment of the task (its subtasks' and groups' included,
+    // labelled) — `commentThread`'s downward rule — so this count is what opens.
+    case 'comments': return (
+      <CommentCountButton
+        count={row.counts.comments}
+        label={lang === 'pt' ? `Comentários: ${row.task.title}` : `Comments: ${row.task.title}`}
+        mobile={isMobile}
+        onOpen={onOpenComments}
+      />
+    )
     case 'files': return row.counts.files === 0
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
       : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...numeric, fontSize: 12 }}>
@@ -309,9 +336,14 @@ function cellFor(
 
 function SubtaskRows({
   subtasks, subtaskRollups, indent, mainCols, subtaskCols, sessions, lang, nowMs, statuses, onPatch, onRemove,
-  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor,
+  onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor, commentCounts, onOpenComments,
 }: {
   subtasks: Subtask[]
+  /** Each subtask's/group's THREAD size (`TaskListRow.counts.commentsBySubtask`) — a group's
+   *  includes its members' comments. Absent key = none. */
+  commentCounts: Readonly<Record<string, number>>
+  /** Open one subtask's or group's thread over the table. */
+  onOpenComments: (subtask: Subtask) => void
   /** The delivery's own `TaskDetail.subtaskRollups` — a GROUP's own `groupProgress` (§F.1), and now
    *  also the per-subtask Cost/Tokens cells (owner-approved reversal of this table's earlier "the
    *  rest of this row's numbers stay off this table by design" — they no longer do, and are drawn
@@ -412,6 +444,7 @@ function SubtaskRows({
               (`clusterBarStyle`) lands here — the leading edge of every clustered row, header
               through last member, so it reads as one continuous stripe. */}
           <td style={{ padding: cellPad, whiteSpace: 'nowrap', ...tint, ...clusterBarStyle(clustered) }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <SubtaskActionsMenu
               subtask={t}
               siblings={subtasks}
@@ -422,6 +455,16 @@ function SubtaskRows({
               onRemove={onRemove}
               staged={stagedFor(t)}
             />
+            {/* Right beside the gear (owner, 2026-10-02): every row — group, member, loose — carries
+                its thread's count and the way into it. Not a picker column, so no stored column
+                arrangement can hide the only way to comment on a subtask from the table. */}
+            <CommentCountButton
+              count={commentCounts[t.id] ?? 0}
+              label={lang === 'pt' ? `Comentários: ${t.title}` : `Comments: ${t.title}`}
+              mobile={isMobile}
+              onOpen={() => onOpenComments(t)}
+            />
+            </span>
           </td>
           {/* A MEMBER is indented one level further than the base subtask indent — the visual
               nesting that replaces the old "parte do grupo" caption for every properly clustered
@@ -592,7 +635,9 @@ export interface TaskTableProps {
   onOpen: (id: string) => void
   onStatus: (ref: string, status: TaskStatus) => void
   onPriority?: (ref: string, priority: TaskPriorityId) => void
-  onCreate: (title: string, status: TaskStatus) => void
+  /** Set a task's type; an empty string clears it. */
+  onType?: (ref: string, type: string) => void
+  onCreate: (title: string, status: TaskStatus, type?: string) => void
   onExpand: (id: string) => void
   onAddSubtask: (ref: string, title: string) => void
   /** Returns the write's outcome — the group-forming gestures (§F.1) need it to show
@@ -616,9 +661,14 @@ export interface TaskTableProps {
   onOpenSession?: (sessionId: string) => void
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
+  /** The board's LIVE type list (`useTaskTypes`) — `null` while it loads. */
+  types: readonly TaskTypeDef[] | null
   /** Re-read ONE delivery's detail, cached or not — `onExpand` is a no-op once it is cached, so a
    *  write that must show its result (a staged draft saved, a session fired) calls this instead. */
   onRefreshDetail: (ref: string) => Promise<unknown> | void
+  /** A comment was written/edited/removed from a row's thread — re-read what carries the COUNTS
+   *  (the list) so the number on the row follows. Absent = the counts refresh on the next poll. */
+  onCommentsChanged?: (ref: string) => Promise<unknown> | void
   /** Drawn at the START of the toolbar row — the page's search box, so the table has ONE row of
    *  controls instead of a search row above a controls row. */
   toolbarStart?: React.ReactNode
@@ -654,7 +704,8 @@ export function TaskTable(p: TaskTableProps) {
   // must still get its own group the first time it renders, so a default (never customized: no
   // stored `groups`) is DERIVED from the list on every render rather than frozen.
   const [storedGroups, setGroups] = useBoardPref('groups')
-  const groupsShown = useMemo(() => storedGroups ?? liveStatusOrder(p.statuses), [storedGroups, p.statuses])
+  const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
   const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
   const [menu, setMenu] = useState<'columns' | 'groups' | null>(null)
@@ -669,11 +720,13 @@ export function TaskTable(p: TaskTableProps) {
    * reader is not looking at, so the override is keyed per task and never touches the others.
    */
   const [subSort, setSubSort] = useState<Record<string, SubtaskSortSpec | null>>({})
-  const [adding, setAdding] = useState<TaskStatus | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [subDraft, setSubDraft] = useState<Record<string, string>>({})
   /** Which subtask is being given a session — `taskId/subtaskId`, so the patch knows both. */
   const [linkingSub, setLinkingSub] = useState<{ task: string; sub: string } | null>(null)
+  /** The comment thread open over the table, if any — a task's (`target: null`), a group's or a subtask's. */
+  const [thread, setThread] = useState<{ taskId: string; target: string | null; title: string } | null>(null)
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
   /**
@@ -729,14 +782,52 @@ export function TaskTable(p: TaskTableProps) {
   // Every group is BUILT, even a hidden one: the chooser needs its count to say what it is hiding.
   // Sorted INSIDE the group, never across: the grouping is the first ordering and a sort that
   // reordered the bands would silently undo the arrangement chosen a control away.
-  const groups = useMemo(() => liveStatusOrder(p.statuses).map(status => ({
-    status,
-    rows: sortRows(p.rows.filter(r => (r.task.status as BoardStatus) === status), sort),
-  })), [p.rows, sort, p.statuses])
+  // The bands of the ACTIVE grouping. A band is `{ key, label, color, rows }` whichever dimension it
+  // is: the status bands are keyed by status id (as they always were — a stored fold survives), the
+  // type bands by `type:<id>` so a type can never collide with a status of the same word, and tasks
+  // with no type fall in the `type:__none__` band, last.
+  const typeList = useMemo(() => sortTaskTypes(p.types ?? []), [p.types])
+  const sortCtx = useMemo(
+    () => ({ statusOrder: liveStatusOrder(p.statuses), typeOrder: typeList.map(t => t.id) }),
+    [p.statuses, typeList],
+  )
+  const groups = useMemo(() => {
+    if (groupBy === 'type') {
+      const known = new Set(typeList.map(t => t.id))
+      return [
+        ...typeList.map(t => ({ id: t.id, key: `type:${t.id}`, label: t.label, color: t.color })),
+        { id: NO_TYPE_KEY, key: `type:${NO_TYPE_KEY}`, label: copy.types.none, color: typeStyle(null, undefined).color },
+      ].map(g => ({
+        key: g.key, label: g.label, color: g.color,
+        createStatus: 'todo' as TaskStatus,
+        createType: g.id === NO_TYPE_KEY ? undefined : g.id,
+        rows: sortRows(p.rows.filter(r => (g.id === NO_TYPE_KEY
+          // A task naming a type the list no longer holds is unclassified for grouping purposes.
+          ? !r.task.type || !known.has(r.task.type)
+          : r.task.type === g.id)), sort, sortCtx),
+      }))
+    }
+    return liveStatusOrder(p.statuses).map(status => ({
+      key: status,
+      label: statusLabel(status, p.lang ?? 'en', p.statuses),
+      color: statusStyle(p.statuses, status).color,
+      createStatus: status as TaskStatus,
+      createType: undefined as string | undefined,
+      rows: sortRows(p.rows.filter(r => (r.task.status as BoardStatus) === status), sort, sortCtx),
+    }))
+  }, [p.rows, sort, p.statuses, p.lang, groupBy, typeList, sortCtx, copy.types.none])
+  // Which bands are on screen, and in what order — a stored choice per grouping, derived from the
+  // live list while nobody has customised it so a type created a moment ago gets its own band.
+  const groupsShown = useMemo(
+    () => (groupBy === 'type'
+      ? storedTypeGroups?.map(k => `type:${k}`) ?? groups.map(g => g.key)
+      : storedGroups ?? liveStatusOrder(p.statuses)),
+    [groupBy, storedTypeGroups, storedGroups, p.statuses, groups],
+  )
 
-  const foldGroup = (status: BoardStatus) => {
+  const foldGroup = (key: string) => {
     const next = new Set(collapsed)
-    next.has(status) ? next.delete(status) : next.add(status)
+    next.has(key) ? next.delete(key) : next.add(key)
     setStoredCollapsed([...next] as BoardStatus[])
   }
 
@@ -779,14 +870,14 @@ export function TaskTable(p: TaskTableProps) {
 
   // In the CHOSEN order, not the canonical one — see the chooser's note.
   const visible = groupsShown
-    .map(st => groups.find(g => g.status === st))
+    .map(st => groups.find(g => g.key === st))
     .filter((g): g is typeof groups[number] => g !== undefined)
 
   // The selection that ACTS is the one on screen: a row in a hidden or folded group, filtered out by
   // the search box or deleted since, is not something the bar's count or a batch verb reaches.
   const selected = selectedVisible(
     sel,
-    visible.filter(g => !collapsed.has(g.status)).flatMap(g => g.rows.map(r => r.task.id)),
+    visible.filter(g => !collapsed.has(g.key)).flatMap(g => g.rows.map(r => r.task.id)),
   )
 
   // Every toolbar trigger is the same height and shape — a row of mixed sizes reads as unrelated
@@ -814,11 +905,11 @@ export function TaskTable(p: TaskTableProps) {
         {p.toolbarStart && (
           <div style={{ flex: isMobile ? '1 1 100%' : '0 1 340px', minWidth: 0 }}>{p.toolbarStart}</div>
         )}
-        {sort.key !== DEFAULT_SORT.key && (
+        {(sort.key !== DEFAULT_PREFS.sort.key || sort.dir !== DEFAULT_PREFS.sort.dir) && (
           // Said in words, with the way out beside it: a sort is invisible once you have scrolled
           // past the header, and "why is this board in this order" should never need investigating.
           <button
-            onClick={() => setSort(DEFAULT_SORT)}
+            onClick={() => setSort(DEFAULT_PREFS.sort)}
             title={L.resetSort}
             style={{
               ...button(isMobile), height: isMobile ? 44 : 28, fontSize: 11,
@@ -837,23 +928,43 @@ export function TaskTable(p: TaskTableProps) {
           label={copy.subtaskFilter.title}
           triggerStyle={TRIGGER}
         />
+        {/* One or the other, per person: a single-choice list over the same PickerMenu the Groups and
+            Columns pickers use — picking the row that is not current moves the choice to it. */}
+        <PickerMenu
+          title={copy.types.groupBy}
+          lang={p.lang ?? 'en'}
+          triggerStyle={TRIGGER}
+          items={[
+            { value: 'status', label: copy.types.groupByStatus },
+            { value: 'type', label: copy.types.groupByType },
+          ]}
+          value={[groupBy]}
+          onChange={next => {
+            const picked = next.find(v => v !== groupBy)
+            if (picked === 'status' || picked === 'type') setGroupBy(picked)
+          }}
+        >
+          {copy.types.groupBy}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
+        </PickerMenu>
         <PickerMenu
           title={copy.pickers.groupsTitle}
           lang={p.lang ?? 'en'}
           triggerStyle={TRIGGER}
           items={groups.map(g => ({
-            value: g.status,
+            value: g.key,
             // The SAME word the chip in every row of this group prints — one vocabulary, one language.
-            label: statusLabel(g.status, p.lang ?? 'en', p.statuses),
-            color: statusStyle(p.statuses, g.status).color,
+            label: g.label,
+            color: g.color,
             // The count of a HIDDEN group too — "hidden" must not read as "empty".
             hint: String(g.rows.length),
           }))}
           value={groupsShown}
           // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
-          onChange={next => setGroups(next as BoardStatus[])}
+          onChange={next => (groupBy === 'type'
+            ? setTypeGroups(next.map(k => k.replace(/^type:/, '')))
+            : setGroups(next as BoardStatus[]))}
           orderable
-          note={copy.pickers.groupsNote}
+          note={groupBy === 'type' ? copy.types.groupsNote : copy.pickers.groupsNote}
         >
           <Rows3 size={13} /> {copy.pickers.groupsTrigger}
           {/* How many are on screen, on the trigger itself — it used to be a separate caption. */}
@@ -908,12 +1019,12 @@ export function TaskTable(p: TaskTableProps) {
       {/* One CARD per group, each folding on its own. A single table holding every status made the
           whole board one scroll and one thing to collapse; a group is what people actually work in. */}
       {visible.map(g => {
-        const s = statusStyle(p.statuses, g.status)
-        const isFolded = collapsed.has(g.status)
+        const s = { color: g.color }
+        const isFolded = collapsed.has(g.key)
         return (
-          <div key={g.status} style={{ ...surface, overflow: 'hidden', borderLeft: `3px solid ${s.color}` }}>
+          <div key={g.key} style={{ ...surface, overflow: 'hidden', borderLeft: `3px solid ${s.color}` }}>
             <div
-              onClick={() => foldGroup(g.status)}
+              onClick={() => foldGroup(g.key)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
                 padding: '9px 11px', background: 'var(--bg-base)',
@@ -924,7 +1035,7 @@ export function TaskTable(p: TaskTableProps) {
               {/* The reader's word, not the constant — the picker one control away already said
                   `Em andamento` over the very band this heading called `In progress`. */}
               <span style={{ fontSize: 12.5, fontWeight: 700, color: s.color }}>
-                {statusLabel(g.status, p.lang ?? 'en', p.statuses)}
+                {g.label}
               </span>
               <span style={{ ...microLabel, fontSize: 11 }}>{g.rows.length}</span>
             </div>
@@ -1059,6 +1170,8 @@ export function TaskTable(p: TaskTableProps) {
                             onUnfile={sid => p.onUnfileSession(row.task.id, sid)}
                             onOpenSession={p.onOpenSession}
                             stagedFor={stagedFor(row.task.id, detail?.files ?? [])}
+                            commentCounts={row.counts.commentsBySubtask ?? {}}
+                            onOpenComments={t => setThread({ taskId: row.task.id, target: t.id, title: t.title })}
                           />
                           <tr style={{ background: 'var(--bg-surface)' }}>
                             <td style={{ padding: '5px 10px' }} />
@@ -1148,6 +1261,7 @@ export function TaskTable(p: TaskTableProps) {
                                 belongs to the row, and pressing it never leaves the board. It is a
                                 pointer convenience over the chevron's button, not a second tab stop. */}
                             <td style={{ padding: cellPad }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                               <span
                                 role="presentation"
                                 onClick={() => {
@@ -1155,13 +1269,23 @@ export function TaskTable(p: TaskTableProps) {
                                   if (!open) p.onExpand(row.task.id)
                                 }}
                                 style={{
-                                  display: 'block', cursor: 'pointer', minWidth: 0, textAlign: 'left',
+                                  display: 'block', cursor: 'pointer', minWidth: 0, textAlign: 'left', flex: 1,
                                   fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)',
                                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                   ...(isMobile ? { minHeight: 44, lineHeight: '44px' } : {}),
                                 }}
                               >
                                 {row.task.title}
+                              </span>
+                              {/* The task's thread, from its own row — in the title cell like every
+                                  subtask row's, because the Comments column is off by default and a
+                                  hidden column is no way in. */}
+                              <CommentCountButton
+                                count={row.counts.comments}
+                                label={(p.lang ?? 'en') === 'pt' ? `Comentários: ${row.task.title}` : `Comments: ${row.task.title}`}
+                                mobile={isMobile}
+                                onOpen={() => setThread({ taskId: row.task.id, target: null, title: row.task.title })}
+                              />
                               </span>
                             </td>
                             {cols.map(c => (
@@ -1177,6 +1301,11 @@ export function TaskTable(p: TaskTableProps) {
                                   p.lang ?? 'en',
                                   money,
                                   p.statuses,
+                                  () => setThread({ taskId: row.task.id, target: null, title: row.task.title }),
+                                  isMobile,
+                                  p.types,
+                                  t => p.onType?.(row.task.id, t),
+                                  copy.types.none,
                                 )}
                               </td>
                             ))}
@@ -1215,7 +1344,7 @@ export function TaskTable(p: TaskTableProps) {
                     <tr style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: cellPad }} />
                       <td colSpan={cols.length + 1} style={{ padding: cellPad }}>
-                        {adding === g.status ? (
+                        {adding === g.key ? (
                           <input
                             autoFocus value={draft} placeholder="Task name, then Enter"
                             onChange={e => setDraft(e.target.value)}
@@ -1223,7 +1352,7 @@ export function TaskTable(p: TaskTableProps) {
                             onKeyDown={e => {
                               if (e.key === 'Escape') { setAdding(null); setDraft('') }
                               if (e.key === 'Enter' && draft.trim()) {
-                                p.onCreate(draft.trim(), g.status)
+                                p.onCreate(draft.trim(), g.createStatus, g.createType)
                                 setDraft(''); setAdding(null)
                               }
                             }}
@@ -1235,7 +1364,7 @@ export function TaskTable(p: TaskTableProps) {
                           />
                         ) : (
                           <button
-                            onClick={() => { setAdding(g.status); setDraft('') }}
+                            onClick={() => { setAdding(g.key); setDraft('') }}
                             style={{
                               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
                               color: 'var(--text-tertiary)', fontSize: 12,
@@ -1272,6 +1401,16 @@ export function TaskTable(p: TaskTableProps) {
         }}
       />
 
+      {thread && (
+        <CommentThreadDialog
+          taskId={thread.taskId}
+          target={thread.target}
+          title={thread.title}
+          lang={p.lang ?? 'en'}
+          onClose={() => setThread(null)}
+          onChanged={() => p.onCommentsChanged?.(thread.taskId)}
+        />
+      )}
       {linkingSub && (
         <SessionPicker
           // A subtask holds any number of sessions, so the picker is MULTIPLE and the attaches are

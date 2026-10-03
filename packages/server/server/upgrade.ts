@@ -8,6 +8,48 @@ import { restartAutostart } from './autostart.ts'
 import { AGENTISTICS_DATA_DIR, PORT } from './config.ts'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n.ts'
 import { PRIMARY_REPO, fetchFirstOk, releaseAssetUrls } from './release-source.ts'
+import { shouldWriteDownload, type UpgradeProgress } from './upgrade-progress.ts'
+
+/** Where a running upgrade narrates itself for the page that started it (`upgrade-progress.ts`). */
+export const UPGRADE_PROGRESS_FILE = join(AGENTISTICS_DATA_DIR, 'upgrade-progress.json')
+
+/** Best-effort: a progress file that cannot be written costs the page its narration, never the upgrade. */
+function writeProgress(p: Omit<UpgradeProgress, 'at'>): void {
+  try {
+    mkdirSync(AGENTISTICS_DATA_DIR, { recursive: true })
+    writeFileSync(UPGRADE_PROGRESS_FILE, JSON.stringify({ ...p, at: Date.now() }))
+  } catch { /* unwritable data dir */ }
+}
+
+/**
+ * Read the body chunk by chunk so the download stage can report bytes. Same failure surface as
+ * `arrayBuffer()` (a reset or the timeout rejects the read), so the caller's guard is unchanged.
+ */
+async function readBodyWithProgress(resp: Response, version: string): Promise<Uint8Array> {
+  const totalHeader = Number(resp.headers.get('content-length'))
+  const total = Number.isFinite(totalHeader) && totalHeader > 0 ? totalHeader : undefined
+  const reader = resp.body?.getReader()
+  if (!reader) return new Uint8Array(await resp.arrayBuffer())
+  const chunks: Uint8Array[] = []
+  let received = 0
+  let last: { received: number; at: number } | null = null
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    received += value.byteLength
+    const now = Date.now()
+    if (shouldWriteDownload(last, received, total, now)) {
+      writeProgress({ stage: 'downloading', version, received, ...(total ? { total } : {}) })
+      last = { received, at: now }
+    }
+  }
+  const out = new Uint8Array(received)
+  let off = 0
+  for (const c of chunks) { out.set(c, off); off += c.byteLength }
+  writeProgress({ stage: 'downloading', version, received, ...(total ? { total } : {}) })
+  return out
+}
 
 /**
  * Where a release asset lives, addressed BY VERSION.
@@ -226,6 +268,7 @@ export function readUpgradeFailure(): UpgradeFailure | null {
 }
 
 function recordUpgradeFailure(version: string, reason: string): void {
+  writeProgress({ stage: 'failed', version, reason })
   try {
     mkdirSync(AGENTISTICS_DATA_DIR, { recursive: true })
     const next = nextUpgradeFailure(readUpgradeFailure(), version, Date.now(), reason)
@@ -825,6 +868,7 @@ async function installDownloadedBinary(
     }
   }
 
+  writeProgress({ stage: 'swapping', version: expected })
   // 4) Move the working binary aside FIRST — that is the rollback copy, and on Windows it is
   //    also the only way to replace a running executable.
   const backup = backupBinaryPath(currentBin)
@@ -889,17 +933,20 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   }
 
   process.stdout.write('Checking for updates...\n')
+  writeProgress({ stage: 'checking', version: '' })
 
   let info
   try {
     info = await getVersionInfo({ force: true })
   } catch {
     console.error('Failed to check for updates. Check your internet connection.')
+    writeProgress({ stage: 'failed', version: '', reason: 'version check failed' })
     return 1
   }
 
   if (!info.hasUpdate) {
     console.log(`Already on the latest version (${_GR}${_B}v${info.current}${_R}).`)
+    writeProgress({ stage: 'done', version: info.current })
     clearUpgradeFailure()
     return 0
   }
@@ -922,6 +969,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     `  ${_D}Latest: ${_R} ${_GR}${_B}v${info.latest}${_R}\n\n`,
   )
   process.stdout.write(`Downloading ${target.asset}...\n`)
+  writeProgress({ stage: 'downloading', version: info.latest, received: 0 })
 
   let resp: Response
   try {
@@ -956,12 +1004,13 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // stack trace instead of a message.
   let bytes: Uint8Array
   try {
-    bytes = new Uint8Array(await resp.arrayBuffer())
+    bytes = await readBodyWithProgress(resp, info.latest)
   } catch (err: any) {
     console.error(`Download failed: ${err?.message ?? String(err)}`)
     recordUpgradeFailure(info.latest, `download interrupted: ${err?.message ?? String(err)}`)
     return 1
   }
+  writeProgress({ stage: 'verifying', version: info.latest })
   const installed = await installDownloadedBinary(bytes, currentBin, info.latest, s)
 
   if (!installed.ok) {
@@ -991,6 +1040,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
 
   // Auto-apply: bounce any running services so they run the new version immediately.
   process.stdout.write('Applying the update to running services…\n')
+  writeProgress({ stage: 'restarting', version: info.latest })
   let restart: RestartOutcome
   try {
     restart = await restartRunningServices(currentBin)
@@ -1041,6 +1091,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     return 1
   }
 
+  writeProgress({ stage: 'done', version: info.latest })
   process.stdout.write(`\n${_GR}${_B}Done — now running v${info.latest}.${_R}\n\n`)
   return 0
 }

@@ -51,6 +51,9 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { isFocusedRow, ROW_FLASH } from '../../lib/noteFocus'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { SessionRowMenu } from './SessionRowMenu'
+import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
+import { toggleSessionMuted } from '../../lib/mutedSessions'
+import { useFleet } from '../../lib/fleet'
 
 export interface GalleryTabProps {
   /** The session these files belong to — what a PRODUCED file's URL is resolved against. */
@@ -92,6 +95,9 @@ export function GalleryTab({
   sessionId, groups: allGroups, lang, view, onViewChange, scope, onScopeChange, older, focusStep, anchorOf,
 }: GalleryTabProps) {
   const pt = lang === 'pt'
+  const mutedKeys = useMutedKeys()
+  // The row this gallery belongs to, for the mute key (conversation where linked, id otherwise).
+  const sessionRow = useFleet(lang).fleet.rows.find(r => r.id === sessionId)
   const isMobile = useIsMobile()
 
   /**
@@ -174,6 +180,7 @@ export function GalleryTab({
   }, [])
 
   const pick = useCallback((action: string, group: GalleryGroup) => {
+    if (action === NOTIFY_TOGGLE) { toggleSessionMuted(sessionRow?.conversationId ?? sessionId); return }
     if (action === 'view') { setViewing(group); return }
     if (action !== 'goto') return
     // The lightbox has to close first, or the reader is taken to a bubble underneath a full-screen
@@ -184,7 +191,7 @@ export function GalleryTab({
         ? 'Essa mensagem não está na conversa carregada — abra a aba de chat da sessão.'
         : 'That message is not in the loaded conversation — open the session\'s chat view.')
     }
-  }, [pt, anchorOf])
+  }, [pt, anchorOf, sessionRow, sessionId])
 
   if (allGroups.length === 0) {
     // The window outranks the "nothing yet" sentence, which would be FALSE on a long conversation:
@@ -339,7 +346,10 @@ export function GalleryTab({
       {menu && (
         <SessionRowMenu
           x={menu.x} y={menu.y}
-          entries={galleryMenuEntries(pt, menu.group).map(e => ({ action: e.action, label: e.label, enabled: e.enabled }))}
+          entries={[
+            ...galleryMenuEntries(pt, menu.group).map(e => ({ action: e.action, label: e.label, enabled: e.enabled })),
+            ...notifyMenuExtras(sessionRow ?? { id: sessionId }, mutedKeys, pt),
+          ]}
           onPick={action => pick(action, menu.group)}
           onClose={() => setMenu(null)}
         />

@@ -120,6 +120,7 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | agentistics_session_groups | The user's session folders/groups and which sessions each holds |
 | agentistics_session_group_create | Create a folder (group), optionally filing sessions into it |
 | agentistics_session_group_edit | Add/remove a session, rename, nest or delete a folder |
+| agentistics_session_notify | Mute/unmute (or read) a session's notifications — delivery only, never its waiting state |
 | agentistics_tasks / agentistics_task | The task board, and one delivery in detail |
 | agentistics_task_create / agentistics_task_edit / agentistics_task_status | Create a delivery, edit it, move its status |
 

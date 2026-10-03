@@ -21,6 +21,11 @@ import { mkdir, writeFile, readFile, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import type { CentralRuntimeId } from './central-runtime'
 import { PORT } from './config'
+import { isWSL } from './wsl-ports-io'
+import {
+  formatStatusLines, lingerOutcome, lingerPlan, parseLinger, portHeldVerdict, statusLines,
+  wslTaskCreateOutcome, wslTaskPlan, wslTaskRemoveOutcome, type BusFacts,
+} from './autostart-plan'
 import { cliStrings, type CliStrings } from './cli-i18n'
 import { resolveLang } from './cli-lang'
 import {
@@ -37,6 +42,7 @@ import {
   pm2StartArgs,
   systemdUnit,
   migrateUnitKillMode,
+  migrateUnitOOMPolicy,
   migrateUnitPath,
   type RestartVerdict,
   type ServingObservation,
@@ -223,6 +229,8 @@ export function serviceSpecFor(mode: AutostartMode, opts: ServiceCommandOpts = {
     description: `agentop ${mode} (agentistics autostart)`,
     command,
     keepsRunning: serviceKeepsRunning(mode, opts),
+    // The server holds a port; a hand-started one makes the unit fail and loop every 5 s.
+    ...(mode === 'server' ? { condition: `${process.execPath} autostart guard server` } : {}),
   }
 }
 
@@ -435,7 +443,32 @@ export async function enableAutostart(mode: AutostartMode, opts: AutostartOption
   }
 }
 
+/** What the user bus looks like right now. Reads only. */
+async function readBusFacts(exec: Exec = run): Promise<BusFacts> {
+  const user = userInfo().username
+  const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? ''}`
+  const l = await exec(['loginctl', 'show-user', user, '-p', 'Linger'])
+  return { busSocket: existsSync(join(runtimeDir, 'bus')), linger: l.code === 0 ? parseLinger(l.stdout) : 'unknown' }
+}
+
+/** The distro `wsl.exe` must boot, or undefined outside WSL. */
+function wslDistro(): string | undefined {
+  return process.env.WSL_DISTRO_NAME
+}
+
 async function enableSystemd(mode: AutostartMode, spec: ServiceSpec): Promise<AutostartResult> {
+  const user = userInfo().username
+  const lines: string[] = []
+
+  // LINGER FIRST. Without it there is no user bus, and every `systemctl --user` below fails with
+  // "Failed to connect to bus" — which used to print a failure and then, for the unit file already
+  // written, carry on as if autostart existed. A refusal here stops the whole enable.
+  const plan = lingerPlan(await readBusFacts(), user)
+  const ran = plan.action === 'enable-linger' ? await run(plan.argv) : null
+  const linger = lingerOutcome(plan, ran, user)
+  if (!linger.active) return { ok: false, message: linger.message }
+  if (linger.message) lines.push(linger.message)
+
   const path = unitPath(mode)
   try {
     await mkdir(join(homedir(), '.config', 'systemd', 'user'), { recursive: true })
@@ -443,8 +476,7 @@ async function enableSystemd(mode: AutostartMode, spec: ServiceSpec): Promise<Au
   } catch (err: any) {
     return { ok: false, message: `Could not write unit file ${path}: ${err?.message ?? err}` }
   }
-
-  const lines: string[] = [`Wrote ${path}`]
+  lines.push(`Wrote ${path}`)
 
   const reload = await run(['systemctl', '--user', 'daemon-reload'])
   if (reload.code !== 0) {
@@ -459,19 +491,37 @@ async function enableSystemd(mode: AutostartMode, spec: ServiceSpec): Promise<Au
   }
   lines.push(`Enabled and started agentop-${mode}.`)
 
-  // Allow the user's services to run at boot without an active login session.
-  const linger = await run(['loginctl', 'enable-linger', userInfo().username])
-  if (linger.code === 0) {
-    lines.push('Enabled linger so it starts at boot without login.')
-  } else {
-    lines.push(`Note: could not enable linger (${linger.stderr || `exit ${linger.code}`}); ` +
-      `the service will start on your next login instead of at boot.`)
+  // WSL: Windows does not start the distro at logon, so the unit never gets its chance.
+  let ok = true
+  if (isWSL()) {
+    const task = wslTaskPlan(wslDistro())
+    if (!task.ok) {
+      ok = false
+      lines.push(task.reason)
+    } else {
+      const res = await run(task.create)
+      const v = wslTaskCreateOutcome(task.name, res.code, res.stderr)
+      ok = v.ok
+      lines.push(v.message)
+    }
   }
 
   const hook = await installUpdateHook()
   lines.push(hook.message)
 
-  return { ok: true, message: lines.join('\n') }
+  return { ok, message: lines.join('\n') }
+}
+
+/**
+ * `agentop autostart guard server` — the unit's `ExecCondition`. Exit 0 = start; exit 1 = skip
+ * quietly (systemd does not count it as a failure, so `Restart=on-failure` never loops).
+ */
+export async function guardServerStart(): Promise<number> {
+  const pid = await listenerPid(PORT, run)
+  const verdict = portHeldVerdict(PORT, pid)
+  if (verdict.run) return 0
+  process.stdout.write(verdict.message + '\n')
+  return 1
 }
 
 /**
@@ -580,7 +630,22 @@ export async function disableAutostart(
   }
 
   await run(['systemctl', '--user', 'daemon-reload'])
+
+  // The Windows logon task is shared by every mode (it only boots the distro), so it goes when the
+  // LAST agentop unit goes — removing it while another mode still relies on it would break that one.
+  if (isWSL() && !(await anyUnitInstalled())) {
+    const task = wslTaskPlan(wslDistro())
+    if (task.ok) {
+      const res = await run(task.remove)
+      lines.push(wslTaskRemoveOutcome(task.name, res.code, res.stderr).message)
+    }
+  }
   return { ok: true, message: lines.join('\n') }
+}
+
+async function anyUnitInstalled(): Promise<boolean> {
+  for (const m of MODES) if (existsSync(unitPath(m))) return true
+  return false
 }
 
 /**
@@ -793,6 +858,8 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   let next = unitText
   const killMode = migrateUnitKillMode(next)
   if (killMode) { next = killMode; done.push('a restart no longer stops your sessions') }
+  const oom = migrateUnitOOMPolicy(next)
+  if (oom) { next = oom; done.push('a session running out of memory no longer stops the server') }
   const pathFixed = process.env.INVOCATION_ID ? null : migrateUnitPath(next, process.env.PATH)
   if (pathFixed) { next = pathFixed; done.push('sessions it starts can find the coding assistants on your PATH') }
   if (next !== unitText) {
@@ -858,6 +925,25 @@ export async function autostartStatus(mode?: AutostartMode): Promise<AutostartRe
       lines.push(`  → comes back at boot${cmd ? `, running: ${cmd}` : ''}`)
       lines.push(`  → \`agentop autostart ${m} disable\` removes it`)
     }
+  }
+  // The prerequisites, each with its fix: linger, the bus, the unit and (WSL) the logon task.
+  if (!mode || mode === 'server') {
+    const bus = await readBusFacts()
+    const u = await run(['systemctl', '--user', 'is-active', 'agentop-server'])
+    const e = await run(['systemctl', '--user', 'is-enabled', 'agentop-server'])
+    let wsl: { distro: string | undefined; taskPresent: boolean | null } | null = null
+    if (isWSL()) {
+      const task = wslTaskPlan(wslDistro())
+      let present: boolean | null = null
+      if (task.ok) {
+        const q = await run(task.query)
+        present = q.code === 0 ? true : q.code === 127 ? null : false
+      }
+      wsl = { distro: wslDistro(), taskPresent: present }
+    }
+    lines.push('', formatStatusLines(statusLines({
+      ...bus, user: userInfo().username, unitActive: u.stdout, unitEnabled: e.stdout, wsl,
+    })))
   }
   return { ok: true, message: lines.join('\n') }
 }

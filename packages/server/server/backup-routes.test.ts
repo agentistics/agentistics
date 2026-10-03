@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { readGithubConfig, writeGithubConfig } from './backup/github-store'
+import { sealedPathFor } from './vault/whole-file'
 import {
   connectGithub, disconnectGithub, readGithubSection, updateGithubSection,
 } from './backup-routes'
@@ -70,7 +71,7 @@ describe('the GitHub versioning section — the token never leaves the machine',
     const file = join(dir, 'nothing.json')
     const res = await updateGithubSection({ label: 'x' }, file)
     expect(res.ok).toBe(false)
-    expect(existsSync(file)).toBe(false)
+    expect(existsSync(file) || existsSync(sealedPathFor(file))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -131,7 +132,7 @@ describe('connecting a repository FROM the interface', () => {
       file, fetchImpl: async () => ok({ private: false, permissions: { push: true } }),
     })
     expect(res.ok).toBe(false)
-    expect(existsSync(file)).toBe(false)
+    expect(existsSync(file) || existsSync(sealedPathFor(file))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -179,7 +180,7 @@ test('connecting through the GitHub CLI stores NO token at all', async () => {
     ),
   })
   expect(res.ok).toBe(true)
-  const raw = readFileSync(file, 'utf-8')
+  const raw = readFileSync(sealedPathFor(file), 'utf-8')
   expect(raw).not.toContain('ghp_')
   const stored = await readGithubConfig(file)
   expect(stored?.auth).toBe('gh')
@@ -207,7 +208,7 @@ test('connecting in gh mode does NOT ask for a token — that is the whole point
     ),
   })
   expect(res.ok).toBe(true)
-  expect(readFileSync(file, 'utf-8')).not.toContain('ghp_')
+  expect(readFileSync(sealedPathFor(file), 'utf-8')).not.toContain('ghp_')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -238,7 +239,7 @@ describe('disconnecting the repository', () => {
 
     const res = await disconnectGithub(file)
     expect(res.ok).toBe(true)
-    expect(existsSync(file)).toBe(false)
+    expect(existsSync(file) || existsSync(sealedPathFor(file))).toBe(false)
     expect((await readGithubSection(file)).configured).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })

@@ -6,9 +6,9 @@
  * delivery cost", and the two would drift.
  */
 
-import type { StagedSessionDraft, TaskStatusDef } from '@agentistics/core'
+import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
-  canDeleteStatus, isKnownStatusId, isValidStatusColor, nextStatusId, sortTaskStatuses,
+  canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
 import { historicalLinkId, type HistoricalSession } from './task-model'
@@ -28,7 +28,9 @@ import {
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
 import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
 import { planMove } from './task-rank'
-import { compareBy, repoShortName, sessionLabel } from '@agentistics/core'
+import { resolveAttachmentRead } from './attachment-web'
+import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
+import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
 
@@ -75,6 +77,16 @@ export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
   }
 }
 
+/**
+ * Attachments as an assistant reads them: the stored `{name, path}` plus the `url` that serves it
+ * (the chat's own attachment door). Applied to the detail reply only — the book keeps the bare
+ * reference, so the store never holds a URL that a changed port would make wrong.
+ */
+export function withAttachmentRefs<C extends { attachments?: ChatAttachmentRef[] }>(c: C): C {
+  if (!c.attachments || c.attachments.length === 0) return c
+  return { ...c, attachments: c.attachments.map(chatAttachmentRef) }
+}
+
 export async function showTask(
   ref: string,
   filter?: TaskFilter,
@@ -91,7 +103,7 @@ export async function showTask(
       rows: w.rollupRows,
       metas: scoped.metas,
       costOf: w.costOf,
-      comments: w.book.comments.filter(c => c.taskId === task.id),
+      comments: w.book.comments.filter(c => c.taskId === task.id).map(withAttachmentRefs),
       subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
       files: w.book.files.filter(f => f.taskId === task.id),
     }),
@@ -99,7 +111,7 @@ export async function showTask(
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
-export async function createTask(o: { title: string; detail?: string }): Promise<Task | null> {
+export async function createTask(o: { title: string; detail?: string; type?: string }): Promise<Task | null> {
   const title = o.title.trim()
   if (!title) return null
   const w = await loadTaskWorld()
@@ -115,9 +127,12 @@ export async function createTask(o: { title: string; detail?: string }): Promise
     id: newTaskId(),
     title,
     status: 'todo',
+    priority: 'low',
     createdAt: now,
     updatedAt: now,
     ...(o.detail?.trim() ? { detail: o.detail.trim() } : {}),
+    // Only a KNOWN type sticks — an unknown one is dropped, like a task nobody classified.
+    ...(o.type && isKnownTypeId(o.type, w.book.types) ? { type: o.type } : {}),
   }
   await w.store.upsertTask(task)
   return task
@@ -129,6 +144,8 @@ export async function editTask(
     title?: string
     detail?: string
     priority?: string
+    /** A type id from the vocabulary; `''` clears it. */
+    type?: string
     dueDate?: string
     startDate?: string
     labels?: string[]
@@ -144,7 +161,11 @@ export async function editTask(
   // An UNKNOWN priority word is refused rather than coerced: `migratePriority` would read it as
   // `none`, which is a real answer ("nobody has said") and would silently overwrite a real one.
   const priority = patch.priority !== undefined ? migratePriority(patch.priority) : undefined
+  // An unknown type is refused (nothing written) — a type is a vocabulary entry, not free text.
+  const nextType = patch.type !== undefined ? patch.type.trim() : undefined
+  if (nextType && !isKnownTypeId(nextType, w.book.types)) return false
   const ok = await w.store.patchTask(task.id, {
+    ...(nextType !== undefined ? { type: nextType } : {}),
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
     // An EMPTY description is a deliberate clearing, which is why it is not filtered out the way an
     // empty title is: a title is an identity, a description is a note. Same for every field below:
@@ -166,8 +187,11 @@ export async function editTask(
   if (!ok) return false
   const changes: TaskEvent[] = []
   const actor = patch.actor?.trim() || 'you'
-  if (priority !== undefined && priority !== (task.priority ?? 'none')) {
-    changes.push(event(task.id, actor, 'priority', { from: task.priority ?? 'none', to: priority }))
+  if (priority !== undefined && priority !== (task.priority ?? 'low')) {
+    changes.push(event(task.id, actor, 'priority', { from: task.priority ?? 'low', to: priority }))
+  }
+  if (nextType !== undefined && nextType !== (task.type ?? '')) {
+    changes.push(event(task.id, actor, 'type', { from: task.type ?? '', to: nextType }))
   }
   if (patch.shared !== undefined && (patch.shared === true) !== (task.shared === true)) {
     // Logged like every other decision: which central a delivery's text reaches is exactly the
@@ -336,20 +360,43 @@ export async function deleteTask(ref: string): Promise<boolean> {
   return true
 }
 
-export async function addComment(ref: string, o: { author: string; body: string }): Promise<boolean> {
+/**
+ * Leave a comment on a task, or — with `subtaskId` — on one of its subtasks or subtask GROUPS.
+ * An unknown, deleted or foreign subtask is REFUSED with a sentence (`planCommentTarget`), never
+ * quietly filed on the task. The activity log names the target, so "someone commented" always says
+ * on WHAT.
+ */
+export async function addComment(
+  ref: string,
+  o: { author: string; body: string; subtaskId?: string; attachments?: unknown },
+): Promise<
+  | { ok: true; id: string }
+  | { ok: false; reason: 'empty' | 'no_such_task' | CommentTargetRefusal; message: string }
+> {
   const body = o.body.trim()
-  if (!body) return false
+  // Only paths inside agentop's attachments directory survive — see `commentAttachments.ts`.
+  const attachments = sanitizeCommentAttachments(o.attachments, resolveAttachmentRead)
+  if (!body && attachments.length === 0) {
+    return { ok: false, reason: 'empty', message: 'A comment needs a body or an attachment.' }
+  }
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
-  if (!task) return false
+  if (!task) return { ok: false, reason: 'no_such_task', message: `No task "${ref}" exists.` }
+  const plan = planCommentTarget(task.id, o.subtaskId, w.book.subtasks)
+  if (!plan.ok) return plan
+  const author = o.author.trim() || 'unknown'
+  const id = newCommentId()
   await w.store.addComment({
-    id: newCommentId(),
+    id,
     taskId: task.id,
-    author: o.author.trim() || 'unknown',
+    ...(plan.subtaskId ? { subtaskId: plan.subtaskId } : {}),
+    author,
     body,
+    ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: new Date().toISOString(),
   })
-  return true
+  await w.store.logEvents([event(task.id, author, 'comment', { detail: commentTargetPhrase(plan.target) })])
+  return { ok: true, id }
 }
 
 /** An empty body is a DELETE by another name, so it is refused rather than silently blanking a row. */
@@ -1286,5 +1333,65 @@ export async function deleteStatus(id: string): Promise<
   const check = canDeleteStatus({ status: found, usageCount })
   if (!check.ok) return { ok: false, message: check.reason, ...(check.reason === 'in_use' ? { usageCount } : {}) }
   await w.store.removeStatus(id)
+  return { ok: true }
+}
+
+/**
+ * The TYPE vocabulary — list, create, edit, delete. The same door and the same shape as the status
+ * functions above (`@agentistics/core`'s `taskType.ts`); a type has no protected set, so the only
+ * delete refusal is `in_use`.
+ */
+export interface TaskTypeRow extends TaskTypeDef {
+  /** Tasks carrying this type — a courtesy for the UI; `deleteType` re-checks against a fresh read. */
+  usageCount: number
+}
+
+export async function listTypes(): Promise<TaskTypeRow[]> {
+  const w = await loadTaskWorld()
+  return sortTaskTypes(w.book.types).map(t => ({
+    ...t, usageCount: w.book.tasks.filter(x => x.type === t.id).length,
+  }))
+}
+
+export async function createType(o: { label: string; color: string }): Promise<
+  { ok: true; type: TaskTypeDef } | { ok: false; message: 'label_required' | 'bad_color' }
+> {
+  const label = o.label.trim()
+  if (!label) return { ok: false, message: 'label_required' }
+  if (!isValidTypeColor(o.color)) return { ok: false, message: 'bad_color' }
+  const w = await loadTaskWorld()
+  const id = nextTypeId(label, w.book.types.map(t => t.id))
+  const order = w.book.types.reduce((max, t) => Math.max(max, t.order), -1) + 1
+  const def: TaskTypeDef = { id, label, color: o.color, order }
+  await w.store.upsertType(def)
+  return { ok: true, type: def }
+}
+
+export async function editType(id: string, patch: { label?: string; color?: string }): Promise<
+  { ok: true } | { ok: false; message: 'no_such_type' | 'bad_color' }
+> {
+  const w = await loadTaskWorld()
+  const found = w.book.types.find(t => t.id === id)
+  if (!found) return { ok: false, message: 'no_such_type' }
+  if (patch.color !== undefined && !isValidTypeColor(patch.color)) return { ok: false, message: 'bad_color' }
+  const label = patch.label?.trim()
+  await w.store.upsertType({
+    ...found,
+    ...(label ? { label } : {}),
+    ...(patch.color !== undefined ? { color: patch.color } : {}),
+  })
+  return { ok: true }
+}
+
+export async function deleteType(id: string): Promise<
+  { ok: true } | { ok: false; message: 'no_such_type' | 'in_use'; usageCount?: number }
+> {
+  const w = await loadTaskWorld()
+  const found = w.book.types.find(t => t.id === id)
+  if (!found) return { ok: false, message: 'no_such_type' }
+  const usageCount = w.book.tasks.filter(t => t.type === id).length
+  const check = canDeleteType({ usageCount })
+  if (!check.ok) return { ok: false, message: 'in_use', usageCount }
+  await w.store.removeType(id)
   return { ok: true }
 }

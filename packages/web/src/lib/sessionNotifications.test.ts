@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
   DEFAULT_NOTIFICATION_SETTINGS, handleSessionStateTransitions, notifyFleetTransitions, observeDeliveries,
-  resetNotificationMemory, type SessionActivity,
+  fleetActivityStates, resetNotificationMemory, type SessionActivity,
 } from './sessionNotifications'
+import { setSessionMuted } from './mutedSessions'
 
 /**
  * These tests exist because this module interrupts the user: a card, a sound and the bell (in-app
@@ -228,3 +229,26 @@ describe('a row nobody watched arrive is not an event that happened', () => {
   })
 })
 
+
+describe('a muted session', () => {
+  const rows = (state: string) => [{ id: 'm1', conversationId: 'conv-1', state, title: 'quiet one', cwd: '/home/padawan/agentistics', harness: 'claude' }]
+
+  it('delivers nothing, yet its waiting state is still reported', () => {
+    setSessionMuted('conv-1', true)
+    let prev: Record<string, SessionActivity> | null = notifyFleetTransitions(null, rows('working'), 'en')
+    prev = notifyFleetTransitions(prev, rows('working'), 'en')
+    prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
+    prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
+    expect(captured).toEqual([])
+    expect(fleetActivityStates(rows('waiting')).m1).toBe('waiting')
+    setSessionMuted('conv-1', false)
+  })
+
+  it('delivers again once unmuted (the mute is the only difference)', () => {
+    let prev: Record<string, SessionActivity> | null = notifyFleetTransitions(null, rows('working'), 'en')
+    prev = notifyFleetTransitions(prev, rows('working'), 'en')
+    prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
+    prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
+    expect(captured.length).toBeGreaterThan(0)
+  })
+})

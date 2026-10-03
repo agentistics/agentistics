@@ -17,6 +17,7 @@ import {
   HARNESS_IDS,
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
+import { taskCommentRequest } from "./task-comment-args.js";
 
 const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
@@ -185,7 +186,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). `ref` is the task id or its exact title.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). Comments come twice: `comments` (flat, oldest first, each with `subtaskId` when it was left on a subtask or group) and `commentThreads` — the same comments grouped by their OWN target (`target: {kind: 'task'|'group'|'subtask', id, title}`; the task first, empty targets omitted). `ref` is the task id or its exact title.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string", description: "Task id or exact title." } },
@@ -236,6 +237,27 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "agentistics_task_types",
+    description:
+      "BETA — Agentask (the task board) is new and still changing. List the task TYPE vocabulary (id, label, color, order, usageCount). A type is a second classification beside the status (e.g. CORE); a task may carry one or none. Call this before setting `type` through agentistics_task_edit.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "agentistics_task_type_edit",
+    description:
+      "BETA — Agentask (the task board) is new and still changing. Add, rename/recolor, or delete a task type. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a type — its id is derived from the label. Pass `id` with `label` and/or `color` to EDIT. Pass `id` with `remove: true` to DELETE: refused (422, `in_use`, with `usageCount`) while any task still carries it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Required to edit or delete; omit to create." },
+        label: { type: "string" },
+        color: { type: "string", description: "#rrggbb" },
+        remove: { type: "boolean" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_task_status_edit",
     description:
       "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Add, rename/recolor, or delete a status. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a new, non-protected status — its id is derived from the label and returned. Pass `id` with `label` and/or `color` to EDIT an existing status's label/color — works on a protected one too, only its id can never change. Pass `id` with `remove: true` to DELETE it: refused (422, `protected`) for todo/in_progress/blocked/done regardless of usage, and refused (422, `in_use`, with `usageCount`) for any other status still referenced by at least one task or subtask.",
@@ -252,11 +274,24 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_comment",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on. `author` is free text — say who you are (e.g. 'claude:3f5f').",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f').",
     inputSchema: {
       type: "object",
-      properties: { ref: { type: "string" }, body: { type: "string" }, author: { type: "string" } },
-      required: ["ref", "body"],
+      properties: {
+        ref: { type: "string" },
+        body: { type: "string" },
+        author: { type: "string" },
+        subtaskId: {
+          type: "string",
+          description: "Optional target: a subtask or subtask GROUP id of this task (from agentistics_task's `subtasks`). Omit for the task itself.",
+        },
+        attachments: {
+          type: "array",
+          description: "Optional files left with the comment, as {name, path} references to files already in agentop's attachments directory (the path the chat upload returns). Paths outside it are dropped. At most 10.",
+          items: { type: "object", properties: { name: { type: "string" }, path: { type: "string" } }, required: ["path"] },
+        },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -371,14 +406,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low | none), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `none`, which means 'nobody has said' and is not the same as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string" },
         title: { type: "string" },
         detail: { type: "string" },
-        priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
+        type: { type: "string", description: "A task type id (see agentistics_task_types); empty string clears it." },
         dueDate: { type: "string" },
         startDate: { type: "string" },
         labels: { type: "array", items: { type: "string" } },
@@ -460,6 +496,19 @@ const TOOLS: Tool[] = [
         name: { type: "string", description: "The new name. Required for rename." },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "agentistics_session_notify",
+    description:
+      "Switch a session's notifications on or off, or read the switch. `ref` is a managed id, a conversation id, an exact title or a unique id prefix. With `notify` ('on' | 'off') it sets the switch; with `ref` alone it reads it. Muting removes the INTERRUPTION only (bell, Nay card, sound, desktop toast, peer message): the session still shows as waiting and its events are still recorded in the inbox. The mute follows the conversation, so it survives a reopen. 404 for a ref that matches nothing, 409 for an ambiguous one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference." },
+        notify: { type: "string", enum: ["on", "off"], description: "Set the switch. Omit to read it." },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -747,6 +796,26 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiGet("/api/tasks/statuses");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_task_types": {
+        const body = await apiGet("/api/tasks/types");
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_type_edit": {
+        const a = args as any;
+        const id = typeof a?.id === "string" && a.id ? a.id : null;
+        if (id && a?.remove === true) {
+          const body = await apiSend("DELETE", `/api/tasks/types/${encodeURIComponent(id)}`);
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        const payload = {
+          ...(typeof a?.label === "string" ? { label: a.label } : {}),
+          ...(typeof a?.color === "string" ? { color: a.color } : {}),
+        };
+        const body = id
+          ? await apiSend("POST", `/api/tasks/types/${encodeURIComponent(id)}`, payload)
+          : await apiSend("POST", "/api/tasks/types", payload);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_task_status_edit": {
         const a = args as any;
         const id = typeof a?.id === "string" && a.id ? a.id : null;
@@ -764,10 +833,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_comment": {
-        const a = args as any;
-        const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/comments`, {
-          body: a?.body, author: a?.author ?? "assistant",
-        });
+        // The route stays LITERAL here: agentToolPolicy.lint reads each handler's routes off this source.
+        const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String((args as any)?.ref))}/comments`,
+          taskCommentRequest(args).payload);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_subtask": {
@@ -852,7 +920,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
         const patch: Record<string, unknown> = {};
-        for (const f of ["title", "detail", "priority", "dueDate", "startDate", "actor"]) {
+        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "actor"]) {
           if (typeof a?.[f] === "string") patch[f] = a[f];
         }
         if (Array.isArray(a?.labels)) patch.labels = a.labels;
@@ -923,6 +991,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           default:
             throw new Error("agentistics_session_group_edit: `action` must be add, remove, rename or delete");
         }
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_notify": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-notify", {
+          ref: a?.ref,
+          ...(a?.notify !== undefined ? { notify: a.notify } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_summary": {

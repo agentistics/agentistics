@@ -20,6 +20,7 @@ import { parseSessionArgs, LS_DEFAULT, type SessionCommand } from './cli-parse'
 import { cliStrings } from '../cli-i18n'
 import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
+import { muteAtSpawn } from './session-notify-web'
 import {
   admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusalBody, type Admission,
 } from './spawn-admission'
@@ -32,6 +33,7 @@ import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
+import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { conversationForProcess, loadConversations } from './conversations'
 import { resolveBackend } from './index'
@@ -67,7 +69,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -83,6 +85,10 @@ const USAGE = `Usage:
   \`--force\` starts anyway when this machine cannot hold another assistant session (see the
   memory gate below) — every verb that starts or reopens a process takes it, and it never fails
   silently: the check that was overridden is printed regardless.
+
+  \`--notify off\` starts the session with its notifications muted: no bell, card, sound or desktop
+  toast for it, while it still shows as waiting and its events are still recorded. Absent = on. On
+  \`batch\` it is a default for the \`--session\`s that follow it, like \`--model\`.
 
 Orchestrating several at once — the form an assistant should use:
 
@@ -287,6 +293,9 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
+  // poller links the conversation). Delivery only — the session still reads as waiting.
+  if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
 
   const liveBackend = await backend.list().catch(() => [])
   const backendIds = new Set(liveBackend.map(b => b.id))
@@ -478,6 +487,7 @@ async function batch(
         : {}),
       ...(await recordedRepo(cwd)),
     })
+    if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     const liveBackend = await backend.list().catch(() => [])
     const backendIds = new Set(liveBackend.map(b => b.id))
     await retireFallenSessions({
@@ -558,7 +568,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
 
   for (const row of plan.reopen) {
     const m = row.entry
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId })
+    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...inheritedLaunch(m, m.harness) })
     if (!planned.ok) { skipped.push(m.id); continue }
     const id = newSessionId()
     try {
@@ -576,12 +586,11 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     }
     await addSession({
       id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
-      label: row.label,
-      ...(m.note ? { note: m.note } : {}),
       // INHERITED from the row being replaced, never taken from the request: a reopened session is
-      // the same piece of work, and the attribution is what says so. See `ManagedSession.taskId`.
-      ...(m.taskId ? { taskId: m.taskId } : {}),
-      ...(m.attemptId ? { attemptId: m.attemptId } : {}),
+      // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
+      ...inheritedIdentity(m),
+      ...inheritedLaunch(m, m.harness),
+      label: row.label,
       // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
       // reopen verb has recorded it since it was written; this path had not, so the same gesture
       // left a row that knew which conversation it drove or one that did not, depending on where it
@@ -919,8 +928,14 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const died = await spawnFailure(backend, id, planned.plan.argv[0])
   if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
 
+  // The newest row of this conversation is the one being continued: its filing and name come
+  // along, and the live harness name (if any) still wins for the label.
+  const previous = (await readRegistry())
+    .filter(m => m.conversationId === plan.conversationId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   const record: ManagedSession = {
     id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
+    ...inheritedIdentity(previous),
     ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
     conversationId: plan.conversationId,
     ...(await recordedRepo(plan.cwd)),
@@ -932,6 +947,8 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   // session it lost was the one the user was about to sit in: running, unregistered, and beyond
   // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
   // it is SAID rather than left for the user to discover when a rename stops working.
+  // Retired like every other reopen: it stops standing beside its own continuation.
+  if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
   if (!await addVerified(record)) {
     console.error(
       `${id} is running but its registry record could not be kept — another agentop process is `

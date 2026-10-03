@@ -59,7 +59,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Columns3, Plus } from 'lucide-react'
 import {
-  cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
+  commentCounts, cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
 } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -69,6 +69,7 @@ import {
 import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
+import { CommentCountButton } from './CommentThreadDialog'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
   clusterBarStyle, clusterSubtaskRows, clusterTintStyle, groupMembers, groupOf, isGroupMember,
@@ -91,7 +92,7 @@ import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from
 import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import type {
   StagedSessionWriteResult, StatusWriteResult, Subtask, SubtaskPatch, SubtaskView,
-  TaskFile, TaskSessionRow, TaskStatus,
+  TaskComment, TaskFile, TaskSessionRow, TaskStatus,
 } from '../../lib/tasks'
 
 /** `SubtaskColumnId` and `SubtaskSortKey` (`@agentistics/core`) name the same seven legacy columns
@@ -204,6 +205,11 @@ export interface SubtaskTableProps {
   /** The subtask whose attachments are being materialized into real paths right now, so its Fire
    *  button reads busy instead of looking inert during the brief round trip. */
   preparingStagedSessionId?: string | null
+  /** The delivery's comments — each row shows its THREAD's count (`commentCounts`: a group's
+   *  includes its members'). Absent = no comment control on the rows. */
+  comments?: readonly TaskComment[]
+  /** Open one subtask's or group's thread. */
+  onOpenComments?: (subtask: Subtask) => void
 }
 
 export function SubtaskTable(p: SubtaskTableProps) {
@@ -213,6 +219,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
   // Only feeds `fmtDateTime`'s "is this the same calendar year" check — that answer does not need
   // to tick, unlike the lease countdown `TaskTable`'s own `nowMs` state exists for.
   const nowMs = Date.now()
+  const threadCounts = commentCounts(p.comments ?? [], p.subtasks).bySubtask
   const [draft, setDraft] = useState('')
   const [linking, setLinking] = useState<string | null>(null)
   /** Set when a status write refused `done` for having no session filed yet — see
@@ -409,6 +416,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   The inset left bar (`clusterBarStyle`) lands here — the leading edge of every
                   clustered row, header through last member, so it reads as one continuous stripe. */}
               <td style={{ ...cell, width: 1, ...tint, ...clusterBarStyle(clustered) }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <SubtaskActionsMenu
                   subtask={t}
                   siblings={p.subtasks}
@@ -427,6 +435,16 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     onDelete: () => stagedDialogs.remove(target(t)),
                   }}
                 />
+                {/* Beside the gear (owner, 2026-10-02): the row's thread, count and way in. */}
+                {p.onOpenComments && (
+                  <CommentCountButton
+                    count={threadCounts[t.id] ?? 0}
+                    label={p.lang === 'pt' ? `Comentários: ${t.title}` : `Comments: ${t.title}`}
+                    mobile={isMobile}
+                    onOpen={() => p.onOpenComments?.(t)}
+                  />
+                )}
+                </span>
               </td>
               {/* A MEMBER is indented one level under its group's header — the visual nesting that
                   replaces the old "parte do grupo" caption for every properly clustered row. */}

@@ -34,6 +34,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, Check, Copy, History, MoreVertical, Send, Terminal, X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { withReopening } from '../lib/reopeningStore'
 import { PERFORMABLE, TEXT_VERBS, type FleetActionId, type FleetRow, type FleetVerb } from '../lib/fleet'
 import {
   auditForSession,
@@ -163,7 +164,8 @@ export function useSessionActionsController(
   async function run(action: FleetActionId, extra?: { text?: string; choice?: number }) {
     setBusy(true)
     setMsg(null)
-    const out = await act({ id: row.id, action, ...extra })
+    const call = () => act({ id: row.id, action, ...extra })
+    const out = await (action === 'resume' ? withReopening([row.id], call) : call())
     // AUDIT the write channel. `prompt` is the one verb that types free text INTO the session, so
     // every one — accepted or refused — leaves a record of who/which session/what/when + the
     // outcome. Recorded AFTER the server answers, so `ok`/`message` are the truth, and only when

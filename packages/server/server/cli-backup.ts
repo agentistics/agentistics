@@ -652,8 +652,8 @@ export async function runBackupCli(argv: string[]): Promise<number> {
     const result = await setupGithubBackup({ url: parsed.url, token })
     if (!result.ok) { console.error(result.message); return 1 }
     log(`github backup configured: ${result.config.owner}/${result.config.repo}`)
-    log(`The token is stored at ${join(AGENTISTICS_DATA_DIR, 'github-backup.json')} (mode 0600) `
-      + 'and is never included in a backup.')
+    log(`The token is stored encrypted at ${join(AGENTISTICS_DATA_DIR, 'github-backup.sealed')} `
+      + '(sealed by this machine\'s vault) and is never included in a backup.')
 
     // Best-effort: setup already succeeded, so a workflow problem is reported, not fatal — the
     // user can retry it on its own with `github install-workflow`.

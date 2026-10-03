@@ -48,3 +48,9 @@ export interface EngineHealthIssue {
   description: string
   guide?: string
 }
+
+/**
+ * Mirrors the host's `SessionActivity` (1.4) — what a managed session is doing right now, as the
+ * fleet poll reads it off the screen. Must stay EQUAL (`engine-api-mirrors.test.ts`).
+ */
+export type EngineSessionActivity = 'working' | 'waiting-approval' | 'waiting' | 'exited'

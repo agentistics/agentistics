@@ -117,8 +117,13 @@ export function dictationLocale(lang: 'en' | 'pt'): string {
  * fix the wrong thing.
  *
  * An unknown code is REPORTED, carrying the code itself. A new one must be visible, not swallowed.
+ *
+ * `aborted` is the one code that is NOT a failure and returns `null`: the recogniser reports it when
+ * THIS page ended it — the person clicked the microphone off, or sending ended the dictation. Showing
+ * "dictation was interrupted" there told people about their own click, and it stayed under the
+ * composer after the message was sent.
  */
-export function dictationError(code: string, lang: 'en' | 'pt'): string {
+export function dictationError(code: string, lang: 'en' | 'pt'): string | null {
   const pt = lang === 'pt'
   switch (code) {
     case 'not-allowed':
@@ -139,7 +144,7 @@ export function dictationError(code: string, lang: 'en' | 'pt'): string {
         ? 'Nenhum microfone disponível para o navegador.'
         : 'No microphone is available to the browser.'
     case 'aborted':
-      return pt ? 'O ditado foi interrompido.' : 'Dictation was interrupted.'
+      return null
     default:
       return pt
         ? `O ditado parou: ${code}.`

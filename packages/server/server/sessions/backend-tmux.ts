@@ -17,6 +17,7 @@ import {
 } from './tmux-cli'
 import { dependencyCommandLine } from './dependency-plan'
 import { probeDependency } from './dependency-probe'
+import { sessionEnv } from './login-env'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
 import { writeToPane } from './pane-writer'
@@ -100,6 +101,51 @@ async function tmux(args: string[]): Promise<{ code: number; out: string; err: s
     // callers are meant to consult — no throw, so a missing tmux never crashes a caller.
     return { code: 127, out: '', err: '' }
   }
+}
+
+/**
+ * PURE. The argv that starts the tmux SERVER in a cgroup of its own, or `null` to start it plainly.
+ *
+ * A tmux client starts the server as its own child when none is running, so the server — and every
+ * session it hosts — landed in the cgroup of whoever ran that first command: the `agentop-server`
+ * unit, when the server runs as a service. The fleet then shared the unit's fate: a stop, or an OOM
+ * kill of one heavy session process under `OOMPolicy=stop`, took every session at once (2026-10-02,
+ * the whole fleet gone at ~11:00 with the server still up). A transient `--scope` of its own makes
+ * the fleet independent of the service. Only on Linux with a reachable user manager; anything else
+ * starts it the old way.
+ */
+export function coldStartArgv(args: string[], env: { platform: string; runtimeDir?: string; hasUserBus: boolean }, now = Date.now()): string[] | null {
+  if (env.platform !== 'linux' || !env.runtimeDir || !env.hasUserBus) return null
+  return ['systemd-run', '--user', '--scope', '--quiet', '--collect', `--unit=agentop-tmux-${now}`, '--', 'tmux', ...args]
+}
+
+/** Is a tmux server already up on the fleet socket? A server that is up keeps its own cgroup. */
+async function tmuxServerUp(): Promise<boolean> {
+  const { code, out, err } = await tmux(listSessionsArgs())
+  if (code === 0) return true
+  const text = `${out}\n${err}`.toLowerCase()
+  return !(text.includes('no server running') || text.includes('error connecting'))
+}
+
+/** Runs `tmux <args>`, starting the server in its own scope when this call is what starts it. */
+async function tmuxStartingServer(args: string[]): Promise<{ code: number; out: string; err: string }> {
+  if (!(await tmuxServerUp())) {
+    const runtimeDir = process.env.XDG_RUNTIME_DIR
+    const hasUserBus = !!runtimeDir && (await Bun.file(`${runtimeDir.replace(/\/$/, '')}/bus`).exists().catch(() => false))
+    const argv = coldStartArgv(args, { platform: process.platform, runtimeDir, hasUserBus })
+    if (argv) {
+      try {
+        const p = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
+        const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
+        const code = await p.exited
+        // systemd-run itself could not run the scope (no manager, no permission): tmux never ran,
+        // so fall back to the plain start below. A tmux error is tmux's answer and stands.
+        const scopeFailed = code !== 0 && /failed to (connect|start transient|create)|systemd-run/i.test(err)
+        if (!scopeFailed) return { code, out, err }
+      } catch { /* systemd-run missing — plain start below */ }
+    }
+  }
+  return tmux(args)
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -395,8 +441,13 @@ export const tmuxBackend: SessionBackend = {
     // Applied as SEPARATE pre-flight calls they were lost on a cold socket, because `set-option`
     // does not start a server — see `spawnArgs`.
     const profile = await terminalProfile()
-    const { code, out } = await tmux(
-      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: process.env.PATH }),
+    // Re-resolved from the login shell (60 s memo) so a tool installed a minute ago is found with
+    // no restart. See `login-env.ts`.
+    const env = await sessionEnv()
+    // The first session of a cold socket also starts the tmux SERVER — in a scope of its own, so the
+    // fleet does not live and die with this service's cgroup. See `coldStartArgv`.
+    const { code, out } = await tmuxStartingServer(
+      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: env.PATH ?? process.env.PATH, env }),
     )
     if (code !== 0) throw new Error(out.trim() || `tmux new-session failed (code ${code})`)
     if (req.initialPrompt) {

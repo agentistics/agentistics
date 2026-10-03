@@ -16,6 +16,7 @@ import {
   serviceManagerOptions,
   systemdUnit,
   migrateUnitKillMode,
+  migrateUnitOOMPolicy,
   migrateUnitPath,
   systemdPathLine,
   type ServiceManagerFacts,
@@ -324,4 +325,16 @@ describe('awaitReplacement', () => {
       async () => { calls++; return { pid: 200, answering: true } }, { timeoutMs: 3_000, intervalMs: 1_000, ...clock() })
     expect(calls).toBeLessThanOrEqual(5)
   })
+})
+
+// One session running out of memory used to stop the whole service (systemd's default OOMPolicy=stop).
+test('a long-running unit keeps going when the kernel OOM-kills one of its processes', () => {
+  const old = '[Service]\nType=simple\nExecStart=/home/u/.local/bin/agentop server\nKillMode=process\n'
+  const next = migrateUnitOOMPolicy(old)
+  expect(next).toContain('OOMPolicy=continue')
+  expect(next).toContain('ExecStart=/home/u/.local/bin/agentop server')
+  expect(migrateUnitOOMPolicy(next!)).toBeNull()                                  // idempotent
+  expect(migrateUnitOOMPolicy(old + 'OOMPolicy=stop\n')).toBeNull()             // an explicit choice stays
+  expect(migrateUnitOOMPolicy(systemdUnit(RETURNS))).toBeNull()                  // a oneshot owns no children
+  expect(systemdUnit(FOREGROUND)).toContain('OOMPolicy=continue')                // and new units are born with it
 })

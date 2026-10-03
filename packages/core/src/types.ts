@@ -1015,8 +1015,21 @@ export function getModelPrice(modelId: string) {
   }
   const hit = forwardKey || reverseKey
   if (hit) return MODEL_PRICING[hit]!
-  // Sonnet-class fallback, cacheWrite1h at the same 2x-base-input rate every table row derives.
+  // Sonnet-class fallback — an ESTIMATE for a model the table does not know. A caller that must not
+  // invent a figure (a provider call journaled by the native runtime, e.g. an OpenRouter model) asks
+  // `hasModelPrice` first and reports the response as unpriced instead., cacheWrite1h at the same 2x-base-input rate every table row derives.
   return { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 }
+}
+
+/**
+ * Does the pricing table actually know this model (exactly, by prefix or as a truncated id), or is
+ * it a local model that costs nothing? `false` means `getModelPrice` would fall back to a GUESS.
+ */
+export function hasModelPrice(modelId: string): boolean {
+  if (MODEL_PRICING[modelId] || isLocalModelId(modelId)) return true
+  const id = String(modelId ?? '')
+  if (!id) return false
+  return Object.keys(MODEL_PRICING).some(key => id.startsWith(key) || (key.startsWith(id) && key[id.length] === '-'))
 }
 
 /** Empty per-model usage accumulator. */

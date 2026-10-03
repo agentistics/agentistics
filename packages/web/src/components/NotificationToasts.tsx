@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, CheckCircle2, X } from 'lucide-react'
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
 import { getNotificationSettings, NAY_CARD_CODES } from '../lib/sessionNotifications'
+import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 
 // How long a toast lingers before it auto-dismisses (ms). Errors/warnings stay longer
 // so they're readable; info/success clear a bit faster.
@@ -73,6 +74,8 @@ export function NotificationToasts({ lang }: Props) {
       seen.current.add(n.id)
       // A session card is the Nay button's to show, and do-not-disturb keeps every session event
       // quiet. Both stay in the bell; only the popup is skipped.
+      // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
+      if (n.code === UPDATE_NOTICE_CODE) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && getNotificationSettings().doNotDisturb))) continue
       setToasts(t => [n, ...t])
       setTimeout(() => startLeave(n.id), AUTO_MS[n.type])

@@ -54,7 +54,7 @@ function secureCookies(): boolean {
 }
 
 /** Read the session cookie under either name — flipping TLS on must not log everyone out. */
-function readSessionCookie(req: Request): string | undefined {
+export function readSessionCookie(req: Request): string | undefined {
   const cookies = parseCookies(req.headers.get('cookie'))
   return cookies[cookieName(true)] ?? cookies[cookieName(false)]
 }

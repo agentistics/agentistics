@@ -20,6 +20,17 @@ conversation transcripts**.
 Members never push chat. Raw transcripts are fetched on demand over the reverse WebSocket and
 are never stored centrally.
 
+Every machine — solo, member or central — also holds credentials of its own, and those are
+**encrypted at rest, never plain text** ([§7a](#7a-secrets-at-rest--every-secret-is-sealed-never-plain-text-under-0600)):
+
+| Secret | Where (under `~/.agentistics`) | Purpose |
+|---|---|---|
+| GitHub PAT for versioned backups | `github-backup.sealed` | `github-backup` |
+| Member tokens for each central (`team.connections[].token`) | `connections/tokens.sealed` — no longer in `preferences.json` | `central-token` |
+| X25519 private key of the sealed envelope channel | `connections/envelope-key.sealed` | `envelope-key` |
+| A central's password, session secret, ingest token, `MONGO_URL` | `central/secrets.sealed` — `central.env` keeps only the non-secret variables | `central-env` |
+| Provider API keys of the native runtime | `provider-keys/<id>.sealed` (the engine, through engine-api 1.5 `secrets`) | `engine/provider-key` |
+
 ## 2. Threat model
 
 Defended against:
@@ -263,10 +274,292 @@ test asserting exactly that (`auth-principal.test.ts`, `stepup.test.ts`).
 - **A public repository does not weaken any of this** — every secret is operator-supplied at
   runtime and none is committed — but it does mean the defaults are read by attackers too, which
   is why they are the conservative ones. See [SECURITY.md](../SECURITY.md).
+- **The vault does not stop malware running as you.** It closes copies of `~/.agentistics` read
+  elsewhere; a process with your account, while the vault is open, can ask the protector for the key
+  ([§7a](#7a-secrets-at-rest--every-secret-is-sealed-never-plain-text-under-0600)).
 - **Configuration is the weakest link.** Most of these controls are switched on by an
   environment variable, and OWASP ranks security misconfiguration second among current risks.
   That is the entire reason `agentop doctor --exposed` exists and refuses to declare readiness
   on a check it could not verify.
+
+## 7a. Secrets at rest — every secret is sealed, never plain text under 0600
+
+**The rule:** every secret Agentistics writes is encrypted. A secret in plain text protected only by
+mode `0600` is not acceptable — `0600` protects against other non-root users of the same machine
+and nothing else.
+
+**What this buys.** The threat the vault closes is **a copy of `~/.agentistics` read somewhere
+else**: a backup tarball, a cloud-sync folder that swept the home directory, a pendrive, a disk
+image, a stolen laptop's disk read from another OS, the Windows side of a WSL disk, a support
+bundle, an agent that `cat`s the file into a transcript that is later shared. Before this, every one
+of those was a live credential. Now each is a blob that opens only on this machine, under this OS
+account, through its protector.
+
+**What it does not close, in these words: a process running as you, on this machine, while the
+vault is open, can ask the protector for the key** — DPAPI, an unlocked login keyring and the
+Keychain all serve the same user. Malware with your account is out of scope, as it is for every
+credential store on a desktop OS. The policy floor (`protectedGlobs`, and the engine's floor over the
+whole data directory) keeps the native runtime's own agent away from the vault; that is the
+in-product half of this limit.
+
+### How it works
+
+- **Envelope encryption** (`packages/vault`, public so the claim is verifiable). One 32-byte data key
+  (DEK) per machine, with a random key id. It exists in plain form only in the memory of a process
+  that opened the vault — never on disk, in a log, an audit event, a response or an error.
+- **Per-purpose subkeys**: `HKDF-SHA256(DEK, salt = kid, info = "agentistics/vault/v1/" + purpose)`.
+  A blob sealed for one purpose cannot be opened as another, which is what makes engine-api 1.5
+  `secrets` safe to hand an engine: it is served `engine/…` purposes only.
+- **AES-256-GCM**, a random 96-bit nonce per seal, AAD binding the blob to its purpose, its logical
+  name and the vault's kid (length-prefixed, so no two tuples encode alike). Copying
+  `anthropic.sealed` over `openai.sealed` fails the tag (`tampered`); a file from another machine's
+  vault says so (`wrong-machine`) — "copied" and "modified" are different sentences.
+- **The DEK is stored only wrapped**, in `~/.agentistics/vault/`, by the protector detection found —
+  each accepted only after a real round trip, never a presence check:
+
+| Platform | Protector |
+|---|---|
+| macOS | the login Keychain (`security -i`, the key on stdin) |
+| Windows | DPAPI, CurrentUser (`powershell.exe`, payload on stdin; blob in `vault/dek.dpapi`) |
+| WSL | Windows DPAPI through interop — verified to work from the agentop service — then libsecret, then a TPM |
+| Linux | libsecret (Secret Service) first, then `systemd-creds` **with a TPM2 only** |
+| none of these | a passphrase you choose — said in words, naming what was checked |
+
+  A secret never appears in a command line (`ps` shows every argv to every user): every protector
+  CLI gets it on stdin. `systemd-creds --with-key=host` is never used — a key file on the same disk is
+  the rejected option below.
+- **Detection runs once.** The protector is recorded in `vault.json` and never switched silently: if
+  it stops answering the vault is `locked` or `protector-lost`, never quietly re-keyed (a new key
+  would orphan every sealed file). `agentop vault rekey --protector <p>` is the explicit move.
+- **Rejected, and recorded so it is not re-proposed:** a key derived from the machine and stored
+  beside the data (machine-id, hostname, a key file in `~/.agentistics`) — everything needed to
+  decrypt travels in the same tarball, so it is obfuscation; `0600` as the end state; a
+  passphrase-less fallback; Windows Credential Manager; a native keychain addon.
+- `0600` stays as a **second layer**: sealed files are still written `0600` in `0700` directories,
+  atomically (tmp + fsync + rename + chmod + fsync of the directory), and a reader refuses a sealed
+  file that is group- or world-readable, as evidence something else is wrong.
+
+### Seeing it: Settings → Vault
+
+`GET /api/vault` (guarded as `localShell` in `capability-guard.ts`, 404 on a central) returns metadata
+only: the vault's state, its protector in plain words, the key id and creation time, and one row per
+sealed file — what it is, when it was sealed (read from the file's own plain header), and whether it is
+`sealed`, `pending` (plaintext still waiting) or `unreadable` (another machine's vault, not a sealed
+file, or a file open to other users) with how to enter it again. It never decrypts anything, so it never
+holds a value, a fragment or a fingerprint; `inventory.test.ts` plants known values and asserts their
+absence. The one action, `POST /api/vault/lock`, goes through `requireVaultStepUp` (`vault/inventory.ts`),
+the single place a stronger gate (authenticator, Windows Hello presence) plugs in.
+
+### The passphrase, and a locked service
+
+With no protector, `agentop vault init` asks for a passphrase (≥ 12 characters, not one of the
+secrets it protects): `scrypt(N = 2^17, r = 8, p = 1)` → a key-encryption key → AES-256-GCM over the
+DEK, parameters stored so they can be raised. Such a vault — or any vault whose protector the
+service cannot reach — makes the service start **locked**: whatever needs a secret refuses with the
+`locked` sentence, and nothing else is affected (metrics, the board and the dashboard keep working).
+`agentop vault unlock` reads the passphrase on the terminal with no echo and hands it to the running
+service over `~/.agentistics/run/vault.sock` (directory `0700`, socket `0600` — Bun has no
+peer-credential call, so the uid check is the filesystem's), **never over the HTTP server**, which
+binds every interface. `agentop vault lock` drops the key.
+
+A passphrase wrapper beside the system one is optional (`agentop vault add-passphrase`); it is how a
+**Docker machine** opens the vault (a container has no DPAPI or Keychain), and it is an offline
+brute-force target beside the files it opens, which is why it is never the default.
+
+### Migration, and what "securely deleted" honestly means
+
+Every plaintext secret an earlier version wrote is migrated automatically at the first open: sealed
+to a NEW file name, re-read from disk and verified, then the original is moved aside, overwritten
+with random bytes, fsynced and unlinked. Each step is correct at every crash point (the state
+machine is in `packages/vault/src/migrate.ts`, and a test crashes it after every single syscall).
+The preferences tokens move to their sealed map FIRST and only then leave `preferences.json`, which
+is now also written `0600` (it was the umask's — `0664` on the reference machine). Removing a
+connection deletes its token from the sealed map in the same write; if the vault cannot open at that
+moment, the id is tombstoned in `preferences.json` (`sealedTokenTombstones`, no secret) so a token
+never comes back with a re-added id, and the next write with the vault open deletes it. With no protector
+and no terminal, the plaintext files are left **exactly as they are** — destroying them would lose
+the credentials — the service says `plaintext-pending`, and from that moment no new plaintext is
+ever written: every write refuses.
+
+**Overwrite-then-unlink is best-effort.** On SSDs (wear levelling), copy-on-write filesystems (btrfs,
+APFS, ZFS), WSL's ext4-in-VHDX and anything with snapshots, the old blocks may survive. The guarantee
+is "nothing is written in plain text from now on", not "the past is erased" — so the migration says,
+once, that copies made before (backups, snapshots, synced folders) may still hold the secrets, and
+that rotating them closes it.
+
+A rollback to an agentop older than the vault does not know `.sealed` files: it sees no key and, if
+the user re-enters one, writes plain text again. The next upgrade migrates it again. There is no
+"decrypt everything back" verb; leaving the vault is `agentop vault reset` (it deletes the vault and
+every sealed file after naming each) and re-entering the secrets.
+
+**One owner per file.** The host migrates and writes S2–S6; the engine alone owns
+`provider-keys/` (its layout, its writes and the migration of its legacy plaintext), and the host
+never lists, migrates, scrubs or deletes anything there — `agentop vault reset` says so and leaves it.
+Every migration event — `vault.migrated`, `vault.plaintext-pending`, `vault.migration-failed`, from
+the host or from the engine through `host.audit` — is one line in `~/.agentistics/vault/audit.jsonl`
+(0600), naming the purpose and the logical name and never a value, a length or a fragment.
+
+### Backups
+
+**A backup never carries the data key, wrapped or not** (`.agentistics/vault` is a `secret` row). A
+restore produces a machine with no vault; the first use creates a new one, and the restore's
+"omitted secrets" list is the re-entry checklist. A sealed file that travelled by other means reads
+`wrong-machine`.
+
+### A Docker central — the limit this leaves
+
+`agentop central up` opens `central/secrets.sealed` on the HOST and passes the values to
+`docker compose` through the child's **environment** (the compose file interpolates `${VAR:-}`), so
+Agentistics writes no plaintext copy of its own. **But Docker persists a container's environment in
+its own root-only state (`/var/lib/docker/containers/*/config.v2.json`), so on the Docker host the
+central's secrets are at rest in Docker's store, readable by root and by the `docker` group (which is
+root-equivalent).** Avoiding even that takes Docker/Swarm secrets or a KMS (the cloud track). A
+central run without Docker under systemd should load its secrets with `LoadCredentialEncrypted=` and
+a TPM2. A central started from a **repository checkout** through `central.sh` keeps its `central.env`
+beside the script, where bash reads it — a developer's checkout file outside `~/.agentistics`, not
+split. `agentop ci-push` reads `AGENTISTICS_CI_TOKEN` from the runner's environment and writes no
+file (a test pins it).
+
+Central-side database secrets (the persisted session secret, password hashes, TOTP seeds) are a
+database-at-rest question, out of scope here.
+
+## 7b. Ultra secure vault — presence, an authenticator code, a recovery key
+
+§7a closes a copy of `~/.agentistics` read elsewhere. Its stated limit is that **a process running as
+you, on this machine, can ask the protector for the key in silence.** The ultra secure vault attacks
+that limit. It is opt-in: a banner recommends it, and `agentop vault enroll` (or Settings → Vault) turns
+it on. A vault set up under §7a keeps working unchanged until you do.
+
+> ### ⚠ Keep your 24-word recovery key. There is no second copy.
+> The vault opens with **a presence device** or **the 24 words**.
+> **If you lose both (a reset Windows profile or a lost key, and the paper), the secrets are gone.**
+> Nobody can recover them: not Agentistics, not support, not a "forgot password" flow. You would
+> re-enter them (provider keys, tokens) from their original sources. The words are shown **once**.
+> Write them on paper and keep them offline. Anyone holding the words **and** this computer's disk can
+> open your vault, so do not photograph them or store them in a cloud note.
+
+### What it adds over §7a
+
+| Layer | What it changes |
+|---|---|
+| **Presence** (see *Platforms* for what is available where) | The data key opens only after a human gesture. When you enrol, the silent OS wrapper is **removed** — as the setup's **very last step**, only after your recovery key is confirmed; leaving the setup earlier changes nothing and the vault keeps opening as before — and the vault gets a **new data key**: every sealed secret is re-sealed under it, so an earlier copy of the silent wrapper (a backup, a snapshot, a synced folder) opens nothing. The recovery key must follow the new key. That is why setup makes it **last**. When you turn presence on later, you type your 24 words on a terminal (`agentop vault enroll --presence`), or make **new** words (your old words then stop working). After that, the vault is locked at every service start until you confirm with your device **and** type your code (what later unlocks ask is the **unlock policy** below). |
+| **Authenticator code** (TOTP, RFC 6238) | A gate on the vault's own actions, never key material: nothing is derived from the code or the seed. It applies **once you have enrolled an authenticator**. Before that, no action asks for a code. **Gated actions:** see the next table. **Replay:** a code already used is refused. **Wrong codes:** 5 pause for 30 s (doubling, capped at 15 min) and 20 freeze the gate until you use the recovery key. **The count survives a restart.** |
+| **24-word recovery key** | Losing the phone or the presence device is not losing the vault. `agentop vault recover` opens it from a terminal, and then you re-enrol and receive a **new** key (the words you just typed are treated as exposed). |
+| **Auto-lock** | The vault locks itself after 30 minutes without use (configurable 5–480; there is no "never"). Use means input on the Settings → Vault page, any `agentop vault` command, or any use of a secret, so a long agent run is not cut off at minute 30. Locking from a terminal on this machine never asks for a code. With presence **off**, auto-lock only drops the key from memory: the next use opens it again in silence. |
+| **Process hardening** | Only the agentop service holds the key, and no vault socket or HTTP route returns a stored secret to another process: the service uses a secret on your behalf and zeroes it. On Linux/WSL the service is made non-dumpable with core dumps off; on macOS ptrace-attach is denied and core dumps are off. If that cannot be done, the vault refuses to open rather than opening unprotected. |
+
+| Action | Code | Presence | Reuse |
+|---|---|---|---|
+| unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
+| change the unlock policy | yes | yes | none, asked every time |
+| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. |
+| rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
+| lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
+
+Metrics, the board and the dashboard keep working while the vault is locked; only what needs a secret
+is paused.
+
+### The unlock policy — what unlocking asks besides the gesture
+
+Owner decision, 2026-10-02. Settings → Vault offers three modes; changing it asks for your code **and**
+your gesture.
+
+| Mode | An unlock asks | Notes |
+|---|---|---|
+| **Per day** (the default) | gesture + code on the **first** unlock after the computer or the agentop service starts, and once the window has expired; inside the window, re-opening after auto-lock asks the **gesture alone** | The window is **12 hours** by default (1–24, configurable), anchored to the last gesture+code unlock — a gesture-only re-open does not extend it. It lives **only in the service's memory**: a restart or reboot starts without one. It is also dropped by **any** wrong code, a recovery, a reset and a protector change (enrolling or turning off presence, a rekey). |
+| **Gesture + code, always** | both, every time | The strictest. |
+| **Gesture only** | the gesture alone | The code is still asked for everything else in the table above: listing the vault, settings, recovery, presence changes. |
+
+What this trades: inside a per-day window (or always, in *gesture only*), a process running as you that
+can make you approve **one** presence dialog opens the vault without the code. The code still stands
+between that process and every setting, the inventory and recovery. The window never survives a restart,
+so the first unlock of every boot asks for both.
+
+**Presence prompts.** Turning presence on asks the device **twice** (create the key, then one
+signature/assertion that derives the vault's key); the device check before it asks **nothing**; every
+unlock asks **once**. Whether the device reproduces the key is proved by the first real unlock: a
+mismatch is said in words and sent to the recovery key (`agentop vault recover`), and nothing else is
+touched.
+
+### What a page can and cannot do
+
+- **Only the agentop dashboard on this machine can drive the vault.** Every vault request that changes
+  something must be a same-origin JSON request. A web page you happen to have open cannot send one: it
+  cannot unlock, cannot keep the vault from auto-locking, and cannot use up your wrong-code allowance.
+- **The first setup from a page needs a code from this machine.** Before any authenticator exists there
+  is nothing to ask, so Settings → Vault asks for a one-time **setup code**: 8 digits, 10 minutes, one
+  use. Only `agentop vault setup-code`, run on a terminal, prints it. It is never written to a log
+  (logs get copied), and each run makes a new one, so an earlier code stops working. A terminal on this
+  machine needs no setup code.
+- **The 24 words are never typed into a page.** Recovery is `agentop vault recover`, in a terminal.
+  While a recovered vault is being set up again, the steps that hand out a new key (new words, a new
+  authenticator, presence) answer **only** the terminal (`agentop vault enroll`), never the dashboard.
+
+### What it does NOT stop
+
+**In these words:** malware running as you that can modify the agentop install (its JS, its binary,
+its systemd unit) can wait for your next legitimate gesture and take the key then. Presence proves a
+human said "yes", not *what* they said yes to. A same-user process can also read a secret at the moment
+the service uses it, if the OS lets it read the service's memory. The hardening closes that on Linux and
+macOS; the list below says where it cannot. Kernel, root and administrator compromise is out of scope.
+
+- Root or administrator, a debugger run as root, the kernel; on WSL, Windows-side administrators reading
+  the VM's memory.
+- **Windows native (limit):** Windows has no per-process equivalent of "non-dumpable" for a same-user,
+  same-integrity caller, so a same-user process can open the service for reading
+  (`PROCESS_VM_READ`). Presence keeps the key **out of memory while the vault is locked**; while it is
+  **open**, a same-user reader of the service's memory gets it. Auto-lock shortens that window; it does
+  not remove it. Under WSL the hardening applies to the Linux side as above.
+- **A gesture you approve that malware triggered.** For Windows Hello this is lasting: the key that
+  protects the vault comes from a signature Hello gives over a fixed challenge. One approved gesture
+  gives malware that key for good, not only for that moment.
+- **A modified agentop install** (above).
+- **Strings in memory:** JavaScript strings cannot be zeroed and the garbage collector may copy them.
+  Zeroing is best-effort: every buffer the vault owns is zeroed, and a secret becomes a string only at
+  the last boundary that demands one. The 24 words are never kept in memory across steps. Their buffer
+  is zeroed right after the step that used them.
+- **Losing both** the presence device **and** the 24 words (see the warning above).
+- **No way back after enrolment:** an agentop older than this feature cannot read the vault.
+
+### Platforms
+
+| Platform | Presence |
+|---|---|
+| Windows and WSL | **Windows Hello.** Setup asks Hello **twice** (create the key, then one signature that derives the vault's key) and every unlock asks **once**; the device check before it asks nothing (`IsSupportedAsync`). Whether Hello reproduces the key is proved by the first real unlock, and a mismatch is said in words and sent to the 24-word recovery key. The dialog is owned by a small topmost window the bridge brings to the foreground, so it opens in front (the owner window taking the foreground is verified on Windows 11 build 26200 from WSL; the dialog itself awaits the owner's check). **A FIDO2 security key is not available here yet:** the Windows security-key bridge is not verified, so it is refused in words. |
+| Linux desktop | **A FIDO2 security key** with `hmac-secret` (e.g. YubiKey 5), through libfido2's tools (`apt install fido2-tools`). Every open asks you to touch the key, and asks for its PIN when one is set. Not yet verified on real hardware, including the PIN prompt, which may need a terminal the background service does not have. |
+| macOS | **No presence by default yet** (Touch ID is deferred): macOS stays on the Keychain wrapper of §7a, so the §7a limit still applies there. The authenticator code, recovery key, auto-lock and hardening do apply. A FIDO2 key (`brew install libfido2`) is an opt-in presence option. |
+| Headless / container | None. The vault stays on its OS protector, or a passphrase where none exists; presence is reported as "not available here". |
+
+The vault keeps one presence credential **per kind**; when it holds two kinds, either opens it. No
+platform offers two kinds today, because a security key is not available on Windows/WSL yet. A vault
+that also opens with a passphrase cannot turn presence on, because the new data key would leave the
+passphrase behind. It is refused in words, and nothing changes.
+
+Sleep and screen lock lock the vault **only on Linux desktops** (logind, through `gdbus`). On WSL,
+Windows and macOS this is not wired yet, and the 30-minute auto-lock is what closes a forgotten vault.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `agentop vault status` | presence, authenticator state (enrolled, failures, paused/frozen), auto-lock countdown, hardening |
+| `agentop vault enroll` | runs what is still missing, in order: the authenticator (QR, then one code), presence (a device check that asks nothing, then two confirmations; the silent wrapper is removed and the data key replaced), then the recovery key **last** (shown once; three of its words typed back). If a recovery key already exists, the presence step asks for your 24 words here. Press Enter with nothing to make new words instead; your old words then stop working. `--authenticator`, `--presence <hello\|fido2>` and `--recovery` run a single step. |
+| `agentop vault setup-code` | prints, on a terminal only, a new one-time code for the dashboard's first setup (never logged) |
+| `agentop vault unlock` | asks the service to raise the presence prompt, then asks for your code here |
+| `agentop vault lock` | locks immediately (no code needed from a local terminal) |
+| `agentop vault recover` | opens with the 24 words (terminal only), then the setup steps above are owed before anything else |
+| `agentop vault disable-presence` | puts the system wrapper back first, then removes the presence key. Needs your code and your gesture; on a machine marked as the owner's, also your 24 words. |
+| `agentop vault rekey`, `agentop vault reset` | change the protector / wipe the vault; need your code and your gesture. If the vault's key is gone for good (the protector lost it), the terminal can reset without them. With the agentop service stopped, `reset` deletes the files directly, with only its own confirmation, because deleting needs no key. |
+| `agentop vault add-passphrase` | refused where an OS protector or presence exists; the recovery key replaces it |
+
+Every command except `reset` with the service stopped talks to the running service. None opens the
+vault in its own process.
+
+### Runner machines
+
+A machine paired as an unattended runner will keep its runner credentials in a **separate vault**,
+with its own key, that can never read your personal secrets. The storage for it exists. Pairing, the
+unattended open at service start, and the `agentop vault runner` commands are **not built yet**.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 

@@ -29,9 +29,9 @@ function world(central: boolean) {
 describe('/api/user-prefs on a CENTRAL — per account, never the shared machine file', () => {
   test('two accounts do not see each other', async () => {
     const w = world(true)
-    expect((await w.call('PUT', 'acct-a', { theme: 'light', pinnedSessions: ['s1'] })).status).toBe(200)
+    expect((await w.call('PUT', 'acct-a', { theme: 'light', pinnedSessions: ['s1'], mutedSessions: ['c1'] })).status).toBe(200)
     expect((await w.call('PUT', 'acct-b', { theme: 'dark', sessionsAside: { groupBy: 'task' } })).status).toBe(200)
-    expect((await w.call('GET', 'acct-a')).body).toEqual({ theme: 'light', pinnedSessions: ['s1'] })
+    expect((await w.call('GET', 'acct-a')).body).toEqual({ theme: 'light', pinnedSessions: ['s1'], mutedSessions: ['c1'] })
     expect((await w.call('GET', 'acct-b')).body).toEqual({ theme: 'dark', sessionsAside: { groupBy: 'task' } })
   })
 

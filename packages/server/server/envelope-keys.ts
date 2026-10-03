@@ -2,8 +2,9 @@
  * envelope-keys.ts — the I/O edge of the sealed envelope: this machine's own keypair, and the
  * peer public keys it has PINNED.
  *
- * The private key is generated here, stored here (0600, under `~/.agentistics/connections`), and
- * goes nowhere else. It is never put in `preferences.json` (which is served, redacted, over
+ * The private key is generated here, stored here — SEALED by the machine's vault
+ * (`connections/envelope-key.sealed`, purpose `envelope-key`; never plain text, the legacy
+ * `envelope-key.json` is migrated on the first open) — and goes nowhere else. It is never put in `preferences.json` (which is served, redacted, over
  * `GET /api/preferences`), never logged, never audited, and never included in any response body —
  * `publicKeyOnly()` is the only thing any route may see.
  *
@@ -14,52 +15,82 @@
  * a warning, because a reinstall and an attack look identical from here and the machine must not
  * choose for the user.
  */
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { VaultRefusalError, writePrivateAtomic } from '@agentistics/vault'
 import { envelopeKeyFile, envelopePinsFile } from './config'
+import { openFromFile, refusal, registerVaultMigrator, sealToFile, secretFs } from './vault/service'
+import { migrateWholeFile, sealedPathFor, wholeFileMigrator } from './vault/whole-file'
 import { safeReadJson } from './utils'
 import { generateMachineKeypair, fingerprintOf, type MachineKeypair } from './envelope-crypto'
 import { decidePin, type PinDecision } from './envelope-message'
 
-/** Cached so a push cycle does not re-read (and possibly re-generate) the key file every time. */
-let _cached: MachineKeypair | null = null
+/**
+ * Only the PUBLIC half is cached (SECRETS.4 §5.2: no module-level variable holds a secret). The
+ * private key is opened from the vault at each use — a cheap AES open — and not kept.
+ */
+let _cachedPublic: string | null = null
 
 /** Test-only: drop the in-process cache. */
 export function __resetEnvelopeKeysForTests(): void {
-  _cached = null
+  _cachedPublic = null
 }
 
+/** The pins (public keys — integrity, not confidentiality) go through the same atomic writer. */
 async function writePrivate(path: string, body: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  // Written before the content, so the file is never briefly world-readable with a key in it.
-  await writeFile(path, body, { encoding: 'utf-8', mode: 0o600 })
-  await chmod(path, 0o600).catch(() => { /* best-effort: some filesystems (WSL/DrvFs) refuse */ })
+  const r = await writePrivateAtomic(secretFs(), path, new TextEncoder().encode(body))
+  if (r.chmodFailed) process.stderr.write(`agentop: could not set ${path} to mode 600 (${r.chmodFailed}).\n`)
+}
+
+const PURPOSE = 'envelope-key'
+const NAME = 'machine'
+
+function keyItem() {
+  const plainPath = envelopeKeyFile()
+  return { purpose: PURPOSE, name: NAME, plainPath, sealedPath: sealedPathFor(plainPath) }
+}
+
+registerVaultMigrator(wholeFileMigrator('envelope-key', keyItem))
+
+function parseKeypair(raw: string): MachineKeypair | null {
+  try {
+    const o = JSON.parse(raw) as Partial<MachineKeypair>
+    return typeof o.publicKey === 'string' && typeof o.privateKey === 'string' && o.publicKey !== '' && o.privateKey !== ''
+      ? { publicKey: o.publicKey, privateKey: o.privateKey } : null
+  } catch { return null }
 }
 
 /**
  * This machine's keypair, generating and persisting one the first time. Automatic and
  * passphrase-less by design — the product requirement is that a second machine joining an account
- * works with nothing to type.
+ * works with nothing to type. The vault is what keeps it: a vault that cannot open makes this THROW
+ * its sentence rather than mint a fresh key per process, which would re-pin this machine on every
+ * sibling at every start.
  */
 export async function loadOrCreateKeypair(): Promise<MachineKeypair> {
-  if (_cached) return _cached
-  const path = envelopeKeyFile()
-  const stored = await safeReadJson<Partial<MachineKeypair>>(path)
-  if (stored && typeof stored.publicKey === 'string' && typeof stored.privateKey === 'string'
-      && stored.publicKey !== '' && stored.privateKey !== '') {
-    _cached = { publicKey: stored.publicKey, privateKey: stored.privateKey }
-    return _cached
+  const item = keyItem()
+  let r = await openFromFile(item.sealedPath, PURPOSE, NAME)
+  if (!r.ok && r.absent && (await secretFs().lstat(item.plainPath))) {
+    await migrateWholeFile(item)
+    r = await openFromFile(item.sealedPath, PURPOSE, NAME)
+    if (!r.ok && r.absent) throw refusal('plaintext-pending', { n: 1 })
   }
+  if (r.ok) {
+    const kp = parseKeypair(new TextDecoder().decode(r.plaintext))
+    r.plaintext.fill(0)
+    if (kp) { _cachedPublic = kp.publicKey; return kp }
+    throw refusal('tampered', { file: item.sealedPath, restoreWith: 'nothing — siblings re-pin this machine on its next announcement' })
+  }
+  if (!r.absent) throw new VaultRefusalError(r.code, r.sentence)
   const fresh = generateMachineKeypair()
-  await writePrivate(path, JSON.stringify(fresh, null, 2))
-  _cached = fresh
+  const body = new TextEncoder().encode(JSON.stringify(fresh))
+  try { await sealToFile(item.sealedPath, PURPOSE, NAME, body) } finally { body.fill(0) }
+  _cachedPublic = fresh.publicKey
   return fresh
 }
 
 /** The public half plus its human-comparable fingerprint. The ONLY shape any route may return. */
 export async function publicKeyOnly(): Promise<{ publicKey: string; fingerprint: string }> {
-  const kp = await loadOrCreateKeypair()
-  return { publicKey: kp.publicKey, fingerprint: fingerprintOf(kp.publicKey) }
+  const publicKey = _cachedPublic ?? (await loadOrCreateKeypair()).publicKey
+  return { publicKey, fingerprint: fingerprintOf(publicKey) }
 }
 
 /** What is pinned for one peer. The NAME is display only and carries no authority — it is stored

@@ -14,7 +14,7 @@
  *
  * A CENTRAL IS REFUSED OUTRIGHT, whatever its profile. Its upgrade is a compose rebuild of several
  * minutes against an image, not a binary swap; a button for it on a reachable host is a remote
- * rebuild trigger. The modal keeps printing `bun run up:central` there, which is the honest answer.
+ * rebuild trigger. The page offers nothing there at all (owner rule: in the UI, updating is the button only).
  *
  * And a machine already on the latest version has NOTHING TO RUN. Without that, the button is a
  * "download a release again" trigger anybody can hold down.
@@ -30,12 +30,12 @@ export type UpgradeDecision =
  *  two surfaces will word differently. */
 export const UPGRADE_REFUSALS: Record<UpgradeRefusal, { pt: string; en: string }> = {
   'no-capability': {
-    pt: 'Este perfil de exposição não permite rodar comandos nesta máquina, então a atualização tem que ser feita no terminal.',
-    en: 'This exposure profile does not allow running commands on this machine, so the upgrade has to be done in a terminal.',
+    pt: 'Este perfil de exposição não permite que a página rode a atualização nesta máquina.',
+    en: 'This exposure profile does not allow the page to run the update on this machine.',
   },
   central: {
-    pt: 'Um central se atualiza reconstruindo a imagem, não trocando um binário — rode o comando abaixo no host dele.',
-    en: 'A central upgrades by rebuilding its image rather than swapping a binary — run the command below on its host.',
+    pt: 'Um central se atualiza reconstruindo a imagem no host dele, não trocando um binário pela página.',
+    en: 'A central upgrades by rebuilding its image on its host, not by swapping a binary from the page.',
   },
   // A machine run from the published image (docker/machine.yml) runs the compiled `agentop`, so the
   // binary check below would PASS and the upgrade would swap the binary inside the container: gone
@@ -56,8 +56,8 @@ export const UPGRADE_REFUSALS: Record<UpgradeRefusal, { pt: string; en: string }
   // rodar comandos, e reusar aquela frase mandaria a pessoa mexer na exposição por um motivo que
   // não existe. Aqui a atualização é `git pull`, não a troca de um binário.
   'not-a-binary': {
-    pt: 'Este servidor está rodando a partir do código-fonte, não de um binário instalado — aqui a atualização é um `git pull`.',
-    en: 'This server is running from source rather than from an installed binary — here the update is a `git pull`.',
+    pt: 'Este servidor está rodando a partir do código-fonte, não de um binário instalado, então a página não tem um binário para trocar.',
+    en: 'This server is running from source rather than from an installed binary, so the page has no binary to swap.',
   },
 }
 

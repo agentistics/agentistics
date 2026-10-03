@@ -61,6 +61,7 @@ export const USER_UI_PREF_REGISTRY = {
   chatSoundId: { machine: 'top', maxBytes: SMALL },
   nayMotion: { machine: 'top', maxBytes: SMALL },
   pinnedSessions: { machine: 'top', maxBytes: MEDIUM },
+  mutedSessions: { machine: 'top', maxBytes: MEDIUM },
   sessionGroups: { machine: 'top', maxBytes: LARGE },
   idleSessions: { machine: 'top', maxBytes: MEDIUM },
   dismissedHealth: { machine: 'top', maxBytes: MEDIUM },
@@ -85,6 +86,7 @@ export const USER_UI_PREF_REGISTRY = {
   fleetOpen: { machine: 'ui', maxBytes: SMALL },
   studioSeen: { machine: 'ui', maxBytes: SMALL },
   centralMachine: { machine: 'ui', maxBytes: SMALL },
+  updateSnooze: { machine: 'ui', maxBytes: SMALL },
 } as const satisfies Record<string, KeySpec>
 
 export type UserUiPrefKey = keyof typeof USER_UI_PREF_REGISTRY

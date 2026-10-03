@@ -15,6 +15,7 @@ import { useEffect, useMemo } from 'react'
 import { freedBytes, idleCandidates, idleNotifyStep, sessionIdentityKey, type IdleCandidate } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { pushNotification } from '../lib/notifications'
+import { isSessionMuted } from '../lib/mutedSessions'
 import { pruneKept, useIdlePrefs } from '../lib/idleSessionsPrefs'
 import { toIdleRow } from '../lib/idleRows'
 
@@ -51,21 +52,24 @@ export function useIdleSessions(args: {
     // load" is a statement about this effect never running at all while disabled, not about it
     // running and happening to compute nothing.
     if (!args.enabled) return
-    const step = idleNotifyStep(notifiedIds, candidates)
+    // A muted session never joins the toast — the row still reads idle, only the interruption goes.
+    const muted = new Set(args.rows.filter(r => isSessionMuted(sessionIdentityKey(r))).map(r => r.id))
+    const audible = candidates.filter(c => !muted.has(c.row.id))
+    const step = idleNotifyStep(notifiedIds, audible)
     notifiedIds = step.next
     if (!step.notify) return
     // LANGUAGE-NEUTRAL meta — see `NOTIFICATION_TEXT['sessions.idle']`'s own header. `names` is the
     // first three titles, `more` is a plain count (never pre-worded: "and N more"/"e mais N" is
     // composed at render time by `idleMoreSuffix`, or it would freeze in today's language), and
     // `freed` is a pre-formatted amount with no verb around it — `idleFreedSentence` supplies that.
-    const top = candidates.slice(0, 3).map(c => args.rows.find(r => r.id === c.row.id)?.title ?? c.row.id)
-    const freed = freedBytes(candidates)
+    const top = audible.slice(0, 3).map(c => args.rows.find(r => r.id === c.row.id)?.title ?? c.row.id)
+    const freed = freedBytes(audible)
     pushNotification({
       type: 'info', code: 'sessions.idle',
       meta: {
-        count: candidates.length,
+        count: audible.length,
         names: top.join(', '),
-        more: Math.max(0, candidates.length - top.length),
+        more: Math.max(0, audible.length - top.length),
         ...(freed === null ? {} : { freed: fmtGB(freed) }),
       },
     })

@@ -88,8 +88,14 @@ export async function handleRuntimeMetricsRequest(
 /** How often a request may start a catch-up pass. A resume costs time proportional to the NEW events
  *  (P3 §6), so this bounds how stale an answer can be, not how much work a pass does. */
 export const CATCH_UP_EVERY_MS = 15_000
+/**
+ * Journal pages one catch-up pass folds before it stops (`interrupted`, resumable from its committed
+ * cursor) — LIVE C5. A first pass on a large journal is a rebuild; bounding a pass bounds how long one
+ * holds the store, and the next pass continues where it stopped.
+ */
+export const CATCH_UP_MAX_PAGES = 50
 
-interface LiveStore {
+export interface LiveStore {
   reader: ProjectionReader
   close(): void
   catchUp(): Promise<unknown>
@@ -98,6 +104,7 @@ interface LiveStore {
 let live: LiveStore | null = null
 let opening: Promise<LiveStore | null> | null = null
 let catching: Promise<unknown> | null = null
+let catchUpDirty = false
 let lastCatchUpAt = 0
 
 /**
@@ -118,7 +125,7 @@ async function openLive(): Promise<LiveStore | null> {
       live = {
         reader: opened.reader,
         close: () => { opened.close(); journal.close() },
-        catchUp: () => runProjectionCatchUp({ journal, store: opened.store }),
+        catchUp: () => runProjectionCatchUp({ journal, store: opened.store, maxPages: CATCH_UP_MAX_PAGES }),
       }
       return live
     } catch (err) {
@@ -137,16 +144,28 @@ async function openLive(): Promise<LiveStore | null> {
  * large journal, P3 §6), and the answer states its own freshness (`basis.freshness`) rather than
  * holding the request.
  */
-function maybeCatchUp(store: LiveStore, now = Date.now()): void {
-  if (catching || now - lastCatchUpAt < CATCH_UP_EVERY_MS) return
+export function maybeCatchUp(store: LiveStore, now = Date.now()): void {
+  if (now - lastCatchUpAt < CATCH_UP_EVERY_MS) return
+  // Single flight, COALESCED (LIVE C5): a due request that finds a pass running sets one dirty bit,
+  // and the running pass is followed by exactly one more — never a queue of passes.
+  if (catching) { catchUpDirty = true; return }
   lastCatchUpAt = now
-  catching = store.catchUp()
-    .then(r => {
-      const rep = r as { state?: string; reason?: string }
-      if (rep.state === 'failed') console.error('[runtime-metrics] projection catch-up failed:', rep.reason ?? '')
-    })
-    .catch(err => console.error('[runtime-metrics] projection catch-up threw:', err instanceof Error ? err.message : String(err)))
-    .finally(() => { catching = null })
+  catching = (async () => {
+    do {
+      catchUpDirty = false
+      try {
+        const rep = await store.catchUp() as { state?: string; reason?: string }
+        if (rep.state === 'failed') console.error('[runtime-metrics] projection catch-up failed:', rep.reason ?? '')
+      } catch (err) {
+        console.error('[runtime-metrics] projection catch-up threw:', err instanceof Error ? err.message : String(err))
+      }
+    } while (catchUpDirty)
+  })().finally(() => { catching = null })
+}
+
+/** Tests only: what the next catch-up decision sees. */
+export function catchUpStateForTests(): { running: boolean; dirty: boolean } {
+  return { running: catching !== null, dirty: catchUpDirty }
 }
 
 /** The production dependencies, resolved per request (the flag in particular). With the flag OFF this
@@ -165,4 +184,5 @@ export function closeRuntimeMetricsStore(): void {
   live?.close()
   live = null
   lastCatchUpAt = 0
+  catchUpDirty = false
 }
