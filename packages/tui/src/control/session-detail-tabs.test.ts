@@ -58,3 +58,19 @@ describe('detail tabs (SS-03 chat · SS-04 terminal · SS-05 metrics)', () => {
     expect(vals(detailTabLines(base({ harness: 'agentistics' }), 'metrics', facts, W))[1]).toBe('NATIVE-METRICS')
   })
 })
+
+describe('the file-under-a-task picker is the wizard\'s task step (SS-09)', () => {
+  test('same rows as NW-01, without the crumbs; picking a task reaches review', async () => {
+    const { openWizard, wizardLines, filePickerLines, wizardKey } = await import('./code-wizard')
+    const { codeStrings } = await import('./code-i18n')
+    const t = codeStrings('en')
+    const st = { ...openWizard(), tasks: [{ id: 't-1', ref: 't-0001', title: 'Fix', status: 'todo', statusLabel: 'To do' }] }
+    const full = wizardLines(st, t, 60)
+    const pick = filePickerLines(st, t, 60)
+    expect(pick.body).toEqual(full.body)
+    expect(pick.head).toEqual(full.head.slice(2))
+    const r = wizardKey(st, { input: '', return: true })
+    expect(r.state.step).toBe('review')
+    expect(r.state.task?.id).toBe('t-1')
+  })
+})

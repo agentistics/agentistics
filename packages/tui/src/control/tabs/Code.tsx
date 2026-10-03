@@ -147,7 +147,7 @@ function LineRow({ line }: { line: Line }) {
 }
 
 /** Exactly `rows` rows of `lines` — cut, never grown, and never composited over what is below. */
-function Lines({ lines, rows, width, indent = 0 }: { lines: Line[]; rows: number; width: number; indent?: number }) {
+export function Lines({ lines, rows, width, indent = 0 }: { lines: Line[]; rows: number; width: number; indent?: number }) {
   if (rows <= 0) return null
   return (
     <Box flexDirection="column" width={width} height={rows} flexShrink={0} overflow="hidden" paddingLeft={indent}>

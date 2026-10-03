@@ -4312,6 +4312,26 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
         return { ...snap, sessions: [...snap.sessions, ...rows] }
       }
     }
+    // SS-09: file any row under a BOARD task — native, agentop-started, or external by conversation.
+    host.fileSession = async (row, taskId) => {
+      const L = cliStrings(host.lang === 'pt' ? 'pt' : 'en')
+      const tw = await import('./sessions/task-web')
+      const task = (await tw.listTasks()).tasks.find(t => t.task.id === taskId)?.task
+      const name = task ? `${taskId.slice(0, 6)} ${task.title}` : taskId
+      const reasonOf = (r: { ok: false; reason: string; blockedBy?: readonly string[] }) =>
+        r.reason === 'blocked' && r.blockedBy?.length ? `blocked by ${r.blockedBy.join(', ')}` : r.reason.replace(/_/g, ' ')
+      let r: { ok: true } | { ok: false; reason: string; blockedBy?: readonly string[] }
+      if (row.id.startsWith('ses_')) {
+        r = await tw.fileNativeSession({ sessionId: row.id, taskId, label: row.title, ...(row.cwd ? { cwd: row.cwd } : {}) })
+      } else if ((await readRegistry()).some(m => m.id === row.id)) {
+        r = await tw.attachSession(taskId, row.id)
+      } else {
+        const conv = row.resume?.sessionId ?? row.conversationId
+        if (!conv) return { ok: false, message: L.sessFileNoConversation }
+        r = await tw.attachConversation(taskId, conv, { harness: row.harness })
+      }
+      return r.ok ? { ok: true, message: L.sessFiled(name) } : { ok: false, message: L.sessFileRefused(reasonOf(r)) }
+    }
     // SS-08: a NATIVE session has one name — its title in the engine's store — renamed there.
     const renameTmux = host.renameSession?.bind(host)
     host.renameSession = async (id, label) => {

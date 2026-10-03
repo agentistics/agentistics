@@ -12,11 +12,15 @@
  * counter it feeds is drawn in the header where it is readable from every other tab.
  */
 
+import { Lines as CodeLines } from './Code'
+import { filePickerLines, openWizard, wizardHints, wizardKey, type WizardState } from '../code-wizard'
+import { codeStrings } from '../code-i18n'
+import type { CliLang } from '../lang'
 import { isNativeRow } from '../session-native'
 import { nextCycleGrouping, stateCell } from '../sessions'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSessionsMenuHidden, setSessionsMenuHidden } from '../ephemeral'
-import { Box, Text, useInput } from 'ink'
+import { Box, Text, useInput, type Key } from 'ink'
 import type {
   ActionResult, ControlExit, ControlHost, ControlSession, ControlSessions, RestoreCandidate,
   SessionState, SessionViewPrefs,
@@ -220,7 +224,7 @@ const TRANSCRIPT_DEBOUNCE_MS = 300
 
 export function Sessions({
   host, fleet, strings: s, width, height, isActive, run, onChrome, onExit, onRefreshFleet,
-  view, onView, onOpenCode,
+  view, onView, onOpenCode, lang = 'en',
 }: {
   host: ControlHost
   /** `null` until the first poll lands, `undefined` when the host has no fleet at all. The two are
@@ -243,6 +247,8 @@ export function Sessions({
   onView: (v: SessionViewPrefs) => void
   /** SS-07: open a NATIVE session in the `code` tab (it has no terminal to attach to). */
   onOpenCode?: (launch: { resume: string }) => void
+  /** The interface language — the task picker (SS-09) speaks the code tab's strings. */
+  lang?: CliLang
 }) {
   // A stored `grouping: 'tree'` predates the cascade being a view: it meant "no bands, cascade on",
   // which is exactly `none` + cascade. Rewritten on the way in rather than left as a grouping the
@@ -293,6 +299,9 @@ export function Sessions({
     glueRef.current = undefined
   }, [])
   const [ask, setAsk] = useState<Ask | null>(null)
+  /** SS-09: the board task picker (the NW-01 task step), open on the session it files. */
+  const [filePick, setFilePick] = useState<{ session: ControlSession; wiz: WizardState } | null>(null)
+  const codeT = useMemo(() => codeStrings(lang), [lang])
   const [query, setQuery] = useState('')
   /**
    * The deep half of the search — conversation ids whose TEXT carries the query.
@@ -670,7 +679,9 @@ export function Sessions({
   // A picker needs a row per option on top of the evidence, or the answers are composited over
   // whatever sits under the pane — the same reason the evidence itself is budgeted.
   const askChoices = askDetail?.kind === 'approve' ? (askDetail.session.dialogOptions?.length ?? 0) : 0
-  const detailWanted = askDetail
+  const detailWanted = filePick
+    ? Math.max(10, (filePick.wiz.tasks?.length ?? 1) + 7)
+    : askDetail
     ? askRows({ preview: askPreview, detail: detail.length, choices: askChoices })
     : layout === 'cards' || hideDetail ? 0 : detail.length
 
@@ -785,7 +796,7 @@ export function Sessions({
    */
   const narrow = narrowTerminal(width)
   const shownPane: SessionsPane | null = !narrow ? null
-    : askDetail ? 'detail'
+    : askDetail || filePick ? 'detail'
     : focus === 'aside' ? 'menu'
     : narrowDetail ? 'detail'
     : 'sessions'
@@ -984,6 +995,16 @@ export function Sessions({
   // `runAction`; routing it through here would hand it a row it must not act on.
   const actOn = useCallback((kind: Extract<Ask, { session: ControlSession }>['kind'] | 'attach') => {
     if (!selected) return
+    // SS-09: `t` opens the BOARD's task picker — the same task step as the new-session wizard
+    // (NW-01) — for every kind of row; the host files it (or says why it cannot).
+    if (kind === 'task' && host.code && host.fileSession) {
+      const session = selected
+      setFilePick({ session, wiz: openWizard() })
+      void host.code.openTasks().then(r => setFilePick(p => p && p.session.id === session.id
+        ? { ...p, wiz: r.ok ? { ...p.wiz, tasks: r.tasks } : { ...p.wiz, tasksError: r.sentence } }
+        : p))
+      return
+    }
     // SS-07: a NATIVE session has no terminal — "open" means the `code` tab, resumed.
     if (kind === 'attach' && isNativeRow(selected)) {
       if (onOpenCode) onOpenCode({ resume: selected.id })
@@ -1024,6 +1045,39 @@ export function Sessions({
     }
     setAsk({ kind, session: selected })
   }, [selected, host, run, onExit, s, onOpenCode])
+
+  /** SS-09: a key in the task picker — `wizardKey` decides; reaching `review` means "file it". */
+  const fileKey = useCallback((input: string, key: Key) => {
+    if (!filePick) return
+    const r = wizardKey(filePick.wiz, {
+      input, return: key.return, escape: key.escape, backspace: key.backspace, delete: key.delete,
+      ctrl: key.ctrl, meta: key.meta, tab: key.tab, upArrow: key.upArrow, downArrow: key.downArrow,
+    })
+    const session = filePick.session
+    const file = (taskId: string) => {
+      setFilePick(null)
+      void run(() => host.fileSession!(session, taskId)).then(onRefreshFleet)
+    }
+    const e = r.effect
+    if (e.kind === 'close') { setFilePick(null); return }
+    if (e.kind === 'say') {
+      void run(async () => ({ ok: false, message: e.code === 'empty-title' ? codeT.sayEmptyTitle : codeT.loadingTasks }))
+      return
+    }
+    if (e.kind === 'create-task') {
+      setFilePick({ session, wiz: r.state })
+      void host.code!.createTask(e.title).then(made => {
+        if (made.ok) file(made.task.id)
+        else {
+          setFilePick(p => p && { ...p, wiz: { ...p.wiz, busy: false } })
+          void run(async () => ({ ok: false, message: made.sentence }))
+        }
+      })
+      return
+    }
+    if (r.state.step === 'review' && r.state.task) { file(r.state.task.id); return }
+    setFilePick({ session, wiz: r.state })
+  }, [filePick, host, run, onRefreshFleet, codeT])
 
   /**
    * Jump the menu to a section, whatever the focus was.
@@ -1136,6 +1190,7 @@ export function Sessions({
   }, [asideList, runAction, resetView, pressShortcut, scopeTo, toTop])
 
   useInput((input, key) => {
+    if (filePick) { fileKey(input, key); return }
     const nav: NavKey = {
       input,
       upArrow: key.upArrow,
@@ -1404,6 +1459,9 @@ export function Sessions({
       // The offer owns the keyboard and answers exactly two keys. It says so on the pane itself;
       // the footer must not contradict it with a strip of verbs that do nothing.
       ? { capture: true, hints: [s.keyRestoreAnswer] }
+      // SS-09: the task picker answers the wizard's keys, and the footer names exactly those.
+      : filePick
+      ? { capture: true, hints: wizardHints(filePick.wiz, codeT) }
       : ask
       ? { capture: true, hints: [s.keyBack] }
       : focus === 'aside' && cockpit.aside > 0
@@ -1467,7 +1525,7 @@ export function Sessions({
               s.keySessionsReset,
             ],
           })
-  }, [isActive, onChrome, s, ask, actionsFocused, focus, cockpit.aside, grouping,
+  }, [isActive, onChrome, s, ask, filePick, codeT, actionsFocused, focus, cockpit.aside, grouping,
       selected?.canApprove, selected?.canChoose, canPrompt, menuHidden, restoring, asideList, asideRow,
       bulk.on, narrow, shownPane])
 
@@ -2130,12 +2188,25 @@ export function Sessions({
 
   // In a NARROW cockpit the detail is a pane the user ASKED for with `tab`, so it is drawn even
   // when there is nothing to describe (it says so) and even when `d` folded it on a wide one.
-  const showDetail = cockpit.detail > 0 && (askDetail || narrow || (!hideDetail && detail.length > 0))
+  const showDetail = cockpit.detail > 0 && (askDetail || filePick || narrow || (!hideDetail && detail.length > 0))
   const detailNode = (
     <>
     {/* The third pane: what you selected, or the question you were just asked. A question owns the
         keyboard, so the frame says so — the accent is where the keys go, everywhere, always. */}
-    {showDetail ? (
+    {showDetail && filePick ? (() => {
+      const inner = paneBody(width)
+      const fl = filePickerLines(filePick.wiz, codeT, inner)
+      const rowsAll = paneRows(cockpit.detail)
+      const headRows = Math.min(fl.head.length, rowsAll)
+      const bodyRows = Math.max(0, rowsAll - headRows)
+      const offset = fl.selected === null ? 0 : windowOffset(fl.selected, fl.body.length, bodyRows)
+      return (
+        <Pane title={s.sessionsFileTitle} badge={filePick.session.title} focused width={width} height={cockpit.detail}>
+          <CodeLines lines={fl.head} rows={headRows} width={inner} />
+          <CodeLines lines={fl.body.slice(offset)} rows={bodyRows} width={inner} />
+        </Pane>
+      )
+    })() : showDetail ? (
       <Pane
         title={askDetail ? s.sessionsPaneAsk : s.sessionsPaneDetail}
         // The key that puts this pane away, written ON the pane. It lives as a row in the `show`

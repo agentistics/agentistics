@@ -1326,6 +1326,11 @@ export interface ControlHost {
    */
   code?: CodeHost
   /**
+   * SS-09: file a session under a board task — a native session, an agentop session, or an external
+   * one through its conversation. The sentence says what happened (or why not).
+   */
+  fileSession?(session: ControlSession, taskId: string): Promise<ActionResult>
+  /**
    * HM-05 / TK-01: the person's tasks — open tasks they claimed or that one of their sessions is filed
    * under (spec §5), most active first, with subtask progress and the rollup cost. A refusal is a
    * sentence (no board here), never an empty list alone.

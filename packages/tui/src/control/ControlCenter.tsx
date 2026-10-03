@@ -835,6 +835,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               view={status?.sessionView}
               onView={v => { void host.setSessionView?.(v) }}
               onOpenCode={openCode}
+              lang={lang}
             />
         </Screen>
 

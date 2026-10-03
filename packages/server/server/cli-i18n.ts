@@ -321,6 +321,12 @@ export interface CliStrings {
   sessAttaching: (title: string, detach: string) => string
   sessNoted: string
   sessTasked: string
+  /** SS-09: filed under a board task — and what that changes. */
+  sessFiled: (task: string) => string
+  /** SS-09: an external session with no known conversation has nothing the board can hold. */
+  sessFileNoConversation: string
+  /** SS-09: the board refused the filing — its reason, in words. */
+  sessFileRefused: (reason: string) => string
   sessTaskEmpty: (task: string) => string
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) => string
   sessTaskNoneOpened: (task: string, skipped: number) => string
@@ -772,6 +778,9 @@ const EN: CliStrings = {
     `Attaching to ${title}. To leave it running and come back here, press ${detach}.`,
   sessNoted: 'note saved.',
   sessTasked: 'task set.',
+  sessFiled: (task: string) => `filed under ${task} — its cost rolls up there from now on.`,
+  sessFileNoConversation: 'agentop cannot see which conversation this external session is, so there is nothing to file — start it from agentop, or file it from the web once its conversation is known.',
+  sessFileRefused: (reason: string) => `the board did not file it: ${reason}.`,
   sessTaskEmpty: (task: string) => `no sessions are filed under "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) of "${task}".`
@@ -1196,6 +1205,9 @@ const PT: CliStrings = {
     `Anexando a ${title}. Para deixá-la rodando e voltar aqui, aperte ${detach}.`,
   sessNoted: 'nota salva.',
   sessTasked: 'tarefa definida.',
+  sessFiled: (task: string) => `arquivada em ${task} — o custo dela soma lá a partir de agora.`,
+  sessFileNoConversation: 'o agentop não consegue ver qual conversa é esta sessão externa, então não há o que arquivar — inicie pelo agentop, ou arquive pela web quando a conversa for conhecida.',
+  sessFileRefused: (reason: string) => `o board não arquivou: ${reason}.`,
   sessTaskEmpty: (task: string) => `nenhuma sessão está na tarefa "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) de "${task}" reabertas.`

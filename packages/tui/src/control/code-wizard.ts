@@ -265,6 +265,16 @@ export function wizardLines(st: WizardState, t: CodeStrings, width: number): Wiz
   return { head, body: body.map(l => fitLine(l, width)), selected: null }
 }
 
+/**
+ * SS-09: the SAME task step, as the `sessions` tab's "file under a task" picker — no crumbs (there is
+ * no review step: picking a task files the session). Keys are `wizardKey`'s; reaching `review` with a
+ * task picked means "file it there".
+ */
+export function filePickerLines(st: WizardState, t: CodeStrings, width: number): WizardLines {
+  const w = wizardLines({ ...st, step: 'task' }, t, width)
+  return { ...w, head: w.head.slice(2) }
+}
+
 /** Footer keys for the wizard, most important first. */
 export function wizardHints(st: WizardState, t: CodeStrings): string[] {
   if (st.step === 'task') {

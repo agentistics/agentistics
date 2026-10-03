@@ -47,6 +47,8 @@ export interface ControlStrings {
    * the bar and in the frame around it.
    */
   tabsShort: Record<TabId, string>
+  /** SS-09: the file-under-a-task picker's pane title. */
+  sessionsFileTitle: string
   /** SS-07: why enter does not open an external session. */
   sessionsExternalOpen: string
   /** SS-06: heads a native session's question — the policy's, not a screen read. */
@@ -1347,6 +1349,7 @@ const EN: ControlStrings = {
   sessionsNotePrompt: 'Describe this session',
   sessionsKillConfirm: (title: string) => `Stop "${title}"? The assistant running in it is ended.`,
   sessionsNotActionable: 'that session was not started by agentop, so it cannot be driven from here.',
+  sessionsFileTitle: 'file under a task',
   sessionsExternalOpen: 'agentop did not start that session: it is running in another terminal, so there is nothing here to attach to — open it where it runs. t files it under a task.',
   sessionsNotAsking: 'that session is not blocked on a question — there is nothing to answer.',
   sessionsNoFell: 'nothing fell — no session was lost with the machine still on record.',
@@ -1952,6 +1955,7 @@ const PT: ControlStrings = {
   sessionsNotePrompt: 'Descreva esta sessão',
   sessionsKillConfirm: (title: string) => `Encerrar "${title}"? O assistente que roda nela é finalizado.`,
   sessionsNotActionable: 'essa sessão não foi iniciada pelo agentop, então não dá para controlá-la daqui.',
+  sessionsFileTitle: 'arquivar numa tarefa',
   sessionsExternalOpen: 'o agentop não iniciou essa sessão: ela roda em outro terminal, então não há nada aqui para anexar — abra onde ela roda. t arquiva numa tarefa.',
   sessionsNotAsking: 'essa sessão não está travada em uma pergunta — não há o que responder.',
   sessionsNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
