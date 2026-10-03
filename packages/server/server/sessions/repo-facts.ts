@@ -43,6 +43,7 @@
 import { stat } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { repoShortName, normalizeGitRemote } from '@agentistics/core'
+import { createLimiter } from '../utils'
 
 export interface RepoFacts {
   /** `org/repo` from the remote, else the main checkout's folder name. Absent outside a repo. */
@@ -159,6 +160,7 @@ export function resolveRepoFacts(o: {
 /** Reset the memo. Tests only. */
 export function forgetRepoFacts(): void {
   cache.clear()
+  inFlight.clear()
 }
 
 /**
@@ -190,7 +192,48 @@ export function decideRepoFacts(o: {
   return root ? { repo: root, ...at, worktree } : { worktree }
 }
 
-async function git(cwd: string, args: string[]): Promise<string> {
+/**
+ * At most this many `git` processes at once, across every caller of `repoFacts`.
+ *
+ * RES.1, measured 2026-10-03: the cockpit's poll asks for every row of the fleet in one
+ * `Promise.all` — 780 rows over 237 directories on the owner's machine — and each miss spawned three
+ * gits with nothing bounding them, so ONE poll forked ~2.300 processes and took the host from 76 MB
+ * to 690 MB RSS. The allocator rarely hands that back, and it recurred every `NEGATIVE_TTL_MS` for
+ * the repo-less directories. Bounded here, beside the spawn, so no caller can forget it.
+ */
+export const GIT_CONCURRENCY = 6
+const gitLimit = createLimiter(GIT_CONCURRENCY)
+
+/** The memo's ceiling. Directories are not unbounded in practice, but a five-second poll is. */
+export const REPO_FACTS_CACHE_MAX = 2000
+
+/**
+ * One lookup per directory IN FLIGHT. 780 rows over 237 directories used to be 780 lookups, because
+ * the memo is only written once a lookup FINISHES — every concurrent caller missed it.
+ */
+const inFlight = new Map<string, Promise<RepoFacts>>()
+
+function remember(cwd: string, entry: CacheEntry): void {
+  cache.delete(cwd)
+  cache.set(cwd, entry)
+  // Insertion order is the eviction order: the oldest answer goes first.
+  while (cache.size > REPO_FACTS_CACHE_MAX) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined) break
+    cache.delete(oldest)
+  }
+}
+
+/** Test seam: how many directories are memoized / being asked about right now. */
+export function repoFactsCacheSize(): { cached: number; inFlight: number } {
+  return { cached: cache.size, inFlight: inFlight.size }
+}
+
+function git(cwd: string, args: string[]): Promise<string> {
+  return gitLimit(() => gitNow(cwd, args))
+}
+
+async function gitNow(cwd: string, args: string[]): Promise<string> {
   try {
     const proc = Bun.spawn(['git', '-C', cwd, ...args], {
       stdout: 'pipe',
@@ -236,13 +279,21 @@ export async function repoFacts(cwd: string, recorded?: RepoFacts): Promise<Reso
     return resolveRepoFacts({ live: hit.facts, recorded, exists: true })
   }
 
-  const [commonDir, gitDir, remote] = await Promise.all([
-    git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
-    git(cwd, ['rev-parse', '--path-format=absolute', '--git-dir']),
-    git(cwd, ['config', '--get', 'remote.origin.url']),
-  ])
-  const live = decideRepoFacts({ remote, gitDir, commonDir })
-  cache.set(cwd, { facts: live, atMs: nowMs })
+  let pending = inFlight.get(cwd)
+  if (!pending) {
+    pending = (async () => {
+      const [commonDir, gitDir, remote] = await Promise.all([
+        git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+        git(cwd, ['rev-parse', '--path-format=absolute', '--git-dir']),
+        git(cwd, ['config', '--get', 'remote.origin.url']),
+      ])
+      const live = decideRepoFacts({ remote, gitDir, commonDir })
+      remember(cwd, { facts: live, atMs: nowMs })
+      return live
+    })().finally(() => { inFlight.delete(cwd) })
+    inFlight.set(cwd, pending)
+  }
+  const live = await pending
   return resolveRepoFacts({ live, recorded, exists: true })
 }
 
