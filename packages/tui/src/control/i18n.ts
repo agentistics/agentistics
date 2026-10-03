@@ -247,6 +247,8 @@ export interface ControlStrings {
   sessionsEmptyActive: (total: number) => string
   /** The list is empty because a search or a scope is narrowing it. */
   sessionsEmptyFiltered: string
+  /** SS-11: the empty list under a search — names what was searched, and the way out. */
+  sessionsEmptySearch: (query: string) => string
   sessionsLoading: string
   /** Said when the host does not implement the fleet at all — not the same as an empty fleet. */
   sessionsUnsupported: string
@@ -994,6 +996,7 @@ const EN: ControlStrings = {
   sessionsEmptyActive: (total: number) =>
     `nothing running · ${total} session${total === 1 ? '' : 's'} withheld — l shows them`,
   sessionsEmptyFiltered: 'nothing matches · esc clears the filter',
+  sessionsEmptySearch: q => `nothing matches "${q}" · esc clears the search`,
   sessionsLoading: 'reading…',
   sessionsUnsupported: 'session management is not available on this machine.',
   profileHeading: (days, sessions) => `Your last ${days} days · ${sessions} sessions`,
@@ -1282,7 +1285,7 @@ const EN: ControlStrings = {
     'the assistant running it will be STOPPED and the conversation reopened here — the turn in flight is lost, the conversation is not.',
   sessionsSearchLabel: 'Search sessions and closed conversations',
   sessionsSearchEmpty: 'nothing matches.',
-  sessionsClosedWord: 'off',
+  sessionsClosedWord: 'ended',
   sessionsShowClosed: 'closed: shown',
   viewTitle: 'What this list shows',
   viewGroupBy: 'Group by',
@@ -1615,6 +1618,7 @@ const PT: ControlStrings = {
   sessionsEmptyActive: (total: number) =>
     `nada rodando · ${total} ${total === 1 ? 'sessão retida' : 'sessões retidas'} — l mostra`,
   sessionsEmptyFiltered: 'nada corresponde · esc limpa o filtro',
+  sessionsEmptySearch: q => `nada corresponde a "${q}" · esc limpa a busca`,
   sessionsLoading: 'lendo…',
   sessionsUnsupported: 'gerenciamento de sessões não está disponível nesta máquina.',
   profileHeading: (days, sessions) => `Seus últimos ${days} dias · ${sessions} sessões`,
@@ -1890,7 +1894,7 @@ const PT: ControlStrings = {
     'o assistente que roda ela vai ser ENCERRADO e a conversa reaberta aqui — perde-se o turno em andamento, não a conversa.',
   sessionsSearchLabel: 'Buscar sessões e conversas fechadas',
   sessionsSearchEmpty: 'nada corresponde.',
-  sessionsClosedWord: 'desligada',
+  sessionsClosedWord: 'encerrada',
   sessionsShowClosed: 'fechadas: visíveis',
   viewTitle: 'O que esta lista mostra',
   viewGroupBy: 'Agrupar por',

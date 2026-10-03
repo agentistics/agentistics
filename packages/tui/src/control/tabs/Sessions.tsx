@@ -1718,6 +1718,7 @@ export function Sessions({
     ? (fleet!.fell && fellAgo
         ? `${s.sessionsEmptyActive(fleet!.sessions.length)} · ${s.sessionsFellNote(fleet!.fell.count, fellAgo)}`
         : s.sessionsEmptyActive(fleet!.sessions.length))
+    : query ? s.sessionsEmptySearch(query)
     : narrowed ? s.sessionsEmptyFiltered
     : s.sessionsEmpty
 
