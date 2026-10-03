@@ -8,7 +8,7 @@ import {
 import type { AppContext } from './app-context'
 import { sessionTime } from './sessionTime'
 import { widerValue } from './statCardSize'
-import { projectFolder, fmt, fmtDuration, fmtCost, fmtFull } from '@agentistics/core'
+import { projectFolder, fmt, fmtDuration, fmtCost, fmtFull, UNPRICED_TOTAL_MARKER } from '@agentistics/core'
 import { StatCard } from '../components/StatCard'
 import { StreakBreakdownButton } from '../components/StreakBreakdownButton'
 import { HighlightsBoard } from '../components/HighlightsBoard'
@@ -140,7 +140,7 @@ export const CATALOG: CatalogItem[] = [
         // Same rule as the HomePage cost card: size by the wider currency so switching
         // USD ⇄ BRL leaves the headline alone.
         sizeBasis={widerValue(fmtCost(derived.totalCostUSD, 'USD', brlRate), fmtCost(derived.totalCostUSD, 'BRL', brlRate))}
-        sub={lang === 'pt' ? 'preços da API Anthropic' : 'Anthropic API pricing'}
+        sub={`${lang === 'pt' ? 'preços da API Anthropic' : 'Anthropic API pricing'}${derived.unpricedTokens > 0 ? ` ${UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en']}` : ''}`}
         icon={<TrendingUp size={15} />}
         accent="var(--anthropic-orange)"
       />

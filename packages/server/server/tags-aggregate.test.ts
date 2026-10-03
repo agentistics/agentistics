@@ -13,7 +13,7 @@ function s(over: Partial<SessionMeta>): SessionMeta {
 
 test('empty input yields zeroes and null tops', () => {
   expect(aggregateSessions([])).toEqual({
-    sessions: 0, costUSD: 0, inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS,
+    sessions: 0, costUSD: 0, inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS, unpricedTokens: 0,
     topProject: null, topModel: null, topHarness: null,
   })
 })
@@ -32,8 +32,8 @@ test('the tokens total carries the cache counters, not just the conversation', (
 
 test('sums tokens and counts sessions', () => {
   const out = aggregateSessions([
-    s({ input_tokens: 100, output_tokens: 10 }),
-    s({ input_tokens: 50, output_tokens: 5 }),
+    s({ input_tokens: 100, output_tokens: 10, model: 'claude-opus-4-6' }),
+    s({ input_tokens: 50, output_tokens: 5, model: 'claude-opus-4-6' }),
   ])
   expect(out.sessions).toBe(2)
   expect(out.inputTokens).toBe(150)
@@ -56,4 +56,17 @@ test('top project/model/harness are the most frequent values', () => {
 test('sessions with no model do not produce a phantom top model', () => {
   const out = aggregateSessions([s({}), s({})])
   expect(out.topModel).toBeNull()
+})
+
+test('PRICE.UNKNOWN: a session of an unknown model (or none) is counted in tokens, never priced; the total says how much it left out', () => {
+  const out = aggregateSessions([
+    s({ input_tokens: 1000, output_tokens: 100, model: 'claude-opus-4-6' }),
+    s({ input_tokens: 400, output_tokens: 100, model: 'some-new-model' }),
+    s({ input_tokens: 10, output_tokens: 0 }),
+  ])
+  expect(out.inputTokens).toBe(1410)
+  expect(out.unpricedTokens).toBe(510)
+  const priced = aggregateSessions([s({ input_tokens: 1000, output_tokens: 100, model: 'claude-opus-4-6' })])
+  expect(out.costUSD).toBeCloseTo(priced.costUSD)
+  expect(priced.unpricedTokens).toBe(0)
 })

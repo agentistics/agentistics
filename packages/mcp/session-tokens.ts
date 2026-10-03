@@ -1,5 +1,5 @@
 import {
-  calcCost, sessionCostUSD, sumTokens, totalTokens, usageTokens, usageTokenTotal, type ModelUsage,
+  calcCost, sessionCostUSD, unpricedTokens, sumTokens, totalTokens, usageTokens, usageTokenTotal, type ModelUsage,
   HARNESS_ORDER,
 } from "@agentistics/core";
 
@@ -22,14 +22,14 @@ export function filterSessions(sessions: AnySession[], harness?: string): AnySes
  * more than one model (an Antigravity parent with its subagent children folded in carries a
  * `model_usage` breakdown) is charged each model at its own rate, never the whole session at the
  * dominant model's rate. A session with no model at all (`sessionCostUSD` returns null) falls
- * back to the blended default rate `calcCost` applies when given an empty model id.
+ * is UNPRICED (PRICE.UNKNOWN): cost 0 here, its tokens reported as `unpriced`.
  */
 export function sessionTokens(s: AnySession) {
   const input = s.input_tokens ?? 0;
   const output = s.output_tokens ?? 0;
   const cacheRead = s.cache_read_input_tokens ?? 0;
   const cacheWrite = s.cache_creation_input_tokens ?? 0;
-  const cost = sessionCostUSD({
+  const priced = {
     model: s.model,
     model_usage: s.model_usage,
     input_tokens: input,
@@ -40,15 +40,13 @@ export function sessionTokens(s: AnySession) {
     // write at 5m, so the MCP read lower than the dashboards' Costs (A4.4 parity).
     cache_creation_1h_input_tokens: s.cache_creation_1h_input_tokens,
     cache_creation_5m_input_tokens: s.cache_creation_5m_input_tokens,
-  }) ?? calcCost({
-    inputTokens: input,
-    outputTokens: output,
-    cacheReadInputTokens: cacheRead,
-    cacheCreationInputTokens: cacheWrite,
-    webSearchRequests: 0,
-    costUSD: 0,
-  }, "");
-  return { input, output, cacheRead, cacheWrite, cost };
+  };
+  // PRICE.UNKNOWN: a model the table does not know is UNPRICED — no blended default, no guess. Its tokens
+  // are in `input`/`output`/…, its cost is not in `cost`, and `unpriced` says how many tokens that is so
+  // a total can admit it is a floor.
+  const cost = sessionCostUSD(priced) ?? 0;
+  const unpriced = unpricedTokens(priced);
+  return { input, output, cacheRead, cacheWrite, cost, unpriced };
 }
 
 export function sessionMessages(s: AnySession): number {

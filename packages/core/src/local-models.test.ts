@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test'
 import { isLocalModelId } from './local-models'
-import { getModelPrice, calcCost } from './types'
+import { getModelPrice, calcCost, modelCostUSD, isUnpricedModel } from './types'
 
 const usage = (i: number, o: number) => ({
   inputTokens: i, outputTokens: o, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
@@ -38,7 +38,9 @@ test('a local model is free — not the shared fallback price', () => {
   expect(calcCost(usage(2050, 67), 'ollama-local/qwen2.5-coder-7b')).toBe(0)
 })
 
-test('the fallback still applies to an unknown HOSTED model', () => {
-  expect(getModelPrice('some-new-hosted-model').input).toBeGreaterThan(0)
-  expect(calcCost(usage(2050, 67), 'some-new-hosted-model')).toBeGreaterThan(0)
+test('an unknown HOSTED model is UNPRICED — never the Sonnet price, never free: cost is null (PRICE.UNKNOWN)', () => {
+  expect(isUnpricedModel('some-new-hosted-model')).toBe(true)
+  expect(modelCostUSD(usage(2050, 67), 'some-new-hosted-model')).toBeNull()
+  expect(isUnpricedModel('some-new-hosted-model')).toBe(true)
+  expect(isUnpricedModel('ollama-local/qwen2.5-coder-7b')).toBe(false) // local = free, a known fact
 })

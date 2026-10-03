@@ -10,6 +10,11 @@
 export type TuiLang = 'en' | 'pt'
 
 export interface TuiStrings {
+  // PRICE.UNKNOWN
+  /** A model the table has no price for (per-model rows). */
+  unpricedModel: string
+  /** Appended to a cost total that left unpriced usage out. */
+  unpricedTotal: string
   // chrome
   live: string
   offline: string
@@ -78,6 +83,8 @@ export interface TuiStrings {
 }
 
 const en: TuiStrings = {
+  unpricedModel: 'unknown',
+  unpricedTotal: '+ unpriced usage',
   live: 'live',
   offline: 'offline',
   connecting: 'connecting',
@@ -123,6 +130,8 @@ const en: TuiStrings = {
 }
 
 const pt: TuiStrings = {
+  unpricedModel: 'desconhecido',
+  unpricedTotal: '+ uso sem preço',
   live: 'ao vivo',
   offline: 'offline',
   connecting: 'conectando',

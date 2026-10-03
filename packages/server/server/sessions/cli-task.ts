@@ -48,6 +48,9 @@ function rollupLines(r: AttemptRollup): string[] {
   if (r.costMeasuredSessions > 0 && r.costEstimatedSessions > 0) {
     out.push(`    ${r.costMeasuredSessions} measured, ${r.costEstimatedSessions} estimated`)
   }
+  if (r.costUnpricedSessions > 0) {
+    out.push(`    ${r.costUnpricedSessions} with usage of a model that has no price (+ unpriced usage) — the cost is a floor`)
+  }
   return out
 }
 

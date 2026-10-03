@@ -1071,7 +1071,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const rows = filterSessions((data.sessions ?? []) as AnySession[], harness)
           .slice(0, limit)
           .map((s: any) => {
-            const { input, output, cacheRead, cacheWrite, cost } = sessionTokens(s);
+            const { input, output, cacheRead, cacheWrite, cost, unpriced } = sessionTokens(s);
             return {
               id: s.session_id,
               harness: sessionHarness(s),
@@ -1084,7 +1084,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               cacheReadTokens: cacheRead,
               cacheWriteTokens: cacheWrite,
               totalTokens: input + output + cacheRead + cacheWrite,
-              estimatedCostUSD: Math.round(cost * 10000) / 10000,
+              // PRICE.UNKNOWN: null (not 0, not a guess) when none of the session's tokens could be priced.
+              estimatedCostUSD: unpriced > 0 && unpriced === input + output + cacheRead + cacheWrite ? null : Math.round(cost * 10000) / 10000,
+              ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
               model: s.model ?? null,
             };
           });

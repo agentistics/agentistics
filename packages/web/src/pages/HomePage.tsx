@@ -12,7 +12,7 @@ import type { AppContext } from '../lib/app-context'
 import { sessionTime } from '../lib/sessionTime'
 import { planAllocation, projectFolder, t } from '@agentistics/core'
 import { widerValue } from '../lib/statCardSize'
-import { fmt, fmtFull, fmtDuration, fmtCost, totalTokens } from '@agentistics/core'
+import { fmt, fmtFull, fmtDuration, fmtCost, totalTokens, UNPRICED_TOTAL_MARKER } from '@agentistics/core'
 import type { Lang } from '@agentistics/core'
 import type { HarnessId } from '@agentistics/core'
 import { Section } from '../components/Section'
@@ -142,7 +142,7 @@ export default function HomePage() {
           // Sized by whichever currency renders wider, so flipping USD ⇄ BRL never resizes the
           // headline — BRL is ~5× the amount and can carry an extra digit.
           sizeBasis={widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
-          sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote].filter(Boolean).join('\n')}
+          sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote, d.unpricedTokens > 0 ? UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en'] : ''].filter(Boolean).join('\n')}
           // Belt and braces beside the shorter text: every card in a grid row shares its height,
           // so this one may never be the one that stretches it.
           subNoWrap={showPlan}

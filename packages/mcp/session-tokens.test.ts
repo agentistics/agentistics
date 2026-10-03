@@ -98,10 +98,18 @@ test("sessionTokens sums all four billed counters, never just input+output", () 
   expect(cacheWrite).toBe(s.cache_creation_input_tokens);
 });
 
-test("a session with no model at all still prices via the blended default rate", () => {
+test("a session with no model at all is UNPRICED: cost 0 here, its tokens reported as unpriced (PRICE.UNKNOWN)", () => {
   const s = { session_id: "no-model", input_tokens: 1000, output_tokens: 500 };
-  const { cost } = sessionTokens(s);
-  expect(cost).toBeGreaterThan(0);
+  const { cost, unpriced } = sessionTokens(s);
+  expect(cost).toBe(0);
+  expect(unpriced).toBe(1500);
+});
+
+test("a model outside the table is unpriced too — never the Sonnet price", () => {
+  const { cost, unpriced } = sessionTokens({ session_id: "ghost", model: "some-new-model", input_tokens: 1000, output_tokens: 500 });
+  expect(cost).toBe(0);
+  expect(unpriced).toBe(1500);
+  expect(sessionTokens({ session_id: "ok", model: "claude-opus-4-6", input_tokens: 1000, output_tokens: 500 }).unpriced).toBe(0);
 });
 
 test("sessionHarness defaults missing/legacy sessions to claude", () => {
