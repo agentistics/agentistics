@@ -11,7 +11,7 @@
  */
 
 import type { AppData, HarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
-import { calcCost, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
+import { calcCost, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
 
 export interface HarnessRow {
   harness: HarnessId
@@ -179,7 +179,8 @@ function basename(path: string): string {
 export function projectRows(data: AppData): ProjectRow[] {
   const acc = new Map<string, ProjectRow>()
   for (const s of data.sessions ?? []) {
-    const path = s.project_path || ''
+    // The project ROOT: a worktree's sessions roll up to its repository, as on every surface.
+    const path = canonicalProjectPath(s.project_path || '')
     let row = acc.get(path)
     if (!row) {
       row = { name: basename(path), path, sessions: 0, tokens: 0, costUSD: 0, lastActivity: '' }

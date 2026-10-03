@@ -34,6 +34,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - **Session titles** — sessions now display the Claude-generated title (parsed from the transcript's `ai-title`, or legacy `summary`, line) instead of the raw first prompt; a shared `sessionLabel()` helper also strips `<local-command-caveat>`/`<command-name>` wrappers from the first-prompt fallback so untitled sessions no longer look broken
 
 ### Fixed
+- **MCP cost now matches the dashboards' Costs** — the MCP's per-session cost dropped the cache-write TTL split, so 1-hour cache writes were priced at the 5-minute rate and every MCP cost read low. It now prices them like the web and TUI do (A4.4 parity: 624 of 647 sessions moved onto the dashboards' figure)
 - A trailing slash on the member endpoint produced double-slash routes that broke ingest and presence
 - Viewing a remote member's **Claude chat on the central** returned empty — the encoded project directory wasn't sent to the member's transcript reader, which locates the file by `<encodedDir>/<sessionId>.jsonl`
 - **Transcript rendering** — huge vertical gaps between list items/paragraphs in the chat view: the message bubble mixed `white-space: pre-wrap` with react-markdown's structural newlines, so each rendered as a visible line break. Dropped pre-wrap, added `remark-breaks` (soft newlines → `<br>`, so prose line breaks survive) and compact list margins
@@ -44,6 +45,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Mobile Models dropdown was clipped by the filter collapse-animation wrapper's `overflow: hidden`
 
 ### Changed
+- **Projects are their repository's root everywhere** — a worktree (`<project>/.claude/worktrees/<name>` or `<project>/.worktrees/<name>`) rolls up into the project it belongs to on every surface: the projections, the web, the TUI and the MCP (`canonicalProjectPath`, see `docs/metrics.md`). The `cost-by-dimension` and `run-metrics` projections are version 2 and rebuild once from the journal
+- **MCP `personTurns`** — on the projected path (`AGENTISTICS_PROJECTIONS_SURFACES=mcp`) the harness, project and repo rows report `personTurns`, the person's turns from the journal. `messages` is kept there as a **deprecated alias** of `personTurns` for this bundle only
 - **Security** — the session-cookie HMAC secret (`AGENTISTICS_TEAM_SESSION_SECRET`) is kept separate from the dashboard password; tokens are stored only as sha256 hashes; Mongo is not published to the host; `BIND_IP` can restrict the central to a private tailnet (default `0.0.0.0`); auth uses constant-time comparison
 - Removed the **Environment** tab from Settings
 - `stats-cache.json` is treated as Claude-only; non-Claude harnesses are aggregated purely from per-session data so Claude totals are never corrupted

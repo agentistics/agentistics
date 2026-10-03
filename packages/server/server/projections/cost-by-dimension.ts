@@ -149,7 +149,8 @@ function finish(s: CostByDimensionState): CostByDimensionResult {
 
 export const costByDimensionProjection: Projection<CostByDimensionState, CostByDimensionResult> = {
   name: 'cost-by-dimension',
-  version: 1,
+  // 2: `project` is the project root (`canonicalProjectPath`), so worktrees roll up (A4.4 decision 2).
+  version: 2,
   empty: () => ({ seen: new Set(), dims: emptyDimensionFacts(), cells: new Map(), agentKinds: new Map() }),
   fold(state, events) {
     for (const e of events) foldOne(state, e)

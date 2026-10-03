@@ -25,6 +25,7 @@ import {
   type AgentisticsEvent,
   type AnyAgentisticsEvent,
   type Confidence,
+  canonicalProjectPath,
   type HarnessId,
   type ModelUsage,
   type ProviderId,
@@ -113,7 +114,8 @@ export function dimensionsOf(f: DimensionFacts): {
   const task = [...f.taskIds].sort()[0] ?? null
   return {
     repo: f.session?.repo ?? '',
-    project: f.session?.project ?? f.run?.cwd ?? '',
+    // The project ROOT: a worktree's spend rolls up to its repository, on every surface (A4.4 decision 2).
+    project: canonicalProjectPath(f.session?.project ?? f.run?.cwd ?? ''),
     taskId: task,
     harness: resolveHarness(f.run?.harness, f.sourceId),
     ...(f.run?.conversationId ? { conversationId: f.run.conversationId } : {}),

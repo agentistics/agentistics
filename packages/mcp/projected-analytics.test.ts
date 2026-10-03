@@ -37,7 +37,7 @@ describe("projected MCP analytics (A4.4)", () => {
     expect(rows.map((r) => r.harness)).toEqual(["claude", "codex"]);
     const claude = rows[0];
     expect(claude).toMatchObject({
-      sessions: 1, messages: null, personTurns: 3,
+      sessions: 1, personTurns: 3, messages: 3,
       inputTokens: 10, outputTokens: 20, cacheReadTokens: 300, cacheWriteTokens: 40, totalTokens: 370,
       estimatedCostUSD: 1, subagentTokens: 4, subagentCostUSD: 0.5,
       lastActive: "2026-09-02", source: "projections",

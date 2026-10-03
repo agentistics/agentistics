@@ -3,6 +3,7 @@
  * tool switch so the projected path (`projected-analytics.ts`) can be checked against exactly what the
  * surface emits (`surface-parity.ts`). Pure: data in, the tool's JSON value out.
  */
+import { canonicalProjectPath } from "@agentistics/core";
 import { filterSessions, sessionHarness, sessionMessages, sessionTokens, statsCacheTotals, type AnySession } from "./session-tokens.js";
 
 export function legacySummary(data: any, harness?: string): unknown {
@@ -24,7 +25,10 @@ export function legacySummary(data: any, harness?: string): unknown {
     totalInput += input; totalOutput += output; totalCacheRead += cacheRead; totalCacheWrite += cacheWrite;
     totalCostUSD += cost;
     if (s.model) modelTokens[s.model] = (modelTokens[s.model] ?? 0) + input + output;
-    if (s.project_path) projectSessions[s.project_path] = (projectSessions[s.project_path] ?? 0) + 1;
+    if (s.project_path) {
+      const root = canonicalProjectPath(s.project_path);
+      projectSessions[root] = (projectSessions[root] ?? 0) + 1;
+    }
     if (s.start_time) activeDates.add(String(s.start_time).slice(0, 10));
   }
   const claudeFallback = unified || harness === "claude";
@@ -82,7 +86,8 @@ export function legacyProjects(data: any, harness?: string): unknown {
   const allSessions = filterSessions((data.sessions ?? []) as AnySession[], harness);
   const byPath: Record<string, { sessions: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; costUSD: number; messages: number; lastActive: string; languages: string[] }> = {};
   for (const s of allSessions) {
-    const key = s.project_path as string;
+    // The project ROOT: a worktree's sessions roll up to its repository (A4.4 decision 2).
+    const key = canonicalProjectPath(s.project_path as string);
     if (!key) continue;
     if (!byPath[key]) byPath[key] = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, messages: 0, lastActive: "", languages: [] };
     const agg = byPath[key]!;
@@ -97,7 +102,18 @@ export function legacyProjects(data: any, harness?: string): unknown {
     if (!agg.lastActive || (s.start_time ?? "") > agg.lastActive) agg.lastActive = s.start_time ?? "";
     for (const lang of s.languages ?? []) if (!agg.languages.includes(lang)) agg.languages.push(lang);
   }
-  const projects = (data.projects ?? []) as Array<any>;
+  // `data.projects` lists every worktree as its own entry: fold them into their root, counting their
+  // sessions together, and name the row after the root's own entry when there is one.
+  type Root = { name: string; path: string; sessions: unknown[] };
+  const roots = new Map<string, Root>();
+  for (const p of (data.projects ?? []) as Array<any>) {
+    const path = canonicalProjectPath(p.path ?? "");
+    const r: Root = roots.get(path) ?? { name: p.name, path, sessions: [] };
+    if (p.path === path) r.name = p.name;
+    r.sessions.push(...(p.sessions ?? []));
+    roots.set(path, r);
+  }
+  const projects = [...roots.values()];
   const summary = projects
     // When scoped to a harness, drop projects with no sessions in that harness.
     .filter((p: any) => !harness || harness === "all" || byPath[p.path])

@@ -161,12 +161,12 @@ describe('the re-projection lever (§19.4, P3 §8.4)', () => {
     await catchUpProjections({ journal: j, store: s, env: ON, adapterVersions: ADAPTERS_V1 })
     const before = snapshot(s)
 
-    // Version 2 of run-metrics: the same fold, a different answer (it no longer reports a model).
+    // The NEXT version of run-metrics: the same fold, a different answer (it no longer reports a model).
     const v2: StoredProjection = {
       ...RUN_METRICS,
       projection: {
         ...runMetricsProjection,
-        version: 2,
+        version: runMetricsProjection.version + 1,
         finish: st => {
           const r: RunMetricsResult = runMetricsProjection.finish(st)
           return r.fact ? { ...r, fact: { ...r.fact, model: 'v2' } } : r
@@ -179,14 +179,14 @@ describe('the re-projection lever (§19.4, P3 §8.4)', () => {
     const run = report.projections.find(p => p.name === 'run-metrics')!
     expect(run.mode).toBe('rebuild')
     expect(run.fromCursor).toBe(0)
-    expect(run.rebuildReason).toContain('projectionVersion changed (1 → 2)')
+    expect(run.rebuildReason).toContain(`projectionVersion changed (${runMetricsProjection.version} → ${runMetricsProjection.version + 1})`)
     for (const p of report.projections.filter(p => p.name !== 'run-metrics')) expect(p.mode).toBe('resume')
 
     const after = snapshot(s)
     expect(after[RUN_METRICS.id]).not.toEqual(before[RUN_METRICS.id])
     expect(after[RUN_METRICS.id]!.every(r => JSON.parse(r.split('\u0000')[2]!).model === 'v2')).toBe(true)
     for (const d of STORED_PROJECTIONS.filter(d => d.id !== RUN_METRICS.id)) expect(after[d.id]).toEqual(before[d.id])
-    expect((await createProjectionReader(s).status()).versions['run-metrics']).toBe(2)
+    expect((await createProjectionReader(s).status()).versions['run-metrics']).toBe(runMetricsProjection.version + 1)
 
     // And it stays rebuilt: the next pass resumes at v2.
     const next = await catchUpProjections({ journal: j, store: s, env: ON, projections: defs, adapterVersions: ADAPTERS_V1 })

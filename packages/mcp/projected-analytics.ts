@@ -5,8 +5,9 @@
  *
  * Every row carries `source: "projections"`. Where the projection's figure means something else than
  * the legacy field, the legacy field is NOT reused under the old name:
- * - `messages` is `null`: the journal counts the person's turns (`personTurns`), the legacy counted
- *   every user AND assistant transcript line — two different quantities.
+ * - `personTurns` replaces `messages`: the journal counts the person's turns, the legacy counted every
+ *   user AND assistant transcript line. `messages` stays one bundle as a DEPRECATED alias of
+ *   `personTurns` (the leader's A4.4 decision 4), so a reader of the old field does not break.
  * - Tokens and cost are the MAIN agent's (`subagent=false`), the legacy session total's meaning;
  *   subagents' spend is reported beside them (`subagentTokens`, `subagentCostUSD`), never folded in.
  * - `lastActive` is a UTC day (`yyyy-MM-dd`), the API's day rule — no timestamp is projected.
@@ -43,8 +44,9 @@ export async function projectedHarnesses(q: MetricsQueryFn): Promise<unknown> {
   const rows = [...(await rollup(q, 'harness')).values()].map(r => ({
     harness: r.key,
     sessions: r.sessions,
-    messages: null,
     personTurns: r.personTurns,
+    /** @deprecated alias of `personTurns`, kept for one bundle (A4.4 decision 4). */
+    messages: r.personTurns,
     ...spend(r, 2),
     lastActive: r.lastActive,
     source: 'projections' as const,
@@ -61,8 +63,9 @@ export async function projectedProjects(q: MetricsQueryFn, harness?: string): Pr
         name: r.key!.split(/[\\/]/).filter(Boolean).pop() ?? r.key,
         path: r.key,
         sessions: r.sessions,
-        messages: null,
         personTurns: r.personTurns,
+        /** @deprecated alias of `personTurns`, kept for one bundle (A4.4 decision 4). */
+        messages: r.personTurns,
         inputTokens: s.inputTokens,
         outputTokens: s.outputTokens,
         // The legacy field's meaning: input + output only.
@@ -85,8 +88,9 @@ export async function projectedRepos(q: MetricsQueryFn, harness?: string): Promi
     repo: r.key || 'unlinked',
     remote: r.key || null,
     sessions: r.sessions,
-    messages: null,
     personTurns: r.personTurns,
+    /** @deprecated alias of `personTurns`, kept for one bundle (A4.4 decision 4). */
+    messages: r.personTurns,
     ...spend(r, 4),
     lastActive: r.lastActive,
     source: 'projections' as const,

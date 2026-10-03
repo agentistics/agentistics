@@ -559,13 +559,13 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_harnesses",
     description:
-      "Compare the tracked AI coding harnesses side by side. Lists every harness present in the data with its sessions, messages, token usage, estimated cost, and last-active date. Use this to answer 'which harness do I use most / costs most' questions.",
+      "Compare the tracked AI coding harnesses side by side. Lists every harness present in the data with its sessions, messages, token usage, estimated cost, and last-active date. Use this to answer 'which harness do I use most / costs most' questions. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "agentistics_projects",
     description:
-      "List projects with session counts, message counts, token usage, estimated cost, and last active date. Optionally scope to a single harness.",
+      "List projects with session counts, message counts, token usage, estimated cost, and last active date. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
     inputSchema: { type: "object", properties: { harness: HARNESS_PARAM }, required: [] },
   },
   {
@@ -757,7 +757,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_repos",
     description:
-      "List repositories, grouped by normalized git remote (independent of local path or which machine produced the session), with session/message/token/cost totals and last-active date. Sessions with no linked repository are grouped under 'unlinked'. Optionally scope to a single harness.",
+      "List repositories, grouped by normalized git remote (independent of local path or which machine produced the session), with session/message/token/cost totals and last-active date. Sessions with no linked repository are grouped under 'unlinked'. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
     inputSchema: { type: "object", properties: { harness: HARNESS_PARAM }, required: [] },
   },
   {

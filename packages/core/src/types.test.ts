@@ -640,12 +640,20 @@ test('canonicalProjectPath folds a worktree back into its project', () => {
   expect(canonicalProjectPath('/home/u/prontuario//claude/worktrees/filtro/metricas')).toBe('/home/u/prontuario')
 })
 
+test('canonicalProjectPath folds a .worktrees/<name> checkout into its repo (A4.4 decision 2)', () => {
+  expect(canonicalProjectPath('/home/u/agentistics-engine/.worktrees/b8-67')).toBe('/home/u/agentistics-engine')
+  expect(canonicalProjectPath('/home/u/org/agentistics/.worktrees/j-20260901-rk-server--victor/packages/web')).toBe('/home/u/org/agentistics')
+  // A worktree of a worktree's project still lands on the outermost project root.
+  expect(canonicalProjectPath('/home/u/app/.claude/worktrees/x/.worktrees/y')).toBe('/home/u/app')
+})
+
 test('canonicalProjectPath leaves a real project path alone', () => {
   expect(canonicalProjectPath('/home/u/projects/pulsar')).toBe('/home/u/projects/pulsar')
   expect(canonicalProjectPath('')).toBe('')
   // A directory merely NAMED worktrees is not a worktree root.
   expect(canonicalProjectPath('/home/u/worktrees/thing')).toBe('/home/u/worktrees/thing')
   expect(canonicalProjectPath('/home/u/.claude')).toBe('/home/u/.claude')
+  expect(canonicalProjectPath('/home/u/.worktrees')).toBe('/home/u/.worktrees')
 })
 
 test('HARNESS_ORDER lists every harness exactly once', () => {

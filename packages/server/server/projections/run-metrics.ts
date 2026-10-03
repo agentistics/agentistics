@@ -95,7 +95,8 @@ function finish(s: RunMetricsState): RunMetricsResult {
 
 export const runMetricsProjection: Projection<RunMetricsState, RunMetricsResult> = {
   name: 'run-metrics',
-  version: 1,
+  // 2: `project` is the project root (`canonicalProjectPath`), so worktrees roll up (A4.4 decision 2).
+  version: 2,
   empty: () => ({
     sm: sessionMetaProjection.empty(), tools: new Map(), dims: emptyDimensionFacts(), providers: new Map(), conf: null,
   }),

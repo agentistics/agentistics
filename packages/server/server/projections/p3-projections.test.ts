@@ -172,6 +172,12 @@ describe('costByDimension', () => {
     data: { harness: 'claude', conversationLink: 'observed' },
   } as AnyAgentisticsEvent
 
+  test('A4.4 decision 2: a worktree cwd rolls up to its project root, in cost AND run facts', () => {
+    const inWorktree = { ...runStarted, data: { ...(runStarted as any).data, cwd: '/home/u/app/.worktrees/feature-x' } } as AnyAgentisticsEvent
+    expect(project(costByDimensionProjection, [inWorktree, base({}, 'w1')]).facts[0]!.project).toBe('/home/u/app')
+    expect(project(runMetricsProjection, [inWorktree, base({}, 'w2')]).fact!.project).toBe('/home/u/app')
+  })
+
   test('D21: a counter no response reported is ABSENT, and one some response left out is named partial', () => {
     const r = project(costByDimensionProjection, [runStarted,
       base({ usage: { input: 5, output: 6 } }, 'a1'),

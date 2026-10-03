@@ -174,6 +174,18 @@ describe('projectRows', () => {
     expect(projectRows(data).map(r => r.name)).toEqual(['pricey', 'cheap'])
   })
 
+  test('a worktree rolls up to its project root (A4.4 decision 2)', () => {
+    const data = appData({
+      sessions: [
+        session({ session_id: 'a', project_path: '/p/app', model: 'claude-sonnet-4-6', input_tokens: 10 }),
+        session({ session_id: 'b', project_path: '/p/app/.worktrees/feature', model: 'claude-sonnet-4-6', input_tokens: 20 }),
+        session({ session_id: 'c', project_path: '/p/app/.claude/worktrees/x', model: 'claude-sonnet-4-6', input_tokens: 30 }),
+      ],
+      harnesses: ['claude'],
+    })
+    expect(projectRows(data).map(r => [r.path, r.sessions, r.tokens])).toEqual([['/p/app', 3, 60]])
+  })
+
   test('groups every session of one project into a single row', () => {
     const data = appData({
       sessions: [

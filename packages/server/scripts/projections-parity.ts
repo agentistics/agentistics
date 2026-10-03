@@ -6,7 +6,10 @@
  *
  *   bun packages/server/scripts/projections-parity.ts \
  *     --data-dir <COPY of the data dir> --projections <COPY of projections.db> [--surface mcp|tui|all] \
- *     [--legacy-cache <file.json>] [--json <report.json>]
+ *     [--journal <COPY of journal.db>] [--legacy-cache <file.json>] [--json <report.json>]
+ *
+ * `--journal` first catches the store up on that journal (a projection whose version changed is
+ * rebuilt there, exactly as the server would at start), so the check runs the projections as shipped.
  *
  * READ-ONLY by construction: it refuses the live data dir and any path inside it. Building the legacy
  * answer writes its caches into `--data-dir`, and opening a store may create its tables — so both must
@@ -33,7 +36,8 @@ if (!dataDir || !projectionsPath) {
 }
 const live = resolve(homedir(), '.agentistics')
 const real = (p: string) => (existsSync(p) ? realpathSync(p) : resolve(p))
-for (const p of [dataDir, projectionsPath]) {
+const journalPath = arg('journal')
+for (const p of [dataDir, projectionsPath, ...(journalPath ? [journalPath] : [])]) {
   const r = real(p)
   if (r === live || r.startsWith(`${live}/`)) {
     console.error(`refused: ${p} is the live data dir — run on copies (VACUUM INTO for the databases)`)
@@ -68,6 +72,15 @@ else {
   if (cachePath) await Bun.write(cachePath, JSON.stringify(data))
 }
 const store = await openProjectionStore({ path: resolve(projectionsPath), projections: STORED_PROJECTIONS })
+if (journalPath) {
+  const { openJournal } = await import('../server/journal/journal')
+  const { catchUpProjections } = await import('../server/projections/catch-up')
+  const journal = await openJournal({ path: resolve(journalPath) })
+  const t0 = performance.now()
+  const r = await catchUpProjections({ journal, store, env: process.env })
+  console.error(`catch-up on the journal copy: ${r.state}, ${r.eventsRead} events, ${Math.round(performance.now() - t0)} ms; ${r.projections.map(p => `${p.name} ${p.mode}`).join(', ')}`)
+  await journal.close?.()
+}
 const reader = createProjectionReader(store)
 const query: import('../../mcp/projected-analytics').MetricsQueryFn = async (p) => {
   const parsed = parseMetricsQuery(p)
