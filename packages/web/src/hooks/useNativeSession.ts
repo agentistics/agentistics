@@ -11,6 +11,7 @@
  * - **Acts**: send (shown at once, pending), answer a question, stop the run in flight. A refusal is
  *   the engine's own sentence, kept in `state.notice`.
  */
+import { uploadPreviewUrl } from '../lib/nativeAttachments'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   INITIAL_NATIVE_CHAT,
@@ -26,11 +27,15 @@ import { approveUrl, cancelUrl, execIdOf, messagesUrl, refusalSentence, streamUr
 const REFRESH_DEBOUNCE_MS = 250
 const RECONNECT_MS = 1500
 
+/** One upload in the chat attachment store, as the composer holds it before sending. */
+export interface NativeUpload { name: string; mediaType: string; size: number }
+
 export interface NativeSession {
   state: NativeChatState
   /** `null` while the first window read is in flight; a sentence when it failed (not found, …). */
   loadError: string | null
-  send: (text: string) => Promise<boolean>
+  /** UI follow-up 3: `attachments` are uploads already in the chat attachment store (stored names). */
+  send: (text: string, attachments?: readonly NativeUpload[]) => Promise<boolean>
   answer: (questionId: string, a: { choice?: number; text?: string }) => Promise<void>
   stop: () => Promise<void>
 }
@@ -100,12 +105,16 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     }
   }, [id, scheduleRefresh])
 
-  const send = useCallback(async (text: string): Promise<boolean> => {
+  const send = useCallback(async (text: string, attachments: readonly NativeUpload[] = []): Promise<boolean> => {
     const clientRef = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    dispatch({ type: 'sent', clientRef, text })
+    dispatch({
+      type: 'sent', clientRef, text,
+      ...(attachments.length ? { attachments: attachments.map(a => ({ url: uploadPreviewUrl(a.name), mediaType: a.mediaType, name: a.name })) } : {}),
+    })
     try {
       const res = await fetch(messagesUrl(id), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientRef, text }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientRef, text, ...(attachments.length ? { attachments: attachments.map(a => a.name) } : {}) }),
       })
       const body = await res.json().catch(() => null) as { status?: string; sentence?: string } | null
       if (!res.ok || body?.status === 'refused') {
