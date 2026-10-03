@@ -1241,13 +1241,29 @@ function runsAsYouLines(t: CodeStrings, width: number, cwd?: string): Line[] {
   return [fitLine([where], width), fitLine(warn, width)]
 }
 
-/** The options exactly as the policy gave them, numbered 1..n in the policy's order. */
-export function optionLines(ask: CodeAsk, width: number): Line[] {
-  return ask.options.map((o, i) => {
+/**
+ * CD-08: the number of the "deny with a reason" option — the one after the policy's own options —
+ * or null when this question has no Deny to attach a reason to (a model's question, not a permission).
+ */
+export function reasonOptionNumber(ask: CodeAsk): number | null {
+  return ask.kind === 'permission' && ask.denyIndex !== null ? ask.options.length + 1 : null
+}
+
+/**
+ * The options exactly as the policy gave them, numbered 1..n in the policy's order — then, for a
+ * permission with a Deny (CD-08), `n+1 Deny with a reason…`: the policy's Deny, plus the person's words.
+ */
+export function optionLines(ask: CodeAsk, width: number, t?: Pick<CodeStrings, 'reasonOption' | 'reasonOptionHint'>): Line[] {
+  const lines = ask.options.map((o, i) => {
     const line: Line = [seg(`${i + 1}`, { color: COLORS.accent, bold: true }), seg(` ${sanitize(o.label)}`, { color: COLORS.text })]
     if (o.description) line.push(seg(`  ${sanitize(o.description)}`, { color: COLORS.muted }))
     return fitLine(line, width)
   })
+  const n = reasonOptionNumber(ask)
+  if (t && n !== null) {
+    lines.push(fitLine([seg(`${n}`, { color: COLORS.accent, bold: true }), seg(` ${t.reasonOption}`, { color: COLORS.text }), seg(`  ${t.reasonOptionHint}`, { color: COLORS.muted })], width))
+  }
+  return lines
 }
 
 function fileHeader(f: CodeDiffFile, t: CodeStrings, width: number): Line {
@@ -1338,7 +1354,7 @@ function cardSections(ask: CodeAsk, t: CodeStrings, width: number, previewRows: 
   }
 
   sections.push({ lines: [blank()], min: 0, drop: 0 })
-  const opts = optionLines(ask, width)
+  const opts = optionLines(ask, width, t)
   sections.push({ lines: opts, min: opts.length, drop: 100 })
   return sections
 }
@@ -1403,7 +1419,7 @@ export function fullDiffLines(ask: CodeAsk, t: CodeStrings, width: number): Full
       }
     }
   })
-  return { head, body, options: optionLines(ask, width) }
+  return { head, body, options: optionLines(ask, width, t) }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -1428,6 +1444,11 @@ export type CodeIntent =
   | { kind: 'open-wizard'; firstMessage?: string }
   | { kind: 'answer'; choice: number }
   | { kind: 'deny' }
+  /** CD-08: open the reason field, edit it, leave it, or send the policy's Deny with it. */
+  | { kind: 'reason-open' }
+  | { kind: 'reason-close' }
+  | { kind: 'reason-draft'; draft: string }
+  | { kind: 'deny-reason'; reason: string }
   | { kind: 'open-diff' }
   | { kind: 'close-diff' }
   | { kind: 'diff-scroll'; delta: number }
@@ -1449,7 +1470,7 @@ export type CodeIntent =
   | { kind: 'scroll'; dir: -1 | 1 }
   | { kind: 'popup-move'; delta: 1 | -1 }
   | { kind: 'unknown-command'; text: string }
-  | { kind: 'say'; code: 'answer-first' | 'no-diff' | 'locked' }
+  | { kind: 'say'; code: 'answer-first' | 'no-diff' | 'locked' | 'reason-empty' }
 
 export interface CodeCommand {
   id: CodeCommandId
@@ -1488,10 +1509,17 @@ export function matchCommands(draft: string): CodeCommand[] {
 
 /** CD-11: the composer's one content row. `cursorOn` blinks nothing — the cursor is static. */
 export function composerLine(
-  o: { draft: string; ask: CodeAsk | null; closed: string | null; sessionOpen: boolean; busy?: boolean },
+  o: { draft: string; ask: CodeAsk | null; closed: string | null; sessionOpen: boolean; busy?: boolean; reason?: string | null },
   t: CodeStrings,
   width: number,
 ): Line {
+  // CD-08: the reason field replaces the locked composer while it is open.
+  if (o.ask && typeof o.reason === 'string') {
+    return fitLine([
+      seg('› ', { color: COLORS.text }), seg(t.reasonPrompt, { color: COLORS.accent }),
+      o.reason ? seg(`${o.reason}▍`, { color: COLORS.text }) : seg(`▍${t.reasonPlaceholder}`, { color: COLORS.muted }),
+    ], width)
+  }
   if (o.ask) {
     return fitLine([seg('› ', { color: COLORS.muted }), seg(t.locked(o.ask.options.length), { color: COLORS.muted })], width)
   }
@@ -1763,6 +1791,8 @@ export interface CodeKeyContext {
   panelVisible?: boolean
   /** Whether the shell has a help overlay to open (`?`). Absent / false: `?` is typed. */
   help?: boolean
+  /** CD-08: the reason being typed for a denial; `null`/absent while the options show. */
+  reason?: string | null
 }
 
 /** Delete the word before the end, the way a shell's `ctrl+w` does (the `Prompt.tsx` rule). */
@@ -1812,6 +1842,7 @@ export function codeKeyIntent(ctx: CodeKeyContext, k: CodeKey): CodeIntent {
   if (ctx.diffOpen) {
     if (k.escape) return { kind: 'close-diff' }
     const d = digit(k)
+    if (d !== null && ctx.ask && d === reasonOptionNumber(ctx.ask)) return { kind: 'reason-open' }
     if (d !== null && ctx.ask && d <= ctx.ask.options.length) return { kind: 'answer', choice: d - 1 }
     if (k.upArrow) return { kind: 'diff-scroll', delta: -1 }
     if (k.downArrow) return { kind: 'diff-scroll', delta: 1 }
@@ -1847,8 +1878,16 @@ export function codeKeyIntent(ctx: CodeKeyContext, k: CodeKey): CodeIntent {
     return { kind: 'none' }
   }
 
+  if (ctx.ask && typeof ctx.reason === 'string') {
+    if (k.escape) return { kind: 'reason-close' }
+    if (k.return) return ctx.reason.trim() ? { kind: 'deny-reason', reason: ctx.reason.trim() } : { kind: 'say', code: 'reason-empty' }
+    const next = editDraft(ctx.reason, k)
+    return next !== null ? { kind: 'reason-draft', draft: next } : { kind: 'none' }
+  }
+
   if (ctx.ask) {
     const d = digit(k)
+    if (d !== null && d === reasonOptionNumber(ctx.ask)) return { kind: 'reason-open' }
     if (d !== null) return d <= ctx.ask.options.length ? { kind: 'answer', choice: d - 1 } : { kind: 'say', code: 'answer-first' }
     if (k.input === 'd' && !k.ctrl) return ctx.ask.diff && ctx.ask.diff.files.length > 0 ? { kind: 'open-diff' } : { kind: 'say', code: 'no-diff' }
     if (k.escape) return { kind: 'deny' }
@@ -1969,10 +2008,11 @@ export function codeHints(st: CodeHintState, t: CodeStrings): string[] {
     return [t.keyPanelBack, ...(inspecting ? [t.keyTurn] : []), ...(st.panelOverflow ? [t.keyPanelPage] : []), ...sides, ...mode, t.keyTabs, t.keyQuit]
   }
   const panelScroll = st.panelOverflow && (st.panelVisible ?? true) ? [t.keyPanelScroll] : []
+  if (st.ask && typeof st.reason === 'string') return [t.keyReasonSend, t.keyReasonBack]
   if (st.ask) {
     const hasDiff = Boolean(st.ask.diff && st.ask.diff.files.length > 0)
     return [
-      t.keyAnswer(st.ask.options.length),
+      t.keyAnswer(reasonOptionNumber(st.ask) ?? st.ask.options.length),
       ...(hasDiff ? [t.keyFullDiff] : []),
       st.ask.denyIndex === null ? t.keyDismiss : t.keyDeny,
       ...mode,

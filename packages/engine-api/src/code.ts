@@ -315,8 +315,12 @@ export interface CodeTabHost {
   subscribe(sessionId: string, listener: (e: CodeEvent) => void): () => void
   /** Queue a prompt. `ok` means QUEUED (the run may still be refused later, with a notice). */
   submit(sessionId: string, text: string): CodeResult<{ sentence?: string }>
-  /** Answer an open question with the option at `choice` (0-based), exactly as the person picked. */
-  answer(sessionId: string, questionId: string, choice: number): CodeResult<{ sentence: string }>
+  /**
+   * Answer an open question with the option at `choice` (0-based), exactly as the person picked.
+   * CD-08: `reason`, with the policy's Deny option, is the person's reason — handed to the agent with
+   * the denial (never journaled).
+   */
+  answer(sessionId: string, questionId: string, choice: number, reason?: string): CodeResult<{ sentence: string }>
   /** Cancel the run in progress. */
   cancel(sessionId: string): CodeResult<{ sentence: string }>
   /** Stop driving the session here: release its lease. The session stays on disk, resumable. */

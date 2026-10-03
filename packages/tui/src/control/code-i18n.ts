@@ -226,6 +226,14 @@ export interface CodeStrings {
   keyCancelRun: string
   keyClear: string
   keyAnswer: (n: number) => string
+  /** CD-08: the extra option after the policy's Deny, and the reason field it opens. */
+  reasonOption: string
+  reasonOptionHint: string
+  reasonPrompt: string
+  reasonPlaceholder: string
+  keyReasonSend: string
+  keyReasonBack: string
+  sayReasonEmpty: string
   keyFullDiff: string
   keyDeny: string
   keyDismiss: string
@@ -462,6 +470,13 @@ const EN: CodeStrings = {
   keyCancelRun: 'esc cancel run',
   keyClear: 'esc clear',
   keyAnswer: n => `1-${n} answer`,
+  reasonOption: 'Deny with a reason…',
+  reasonOptionHint: 'the agent reads why',
+  reasonPrompt: 'reason: ',
+  reasonPlaceholder: 'why not — the agent reads it with the denial',
+  keyReasonSend: 'enter send the denial with your reason',
+  keyReasonBack: 'esc back to the options',
+  sayReasonEmpty: 'Type the reason first — or esc to go back to the options.',
   keyFullDiff: 'd full diff',
   keyDeny: 'esc deny',
   keyDismiss: 'esc dismiss',
@@ -695,6 +710,13 @@ const PT: CodeStrings = {
   keyCancelRun: 'esc cancelar',
   keyClear: 'esc limpar',
   keyAnswer: n => `1-${n} responder`,
+  reasonOption: 'Negar com um motivo…',
+  reasonOptionHint: 'o agente lê o porquê',
+  reasonPrompt: 'motivo: ',
+  reasonPlaceholder: 'por que não — o agente lê junto com a negação',
+  keyReasonSend: 'enter envia a negação com o seu motivo',
+  keyReasonBack: 'esc volta às opções',
+  sayReasonEmpty: 'Escreva o motivo primeiro — ou esc para voltar às opções.',
   keyFullDiff: 'd diff completo',
   keyDeny: 'esc negar',
   keyDismiss: 'esc dispensar',

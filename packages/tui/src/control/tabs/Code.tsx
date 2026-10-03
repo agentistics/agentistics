@@ -183,6 +183,8 @@ export function Code({
   const [popup, setPopup] = useState(0)
   const [wizard, setWizard, wizardRef] = useLatestState<WizardState | null>(null)
   const [diffOpen, setDiffOpen] = useState(false)
+  // CD-08: the reason being typed for a denial; null while the options show.
+  const [reason, setReason] = useState<string | null>(null)
   const [diffTop, setDiffTop] = useState(0)
   const [scroll, setScroll] = useState<TailScroll>(FOLLOW)
   // Two switches because the panel's default differs by layout: beside the conversation on a wide
@@ -327,6 +329,8 @@ export function Code({
   const panelOpen = narrowNow ? narrowShown : !wideHidden
   const layout = codeLayout(width, height, { panelOpen })
   const ask = view.ask
+  // A new (or no) question closes a reason field that belonged to the previous one.
+  useEffect(() => { setReason(null) }, [ask?.id])
   const closed = view.closed !== null
   const running = view.runId !== null
   const sessionOpen = facts !== null
@@ -474,7 +478,18 @@ export function Code({
         setPopup(p => Math.min(Math.max(0, p + intent.delta), Math.max(0, matches.length - 1)))
         return
       case 'unknown-command': say(false, t.sayNoSuchCommand(intent.text)); setDraft(''); return
-      case 'say': say(false, intent.code === 'no-diff' ? t.sayNoDiff : intent.code === 'locked' ? t.sayLocked : t.sayAnswerFirst); return
+      case 'say': say(false, intent.code === 'no-diff' ? t.sayNoDiff : intent.code === 'locked' ? t.sayLocked : intent.code === 'reason-empty' ? t.sayReasonEmpty : t.sayAnswerFirst); return
+      // CD-08: the reason field — open, edit, back to the options, or send the policy's Deny with it.
+      case 'reason-open': setDiffOpen(false); setReason(''); return
+      case 'reason-close': setReason(null); return
+      case 'reason-draft': setReason(intent.draft); return
+      case 'deny-reason': {
+        if (!code || !sid || !ask || ask.denyIndex === null) return
+        const r = code.answer(sid, ask.id, ask.denyIndex, intent.reason)
+        say(r.ok, r.sentence)
+        if (r.ok) { setReason(null); setDiffOpen(false) }
+        return
+      }
       case 'open-wizard': setDraft(''); startWizard(intent.firstMessage); return
       case 'close-diff': setDiffOpen(false); return
       case 'diff-scroll': setDiffTop(v => Math.min(Math.max(0, v + intent.delta), diffMax)); return
@@ -575,6 +590,7 @@ export function Code({
       panelSide: side,
       panelVisible: panelOpen,
       help: Boolean(onHelp),
+      reason,
     }, {
       input,
       return: key.return,
@@ -621,6 +637,7 @@ export function Code({
             panelSide: side,
             panelVisible: panelOpen,
             help: Boolean(onHelp),
+            reason,
             canScroll,
             narrow: layout.narrow,
             longOutput,
@@ -724,7 +741,7 @@ export function Code({
         : null}
       <Pane title={t.composerTitle} badge={facts ? modeWord(mode, t) : ''} focused={!ask} width={layout.mainWidth} height={rows.composer}>
         <Lines
-          lines={[composerLine({ draft, ask, closed: view.closed, sessionOpen, busy: editing }, t, mainInner)]}
+          lines={[composerLine({ draft, ask, closed: view.closed, sessionOpen, busy: editing, reason }, t, mainInner)]}
           rows={paneRows(rows.composer)}
           width={mainInner}
         />

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  codeKeyIntent as codeKeyIntentForTest,
+  reasonOptionNumber,
   CODE_COMMANDS,
   CODE_KEY_TABLE,
   CODE_WIDE_AT,
@@ -484,7 +486,8 @@ describe('permission card (CD-07)', () => {
     const short = permissionCardLines(PATCH_ASK, t, 100, full.length - 3)
     expect(short).toHaveLength(full.length - 3)
     const text = short.map(lineText)
-    expect(text.slice(-3)).toEqual(['1 Apply once', expect.stringContaining('2 Apply'), '3 Reject'])
+    // the policy's three options, then CD-08's "deny with a reason" — none of them is ever dropped
+    expect(text.slice(-4)).toEqual(['1 Apply once', expect.stringContaining('2 Apply'), '3 Reject', expect.stringContaining('4 Deny with a reason')])
     expect(text.join('\n')).toContain('packages/core/src/tokens.ts')
   })
 
@@ -630,7 +633,9 @@ const ctx = (over: Partial<CodeKeyContext> = {}): CodeKeyContext => ({
 describe('keys → intents', () => {
   test('with an ask open: digits answer in policy order, d opens the diff only when there is one, esc denies', () => {
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '2' })).toEqual({ kind: 'answer', choice: 1 })
-    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '4' })).toEqual({ kind: 'say', code: 'answer-first' })
+    // `4` is CD-08's reason field (the option after the policy's three); `5` names nothing
+    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '4' })).toEqual({ kind: 'reason-open' })
+    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '5' })).toEqual({ kind: 'say', code: 'answer-first' })
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: 'd' })).toEqual({ kind: 'open-diff' })
     expect(codeKeyIntent(ctx({ ask: SHELL_ASK }), { input: 'd' })).toEqual({ kind: 'say', code: 'no-diff' })
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '', escape: true })).toEqual({ kind: 'deny' })
@@ -673,7 +678,7 @@ const hs = (over: Partial<CodeHintState> = {}): CodeHintState => ({ ...ctx(), ca
 
 describe('codeHints (GL-05) — exactly the keys that work now', () => {
   test('ask open: answer, full diff only with a diff, deny', () => {
-    expect(codeHints(hs({ ask: PATCH_ASK }), t).slice(0, 3)).toEqual(['1-3 answer', 'd full diff', 'esc deny'])
+    expect(codeHints(hs({ ask: PATCH_ASK }), t).slice(0, 3)).toEqual(['1-4 answer', 'd full diff', 'esc deny'])
     expect(codeHints(hs({ ask: SHELL_ASK }), t)).not.toContain('d full diff')
     expect(codeHints(hs({ ask: { ...SHELL_ASK, denyIndex: null } }), t)).toContain('esc dismiss')
   })
@@ -1122,5 +1127,44 @@ describe('P2 footer hints — only keys that work here', () => {
         expect(codeKeyIntent(st, key).kind, `${h}`).not.toBe('none')
       }
     }
+  })
+})
+
+describe('CD-08 — deny with a reason', () => {
+  const T = codeStrings('en')
+  const ctx = (over: Partial<Parameters<typeof codeKeyIntentForTest>[0]> = {}) => ({
+    draft: '', sessionOpen: true, closed: false, ask: SHELL_ASK, diffOpen: false, panelFull: false, running: true, popup: null, ...over,
+  })
+  const key = (input: string, over: Record<string, boolean> = {}) => ({ input, ...over })
+  test('the option after the policy\'s own opens the reason field; the policy\'s options stay as they are', () => {
+    expect(reasonOptionNumber(SHELL_ASK)).toBe(4)
+    expect(codeKeyIntentForTest(ctx(), key('4'))).toEqual({ kind: 'reason-open' })
+    expect(codeKeyIntentForTest(ctx(), key('3'))).toEqual({ kind: 'answer', choice: 2 })
+    expect(codeKeyIntentForTest(ctx(), key('5'))).toEqual({ kind: 'say', code: 'answer-first' })
+    const lines = optionLines(SHELL_ASK, 80, T).map(l => l.map(sg => sg.text).join(''))
+    expect(lines).toHaveLength(4)
+    expect(lines[3]).toContain('4 Deny with a reason…')
+  })
+  test('in the field: typing edits, enter sends the Deny with the reason, empty enter refuses in words, esc goes back', () => {
+    const c = ctx({ reason: 'use ' })
+    expect(codeKeyIntentForTest(c, key('x'))).toEqual({ kind: 'reason-draft', draft: 'use x' })
+    expect(codeKeyIntentForTest(c, key('', { backspace: true }))).toEqual({ kind: 'reason-draft', draft: 'use' })
+    expect(codeKeyIntentForTest(ctx({ reason: '  use bun run clean ' }), key('', { return: true }))).toEqual({ kind: 'deny-reason', reason: 'use bun run clean' })
+    expect(codeKeyIntentForTest(ctx({ reason: '   ' }), key('', { return: true }))).toEqual({ kind: 'say', code: 'reason-empty' })
+    expect(codeKeyIntentForTest(c, key('', { escape: true }))).toEqual({ kind: 'reason-close' })
+    // a digit is text in the field, never an answer
+    expect(codeKeyIntentForTest(c, key('1'))).toEqual({ kind: 'reason-draft', draft: 'use 1' })
+  })
+  test('the footer and the composer say what the field does', () => {
+    const hints = codeHints({ ...ctx({ reason: '' }), canScroll: false, narrow: false }, T)
+    expect(hints).toEqual([T.keyReasonSend, T.keyReasonBack])
+    expect(codeHints({ ...ctx(), canScroll: false, narrow: false }, T)[0]).toBe('1-4 answer')
+    const comp = composerLine({ draft: '', ask: SHELL_ASK, closed: null, sessionOpen: true, reason: 'not now' }, T, 60).map(sg => sg.text).join('')
+    expect(comp).toContain('reason: not now')
+  })
+  test('a question with no Deny (a model\'s question) gets no reason option', () => {
+    const q: CodeAsk = { ...SHELL_ASK, kind: 'question', denyIndex: null }
+    expect(reasonOptionNumber(q)).toBeNull()
+    expect(optionLines(q, 80, T)).toHaveLength(3)
   })
 })
