@@ -55,7 +55,8 @@ export interface NativeToolCallRef {
 
 export interface NativeWindow {
   session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string } }
-  messages: { seq: number; message: NativeMessage }[]
+  /** `createdAt`: when the engine's store took the message (ISO). Absent from an older engine. */
+  messages: { seq: number; createdAt?: string; message: NativeMessage }[]
   nextBefore?: number
   latestRun?: { runId: string; status: string; toolCalls: NativeToolCallRef[] }
 }
@@ -379,21 +380,23 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
 
   for (const m of w?.messages ?? []) {
     const msg = m.message
+    // The bubble's time — the store's own, never "now": an engine that sends none draws none.
+    const at = typeof m.createdAt === 'string' && m.createdAt !== '' ? { at: m.createdAt } : {}
     if (msg.role === 'user') {
       const text = userText(msg)
       const atts = attachmentViews(w?.session.sessionId, msg)
       if (text.trim() !== '' || atts.length > 0) {
-        items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text }, ...(atts.length ? { attachments: atts } : {}) })
+        items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text, ...at }, ...(atts.length ? { attachments: atts } : {}) })
       }
       continue
     }
     if (typeof msg.content === 'string') {
-      if (msg.content.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'assistant', text: msg.content } })
+      if (msg.content.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'assistant', text: msg.content, ...at } })
       continue
     }
     let text = ''
     const flush = (i: number) => {
-      if (text.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text } })
+      if (text.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text, ...at } })
       text = ''
     }
     msg.content.forEach((p, i) => {

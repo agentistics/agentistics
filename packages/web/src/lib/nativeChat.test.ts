@@ -266,3 +266,15 @@ describe('the REASONING channel (TOOLS-NATIVE item 5) — folded above the answe
     expect(nativeChatItems(s).some(i => i.kind === 'turn' && i.turn.reasoning)).toBe(false)
   })
 })
+
+describe('message time — the store\'s own, never invented', () => {
+  test('a window message with createdAt carries it as the turn\'s `at`; one without carries none', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
+      { seq: 1, createdAt: '2026-10-04T13:05:00.000Z', message: { role: 'user', content: 'hi' } },
+      { seq: 2, message: { role: 'assistant', content: 'hello' } },
+    ]) })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn')
+    expect(turns[0]).toMatchObject({ turn: { text: 'hi', at: '2026-10-04T13:05:00.000Z' } })
+    expect('at' in (turns[1] as { turn: object }).turn).toBe(false)
+  })
+})

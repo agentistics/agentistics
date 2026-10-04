@@ -44,3 +44,8 @@ describe('nativeToolName — the native calls in the shared vocabulary the aside
     expect(artifactsFromTurns(turns).map(a => a.path)).toEqual(['/w/src/date.ts'])
   })
 })
+
+test('nativeChatTurns keeps the message time for the bubble', () => {
+  const t = nativeChatTurns([{ kind: 'turn', key: 'm1', turn: { role: 'assistant', text: 'ok', at: '2026-10-04T13:06:00.000Z' } }], 'en')
+  expect(t[0]).toEqual({ role: 'assistant', text: 'ok', at: '2026-10-04T13:06:00.000Z' })
+})
