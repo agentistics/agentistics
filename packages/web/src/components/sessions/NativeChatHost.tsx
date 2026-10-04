@@ -17,7 +17,8 @@ import { NativeRunsStrip } from './NativeRunsStrip'
 import type { ChatAct, ChatSource } from './chatSource'
 import { useNativeSession } from '../../hooks/useNativeSession'
 import { nativeChatItems } from '../../lib/nativeChat'
-import { nativeAsks, nativeChatTurns, nativeLiveReasoning, nativeLiveText, nativeRunningTools, nativeSendParts } from '../../lib/nativeChatSource'
+import { nativeAsks, nativeChatTurns, nativeControls, nativeProviderKey, nativeLiveReasoning, nativeLiveText, nativeRunningTools, nativeSendParts } from '../../lib/nativeChatSource'
+import { useNativeProviders } from '../../hooks/useNativeProviders'
 import { nativeAct } from '../../lib/nativeFleet'
 import { nativeSessionStats } from '../../lib/nativeStats'
 
@@ -25,7 +26,13 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
   const { session, lang } = props
   const pt = lang === 'pt'
   const live = useNativeSession(session.id, lang)
-  const { state, runs, loadError, send, answer, stop } = live
+  const { state, runs, loadError, send, answer, stop, switchModel, setEffort, addDir, setBrowser } = live
+  // The session's settings in the composer's standard menu (what the old native page drew).
+  const { models } = useNativeProviders(state.window !== null, nativeProviderKey(state.window?.session), lang)
+  const controls = useMemo(
+    () => nativeControls(state.window?.session ?? null, state.running, models, { switchModel, setEffort, addDir, setBrowser }),
+    [state.window, state.running, models, switchModel, setEffort, addDir, setBrowser],
+  )
   const items = useMemo(() => nativeChatItems(state), [state])
   const turns = useMemo(() => (state.window === null ? null : nativeChatTurns(items, lang)), [state.window, items, lang])
   const asks = useMemo(() => nativeAsks(items), [items])
@@ -65,6 +72,7 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
     // The gauge is the composer's ring now (`stats`); the strip keeps the per-run lines.
     status: <NativeRunsStrip runs={runs} lang={lang} gauge={false} />,
     notice: state.notice ?? (state.window !== null ? loadError : null),
+    ...(controls ? { controls } : {}),
   }
   // The composer's context meter and metrics card, from the engine's real usage (`nativeStats.ts`).
   const stats = nativeSessionStats({

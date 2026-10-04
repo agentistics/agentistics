@@ -39,4 +39,20 @@ export interface ChatSource {
   status?: ReactNode
   /** A sentence the source wants said under the composer (a refused send, a failed read). */
   notice?: string | null
+  /**
+   * The session's own settings for its NEXT turns, drawn in the composer's standard "more" menu —
+   * the model list a CLI session gets there, the `EffortPicker` scale, and two controls of the same
+   * kind. Each member is optional; a refusal comes back as a sentence (null = done).
+   */
+  controls?: SourceControls
+}
+
+export interface SourceControls {
+  /** Settings are refused mid-turn: the running turn keeps what it started with. */
+  busy: boolean
+  model?: { current: string; options: readonly { id: string; label: string }[]; freeText: boolean; switch(id: string): Promise<string | null> }
+  /** `efforts` is the closed scale (`EffortPicker`); `''` is "off". */
+  effort?: { value: string; efforts: readonly string[]; set(value: string): Promise<string | null> }
+  browser?: { on: boolean; set(on: boolean): Promise<string | null> }
+  extraDirs?: { dirs: readonly string[]; add(path: string): Promise<string | null> }
 }

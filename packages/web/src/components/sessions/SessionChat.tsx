@@ -128,6 +128,7 @@ import type { SessionStats } from '../../lib/sessionStats'
 import type { ChatSource } from './chatSource'
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { caretOfSelection } from '../../lib/selectionCaret'
+import { SourceSettings } from './SourceSettings'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
@@ -530,9 +531,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [models, setModels] = useState<{ id: string; label: string }[]>([])
   /** The list is the server's fallback table, so a typed id is offered too — see `ModelSelect`. */
   const [modelFreeText, setModelFreeText] = useState(false)
-  const modelReason = useMemo(() => modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en'), [row, pt])
+  // A SOURCE with its own settings (the native runtime) gives its model list and switch itself.
+  const sourceControls = source?.controls
+  const modelReason = useMemo(
+    () => (sourceControls?.model ? null : modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en')),
+    [row, pt, sourceControls?.model],
+  )
   useEffect(() => {
-    if (modelReason || !row?.harness) return
+    if (sourceControls?.model || modelReason || !row?.harness) return
     let alive = true
     fetch(`/api/fleet/new?lang=${pt ? 'pt' : 'en'}`)
       .then(r => (r.ok ? r.json() : null))
@@ -546,7 +552,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       })
       .catch(() => { /* no list, no picker — the control simply does not appear */ })
     return () => { alive = false }
-  }, [row?.harness, modelReason, pt])
+  }, [row?.harness, modelReason, pt, sourceControls?.model])
+  const menuModels = sourceControls?.model ? sourceControls.model.options : models
+  const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
 
   /**
    * The session's skills. Fetched when the menu is FIRST opened, not on mount: most sessions are
@@ -815,11 +823,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
 
   /** Switch the model mid-conversation by TYPING the harness's own command — see modelSwitch.ts. */
   const switchModel = useCallback(async (model: string) => {
-    const line = modelSwitchLine(row?.harness ?? '', model)
     setMoreOpen(false)
+    if (sourceControls?.model) {
+      const refused = await sourceControls.model.switch(model)
+      if (refused) setNotice(refused)
+      return
+    }
+    const line = modelSwitchLine(row?.harness ?? '', model)
     if (!line) return
     await act({ id: row!.id, action: 'prompt', text: line })
-  }, [row, act])
+  }, [row, act, sourceControls])
 
   const [notice, setNotice] = useState<string | null>(null)
   const [atTail, setAtTail] = useState(true)
@@ -3563,7 +3576,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
                         </p>
-                      ) : (models.length > 0 || modelFreeText) && (
+                      ) : (menuModels.length > 0 || menuFreeText) && (
                         <>
                           <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
                           <p style={{
@@ -3575,9 +3588,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           {/* The LABEL is what you read; the ID is what gets typed into the
                               session. Where the server has no labels the two are the same string,
                               which is what this menu showed before. */}
-                          {models.map(m => (
+                          {menuModels.map(m => (
                             <button
                               key={m.id}
+                              disabled={sourceControls?.busy === true}
+                              aria-current={sourceControls?.model?.current === m.id ? 'true' : undefined}
                               onClick={() => { setMoreOpen(false); void switchModel(m.id) }}
                               style={{
                                 display: 'block', width: '100%', textAlign: 'left',
@@ -3586,16 +3601,25 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                 fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
                               }}
                             >
-                              {m.label}
+                              {m.label}{sourceControls?.model?.current === m.id ? ' ✓' : ''}
                             </button>
                           ))}
-                          {modelFreeText && (
+                          {menuFreeText && (
                             <TypedModel lang={pt ? 'pt' : 'en'} onPick={id => { setMoreOpen(false); void switchModel(id) }} />
                           )}
                           <p style={{ margin: '2px 8px 4px', fontSize: 10, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                            {pt ? 'Envia /model para a sessão.' : 'Sends /model to the session.'}
+                            {sourceControls?.model
+                              ? (pt ? 'Vale para os próximos turnos.' : 'Applies to the next turns.')
+                              : (pt ? 'Envia /model para a sessão.' : 'Sends /model to the session.')}
                           </p>
                         </>
+                      )}
+
+                      {/* A SOURCE's own settings (the native runtime): reasoning effort on the same
+                          EffortPicker the new-session dialog uses, the gated browser and the extra
+                          folders — what the session's own page drew before UI.UNIFY. */}
+                      {!answeringNow && sourceControls && (
+                        <SourceSettings controls={sourceControls} pt={pt} onRefused={setNotice} />
                       )}
 
                       {/* NOTIFICATIONS for THIS session. Delivery only — the session still reads as

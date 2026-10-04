@@ -18,11 +18,14 @@
  *   - `nativeLiveText`   the model's own stream (the `live` item), which is what the screen scrape
  *                        is for a CLI session — and unlike the scrape it is exact.
  *   - `nativeAsks`       the questions waiting on the person — drawn where `ApprovalCard` draws.
+ *   - `nativeControls`   the session's settings (model, reasoning effort, browser, extra folders) as
+ *                        the composer's standard controls — what the deleted native page drew.
  *   - `nativeSendParts`  the composer's message (paths on their own lines above the words, see
  *                        `messageAttachments.ts`) back into words + the stored upload names the
  *                        engine attaches.
  */
 import type { ChatTurn } from '../components/sessions/ChatBubble'
+import type { SourceControls } from '../components/sessions/chatSource'
 import type { NativeAsk, NativeChatItem } from './nativeChat'
 import { ATTACHMENT_DIR_MARK, attachmentName, splitMessage } from './messageAttachments'
 import { mediaTypeOf } from './nativeAttachments'
@@ -123,4 +126,44 @@ export function nativeSendParts(message: string): { text: string; uploads: { nam
     else refused.push(name)
   }
   return { text, uploads, refused }
+}
+
+/** B9.1's levels, in the order `EffortPicker` draws them; "off" is the picker's empty value. */
+export const NATIVE_EFFORTS = ['low', 'medium', 'high'] as const
+
+/**
+ * A native session's settings as the composer's standard controls (H24 model, B9.1 effort, B6.4
+ * browser, H20 extra folders). `window` is the engine's session facts; `models` the provider's list.
+ * The current model is always offered (a typed id may not be in the list). Null before the first read.
+ */
+export function nativeControls(
+  window: { model: string; effort?: 'low' | 'medium' | 'high'; browser?: boolean; extraDirs?: string[] } | null,
+  running: boolean,
+  models: readonly { id: string; label: string }[],
+  verbs: {
+    switchModel(model: string): Promise<string | null>
+    setEffort(effort: 'low' | 'medium' | 'high' | 'off'): Promise<string | null>
+    setBrowser(on: boolean): Promise<string | null>
+    addDir(path: string): Promise<string | null>
+  },
+): SourceControls | undefined {
+  if (!window) return undefined
+  const options = models.some(m => m.id === window.model) ? models : [{ id: window.model, label: window.model }, ...models]
+  return {
+    busy: running,
+    model: { current: window.model, options, freeText: true, switch: id => (id === window.model ? Promise.resolve(null) : verbs.switchModel(id)) },
+    effort: {
+      value: window.effort ?? '',
+      efforts: NATIVE_EFFORTS,
+      set: v => verbs.setEffort(v === '' ? 'off' : (NATIVE_EFFORTS as readonly string[]).includes(v) ? (v as 'low' | 'medium' | 'high') : 'off'),
+    },
+    browser: { on: window.browser === true, set: on => verbs.setBrowser(on) },
+    extraDirs: { dirs: window.extraDirs ?? [], add: p => verbs.addDir(p) },
+  }
+}
+
+/** The provider key the models route takes: an OpenAI-compatible session is keyed by its ENDPOINT. */
+export function nativeProviderKey(session: { provider: string; credential?: { provider: string; id: string } } | null | undefined): string {
+  if (!session) return ''
+  return session.provider === 'openai-compatible' && session.credential?.id ? session.credential.id : session.provider
 }
