@@ -75,7 +75,8 @@ import type {
   RestoreCandidate,
 } from '@agentistics/tui/control'
 import { DEFAULT_SESSION_VIEW } from '@agentistics/tui/control'
-import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT } from './config'
+import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT, serverLockFile } from './config'
+import { probeInstanceLock } from './single-instance'
 import {
   readPreferences, writePreferences, resolveArchiveMode, type ArchiveMode,
   clampSessionPollMs, sessionPollMsOrDefault, SESSION_POLL_DEFAULT_MS,
@@ -927,10 +928,42 @@ async function idleServerPids(): Promise<number[]> {
 
 async function stopLocal(s: CliStrings): Promise<void> {
   process.stdout.write(`  ${D}${s.stoppingLocal}${R}\n`)
-  const pids = await listeningServerPids()
-  if (pids.length) { for (const pid of pids) await sh(['kill', pid]) }
-  else await sh(['pkill', '-f', 'agentop server'])
+  const targets = planLocalStop({
+    listeners: await listeningServerPids(),
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    self: process.pid,
+  })
+  if (targets.length === 0) {
+    // Nothing on record to stop. NEVER widen to a pattern: see `planLocalStop`.
+    process.stdout.write(`  ${YE}${s.stopNoTarget}${R}\n`)
+    return
+  }
+  for (const pid of targets) await sh(['kill', String(pid)])
   for (let i = 0; i < 20; i++) { if (!(await isServerRunning())) return; await sleep(150) }
+}
+
+/**
+ * WHICH processes "stop the local server" may signal — PURE. The port's listener (when `lsof` can
+ * name it) and the holder of THIS data dir's `server.lock`, never ourselves, deduplicated.
+ *
+ * There is deliberately NO fallback. It used to be `pkill -f 'agentop server'`, and on Linux it ran
+ * on EVERY stop: Bun marks its processes non-dumpable, so `lsof`/`ss` cannot see the listener's
+ * socket (measured 2026-10-04: `lsof -ti tcp:47291 -sTCP:LISTEN` empty while pid 1770369 held the
+ * port). The pattern then matched every process whose command line contained "agentop server" — every
+ * other HOME's preview and test server on the machine, the shell wrappers around them, and any tmux
+ * server whose stored command said those words. One `agentop restart server` (or the cockpit's
+ * Stop/Restart, or a foreground start clearing the port) in ANY instance, preview copies included,
+ * SIGTERMed all of them. The lock names exactly the server of this data dir, by pid AND start time.
+ */
+export function planLocalStop(o: { listeners: readonly string[]; lockHolder: number | null; self: number }): number[] {
+  const out = new Set<number>()
+  for (const raw of o.listeners) {
+    const n = Number(raw)
+    if (Number.isInteger(n) && n > 1) out.add(n)
+  }
+  if (o.lockHolder !== null && Number.isInteger(o.lockHolder) && o.lockHolder > 1) out.add(o.lockHolder)
+  out.delete(o.self)
+  return [...out]
 }
 
 async function stopContainers(filter: string, msg: string): Promise<void> {
