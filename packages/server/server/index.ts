@@ -1802,7 +1802,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (live) {
           for (const route of live.routes) {
             if (url.pathname !== route.prefix && !url.pathname.startsWith(route.prefix + '/')) continue
-            const res = await route.handle(req, url, { clientIp })
+            const res = await route.handle(req, url, { clientIp, transport: 'tcp' })
             if (res === null) continue
             const headers = new Headers(res.headers)
             for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
@@ -4563,6 +4563,34 @@ const scheduleBackfillCheck = () => {
 }
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
 console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
+
+// B4.6: the machine-local door to the engine's native runtime (`runtime-socket.ts`): `agentop code`
+// on this machine drives sessions HOSTED here through it. Bound only when the engine asks for it and
+// this is not a central; removed on exit. Never on the startup path.
+if (!TEAM_CENTRAL) {
+  void (async () => {
+    try {
+      await loadEngine()
+      const { shouldBindRuntimeSocket, startRuntimeSocket } = await import('./runtime-socket')
+      const routes = () => engine()?.routes ?? null
+      if (!shouldBindRuntimeSocket({ central: false, routes: routes() })) return
+      const sock = startRuntimeSocket({
+        dataDir: AGENTISTICS_DATA_DIR,
+        routes,
+        guard: pathname => {
+          const needed = routeCapability(pathname)
+          const denied = needed ? capabilityDenied(needed) : null
+          return denied
+        },
+      })
+      process.on('exit', () => sock.stop())
+      process.on('SIGTERM', () => sock.stop())
+      console.log(`[boot] +${Math.round(performance.now())} ms runtime socket ${sock.path}`)
+    } catch (err) {
+      console.warn('[runtime-socket] not bound:', err instanceof Error ? err.message : String(err))
+    }
+  })()
+}
 setTimeout(scheduleBackfillCheck, 120_000).unref()
 setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
 } catch (err: unknown) {
