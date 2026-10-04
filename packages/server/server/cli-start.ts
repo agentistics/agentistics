@@ -2621,6 +2621,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
+      ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
       ...(previous ? { inherit: previous } : {}),
       attach: req.attach,

@@ -1857,6 +1857,12 @@ export interface ResumeSessionRequest {
    * you wrote about a piece of work must survive picking that work back up.
    */
   replaces?: string
+  /**
+   * EXT.OPEN: the message to continue the conversation with — delivered as the resumed session's
+   * first prompt (`planSpawn`'s `resumeId` + `prompt`), so it is never typed into a pane that is
+   * still coming up.
+   */
+  prompt?: string
   attach: boolean
 }
 
