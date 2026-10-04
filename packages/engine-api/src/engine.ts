@@ -29,6 +29,11 @@ export interface EngineManifest {
 export interface EngineRequestContext {
   /** The peer address the host's own rate limits and audit use. */
   clientIp: string
+  /**
+   * B4.6 (1.7, optional): the door the request came through — the TCP port every surface uses, or the
+   * machine-local unix socket (`<dataDir>/run/runtime.sock`, 0600) a terminal client uses. Absent: tcp.
+   */
+  transport?: 'tcp' | 'unix'
 }
 
 /** The host serves every engine route AFTER its capability guard, auth gate and Host allowlist. */
@@ -39,6 +44,11 @@ export interface EngineRoute {
   capability: CapabilityName
   /** `null` = not mine; the host answers 404. */
   handle(req: Request, url: URL, ctx?: EngineRequestContext): Promise<Response | null>
+  /**
+   * B4.6 (1.7, optional): may this route also be served on the machine-local unix socket? Only a route
+   * that says so is reachable there; the host binds the socket only when some route does.
+   */
+  localSocket?: boolean
 }
 
 /** The only prefixes an engine route may live under. There is no field for a public route. */
