@@ -91,7 +91,8 @@ export async function handlePhoneHttp(c: PhoneHttpCtx): Promise<Response | null>
     const done = await gate.completeUnlock(code, { audit: false })
     if (!done.ok) { vaultAudit({ type: 'vault.phone-unlock-failed' }); return reply(done) }
     vaultAudit({ type: 'vault.unlock', device: (await phoneLabel(s.id)) ?? (pt() ? 'celular' : 'phone') })
-    return reply({ ok: true, state: 'open' })
+    // The code just verified is the step-up too (owner 2026-10-03): the list asks nothing more.
+    return reply({ ok: true, state: 'open', grant: gate.mintGrant(session, 'read') })
   }
 
   // ── registering a phone: the request (phone) ──

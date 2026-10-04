@@ -165,7 +165,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {
     const b = await body()
     if (!str(b.code, 16)) return bad()
-    return reply(await gate.completeUnlock(b.code))
+    // Owner 2026-10-03: the code that completes the unlock IS the step-up — it hands back the
+    // 5-minute 'read' grant, so the list right behind the unlock never asks for a second code.
+    const r = await gate.completeUnlock(b.code)
+    return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
   }
   if (path === '/api/vault/auto-lock' && req.method === 'POST') {
     const b = await body()

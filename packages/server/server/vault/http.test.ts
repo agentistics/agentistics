@@ -384,12 +384,12 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
     expect((await http('GET', '/api/vault')).json).toMatchObject({ pendingStepup: true, state: 'locked' })
     expect((await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')).ok).toBe(false)
 
-    // the code → open; a grant for the list
-    expect((await http('POST', '/api/vault/unlock/code', { code: codeAt() })).status).toBe(200)
-    next()
-    expect((await http('GET', '/api/vault')).status).toBe(401) // the inventory still wants its own step-up
-    const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
-    const open = await http('GET', '/api/vault', undefined, g.json.grant)
+    // the code → open AND the grant for the list: ONE code (owner 2026-10-03 — it was asked twice)
+    const uc = await http('POST', '/api/vault/unlock/code', { code: codeAt() })
+    expect(uc.status).toBe(200)
+    expect(typeof uc.json.grant).toBe('string')
+    expect((await http('GET', '/api/vault')).status).toBe(401) // without the grant: still its own step-up
+    const open = await http('GET', '/api/vault', undefined, uc.json.grant)
     expect(open.json).toMatchObject({ state: 'open', presence: true, autoLockMinutes: 30 })
     expect(Array.isArray(open.json.items)).toBe(true)
     expect(open.json.autoLockInMs).toBeGreaterThan(0)

@@ -452,7 +452,7 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 |---|---|---|---|
 | unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
 | change the unlock policy | yes | yes | none, asked every time |
-| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. |
+| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. **The code that completes an unlock IS that step-up** (owner decision, 2026-10-03): `POST /api/vault/unlock/code` and the phone's `/api/vault/phone/unlock` hand back the same 5-minute grant, bound to the session that typed it, so the list right behind an unlock never asks a second code. An unlock that asked NO code (gesture only, or inside the per-day window) mints nothing — its list still asks, inline in the vault's own header, never as a second card. |
 | rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
 | lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 

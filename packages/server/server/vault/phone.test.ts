@@ -260,6 +260,9 @@ describe('opening with the code alone (opt-in, default off)', () => {
     const r = await http('POST', '/api/vault/phone/unlock', { kind: 'device', deviceId: d.deviceId, deviceSecret: d.deviceSecret, code: codeAt() }, PHONE_HTTP)
     expect(r.json).toMatchObject({ ok: true, state: 'open' })
     expect(hello.gestures).toBe(g0)
+    // Owner 2026-10-03: the unlock's code is the step-up — the list opens with no second code.
+    expect(typeof r.json.grant).toBe('string')
+    expect((await http('GET', '/api/vault', undefined, PHONE_HTTP)).status).toBe(200) // carries the grant the unlock returned
   })
   test('the code with another device\'s secret opens nothing', async () => {
     await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()
