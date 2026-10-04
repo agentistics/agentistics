@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { acceptPayload, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -65,5 +65,16 @@ describe('startup strip', () => {
         expect(t.body).not.toMatch(/bun run|server\.ts/)
       }
     }
+  })
+})
+
+describe('livenessStep', () => {
+  test('a failed probe marks the server down once, then stays quiet', () => {
+    expect(livenessStep(false, false)).toBe('mark-offline')
+    expect(livenessStep(true, false)).toBe('none')
+  })
+  test('an answer after being down means recover now; an answer while up changes nothing', () => {
+    expect(livenessStep(true, true)).toBe('recover')
+    expect(livenessStep(false, true)).toBe('none')
   })
 })

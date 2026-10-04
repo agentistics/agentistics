@@ -6,7 +6,7 @@ import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays,
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
-import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, partialPollMs, retryDelayMs, type LoadError, type StartupStripState } from '../lib/startupLoad'
+import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 
@@ -495,6 +495,30 @@ export function useData() {
     const id = setInterval(() => { void fetchData() }, updateInterval * 1000)
     return () => { clearInterval(id) }
   }, [liveUpdates, updateInterval, fetchData])
+
+  // Liveness: with data on screen, a stopped server is noticed in seconds (not at the next 30 s refresh),
+  // and when it answers again the data is refreshed by itself — no manual reload.
+  useEffect(() => {
+    let down = false
+    let stopped = false
+    const probe = async () => {
+      if (stopped || (typeof document !== 'undefined' && document.hidden)) return
+      let answered = false
+      try { answered = (await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)).ok } catch { answered = false }
+      if (stopped) return
+      const step = livenessStep(down, answered)
+      if (step === 'mark-offline') {
+        down = true
+        if (dataRef.current) setOffline(prev => prev ?? { kind: 'unreachable', detail: 'no answer from /api/health' })
+      } else if (step === 'recover') {
+        down = false
+        pollRef.current.failures = 0
+        void refreshRef.current()
+      }
+    }
+    const id = setInterval(() => { void probe() }, LIVENESS_MS)
+    return () => { stopped = true; clearInterval(id) }
+  }, [])
 
   // Retry / re-load on demand (the error screen's button, after a login). Shows the boot screen only
   // when there is nothing on screen to keep.

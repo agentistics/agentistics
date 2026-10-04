@@ -153,3 +153,15 @@ export function acceptPayload(current: { partial?: boolean } | null, fresh: { pa
   if (!current) return true
   return !(fresh.partial && fresh.partialReason === 'quick' && !current.partial)
 }
+
+/** The liveness probe: while data is on screen, ask `/api/health` this often with this deadline, so a
+ *  stopped server is noticed in about 4 s instead of at the next 30 s data refresh. */
+export const LIVENESS_MS = 2000
+export const LIVENESS_TIMEOUT_MS = 2000
+
+/** What one probe result means given whether the page already says the server is down. A failure
+ *  marks it down; an answer after that means it is back and the data should be refreshed NOW. */
+export function livenessStep(down: boolean, answered: boolean): 'mark-offline' | 'recover' | 'none' {
+  if (!answered) return down ? 'none' : 'mark-offline'
+  return down ? 'recover' : 'none'
+}

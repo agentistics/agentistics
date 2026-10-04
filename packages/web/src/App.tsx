@@ -3652,8 +3652,8 @@ export default function AppLayout() {
   const startupText = startupStripText(startup, lang === 'pt' ? 'pt' : 'en')
   const offlineText = offline
     ? (lang === 'pt'
-      ? `Sem resposta do servidor (${offline.kind === 'unreachable' ? 'inacessível' : offline.detail}). Mostrando o que já estava carregado; tentando de novo.`
-      : `The server isn't answering (${offline.kind === 'unreachable' ? 'unreachable' : offline.detail}). Showing what was already loaded; retrying.`)
+      ? `O servidor não está respondendo (${offline.kind === 'unreachable' ? 'inacessível' : offline.detail}). Mostrando o que já estava carregado; volta sozinho quando ele responder.`
+      : `The server is not answering (${offline.kind === 'unreachable' ? 'unreachable' : offline.detail}). Showing what was already loaded; it comes back by itself when the server answers.`)
     : null
   const noteLines = [offlineText, startupText, backfillText].filter((t): t is string => !!t)
   const backfillNote = noteLines.length > 0
@@ -3665,6 +3665,15 @@ export default function AppLayout() {
               <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anthropic-orange)', flexShrink: 0, animation: 'agStartupPulse 1.4s ease-in-out infinite' }} />
             )}
             <span>{t}</span>
+            {t === offlineText && (
+              <button onClick={refetch} style={{
+                minHeight: isMobile ? 44 : 28, padding: '2px 12px',
+                background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
+                color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
+              }}>
+                {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
+              </button>
+            )}
           </div>
         ))}
       </div>
