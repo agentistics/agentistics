@@ -945,6 +945,30 @@ if (command === 'server' || command === 'start' || !command) {
   // MONGO_URL + secrets. Unlike the Docker central there is NO bundled Mongo, so an external
   // MONGO_URL (Atlas or your own mongod) is required.
   const central = args.includes('--central')
+  // THE UNIT OWNS THIS DATA DIR'S SERVER WHEN IT IS INSTALLED (docs/incidents/2026-10-04-server-
+  // outside-unit.md). A hand-run `agentop server` / `--bg` here would be a second, unsupervised copy
+  // that holds the data dir and leaves the unit failed — so it starts the unit instead and returns.
+  // `--central` and an explicit `--port` are a different server and keep running here.
+  if (!central && portIdx === -1) {
+    const { serverStartRoute, startServerUnit } = await import('../server/server-ownership-io.ts')
+    if ((await serverStartRoute()).kind === 'delegate') {
+      const r = await startServerUnit()
+      if (r.ok) {
+        console.log(`\n  agentop-server is installed as a service — ${r.message} instead of a second copy here.`)
+        console.log(`  web:  http://localhost:${process.env.WEB_PORT ?? '47292'}`)
+        console.log('  logs: journalctl --user -u agentop-server -f')
+        console.log('  (AGENTISTICS_SERVER_FOREGROUND=1 agentop server runs one in this terminal anyway.)\n')
+        process.exit(0)
+      }
+      if (!r.unreachable) {
+        console.error(`\n  ✗ ${r.message}\n`)
+        process.exit(1)
+      }
+      // No user manager to ask (WSL before systemd's user instance is up): nothing else can serve
+      // now, so this one runs — and the unit takes the data dir back when it starts.
+      console.log(`  note: ${r.message} — running here; the agentop-server service takes over when it starts.`)
+    }
+  }
   // This process is the agentop SERVICE — the vault's only holder (SECRETS.4 §5.2) — and claims it
   // before anything below reads a secret (a native central's sealed env included).
   {
@@ -970,6 +994,15 @@ if (command === 'server' || command === 'start' || !command) {
   {
     const { probeInstanceLock, waitForInstanceFree, SERVICE_LOCK_WAIT } = await import('../server/single-instance.ts')
     const { serverLockFile, AGENTISTICS_DATA_DIR } = await import('../server/config.ts')
+    // Started by the service manager while a server OUTSIDE it holds the data dir: take it back when
+    // it is provably this data dir's own `agentop server` (it holds our lock, its argv says so, it is
+    // in no agentop unit). Waiting it out is what left the unit failed for two hours on 2026-10-04.
+    if (process.env.INVOCATION_ID) {
+      const { reclaimStrayServer } = await import('../server/server-ownership-io.ts')
+      const r = await reclaimStrayServer()
+      if (r.kind === 'reclaimed') console.log(`[startup] stopped agentop server pid ${r.pid}, which ran outside the service and held ${AGENTISTICS_DATA_DIR}`)
+      else if (r.kind === 'failed') console.log(`[startup] agentop server pid ${r.pid} runs outside the service and did not stop (${r.reason}) — waiting for it`)
+    }
     // Started by the service manager (systemd sets INVOCATION_ID): the SAME bounded wait as index.ts's
     // claim, or this early check would exit 75 before that wait is ever reached. By hand: at once.
     const holder = process.env.INVOCATION_ID

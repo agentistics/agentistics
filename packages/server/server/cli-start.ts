@@ -937,6 +937,16 @@ async function idleServerPids(): Promise<number[]> {
 
 async function stopLocal(s: CliStrings): Promise<void> {
   process.stdout.write(`  ${D}${s.stoppingLocal}${R}\n`)
+  // The service owns this server: STOP THE UNIT. Signalling its process instead is a crash to
+  // systemd, which restarts it — racing whatever this caller starts next (2026-10-04 12:22: the
+  // cockpit's restart killed the unit's server and its own `nohup` copy won the data dir).
+  const { serviceOwnsServerHere, reclaimStrayServer, SERVER_UNIT } = await import('./server-ownership-io')
+  if (await serviceOwnsServerHere()) {
+    await sh(['systemctl', '--user', 'stop', SERVER_UNIT])
+    await reclaimStrayServer()
+    for (let i = 0; i < 20; i++) { if (!(await isServerRunning())) return; await sleep(150) }
+    return
+  }
   const targets = planLocalStop({
     listeners: await listeningServerPids(),
     lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
@@ -1159,6 +1169,17 @@ async function restartLocalSvc(s: CliStrings, mode: RestartMode = {}): Promise<b
     else if (r === 'failed') process.stderr.write(`  ${YE}${s.localRebuildFailed}${R}\n`)
   }
   process.stdout.write(`  ${D}${s.restartingLocal}${R}\n`)
+  // The service owns this server: restart THROUGH it (taking back a stray first), never a
+  // stop + `nohup` of our own — that copy runs outside the unit and leaves the unit failed.
+  {
+    const { serviceOwnsServerHere } = await import('./server-ownership-io')
+    if (await serviceOwnsServerHere()) {
+      const { restartAutostart } = await import('./autostart')
+      const res = await restartAutostart('server')
+      if (!res.ok) { mode.failure = res.message.split('\n')[0]; process.stderr.write(`  ${YE}${mode.failure}${R}\n`) }
+      return res.ok
+    }
+  }
   // What was serving BEFORE, so "restarted" can mean "something else is serving now". The old check
   // was `isServerRunning()` alone, which the server being replaced also satisfies — a stop that did
   // not take (a permission, a supervisor respawning it) was reported as a successful restart.
@@ -3012,6 +3033,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: `${s.alreadyRunning(`http://localhost:${WEB_PORT}`)} ${s.useRestartInstead}` }
       }
 
+      {
+        const { serviceOwnsServerHere, startServerUnit } = await import('./server-ownership-io')
+        if (await serviceOwnsServerHere()) {
+          const r = await startServerUnit()
+          if (!r.ok) return { ok: false, message: r.message }
+          const hint = (await archivePending()) ? ` · ${s.archiveUnsetHint}` : ''
+          return { ok: true, message: `${s.startedBg} http://localhost:${WEB_PORT}${hint}` }
+        }
+      }
       startBackground()
       const hint = (await archivePending()) ? ` · ${s.archiveUnsetHint}` : ''
       return { ok: true, message: `${s.startedBg} http://localhost:${WEB_PORT}${hint}` }

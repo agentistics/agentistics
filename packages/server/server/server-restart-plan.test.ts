@@ -128,7 +128,7 @@ describe('serviceFindings — what `agentop doctor` says about the service', () 
     expect(f).toHaveLength(1)
     expect(f[0]!.status).toBe('warn')
     expect(f[0]!.detail).toContain('3825199')
-    expect(f[0]!.detail).toContain('systemctl --user restart agentop-server')
+    expect(f[0]!.detail).toContain('agentop restart server')
   })
 
   test('the service holding its own data dir is healthy', () => {
