@@ -24,6 +24,7 @@
  * on it saying why. The link was never the problem; there was no reader.
  */
 
+import { isExternalRowId } from './external-continue'
 import type { StartHost } from '../cli-start'
 import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
 import type { CliLang } from '../cli-lang'
@@ -146,7 +147,10 @@ async function readSessionChatCore(
   }
 
   onRow(row)
+  // EXT.OPEN: an EXTERNAL row is a RUNNING process (agentop only cannot see its screen), so its
+  // conversation is live and more is expected — it is read exactly like a session agentop hosts.
   const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+    || (row.state === 'unknown' && isExternalRowId(row.id))
 
   // The EXACT link, or nothing. `conversationBlind` is the row's own sentence for a harness that
   // can never report which conversation it is writing — reused rather than reworded, so the chat
