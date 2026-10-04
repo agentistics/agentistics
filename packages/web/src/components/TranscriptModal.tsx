@@ -52,7 +52,7 @@ export function TranscriptModal({ lang }: { lang: 'pt' | 'en' }) {
         style={{
           width: '100%',
           maxWidth: isMobile ? '100%' : 780,
-          height: isMobile ? '100%' : '80vh',
+          height: isMobile ? '100%' : 'calc(80vh / var(--ag-zoom, 1))',
           background: 'var(--bg-surface)',
           border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 14,

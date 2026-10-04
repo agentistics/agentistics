@@ -193,7 +193,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
             background: 'var(--bg-elevated)', padding: 10,
             display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10, alignItems: 'start',
             boxShadow: 'var(--ag-shadow-menu)',
-            maxHeight: `min(560px, calc(100vh - ${at.top + 12}px))`, overflowY: 'auto',
+            maxHeight: `min(560px, calc(calc(100vh / var(--ag-zoom, 1)) - ${at.top + 12}px))`, overflowY: 'auto',
           }}>
             {/* ORDERING — what comes first, inside each group and among the groups. */}
             <section style={card} aria-label={pt ? 'Ordenação' : 'Ordering'}>

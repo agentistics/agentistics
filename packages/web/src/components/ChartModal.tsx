@@ -34,7 +34,7 @@ export function ChartModal({ title, onClose, children }: Props) {
           padding: '24px 28px',
           width: '100%',
           maxWidth: 1100,
-          maxHeight: '90vh',
+          maxHeight: 'calc(90vh / var(--ag-zoom, 1))',
           overflow: 'auto',
           boxShadow: 'var(--shadow-elevated)',
         }}

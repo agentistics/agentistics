@@ -2458,7 +2458,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ag-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {skills === null ? (
@@ -2552,7 +2552,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ag-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {mcpServers === null ? (
@@ -2675,7 +2675,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ag-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {hashRows.length === 0 ? (

@@ -597,7 +597,7 @@ export function SessionFiling(p: SessionFilingProps) {
         padding: 14, display: 'grid', gap: 12, alignContent: 'start',
         ...(isMobile
           ? { width: '100%', height: '100%', borderRadius: 0, overflowY: 'auto' }
-          : { width: 'min(460px, 92vw)', maxHeight: '82vh', overflowY: 'auto' }),
+          : { width: 'min(460px, calc(92vw / var(--ag-zoom, 1)))', maxHeight: 'calc(82vh / var(--ag-zoom, 1))', overflowY: 'auto' }),
       }}>
         {head}
         {body}

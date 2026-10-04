@@ -397,7 +397,7 @@ export function BoardView(p: BoardViewProps) {
                     // Fixed, not fractional: columns of different widths read as different
                     // importance, and a `1fr` column collapses to nothing once seven of them share
                     // a phone.
-                    flex: '0 0 clamp(240px, 78vw, 288px)',
+                    flex: '0 0 clamp(240px, calc(78vw / var(--ag-zoom, 1)), 288px)',
                     scrollSnapAlign: 'start',
                     outline: isOverCol && !(reordering && !canMove)
                       ? '1px dashed var(--anthropic-orange)' : 'none',

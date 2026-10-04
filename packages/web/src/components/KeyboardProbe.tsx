@@ -87,7 +87,7 @@ export function KeyboardProbe({ pt }: { pt: boolean }) {
   return createPortal(
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
-      maxHeight: '42vh', overflowY: 'auto', pointerEvents: 'auto',
+      maxHeight: 'calc(42vh / var(--ag-zoom, 1))', overflowY: 'auto', pointerEvents: 'auto',
       background: 'rgba(0,0,0,0.86)', color: '#e5e7eb',
       font: '9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace',
       padding: '4px 6px', borderBottom: '1px solid #f59e0b',

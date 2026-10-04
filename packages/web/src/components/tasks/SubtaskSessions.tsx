@@ -180,7 +180,7 @@ export function SubtaskSessions(p: SubtaskSessionsProps) {
           style={{
             position: 'fixed', left: list.at.left, top: list.at.top, width: 240, zIndex: 60,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 5,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: '60vh', overflowY: 'auto',
+            boxShadow: 'var(--shadow-elevated)', maxHeight: 'calc(60vh / var(--ag-zoom, 1))', overflowY: 'auto',
           }}
         >
           <span style={microLabel}>{pt ? 'Sessões' : 'Sessions'}</span>
@@ -217,7 +217,7 @@ export function SubtaskSessions(p: SubtaskSessionsProps) {
           style={{
             position: 'fixed', left: menu.at.left, top: menu.at.top, width: 220, zIndex: 60,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: '60vh', overflowY: 'auto',
+            boxShadow: 'var(--shadow-elevated)', maxHeight: 'calc(60vh / var(--ag-zoom, 1))', overflowY: 'auto',
           }}
         >
           {step === 'unlink' && (

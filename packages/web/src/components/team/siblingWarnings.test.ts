@@ -278,7 +278,7 @@ test('the bubble opens INWARD from whichever edge it is near, at every width', (
   const mobileBody = css.slice(at, css.indexOf('}', at))
   expect(/right:\s*0/.test(mobileBody)).toBe(false)
   // Whatever it caps at, it must leave the viewport's own gutter free of the box.
-  expect(/max-width:\s*calc\(100vw/.test(mobileBody)).toBe(true)
+  expect(/max-width:\s*calc\(calc\(100vw \/ var\(--ag-zoom/.test(mobileBody)).toBe(true)
 })
 
 // --- the project dimension across machines -------------------------------------------------------

@@ -60,7 +60,7 @@ export function SessionDrilldownModal({ session, globalModelUsage, currency, brl
           borderRadius: isMobile ? 0 : 14,
           width: '100%',
           maxWidth: isMobile ? '100%' : 980,
-          maxHeight: isMobile ? '100%' : '90vh',
+          maxHeight: isMobile ? '100%' : 'calc(90vh / var(--ag-zoom, 1))',
           height: isMobile ? '100%' : undefined,
           // Vertical scroll only — never let a dense inner grid push the whole
           // modal (and its sticky header) sideways on a narrow phone.

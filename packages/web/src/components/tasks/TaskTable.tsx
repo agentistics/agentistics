@@ -1484,7 +1484,7 @@ export function TaskTable(p: TaskTableProps) {
           bottom: isMobile ? 'calc(var(--mobile-nav-h) + 12px)' : 20, zIndex: 50,
           ...surface, background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)',
           padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-          maxWidth: 'min(92vw, 620px)',
+          maxWidth: 'min(calc(92vw / var(--ag-zoom, 1)), 620px)',
         }}>
           <span style={{ ...numeric, fontSize: 13, color: 'var(--text-primary)' }}>
             {selected.length}

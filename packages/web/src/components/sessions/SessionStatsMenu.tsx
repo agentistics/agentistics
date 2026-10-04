@@ -417,7 +417,7 @@ export function SessionStatsMenu({
     ? {
         position: 'fixed', zIndex: 1200,
         left: gaugeAnchor?.left ?? -9999, bottom: gaugeAnchor?.bottom ?? -9999,
-        width: 'min(300px, calc(100vw - 16px))',
+        width: 'min(300px, calc(calc(100vw / var(--ag-zoom, 1)) - 16px))',
         padding: 12, borderRadius: 12,
         background: 'var(--bg-elevated)', border: '1px solid var(--border)',
         boxShadow: '0 -12px 32px rgba(0,0,0,0.4)',
@@ -429,7 +429,7 @@ export function SessionStatsMenu({
         // near the right edge of a 390px bar, so a 300px panel anchored to it would hang a piece
         // of itself off the screen.
         ...(touch
-          ? { width: 'min(300px, calc(100vw - 24px))' }
+          ? { width: 'min(300px, calc(calc(100vw / var(--ag-zoom, 1)) - 24px))' }
           : { width: variant === 'tab' ? (panelMaxWidth ?? 300) : 300 }),
         padding: 12, borderRadius: 12,
         background: 'var(--bg-elevated)', border: '1px solid var(--border)',

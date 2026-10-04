@@ -807,7 +807,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               borderRadius: '0 0 12px 12px',
               boxShadow: '0 14px 34px rgba(0,0,0,0.45)',
               padding: '10px 14px 12px',
-              maxHeight: '50vh', overflowY: 'auto',
+              maxHeight: 'calc(50vh / var(--ag-zoom, 1))', overflowY: 'auto',
             }}
           >
             <div style={{
@@ -1031,8 +1031,8 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               borderRadius: 8,
               boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
               zIndex: 1000,
-              width: isMobile ? 'min(92vw, 340px)' : 280,
-              maxHeight: '70vh',
+              width: isMobile ? 'min(calc(92vw / var(--ag-zoom, 1)), 340px)' : 280,
+              maxHeight: 'calc(70vh / var(--ag-zoom, 1))',
               overflowY: 'auto',
               overflowX: 'hidden',
               boxSizing: 'border-box',

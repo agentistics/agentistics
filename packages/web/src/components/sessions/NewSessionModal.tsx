@@ -697,7 +697,7 @@ export function NewSessionModal({
     >
       <div style={{
         background: 'var(--bg-surface)', border: '1px solid var(--border)',
-        borderRadius: 16, width: '100%', maxWidth: 620, maxHeight: '86vh',
+        borderRadius: 16, width: '100%', maxWidth: 620, maxHeight: 'calc(86vh / var(--ag-zoom, 1))',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         <header style={{

@@ -83,7 +83,7 @@ export function SessionPicker({
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 998 }} />
       <div style={{
-        position: 'fixed', inset: 0, margin: 'auto', width: 'min(460px, 92vw)', maxHeight: '72vh',
+        position: 'fixed', inset: 0, margin: 'auto', width: 'min(460px, calc(92vw / var(--ag-zoom, 1)))', maxHeight: 'calc(72vh / var(--ag-zoom, 1))',
         zIndex: 999, ...surface, background: 'var(--bg-elevated)', padding: 12,
         display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 9,
         boxShadow: 'var(--shadow-elevated)',

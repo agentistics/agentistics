@@ -55,7 +55,7 @@ export function CommentThreadDialog({ taskId, target, title, lang, onClose, onCh
           boxShadow: 'var(--shadow-elevated)', display: 'grid', gridTemplateRows: 'auto 1fr',
           ...(isMobile
             ? { inset: 0, width: '100%', height: '100%', borderRadius: 0, padding: '12px 16px' }
-            : { inset: 0, margin: 'auto', width: 'min(620px, 92vw)', height: 'min(720px, 86vh)', padding: 14 }),
+            : { inset: 0, margin: 'auto', width: 'min(620px, calc(92vw / var(--ag-zoom, 1)))', height: 'min(720px, calc(86vh / var(--ag-zoom, 1)))', padding: 14 }),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, marginBottom: 10 }}>

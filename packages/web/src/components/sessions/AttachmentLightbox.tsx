@@ -61,7 +61,7 @@ export function AttachmentLightbox({
   const src = srcFor ? srcFor(path) : attachmentUrl(path)
   const kind = attachmentKind(path)
   const frameStyle: React.CSSProperties = {
-    maxWidth: '90vw', maxHeight: '86vh', objectFit: 'contain',
+    maxWidth: 'calc(90vw / var(--ag-zoom, 1))', maxHeight: 'calc(86vh / var(--ag-zoom, 1))', objectFit: 'contain',
     borderRadius: 8, boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
   }
   // The INDEX, not the path: the same file sent in two messages is two entries sharing a path, and
@@ -157,7 +157,7 @@ export function AttachmentLightbox({
         // the `'other'` branch's own note above for the `frame-ancestors` limitation this shares.)
         <div
           onClick={e => e.stopPropagation()}
-          style={{ ...frameStyle, width: '90vw', height: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}
+          style={{ ...frameStyle, width: 'calc(90vw / var(--ag-zoom, 1))', height: 'calc(86vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}
         >
           <iframe
             src={`${src}#view=FitH`}
@@ -238,7 +238,7 @@ function TextFrame({ src, lang, frameStyle }: {
   return (
     <div
       onClick={e => e.stopPropagation()}
-      style={{ ...frameStyle, width: '90vw', height: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}
+      style={{ ...frameStyle, width: 'calc(90vw / var(--ag-zoom, 1))', height: 'calc(86vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}
     >
       {state.kind === 'text' ? (
         <pre style={{

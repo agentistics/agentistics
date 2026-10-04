@@ -175,7 +175,7 @@ export function NoticesModal({
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: isMobile ? '100%' : 620, height: isMobile ? '100%' : undefined,
-          maxHeight: isMobile ? '100%' : '86vh', overflowY: 'auto',
+          maxHeight: isMobile ? '100%' : 'calc(86vh / var(--ag-zoom, 1))', overflowY: 'auto',
           background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 12, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
           display: 'flex', flexDirection: 'column',

@@ -321,7 +321,7 @@ export function SessionsRail({
           aria-label={openFolderItem.name}
           style={{
             position: 'fixed', top: Math.max(8, Math.min(openFolder.top, window.innerHeight - 360)), left: openFolder.left,
-            width: 280, maxHeight: 'min(420px, calc(100vh - 16px))', overflowY: 'auto', zIndex: 510,
+            width: 280, maxHeight: 'min(420px, calc(calc(100vh / var(--ag-zoom, 1)) - 16px))', overflowY: 'auto', zIndex: 510,
             background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
             padding: 6, boxShadow: 'var(--ag-shadow-pop)',
           }}

@@ -211,13 +211,13 @@ html, body {
        `position: sticky` on iOS Safari. `clip` clips without that side effect,
        so the window stays the scroller and the sticky header stays fixed. */
     overflow-x: clip;
-    max-width: 100vw;
+    max-width: calc(100vw / var(--ag-zoom, 1));
     /* Smooth momentum scrolling on iOS */
     -webkit-overflow-scrolling: touch;
   }
 
   #root {
-    max-width: 100vw;
+    max-width: calc(100vw / var(--ag-zoom, 1));
     overflow-x: clip;
   }
 
@@ -511,7 +511,7 @@ html.ag-viewport-locked > body {
    * against the viewport, which is the only box that can honestly cap it. */
   width: max-content;
   min-width: 26ch;
-  max-width: min(34rem, calc(100vw - 32px));
+  max-width: min(34rem, calc(calc(100vw / var(--ag-zoom, 1)) - 32px));
   padding: 9px 11px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -555,7 +555,7 @@ html.ag-viewport-locked > body {
     right: auto;
     /* Narrower than the desktop floor, because at 390px 26ch is most of the screen already. */
     min-width: 0;
-    max-width: calc(100vw - 48px);
+    max-width: calc(calc(100vw / var(--ag-zoom, 1)) - 48px);
   }
 }
 

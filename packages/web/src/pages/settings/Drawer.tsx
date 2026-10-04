@@ -58,7 +58,7 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: isMobile ? '100%' : 'min(680px, 94vw)',
+          width: isMobile ? '100%' : 'min(680px, calc(94vw / var(--ag-zoom, 1)))',
           height: '100%',
           background: 'var(--bg-card)',
           borderLeft: isMobile ? 'none' : '1px solid var(--border)',

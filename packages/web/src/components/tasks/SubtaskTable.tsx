@@ -344,7 +344,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
           on screen, with the header row sticky so the columns stay named while it scrolls. A phone
           swipes sideways and has no scrollbar to lose, so it keeps the page's own vertical scroll —
           a nested one there traps the thumb. */}
-      <div style={isMobile ? { overflowX: 'auto' } : { maxHeight: '70vh', overflow: 'auto' }}>
+      <div style={isMobile ? { overflowX: 'auto' } : { maxHeight: 'calc(70vh / var(--ag-zoom, 1))', overflow: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>

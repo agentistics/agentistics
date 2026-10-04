@@ -115,7 +115,7 @@ export function RecentPromptsPanel({
         style={{
           display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, outline: 'none',
           width: isMobile ? '100%' : 'min(600px, 100%)',
-          height: isMobile ? '100%' : 'min(640px, 84vh)',
+          height: isMobile ? '100%' : 'min(640px, calc(84vh / var(--ag-zoom, 1)))',
           padding: isMobile ? '18px 16px' : 18,
           borderRadius: isMobile ? 0 : 16,
           background: 'var(--bg-card)', border: '1px solid var(--border)',

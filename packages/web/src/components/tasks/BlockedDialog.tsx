@@ -79,7 +79,7 @@ export function BlockedDialog(p: BlockedDialogProps) {
           display: 'grid', gap: 13, padding: 20,
           ...(isMobile
             ? { width: '100%', height: '100%', borderRadius: 0, overflowY: 'auto', alignContent: 'start' }
-            : { width: '100%', maxWidth: 460, maxHeight: '80vh', borderRadius: 12, overflowY: 'auto' }),
+            : { width: '100%', maxWidth: 460, maxHeight: 'calc(80vh / var(--ag-zoom, 1))', borderRadius: 12, overflowY: 'auto' }),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

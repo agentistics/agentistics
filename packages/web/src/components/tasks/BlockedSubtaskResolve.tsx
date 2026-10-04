@@ -148,7 +148,7 @@ export function BlockedSubtaskResolve(p: BlockedSubtaskResolveProps) {
       <div style={{
         ...surface, background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)',
         padding: 16, display: 'grid', gap: 12, alignContent: 'start',
-        width: isMobile ? '100%' : 'min(440px, 92vw)',
+        width: isMobile ? '100%' : 'min(440px, calc(92vw / var(--ag-zoom, 1)))',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <AlertTriangle size={15} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />

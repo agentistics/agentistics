@@ -281,7 +281,7 @@ export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClo
           border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 16,
           width: '100%', maxWidth: isMobile ? '100%' : 560,
-          height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '86vh',
+          height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : 'calc(86vh / var(--ag-zoom, 1))',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >

@@ -66,7 +66,12 @@ interchangeable:
 - **`secret`** — a live credential. Excluded by decision: a tarball holding these is a master key to
   the user's accounts and it travels on a pendrive. The five minutes of re-login are paid on
   purpose, and `omittedSecrets()` is what lets the restore **name each one and the command that
-  re-establishes it**. Nothing goes missing in silence.
+  re-establishes it**. Nothing goes missing in silence. The one deliberate exception is the vault: a
+  backup never carries the data key in the clear or any machine-bound wrapper, but when a vault with a
+  recovery key exists it carries a sealed bundle that opens only with the 24 words. Older bundles stay in
+  older releases until the vault's history is erased (button on the Vault page, and automatically after a
+  data-key rotation) — which cannot reach a release deleted by hand or an archive copied elsewhere. See
+  [security.md](security.md#backups).
 - **`regenerable`** — a cache or a log. It rebuilds itself and costs megabytes.
 - **`runtime`** — true on the old machine, false on the new one. `managed-sessions.json` names tmux
   sessions that will not exist there; restoring it produces a fleet of rows pointing at nothing.

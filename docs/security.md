@@ -401,10 +401,19 @@ the host or from the engine through `host.audit` — is one line in `~/.agentist
 
 ### Backups
 
-**A backup never carries the data key, wrapped or not** (`.agentistics/vault` is a `secret` row). A
-restore produces a machine with no vault; the first use creates a new one, and the restore's
-"omitted secrets" list is the re-entry checklist. A sealed file that travelled by other means reads
-`wrong-machine`.
+**A backup never carries the data key in the clear, and never any machine-bound wrapper**
+(`.agentistics/vault` is a `secret` row, so the live vault directory is not copied). When a vault with a
+recovery key exists, the backup carries ONE sealed bundle instead — the data key wrapped only under the 24
+words, with every record still sealed (see "The backup" under the vault page, below). A restore therefore
+produces a machine with no usable vault until the 24 words are entered; without a bundle, the first use
+creates a new vault and the restore's "omitted secrets" list is the re-entry checklist. A sealed file that
+travelled by other means reads `wrong-machine`.
+
+**A backup is not a deletion.** Older releases keep older bundles — ciphertext under the data key of
+their time. The history wipe erases this machine's older bundle assets: a button on the Vault page
+("Erase the vault's history in the backup", code + Windows Hello) and, automatically, on the next confirmed
+upload after a data-key rotation. **Limit:** a release deleted by hand outside agentop, or a copy of an
+archive made elsewhere, is outside what the wipe can reach.
 
 ### A Docker central — the limit this leaves
 
@@ -657,7 +666,7 @@ what the wipe can reach.
 `:vault` chip in a session's composer; sending GRANTS exactly those to that session — the gesture,
 fresh — and the message carries `vault://` references plus a briefing, never a value. A grant lives in
 memory only, dies when the vault locks or the person revokes it, and holds ids and reference names.
-- **Native sessions** (the engine, engine-api 1.7 `vaultRefs`): after the policy allows a tool call, the
+- **Native sessions** (the engine, engine-api 1.8 `vaultRefs`): after the policy allows a tool call, the
   session's granted values reach THAT call's process as `VAULT_<KEY>` env (a shell call carrying them
   runs in its own bash, never the shared one), and every tool output is scrubbed before the content
   store, the history, the journal, the stream or the model sees it.

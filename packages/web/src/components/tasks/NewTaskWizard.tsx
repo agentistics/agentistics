@@ -60,7 +60,7 @@ export function NewTaskWizard({ onDone, onClose, onCreateSession, session }: New
           padding: 16, display: 'grid', gap: 13, gridTemplateRows: 'auto 1fr',
           ...(isMobile
             ? { width: '100%', height: '100%', borderRadius: 0, overflowY: 'auto', alignContent: 'start' }
-            : { width: 'min(520px, 92vw)', maxHeight: '82vh', overflowY: 'auto' }),
+            : { width: 'min(520px, calc(92vw / var(--ag-zoom, 1)))', maxHeight: 'calc(82vh / var(--ag-zoom, 1))', overflowY: 'auto' }),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

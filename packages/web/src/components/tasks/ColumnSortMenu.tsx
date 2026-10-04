@@ -108,7 +108,7 @@ export function ColumnSortMenu({ title, color, sort, overridden, options, onPick
             style={{
               position: 'fixed', left: at.left, top: at.top, width: 220, zIndex: 1200,
               ...surface, background: 'var(--bg-elevated)', padding: 6, display: 'grid', gap: 2,
-              boxShadow: 'var(--shadow-elevated)', maxHeight: 'min(340px, 70vh)', overflowY: 'auto',
+              boxShadow: 'var(--shadow-elevated)', maxHeight: 'min(340px, calc(70vh / var(--ag-zoom, 1)))', overflowY: 'auto',
             }}
           >
             <div style={{ ...microLabel, padding: '2px 8px 4px' }}>{tooltip}</div>

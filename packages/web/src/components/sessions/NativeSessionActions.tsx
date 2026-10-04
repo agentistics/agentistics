@@ -45,7 +45,7 @@ export function NativeSessionActions({ sessionId, running, lang }: { sessionId: 
         <MoreHorizontal size={17} />
       </button>
       {open && (
-        <div role="menu" style={{ position: 'absolute', right: 0, top: 38, zIndex: 20, minWidth: 220, maxWidth: 'calc(100vw - 32px)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+        <div role="menu" style={{ position: 'absolute', right: 0, top: 38, zIndex: 20, minWidth: 220, maxWidth: 'calc(calc(100vw / var(--ag-zoom, 1)) - 32px)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
           <button type="button" role="menuitem" disabled={running} onClick={() => void fork()} style={{ ...item, opacity: running ? 0.5 : 1 }}
             title={running ? (pt ? 'Espere a run terminar.' : 'Wait for the run to end.') : undefined}>
             <GitFork size={14} /> {pt ? 'Fork a partir do último turno' : 'Fork from the last turn'}
@@ -62,7 +62,7 @@ export function NativeSessionActions({ sessionId, running, lang }: { sessionId: 
         </div>
       )}
       {error && (
-        <div role="alert" style={{ position: 'absolute', right: 0, top: 38, zIndex: 19, maxWidth: 'min(320px, calc(100vw - 32px))', padding: '6px 10px', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--accent-red)', fontSize: 12, border: '1px solid var(--border)' }}
+        <div role="alert" style={{ position: 'absolute', right: 0, top: 38, zIndex: 19, maxWidth: 'min(320px, calc(calc(100vw / var(--ag-zoom, 1)) - 32px))', padding: '6px 10px', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--accent-red)', fontSize: 12, border: '1px solid var(--border)' }}
           onClick={() => setError(null)}>
           {error}
         </div>

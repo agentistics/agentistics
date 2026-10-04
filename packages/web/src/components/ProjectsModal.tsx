@@ -141,7 +141,7 @@ export function ProjectsModal({ projects, sessionCountByProject, selected, onApp
     width: '100%',
     maxWidth: isMobile ? '100%' : 560,
     height: isMobile ? '100%' : undefined,
-    maxHeight: isMobile ? '100%' : '80vh',
+    maxHeight: isMobile ? '100%' : 'calc(80vh / var(--ag-zoom, 1))',
     display: 'flex',
     flexDirection: 'column',
     boxShadow: isMobile ? 'none' : '0 24px 64px rgba(0,0,0,0.5)',

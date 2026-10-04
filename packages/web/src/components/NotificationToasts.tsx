@@ -91,7 +91,7 @@ export function NotificationToasts({ lang }: Props) {
     <div style={{
       position: 'fixed', top: 16, right: 16, zIndex: 4000,
       display: 'flex', flexDirection: 'column', gap: 10,
-      maxWidth: 'min(360px, calc(100vw - 32px))', pointerEvents: 'none',
+      maxWidth: 'min(360px, calc(calc(100vw / var(--ag-zoom, 1)) - 32px))', pointerEvents: 'none',
     }}>
       {toasts.map(n => {
         const { color, Icon } = STYLE[n.type]

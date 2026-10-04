@@ -2525,7 +2525,7 @@ function CardModal({ statusPill, harness, title, meta, lang, onClose, children }
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: isMobile ? '100%' : 'min(1400px, 95vw)', height: isMobile ? '100%' : '92vh',
+          width: isMobile ? '100%' : 'min(1400px, calc(95vw / var(--ag-zoom, 1)))', height: isMobile ? '100%' : 'calc(92vh / var(--ag-zoom, 1))',
           background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
           borderRadius: isMobile ? 0 : 12, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0,
         }}

@@ -56,11 +56,11 @@ export const INK_DIM = 'rgba(255,255,255,.62)'
 export const INK_SOFT = 'rgba(255,255,255,.76)'
 
 const hudStyle: CSSProperties = {
-  position: 'fixed', left: 0, right: 0, top: 'calc(env(safe-area-inset-top, 0px) + 8vh)', display: 'flex', flexDirection: 'column',
+  position: 'fixed', left: 0, right: 0, top: 'calc(env(safe-area-inset-top, 0px) + calc(8vh / var(--ag-zoom, 1)))', display: 'flex', flexDirection: 'column',
   alignItems: 'center', gap: 6, pointerEvents: 'none', paddingInline: 16, textAlign: 'center', transition: 'opacity .5s ease', textShadow: SHADOW,
 }
 const footStyle: CSSProperties = {
-  position: 'fixed', left: 0, right: 0, bottom: 'calc(env(safe-area-inset-bottom, 0px) + 8vh)', display: 'flex', flexDirection: 'column',
+  position: 'fixed', left: 0, right: 0, bottom: 'calc(env(safe-area-inset-bottom, 0px) + calc(8vh / var(--ag-zoom, 1)))', display: 'flex', flexDirection: 'column',
   alignItems: 'center', gap: 12, pointerEvents: 'none', paddingInline: 16, textAlign: 'center', transition: 'opacity .5s ease', textShadow: SHADOW,
 }
 

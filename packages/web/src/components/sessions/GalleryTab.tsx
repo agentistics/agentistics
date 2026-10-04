@@ -638,7 +638,7 @@ function MessageDialog({ group, pt, isMobile, now, onGoTo, onClose }: {
           display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0,
           width: isMobile ? '100%' : 'min(520px, 100%)',
           height: isMobile ? '100%' : 'auto',
-          maxHeight: isMobile ? '100%' : '80vh',
+          maxHeight: isMobile ? '100%' : 'calc(80vh / var(--ag-zoom, 1))',
           padding: isMobile ? '18px 16px' : 20,
           borderRadius: isMobile ? 0 : 16,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
@@ -659,7 +659,7 @@ function MessageDialog({ group, pt, isMobile, now, onGoTo, onClose }: {
             in with nothing typed, and an empty box would read as a failure to load. */}
         <pre style={{
           margin: 0, flex: isMobile ? 1 : '0 1 auto', minHeight: 0,
-          maxHeight: isMobile ? 'none' : '46vh', overflow: 'auto',
+          maxHeight: isMobile ? 'none' : 'calc(46vh / var(--ag-zoom, 1))', overflow: 'auto',
           padding: 12, borderRadius: 10,
           background: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
           fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.6,

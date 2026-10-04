@@ -645,8 +645,8 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
           background: 'var(--bg-card)',
           border: wide ? 'none' : '1px solid var(--border)',
           borderRadius: wide ? 0 : 12,
-          width: wide ? '100%' : 'min(1080px, 96vw)',
-          height: wide ? '100%' : 'min(84vh, 860px)',
+          width: wide ? '100%' : 'min(1080px, calc(96vw / var(--ag-zoom, 1)))',
+          height: wide ? '100%' : 'min(calc(84vh / var(--ag-zoom, 1)), 860px)',
           display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden',
         }}
       >

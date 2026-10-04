@@ -67,8 +67,8 @@ export function VaultUnlockHost({ lang, isMobile, enabled }: { lang: 'en' | 'pt'
 
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3200 } : { ...overlay, zIndex: 3200 }
   const c: React.CSSProperties = isMobile
-    ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
-    : { ...card, maxWidth: 440, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }
+    ? { ...card, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ag-zoom, 1))', maxHeight: 'calc(100dvh / var(--ag-zoom, 1))', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
+    : { ...card, maxWidth: 440, maxHeight: 'calc(92vh / var(--ag-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }
   const title = lang === 'pt' ? 'Destrancar o cofre' : 'Unlock the vault'
   const why = lang === 'pt' ? 'Esta ação precisa do cofre aberto. Destranque aqui e ela continua sozinha.' : 'This needs the vault open. Unlock it here and it carries on by itself.'
   return (

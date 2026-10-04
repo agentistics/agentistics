@@ -80,7 +80,7 @@ export function ArchiveConsentModal({ lang, onChoose, onLangChange }: Props) {
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-elevated)',
           padding: 28,
-          maxHeight: '90vh',
+          maxHeight: 'calc(90vh / var(--ag-zoom, 1))',
           overflowY: 'auto',
         }}
       >

@@ -137,7 +137,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
 
   const badge = minimizedBadge(count)
   const menuPos: CSSProperties = {
-    position: 'absolute', width: MENU_W, maxWidth: 'calc(100vw - 24px)',
+    position: 'absolute', width: MENU_W, maxWidth: 'calc(calc(100vw / var(--ag-zoom, 1)) - 24px)',
     ...(place.vertical === 'above' ? { bottom: 'calc(100% + 10px)' } : { top: 'calc(100% + 10px)' }),
     ...(place.horizontal === 'right' ? { right: 0 } : { left: 0 }),
   }
@@ -193,7 +193,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
             <span>{pt ? 'Minimizadas' : 'Minimized'}</span>
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{count}</span>
           </div>
-          <div style={{ maxHeight: 'min(360px, 60vh)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          <div style={{ maxHeight: 'min(360px, calc(60vh / var(--ag-zoom, 1)))', overflowY: 'auto', overscrollBehavior: 'contain' }}>
             {items.map(({ id, row }) => {
               const title = row?.title ?? 'Nay'
               const color = row ? STATE_COLOR[row.state] : 'var(--text-tertiary)'

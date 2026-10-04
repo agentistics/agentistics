@@ -2535,7 +2535,7 @@ export function MoveToPicker({ sessionId, item, tree, isMobile, lang, onPick, on
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: isMobile ? undefined : 420,
-          height: isMobile ? '100%' : undefined, maxHeight: isMobile ? undefined : '70vh',
+          height: isMobile ? '100%' : undefined, maxHeight: isMobile ? undefined : 'calc(70vh / var(--ag-zoom, 1))',
           background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 12,
           display: 'flex', flexDirection: 'column', minHeight: 0,

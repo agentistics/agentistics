@@ -600,7 +600,7 @@ export default function CustomPage() {
 
   if (layoutNames.length === 0) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 200px)', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(calc(100vh / var(--ag-zoom, 1)) - 200px)', flexDirection: 'column', gap: 20 }}>
         <div style={{ width: 64, height: 64, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Layers size={28} color="var(--text-tertiary)" />
         </div>
@@ -1012,7 +1012,7 @@ export default function CustomPage() {
       </div>
 
       {/*  Main row: aside + canvas  */}
-      <div ref={outerRowRef} style={{ display: 'flex', gap: sidebarOpen ? ASIDE_GAP : 0, alignItems: 'flex-start', minHeight: 'calc(100vh - 300px)' }}>
+      <div ref={outerRowRef} style={{ display: 'flex', gap: sidebarOpen ? ASIDE_GAP : 0, alignItems: 'flex-start', minHeight: 'calc(calc(100vh / var(--ag-zoom, 1)) - 300px)' }}>
 
         {/*  Aside / Palette  */}
         {sidebarOpen && !locked && (
@@ -1025,7 +1025,7 @@ export default function CustomPage() {
             // tall as the panel (window minus the strip, the board's gaps and the page padding).
             position: 'sticky',
             top: 16,
-            maxHeight: 'calc(100vh - var(--ag-topbar-h) - 48px)',
+            maxHeight: 'calc(calc(100vh / var(--ag-zoom, 1)) - var(--ag-topbar-h) - 48px)',
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
@@ -1250,7 +1250,7 @@ export default function CustomPage() {
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}
           onClick={e => { if (e.target === e.currentTarget) setDupModal(null) }}
         >
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl,16px)', padding: 24, width: 440, maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl,16px)', padding: 24, width: 440, maxWidth: 'calc(90vw / var(--ag-zoom, 1))', maxHeight: 'calc(80vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
                 {pt ? 'Duplicar layout' : 'Duplicate layout'}
@@ -1362,7 +1362,7 @@ export default function CustomPage() {
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}
           onClick={e => { if (e.target === e.currentTarget) setManageOpen(false) }}
         >
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl,16px)', padding: 24, width: 420, maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl,16px)', padding: 24, width: 420, maxWidth: 'calc(90vw / var(--ag-zoom, 1))', maxHeight: 'calc(80vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
                 {pt ? 'Gerenciar layouts' : 'Manage layouts'}
@@ -1453,8 +1453,8 @@ export default function CustomPage() {
         >
           <div style={{
             background: 'var(--bg-card)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-xl, 16px)', padding: 24, width: 480, maxWidth: '90vw',
-            maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 16,
+            borderRadius: 'var(--radius-xl, 16px)', padding: 24, width: 480, maxWidth: 'calc(90vw / var(--ag-zoom, 1))',
+            maxHeight: 'calc(80vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column', gap: 16,
             boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

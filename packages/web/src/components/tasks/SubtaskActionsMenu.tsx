@@ -235,7 +235,7 @@ export function SubtaskActionsMenu(p: SubtaskActionsMenuProps) {
           style={{
             position: 'fixed', left: at.left, top: at.top, width: 280, zIndex: 60,
             ...surface, background: 'var(--bg-elevated)', padding: 10, display: 'grid', gap: 6,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: '70vh', overflowY: 'auto',
+            boxShadow: 'var(--shadow-elevated)', maxHeight: 'calc(70vh / var(--ag-zoom, 1))', overflowY: 'auto',
           }}
         >
           {step !== 'menu' && (

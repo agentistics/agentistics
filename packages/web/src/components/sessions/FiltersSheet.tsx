@@ -59,7 +59,7 @@ export function FiltersSheet({ open, onClose, onClear, lang, children }: {
       }}
     >
       <div style={{
-        width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+        width: '100%', maxHeight: 'calc(88vh / var(--ag-zoom, 1))', display: 'flex', flexDirection: 'column',
         background: 'var(--bg-surface)', borderTopLeftRadius: 16, borderTopRightRadius: 16,
         borderTop: '1px solid var(--border)',
         // The sheet reaches the bottom edge of the screen, so it owns the home-indicator band —

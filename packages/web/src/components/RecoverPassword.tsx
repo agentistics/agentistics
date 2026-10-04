@@ -114,7 +114,7 @@ function Shell({ children, onSubmit }: { children: React.ReactNode; onSubmit?: (
     </div>
   )
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: 16 }}>
+    <div style={{ minHeight: 'calc(100vh / var(--ag-zoom, 1))', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: 16 }}>
       {onSubmit ? <form onSubmit={onSubmit} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>{inner}</form> : inner}
     </div>
   )

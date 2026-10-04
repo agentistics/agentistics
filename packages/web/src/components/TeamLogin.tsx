@@ -78,7 +78,7 @@ export function TeamLogin({ onAuthed }: Props) {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: 'calc(100vh / var(--ag-zoom, 1))',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',

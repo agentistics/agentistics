@@ -309,7 +309,7 @@ export function TaskPicker(p: TaskPickerProps) {
           // opens centred at a size that holds both steps comfortably.
           ...(isMobile
             ? { width: '100%', height: '100%', borderRadius: 0, overflowY: 'auto' }
-            : { width: 'min(560px, 92vw)', maxHeight: '80vh', overflowY: 'auto' }),
+            : { width: 'min(560px, calc(92vw / var(--ag-zoom, 1)))', maxHeight: 'calc(80vh / var(--ag-zoom, 1))', overflowY: 'auto' }),
         }}
       >
         {head}

@@ -365,8 +365,8 @@ export function MaximizedRestrictions(p: {
         style={{
           background: 'var(--bg-card)', border: p.isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: p.isMobile ? 0 : 12,
-          width: p.isMobile ? '100%' : 'min(980px, 96vw)',
-          height: p.isMobile ? '100%' : 'min(80vh, 760px)',
+          width: p.isMobile ? '100%' : 'min(980px, calc(96vw / var(--ag-zoom, 1)))',
+          height: p.isMobile ? '100%' : 'min(calc(80vh / var(--ag-zoom, 1)), 760px)',
           display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden',
         }}
       >

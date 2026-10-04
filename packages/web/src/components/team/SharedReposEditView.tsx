@@ -259,7 +259,7 @@ export function pickerListStyle(isMobile: boolean): {
   scrollbarGutter?: 'stable'
 } {
   if (isMobile) return {}
-  return { maxHeight: 'min(48vh, 520px)', overflowY: 'auto', minHeight: 0, scrollbarGutter: 'stable' }
+  return { maxHeight: 'min(calc(48vh / var(--ag-zoom, 1)), 520px)', overflowY: 'auto', minHeight: 0, scrollbarGutter: 'stable' }
 }
 
 /**

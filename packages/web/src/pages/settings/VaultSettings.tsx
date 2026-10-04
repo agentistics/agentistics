@@ -515,7 +515,7 @@ function Gate({ code, gesture, lang }: { code: boolean; gesture: boolean; lang: 
  * card let the nav cover its last button (the 24-word recovery's "Open the vault", at 390px).
  */
 const fullOnMobile = (isMobile: boolean, cardStyle: React.CSSProperties): { o: React.CSSProperties; c: React.CSSProperties } => isMobile
-  ? { o: { ...overlay, padding: 0, zIndex: 3000 }, c: { ...cardStyle, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' } }
+  ? { o: { ...overlay, padding: 0, zIndex: 3000 }, c: { ...cardStyle, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ag-zoom, 1))', maxHeight: 'calc(100dvh / var(--ag-zoom, 1))', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' } }
   : { o: overlay, c: cardStyle }
 
 /** v2.98.1: kinds this platform has but this build cannot offer yet, never already enrolled. */
@@ -955,7 +955,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind, onAct
 
   return (
     <div style={fullOnMobile(isMobile, card).o} role="dialog" aria-modal="true" aria-label={t('wiz_title')}>
-      <div className="ag-vault-wizard" style={fullOnMobile(isMobile, { ...card, maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }).c}>
+      <div className="ag-vault-wizard" style={fullOnMobile(isMobile, { ...card, maxWidth: 460, maxHeight: 'calc(92vh / var(--ag-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }).c}>
         <style>{PRINT_CSS}</style>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{t('wiz_title')}</div>
         {prog && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '2px 0 10px' }}>{vtf('wiz_step', lang, { i: stepNo, n: plan.length })}</div>}
@@ -1169,7 +1169,7 @@ function RecoverDialog({ lang, isMobile, loopback, onCancel, onRecovered }: {
   }
   return (
     <div style={fullOnMobile(isMobile, card).o} role="dialog" aria-modal="true" aria-label={t('rec_recover_title')}>
-      <form onSubmit={e => { e.preventDefault(); void submit() }} className="ag-vault-recover" style={fullOnMobile(isMobile, { ...card, maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }).c}>
+      <form onSubmit={e => { e.preventDefault(); void submit() }} className="ag-vault-recover" style={fullOnMobile(isMobile, { ...card, maxWidth: 560, maxHeight: 'calc(92vh / var(--ag-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }).c}>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>{t('rec_recover_title')}</div>
         {todo ? (
           <>

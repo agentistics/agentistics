@@ -257,7 +257,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         ...(isMobile
           ? { width: '100%', height: '100%', borderRadius: 0 }
-          : { borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh' }),
+          : { borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: 'calc(90vh / var(--ag-zoom, 1))' }),
       }}>
         <header style={{
           display: 'flex', alignItems: 'center', gap: 10,

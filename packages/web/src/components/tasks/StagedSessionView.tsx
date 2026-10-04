@@ -100,7 +100,7 @@ export function StagedSessionView(p: StagedSessionViewProps) {
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         ...(isMobile
           ? { width: '100%', height: '100%', borderRadius: 0 }
-          : { borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '86vh' }),
+          : { borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: 'calc(86vh / var(--ag-zoom, 1))' }),
       }}>
         <header style={{
           display: 'flex', alignItems: 'center', gap: 10,

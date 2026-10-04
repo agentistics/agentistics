@@ -232,7 +232,7 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
 
   return (
     <div style={{
-      minHeight: '100vh',
+      minHeight: 'calc(100vh / var(--ag-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -475,7 +475,7 @@ function ChartModal({ title, onClose, children }: {
           padding: '24px 28px',
           width: '100%',
           maxWidth: 1100,
-          maxHeight: '90vh',
+          maxHeight: 'calc(90vh / var(--ag-zoom, 1))',
           overflow: 'auto',
           boxShadow: 'var(--shadow-elevated)',
         }}
@@ -3488,13 +3488,13 @@ export default function AppLayout() {
   // re-reading that state. Showing "Failed to load data — HTTP 403" in that gap turns the
   // moment right after signing up into a dead end with a Retry button that cannot help.
   if (error && teamSession.central && String(error).includes('403')) {
-    return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
+    return <div style={{ minHeight: 'calc(100vh / var(--ag-zoom, 1))', background: 'var(--bg-base)' }} />
   }
 
   if (error) {
     return (
       <div style={{
-        minHeight: '100vh',
+        minHeight: 'calc(100vh / var(--ag-zoom, 1))',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -3858,7 +3858,7 @@ export default function AppLayout() {
                 display: 'grid',
                 gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
                 transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
-                width: filtrosBounds.width, maxWidth: 'calc(100vw - 16px)',
+                width: filtrosBounds.width, maxWidth: 'calc(calc(100vw / var(--ag-zoom, 1)) - 16px)',
               }}
               onTransitionEnd={e => {
                 if (e.target !== e.currentTarget) return
@@ -4382,7 +4382,7 @@ export default function AppLayout() {
       // Everywhere else it stays, because a short page still has to fill the window.
       // The DESKTOP dashboard is on the board as well: its page scrolls inside its own panel, so
       // the root is a window-sized frame there too, never a document that grows.
-      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: '100vh' }),
+      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: 'calc(100vh / var(--ag-zoom, 1))' }),
       // The REAL cause of the session pane's header/composer "scrolling away" and landing at the
       // wrong spot: `<main>` below sets an explicit `height` for the sessions workspace, but a flex
       // item with `flex: 1 1 0%` computes its used size from the flex algorithm, not from its own
@@ -4465,7 +4465,7 @@ export default function AppLayout() {
       // A home-screen app on iOS can come back from the keyboard with `100dvh` short by about the
       // status bar, leaving a black band under the bottom bar (owner, 2026-10-04). Held at the
       // screen's height then — `useStandaloneHeight` / `lib/standaloneHeight.ts`.
-      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : '100dvh') : undefined,
+      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : 'calc(100dvh / var(--ag-zoom, 1))') : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.
@@ -4768,7 +4768,7 @@ export default function AppLayout() {
               // On MOBILE this fills the parent, which already subtracts the fixed nav (see the
               // root's own note) — repeating the arithmetic here is what let the two disagree.
               // Desktop still subtracts its own fixed top strip, which the root does not know about.
-              height: isMobile ? undefined : 'calc(100vh - var(--ag-topbar-h))',
+              height: isMobile ? undefined : 'calc(calc(100vh / var(--ag-zoom, 1)) - var(--ag-topbar-h))',
               minHeight: 0,
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
@@ -4796,7 +4796,7 @@ export default function AppLayout() {
               flex: 1,
               // Fill at least the viewport so the footer always sits below the fold (a scroll away),
               // even on short pages — it never floats up into a half-empty screen.
-              minHeight: '100vh',
+              minHeight: 'calc(100vh / var(--ag-zoom, 1))',
               // The bottom padding clears the fixed nav, so it has to grow with it: installed as a
               // PWA the bar is 56px + the home-indicator inset, and a flat 80px hid the last card.
               padding: isMobile ? '16px 16px calc(24px + var(--mobile-nav-h))' : '24px 32px',
