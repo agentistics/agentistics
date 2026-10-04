@@ -409,7 +409,7 @@ export interface EngineCachedInvocation {
   usageAnomalies?: unknown[]
   stopReason: unknown
   /**
-   * `reasoning` (B9.1, 1.7): the model's reasoning — an Anthropic thinking block keeps the `signature`
+   * `reasoning` (B9.1, 1.8): the model's reasoning — an Anthropic thinking block keeps the `signature`
    * (or `redactedData`) it must be resent with, so a replayed answer can continue a tool turn. A host
    * stores the parts as JSON and hands them back unchanged.
    */
@@ -467,7 +467,7 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
     sink(): Promise<ProviderJournalSink<E> | null>
     status(): JournalStatus
     /**
-     * ART.2 (1.7, optional): the journal's RARE events of these types (the artifact store's metadata),
+     * ART.2 (1.8, optional): the journal's RARE events of these types (the artifact store's metadata),
      * oldest first, for one session when `sessionId` is given — read through the host's rare-event
      * side table, never a walk of the whole journal. Absent: the engine keeps no artifact index.
      */
@@ -504,20 +504,20 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    */
   events?: { nativeSession(e: EngineNativeSessionEvent): void }
   /**
-   * B6.6 (1.7, optional): memory — facts folded from the journal's `memory.*` events. The HOST enforces
+   * B6.6 (1.8, optional): memory — facts folded from the journal's `memory.*` events. The HOST enforces
    * the scope on the read path (`recall` answers one repository's facts and the person's, §24.6 rule 3)
    * and forgetting deletes the statements. Writes are the engine's own `memory.noted` events through
    * `journal.sink()`, their statements in `paths.contentDir`. Absent on an older host: no memory.
    */
   memory?: EngineMemory
   /**
-   * B6.4 (1.7, optional): the origins this host's own server answers on (`http://127.0.0.1:<port>`, …).
+   * B6.4 (1.8, optional): the origins this host's own server answers on (`http://127.0.0.1:<port>`, …).
    * The engine's browser runtime never drives them — a page the model opens must not reach the
    * product's own API. Absent: the engine assumes the default port.
    */
   serverOrigins?: readonly string[]
   /**
-   * B8.8 (1.7, optional): an environment variable the PERSON named in a declaration (`{env:VAR}` in an
+   * B8.8 (1.8, optional): an environment variable the PERSON named in a declaration (`{env:VAR}` in an
    * MCP server's env or headers). The engine reads no environment of its own; it asks for exactly the
    * names a declaration references. Absent: such a reference reads as unset.
    */
