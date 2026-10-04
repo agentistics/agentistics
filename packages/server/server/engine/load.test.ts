@@ -139,7 +139,7 @@ describe('the engine verbs at the command line', () => {
       const en = resolveEngineVerb(verb, present, cmds, 'en', false)
       expect('refuse' in en && en.refuse).toContain('agentop experimental enable')
       const pt = resolveEngineVerb(verb, present, cmds, 'pt', false)
-      expect('refuse' in pt && pt.refuse).toContain('experimentais')
+      expect('refuse' in pt && pt.refuse).toContain('agentop experimental enable')
       expect('run' in resolveEngineVerb(verb, present, cmds, 'en', true)).toBe(true)
     }
     expect('run' in resolveEngineVerb('ingest', present, cmds, 'en', false)).toBe(true)

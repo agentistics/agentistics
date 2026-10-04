@@ -136,3 +136,12 @@ jobs:
         run: |
           bun scripts/perf/synth-home.ts "$RUNNER_TEMP/stream-home" --scale 0.02 --big 0
           bun scripts/perf/stream-e2e.ts "$RUNNER_TEMP/stream-home"
+
+      # Fast startup: the app must be usable within 2 s of the server answering — on a fresh, empty
+      # machine and on one whose repositories are slow to read (every `git log --numstat` held 20 s),
+      # cold and after a restart — and the full data must still arrive.
+      - name: Startup budget (fresh empty home)
+        run: bun scripts/perf/startup.ts --empty --budget
+
+      - name: Startup budget (slow git)
+        run: bun scripts/perf/startup.ts "$RUNNER_TEMP/storm-home" --slow-git 20000 --budget

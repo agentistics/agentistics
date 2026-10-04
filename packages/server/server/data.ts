@@ -3,7 +3,7 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, SurfaceHarnessId, WorkflowRun } from '@agentistics/core'
 import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
-import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED } from './config'
+import { AGENTISTICS_DATA_DIR, PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
 import { shadowIngest } from './journal/shadow'
@@ -13,6 +13,8 @@ import { mergeLocalAndIngestedSessions, sessionKey } from './session-merge'
 import { writeWorkflowRuns, loadWorkflowRuns } from './workflow-store'
 import { createLimiter, safeReadDir, safeReadJson, safeStat } from './utils'
 import { withTimeout } from './with-timeout'
+import { softDeadline } from './soft-deadline'
+import { SNAPSHOT_FORMAT, SNAPSHOT_MIN_INTERVAL_MS, decodeSnapshot, encodeSnapshot, readSnapshotFile, snapshotPath, writeSnapshotFile } from './data-snapshot'
 import { UUID_RE, decodeProjectDir, getProjectGitStats, getGitRemote, gcGitStatsCache } from './git'
 // `activeMinutesFromClaudeJsonl` / `contextTokensFromClaudeJsonl` are no longer called
 // here — the meta-session enrichment they served now runs inside `cachedEnrich`, which
@@ -70,6 +72,15 @@ export interface ApiResponse {
   /** Team/central only: machine id → owner display name + teams. */
   machineOwners?: Record<string, { user: string; teamIds: string[] }>
   workflows?: WorkflowRun[]
+  /** Set ONLY on an answer served before the first fresh build finished (`/api/data?partial=1`):
+   *  `quick` is the cheap subset (stats cache + stored sessions, no project scan, no git), `snapshot`
+   *  the previous run's full build read back from disk. The web app renders it and keeps asking
+   *  until an answer arrives without this flag. A full build never carries it. */
+  partial?: boolean
+  partialReason?: 'quick' | 'snapshot'
+  /** Project paths whose git facts did not answer within the build's soft deadline. Their walk
+   *  keeps running and lands in git.ts's cache; a rebuild follows when it does. */
+  deferredRepos?: string[]
 }
 
 export interface ScanResult {
@@ -347,12 +358,15 @@ async function scanProjectDir(
   const earliestSession = sessionDates.length > 0
     ? sessionDates.reduce((a, b) => a < b ? a : b)
     : undefined
-  const git_stats = await getProjectGitStats(projectPath, earliestSession)
   // Resolve the repo's origin remote once per project. This is the local-machine source of
   // the group-by-repository key; it's stamped onto every session below so it survives being
   // pushed to a central (which has no filesystem access to the member's repos) and persisted
-  // to the consolidate store.
-  const gitRemote = await getGitRemote(projectPath)
+  // to the consolidate store. Both reads are bounded by the build's SOFT deadline (`gitBounded`):
+  // one slow repository is reported and filled in by a later build, never waited out.
+  const [git_stats, gitRemote] = await Promise.all([
+    gitBounded(projectPath, getProjectGitStats(projectPath, earliestSession)),
+    gitBounded(projectPath, getGitRemote(projectPath)),
+  ])
 
   // Stamp the remote onto this project's sessions so the dimension travels with each session.
   if (gitRemote) {
@@ -376,6 +390,39 @@ async function scanProjectDir(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Git under a SOFT deadline (fast startup).
+//
+// git is the slowest phase of a build on a real machine (PERF.1: 30–78 s for a first build, the
+// project phase dominating), and a single huge repository could hold the whole build — and the app's
+// first full payload — for as long as its walk took. Each project's git read now gets
+// `GIT_SOFT_DEADLINE_MS`; past it, the build carries on without that project's git facts and lists
+// the path in `deferredRepos`. The walk is NOT cancelled (soft-deadline.ts): it finishes into
+// git.ts's memo and on-disk cache, and when the late ones settle a rebuild is requested, which picks
+// them up from that cache in milliseconds. Nothing is lost and nothing is waited for.
+// ---------------------------------------------------------------------------
+
+const GIT_SOFT_DEADLINE_MS = Number(process.env.AGENTISTICS_GIT_SOFT_DEADLINE_MS) || 2500
+
+/** The paths deferred by the build in flight (null between builds). */
+let _deferredGit: Set<string> | null = null
+let _lateGitTimer: ReturnType<typeof setTimeout> | null = null
+
+function onLateGit(): void {
+  // Coalesce: a fresh machine can defer dozens of walks, and they finish one after another.
+  if (_lateGitTimer) clearTimeout(_lateGitTimer)
+  _lateGitTimer = setTimeout(() => {
+    _lateGitTimer = null
+    import('./sse').then(m => m.triggerSseNotification()).catch(() => {})
+  }, 1500)
+}
+
+async function gitBounded<T>(path: string, work: Promise<T>): Promise<T | undefined> {
+  const r = await softDeadline<T | undefined>(work, GIT_SOFT_DEADLINE_MS, undefined, onLateGit)
+  if (r.late) _deferredGit?.add(path)
+  return r.value
+}
+
 /**
  * Read git for every project path that has not been read yet, and stamp what it finds.
  *
@@ -397,8 +444,8 @@ export async function resolveProjectFacts(
     // Both are already total: a path that is gone, or is not a repo, yields '' / undefined rather
     // than throwing. Guarded anyway — one unreadable directory must not fail the whole build.
     const [remote, stats] = await Promise.all([
-      getGitRemote(path).catch(() => ''),
-      getProjectGitStats(path, earliest || undefined).catch(() => undefined),
+      gitBounded(path, getGitRemote(path)).then(r => r ?? ''),
+      gitBounded(path, getProjectGitStats(path, earliest || undefined)),
     ])
     facts.set(path, { remote: remote ?? '', stats })
   })))
@@ -507,7 +554,7 @@ function revalidateInBackground(): void {
   if (_revalidating || _status === 'computing') return
   _revalidating = true
   void _buildApiResponse()
-    .then(result => { _promise = Promise.resolve(result); _resolvedAt = Date.now(); _status = 'done' })
+    .then(result => { _promise = Promise.resolve(result); _resolvedAt = Date.now(); _status = 'done'; onFreshBuild(result) })
     .catch(() => { /* keep serving the previous good result on failure */ })
     .finally(() => { _revalidating = false })
 }
@@ -526,6 +573,7 @@ export async function rebuildNow(): Promise<void> {
     _promise = Promise.resolve(result)
     _resolvedAt = Date.now()
     _status = 'done'
+    onFreshBuild(result)
   } finally {
     _revalidating = false
   }
@@ -579,20 +627,167 @@ export async function buildApiResponse(): Promise<ApiResponse> {
     return _promise
   }
 
-  // First build ever (idle) — the only path that blocks.
+  // First build ever (idle) — the only path that blocks. It BROADCASTS its progress: the server
+  // starts this build at boot, before any browser asks, and it used to run with a no-op progress
+  // function — so a `/api/data-stream` that subscribed to it heard nothing until it ended, and the
+  // boot screen's bars sat empty for the whole build (the "all bars empty" report).
+  return startFirstBuild()
+}
+
+function startFirstBuild(): Promise<ApiResponse> {
+  for (const k of Object.keys(_progressSnapshot)) delete _progressSnapshot[k]
   _status = 'computing'
-  _promise = _buildApiResponse()
+  _promise = _buildApiResponseCore(_broadcastProgress)
     .then(result => {
       _status = 'done'
       _resolvedAt = Date.now()
+      _progressListeners.clear()
+      onFreshBuild(result)
       return result
     })
     .catch(err => {
       _status = 'idle'
       _promise = null
+      _progressListeners.clear()
       throw err
     })
   return _promise
+}
+
+// ---------------------------------------------------------------------------
+// The first payload (fast startup).
+//
+// A browser opening the app used to wait for the WHOLE first build — every transcript parsed, git
+// read for every project — before it could paint anything: 30–78 s on real machines, on a fresh
+// install AND on every restart. `buildApiResponseForClient` answers a client that accepts a partial
+// payload within `FIRST_PAYLOAD_WAIT_MS`: the full build if it is already that close, else the
+// previous run's snapshot (data-snapshot.ts), else the QUICK subset below. The answer says so
+// (`partial`), the app renders it and keeps asking, and clients hear `change` when the full build
+// lands. Internal callers keep `buildApiResponse`, which never returns a partial answer.
+// ---------------------------------------------------------------------------
+
+const FIRST_PAYLOAD_WAIT_MS = 250
+const QUICK_TIMEOUT_MS = 4000
+
+let _servedPartial = false
+let _snapshot: Promise<ApiResponse | null> | null = null
+let _quick: Promise<ApiResponse> | null = null
+let _snapshotWrittenAt = 0
+
+/** The previous run's full build, read once per process. Null when absent or not servable here. */
+export function loadDataSnapshot(): Promise<ApiResponse | null> {
+  if (TEAM_CENTRAL) return Promise.resolve(null)
+  _snapshot ??= (async () => {
+    const text = await readSnapshotFile(snapshotPath(AGENTISTICS_DATA_DIR))
+    if (text === null) return null
+    const { CURRENT_VERSION } = await import('./version')
+    const verdict = decodeSnapshot<ApiResponse>(text, { appVersion: CURRENT_VERSION, homeDir: HOME_DIR })
+    if (!verdict.ok) {
+      console.log(`[data] previous snapshot not used (${verdict.reason})`)
+      return null
+    }
+    return { ...verdict.data, partial: true, partialReason: 'snapshot' as const }
+  })().catch(() => null)
+  return _snapshot
+}
+
+function onFreshBuild(result: ApiResponse): void {
+  // The snapshot read at boot has served its purpose; let it be collected.
+  _snapshot = Promise.resolve(null)
+  _quick = null
+  if (_servedPartial) {
+    _servedPartial = false
+    // Clients holding a partial answer refetch now rather than at their next poll.
+    import('./sse').then(m => m.notifySseClients()).catch(() => {})
+  }
+  if (!TEAM_CENTRAL && Date.now() - _snapshotWrittenAt >= SNAPSHOT_MIN_INTERVAL_MS) {
+    _snapshotWrittenAt = Date.now()
+    void (async () => {
+      const { CURRENT_VERSION } = await import('./version')
+      const text = encodeSnapshot({ v: SNAPSHOT_FORMAT, appVersion: CURRENT_VERSION, homeDir: HOME_DIR, builtAt: new Date().toISOString() }, serializedData(result))
+      await writeSnapshotFile(snapshotPath(AGENTISTICS_DATA_DIR), text)
+    })().catch(err => console.warn('[data] could not write the startup snapshot:', String(err)))
+  }
+}
+
+/**
+ * The cheap subset: Claude's stats cache, the session-meta files and the consolidate store — no
+ * transcript walk, no git, no other harness. Enough for the KPIs (the stats cache IS Claude's whole
+ * history), the session lists the store remembers, and every page's chrome.
+ */
+async function buildQuickResponse(): Promise<ApiResponse> {
+  const t0 = performance.now()
+  const mode = (ARCHIVE_ENABLED ? await getArchiveMode() : 'off') ?? 'off'
+  const metaRoots = mode === 'full' ? [SESSION_META_DIR, ARCHIVE_SESSION_META_DIR] : [SESSION_META_DIR]
+  const [rawStats, metaMap, stored] = await Promise.all([
+    safeReadJson<StatsCache>(STATS_CACHE_FILE),
+    loadSessionMetas(metaRoots),
+    mode === 'consolidate' ? loadConsolidated() : Promise.resolve(new Map<string, SessionMeta>()),
+  ])
+  const statsCache = sanitizeStatsCache(rawStats ?? ({} as StatsCache))
+  const byId = new Map<string, SessionMeta>()
+  for (const s of metaMap.values()) byId.set(sessionKey(s), s)
+  for (const s of stored.values()) if (!byId.has(sessionKey(s))) byId.set(sessionKey(s), s)
+  const sessions = [...byId.values()]
+  for (const s of sessions) normalizeSessionTimes(s)
+  sessions.sort((a, b) => b.start_time.localeCompare(a.start_time))
+
+  const harnessSet = new Set<SurfaceHarnessId>(['claude'])
+  const projByPath = new Map<string, ServerProject>()
+  for (const s of sessions) {
+    if (s.harness) harnessSet.add(s.harness)
+    if (!s.project_path) continue
+    let p = projByPath.get(s.project_path)
+    if (!p) {
+      p = { path: s.project_path, name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path, sessions: [], gitRemote: s.git_remote || undefined }
+      projByPath.set(s.project_path, p)
+    }
+    p.sessions.push({ sessionId: s.session_id, created: s.start_time })
+    if (!p.gitRemote && s.git_remote) p.gitRemote = s.git_remote
+  }
+  const projects = [...projByPath.values()].sort((a, b) => b.sessions.length - a.sessions.length)
+  // Claude's own sessions only, exactly as the full build feeds it (stats-cache.json is Claude-only).
+  supplementStatsCache(statsCache, sessions.filter(s => (s.harness ?? 'claude') === 'claude'))
+  try {
+    const { readRegistry } = await import('./sessions/registry')
+    const { applySessionLabels, linkManagedSessions } = await import('./sessions/link-sessions')
+    applySessionLabels(sessions, linkManagedSessions(await readRegistry(), sessions))
+  } catch { /* labels are a nicety here; the full build applies them too */ }
+  console.log(`[data] quick first payload: ${sessions.length} sessions, ${projects.length} projects in ${Math.round(performance.now() - t0)} ms`)
+  return { statsCache, projects, allSessions: [] as [], sessions, healthIssues: [], homeDir: HOME_DIR, harnesses: [...harnessSet], workflows: [], partial: true, partialReason: 'quick' }
+}
+
+/** Start the quick subset ahead of any request (the server calls this at boot when there is no
+ *  snapshot): it is cheap, but once the full build is parsing transcripts the event loop is busy,
+ *  and a quick payload STARTED then waits behind it. Started first, it is simply there. */
+export function prepareQuickPayload(): void {
+  if (TEAM_CENTRAL || _status === 'done') return
+  _quick ??= buildQuickResponse()
+  _quick.catch(() => { _quick = null })
+}
+
+/** What `/api/data?partial=1` answers. See the block comment above. */
+export async function buildApiResponseForClient(): Promise<ApiResponse> {
+  // A central's data comes from Mongo and is scoped per principal; it keeps the exact path.
+  if (TEAM_CENTRAL || (_status === 'done' && _promise)) return buildApiResponse()
+  const full = buildApiResponse()
+  full.catch(() => { /* surfaced through the race below or the next request */ })
+  const early = await Promise.race([
+    full.then(d => d),
+    new Promise<null>(r => setTimeout(() => r(null), FIRST_PAYLOAD_WAIT_MS)),
+  ])
+  if (early) return early
+  const snap = await loadDataSnapshot()
+  if (snap && _status !== 'done') { _servedPartial = true; return snap }
+  if (_status === 'done' && _promise) return _promise
+  _quick ??= buildQuickResponse()
+  const quick = await withTimeout(_quick, QUICK_TIMEOUT_MS, 'quick payload timed out').catch(err => {
+    console.warn('[data] quick first payload failed:', String(err))
+    _quick = null
+    return null
+  })
+  if (quick && _status !== 'done') { _servedPartial = true; return quick }
+  return full
 }
 
 /** Merge sessions newer than `statsCache.lastComputedDate` into the cache in-place.
@@ -793,6 +988,8 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
 
   const buildPromise = async () => {
     const timer = createBuildTimer()
+    const deferredGit = new Set<string>()
+    _deferredGit = deferredGit
     onProgress('statsCache', 0)
     onProgress('sessions', 0)
     onProgress('health', 0)
@@ -1238,7 +1435,11 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       console.warn('[journal] shadow ingest could not start:', String(err))
     }
 
-    return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), userStatsCaches, machineStatsCaches, machineOwners, workflows }
+    if (_deferredGit === deferredGit) _deferredGit = null
+    if (deferredGit.size > 0) {
+      console.warn(`[data] git for ${deferredGit.size} project(s) took longer than ${GIT_SOFT_DEADLINE_MS} ms; their figures follow in a later build: ${[...deferredGit].slice(0, 5).join(', ')}${deferredGit.size > 5 ? ', …' : ''}`)
+    }
+    return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), userStatsCaches, machineStatsCaches, machineOwners, workflows, ...(deferredGit.size > 0 ? { deferredRepos: [...deferredGit] } : {}) }
   }
 
   // `withTimeout`, never a bare `Promise.race` against `setTimeout`: the bare form left the 5-minute
@@ -1290,23 +1491,7 @@ export async function buildApiResponseStream(onProgress: ProgressFn): Promise<Ap
 
   // Fresh computation — broadcast real progress to all subscribers
   _progressListeners.clear()
-  for (const k of Object.keys(_progressSnapshot)) delete _progressSnapshot[k]
   _progressListeners.add(onProgress)
-
-  _status = 'computing'
-  _promise = _buildApiResponseCore(_broadcastProgress)
-    .then(result => {
-      _status = 'done'
-      _resolvedAt = Date.now()
-      _progressListeners.clear()
-      return result
-    })
-    .catch(err => {
-      _status = 'idle'
-      _promise = null
-      _progressListeners.clear()
-      throw err
-    })
-  return _promise
+  return startFirstBuild()
 }
 

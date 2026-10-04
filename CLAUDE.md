@@ -1956,6 +1956,41 @@ row (15.327 ms after) is `getSessionFileStats`. `git.ts` memoizes on (root, wind
 LIVE session's window ends at its last turn — so the key moves on every turn and the memo misses
 every time, which is the same shape of bug in a different file. Untouched here on purpose.
 
+## Fast startup — the app paints before the first build finishes
+
+The web app used to wait for the server's WHOLE first `/api/data` build before painting anything:
+30–78 s on real machines, on a fresh install and on every restart, and with one slow repository it
+NEVER answered (measured: a 20 s `git log --numstat` per project and the old `/api/data` request was
+dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app never opens"). Rules:
+
+- **`/api/data?partial=1` answers within about a second** (`buildApiResponseForClient`, data.ts): the
+  full build if it lands within 250 ms, else the previous run's snapshot (`data-snapshot.ts`), else
+  the QUICK subset (stats cache + session metas + consolidate store; no transcript walk, no git, no
+  other harness). Both carry `partial: true` + `partialReason`. **Without `?partial=1` the answer is
+  the full build exactly as before** — the MCP, the VS Code extension and every internal caller
+  (`buildApiResponse`) never see a partial payload, so a stale figure can never be pushed to a central.
+- **The snapshot is DROPPED, never adapted**, when its app version, home or format differs, and is
+  never read or written on a central. Written at most every 5 min, atomically, mode 0600.
+- **git runs under a SOFT deadline** (`soft-deadline.ts`, `gitBounded` in data.ts): past 2.5 s the
+  build stops WAITING, not WORKING — the walk lands in git.ts's memo/disk cache, `deferredRepos` names
+  the paths, and a rebuild is requested when the late ones settle. A hard timeout would discard the
+  half-done walk and pay it again every build.
+- **A transcript is folded in 1 MB slices with a yield between them** (`foldYielding`,
+  transcript-state.ts). One synchronous fold of a 40 MB file held the event loop ~1 s, which delayed
+  even the quick payload and `/api/health`. Slicing is the append path's own resumability, so the
+  numbers cannot change.
+- **The boot build BROADCASTS its progress** (`startFirstBuild`). It used to run with a no-op progress
+  function, so a `/api/data-stream` that subscribed to it saw empty bars for the whole build.
+- **Client** (`useData` + `lib/startupLoad.ts`): every request the boot waits on has a deadline; a
+  partial answer is painted and polled; the quick subset never REPLACES a full payload on screen
+  (`acceptPayload`); a failure with data on screen keeps the data and says the server isn't
+  answering; with nothing on screen it is `ServerProblem`, in plain words by kind (`unreachable` —
+  502/503/504 included, they are a proxy that cannot reach the server — `timeout`, `server`,
+  `incompatible`), retrying on its own except for 401/403. The boot screen watches itself
+  (`useBootWatchdog`): "slow" while `/api/health` answers, "can't reach" when it doesn't.
+- **Measure with `scripts/perf/startup.ts`** (`--empty`, `--slow-git <ms>`, `--budget`); CI enforces
+  `startupFirstScreenMs` (2 s after health, cold and warm) and `startupFullDataMs`.
+
 ## Archive mirror (survives Claude's 30-day cleanup)
 
 Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older than `cleanupPeriodDays` (default 30) on every startup, taking per-session detail + agent metrics + chat content with them (the `stats-cache.json` aggregates survive). Official docs: https://code.claude.com/docs/en/settings.
