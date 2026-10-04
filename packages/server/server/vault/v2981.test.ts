@@ -88,7 +88,7 @@ async function enrolLocally(): Promise<string[]> {
   return r.json.words as string[]
 }
 
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-v2981-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-v2981-done-')), 'vault') }) })
 beforeEach(async () => { await fresh() })
 
 describe('loopbackRequest — a page ON this computer, and nothing else', () => {

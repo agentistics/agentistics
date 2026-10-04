@@ -80,7 +80,7 @@ async function presenceOn(): Promise<void> {
 }
 const login = { kind: 'login', name: 'Banco Exemplo', tags: ['pessoal'], notes: 'conta corrente', url: 'https://banco.example', fields: { login: 'eu@example.com', password: 'MARKER-hunter2-Δ' } }
 
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-personal-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-personal-done-')), 'vault') }) })
 beforeEach(async () => { await fresh() })
 
 describe('gate rows (spec §3)', () => {
