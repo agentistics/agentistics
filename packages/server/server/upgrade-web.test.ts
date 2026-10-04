@@ -69,3 +69,16 @@ describe('what /api/version says about pressing install here', () => {
     expect(['up-to-date', 'no-capability', 'central', 'container']).toContain(r!)
   })
 })
+
+describe('a press on the version this server already runs', () => {
+  test('is answered in words and starts nothing', async () => {
+    const { alreadyCurrentMessage } = await import('./upgrade-web')
+    expect(alreadyCurrentMessage('2.103.1', 'pt')).toBe('Já está atualizado (v2.103.1).')
+    expect(alreadyCurrentMessage('2.103.1', 'en')).toBe('Already up to date (v2.103.1).')
+    const src = readFileSync(new URL('./upgrade-web.ts', import.meta.url), 'utf8')
+    const at = src.indexOf("decision.reason === 'up-to-date'")
+    expect(at).toBeGreaterThan(-1)
+    // The answer comes BEFORE the spawn of `agentop upgrade`.
+    expect(at).toBeLessThan(src.indexOf("spawn(bin, ['upgrade']"))
+  })
+})
