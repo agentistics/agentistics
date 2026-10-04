@@ -537,6 +537,37 @@ if (command === 'restore') {
 // The engine's verbs — recognised by every build, run by the engine when it offers them, and
 // answered in a sentence (exit 2) when it does not (`engine/cli.ts`).
 if (command === 'code' || command === 'provider' || command === 'ingest') {
+  // `agentop code` on a terminal opens the control center on its `code` tab (ES.6h) when the engine offers a typed
+  // code host; everything else — a pipe, `ls`, `--help`, an engine without one — is the engine's line mode.
+  if (command === 'code') {
+    const { opensCockpit, parseCodeLaunch } = await import('../server/code-launch.ts')
+    if (opensCockpit(args, { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })) {
+      const { engine, engineStatus, loadEngine } = await import('../server/engine/load.ts')
+      const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('../server/native-gate.ts')
+      await loadEngine()
+      const e = engineStatus().present ? engine() : null
+      if (e?.codeHost && nativeExperimentalOn()) {
+        const parsed = parseCodeLaunch(args)
+        if (!parsed.ok) { process.stderr.write(`${parsed.message}\n`); process.exit(2) }
+        const { asCodePort } = await import('@agentistics/engine-api')
+        // The host's asker is NOT used by the tab (it watches the session and answers `ask` events itself); the engine
+        // ignores it in port mode, so this one refuses.
+        const handle = await e.codeHost(() => ({ ask: async () => ({ answered: false as const }) }) as never)
+        const code = asCodePort(handle)
+        if (code) {
+          const { readPreferencesOrExit } = await import('../server/preferences.ts')
+          await readPreferencesOrExit()
+          const { runStart } = await import('../server/cli-start.ts')
+          const result = await runStart({ ...parsed.start, code, dispose: () => handle.dispose() })
+          process.exit(result === 'foreground' ? 0 : result)
+        }
+        await handle.dispose().catch(() => {})
+      } else if (e?.codeHost && !nativeExperimentalOn()) {
+        process.stderr.write(`${EXPERIMENTAL_SENTENCE[await resolveCliLang()]}\n`)
+        process.exit(2)
+      }
+    }
+  }
   const { runEngineVerb } = await import('../server/engine/cli.ts')
   process.exit(await runEngineVerb(command, args, await resolveCliLang()))
 }
