@@ -2829,6 +2829,29 @@ by the compiler.
   there is no session to open — never a link to `/sessions/hist:…`. Removing the task drops its links;
   removing a subtask sends its links back to the delivery. Both `attachSession` and `attachConversation`
   answer `movedFrom` when they displaced a filing.
+- **THREADS are topics on a task, and the owner's rules bind them (2026-10-04).** `TaskThread` +
+  `TaskComment.threadId` (absent = a LOOSE comment — every pre-thread one, additive like `subtaskId`);
+  the rules are `@agentistics/core`'s `taskThreads.ts` (pure), the IO is `sessions/task-threads.ts`,
+  the route is `POST /api/tasks/<ref>/threads` (`action: open | reply | resolve | reopen | mute |
+  unmute | rename`). (1) A session that needs an answer asks in ITS OWN chat; the thread only MIRRORS
+  that question (`threadMirrors`, read from the fleet snapshot, stored nowhere), and answering in
+  either place is ONE answer: from the thread it is the same fleet `prompt` the session composer
+  sends (`answerTo`), and from the session chat `recordSessionChatAnswer` (hooked into
+  `runFleetAction`'s confirmed `prompt`, skipped for the thread's own deliveries via
+  `opts.fromThread`) records it once in the thread. (2) A thread never gates a session. (3) There is
+  NO bell — "waiting on you" (`threadAttention`) is a visual state. (4) The owner's reply fans out
+  1:N through the fleet `prompt` path, each delivery recorded as what happened (`delivered` /
+  `queued` / `undeliverable` / `muted` / `failed`; there is no "read" receipt because nothing can
+  observe one); `queued` (not running, or on a dialog) is typed in by the server's 30 s flush once the
+  conversation can take a prompt — matched by CONVERSATION, so a reopen finds it — and nothing is
+  ever reopened for it. **Participants are only VERIFIED sessions**: the agentistics MCP proves
+  which pane it runs in with `HMAC(key, AGENTOP_MANAGED_ID)` (`packages/mcp/session-proof.ts`), the key
+  being `session-identity.key` (0600, data dir, created by the tmux backend before a spawn), and the
+  server recomputes it (`session-identity.ts`; both tests pin one vector). No token is ever put on a
+  command line — tmux `-e` is visible in `ps`. It stops MIS-ATTRIBUTION, not a same-user process that
+  reads the key; an unverified poster keeps its free-text `author` and never joins. A request carrying a session identity can
+  never fan out (`session_fanout`, 403) — only the person replies to N. Sessions may OPEN a thread
+  only for a `handback` or a `block`.
 - **New `/api/tasks` sub-routes ride the existing `capability-guard.ts` entries** (`/api/tasks`,
   `/api/task-files` → `localShell`). `GET /api/tasks/next` and `/api/tasks/activity` are matched
   BEFORE the generic `<ref>` GET, or they resolve as task references and 404.
