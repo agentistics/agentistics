@@ -12,9 +12,7 @@
  * decoration.
  */
 
-import { NativeSessionsList } from './NativeSessionsList'
-import { applySummaryFilter, capacityText, nativeSummaryState, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
-import { useNativeSessionRows } from '../../hooks/useNativeSessionRows'
+import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -669,12 +667,9 @@ export function SessionsAside({
   )
   const searched = useMemo(() => filterSessions(valueFiltered, query), [valueFiltered, query])
   const capacityLabel = capacityText(capacity, pt)
-  // H17: the native sessions count too — the same words (working / waiting / waiting-approval), read
-  // from the engine's list, which the native block below renders from these same rows.
-  const nativeRows = useNativeSessionRows(sessionId)
-  const nativeStated = useMemo(() => nativeRows.map(r => ({ row: r, state: nativeSummaryState(r) })), [nativeRows])
-  const summaryNumbers = useMemo(() => summaryCounts([...searched, ...nativeStated]), [searched, nativeStated])
-  const nativeShown = useMemo(() => applySummaryFilter(nativeStated, summaryFilter).map(x => x.row), [nativeStated, summaryFilter])
+  // Native sessions are ordinary fleet rows now (UI.UNIFY, `nativeFleetRow.ts`): they are in
+  // `searched` like every other harness, so the summary counts them through the same rule.
+  const summaryNumbers = useMemo(() => summaryCounts(searched), [searched])
   const matched = useMemo(
     () => applySummaryFilter(activeOnly ? searched.filter(r => active.has(r.state)) : searched, summaryFilter),
     [searched, activeOnly, active, summaryFilter],
@@ -1597,9 +1592,6 @@ export function SessionsAside({
             )}
           </div>
         )}
-
-        {/* NATIVE sessions (UI.3) — not fleet rows, so listed from the engine's own list. */}
-        <NativeSessionsList lang={lang} rows={nativeShown} tap={tap} {...(sessionId ? { activeId: sessionId } : {})} />
 
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above

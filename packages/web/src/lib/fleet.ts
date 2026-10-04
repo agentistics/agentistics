@@ -23,6 +23,9 @@ import { relayedToSessions, type RelayedRow } from './relayedSessions'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
 import { parseActResult } from './fleetAct'
 import { parseRelayActResult } from './relayAct'
+import { nativeAct, readNativeFleet } from './nativeFleet'
+import { withNativeSessions } from './nativeFleetRow'
+import { isNativeSessionId } from './sessionRoute'
 
 /** Mirrors `SessionAction` in `@agentistics/tui/control/sessions`, minus the verbs a page cannot do. */
 export type FleetActionId =
@@ -186,7 +189,9 @@ export interface FleetState {
      * nothing, which is not the same thing and is never collapsed into it.
      */
     ids?: readonly string[]
-  }) => Promise<{ ok: boolean; message: string; id?: string }>
+    /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
+    confirm?: boolean
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
 }
 
 /**
@@ -360,6 +365,11 @@ const ACT_TIMEOUT_MS = 20_000
 async function pollOnce(): Promise<void> {
   if (pollCentral) return pollCentralOnce()
   try {
+    // NATIVE sessions ride the same poll (UI.UNIFY, `nativeFleet.ts`): asked in parallel, folded in
+    // after the fleet answers, so every surface reading `fleet` — the aside, the overview, the
+    // header's counter, search — lists them as ordinary rows. Never rejects: a failed native read is
+    // an empty native half, never a failed fleet poll.
+    const nativeP = readNativeFleet(pollLang)
     const res = await fetch(`/api/fleet?lang=${pollLang}`)
     if (res.status === 403 || res.status === 404) {
       // Not an empty fleet: this machine may not be asked. The two must stay distinguishable, and
@@ -372,7 +382,7 @@ async function pollOnce(): Promise<void> {
     // poll left a minutes-old list on screen looking live — a stale list is worse than an empty
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
-    const json = normalizeFleetPayload(await res.json() as FleetPayload)
+    const json = withNativeSessions(normalizeFleetPayload(await res.json() as FleetPayload), await nativeP)
     snapUnsupported = false
     snapshot = json
     snapFailures = 0
@@ -452,6 +462,13 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   const refresh = useCallback(() => { void pollOnce() }, [])
 
   const act = useCallback<FleetState['act']>(async req => {
+    // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
+    // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
+    if (isNativeSessionId(req.id)) {
+      const out = await nativeAct(req, lang)
+      void pollOnce()
+      return out
+    }
     try {
       /*
        * A VERB THAT NEVER ANSWERS MUST STOP BEING A SPINNER.

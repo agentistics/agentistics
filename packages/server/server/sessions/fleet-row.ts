@@ -18,6 +18,9 @@ import type { SessionConversationLink } from '@agentistics/core'
 import { actionWords, sessionActions, type SessionAction } from '@agentistics/tui/control/session-verbs'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { ControlStrings } from '@agentistics/tui/control/i18n'
+import type { HarnessId } from '@agentistics/core'
+import { isExternalRowId } from './external-continue'
+import { SPAWN_SPECS } from './spawn-spec'
 
 /**
  * Verbs the WEB cannot perform, whatever the row says.
@@ -118,6 +121,11 @@ export interface FleetActionRequest {
    * deliberately different; see `selectFell`.
    */
   ids?: string[]
+  /**
+   * EXT.OPEN: the person said YES to ending an external process so its conversation continues here.
+   * Without it a `prompt` to an external row answers `confirm` and changes nothing.
+   */
+  confirm?: boolean
 }
 
 /** How a verb is offered to the page: performable, present-but-refused, or absent. */
@@ -228,6 +236,13 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
         ...(reason ? { reason } : {}),
       }
     })
+  // EXT.OPEN: an EXTERNAL row that named its conversation, on a harness that resumes by id, TAKES a
+  // prompt — the first write continues it here (`external-continue.ts`, `continueExternal`). Every
+  // other external row keeps its refusal: read-only live.
+  if (externalContinuable(row)) {
+    const i = verbs.findIndex(v => v.action === 'prompt')
+    if (i >= 0) verbs[i] = { action: 'prompt', label: verbs[i]!.label, enabled: true }
+  }
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
@@ -258,4 +273,10 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     attachCommand: `agentop session attach ${sessionHandleOf(row.id)}`,
     verbs,
   }
+}
+
+/** EXT.OPEN: an external row a write can CONTINUE here — an exact conversation, a harness that resumes by id. */
+export function externalContinuable(row: Pick<ControlSession, 'id' | 'state' | 'harness' | 'conversationId'>): boolean {
+  return row.state === 'unknown' && isExternalRowId(row.id) && row.conversationId !== undefined
+    && SPAWN_SPECS[row.harness as HarnessId]?.resume !== undefined
 }

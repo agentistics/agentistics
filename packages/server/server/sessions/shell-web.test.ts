@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { handleShellRoute } from './shell-web'
+import { handleShellRoute, resolveShellTarget } from './shell-web'
 import type { StartHost } from '../cli-start'
 
 /** The routes under test need no host; the ones that do are covered by their own scope checks. */
@@ -25,5 +25,20 @@ describe('GET /api/shell/stream', () => {
 
   test('a path that is not ours falls through, so index.ts can keep routing', async () => {
     expect(await call('GET', '/api/shell/nope')).toBeNull()
+  })
+})
+
+describe('resolveShellTarget — the directory always comes from a record, never the caller', () => {
+  const rows = [{ id: 'agentop-1', conversationId: 'c-1', cwd: '/repo' }]
+  const SID = 'ses_' + 'a'.repeat(32)
+  test('a fleet row by its id or its conversation', async () => {
+    expect(await resolveShellTarget(rows, 'c-1')).toEqual({ sessionId: 'agentop-1', cwd: '/repo' })
+  })
+  test('a NATIVE session (UI.UNIFY): the engine\'s recorded directory', async () => {
+    expect(await resolveShellTarget(rows, SID, async id => (id === SID ? '/work' : null))).toEqual({ sessionId: SID, cwd: '/work' })
+  })
+  test('unknown everywhere is null — refused as unknown, never a shell somewhere', async () => {
+    expect(await resolveShellTarget(rows, SID)).toBeNull()
+    expect(await resolveShellTarget(rows, SID, async () => null)).toBeNull()
   })
 })

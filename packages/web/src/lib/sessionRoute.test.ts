@@ -88,3 +88,18 @@ describe('reopenedSessionRoute — the landing carries the wait', () => {
       .toBe(sessionPath('external:agy:/home/x:1'))
   })
 })
+
+import { nativeRedirect } from '../pages/SessionRoute'
+
+describe('nativeRedirect — one shell for every harness (UI.UNIFY)', () => {
+  const SID = 'ses_' + 'a'.repeat(32)
+  test('a native session at /sessions/:id renders the workspace, like any session (old links keep working)', () => {
+    expect(nativeRedirect(`/sessions/${SID}`, SID)).toBeNull()
+  })
+  test('its /terminal has no screen behind it: sent to the conversation', () => {
+    expect(nativeRedirect(`/sessions/${SID}/terminal`, SID)).toBe(`/sessions/${SID}`)
+  })
+  test('a fleet session is never redirected', () => {
+    expect(nativeRedirect('/sessions/agentop-1/terminal', 'agentop-1')).toBeNull()
+  })
+})

@@ -790,6 +790,11 @@ export function buildSessionViews(o: {
       harness: p.harness,
       cwd: p.cwd,
       status: 'external' as const,
+      // EXT.OPEN: the conversation the process ITSELF named (its harness record, its argv, its open
+      // file) is an EXACT link — so the row reads its chat, artifacts and metrics like any session.
+      // The directory guess never becomes one: that would show some other conversation under it.
+      ...(own?.sessionId ?? p.sessionId ? { conversationId: (own?.sessionId ?? p.sessionId)! } : {}),
+      ...(p.pid !== undefined ? { pid: p.pid } : {}),
       ...(ownName ? { harnessName: ownName } : {}),
       ...(ownName && own?.nameSince !== undefined ? { harnessNameSince: own.nameSince } : {}),
       ...(p.startedMs !== undefined ? { createdMs: p.startedMs } : {}),

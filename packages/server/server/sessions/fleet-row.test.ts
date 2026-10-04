@@ -108,3 +108,17 @@ describe('fleetRow — the verbs a web row is offered', () => {
     expect(sessionHandleOf('short')).toBe('short')
   })
 })
+
+describe('fleetRow — an EXTERNAL session takes a write when it can be continued here (EXT.OPEN)', () => {
+  const ext = (over: Parameters<typeof row>[0]) => fleetRow(row({ id: 'external:claude:c-1', state: 'unknown', actionable: false, harness: 'claude', ...over }), S)
+  it('an exact conversation on a harness that resumes by id: prompt is ENABLED (the first write continues it here)', () => {
+    expect(verb(ext({ conversationId: 'c-1' }), 'prompt').enabled).toBe(true)
+  })
+  it('no conversation named, or a harness with no resume: prompt keeps its sentence — read-only live', () => {
+    expect(verb(ext({}), 'prompt').enabled).toBe(false)
+    expect(verb(ext({ conversationId: 'c-1', harness: 'gemini' }), 'prompt').enabled).toBe(false)
+  })
+  it('the destructive verbs are untouched: an external row is never killed from its row', () => {
+    expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)
+  })
+})

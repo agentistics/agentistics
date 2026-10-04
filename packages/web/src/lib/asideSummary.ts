@@ -60,15 +60,3 @@ export function capacityText(capacity: { used: number; max: number } | null | un
   const free = Math.max(0, capacity.max - capacity.used)
   return pt ? `${free}/${capacity.max} vagas` : `${free}/${capacity.max} slots`
 }
-
-/**
- * A NATIVE session's state in the summary's words (H17). The engine's list carries `activity` —
- * `working`, `waiting-approval` or `waiting`, the same words a fleet row uses — once its process has
- * seen a run of that session. An open session with no activity yet is `unknown` — counted as active
- * (it is open), never as working or as needing you, which nothing measured — and a closed one is
- * `ended`, counted nowhere.
- */
-export function nativeSummaryState(row: { status: string; activity?: string }): string {
-  if (row.status !== 'open') return 'ended'
-  return row.activity === 'working' || row.activity === 'waiting' || row.activity === 'waiting-approval' ? row.activity : 'unknown'
-}

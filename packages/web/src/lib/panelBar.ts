@@ -28,6 +28,11 @@ export interface PanelBarGates {
   relayed: boolean
   /** Hardware reads THIS machine's own process list — meaningless (and refused) on a central. */
   hardwareOffered: boolean
+  /**
+   * The session HAS a screen — a harness process in a pane. Absent reads as true; `false` for a
+   * NATIVE Agentistics session (UI.UNIFY), whose `cli` tab would stream a pane that does not exist.
+   */
+  screen?: boolean
 }
 
 export interface PanelBarEntry {
@@ -63,7 +68,7 @@ export function panelBarEntries(
 
 function panelBarGateOpen(panel: PanelBarId, gates: PanelBarGates): boolean {
   if (panel === 'studio') return gates.editorEnabled
-  if (panel === 'cli') return !gates.relayed
+  if (panel === 'cli') return !gates.relayed && gates.screen !== false
   if (panel === 'shell') return gates.shellEnabled && !gates.relayed
   if (panel === 'hardware') return gates.hardwareOffered
   return true

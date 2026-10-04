@@ -77,6 +77,13 @@ export interface ChatTurn {
   /** Carried by the transcript; deliberately not rendered here. See the header. */
   thinking?: string
   /**
+   * The model's REASONING on its own channel (the native runtime's `reasoning` frame, TOOLS-NATIVE
+   * item 5) — drawn as a COLLAPSED block above the answer, never as answer text. A separate field
+   * from `thinking`, whose not-rendering above is a decision about the CLI transcripts this does not
+   * revisit.
+   */
+  reasoning?: string
+  /**
    * When this turn was written, ISO, as the transcript recorded it.
    *
    * The server has always sent it — 400 of 400 turns on a measured session — and nothing drew it.
@@ -237,6 +244,37 @@ function PastedBlock({ text, pt }: { text: string; pt: boolean }) {
       }}>
         {open ? text : head}{!open && truncated ? ' …' : ''}
       </div>
+    </div>
+  )
+}
+
+/** The model's reasoning, folded above its answer — `PastedBlock`'s shape, closed until asked. */
+export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div data-testid="reasoning-block" style={{
+      margin: '2px 0 6px', border: '1px solid var(--border-subtle)', borderRadius: 8,
+      background: 'var(--bg-elevated)', overflow: 'hidden', minWidth: 0,
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: 32,
+          padding: '4px 10px', background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left',
+        }}
+      >
+        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'none' : 'rotate(-90deg)' }} />
+        <span style={{ fontWeight: 600 }}>{pt ? 'Raciocínio' : 'Reasoning'}</span>
+      </button>
+      {open && (
+        <div style={{
+          padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)',
+          whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 360, overflowY: 'auto',
+        }}>{text}</div>
+      )}
     </div>
   )
 }
@@ -817,6 +855,10 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
               </span>
             ))}
           </div>
+        )}
+
+        {turn.role === 'assistant' && turn.reasoning && turn.reasoning.trim() !== '' && (
+          <ReasoningBlock text={turn.reasoning.trim()} pt={pt} />
         )}
 
         {text.trim() !== '' && (

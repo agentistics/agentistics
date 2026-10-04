@@ -262,6 +262,12 @@ export interface CliStrings {
    * line cannot describe one situation two ways.
    */
   sessTakeoverRefused: (reason: TakeoverRefusal) => string
+  /** EXT.OPEN: the one question before a write ends an external process and continues here. */
+  sessContinueConfirm: (harness: string, pid: number | undefined) => string
+  /** EXT.OPEN: why an external session stays read-only. */
+  sessContinueRefused: (reason: 'no-conversation' | 'not-resumable', harness: string) => string
+  /** EXT.OPEN: the one line saying it continued here. */
+  sessContinuedHere: string
   /** The fallback title for a session the user never named. */
   sessUntitled: (harness: string, project: string) => string
   /**
@@ -732,6 +738,12 @@ const EN: CliStrings = {
         return 'this conversation has no directory to reopen in — a removed worktree, most likely.'
     }
   },
+  sessContinueConfirm: (harness, pid) =>
+    `this ${harness} session is still open in another terminal${pid !== undefined ? ` (pid ${pid})` : ''}. Sending ends that process and continues the same conversation here — a turn it is in the middle of is cut.`,
+  sessContinueRefused: (reason, harness) => reason === 'no-conversation'
+    ? `this ${harness} process never said which conversation it is writing, so it is shown live and read-only — continuing a guessed conversation here could write into the wrong one.`
+    : `${harness} cannot reopen a conversation by id, so this session is shown live and read-only — write to it in its own terminal.`,
+  sessContinuedHere: 'continued here — the conversation is now an agentop session.',
   sessUntitled: (harness: string, project: string) => (project ? `${harness} in ${project}` : harness),
   sessUnregistered: (handle: string) => `unregistered session ${handle}`,
   sessModeUnknown: (harness: string) =>
@@ -1156,6 +1168,12 @@ const PT: CliStrings = {
         return 'esta conversa não tem diretório para reabrir — provavelmente uma worktree removida.'
     }
   },
+  sessContinueConfirm: (harness, pid) =>
+    `esta sessão ${harness} ainda está aberta em outro terminal${pid !== undefined ? ` (pid ${pid})` : ''}. Enviar encerra aquele processo e continua a mesma conversa aqui — um turno em andamento é cortado.`,
+  sessContinueRefused: (reason, harness) => reason === 'no-conversation'
+    ? `este processo ${harness} nunca disse qual conversa está escrevendo, então ela aparece ao vivo e só para leitura — continuar aqui uma conversa adivinhada poderia escrever na errada.`
+    : `${harness} não reabre uma conversa pelo id, então esta sessão aparece ao vivo e só para leitura — escreva nela no próprio terminal.`,
+  sessContinuedHere: 'continuou aqui — a conversa agora é uma sessão do agentop.',
   sessUntitled: (harness: string, project: string) => (project ? `${harness} em ${project}` : harness),
   sessUnregistered: (handle: string) => `sessão sem registro ${handle}`,
   sessModeUnknown: (harness: string) =>

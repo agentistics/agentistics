@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { actFallbackMessage, parseActResult } from './fleetAct'
 
 test('the created session id is CARRIED, which is the whole bug this replaces', () => {
@@ -31,4 +31,12 @@ test('an unreadable body still yields a sentence', () => {
   // An EMPTY message is not a message — the machine's own wording is what this shows, and a blank
   // line under a failed verb says nothing at all.
   expect(parseActResult({ ok: false, message: '' }, 'en').message).toBe(actFallbackMessage('en'))
+})
+
+describe('parseActResult — EXT.OPEN: a write that needs a YES first', () => {
+  test('`confirm` travels with the question; absent otherwise', () => {
+    expect(parseActResult({ ok: false, confirm: true, message: 'still open in another terminal' }, 'en'))
+      .toEqual({ ok: false, confirm: true, message: 'still open in another terminal' })
+    expect('confirm' in parseActResult({ ok: false, message: 'no' }, 'en')).toBe(false)
+  })
 })

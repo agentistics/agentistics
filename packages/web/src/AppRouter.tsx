@@ -17,8 +17,8 @@ const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
 const ComparePage = lazy(() => import('./pages/ComparePage'))
 const ExportPage = lazy(() => import('./pages/ExportPage'))
-// Every /sessions route renders through `SessionRoute`, which sends a NATIVE session id to its own
-// page (UI.3) and everything else to `SessionsPage` — one component type at all three, so the
+// Every /sessions route renders through `SessionRoute`: ONE shell for every harness, native included
+// (UI.UNIFY) — `SessionsPage` at all three, one component type, so the
 // workspace's aside stays mounted across selections exactly as before.
 const SessionRoute = lazy(() => import('./pages/SessionRoute'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
