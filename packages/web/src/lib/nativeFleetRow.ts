@@ -112,6 +112,8 @@ export function nativeFleetEntry(
   r: NativeListRecord,
   filing: NativeFilingFacts | undefined,
   lang: 'pt' | 'en',
+  /** The session's note (the server keeps it beside the registry, `native-notes.ts`). */
+  note?: string,
 ): { row: FleetRow; session: ControlSession } {
   const state = nativeState(r)
   // `unknown` here is not "external" (that word belongs to the CLI fleet): it is open and unmeasured.
@@ -127,7 +129,8 @@ export function nativeFleetEntry(
   // sentence, which is what any refused verb says.
   const verbs: FleetVerb[] = [
     { action: 'rename', label: words.rename, enabled: true },
-    off('note', words.note),
+    // The note lives beside the registry (`/api/fleet/act` routes a native id there).
+    { action: 'note', label: words.note, enabled: true },
     { action: 'task', label: words.task, enabled: true },
     open ? { action: 'resume', label: words.resume, enabled: false, reason: OPEN_ALREADY[lang] } : { action: 'resume', label: words.resume, enabled: true },
     open ? { action: 'kill', label: words.kill, enabled: true } : { action: 'kill', label: words.kill, enabled: false, reason: ENDED_ALREADY[lang] },
@@ -145,6 +148,7 @@ export function nativeFleetEntry(
     stateLabel,
     actionable: open,
     ...(filing ? { task: filing.taskTitle } : {}),
+    ...(note ? { note } : {}),
     ...(r.model ? { model: r.model } : {}),
     // A native session IS its conversation: the id the chat reads is the session's own.
     conversationId: r.sessionId,
@@ -169,7 +173,7 @@ export function nativeFleetEntry(
       name: title,
       folder: cwd,
       harness: NATIVE_HARNESS_ID,
-      note: '',
+      note: note ?? '',
       task: filing?.taskTitle ?? '',
       prompt: '',
     },
@@ -188,13 +192,14 @@ export function nativeFleetEntries(
   list: readonly NativeListRecord[],
   filings: Readonly<Record<string, NativeFilingFacts>>,
   lang: 'pt' | 'en',
+  notes: Readonly<Record<string, string>> = {},
 ): { rows: FleetRow[]; sessions: ControlSession[]; measuredWaiting: string[] } {
   const rows: FleetRow[] = []
   const sessions: ControlSession[] = []
   const measuredWaiting: string[] = []
   for (const r of list) {
     if (typeof r?.sessionId !== 'string' || r.sessionId === '') continue
-    const e = nativeFleetEntry(r, filings[r.sessionId], lang)
+    const e = nativeFleetEntry(r, filings[r.sessionId], lang, notes[r.sessionId])
     rows.push(e.row)
     sessions.push(e.session)
     if (e.session.state === 'waiting' || e.session.state === 'waiting-approval') measuredWaiting.push(r.sessionId)

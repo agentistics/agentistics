@@ -45,7 +45,7 @@ describe('nativeFleetEntry — a native session is an ordinary fleet row', () =>
   test('untitled falls back to the model, as the old aside did', () => {
     expect(nativeFleetEntry(rec({ title: '  ' }), undefined, 'en').row.title).toBe('claude-sonnet-4.6')
   })
-  test('the row menu: lifecycle verbs follow the state; note is listed, disabled, with its reason', () => {
+  test('the row menu: lifecycle verbs follow the state; note is enabled like every harness, and the row carries it', () => {
     const verbs = (r: NativeListRecord) => Object.fromEntries(nativeFleetEntry(r, undefined, 'en').row.verbs.map(v => [v.action, v]))
     const open = verbs(rec())
     expect(open.rename!.enabled).toBe(true)
@@ -53,8 +53,11 @@ describe('nativeFleetEntry — a native session is an ordinary fleet row', () =>
     expect(open.kill!.enabled).toBe(true)
     expect(open.resume!.enabled).toBe(false)
     expect(open.resume!.reason).toBeTruthy()
-    expect(open.note!.enabled).toBe(false)
-    expect(open.note!.reason).toMatch(/native/)
+    expect(open.note!.enabled).toBe(true)
+    expect(open.note!.reason).toBeUndefined()
+    const noted = nativeFleetEntry(rec(), undefined, 'en', 'waiting on review')
+    expect(noted.row.note).toBe('waiting on review')
+    expect(nativeFleetEntries([rec()], {}, 'en', { [rec().sessionId]: 'n1' }).rows[0]!.note).toBe('n1')
     const ended = verbs(rec({ status: 'ended' }))
     expect(ended.resume!.enabled).toBe(true)
     expect(ended.kill!.enabled).toBe(false)
@@ -84,10 +87,11 @@ describe('withNativeSessions — folded into the fleet the whole product reads',
 })
 
 describe('nativeVerbRequest — the row verbs go to the engine\'s lifecycle routes', () => {
-  test('rename / stop / reopen; anything else is not a native verb', () => {
+  test('rename / stop / reopen go to the engine; a note to the machine\'s own act; anything else is not a native verb', () => {
     expect(nativeVerbRequest({ id: SID, action: 'rename', text: 'New' })).toEqual({ url: `/api/runtime/sessions/${SID}`, method: 'PATCH', body: { title: 'New' } })
     expect(nativeVerbRequest({ id: SID, action: 'kill' })).toEqual({ url: `/api/runtime/sessions/${SID}/end`, method: 'POST' })
     expect(nativeVerbRequest({ id: SID, action: 'resume' })).toEqual({ url: `/api/runtime/sessions/${SID}/reopen`, method: 'POST' })
-    expect(nativeVerbRequest({ id: SID, action: 'note', text: 'x' })).toBeNull()
+    expect(nativeVerbRequest({ id: SID, action: 'note', text: 'x' })).toEqual({ url: '/api/fleet/act', method: 'POST', body: { id: SID, action: 'note', text: 'x' } })
+    expect(nativeVerbRequest({ id: SID, action: 'approve' })).toBeNull()
   })
 })

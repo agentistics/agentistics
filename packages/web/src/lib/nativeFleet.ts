@@ -37,12 +37,13 @@ const NONE: NativeFleet = { rows: [], sessions: [], measuredWaiting: [] }
 export async function readNativeFleet(lang: 'pt' | 'en'): Promise<NativeFleet> {
   if (!(await nativeOn())) return NONE
   try {
-    const [list, filings] = await Promise.all([
+    const [list, filings, notes] = await Promise.all([
       fetch(`${CREATE_URL}?limit=${NATIVE_LIST_LIMIT}`).then(r => (r.ok ? r.json() : null)) as Promise<{ sessions?: NativeListRecord[] } | null>,
       fetch('/api/tasks/native-filings').then(r => (r.ok ? r.json() : null)).catch(() => null) as Promise<{ filings?: Record<string, NativeFilingFacts> } | null>,
+      fetch('/api/fleet/native-notes').then(r => (r.ok ? r.json() : null)).catch(() => null) as Promise<{ notes?: Record<string, string> } | null>,
     ])
     if (!list || !Array.isArray(list.sessions)) return NONE
-    return nativeFleetEntries(list.sessions, filings?.filings ?? {}, lang)
+    return nativeFleetEntries(list.sessions, filings?.filings ?? {}, lang, notes?.notes ?? {})
   } catch {
     return NONE
   }
@@ -54,6 +55,8 @@ export function nativeVerbRequest(
 ): { url: string; method: 'PATCH' | 'POST'; body?: Record<string, string> } | null {
   const base = `${CREATE_URL}/${encodeURIComponent(req.id)}`
   switch (req.action) {
+    // A note is the host's, not the engine's: the machine's own act keeps it beside the registry.
+    case 'note': return { url: '/api/fleet/act', method: 'POST', body: { id: req.id, action: 'note', text: req.text ?? '' } }
     case 'rename': return { url: base, method: 'PATCH', body: { title: req.text ?? '' } }
     case 'kill': return { url: `${base}/end`, method: 'POST' }
     case 'resume': return { url: `${base}/reopen`, method: 'POST' }

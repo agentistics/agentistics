@@ -1897,6 +1897,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { nativeFilingOf } = await import('./sessions/task-web')
       return json({ filing: await nativeFilingOf(url.searchParams.get('session') ?? '') })
     }
+    // Every native session's note (the session menu's Note, `native-notes.ts`) — the web's native rows read it.
+    if (url.pathname === '/api/fleet/native-notes' && req.method === 'GET') {
+      const { readNativeNotes } = await import('./sessions/native-notes')
+      return json({ notes: await readNativeNotes(AGENTISTICS_DATA_DIR) })
+    }
     // Every native session's filing at once (UI.UNIFY) — the fleet list's native rows read it.
     if (url.pathname === '/api/tasks/native-filings' && req.method === 'GET') {
       const { nativeFilingsAll } = await import('./sessions/task-web')
