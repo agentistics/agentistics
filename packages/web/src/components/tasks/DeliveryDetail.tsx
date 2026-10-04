@@ -57,6 +57,8 @@ import { TaskFiles } from './TaskFiles'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
 import { CommentThreadDialog } from './CommentThreadDialog'
+import { ThreadsPanel } from './ThreadsPanel'
+import { threadCopy } from './threadCopy'
 import {
   addComment, addLink, addSubtask, attachSession, clearStagedSession, deleteFile,
   deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration,
@@ -1008,18 +1010,20 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
  * Writing always lands on THIS thread's own target, so a reply typed in a group's thread is a
  * comment on the group; the label on a member's comment is what keeps that from misleading anyone.
  */
-export function CommentsTab({ id, detail, onChanged, target, lang = 'en' }: {
+export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseOnly }: {
   id: string
   detail: TaskDetail
   onChanged: () => Promise<void> | void
   /** The subtask or group whose thread this is; absent/null = the task. */
   target?: string | null
   lang?: Lang
+  /** Only comments in NO topic thread — the "loose comments" bucket beside the thread inbox. */
+  looseOnly?: boolean
 }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const threadId = target ?? null
-  const entries = commentThread(detail.comments, detail.subtasks, threadId)
+  const entries = commentThread(looseOnly ? detail.comments.filter(c => !c.threadId) : detail.comments, detail.subtasks, threadId)
   const owner = threadId ? detail.subtasks.find(s => s.id === threadId) : undefined
   /** The server's own sentence when a write was refused (e.g. the subtask was deleted meanwhile). */
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -1190,7 +1194,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en' }: {
   )
 }
 
-export type DeliveryTab = 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity'
+export type DeliveryTab = 'threads' | 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity' | 'about'
 
 export interface DeliveryDetailProps {
   id: string
@@ -1202,12 +1206,19 @@ export interface DeliveryDetailProps {
   dense?: boolean
   /** Deleting the delivery leaves the caller with nothing to draw. Absent = no delete offered. */
   onDeleted?: () => void
+  /** Controlled tab — the page's hero has an "About" button that must reach the same state. */
+  tab?: DeliveryTab
+  onTabChange?: (t: DeliveryTab) => void
 }
 
-export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: DeliveryDetailProps) {
+export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab: tabProp, onTabChange }: DeliveryDetailProps) {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<DeliveryTab>('overview')
+  // The full page opens on the CONVERSATIONS (owner's choice, 2026-10-04); the dense panel in the
+  // session aside keeps opening on the figures, which is what it is read for.
+  const [innerTab, setInnerTab] = useState<DeliveryTab>(dense ? 'overview' : 'threads')
+  const tab = tabProp ?? innerTab
+  const setTab = onTabChange ?? setInnerTab
   const [busy, setBusy] = useState(false)
   // The board's own dialog, never `window.confirm`: the browser's box carries the page's URL and
   // none of the app's words, and on a phone it is a system sheet that reads as a site error.
@@ -1243,14 +1254,40 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
   const oneColumn = dense === true || isMobile
 
   const copy = boardCopy(lang)
-  const TABS: Array<[DeliveryTab, string, number]> = [
-    ['overview', copy.tabs.overview, 0],
-    ['sessions', copy.tabs.sessions, detail.sessions.length],
-    ['comments', copy.tabs.comments, detail.comments.length],
-    ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
-    ['files', copy.tabs.files, detail.files.length],
-    ['activity', copy.tabs.activity, 0],
-  ]
+  const tc = threadCopy(lang)
+  const threadInboxCount = (detail.threads ?? []).length
+  // The full page: conversations first, the description and the plan behind "About". The dense
+  // panel keeps its old shape plus the loose comments tab, since it has no room for a thread view.
+  const TABS: Array<[DeliveryTab, string, number]> = dense
+    ? [
+      ['overview', copy.tabs.overview, 0],
+      ['sessions', copy.tabs.sessions, detail.sessions.length],
+      ['comments', copy.tabs.comments, detail.comments.length],
+      ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['files', copy.tabs.files, detail.files.length],
+      ['activity', copy.tabs.activity, 0],
+    ]
+    : [
+      ['threads', tc.tabThreads, threadInboxCount],
+      ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['sessions', copy.tabs.sessions, detail.sessions.length],
+      ['overview', tc.tabMetrics, 0],
+      ['files', copy.tabs.files, detail.files.length],
+      ['activity', copy.tabs.activity, 0],
+      ['about', tc.tabAbout, 0],
+    ]
+  // On a phone the plan rail (status, priority, links, delete) lives under About, so the page is
+  // not a scroll through facts before anything else; on a desktop it stays beside the work.
+  const showRail = !isMobile || dense === true || tab === 'about'
+  const descriptionEditor = (
+    <DescriptionEditor
+      id={id}
+      task={detail.task}
+      files={detail.files}
+      lang={lang}
+      onSaved={next => run(() => editTask(id, { detail: next }))}
+    />
+  )
 
   return (
     <>
@@ -1261,13 +1298,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
         alignItems: 'start',
       }}>
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-          <DescriptionEditor
-            id={id}
-            task={detail.task}
-            files={detail.files}
-            lang={lang}
-            onSaved={next => run(() => editTask(id, { detail: next }))}
-          />
+          {dense && descriptionEditor}
 
           {/*
            * A TAB-MENU, not an underline row — a filled pill for the active tab (the same
@@ -1379,6 +1410,21 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             </>
           )}
 
+          {tab === 'threads' && (
+            <div style={isMobile ? { margin: '0 -12px' } : undefined}>
+              <ThreadsPanel
+                id={id}
+                detail={detail}
+                lang={lang}
+                reload={reload}
+                renderBody={c => <CommentBody body={c.body} files={detail.files} />}
+                loose={<CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} looseOnly />}
+              />
+            </div>
+          )}
+
+          {tab === 'about' && descriptionEditor}
+
           {tab === 'sessions' && <SessionsTab detail={detail} />}
 
           {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} />}
@@ -1459,7 +1505,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
          * stays open because it is what you came to change; the rest state their name and their
          * count shut, and remember which of them you opened.
          */}
-        <aside style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+        {showRail && <aside style={{ display: 'grid', gap: 10, minWidth: 0 }}>
           <PlanCard
             task={detail.task}
             {...(detail.times ? { times: detail.times } : {})}
@@ -1505,7 +1551,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
               </button>
             </RailSection>
           )}
-        </aside>
+        </aside>}
       </div>
       {blocking && (
         <BlockedDialog
