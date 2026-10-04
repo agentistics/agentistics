@@ -59,11 +59,11 @@ describe('nativeControlSessions', () => {
 })
 
 describe('sessionActions on a native row', () => {
-  test('open: rename and end are offered; attach, prompt, approve, note, task are dimmed — never dropped', () => {
+  test('open: rename, note, task and end are offered; attach, prompt, approve are dimmed — never dropped', () => {
     const [row] = nativeControlSessions([rec({ activity: 'working' })], 'en')
     const verbs = Object.fromEntries(sessionActions(row).map(a => [a.action, a.enabled]))
     expect(verbs.attach).toBeUndefined()
-    expect(verbs).toMatchObject({ resume: false, approve: false, prompt: false, rename: true, note: false, task: false, kill: true })
+    expect(verbs).toMatchObject({ resume: false, approve: false, prompt: false, rename: true, note: true, task: true, kill: true })
   })
   test('closed: reopen is offered, end is not', () => {
     const [row] = nativeControlSessions([rec({ status: 'ended' })], 'en')
@@ -82,6 +82,23 @@ describe('nativeVerbCall', () => {
     const r = nativeVerbCall(ID, 'rename', 'new name')
     expect(r.init.method).toBe('PATCH')
     expect(JSON.parse(String(r.init.body))).toEqual({ title: 'new name' })
+  })
+})
+
+describe('a native session is filed on a task and noted like every harness (session menu)', () => {
+  test('`file` is the engine\'s filing route, the task ref in the body', () => {
+    const f = nativeVerbCall(ID, 'file', 'T-12')
+    expect(f.path).toBe(`/api/runtime/sessions/${ID}/filing`)
+    expect(f.init.method).toBe('PUT')
+    expect(JSON.parse(String(f.init.body))).toEqual({ taskId: 'T-12' })
+    expect(nativeVerbResult('file', 200, {}, 'pt')).toEqual({ ok: true, message: 'Sessão vinculada à tarefa.' })
+  })
+  test('the menu offers Note and Task on a native row, enabled', async () => {
+    const { sessionActions } = await import('@agentistics/tui/control/session-verbs')
+    const acts = sessionActions({ id: ID, harness: 'agentistics', state: 'waiting' } as never)
+    expect(acts.find(a => a.action === 'note')?.enabled).toBe(true)
+    expect(acts.find(a => a.action === 'task')?.enabled).toBe(true)
+    expect(acts.find(a => a.action === 'prompt')?.enabled).toBe(false)
   })
 })
 

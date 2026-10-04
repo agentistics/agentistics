@@ -3803,6 +3803,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     async noteSession(id: string, text: string): Promise<ActionResult> {
       const s = S()
+      // A NATIVE session has no registry record: its note lives beside it (`native-notes.ts`).
+      if (isNativeSessionId(id)) {
+        const { writeNativeNote } = await import('./sessions/native-notes')
+        try { await writeNativeNote(AGENTISTICS_DATA_DIR, id, text); return { ok: true, message: s.sessNoted } } catch { return { ok: false, message: s.sessNoRegistryEntry } }
+      }
       const ok = await patchSession(id, { note: text })
       return ok ? { ok: true, message: s.sessNoted } : { ok: false, message: s.sessNoRegistryEntry }
     },
@@ -3821,6 +3826,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     async taskSession(id: string, task: string): Promise<ActionResult> {
       const s = S()
+      // A NATIVE session is filed on the board through the engine that owns it.
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'file', lang, { title: task })
       const ok = await patchSession(id, { task })
       return ok ? { ok: true, message: s.sessTasked } : { ok: false, message: s.sessNoRegistryEntry }
     },

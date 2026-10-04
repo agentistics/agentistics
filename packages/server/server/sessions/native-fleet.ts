@@ -144,7 +144,7 @@ export function withNativeUsage(rows: readonly ControlSession[], metas: readonly
 }
 
 /** The lifecycle verbs a native session takes. `kill` is the fleet's word for END. */
-export type NativeVerb = 'kill' | 'resume' | 'rename' | 'archive' | 'unarchive' | 'delete'
+export type NativeVerb = 'kill' | 'resume' | 'rename' | 'archive' | 'unarchive' | 'delete' | 'file'
 
 /** PURE. A verb → the engine call that performs it. */
 export function nativeVerbCall(id: string, verb: NativeVerb, title?: string): { path: string; init: RequestInit } {
@@ -160,6 +160,12 @@ export function nativeVerbCall(id: string, verb: NativeVerb, title?: string): { 
       path: base,
       init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title ?? '' }) },
     }
+    // Filing on the board goes through the engine, which owns the session (the web's SessionFiling
+    // does the same); `title` carries the task ref here.
+    case 'file': return {
+      path: `${base}/filing`,
+      init: { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: title ?? '' }) },
+    }
   }
 }
 
@@ -174,6 +180,7 @@ const SENTENCES = {
     archived: 'Session archived.',
     unarchived: 'Session restored from the archive.',
     deleted: 'Session deleted.',
+    filed: 'Session filed under the task.',
     refused: (status: number) => `The native runtime refused this (HTTP ${status}).`,
     noTitle: 'A name is required.',
   },
@@ -187,13 +194,14 @@ const SENTENCES = {
     archived: 'Sessão arquivada.',
     unarchived: 'Sessão restaurada do arquivo.',
     deleted: 'Sessão apagada.',
+    filed: 'Sessão vinculada à tarefa.',
     refused: (status: number) => `O runtime nativo recusou isto (HTTP ${status}).`,
     noTitle: 'Um nome é obrigatório.',
   },
 } as const
 
 const DONE: Record<NativeVerb, keyof (typeof SENTENCES)['en']> = {
-  kill: 'ended', resume: 'reopened', rename: 'renamed', archive: 'archived', unarchive: 'unarchived', delete: 'deleted',
+  kill: 'ended', resume: 'reopened', rename: 'renamed', archive: 'archived', unarchive: 'unarchived', delete: 'deleted', file: 'filed',
 }
 
 /** PURE. The engine's answer → the host's `ActionResult`. An idempotent no-op (`ended: false`) is the engine's sentence, still `ok`. */
@@ -225,7 +233,7 @@ async function gateOpen(opts: { central?: boolean; on?: boolean }): Promise<bool
  */
 export async function loadNativeFleet(
   lang: CliLang,
-  opts: { central?: boolean; on?: boolean; ask?: EngineAsk; includeArchived?: boolean } = {},
+  opts: { central?: boolean; on?: boolean; ask?: EngineAsk; includeArchived?: boolean; dataDir?: string } = {},
 ): Promise<ControlSession[]> {
   const central = opts.central ?? (await import('../config')).TEAM_CENTRAL
   if (!(await gateOpen({ central, ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return []
@@ -241,7 +249,10 @@ export async function loadNativeFleet(
     const body = await res.json() as { sessions?: unknown }
     if (!Array.isArray(body?.sessions)) return []
     const rows = nativeControlSessions(body.sessions as NativeListRecord[], lang, opts.includeArchived ? { includeArchived: true } : {})
-    return withNativeUsage(rows, nativeSessionsFrom(facts))
+    // The session menu's Note for a native row (`native-notes.ts`), read with the list.
+    const { readNativeNotes, withNativeNotes } = await import('./native-notes')
+    const dataDir = opts.dataDir ?? (await import('../config')).AGENTISTICS_DATA_DIR
+    return withNativeNotes(withNativeUsage(rows, nativeSessionsFrom(facts)), await readNativeNotes(dataDir))
   } catch {
     return []
   }
@@ -258,7 +269,7 @@ export async function runNativeVerb(
   const central = opts.central ?? (await import('../config')).TEAM_CENTRAL
   if (central) return { ok: false, message: t.central }
   if (!(await gateOpen({ ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return { ok: false, message: t.gated }
-  if (verb === 'rename' && !(opts.title ?? '').trim()) return { ok: false, message: t.noTitle }
+  if ((verb === 'rename' || verb === 'file') && !(opts.title ?? '').trim()) return { ok: false, message: t.noTitle }
   const call = nativeVerbCall(id, verb, opts.title?.trim())
   try {
     const res = await (opts.ask ?? defaultAsk)(call.path, call.init)
