@@ -3,6 +3,7 @@
  * lives in the pure `tmux-cli.ts` beside it.
  */
 
+import { ensureSessionIdentityKey } from './session-identity'
 import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
 import type { RewindOutcome } from './types'
@@ -448,6 +449,10 @@ export const tmuxBackend: SessionBackend = {
     // acts under. Not a secret (the id is on every fleet row); a value never travels this way — tmux
     // `-e` is visible in `ps`.
     const env: Record<string, string> = { ...(await sessionEnv()) as Record<string, string>, AGENTOP_MANAGED_ID: req.id }
+    // The same id is what an Agentask comment proves it came from (`session-identity.ts`): the MCP
+    // derives the proof from a 0600 key file, so no token is ever put on a command line. The key is
+    // created here, before the first session that could need it exists.
+    await ensureSessionIdentityKey()
     // The first session of a cold socket also starts the tmux SERVER — in a scope of its own, so the
     // fleet does not live and die with this service's cgroup. See `coldStartArgv`.
     const { code, out } = await tmuxStartingServer(
