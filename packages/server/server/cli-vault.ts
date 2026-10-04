@@ -35,7 +35,7 @@ const HELP = `Usage: agentop vault <command>
   rekey --protector <id>   move the vault to another protector (keychain|dpapi|libsecret|systemd-creds|passphrase)
   add-passphrase           add a passphrase wrapper beside the system one (how a Docker machine opens it)
   reset [--yes]            delete the vault and every sealed file — the secrets are then re-entered
-  enroll                   make the vault ultra secure: authenticator, recovery key, presence (what is still missing)
+  enroll                   protect the vault: authenticator, recovery key, presence (what is still missing)
         [--authenticator] [--recovery] [--presence hello|fido2] [--require-presence]
   recover                  open the vault with your 24-word recovery key (terminal only)
   setup-code               print the one-time code the dashboard asks for its FIRST vault setup
@@ -508,8 +508,13 @@ async function cmdDisablePresence(): Promise<number> {
 }
 
 export async function runVault(args: string[]): Promise<number> {
-  await loadVaultConsumers()
   const [cmd, ...rest] = args
+  // VAULT.PERSONAL §8.3 — the three verbs a granted session calls from INSIDE its commands and hooks.
+  // They come before the vault consumers load: a hook runs on every tool call and must cost nothing.
+  if (cmd === 'ref') return cmdRef(rest[0])
+  if (cmd === 'pretool') return cmdPreTool()
+  if (cmd === 'posttool') return cmdPostTool()
+  await loadVaultConsumers()
   switch (cmd) {
     case undefined:
     case 'status': return cmdStatus(rest.includes('--json'))
@@ -530,4 +535,59 @@ export async function runVault(args: string[]): Promise<number> {
       process.stderr.write(HELP + '\n')
       return 2
   }
+}
+
+// ── VAULT.PERSONAL §8.3: inside a granted session ───────────────────────────────────────────────
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const c of process.stdin) chunks.push(c as Buffer)
+  return Buffer.concat(chunks).toString('utf8')
+}
+const managedId = () => process.env.AGENTOP_MANAGED_ID ?? ''
+
+/** `agentop vault ref vault://key[/field]` — the value of a GRANTED reference, to stdout, for the command that runs it. */
+async function cmdRef(ref: string | undefined): Promise<number> {
+  const { askVault } = await import('./vault/socket')
+  if (!ref || !managedId()) { process.stderr.write(t('agentop vault ref: run inside a session agentop started, with a granted reference.\n', 'agentop vault ref: rode dentro de uma sessão iniciada pelo agentop, com uma referência liberada.\n')); return 2 }
+  const r = await askVault({ op: 'personal-ref', managedId: managedId(), ref })
+  const rep = r?.reply as { ok?: boolean; value?: string; sentence?: string } | undefined
+  if (!rep?.ok || typeof rep.value !== 'string') { process.stderr.write(`agentop: ${rep?.sentence ?? t('the vault service did not answer.', 'o serviço do cofre não respondeu.')}\n`); return 1 }
+  process.stdout.write(rep.value)
+  return 0
+}
+
+/** Claude Code PreToolUse (Bash): rewrite granted references; print nothing otherwise. */
+async function cmdPreTool(): Promise<number> {
+  if (!managedId()) return 0
+  const raw = await readStdin()
+  if (!raw.includes('vault://')) return 0
+  let input: { tool_name?: string; tool_input?: Record<string, unknown> }
+  try { input = JSON.parse(raw) } catch { return 0 }
+  const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : null
+  if (input.tool_name !== 'Bash' || !command) return 0
+  const { askVault } = await import('./vault/socket')
+  const refs = ((await askVault({ op: 'personal-refs', managedId: managedId() }))?.reply as { refs?: string[] } | undefined)?.refs ?? []
+  const { rewriteVaultRefs, preToolAnswer } = await import('./vault/hook-rewrite')
+  const { hookInvocation } = await import('./claude-hooks')
+  const out = rewriteVaultRefs(command, refs, hookInvocation({ onPath: false, execPath: process.execPath, script: process.argv[1] }))
+  if (out) process.stdout.write(preToolAnswer(input.tool_input!, out))
+  return 0
+}
+
+/** Claude Code PostToolUse: scrub the tool's output for this session's grant; print nothing when nothing changed. */
+async function cmdPostTool(): Promise<number> {
+  if (!managedId()) return 0
+  const raw = await readStdin()
+  let input: { tool_response?: unknown }
+  try { input = JSON.parse(raw) } catch { return 0 }
+  if (input.tool_response === undefined) return 0
+  const { askVault } = await import('./vault/socket')
+  const text = JSON.stringify(input.tool_response)
+  const r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }))?.reply as { ok?: boolean; changed?: boolean; text?: string } | undefined
+  if (!r?.ok || typeof r.text !== 'string') return 0
+  const { postToolAnswer } = await import('./vault/hook-rewrite')
+  const ans = postToolAnswer(input.tool_response, r.text, r.changed === true)
+  if (ans) process.stdout.write(ans)
+  return 0
 }

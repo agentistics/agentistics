@@ -91,3 +91,30 @@ jobs:
       # production are not installing the same tree.
       - name: Verify the lockfile is unchanged
         run: git diff --exit-code bun.lock
+
+  # PERF.1: the performance budgets (scripts/perf/budgets.json) over a synthetic home — boot, the
+  # first and warm /api/data, a history open, a file change reaching the dashboards, and a live
+  # chat on a fake `claude` in tmux (send -> echo, answer -> shown). Fails when one is exceeded.
+  perf-budgets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Ensure type stub
+        run: bun run stub
+
+      - name: tmux (the live-chat budgets run a fake claude in it)
+        run: sudo apt-get install -y tmux
+
+      - name: Synthetic home
+        run: bun scripts/perf/synth-home.ts "$RUNNER_TEMP/perf-home" --scale 0.1
+
+      - name: Perf budgets
+        run: bun scripts/perf/budget.ts "$RUNNER_TEMP/perf-home"

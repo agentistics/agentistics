@@ -9,7 +9,7 @@
  * structure once; the loop writes widths and text into the refs it was handed.
  */
 
-import { useEffect, useRef, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
 import type { Lang } from '@agentistics/core'
 import { brandAsset } from '../lib/brand'
 import { UPGRADE_POLL_MS } from '../lib/appReload'
@@ -74,7 +74,12 @@ export interface StageRefs {
 }
 
 export function useStageRefs(): StageRefs {
-  return { hud: useRef(null), foot: useRef(null), sub: useRef(null), fills: useRef([]), labels: useRef([]) }
+  // ONE object for the life of the component. It used to be rebuilt every render, and it is a dependency of the
+  // scene effects: every poll's re-render disposed and recreated the canvas scene, so the animation restarted
+  // endlessly (UPD.ANIM).
+  const hud = useRef<HTMLDivElement | null>(null), foot = useRef<HTMLDivElement | null>(null), sub = useRef<HTMLDivElement | null>(null)
+  const fills = useRef<(HTMLDivElement | null)[]>([]), labels = useRef<(HTMLSpanElement | null)[]>([])
+  return useMemo(() => ({ hud, foot, sub, fills, labels }), [hud, foot, sub, fills, labels])
 }
 
 export function StageText({ lang, isMobile, refs, from, to, phrase, title, note, allDone }: {

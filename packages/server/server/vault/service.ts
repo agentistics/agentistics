@@ -595,6 +595,35 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
   return presenceRefusal(s)
 }
 
+/**
+ * VAULT.PERSONAL §10 — the phone's first phase. `unwrap` turns the vault's kid into the data key using
+ * the PHONE's secret (a passkey's PRF output, or a device key); the key then waits in the same pending
+ * slot a Hello unwrap uses, for the authenticator code (`completeUnlock`). Nothing is raised on this
+ * computer. A wrong secret opens nothing and leaves nothing pending.
+ */
+export async function stagePhoneUnlock(unwrap: (kid: string) => Uint8Array | null): Promise<{ ok: true; state: 'open' | 'pending-stepup' } | { ok: false; code: string; sentence: string }> {
+  if (_opened) return { ok: true, state: 'open' }
+  if (_role !== 'holder') return refused('service-only', sentence('service-only'))
+  if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
+  const raw = await io().readFile(join(vaultDir(), 'vault.json'))
+  let vault: VaultJson | null = null
+  if (raw) { try { vault = JSON.parse(new TextDecoder().decode(raw)) as VaultJson } catch { vault = null } }
+  if (!vault || typeof vault.kid !== 'string') return refused('uninitialized', sentence('uninitialized'))
+  if (!vault.stepup) return refused('phone-needs-code', vaultLang() === 'pt'
+    ? 'Abrir o cofre pelo celular pede o código do autenticador, e ele ainda não foi configurado. Configure-o no computador.'
+    : 'Opening the vault from a phone asks for the authenticator code, which is not set up yet. Set it up on the computer.')
+  const dek = unwrap(vault.kid)
+  if (!dek) return refused('phone-key-refused', vaultLang() === 'pt'
+    ? 'A chave deste celular não abriu o cofre. Se o cofre trocou de chave, aprove este celular de novo no computador.'
+    : 'This phone\'s key did not open the vault. If the vault changed its key, approve this phone again on the computer.')
+  abandonPending()
+  const via = (vault.wrappers.find(w => isPresenceId(w.type))?.type ?? vault.wrappers[0]?.type ?? 'memory') as ProtectorId
+  const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
+  ;(timer as { unref?: () => void }).unref?.()
+  _pending = { opened: { kid: vault.kid, dek, vault, via }, expiresMs: _now() + PENDING_STEPUP_MS, timer }
+  return { ok: true, state: 'pending-stepup' }
+}
+
 /** The DEK waiting for its code, or null (expired ones are zeroed here). */
 export function pendingUnlock(): Opened | null {
   if (_pending && _now() > _pending.expiresMs) abandonPending()
@@ -944,9 +973,11 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
+  | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
-export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine' }): void {
+/** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */
+export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine'; device?: string }): void {
   try {
     mkdirSync(vaultDir(), { recursive: true, mode: 0o700 })
     const file = join(vaultDir(), 'audit.jsonl')

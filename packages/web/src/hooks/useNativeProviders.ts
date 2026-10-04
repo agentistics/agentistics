@@ -4,8 +4,9 @@
  * the one chosen (`GET /api/provider/:id/models`). Idle until `enabled`; a model list that cannot be
  * read is empty, and the picker still takes a typed id.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { configuredProviders, type ProviderChoice } from '../lib/nativeSession'
+import { loadVault } from '../lib/vaultApi'
 
 export interface NativeProviders {
   providers: ProviderChoice[] | null
@@ -13,6 +14,10 @@ export interface NativeProviders {
   modelsLoading: boolean
   /** Why there is no list, in words (the flag is off, no provider is configured). */
   unavailable?: string
+  /** A stored key exists that only a locked vault keeps from being read. */
+  locked: boolean
+  /** Read the provider list again (after an unlock). */
+  reload: () => void
 }
 
 export function useNativeProviders(enabled: boolean, provider: string, lang: 'pt' | 'en'): NativeProviders {
@@ -21,6 +26,11 @@ export function useNativeProviders(enabled: boolean, provider: string, lang: 'pt
   const [unavailable, setUnavailable] = useState<string | undefined>()
   const [models, setModels] = useState<{ id: string; label: string }[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
+  // VAULT.PERSONAL §10: a stored key the LOCKED vault cannot read lists as `unreadable`; the wizard then
+  // offers the unlock right there and reads the list again (`reload`).
+  const [locked, setLocked] = useState(false)
+  const [nonce, setNonce] = useState(0)
+  const reload = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
     if (!enabled) return
@@ -36,13 +46,15 @@ export function useNativeProviders(enabled: boolean, provider: string, lang: 'pt
         }
         const list = configuredProviders(b.providers)
         setProviders(list)
+        if (b.providers.some(p => p.state === 'unreadable')) void loadVault().then(v => { if (live) setLocked(v.kind !== 'failed' && v.view.state === 'locked') })
+        else setLocked(false)
         setUnavailable(list.length === 0
           ? (pt ? 'Nenhum provedor configurado — configure um em Configurações → Provedores.' : 'No provider is configured — set one up in Settings → Providers.')
           : undefined)
       })
       .catch(() => { if (live) { setProviders([]); setUnavailable(pt ? 'Erro de rede ao ler os provedores.' : 'Network error reading the providers.') } })
     return () => { live = false }
-  }, [enabled, pt])
+  }, [enabled, pt, nonce])
 
   useEffect(() => {
     setModels([])
@@ -59,5 +71,5 @@ export function useNativeProviders(enabled: boolean, provider: string, lang: 'pt
     return () => { live = false }
   }, [enabled, provider])
 
-  return { providers, models, modelsLoading, ...(unavailable ? { unavailable } : {}) }
+  return { providers, models, modelsLoading, locked, reload, ...(unavailable ? { unavailable } : {}) }
 }

@@ -45,11 +45,16 @@ export interface MinimizedMenuProps {
   anchorStyle: CSSProperties
   /** True while the button is being dragged: the list closes and nothing may open it. */
   suppressed?: boolean
+  /**
+   * Whether a touch long-press opens the list (default). The Nay button gives its long-press to the
+   * vault icon (`VaultFabPop`), so the list is reached there by its count badge instead.
+   */
+  longPress?: boolean
   /** The chat button itself; its click is wrapped so a long-press can swallow it. */
   renderButton: (p: { onClickCapture: (e: ReactMouseEvent) => void; onKeyDown: (e: ReactKeyboardEvent) => void }) => ReactNode
 }
 
-export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, suppressed = false, renderButton }: MinimizedMenuProps) {
+export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, suppressed = false, longPress = true, renderButton }: MinimizedMenuProps) {
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<MenuPlacement>({ vertical: 'above', horizontal: 'right' })
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -111,7 +116,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
 
   const cancelPress = () => { if (press.current) { window.clearTimeout(press.current.timer); press.current = null } }
   const onDown = (e: ReactPointerEvent) => {
-    if (e.pointerType === 'mouse' || count === 0) return
+    if (e.pointerType === 'mouse' || count === 0 || !longPress) return
     cancelPress()
     const timer = window.setTimeout(() => { press.current = null; swallowClick.current = true; show() }, LONG_PRESS_MS)
     press.current = { x: e.clientX, y: e.clientY, timer }

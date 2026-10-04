@@ -11,6 +11,7 @@
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
 
+import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
 import type { ConversationLinkReason, HarnessId } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
@@ -374,7 +375,7 @@ export function createSessionsPoller(o: {
         }
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
-        tails.set(r.id, frameTail(frame, TAIL_LINES))
+        tails.set(r.id, anyGrant() ? frameTail(frame, TAIL_LINES).map(l => scrubTerminalLine(r.id, l)) : frameTail(frame, TAIL_LINES))
 
         const harness = harnessOf.get(r.id)
 
@@ -398,7 +399,7 @@ export function createSessionsPoller(o: {
             .catch(() => null)
           if (path) {
             const turns = await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
-            if (turns.length > 0) chatTails.set(r.id, turns)
+            if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
           }
         }
 
@@ -429,12 +430,13 @@ export function createSessionsPoller(o: {
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
         // different moments — and it costs nothing extra, the frame is already here.
         const statedDialog = state === 'waiting-approval' ? o.backend.dialogOf?.(r.id) : undefined
+        const tail = (): string[] => anyGrant() ? approvalTail(frame, APPROVAL_LINES).map(l => scrubTerminalLine(r.id, l)) : approvalTail(frame, APPROVAL_LINES)
         if (statedDialog) {
-          approvals.set(r.id, approvalTail(frame, APPROVAL_LINES))
-          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label, selected: i === 0 })))
+          approvals.set(r.id, tail())
+          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0 })))
           dialogSelect.set(r.id, 'numbered')
         } else if (state === 'waiting-approval') {
-          approvals.set(r.id, approvalTail(frame, APPROVAL_LINES))
+          approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state
           // says can never describe different moments. Empty when the screen cannot be parsed with
           // confidence, which the UI reports rather than papering over.

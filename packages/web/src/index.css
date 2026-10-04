@@ -1082,3 +1082,21 @@ button:focus-within .ag-row-pin,
 /* Calm finale: a plain fade, no scale, no beat. */
 .ag-upd-finale-calm .ag-upd-logo { filter: drop-shadow(0 0 14px rgba(249,115,22,0.45)); }
 .ag-upd-finale-calm .ag-upd-halo { opacity: 0.6; }
+
+/* The vault icon above the Nay button (lib/vaultFab.ts): rises from behind the button with a spring,
+   sinks back into it; the button gives one soft ripple. Reduced motion uses the plain fades. */
+@keyframes ag-vault-rise {
+  0% { opacity: 0; transform: translateY(26px) scale(0.6); }
+  70% { opacity: 1; transform: translateY(-3px) scale(1.06); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes ag-vault-sink {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(26px) scale(0.6); }
+}
+@keyframes ag-vault-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ag-vault-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ag-vault-ripple {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent); }
+  100% { box-shadow: 0 0 0 16px color-mix(in srgb, var(--anthropic-orange) 0%, transparent); }
+}

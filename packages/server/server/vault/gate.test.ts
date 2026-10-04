@@ -161,26 +161,38 @@ describe('§2.4 — every row of the table', () => {
   const rows = Object.entries(VAULT_ACTION_ROWS).filter(([a]) => a !== 'unlock') as [VaultAction, (typeof VAULT_ACTION_ROWS)[VaultAction]][]
   for (const [action, row] of rows) {
     test(`${action}: code ${row.code ? 'yes' : 'no'}, gesture ${row.gesture ? 'yes' : 'no'}, grant ${row.grant ?? 'none'}`, async () => {
+      // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
+      // passkey token — tested in mobile.test.ts).
+      const C = action.startsWith('personal-') ? { ...S, loopback: true } : S
       if (!row.code && !row.gesture) {
-        expect((await requireVaultStepUp(action, S)).ok).toBe(true)
+        expect((await requireVaultStepUp(action, C)).ok).toBe(true)
         return
       }
-      expect(await requireVaultStepUp(action, S)).toMatchObject({ ok: false, code: 'stepup-required' })
+      if (!row.code) {
+        // Gesture only (§10 the computer's approval of a phone): no code asked, Hello raised, fresh, no grant.
+        const g0 = hello.gestures
+        const ok = await requireVaultStepUp(action, C)
+        expect(ok).toMatchObject({ ok: true })
+        expect(ok.ok && ok.grant).toBeFalsy()
+        expect(hello.gestures - g0).toBe(1)
+        return
+      }
+      expect(await requireVaultStepUp(action, C)).toMatchObject({ ok: false, code: 'stepup-required' })
       const g0 = hello.gestures
-      const ok = await requireVaultStepUp(action, { ...S, code: codeAt() })
+      const ok = await requireVaultStepUp(action, { ...C, code: codeAt() })
       next()
       expect(ok.ok).toBe(true)
       expect(hello.gestures - g0).toBe(row.gesture ? 1 : 0)
       if (row.grant) {
         const grant = ok.ok ? ok.grant : undefined
         expect(grant).toBeString()
-        expect((await requireVaultStepUp(action, { ...S, grant })).ok).toBe(true)                       // reused
-        expect((await requireVaultStepUp(action, { session: 'session-B', grant })).ok).toBe(false)     // bound to the session
+        expect((await requireVaultStepUp(action, { ...C, grant })).ok).toBe(true)                       // reused
+        expect((await requireVaultStepUp(action, { ...C, session: 'session-B', grant })).ok).toBe(false)     // bound to the session
       } else {
         // destructive: a grant from a read step-up is NOT accepted
         const read = await requireVaultStepUp('list', { ...S, code: codeAt() })
         next()
-        expect((await requireVaultStepUp(action, { ...S, grant: read.ok ? read.grant : undefined })).ok).toBe(false)
+        expect((await requireVaultStepUp(action, { ...C, grant: read.ok ? read.grant : undefined })).ok).toBe(false)
       }
     })
   }

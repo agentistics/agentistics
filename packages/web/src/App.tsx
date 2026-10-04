@@ -10,7 +10,7 @@ import {
   GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
   PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
+  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Vault as VaultNavIcon, Target, TerminalSquare,
   TrendingUp, Trophy, Users, Wrench, X, Zap,
   ZoomIn, ClipboardList, BellOff,
 } from 'lucide-react'
@@ -43,6 +43,7 @@ import { ModelBreakdown } from './components/ModelBreakdown'
 import { ProjectsList } from './components/ProjectsList'
 import { FiltersBar } from './components/FiltersBar'
 import { NotificationToasts } from './components/NotificationToasts'
+import { VaultUnlockHost } from './components/vault/VaultUnlockHost'
 import { BetaTag } from './components/BetaTag'
 import { KeyboardProbe, keyboardProbeOn } from './components/KeyboardProbe'
 import { shouldNudgeViewport, shouldResetDocumentScroll } from './lib/viewportReset'
@@ -128,7 +129,7 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
-import { promptExit, shouldShowToast, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
@@ -786,6 +787,7 @@ function MobileBottomNav({
     { key: 'top', label: pt ? 'Top' : 'Top', icon: Trophy, onClick: () => { closeSheet(); navigate('/top') }, active: location.pathname.startsWith('/top') },
     { key: 'tasks', label: 'Agentask', icon: ClipboardList, onClick: () => { closeSheet(); navigate('/tasks') }, active: location.pathname.startsWith('/tasks'), beta: true },
     { key: 'tags', label: 'Tags', icon: TagIcon, onClick: () => { closeSheet(); navigate('/tags') }, active: location.pathname.startsWith('/tags') },
+    ...(isCentral ? [] : [{ key: 'vault', label: pt ? 'Cofre' : 'Vault', icon: VaultNavIcon, onClick: () => { closeSheet(); navigate('/vault') }, active: location.pathname.startsWith('/vault') } as Tile]),
     { key: 'custom', label: pt ? 'Personalizado' : 'Custom', icon: Layers, onClick: () => { closeSheet(); navigate('/custom') }, active: location.pathname.startsWith('/custom') },
     { key: 'export', label: pt ? 'Exportar' : 'Export', icon: FileDown, onClick: () => { closeSheet(); navigate('/export') }, active: location.pathname.startsWith('/export') },
     // Unconditional: the page's filter mode compares two SCOPES and needs no second harness.
@@ -1141,6 +1143,8 @@ function SideNav({
     ...(isCentral ? [{ to: '/members', labelPt: 'Membros', labelEn: 'Members', icon: <Users size={17} /> }] : []),
     { to: '/tasks',     labelPt: 'Agentask',  labelEn: 'Agentask',    icon: <ClipboardList size={17} />, beta: true },
     { to: '/tags',      labelPt: 'Tags',         labelEn: 'Tags',         icon: <TagIcon size={17} /> },
+    // VAULT.PERSONAL: the person's own secrets live on THEIR machine — never on a central (its /api/vault is 404).
+    ...(isCentral ? [] : [{ to: '/vault', labelPt: 'Cofre', labelEn: 'Vault', icon: <VaultNavIcon size={17} /> }]),
     { to: '/tools',     labelPt: 'Ferramentas',  labelEn: 'Tools',        icon: <Wrench size={17} /> },
     { to: '/custom',    labelPt: 'Personalizado',labelEn: 'Custom',       icon: <Layers size={17} /> },
     // Unconditional — see the mobile tile: comparing two filter scopes needs no second harness.
@@ -2464,7 +2468,7 @@ export default function AppLayout() {
   // so it opens only from the bell entry (see the 'agentistics:open-update-modal' listener).
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
-  const [promptGone, setPromptGone] = useState(false)
+  const [promptGone, setPromptGone] = useState<string | null>(null)
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   const [finaleVersion, setFinaleVersion] = useState<string | null>(null)
@@ -2688,33 +2692,58 @@ export default function AppLayout() {
     return () => { cancelled = true }
   }, [])
 
+  // UPD.NOTIFY: the page asks `/api/version` at load, every 5 minutes while visible, and when the tab regains
+  // focus (`versionRefetchDue`) — it used to read it once, so a tab open when a release shipped never
+  // heard of it. Only the FIRST answer may restore the page state after an in-place upgrade.
   useEffect(() => {
-    fetch('/api/version', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then((info: VersionAnswer | null) => {
-        if (!info) return
-        setVersionAnswer(info)
-        // Back from an in-place upgrade on the bundle it was for: put the person where they were
-        // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
-        const back = consumeRestore(info.current)
-        if (!back) return
-        const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
-        if (back.url !== here) navigate(back.url, { replace: true })
-        if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
-        setFinaleFrom(back.from ?? '')
-        setFinaleVersion(info.current)
-      })
-      .catch(() => {})
+    let lastAt: number | null = null
+    let first = true
+    let cancelled = false
+    const check = (trigger: 'interval' | 'focus') => {
+      const now = Date.now()
+      if (!versionRefetchDue({ now, lastAt, trigger, visible: document.visibilityState === 'visible' })) return
+      lastAt = now
+      const isFirst = first
+      first = false
+      fetch('/api/version', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then((info: VersionAnswer | null) => {
+          if (!info || cancelled) return
+          setVersionAnswer(info)
+          if (!isFirst) return
+          // Back from an in-place upgrade on the bundle it was for: put the person where they were
+          // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
+          const back = consumeRestore(info.current)
+          if (!back) return
+          const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
+          if (back.url !== here) navigate(back.url, { replace: true })
+          if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
+          setFinaleFrom(back.from ?? '')
+          setFinaleVersion(info.current)
+        })
+        .catch(() => {})
+    }
+    check('interval')
+    const tick = window.setInterval(() => check('interval'), 60_000)
+    const onVisible = () => check('focus')
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(tick)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
   }, [])
 
   // May this machine be offered the update at all, and is it snoozed? (`shouldShowToast`)
   const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now(), central: isCentral })
   const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
-  const promptVisible = updateVerdict.show && !promptGone && !showUpdateModal && upgradeFlow.phase === 'idle'
+  const promptVisible = updateVerdict.show && !promptDismissedFor(promptGone, versionAnswer?.latest ?? '') && !showUpdateModal && upgradeFlow.phase === 'idle'
   const onPromptExit = useCallback((exit: PromptExit) => {
     if (!versionAnswer) return
     const o = promptExit(exit, versionAnswer, Date.now())
-    setPromptGone(true)
+    setPromptGone(versionAnswer.latest)
     if (o.snooze) snoozeUpdate(o.snooze.version, versionAnswer.critical === true)
     if (o.bell) pushNotification(o.bell)
     if (o.install) void startUpgrade(versionAnswer.latest, lang === 'pt' ? 'pt' : 'en')
@@ -4956,6 +4985,10 @@ export default function AppLayout() {
 
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+
+      {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
+          computer — the phones waiting for approval. A central has no vault of its own here. */}
+      <VaultUnlockHost lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} enabled={!isCentral} />
 
       {/* THE KEYBOARD PROBE, and only when the URL asks for it (`?kbdebug=1`). It reads the three
           quantities that can hold the iOS displacement — the document scroll, the visual viewport's

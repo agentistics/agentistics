@@ -89,6 +89,7 @@ export interface CliStrings {
   bootNote: string
   containerUp: string
   stoppingLocal: string
+  stopNoTarget: string
   stoppingCentral: string
   stoppingMachine: string
   restartingLocal: string
@@ -591,6 +592,7 @@ const EN: CliStrings = {
   bootNote: 'it already restarts with Docker (restart: unless-stopped)',
   containerUp: 'machine container is up.',
   stoppingLocal: 'stopping the local server…',
+  stopNoTarget: 'no server of this data dir could be named (no port listener visible, no server.lock holder) — nothing was signalled. Stop it by its pid if one is still running.',
   stoppingCentral: 'stopping the central container…',
   stoppingMachine: 'stopping the machine container…',
   restartingLocal: 'restarting the local server…',
@@ -1028,6 +1030,7 @@ const PT: CliStrings = {
   bootNote: 'já reinicia com o Docker (restart: unless-stopped)',
   containerUp: 'container da máquina está no ar.',
   stoppingLocal: 'parando o server local…',
+  stopNoTarget: 'nenhum server deste diretório de dados pôde ser identificado (nenhum processo visível na porta, ninguém com o server.lock) — nada foi sinalizado. Se ainda houver um rodando, pare-o pelo pid.',
   stoppingCentral: 'parando o container da central…',
   stoppingMachine: 'parando o container da máquina…',
   restartingLocal: 'reiniciando o server local…',

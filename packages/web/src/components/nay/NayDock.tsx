@@ -45,6 +45,7 @@ import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionCha
 import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
+import { VaultFabPop } from './VaultFabPop'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
@@ -625,7 +626,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       {!(isMobile && dock.open) && fabVisible && (
         <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
           {fab => (
+            // Right-click / long-press / Shift+F10 on the button pops the vault icon above it (owner 2026-10-03).
+            <VaultFabPop lang={pt ? 'pt' : 'en'} isMobile={isMobile} suppressed={fab.dragging}>
             <MinimizedMenu
+              longPress={false}
               pt={pt}
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
               onRestore={id => setDock(d => openSession(d, id))}
@@ -660,6 +664,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 </button>
               )}
             />
+            </VaultFabPop>
           )}
         </NayFab>
       )}

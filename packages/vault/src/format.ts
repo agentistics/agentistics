@@ -36,12 +36,12 @@ export type EnginePurpose = `engine/${string}`
 /** SECRETS.4 §1.1 — the Cloud runner's own secrets, sealed ONLY under the runner scope's DEK. */
 export type RunnerPurpose = `cloud-runner/${string}`
 /** Human-scope purposes added by SECRETS.4 beside the host and engine ones. */
-export type HumanExtraPurpose = 'attachment' | 'vault/totp-seed'
+export type HumanExtraPurpose = 'attachment' | 'vault/totp-seed' | 'vault/personal'
 export type Purpose = HostPurpose | EnginePurpose | HumanExtraPurpose | RunnerPurpose
 
 /** SECRETS.4 §1.1: two scopes, each with its OWN data key — the separation is cryptographic. */
 export type VaultScope = 'human' | 'cloud-runner'
-export const HUMAN_EXTRA_PURPOSES: readonly HumanExtraPurpose[] = ['attachment', 'vault/totp-seed']
+export const HUMAN_EXTRA_PURPOSES: readonly HumanExtraPurpose[] = ['attachment', 'vault/totp-seed', 'vault/personal']
 
 export const HOST_PURPOSES: readonly HostPurpose[] = ['github-backup', 'central-token', 'envelope-key', 'central-env']
 

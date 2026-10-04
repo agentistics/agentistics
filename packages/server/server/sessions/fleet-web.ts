@@ -323,6 +323,9 @@ export async function runFleetAction(
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
+          // The pushed chat (PERF.1) hears about the send now, not on its next safety read.
+          const { wakeChat } = await import('./chat-stream')
+          wakeChat(req.id)
         })()
       }
       return out
@@ -818,6 +821,8 @@ export interface FleetSpawnResponse {
   ok: boolean
   /** Already localized, and always present. */
   message: string
+  /** RES.1 — refused by the memory gate and queued; it starts by itself when room frees. */
+  queued?: { id: string; position: number }
   /** The id of the session that was started, so the caller can attach to the very one it created. */
   id?: string
   /**
@@ -896,6 +901,7 @@ export async function runFleetSpawn(
     // routes to the same sentence.
     ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
+    ...(out.queued ? { queued: out.queued } : {}),
   }
 }
 

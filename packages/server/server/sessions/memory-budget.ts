@@ -48,11 +48,13 @@ export interface SessionCost {
 /**
  * What one assistant costs when none is running to measure.
  *
- * The median of the claude processes on this machine on 2026-08-15, which ranged 162–442 MB. It is
- * a starting point that gets replaced by measurement the moment there is anything to measure, and
+ * Was 250 MB (the median on 2026-08-15, 162–442 MB). RES.1 re-measured on 2026-10-03: a claude CLI
+ * holds ~400–500 MB once it has a conversation in it, and the measured average counts swap too
+ * (`readRss` reads RSS + swap — a swapped-out session needs its RAM back the moment it works). It
+ * is a starting point that gets replaced by measurement the moment there is anything to measure, and
  * `basis: 'assumed'` exists so no surface can present it as a reading.
  */
-export const ASSUMED_SESSION_BYTES = 250 * 1024 * 1024
+export const ASSUMED_SESSION_BYTES = 450 * 1024 * 1024
 
 /**
  * Held back for everything that is not an assistant — the desktop, the browser, the server, a build.
@@ -110,8 +112,15 @@ export function memoryBudget(o: {
   sessions: number
   reservedBytes?: number
   assumedBytes?: number
+  /**
+   * RES.1 addendum 2 — room kept back for ONE heavy job (a `tsc -b`, a full test suite), minus what
+   * the heavy jobs already running hold (see `resources/heavy.ts`). The real memory peaks on this
+   * machine are those jobs, not the sessions, so a session count that spends their room is a count
+   * that freezes the machine the next time somebody builds.
+   */
+  heavyReserveBytes?: number
 }): MemoryBudget {
-  const reserved = o.reservedBytes ?? RESERVED_BYTES
+  const reserved = (o.reservedBytes ?? RESERVED_BYTES) + Math.max(0, o.heavyReserveBytes ?? 0)
   const cost: SessionCost = o.sessions > 0 && o.sessionBytes > 0
     ? { bytes: Math.round(o.sessionBytes / o.sessions), basis: 'measured' }
     : { bytes: o.assumedBytes ?? ASSUMED_SESSION_BYTES, basis: 'assumed' }

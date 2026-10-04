@@ -33,6 +33,7 @@ import {
 import type { HarnessId, Lang } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { ResourcesSection } from './ResourcesSection'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
 import {
   metricsReasonText,
@@ -444,6 +445,9 @@ export function HardwareBody(p: {
           </div>
         )}
       </section>
+
+      {/* RES.1 — the process governor */}
+      <ResourcesSection lang={lang} isMobile={isMobile} />
 
       {/* Managed fleet */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

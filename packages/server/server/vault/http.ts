@@ -19,6 +19,8 @@ import { readVaultView, lockVaultNow } from './inventory'
 import { noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { uiReply } from './ui-sentence'
+import { handlePersonalHttp } from './personal-http'
+import { handlePhoneHttp } from './phone-http'
 
 export interface VaultHttpEnv {
   /** CORS headers the host adds to every answer. */
@@ -148,14 +150,25 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return send(r.ok ? { ok: true, vault: await readVaultView([], async () => []) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
   }
   if (path === '/api/vault/unlock' && req.method === 'POST') {
-    // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2).
+    // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2). VAULT.PERSONAL §10:
+    // NEVER from another device — a Hello prompt on an empty desk is a prompt someone else can answer,
+    // or no one. A phone opens with its own passkey or device key (/api/vault/phone/unlock).
+    if (!loopback) {
+      await req.body?.cancel().catch(() => {})
+      return reply({ ok: false, code: 'unlock-not-here', sentence: vaultLang() === 'pt'
+        ? 'Daqui não dá para usar o Windows Hello do computador. Abra o cofre com a digital deste celular ou com o código (se o computador permitir).'
+        : 'This device cannot use the computer\'s Windows Hello. Open the vault with this phone\'s biometrics, or with the code if the computer allows it.' })
+    }
     const u = await unlockWithGesture()
     return reply(u.ok ? { ok: true, state: u.state } : u)
   }
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {
     const b = await body()
     if (!str(b.code, 16)) return bad()
-    return reply(await gate.completeUnlock(b.code))
+    // Owner 2026-10-03: the code that completes the unlock IS the step-up — it hands back the
+    // 5-minute 'read' grant, so the list right behind the unlock never asks for a second code.
+    const r = await gate.completeUnlock(b.code)
+    return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
   }
   if (path === '/api/vault/auto-lock' && req.method === 'POST') {
     const b = await body()
@@ -248,5 +261,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const r = await gate.listCredentials({ grant, session, loopback })
     return reply(r)
   }
+  // VAULT.PERSONAL: answered through THIS module's `reply` (the one JSON exit, page filter included).
+  const phoneRoute = await handlePhoneHttp({ req, path, url, session, grant, loopback, reply })
+  if (phoneRoute) return phoneRoute
+  const personal = await handlePersonalHttp({ req, path, url, session, grant, loopback, reply })
+  if (personal) return personal
   return null
 }

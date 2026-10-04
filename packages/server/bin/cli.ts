@@ -21,6 +21,14 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
+// RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
+// environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
+// it learns who owns this process. Synchronous and tiny; never throws.
+{
+  const { writeProcCard } = await import('../server/resources/proc-card.ts')
+  writeProcCard(command ?? 'start')
+}
+
 // `preferences.experimental` → the feature variables, BEFORE any module that reads one loads
 // (`JOURNAL_ENABLED` is fixed at import). EVERY subcommand needs it — `agentop provider` reads the
 // same variable the server does, and answered "set AGENTISTICS_PROVIDER=1" with the preference on.
@@ -103,6 +111,10 @@ Commands:
   status        Show services (server/central/member) + health
   tui           Alias for 'start' — the metrics dashboard is its 'dashboard' tab
   watch         Start the background metrics daemon only
+  heavy         Run a heavy job (tsc -b, a full test suite, a build) through the machine-wide slot:
+                'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with
+                the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)
+  resources     Print the agentop processes on this machine, what each costs, and the alerts
   central       Manage the team central (Docker; runs from anywhere)
   member        Configure this machine as a team member
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
@@ -128,6 +140,9 @@ __ENGINE_VERBS__
   autostart     Start a mode with the system (systemd user service on Linux)
   check-update  Print a notice if a newer version is available (else silent);
                 a release marked [critical] says so louder (auto-install is opt-in)
+  clean         List worktrees agentop's projects accumulated, with sizes: merged and clean
+                ones, and node_modules untouched for 30 days, are removed on confirmation
+                (--yes). Uncommitted work and branches are never touched. --json, --repo <path>.
   doctor        Run the exposure preflight; add --exposed to check against the
                 strict public bar before opening a tunnel
   setup-token   Reissue the one-time OWNER setup token (central only; run it where the
@@ -591,6 +606,18 @@ if (command === 'member') {
   process.exit(1)
 }
 
+if (command === 'heavy') {
+  // RES.1 addendum 2 — the heavy-job slot. stderr carries the queue; stdout is the command's.
+  const { runHeavy } = await import('../server/resources/heavy-io.ts')
+  process.exit(await runHeavy(args, line => process.stderr.write(`${line}\n`)))
+}
+
+if (command === 'resources') {
+  // RES.1 — the governor's view, read-only: what the server would show at /api/resources.
+  const { printResources } = await import('../server/resources/cli-resources.ts')
+  process.exit(await printResources(args))
+}
+
 if (command === 'ci-push') {
   // One-shot push of this (ephemeral GitHub Actions) runner's metrics to a central.
   const readFlag = (name: string): string | undefined => {
@@ -974,6 +1001,9 @@ if (command === 'server' || command === 'start' || !command) {
 } else if (command === 'watch') {
   checkVersionAndWarn() // fire-and-forget
   await import('../server/otel-watcher.ts')
+} else if (command === 'clean') {
+  const { runClean } = await import('../server/cli-clean.ts')
+  await runClean(args)
 } else if (command === 'doctor') {
   const { runDoctor } = await import('../server/cli-doctor.ts')
   await runDoctor(args)

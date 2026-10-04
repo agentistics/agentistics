@@ -27,7 +27,7 @@ const THREE_LEFT = measure({ ...noSwap, available: 2798 * MB }, 2, 250 * MB)
 const OVERCOMMITTED = measure({ ...noSwap, available: 100 * MB }, 4, 500 * MB)
 /** Plenty of RAM (left 32) while swap is 97.5% full — the freeze this feature exists for. */
 const SWAPPING = measure({ total: 16 * GB, available: 10 * GB, swapTotal: 4 * GB, swapUsed: 3.9 * GB }, 0, 0)
-/** Nothing running: the cost is the assumed fallback. room 8 GB / 250 MB -> 32. */
+/** Nothing running: the cost is the assumed fallback. room 8 GB / 450 MB -> 18. */
 const EMPTY = measure({ ...noSwap, available: 10 * GB }, 0, 0)
 
 describe('the fixtures are what the table claims', () => {
@@ -47,7 +47,7 @@ describe('admitSpawn — the table', () => {
     input: SpawnBudget | null
     requested: number
     force?: boolean
-    expect: { admit: boolean; unmeasured?: boolean; overridden?: boolean; reason?: 'swap' | 'no-room'; fits?: number }
+    expect: { admit: boolean; unmeasured?: boolean; overridden?: boolean; reason?: 'swap' | 'no-room' | 'cpu'; fits?: number }
   }> = [
     { name: 'unmeasured machine admits, flagged', input: null, requested: 1, expect: { admit: true, unmeasured: true, overridden: false } },
     { name: 'unmeasured + force is still just unmeasured', input: null, requested: 9, force: true, expect: { admit: true, unmeasured: true, overridden: false } },
@@ -56,8 +56,11 @@ describe('admitSpawn — the table', () => {
     { name: 'no room: 6 asked, 5 left', input: FIVE_LEFT, requested: 6, expect: { admit: false, reason: 'no-room', fits: 5 } },
     { name: 'batch of 5 with 3 left is refused whole, fits 3', input: THREE_LEFT, requested: 5, expect: { admit: false, reason: 'no-room', fits: 3 } },
     { name: 'over-committed machine refuses even one, fits 0', input: OVERCOMMITTED, requested: 1, expect: { admit: false, reason: 'no-room', fits: 0 } },
-    { name: 'swap alarm refuses though RAM has room', input: SWAPPING, requested: 1, expect: { admit: false, reason: 'swap', fits: 0 } },
-    { name: 'swap alarm + force admits, overridden', input: SWAPPING, requested: 1, force: true, expect: { admit: true, unmeasured: false, overridden: true, reason: 'swap', fits: 0 } },
+    // RES.1: swap % no longer refuses — MemAvailable decides. 10 GB free, swap 97% full: admitted.
+    { name: 'a full swap with RAM room is ADMITTED (RES.1)', input: SWAPPING, requested: 1, expect: { admit: true, unmeasured: false, overridden: false, fits: SWAPPING.budget.left } },
+    { name: 'a saturated CPU refuses whatever RAM says', input: { ...FIVE_LEFT, load: { load1: 16.4, cores: 8 } }, requested: 1, expect: { admit: false, reason: 'cpu', fits: 0 } },
+    { name: 'cpu + force admits, overridden', input: { ...FIVE_LEFT, load: { load1: 16.4, cores: 8 } }, requested: 1, force: true, expect: { admit: true, unmeasured: false, overridden: true, reason: 'cpu', fits: 0 } },
+    { name: 'a busy but unsaturated CPU admits', input: { ...FIVE_LEFT, load: { load1: 12, cores: 8 } }, requested: 1, expect: { admit: true, unmeasured: false, overridden: false, fits: 5 } },
     { name: 'no room + force admits, overridden', input: THREE_LEFT, requested: 5, force: true, expect: { admit: true, unmeasured: false, overridden: true, reason: 'no-room', fits: 3 } },
     { name: 'force on a machine with room changes nothing', input: FIVE_LEFT, requested: 1, force: true, expect: { admit: true, unmeasured: false, overridden: false, fits: 5 } },
   ]
@@ -85,13 +88,15 @@ describe('admitSpawn — the table', () => {
   }
 
   it('a refusal carries the raw figures a sentence must name', () => {
-    const a = admitSpawn(SWAPPING, 1)
+    const hog = { pid: 15667, label: 'agentop', usedBytes: 8 * GB, fix: { action: 'reopen-cockpit' as const, pid: 15667 } }
+    const a = admitSpawn({ ...OVERCOMMITTED, load: { load1: 1, cores: 8 }, hog, heavyReserveBytes: 1.8 * GB }, 1)
     expect(a.admit).toBe(false)
     const r = admissionRefusal(a)!
     expect(r).toEqual({
-      reason: 'swap', requested: 1, fits: 0,
-      availableBytes: 10 * GB, swapUsedBytes: 3.9 * GB, swapTotalBytes: 4 * GB,
-      costBytes: ASSUMED_SESSION_BYTES, costBasis: 'assumed', used: 0, max: 32,
+      heavyReserveBytes: 1.8 * GB, load1: 1, cores: 8, hog,
+      reason: 'no-room', requested: 1, fits: 0,
+      availableBytes: 100 * MB, swapUsedBytes: 0, swapTotalBytes: 4 * GB,
+      costBytes: 500 * MB, costBasis: 'measured', used: 4, max: 4,
     })
     // JSON-safe: survives a round trip unchanged.
     expect(JSON.parse(JSON.stringify(r))).toEqual(r)
@@ -104,9 +109,10 @@ describe('admitSpawn — the table', () => {
   })
 
   it('carries the assumed cost basis when nothing runs', () => {
-    const tight = measure({ ...noSwap, available: 2048 * MB + 500 * MB }, 0, 0)   // room 500 MB -> 2
+    const tight = measure({ ...noSwap, available: 2048 * MB + 900 * MB }, 0, 0)   // room 900 MB / 450 -> 2
     const r = admissionRefusal(admitSpawn(tight, 3))!
     expect(r.costBasis).toBe('assumed')
+    expect(r.costBytes).toBe(ASSUMED_SESSION_BYTES)
     expect(r.fits).toBe(2)
   })
 
@@ -140,19 +146,26 @@ describe('rendering', () => {
     expect(msg).toContain('--force')
   })
 
-  it('swap names the swap percentage and says RAM looked fine — en and pt', () => {
-    const r = admissionRefusal(admitSpawn(SWAPPING, 1))!
-    const en = admissionMessage(r, 'en')
-    expect(en).toContain('98% full')
-    expect(en).toContain('3.9 GB / 4.0 GB')
-    expect(en).toContain('10.0 GB of RAM available')
-    expect(en).toContain('assumed')
-    expect(en).toContain('Wait for swap to drain')
-    const pt = admissionMessage(r, 'pt')
-    expect(pt).toContain('98% cheio')
-    expect(pt).toContain('3,9 GB / 4,0 GB')
-    expect(pt).toContain('estimado')
-    expect(pt).toContain('Espere o swap esvaziar')
+  it('cpu names the load and says to wait — en and pt', () => {
+    const r = admissionRefusal(admitSpawn({ ...FIVE_LEFT, load: { load1: 16.4, cores: 8 } }, 1))!
+    expect(admissionMessage(r, 'en')).toContain('The CPU is saturated (load 16.4 / 8 cores)')
+    expect(admissionMessage(r, 'en')).toContain('Wait for the load to drop')
+    expect(admissionMessage(r, 'pt')).toContain('A CPU está saturada')
+  })
+
+  it('names the biggest consumer and its fix — the incident cockpit', () => {
+    const hog = { pid: 15667, label: 'agentop', usedBytes: 8.2 * GB, fix: { action: 'reopen-cockpit' as const, pid: 15667 } }
+    const r = admissionRefusal(admitSpawn({ ...OVERCOMMITTED, hog }, 1))!
+    expect(admissionMessage(r, 'en')).toContain('The biggest consumer is agentop (pid 15667, 8.2 GB) — quit it (q) and open it again.')
+    expect(admissionMessage(r, 'pt')).toContain('O maior consumidor é agentop (pid 15667, 8,2 GB)')
+    // A process that is not agentop's is named without a fix.
+    const plain = admissionRefusal(admitSpawn({ ...OVERCOMMITTED, hog: { pid: 7, label: 'chrome', usedBytes: 3 * GB } }, 1))!
+    expect(admissionMessage(plain, 'en')).toContain('The biggest consumer is chrome (pid 7, 3.0 GB).')
+  })
+
+  it('a refusal under a heavy-job reserve says how much was held back', () => {
+    const r = admissionRefusal(admitSpawn({ ...OVERCOMMITTED, heavyReserveBytes: 1.8 * GB }, 1))!
+    expect(admissionMessage(r, 'en')).toContain('with 1.8 GB held back for one heavy job')
   })
 
   it('a single session on an over-committed machine says none fit', () => {
@@ -162,7 +175,7 @@ describe('rendering', () => {
   })
 
   it('an override says it overrode, and only then', () => {
-    const forced = admitSpawn(SWAPPING, 1, { force: true })
+    const forced = admitSpawn(OVERCOMMITTED, 1, { force: true })
     expect(admissionOverrideNote(forced, 'en')).toStartWith('Started anyway, overriding the memory check:')
     expect(admissionOverrideNote(forced, 'pt')).toStartWith('Iniciada mesmo assim')
     expect(admissionOverrideNote(admitSpawn(FIVE_LEFT, 1), 'en')).toBeNull()
@@ -181,5 +194,16 @@ describe('rendering', () => {
     expect(body.code).toBe('memory_budget')
     expect(body.refusal).toEqual(r)
     expect(body.message).toBe(admissionMessage(r, 'en'))
+  })
+})
+
+describe('processLabel', () => {
+  it('names the script for an interpreter, and cuts paths to their last segment', async () => {
+    const { processLabel } = await import('./memory-probe')
+    expect(processLabel(['node', '/home/u/w/node_modules/typescript/bin/tsc', '--noEmit'])).toBe('tsc --noEmit')
+    expect(processLabel(['/usr/bin/node', '--max-old-space-size=4096', '/x/vite.js', 'build'])).toBe('vite.js build')
+    expect(processLabel(['/home/u/.local/bin/agentop', 'mcp'])).toBe('agentop mcp')
+    expect(processLabel(['bun'])).toBe('bun')
+    expect(processLabel([])).toBe('')
   })
 })

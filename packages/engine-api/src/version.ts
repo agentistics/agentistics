@@ -69,7 +69,12 @@
  * Also (H17): `events.nativeSession` (optional) — a native session's own state change (asked the
  * person / a run ended / a run started) into the host's event channel and its desktop delivery.
  */
-export const ENGINE_API_VERSION = '1.7.0'
+/**
+ * 1.8.0 — VAULT.PERSONAL §8.3: `EngineHostServices.vaultRefs` (optional) — a native session's env overlay
+ * for the personal secrets its person granted it, and a scrubber for every tool output. Optional, so a
+ * 1.8 engine loads on an older host (it offers no references there) and an older engine never reads it.
+ */
+export const ENGINE_API_VERSION = '1.8.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

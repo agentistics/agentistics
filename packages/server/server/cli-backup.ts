@@ -9,6 +9,8 @@
  * A run that clones 89 repositories will partially fail, and a count of successes without the list
  * of what did not come back is not a report.
  */
+import { bundleForBackup, stageVaultFromArchive } from './vault/bundle-io'
+import { vaultBundlePathFor } from './backup/vault-bundle-github'
 import { hostname, tmpdir } from 'os'
 import { existsSync } from 'fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
@@ -566,6 +568,19 @@ export async function performBackup(
     log(`archive:            ${formatBytes(result.record.archiveBytes)}`)
     log(`sha256:             ${result.record.sha256}`)
 
+    // VAULT.PERSONAL: the vault as ONE sealed bundle beside the archive (0600). Ciphertext only, the
+    // recovery wrapper included, so only the 24 words restore it — on this machine or a fresh one. No
+    // vault, a locked one, or one without a recovery key: no bundle, said in one line.
+    const vb = await bundleForBackup().catch(() => null)
+    if (vb) {
+      const { writePrivateAtomic } = await import('@agentistics/vault')
+      const { realSecretFs } = await import('./vault/io')
+      await writePrivateAtomic(realSecretFs, vaultBundlePathFor(result.record.path), new TextEncoder().encode(vb.text))
+      log(`vault:              one sealed bundle (${vb.count} record(s), opens only with the 24 words)`)
+    } else {
+      log('vault:              not included (no vault, it is locked, or it has no recovery key yet)')
+    }
+
     // Pruning deletes the FILES and leaves the records. The store is append-only (see BACKUPS_FILE)
     // and already holds the rule that makes rewriting unnecessary: a record whose file is gone is
     // reported absent by `markPresence` from then on, which is the truth and is what the history is
@@ -823,6 +838,7 @@ async function runRestorePhases(
     const r = await restoreMetrics({ archive, homeDir: HOME_DIR, onLine: log })
     if (!r.ok) { console.error(`restore failed: ${r.reason}`); return 1 }
     log(`metrics: ${r.written} written, ${r.skipped} skipped (a newer local copy always wins)`)
+    await stageVaultFromArchive(archive, log).catch(() => 'refused')
 
     log('')
     log(s.backupSecretsOmitted)

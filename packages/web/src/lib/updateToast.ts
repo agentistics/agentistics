@@ -22,9 +22,29 @@ export interface VersionAnswer {
 /** A snooze belongs to ONE version: a newer release re-shows the toast whatever is stored. */
 export interface Snooze { version: string; until: number }
 
-export const SNOOZE_MS = 24 * 60 * 60_000
+export const SNOOZE_MS = 4 * 60 * 60_000
 /** A critical update comes back sooner — it is the one a person should not forget for a day. */
 export const CRITICAL_SNOOZE_MS = 60 * 60_000
+
+/** How often a visible page asks `/api/version` again, and the least spacing between focus-triggered asks. */
+export const VERSION_POLL_MS = 5 * 60_000
+export const VERSION_FOCUS_MIN_MS = 30_000
+
+/**
+ * PURE. Is a `/api/version` re-check due? The page used to read it ONCE at load, so a tab open when a release
+ * shipped never heard of it (UPD.NOTIFY). Never while the tab is hidden; the first check always runs; an
+ * interval tick every `VERSION_POLL_MS`; regaining focus after `VERSION_FOCUS_MIN_MS` (not on every alt-tab).
+ */
+export function versionRefetchDue(o: { now: number; lastAt: number | null; trigger: 'interval' | 'focus'; visible: boolean }): boolean {
+  if (!o.visible) return false
+  if (o.lastAt === null) return true
+  return o.now - o.lastAt >= (o.trigger === 'interval' ? VERSION_POLL_MS : VERSION_FOCUS_MIN_MS)
+}
+
+/** The popup left this page for ONE version; a newer release brings it back without a reload. */
+export function promptDismissedFor(goneVersion: string | null, latest: string): boolean {
+  return goneVersion !== null && goneVersion.replace(/^v/, '') === latest.replace(/^v/, '')
+}
 
 const nums = (v: string) => v.replace(/^v/, '').split('.').map(n => parseInt(n, 10))
 

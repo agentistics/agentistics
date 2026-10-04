@@ -29,6 +29,7 @@
  * does not match is never reused, only ignored and overwritten by the real download. This is the
  * cheap fix, not a cache — it reuses only what a previous run of this same function already wrote.
  */
+import { VAULT_BUNDLE_ASSET, vaultBundlePathFor } from './vault-bundle-github'
 import { createHash } from 'crypto'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -327,6 +328,19 @@ export async function downloadBackupRelease(
     owner, repo, token, assetPicked.asset, summary.sha256, destDir, deps.fetchImpl, log,
   )
   if (!downloaded.ok) return { status: 'error', reason: downloaded.reason, archivePath: downloaded.path }
+
+  // VAULT.PERSONAL: the vault's sealed bundle rides beside the archive as its own asset. Fetched here
+  // and written next to the archive (0600); the restore stages it, and only the 24 words open it.
+  const vb = release.assets.find(a => a.name === VAULT_BUNDLE_ASSET)
+  if (vb) {
+    const got = await gh<ArrayBuffer>(`/repos/${owner}/${repo}/releases/assets/${vb.id}`, token, { headers: { Accept: 'application/octet-stream' } }, deps.fetchImpl, 'arrayBuffer')
+    if (got.ok) {
+      const { writePrivateAtomic } = await import('@agentistics/vault')
+      const { realSecretFs } = await import('../vault/io')
+      await writePrivateAtomic(realSecretFs, vaultBundlePathFor(downloaded.path), new Uint8Array(got.data))
+      log('downloaded the vault bundle (it opens only with your 24 words)')
+    } else log(`the vault bundle could not be downloaded (${got.message}); the rest restores without it`)
+  }
 
   return { status: 'downloaded', archivePath: downloaded.path, release, summary }
 }
