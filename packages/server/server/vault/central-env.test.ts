@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, test } from 'bun:test'
 import { mkdir, readFile, writeFile, stat, mkdtemp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import {
   centralEnvTextWithSecrets, centralSecretsFile, isVaultedEnvFile, loadCentralEnv, migrateCentralEnvAt,
   plaintextSecretCount, splitCentralEnv, writeCentralEnv,
 } from './central-env'
+import { __resetVaultForTests } from './service'
 
 const SECRET = 'TEST-NOT-A-SECRET-session-' + Math.random().toString(36).slice(2)
 const MONGO = 'mongodb+srv://TEST-NOT-A-SECRET-user:pw@cluster.example/agentistics'
@@ -30,6 +31,11 @@ async function envFile(): Promise<string> {
 }
 
 describe('S6 — central.env split', () => {
+  // Its OWN vault, never the module-global one another test file left behind: a reset pointed at a
+  // fixed tmp path once let a vault sealed by a previous PROCESS's memory key be found here, and
+  // every seal refused with `protector-lost` (CI's second `bun test`, in the pre-commit hook).
+  beforeEach(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-central-env-')), 'vault') }) })
+
   test('pure split: the four secret keys out, everything else (comments included) kept', () => {
     const { publicText, secrets } = splitCentralEnv(ENV)
     expect(secrets).toEqual({ MONGO_URL: MONGO, AGENTISTICS_TEAM_SESSION_SECRET: SECRET })
