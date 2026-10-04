@@ -16,8 +16,10 @@ describe('TOOL.1 / TOOL.3 vocabulary', () => {
   test('exactly four new types, appended after the previous tail; unique; none removed', () => {
     const added = ['structured.attempt', 'structured.exhausted', 'completion.blocked', 'completion.released']
     for (const t of added) expect(EVENT_TYPES).toContain(t as never)
-    expect(EVENT_TYPES.indexOf('structured.attempt' as never)).toBe(EVENT_TYPES.indexOf('turn.ended') + 1)
-    expect(EVENT_TYPES.slice(-added.length - 2, -added.length)).toContain('turn.ended' as never)
+    // Appended: the four are the tail, in order, after every type that existed before them (the native
+    // queue's H24/memory/ART.2 types landed in the same release, ahead of them).
+    expect(EVENT_TYPES.slice(-added.length)).toEqual(added as never)
+    expect(EVENT_TYPES.indexOf('turn.ended')).toBeLessThan(EVENT_TYPES.indexOf('structured.attempt' as never))
     expect(new Set(EVENT_TYPES).size).toBe(EVENT_TYPES.length)
   })
   test('shapes are typed counts: no text field exists to put a value or a message in', () => {
