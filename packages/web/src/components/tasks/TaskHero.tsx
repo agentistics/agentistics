@@ -14,11 +14,11 @@ import type { TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { TaskDetail } from '../../lib/tasks'
 import { BetaTag } from '../BetaTag'
-import { NA, PRIORITY, fmtInt, fmtTokens, harnessColor, statusStyle } from './board'
-import { statusLabel } from './copy'
+import { NA, button, fmtInt, fmtTokens, harnessColor } from './board'
+import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { useMoney } from './money'
 import { threadCopy, type Lang } from './threadCopy'
-import { daysSince, mixOf } from './threadView'
+import { mixOf } from './threadView'
 
 function fmtHours(minutes: number | null, lang: Lang): string {
   if (minutes === null) return NA
@@ -50,34 +50,31 @@ function Ring({ done, total, size }: { done: number; total: number; size: number
   )
 }
 
-const pillBase = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px', borderRadius: 999,
-  fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' as const,
-}
-
-export function TaskHero({ detail, lang, statuses, live, onBack, onAbout }: {
+export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout, onDeleted, onFileSession }: {
   detail: TaskDetail
   lang: Lang
   statuses: readonly TaskStatusDef[] | null
   /** Sessions of this task running right now (fleet poll); `null` = the fleet is not known here. */
   live: number | null
+  /** Re-read the task after a chip writes. The page owns the fetch — see `useTaskDetail`. */
+  reload: () => void | Promise<void>
   onBack: () => void
   onAbout?: () => void
+  /** Deleting leaves the page with nothing to draw; absent = no delete offered. */
+  onDeleted?: () => void
+  /** "File a session" from the done-needs-a-session refusal. */
+  onFileSession?: () => void
 }) {
   const isMobile = useIsMobile()
   const t = threadCopy(lang)
   const money = useMoney()
   const task = detail.task
-  const st = statusStyle(statuses as TaskStatusDef[] | null, task.status)
-  const pr = task.priority && task.priority !== 'none' ? PRIORITY[task.priority] : undefined
   const subsDone = detail.subtasks.filter(s => s.done).length
   const subsTotal = detail.subtasks.length
   const r = detail.rollup
   const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
     : money(r.costUSD, r.costByHarness)
-  const since = task.startedAt ?? task.createdAt
-  const days = daysSince(since, Date.now())
   const mix = mixOf(detail.stats.harnesses)
   const models = detail.stats.models.filter(m => (m.tokens ?? 0) > 0).slice(0, 3).map(m => m.key)
 
@@ -89,16 +86,32 @@ export function TaskHero({ detail, lang, statuses, live, onBack, onAbout }: {
     [t.kpiTokens, fmtTokens(r.tokens), true],
   ]
 
+  // The cabeçalho's two buttons: "About" (the description editor) and ⋯ (delete). On a desktop they
+  // stand at the card's right; on a phone the row has no room for them beside the chips, so they
+  // sit at the end of the breadcrumb line.
+  const actions = (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: '0 0 auto' }}>
+      {onAbout && (
+        <button
+          onClick={onAbout}
+          style={{ ...button(isMobile), height: isMobile ? 36 : 32, background: 'var(--ag-tint-2)', color: 'var(--text-primary)' }}
+        >{t.about}</button>
+      )}
+      {onDeleted && <TaskMoreMenu id={task.id} task={task} lang={lang} onDeleted={onDeleted} />}
+    </div>
+  )
+
   return (
+    // The app's STANDARD card (`Section.tsx`): card background, 1px border, the large radius — no
+    // glow, no coloured stripe. Status lives in the chip below, not in the frame.
     <section style={{
-      position: 'relative', overflow: 'hidden',
+      position: 'relative',
       border: isMobile ? 'none' : '1px solid var(--border)',
       borderBottom: '1px solid var(--border)',
-      borderRadius: isMobile ? 0 : 10,
+      borderRadius: isMobile ? 0 : 'var(--radius-lg)',
       padding: isMobile ? '14px 16px' : '16px 20px',
-      background: 'radial-gradient(120% 160% at 0% 0%, var(--anthropic-orange-glow), transparent 55%), var(--bg-card)',
+      background: 'var(--bg-card)',
     }}>
-      <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: st.color }} />
       <div style={{ display: 'flex', gap: isMobile ? 12 : 18, alignItems: isMobile ? 'flex-start' : 'center' }}>
         {subsTotal > 0 && <Ring done={subsDone} total={subsTotal} size={isMobile ? 56 : 68} />}
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -111,9 +124,10 @@ export function TaskHero({ detail, lang, statuses, live, onBack, onAbout }: {
                 color: 'var(--text-secondary)', cursor: 'pointer', flex: '0 0 auto',
               }}
             ><ArrowLeft size={14} /></button>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
               Agentask · {task.id}{subsTotal > 0 ? ` · ${t.subtasksOf(subsDone, subsTotal)}` : ''}
             </span>
+            {isMobile && actions}
           </div>
           <h1 style={{
             margin: '6px 0 0', fontSize: isMobile ? 17 : 21, lineHeight: 1.2, fontWeight: 700, letterSpacing: '-0.01em',
@@ -122,34 +136,25 @@ export function TaskHero({ detail, lang, statuses, live, onBack, onAbout }: {
             <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{task.title}</span>
             <BetaTag what="Agentask" />
           </h1>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8 }}>
-            <span style={{ ...pillBase, color: st.color, background: st.dim }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor' }} />
-              {statusLabel(task.status, lang, statuses as TaskStatusDef[] | null)}
-            </span>
-            {pr && <span style={{ ...pillBase, color: pr.color, background: pr.dim }}>{pr.label}</span>}
-            {live !== null && live > 0 && (
-              <span style={{ ...pillBase, color: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 0 3px var(--accent-green-dim)' }} />
-                {t.liveNow(live)}
-              </span>
-            )}
-            {days !== null && (
-              <span style={{ ...pillBase, color: 'var(--text-secondary)', background: 'var(--ag-tint-2)', border: '1px solid var(--border)', fontWeight: 500 }}>
-                {t.since(new Date(since).toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', { day: '2-digit', month: '2-digit' }), days)}
-              </span>
-            )}
+          <div style={{ marginTop: 8 }}>
+            <TaskChips
+              id={task.id} detail={detail} lang={lang} statuses={statuses} reload={reload}
+              {...(onFileSession ? { onFileSession } : {})}
+            >
+              {live !== null && live > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px', borderRadius: 999,
+                  fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                  color: 'var(--accent-green)', background: 'var(--accent-green-dim)',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 0 3px var(--accent-green-dim)' }} />
+                  {t.liveNow(live)}
+                </span>
+              )}
+            </TaskChips>
           </div>
         </div>
-        {!isMobile && onAbout && (
-          <button
-            onClick={onAbout}
-            style={{
-              alignSelf: 'flex-start', height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)',
-              background: 'var(--ag-tint-2)', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >{t.about}</button>
-        )}
+        {!isMobile && <div style={{ alignSelf: 'flex-start' }}>{actions}</div>}
       </div>
 
       <div style={{

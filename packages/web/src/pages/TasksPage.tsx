@@ -617,8 +617,11 @@ function TaskDetailView({ id }: { id: string }) {
         lang={lang}
         statuses={statuses}
         live={live}
+        reload={reload}
         onBack={() => navigate('/tasks')}
         onAbout={() => setTab('about')}
+        onDeleted={() => navigate('/tasks')}
+        onFileSession={() => setTab('subtasks')}
       />
 
       <div style={{ padding: isMobile ? '0 12px' : 0, display: 'grid', gap: 14, minWidth: 0 }}>

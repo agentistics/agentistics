@@ -67,6 +67,7 @@ import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from '
 import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
 import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
+import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { subtaskGridLayout } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
 import { CommentCountButton, CommentThreadDialog } from './CommentThreadDialog'
@@ -88,7 +89,7 @@ import {
  *  copy rather than a shared import so neither file has to import the other's internals for one
  *  three-line function. */
 function subtaskSortKeyFor(id: SubtaskColumnId): SubtaskSortKey | undefined {
-  return id === 'model' ? undefined : (id as SubtaskSortKey)
+  return id === 'model' || id === 'progress' ? undefined : (id as SubtaskSortKey)
 }
 
 // ---------------------------------------------------------------------------- columns
@@ -934,93 +935,104 @@ export function TaskTable(p: TaskTableProps) {
         {p.toolbarStart && (
           <div style={{ flex: isMobile ? '1 1 100%' : '0 1 340px', minWidth: 0 }}>{p.toolbarStart}</div>
         )}
-        {(sort.key !== DEFAULT_PREFS.sort.key || sort.dir !== DEFAULT_PREFS.sort.dir) && (
-          // Said in words, with the way out beside it: a sort is invisible once you have scrolled
-          // past the header, and "why is this board in this order" should never need investigating.
-          <button
-            onClick={() => setSort(DEFAULT_PREFS.sort)}
-            title={L.resetSort}
-            style={{
-              ...button(isMobile), height: isMobile ? 44 : 28, fontSize: 11,
-              color: 'var(--anthropic-orange)',
-            }}
-          >
-            {L.sortedByPrefix} {L.keys[sort.key] ?? sort.key} {sort.dir === 'asc' ? '↑' : '↓'}
-            <X size={12} />
-          </button>
-        )}
         {!isMobile && <span style={{ flex: 1 }} />}
-        <SubtaskFilterMenu
-          value={subtaskFilter} onChange={setSubtaskFilter}
-          sessions={[...p.details.values()].flatMap(d => d.sessions)}
-          statuses={p.statuses} lang={p.lang ?? 'en'}
-          label={copy.subtaskFilter.title}
-          triggerStyle={TRIGGER}
-        />
-        {/* One or the other, per person: a single-choice list over the same PickerMenu the Groups and
-            Columns pickers use — picking the row that is not current moves the choice to it. */}
-        <PickerMenu
-          title={copy.types.groupBy}
-          lang={p.lang ?? 'en'}
-          triggerStyle={TRIGGER}
-          items={[
-            { value: 'status', label: copy.types.groupByStatus },
-            { value: 'type', label: copy.types.groupByType },
-          ]}
-          value={[groupBy]}
-          onChange={next => {
-            const picked = next.find(v => v !== groupBy)
-            if (picked === 'status' || picked === 'type') setGroupBy(picked)
-          }}
-        >
-          {copy.types.groupBy}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
-        </PickerMenu>
-        <PickerMenu
-          title={copy.pickers.groupsTitle}
-          lang={p.lang ?? 'en'}
-          triggerStyle={TRIGGER}
-          items={groups.map(g => ({
-            value: g.key,
-            // The SAME word the chip in every row of this group prints — one vocabulary, one language.
-            label: g.label,
-            color: g.color,
-            // The count of a HIDDEN group too — "hidden" must not read as "empty".
-            hint: String(g.rows.length),
-          }))}
-          value={groupsShown}
-          // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
-          onChange={next => (groupBy === 'type'
-            ? setTypeGroups(next.map(k => k.replace(/^type:/, '')))
-            : setGroups(next as BoardStatus[]))}
-          orderable
-          note={groupBy === 'type' ? copy.types.groupsNote : copy.pickers.groupsNote}
-        >
-          <Rows3 size={13} /> {copy.pickers.groupsTrigger}
-          {/* How many are on screen, on the trigger itself — it used to be a separate caption. */}
-          <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
-        </PickerMenu>
-        <PickerMenu
-          title={copy.pickers.columnsTitle}
-          lang={p.lang ?? 'en'}
-          width={270}
-          triggerStyle={TRIGGER}
-          tabs={[
-            {
-              id: 'deliveries', label: copy.pickers.deliveriesTab, orderable: true,
-              items: COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) })),
-              value: shown, onChange: next => setColumns(next as ColumnId[]),
-              note: copy.pickers.columnsNote,
-            },
-            {
-              id: 'subtasks', label: copy.pickers.subtasksTab, orderable: true,
-              items: SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] })),
-              value: shownSubtaskCols, onChange: next => setSubtaskColumns(next as SubtaskColumnId[]),
-              note: copy.pickers.subtaskColumnsNote,
-            },
-          ]}
-        >
-          <Columns3 size={13} /> {copy.pickers.columnsTrigger}
-        </PickerMenu>
+        {/* ONE bar — Filter · Group · Columns · Sort — whose segments open the existing menus in the
+            same portal panel (`ViewBar.tsx`), the same bar the subtask grid and the kanban draw.
+            Moving a segment off its default is read off the segment itself, so the old "sorted
+            by … ✕" chip is gone: the Sort segment is selected and its panel names the order. */}
+        <ViewBar label={`${copy.viewBar.filter} · ${copy.viewBar.group} · ${copy.viewBar.columns} · ${copy.viewBar.sort}`}>
+          <SubtaskFilterMenu
+            value={subtaskFilter} onChange={setSubtaskFilter}
+            sessions={[...p.details.values()].flatMap(d => d.sessions)}
+            statuses={p.statuses} lang={p.lang ?? 'en'}
+            label={copy.viewBar.filter} noIcon
+            triggerStyle={viewSegment(isMobile)}
+            activeTriggerStyle={viewSegment(isMobile, true)}
+          />
+          {/* Two lists behind one segment: HOW the table is grouped (one or the other, per person: a
+              single-choice list over the same PickerMenu — picking the row that is not current moves
+              the choice to it) and WHICH groups are on screen. */}
+          <PickerMenu
+            title={copy.viewBar.group}
+            lang={p.lang ?? 'en'}
+            width={250}
+            triggerStyle={viewSegment(isMobile, groupBy !== 'status' || visible.length !== groups.length)}
+            tabs={[
+              {
+                id: 'groupBy', label: copy.types.groupBy,
+                items: [
+                  { value: 'status', label: copy.types.groupByStatus },
+                  { value: 'type', label: copy.types.groupByType },
+                ],
+                value: [groupBy],
+                onChange: next => {
+                  const picked = next.find(v => v !== groupBy)
+                  if (picked === 'status' || picked === 'type') setGroupBy(picked)
+                },
+              },
+              {
+                id: 'groups', label: copy.pickers.groupsTitle, orderable: true,
+                items: groups.map(g => ({
+                  value: g.key,
+                  // The SAME word the chip in every row of this group prints — one vocabulary, one language.
+                  label: g.label,
+                  color: g.color,
+                  // The count of a HIDDEN group too — "hidden" must not read as "empty".
+                  hint: String(g.rows.length),
+                })),
+                value: groupsShown,
+                // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
+                onChange: next => (groupBy === 'type'
+                  ? setTypeGroups(next.map(k => k.replace(/^type:/, '')))
+                  : setGroups(next as BoardStatus[])),
+                note: groupBy === 'type' ? copy.types.groupsNote : copy.pickers.groupsNote,
+              },
+            ]}
+          >
+            {copy.viewBar.group}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
+            <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
+          </PickerMenu>
+          <PickerMenu
+            title={copy.pickers.columnsTitle}
+            lang={p.lang ?? 'en'}
+            width={270}
+            triggerStyle={viewSegment(isMobile)}
+            tabs={[
+              {
+                id: 'deliveries', label: copy.pickers.deliveriesTab, orderable: true,
+                items: COLUMNS.map(c => ({ value: c.id, label: colLabel(c.id) })),
+                value: shown, onChange: next => setColumns(next as ColumnId[]),
+                note: copy.pickers.columnsNote,
+              },
+              {
+                id: 'subtasks', label: copy.pickers.subtasksTab, orderable: true,
+                items: SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] })),
+                value: shownSubtaskCols, onChange: next => setSubtaskColumns(next as SubtaskColumnId[]),
+                note: copy.pickers.subtaskColumnsNote,
+              },
+            ]}
+          >
+            {copy.viewBar.columns}
+            {shown.length !== COLUMNS.length && <span style={segmentBadge}>{shown.length}</span>}
+          </PickerMenu>
+          <ViewSortMenu
+            label={copy.viewBar.sort}
+            title={copy.viewBar.sortBy}
+            options={[
+              { key: 'title' as SortKey, label: L.keys.title ?? 'title' },
+              ...shown.flatMap(id => {
+                const def = COLUMNS.find(c => c.id === id)
+                return def?.sort ? [{ key: def.sort, label: colLabel(id) }] : []
+              }),
+            ]}
+            current={sort.key === DEFAULT_PREFS.sort.key && sort.dir === DEFAULT_PREFS.sort.dir ? null : sort}
+            onChange={next => setSort(next ?? DEFAULT_PREFS.sort)}
+            defaultLabel={copy.viewBar.sortDefault}
+            ascLabel={copy.viewBar.asc}
+            descLabel={copy.viewBar.desc}
+            note={copy.viewBar.sortNote}
+          />
+        </ViewBar>
         <button
           type="button"
           onClick={() => setSavedWidths({})}
