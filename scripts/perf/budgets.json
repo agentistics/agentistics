@@ -8,5 +8,8 @@
   "liveOpenFirstFrameMs": 1000,
   "sendToEchoP95Ms": 2000,
   "answerShownP95Ms": 800,
-  "changeAfterAppendP95Ms": 3000
+  "changeAfterAppendP95Ms": 3000,
+  "_comment_inflight": "STREAM.FIX: keys ending in Min are FLOORS. The fake claude prints its answer word by word over 1.5 s; the chat's live-answer reader must see it grow at least this many times before the finished turn arrives, and must have something to draw this soon after the send.",
+  "inflightGrowthStepsMin": 3,
+  "sendToLiveAnswerP95Ms": 1500
 }
