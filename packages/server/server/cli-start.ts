@@ -37,7 +37,8 @@ import { join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
-import { homedir, platform, userInfo } from 'node:os'
+import { homedir, platform } from 'node:os'
+import { accountHome } from './account-home'
 import {
   DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type HarnessId, type TeamConnection,
@@ -1344,9 +1345,9 @@ export async function restartForConfigChange(): Promise<{ state: 'nothing-runnin
   return { state: ok ? 'restarted' : 'failed', message, port }
 }
 
-/** The account's own home (`os.userInfo()`), which an overridden `HOME` does not move. */
+/** The account's own home, which an overridden `HOME` does not move (`account-home.ts`). */
 function ownerHome(): string {
-  try { return userInfo().homedir } catch { return homedir() }
+  return accountHome()
 }
 
 /**
