@@ -1,6 +1,7 @@
 /**
  * BoardArrange — the kanban's own controls: what the cards are ordered BY, what the rows are, and
- * how many cards a column should hold.
+ * how many cards a column should hold. They are segments of the ONE view bar every task screen
+ * draws (`ViewBar.tsx`): Group (swimlanes) · Columns · Sort, plus the board-only WIP limits.
  *
  * They sit above the board rather than inside a settings dialog because all three change what is on
  * screen right now, and a control whose effect you cannot see while you press it is one people
@@ -10,17 +11,15 @@
  * in the grid and another in the columns is two boards.
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { ArrowDownUp, Columns3, LayoutList, Rows3, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { PRIORITY_ORDER, type SortKey, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { scrollIsOutside } from '../../lib/popoverScroll'
 import {
-  button, field, liveStatusMap, liveStatusOrder, microLabel, pill, surface, type BoardStatus,
+  button, field, liveStatusMap, liveStatusOrder, microLabel, pill, type BoardStatus,
 } from './board'
 import { boardCopy, type Lang } from './copy'
-import { PickerMenu } from './PickerMenu'
+import { PanelMenu, PickerMenu } from './PickerMenu'
+import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { LANE_KEYS, type LaneKey } from './boardPrefs'
 import type { ColumnSorts } from './columnSort'
 
@@ -78,178 +77,94 @@ export interface BoardArrangeProps {
 export function BoardArrange(p: BoardArrangeProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(p.lang ?? 'en')
-  const [menu, setMenu] = useState<'sort' | 'lanes' | 'wip' | null>(null)
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
-  const bar = useRef<HTMLDivElement>(null)
-  // Only one of the three panels is ever mounted at a time (`menu` is a single value), so one ref
-  // covers all of them.
-  const panel = useRef<HTMLDivElement>(null)
   const statusOrder = liveStatusOrder(p.statuses)
   const statusMap = liveStatusMap(p.statuses)
+  const limited = Object.keys(p.wip).length
 
-  /**
-   * The panels are FIXED and live in a portal, and they open to the RIGHT of their button.
-   *
-   * Both halves were wrong before. `position: absolute` put them in the page's own stacking
-   * context, so the sidebar — which is fixed and higher — drew straight over them; and `right: 0`
-   * hung them off the button's right edge, so they opened LEFTWARD, across the nav and off the
-   * screen. `fixed` + a portal means no ancestor's overflow or z-index can clip them, and
-   * left-aligning to the trigger opens them into the board, which is where the space is.
-   *
-   * They close on scroll rather than chasing the button: a panel that drifts away from the control
-   * it belongs to is worse than one that closed. Same rule the settings popovers follow.
-   *
-   * But the listener is capture-phase on `window`, so it ALSO fires when the panel's OWN list
-   * scrolls (the WIP panel's per-column rows, or a keyboard scroll-into-view) — closing on that
-   * beats the click that was reaching a row past the fold. Only a scroll OUTSIDE the panel closes
-   * it; a portaled panel is never a descendant of the button, so the check is against the panel's
-   * own ref, not `bar`.
-   */
-  useEffect(() => {
-    if (!menu) return
-    const close = () => setMenu(null)
-    const onScroll = (e: Event) => {
-      if (scrollIsOutside(panel.current, e.target)) close()
-    }
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', close)
-    return () => {
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', close)
-    }
-  }, [menu])
-
-  const openAt = (which: 'sort' | 'lanes' | 'wip') => (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (menu === which) { setMenu(null); return }
-    const r = e.currentTarget.getBoundingClientRect()
-    const width = which === 'wip' ? 260 : 230
-    setAt({
-      // Clamped to the viewport, so a button near the right edge does not open a panel half off it.
-      left: Math.min(r.left, window.innerWidth - width - 12),
-      top: r.bottom + 6,
-    })
-    setMenu(which)
-  }
-
-  const renderPanel = (which: 'sort' | 'lanes' | 'wip', width: number, body: React.ReactNode) =>
-    menu === which && at
-      ? createPortal(
-        <>
-          <div onClick={() => setMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
-          <div ref={panel} style={{
-            position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
-            ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 3,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: 340, overflowY: 'auto',
-          }}>{body}</div>
-        </>,
-        document.body,
-      )
-      : null
   const row = (on: boolean): React.CSSProperties => ({
     display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', width: '100%',
-    padding: '6px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 12,
+    padding: '6px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
     border: `1px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
     background: on ? 'var(--anthropic-orange-dim)' : 'transparent',
     color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
     minHeight: isMobile ? 44 : 28,
   })
-  const trigger = { ...button(isMobile), height: isMobile ? 44 : 28 }
-  const limited = Object.keys(p.wip).length
+  const note: React.CSSProperties = {
+    ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px', lineHeight: 1.5,
+  }
 
   return (
-    <div ref={bar} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      {/*
-       * WHICH COLUMNS, and in what order.
-       *
-       * Seven fixed columns are wider than any screen, so the board scrolled sideways and the last
-       * two were simply off the edge with nothing offering to hide them — the arrangement existed
-       * for the table and not for the board it was more needed on. Reorderable too: a pipeline that
-       * runs backlog → done is a sequence, and a team that reviews before it blocks should be able
-       * to say so.
-       */}
-      <PickerMenu
-        title={copy.pickers.boardColumnsTitle}
-        lang={p.lang ?? 'en'}
-        triggerStyle={trigger}
-        items={statusOrder.map(st => ({
-          value: st,
-          label: statusMap[st]?.label ?? st,
-          color: statusMap[st]?.color ?? 'var(--text-tertiary)',
-          hint: String(p.counts[st] ?? 0),
-        }))}
-        value={p.columns}
-        onChange={next => p.onColumns(next as BoardStatus[])}
-        orderable
-        note={copy.pickers.boardColumnsNote}
-      >
-        <Columns3 size={13} /> {copy.pickers.boardColumnsTrigger} · {p.columns.length}
-      </PickerMenu>
-
-      <div>
-        <button style={trigger} onClick={openAt('sort')}>
-          <ArrowDownUp size={13} />
-          {BOARD_SORTS.find(s => s.key === p.sort.key)?.label ?? 'Order'}
-          {p.sort.key !== 'manual' && <span>{p.sort.dir === 'asc' ? '↑' : '↓'}</span>}
-        </button>
-        {renderPanel('sort', 230, (
-          <>
-              <div style={{ ...microLabel, marginBottom: 3 }}>Order cards by</div>
-              {BOARD_SORTS.map(s => (
-                <button
-                  key={s.key}
-                  onClick={() => {
-                    // Pressing the ACTIVE key flips the direction — the second half of the same
-                    // gesture, so nobody has to find a separate up/down control.
-                    p.onSort(p.sort.key === s.key
-                      ? { key: s.key, dir: p.sort.dir === 'asc' ? 'desc' : 'asc' }
-                      : { key: s.key, dir: 'asc' })
-                  }}
-                  style={row(p.sort.key === s.key)}
-                >
-                  <span style={{ flex: 1 }}>{s.label}</span>
-                  {p.sort.key === s.key && <span>{p.sort.dir === 'asc' ? '↑' : '↓'}</span>}
-                </button>
-              ))}
-              <div style={{
-                ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px',
-                lineHeight: 1.5,
-              }}>
-                A card nothing could price sorts last whichever way the arrow points.
-              </div>
-          </>
-        ))}
-      </div>
-
-      <div>
-        <button style={trigger} onClick={openAt('lanes')}>
-          <Rows3 size={13} /> {LANE_LABEL[p.lanes]}
-        </button>
-        {renderPanel('lanes', 230, (
-          <>
-              <div style={{ ...microLabel, marginBottom: 3 }}>Swimlanes</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <ViewBar label={`${copy.viewBar.group} · ${copy.viewBar.columns} · ${copy.viewBar.sort}`}>
+        {/* GROUP — the swimlanes: a lane per value, each holding the whole pipeline. */}
+        <PanelMenu
+          title={copy.viewBar.group}
+          width={230}
+          triggerStyle={viewSegment(isMobile, p.lanes !== 'none')}
+          render={close => (
+            <>
               {LANE_KEYS.map(k => (
-                <button key={k} onClick={() => { setMenu(null); p.onLanes(k) }} style={row(p.lanes === k)}>
+                <button key={k} type="button" onClick={() => { close(); p.onLanes(k) }} style={row(p.lanes === k)}>
                   {LANE_LABEL[k]}
                 </button>
               ))}
-              <div style={{
-                ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px',
-                lineHeight: 1.5,
-              }}>
+              <div style={note}>
                 A lane per value, each holding the whole pipeline — which repository, which agent,
                 which harness is doing what.
               </div>
-          </>
-        ))}
-      </div>
+            </>
+          )}
+        >{copy.viewBar.group}{p.lanes !== 'none' ? `: ${LANE_LABEL[p.lanes]}` : ''}</PanelMenu>
 
-      <div>
-        <button style={trigger} onClick={openAt('wip')}>
-          <LayoutList size={13} /> WIP{limited > 0 ? ` · ${limited}` : ''}
-        </button>
-        {renderPanel('wip', 260, (
-          <>
-              <div style={{ ...microLabel, marginBottom: 3 }}>Cards per column</div>
+        {/*
+         * WHICH COLUMNS, and in what order.
+         *
+         * Seven fixed columns are wider than any screen, so the board scrolled sideways and the last
+         * two were simply off the edge with nothing offering to hide them — the arrangement existed
+         * for the table and not for the board it was more needed on. Reorderable too: a pipeline that
+         * runs backlog → done is a sequence, and a team that reviews before it blocks should be able
+         * to say so.
+         */}
+        <PickerMenu
+          title={copy.pickers.boardColumnsTitle}
+          lang={p.lang ?? 'en'}
+          triggerStyle={viewSegment(isMobile)}
+          items={statusOrder.map(st => ({
+            value: st,
+            label: statusMap[st]?.label ?? st,
+            color: statusMap[st]?.color ?? 'var(--text-tertiary)',
+            hint: String(p.counts[st] ?? 0),
+          }))}
+          value={p.columns}
+          onChange={next => p.onColumns(next as BoardStatus[])}
+          orderable
+          note={copy.pickers.boardColumnsNote}
+        >
+          {copy.viewBar.columns}
+          {p.columns.length !== statusOrder.length && <span style={segmentBadge}>{p.columns.length}</span>}
+        </PickerMenu>
+
+        {/* SORT — the table's sort, one field written by both. Hand order is the board's resting
+            order, so it is the "default" row rather than a key. */}
+        <ViewSortMenu
+          label={copy.viewBar.sort}
+          title={copy.viewBar.sortBy}
+          options={BOARD_SORTS.filter(s => s.key !== 'manual')}
+          current={p.sort.key === 'manual' ? null : p.sort}
+          onChange={next => p.onSort(next ?? { key: 'manual', dir: 'asc' })}
+          defaultLabel="Hand order"
+          ascLabel={copy.viewBar.asc}
+          descLabel={copy.viewBar.desc}
+          note="A card nothing could price sorts last whichever way the arrow points."
+        />
+
+        {/* WIP is the board's own — a table has no column to limit. */}
+        <PanelMenu
+          title="Cards per column"
+          width={260}
+          triggerStyle={viewSegment(isMobile, limited > 0)}
+          render={() => (
+            <>
               {statusOrder.map(st => {
                 const c = statusMap[st] ?? { label: st, color: 'var(--text-tertiary)' }
                 const v = p.wip[st]
@@ -274,16 +189,14 @@ export function BoardArrange(p: BoardArrangeProps) {
                   </label>
                 )
               })}
-              <div style={{
-                ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px',
-                lineHeight: 1.5,
-              }}>
+              <div style={note}>
                 A limit WARNS, it never blocks a drop. It is an agreement you make with yourself —
                 a board that refuses work teaches people to route around it.
               </div>
-          </>
-        ))}
-      </div>
+            </>
+          )}
+        >WIP{limited > 0 ? <span style={segmentBadge}>{limited}</span> : null}</PanelMenu>
+      </ViewBar>
 
       {p.lanes === 'priority' && (
         <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
@@ -303,7 +216,7 @@ export function BoardArrange(p: BoardArrangeProps) {
             p.onWip({})
             p.onColumns([...statusOrder])
           }}
-          style={{ ...trigger, color: 'var(--text-tertiary)' }}
+          style={{ ...button(isMobile), height: isMobile ? 44 : 28, gap: 6, color: 'var(--text-tertiary)' }}
           title="Back to the plain board"
         ><X size={12} /> Reset</button>
       )}

@@ -57,13 +57,13 @@
  */
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Columns3, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import {
   commentCounts, cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
 } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  button, liveStatusMap, liveStatusOrder, microLabel, pill,
+  liveStatusOrder, microLabel, pill,
   statusStyle, surface, type BoardStatus,
 } from './board'
 import { SessionPicker } from './SessionPicker'
@@ -85,6 +85,8 @@ import { costCellFor, tokensCellFor } from './subtaskRollup'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { ModelCellView } from './SubtaskModelCell'
 import { PickerMenu } from './PickerMenu'
+import { StatusChip } from './StatusChip'
+import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { useBoardPref } from './boardPrefs'
 import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { subtaskColumnCell } from './subtaskColumnCell'
@@ -100,59 +102,7 @@ import type {
  *  server to sort a raw session field by), so its header carries no click affordance, the same rule
  *  `TaskTable.tsx`'s own `cellFor` applies to any column with no `sort` in its `ColumnDef`. */
 function subtaskSortKeyFor(id: SubtaskColumnId): SubtaskSortKey | undefined {
-  return id === 'model' ? undefined : (id as SubtaskSortKey)
-}
-
-function StatusPick({ value, lang, statuses, onPick }: {
-  value: TaskStatus
-  lang: Lang
-  /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
-  statuses: readonly TaskStatusDef[] | null
-  onPick: (s: TaskStatus) => void
-}) {
-  const isMobile = useIsMobile()
-  const [open, setOpen] = useState(false)
-  const s = statusStyle(statuses, value)
-  const map = liveStatusMap(statuses)
-  const order = liveStatusOrder(statuses)
-  return (
-    <div style={{ position: 'relative' }}>
-      <button className="ag-tap"
-        onClick={() => setOpen(v => !v)}
-        style={{
-          border: `1px solid ${s.color}`, cursor: 'pointer', padding: '3px 9px', borderRadius: 5,
-          background: s.dim, color: s.color, fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
-        }}
-      >{statusLabel(value, lang, statuses)}</button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, zIndex: 31, marginTop: 4, minWidth: 128,
-            ...surface, background: 'var(--bg-elevated)', padding: 4, display: 'grid', gap: 2,
-            boxShadow: 'var(--shadow-elevated)',
-          }}>
-            {order.map(st => {
-              const c = map[st] ?? { label: st, color: 'var(--text-tertiary)', dim: 'var(--border)' }
-              return (
-                <button
-                  // A MENU ROW pays its 44px in PAINT. `.ag-tap` is for controls whose smallness
-                  // is their meaning; these sit in a `gap: 2` list, where a projected box covers
-                  // the row above and its bottom band selects the row below.
-                  key={st} onClick={() => { setOpen(false); onPick(st) }}
-                  style={{
-                    border: 'none', cursor: 'pointer', textAlign: 'left', padding: '5px 9px',
-                    minHeight: isMobile ? 44 : undefined,
-                    borderRadius: 5, background: c.dim, color: c.color, fontSize: 10.5, fontWeight: 600,
-                  }}
-                >{statusLabel(st, lang, statuses)}</button>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
+  return id === 'model' || id === 'progress' ? undefined : (id as SubtaskSortKey)
 }
 
 const cell: React.CSSProperties = { padding: '7px 9px', borderTop: '1px solid var(--border)' }
@@ -269,13 +219,16 @@ export function SubtaskTable(p: SubtaskTableProps) {
   /** The column filter (t-63b7d3b2b0 #2) — ephemeral, like the sort above: it narrows this one look
    *  at the grid and is never remembered across a remount. */
   const [filter, setFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
+  /** Group header rows per status ("Em andamento · 3"). Ephemeral like the filter and the sort: it
+   *  shapes this one look at the grid. On by default — the board's own vocabulary is its statuses. */
+  const [groupByStatus, setGroupByStatus] = useState(true)
   const filtered = filterSubtaskRows(p.subtasks, p.sessions, filter)
   const ordered = orderedSubtasks(filtered, sort, {
     views: p.subtaskRollups,
     sessions: p.sessions,
     statusOrder: liveStatusOrder(p.statuses),
   })
-  const colCount = 2 + shownCols.length
+  const colCount = 3 + shownCols.length
 
   const pickStatus = async (t: Subtask, status: TaskStatus) => {
     const result = await p.onPatch(t.id, { status })
@@ -285,6 +238,42 @@ export function SubtaskTable(p: SubtaskTableProps) {
   }
 
   const done = p.subtasks.filter(t => t.done).length
+
+  // The visible rows (clusters already folded), optionally bucketed under one header row per
+  // status. A cluster — a GROUP and its members — travels together under the GROUP's status, so
+  // grouping never tears a group apart; the buckets follow the board's own status order.
+  type RowItem =
+    | { kind: 'head'; status: string; color: string; count: number }
+    | { kind: 'row'; row: ReturnType<typeof visibleClusterRows>[number] }
+  const visibleRows = visibleClusterRows(clusterSubtaskRows(ordered), expandedGroups)
+  const rowItems: RowItem[] = []
+  if (!groupByStatus) {
+    for (const row of visibleRows) rowItems.push({ kind: 'row', row })
+  } else {
+    const clusters: Array<typeof visibleRows> = []
+    for (const row of visibleRows) {
+      if (row.depth === 0 || clusters.length === 0) clusters.push([row])
+      else clusters[clusters.length - 1]!.push(row)
+    }
+    const order = liveStatusOrder(p.statuses)
+    const rank = (st: string) => { const i = order.indexOf(st as BoardStatus); return i === -1 ? order.length : i }
+    const sorted = clusters
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => rank(a.c[0]!.subtask.status) - rank(b.c[0]!.subtask.status) || a.i - b.i)
+      .map(x => x.c)
+    let last: string | null = null
+    for (const c of sorted) {
+      const st = c[0]!.subtask.status
+      if (st !== last) {
+        last = st
+        rowItems.push({
+          kind: 'head', status: st, color: statusStyle(p.statuses, st).color,
+          count: sorted.filter(x => x[0]!.subtask.status === st).length,
+        })
+      }
+      for (const row of c) rowItems.push({ kind: 'row', row })
+    }
+  }
 
   // The direct-branch footer row — sessions filed straight on the delivery, under no subtask.
   // `subtaskRollupOf` only resolves a SUBTASK's bucket (it takes `{ id, groupId }`, never `null`),
@@ -313,26 +302,66 @@ export function SubtaskTable(p: SubtaskTableProps) {
         <div style={{ flex: 1, maxWidth: 220 }}>
           <TaskProgressBar done={done} total={p.subtasks.length} />
         </div>
-        {/* The grid's own controls sit together at the far end: one labeled Filter (the panel names
-            each dimension) beside Columns — never a row of three bare "All" selects. */}
+        {/* The grid's own controls: ONE bar — Filter · Group · Columns · Sort — whose segments open
+            the existing menus in the same portal panel (see `ViewBar.tsx`). */}
         <span style={{ flex: 1 }} />
-        <SubtaskFilterMenu
-          value={filter} onChange={setFilter} sessions={p.sessions} statuses={p.statuses} lang={p.lang}
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28, gap: 6 }}
-        />
-        <PickerMenu
-          title={boardCopy(p.lang).pickers.columnsTitle}
-          lang={p.lang}
-          width={230}
-          orderable
-          triggerStyle={{ ...button(isMobile), height: isMobile ? 44 : 28, gap: 6 }}
-          items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: boardCopy(p.lang).subtaskColumns[c.id] }))}
-          value={shownCols}
-          onChange={next => setColumns(next as SubtaskColumnId[])}
-          note={boardCopy(p.lang).pickers.columnsNote}
-        >
-          <Columns3 size={13} /> {boardCopy(p.lang).pickers.columnsTrigger}
-        </PickerMenu>
+        <ViewBar label={copy.viewBar.filter + ' · ' + copy.viewBar.group + ' · ' + copy.viewBar.columns + ' · ' + copy.viewBar.sort}>
+          <SubtaskFilterMenu
+            value={filter} onChange={setFilter} sessions={p.sessions} statuses={p.statuses} lang={p.lang}
+            label={copy.viewBar.filter} noIcon
+            triggerStyle={viewSegment(isMobile)}
+            activeTriggerStyle={viewSegment(isMobile, true)}
+          />
+          <PickerMenu
+            title={copy.viewBar.group}
+            lang={p.lang}
+            width={210}
+            triggerStyle={viewSegment(isMobile, groupByStatus)}
+            items={[
+              { value: 'none', label: copy.viewBar.groupNone },
+              { value: 'status', label: copy.viewBar.groupStatus },
+            ]}
+            value={[groupByStatus ? 'status' : 'none']}
+            onChange={next => {
+              // Single choice over the multi-select list: the row that is not current wins.
+              const picked = next.find(v => v !== (groupByStatus ? 'status' : 'none'))
+              if (picked) setGroupByStatus(picked === 'status')
+            }}
+          >{copy.viewBar.group}{groupByStatus ? `: ${copy.subtaskColumns.status.toLowerCase()}` : ''}</PickerMenu>
+          <PickerMenu
+            title={copy.pickers.columnsTitle}
+            lang={p.lang}
+            width={230}
+            orderable
+            triggerStyle={viewSegment(isMobile)}
+            items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] }))}
+            value={shownCols}
+            onChange={next => setColumns(next as SubtaskColumnId[])}
+            note={copy.pickers.columnsNote}
+          >
+            {copy.viewBar.columns}
+            {shownCols.length !== SUBTASK_COLUMNS.length && (
+              <span style={segmentBadge}>{shownCols.length}</span>
+            )}
+          </PickerMenu>
+          <ViewSortMenu
+            label={copy.viewBar.sort}
+            title={copy.viewBar.sortBy}
+            options={[
+              { key: 'title' as SubtaskSortKey, label: copy.subtasks },
+              ...shownCols.flatMap(id => {
+                const k = subtaskSortKeyFor(id)
+                return k ? [{ key: k, label: copy.subtaskColumns[id] }] : []
+              }),
+            ]}
+            current={sort}
+            onChange={setSort}
+            defaultLabel={copy.viewBar.sortDefault}
+            ascLabel={copy.viewBar.asc}
+            descLabel={copy.viewBar.desc}
+            note={copy.viewBar.sortNote}
+          />
+        </ViewBar>
       </div>
 
       {/* The grid's OWN scroll box. Its last column (Tokens) was cut off at 1440: a flat 760px table
@@ -379,6 +408,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
                 />
               )
             })}
+            {/* Trailing actions column — no title, no sort: nothing to order by. */}
+            <th style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, ...stickyHead }} />
           </tr>
         </thead>
         <tbody>
@@ -389,7 +420,24 @@ export function SubtaskTable(p: SubtaskTableProps) {
               </td>
             </tr>
           )}
-          {visibleClusterRows(clusterSubtaskRows(ordered), expandedGroups).map(({ subtask: t, depth, clustered }) => {
+          {rowItems.map(item => {
+            if (item.kind === 'head') {
+              return (
+                <tr key={`head:${item.status}`}>
+                  <td colSpan={colCount} style={{
+                    ...cell, background: 'var(--bg-surface)', fontSize: 11.5, fontWeight: 600,
+                    color: 'var(--text-secondary)', padding: '6px 10px',
+                  }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: item.color }} />
+                      {statusLabel(item.status, p.lang, p.statuses)} · {item.count}
+                    </span>
+                  </td>
+                </tr>
+              )
+            }
+            const { subtask: t, depth, clustered } = item.row
+
             // A GROUP MEMBER (§F.1) never carries a session of its own — refused server-side
             // (`subtask_in_group`) — so it has no rollup bucket at all (`subtaskViews` excludes it
             // outright), which `subtaskColumnCell`'s own cost/tokens cases already read as the
@@ -410,42 +458,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
             const memberCount = isGroupHeader ? groupMembers(t.id, p.subtasks).length : 0
             return (
             <tr key={t.id}>
-              {/* ONE gear, leading the row — every action that used to be a scattered icon-only
-                  button (blocked-by, group forming, staged-session compose/edit/fire, remove) lives
-                  in this single labeled popover now. See `SubtaskActionsMenu`'s own doc comment.
-                  The inset left bar (`clusterBarStyle`) lands here — the leading edge of every
-                  clustered row, header through last member, so it reads as one continuous stripe. */}
-              <td style={{ ...cell, width: 1, ...tint, ...clusterBarStyle(clustered) }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <SubtaskActionsMenu
-                  subtask={t}
-                  siblings={p.subtasks}
-                  lang={p.lang}
-                  statuses={p.statuses}
-                  onPatch={p.onPatch}
-                  onCreateGroup={p.onCreateGroup}
-                  onRemove={p.onRemove}
-                  staged={{
-                    hasDraft: Boolean(t.stagedSession),
-                    preparing: p.preparingStagedSessionId === t.id,
-                    onCompose: () => stagedDialogs.compose(target(t)),
-                    onEdit: () => stagedDialogs.compose(target(t)),
-                    onFire: () => p.onFireStagedSession(t),
-                    onView: () => stagedDialogs.view(target(t)),
-                    onDelete: () => stagedDialogs.remove(target(t)),
-                  }}
-                />
-                {/* Beside the gear (owner, 2026-10-02): the row's thread, count and way in. */}
-                {p.onOpenComments && (
-                  <CommentCountButton
-                    count={threadCounts[t.id] ?? 0}
-                    label={p.lang === 'pt' ? `Comentários: ${t.title}` : `Comments: ${t.title}`}
-                    mobile={isMobile}
-                    onOpen={() => p.onOpenComments?.(t)}
-                  />
-                )}
-                </span>
-              </td>
+              {/* The leading cell carries only the cluster's inset bar (`clusterBarStyle`) — the leading
+                  edge of every clustered row, header through last member, so it reads as one
+                  continuous stripe. The row's actions moved to the trailing cell, where they show
+                  on hover/focus (and always on touch). */}
+              <td style={{ ...cell, width: 1, padding: 0, ...tint, ...clusterBarStyle(clustered) }} />
               {/* A MEMBER is indented one level under its group's header — the visual nesting that
                   replaces the old "parte do grupo" caption for every properly clustered row. */}
               <td style={{ ...cell, minWidth: 150, ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
@@ -534,9 +551,9 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   >
                     {id === 'status'
                       ? (
-                        <StatusPick
-                          value={t.status} lang={p.lang} statuses={p.statuses}
-                          onPick={s => void pickStatus(t, s)}
+                        <StatusChip
+                          value={t.status} lang={p.lang} statuses={p.statuses} compact block={false}
+                          onPick={st => void pickStatus(t, st)}
                         />
                       )
                       : subtaskColumnCell(id, {
@@ -547,6 +564,40 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   </td>
                 )
               })}
+              {/* Row actions: the thread (a count that is always readable) and the ⋯ menu, which
+                  appears on hover / keyboard focus and stays put on touch (`.ag-row-actions`). */}
+              <td style={{ ...cell, ...tint, width: 1, whiteSpace: 'nowrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  {p.onOpenComments && (
+                    <CommentCountButton
+                      count={threadCounts[t.id] ?? 0}
+                      label={p.lang === 'pt' ? `Comentários: ${t.title}` : `Comments: ${t.title}`}
+                      mobile={isMobile}
+                      onOpen={() => p.onOpenComments?.(t)}
+                    />
+                  )}
+                  <span className="ag-row-actions" style={{ display: 'inline-flex' }}>
+                    <SubtaskActionsMenu
+                      subtask={t}
+                      siblings={p.subtasks}
+                      lang={p.lang}
+                      statuses={p.statuses}
+                      onPatch={p.onPatch}
+                      onCreateGroup={p.onCreateGroup}
+                      onRemove={p.onRemove}
+                      staged={{
+                        hasDraft: Boolean(t.stagedSession),
+                        preparing: p.preparingStagedSessionId === t.id,
+                        onCompose: () => stagedDialogs.compose(target(t)),
+                        onEdit: () => stagedDialogs.compose(target(t)),
+                        onFire: () => p.onFireStagedSession(t),
+                        onView: () => stagedDialogs.view(target(t)),
+                        onDelete: () => stagedDialogs.remove(target(t)),
+                      }}
+                    />
+                  </span>
+                </span>
+              </td>
             </tr>
             )
           })}
@@ -589,6 +640,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   </td>
                 )
               })}
+              <td style={cell} />
             </tr>
           )}
           <tr>

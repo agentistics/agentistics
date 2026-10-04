@@ -12,7 +12,7 @@
  */
 
 export type SubtaskColumnId =
-  | 'status' | 'started' | 'completed' | 'duration' | 'sessions' | 'model' | 'cost' | 'tokens'
+  | 'status' | 'progress' | 'started' | 'completed' | 'duration' | 'sessions' | 'model' | 'cost' | 'tokens'
 
 export interface SubtaskColumnDef {
   id: SubtaskColumnId
@@ -26,6 +26,7 @@ export interface SubtaskColumnDef {
  *  column that reads the raw session list rather than the server's rollup. */
 export const SUBTASK_COLUMNS: SubtaskColumnDef[] = [
   { id: 'status', width: 100 },
+  { id: 'progress', width: 120 },
   { id: 'started', width: 118 },
   { id: 'completed', width: 118 },
   { id: 'duration', numeric: true, width: 80 },

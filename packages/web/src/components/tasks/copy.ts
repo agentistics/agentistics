@@ -190,6 +190,41 @@ export interface BoardCopy {
    * sort note) rather than inventing a second translation of the same idea.
    */
   columns: Record<ColumnId, string>
+  /** The ONE view control ("Filter · Group · Columns · Sort") every task screen draws. */
+  viewBar: {
+    filter: string
+    group: string
+    columns: string
+    sort: string
+    sortBy: string
+    sortDefault: string
+    asc: string
+    desc: string
+    groupNone: string
+    groupStatus: string
+    /** Under the sort list: unpriced work sorts last either way. */
+    sortNote: string
+  }
+  /** The task header's pills and their popovers. `{n}` / `{date}` are replaced by the caller. */
+  header: {
+    more: string
+    links: string
+    addLink: string
+    blocked: string
+    addBlocker: string
+    start: string
+    due: string
+    done: string
+    noDue: string
+    noLinks: string
+    noBlockers: string
+    openRows: string
+    deleteTask: string
+    pasteLink: string
+    pickTask: string
+    searchTasks: string
+    remove: string
+  }
   /**
    * The subtask grid's own column headers — the SAME record feeds its "Columns" picker's option
    * labels (t-63b7d3b2b0 #1), the same relationship `columns` above has with the delivery table.
@@ -410,7 +445,40 @@ const EN: BoardCopy = {
     created: 'Created',
     updated: 'Updated',
   },
+  viewBar: {
+    filter: 'Filter',
+    group: 'Group',
+    columns: 'Columns',
+    sort: 'Sort',
+    sortBy: 'Order by',
+    sortDefault: 'Default order',
+    asc: 'Ascending',
+    desc: 'Descending',
+    groupNone: 'No grouping',
+    groupStatus: 'By status',
+    sortNote: 'A row nothing could price sorts last whichever way the arrow points.',
+  },
+  header: {
+    more: 'More actions',
+    links: '{n} links',
+    addLink: '+ link',
+    blocked: 'Blocked by {n}',
+    addBlocker: '+ blocker',
+    start: 'Start {date}',
+    due: 'Due {date}',
+    done: 'Done {date}',
+    noDue: 'Due —',
+    noLinks: 'No PR or document linked.',
+    noBlockers: 'Nothing is blocking this.',
+    openRows: '{n} open',
+    deleteTask: 'Delete this task',
+    pasteLink: 'Paste a PR or doc URL, then Enter',
+    pickTask: 'Pick a task…',
+    searchTasks: 'Search…',
+    remove: 'Remove',
+  },
   subtaskColumns: {
+    progress: 'Progress',
     status: 'Status',
     started: 'Started',
     completed: 'Completed',
@@ -643,7 +711,40 @@ const PT: BoardCopy = {
     created: 'Criada em',
     updated: 'Atualizada em',
   },
+  viewBar: {
+    filter: 'Filtrar',
+    group: 'Agrupar',
+    columns: 'Colunas',
+    sort: 'Ordenar',
+    sortBy: 'Ordenar por',
+    sortDefault: 'Ordem padrão',
+    asc: 'Crescente',
+    desc: 'Decrescente',
+    groupNone: 'Sem agrupamento',
+    groupStatus: 'Por status',
+    sortNote: 'Uma linha que nada conseguiu precificar fica por último, para qualquer lado da seta.',
+  },
+  header: {
+    more: 'Mais ações',
+    links: '{n} links',
+    addLink: '+ link',
+    blocked: 'Bloqueada por {n}',
+    addBlocker: '+ bloqueio',
+    start: 'Início {date}',
+    due: 'Prazo {date}',
+    done: 'Concluída {date}',
+    noDue: 'Prazo —',
+    noLinks: 'Nenhum PR ou documento ligado.',
+    noBlockers: 'Nada está bloqueando esta tarefa.',
+    openRows: '{n} em aberto',
+    deleteTask: 'Excluir esta tarefa',
+    pasteLink: 'Cole a URL de um PR ou documento e tecle Enter',
+    pickTask: 'Escolher uma tarefa…',
+    searchTasks: 'Buscar…',
+    remove: 'Remover',
+  },
   subtaskColumns: {
+    progress: 'Progresso',
     status: 'Status',
     started: 'Início',
     completed: 'Concluída',
