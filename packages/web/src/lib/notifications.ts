@@ -100,6 +100,32 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Backup salvo, envio falhou', message: 'O arquivo está no disco desta máquina e restaura normalmente — só a cópia no GitHub não foi feita. Motivo: {reason}' },
     en: { title: 'Backup saved, upload failed', message: 'The archive is on this machine and restores normally — only the GitHub copy was not made. Reason: {reason}' },
   },
+  // RES.1 — the process governor (resources/governor.ts). A stop is said once; an alert once per
+  // (process, reason) for as long as it holds. {label} is `agentop mcp`, a helper's name, …
+  'hardware.orphan_stopped': {
+    pt: { title: 'Processo órfão encerrado', message: '{label} (pid {pid}, {size}) não servia mais ninguém — a sessão dona tinha acabado — e foi encerrado.' },
+    en: { title: 'Orphaned process stopped', message: '{label} (pid {pid}, {size}) no longer served anyone — its owner session had ended — and was stopped.' },
+  },
+  'hardware.helper_stopped': {
+    pt: { title: 'Processo auxiliar encerrado', message: '{label} (pid {pid}, {size}) ficou ocioso além do tempo que ele mesmo declarou, ou seu dono acabou, e foi encerrado.' },
+    en: { title: 'Helper process stopped', message: '{label} (pid {pid}, {size}) sat idle past its own declared timeout, or its owner ended, and was stopped.' },
+  },
+  'hardware.process_over_budget': {
+    pt: { title: 'Processo acima do orçamento de memória', message: '{label} (pid {pid}) está usando {size} de RAM+swap, acima do limite de {budget}. Abra Hardware → Recursos para a correção.' },
+    en: { title: 'Process over its memory budget', message: '{label} (pid {pid}) is using {size} of RAM+swap, over its {budget} budget. Open Hardware → Resources for the fix.' },
+  },
+  'hardware.process_stale': {
+    pt: { title: 'Processo rodando um binário antigo', message: '{label} (pid {pid}) ainda roda um agentop que uma atualização já substituiu. Abra Hardware → Recursos para a correção.' },
+    en: { title: 'Process running an old binary', message: '{label} (pid {pid}) still runs an agentop an upgrade already replaced. Open Hardware → Resources for the fix.' },
+  },
+  'hardware.mcp_stale': {
+    pt: { title: 'Servidores MCP numa versão antiga', message: '{count} servidor(es) MCP de sessões abertas ainda rodam o agentop anterior à atualização. Continuam funcionando; para usar a versão nova, reconecte o MCP na sessão (/mcp) ou reabra-a.' },
+    en: { title: 'MCP servers on an old version', message: '{count} MCP server(s) of open sessions still run the agentop from before the upgrade. They keep working; to use the new version, reconnect the MCP in the session (/mcp) or reopen it.' },
+  },
+  'hardware.process_spinning': {
+    pt: { title: 'Processo sem dono consumindo CPU', message: '{label} (pid {pid}) está com CPU alta e quem o iniciou já não existe. Abra Hardware → Recursos para encerrá-lo.' },
+    en: { title: 'Ownerless process burning CPU', message: '{label} (pid {pid}) is using a lot of CPU and whoever started it is gone. Open Hardware → Resources to stop it.' },
+  },
   'member.removed': {
     pt: { title: 'Removido da central', message: 'O acesso desta máquina a {central} foi revogado. A conexão foi removida — gere um novo token nessa central para reconectar.' },
     en: { title: 'Removed from the central', message: 'Access to {central} was revoked for this machine. The connection was removed — mint a new token there to reconnect.' },

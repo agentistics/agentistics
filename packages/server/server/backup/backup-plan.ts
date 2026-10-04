@@ -401,6 +401,15 @@ const REGENERABLE: ExcludeRule[] = [
 ]
 
 const RUNTIME: ExcludeRule[] = [
+  // RES.1 — the process governor's state. Both name PIDS on this machine.
+  {
+    pattern: '.agentistics/helpers.json', match: 'prefix', reason: 'runtime',
+    why: 'Registered helper processes, by pid. Those processes do not exist on the new machine.',
+  },
+  {
+    pattern: '.agentistics/heavy', match: 'prefix', reason: 'runtime',
+    why: 'The heavy-job queue: one file per waiting or running job, by pid. Nothing in it outlives its process.',
+  },
   {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
