@@ -73,3 +73,18 @@ describe('ReasoningBlock — the native reasoning, collapsed above the answer', 
     expect(html).not.toContain('reasoning-block')
   })
 })
+
+describe('EXT.OPEN — an external session opens with a working composer', () => {
+  const external = { ...session, id: 'external:claude:c-1', harness: 'claude', state: 'unknown', stateLabel: 'external', actionable: false, conversationId: 'c-1' } as ControlSession
+  const rowWith = (enabled: boolean) => ({
+    id: external.id, title: 't', harness: 'claude', cwd: '/w', project: 'w', state: 'unknown', stateLabel: 'external', actionable: false,
+    conversationId: 'c-1', attachCommand: '',
+    verbs: [{ action: 'prompt', label: 'Send a prompt', enabled }, { action: 'resume', label: 'Reopen', enabled: true }],
+  }) as never
+  const src = { turns: [{ role: 'user' as const, text: 'hello from the terminal' }], working: false, liveText: null, act: noAct, canStop: false }
+  test('prompt enabled on the row: the field is offered, not the Reopen button', () => {
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={external} row={rowWith(true)} lang="en" act={noAct} source={src} /></MemoryRouter>)
+    expect(html).toContain('hello from the terminal')
+    expect(html).not.toContain('>Reopen<')
+  })
+})

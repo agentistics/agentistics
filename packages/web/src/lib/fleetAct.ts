@@ -25,6 +25,8 @@ export interface FleetActResult {
   message: string
   /** The session a verb CREATED, when it created one. */
   id?: string
+  /** EXT.OPEN: the write needs a YES first — `message` is the question. */
+  confirm?: boolean
 }
 
 /** The sentence for an answer that carried none — a network error, or a body that is not ours. */
@@ -45,5 +47,5 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
     ? o.message
     : actFallbackMessage(lang)
   const id = typeof o.id === 'string' && o.id.trim() !== '' ? o.id : undefined
-  return { ok: o.ok === true, message, ...(id ? { id } : {}) }
+  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}) }
 }

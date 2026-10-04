@@ -117,6 +117,7 @@ import { SessionPickModal } from './SessionPickModal'
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
 import type { ChatSource } from './chatSource'
+import { ConfirmModal } from '../../pages/settings/primitives'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
@@ -173,8 +174,8 @@ export interface SessionChatProps {
   /** The shaped row, which carries the parsed dialog and what may be done about it. */
   row?: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number })
-    => Promise<{ ok: boolean; message: string; id?: string }>
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
   /**
    * The files this session has touched, reported up as the conversation is read.
    *
@@ -1626,7 +1627,30 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * and what changes is only which field the words are typed into.
    */
   const answeringNow = blocked && answering !== null
-  const canPrompt = !loading && session.actionable && (!blocked || answeringNow) && payload.live !== false
+  // EXT.OPEN: an EXTERNAL row is not `actionable` (nothing of agentop's runs it), but its `prompt`
+  // verb is ENABLED when a write can continue it here — the server decides, the row says so.
+  const promptOffered = session.actionable || row?.verbs.some(v => v.action === 'prompt' && v.enabled) === true
+  const canPrompt = !loading && promptOffered && (!blocked || answeringNow) && payload.live !== false
+  /** EXT.OPEN: the one question before a write continues an external session here. */
+  const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
+  const [continuing, setContinuing] = useState(false)
+  async function continueHere() {
+    if (!continueAsk || continuing) return
+    setContinuing(true)
+    const out = await act({ id: session.id, action: 'prompt', text: continueAsk.text, confirm: true })
+    setContinuing(false)
+    setContinueAsk(null)
+    setNotice(out.message)
+    if (out.ok) {
+      setDraft('')
+      sessionScratch.clearDraft(scratchId)
+      setAttached([])
+      sessionScratch.writeAttachments(scratchId, [])
+      // The conversation is a managed session now, under a NEW id — the page follows it there, the
+      // same callback both Reopen buttons use.
+      if (out.id) onReopened?.(out.id)
+    }
+  }
 
   /** Everything the person sent, newest first — the recent-prompts panel's rows. */
   const promptList = useMemo(() => buildPromptList(session.id, turns, queued), [session.id, turns, queued])
@@ -2042,6 +2066,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // It did not go. Take the echo back out — leaving it would show a message that is waiting for
     // a session that never received it — and give the person their words back untouched.
     editEcho(list => list.filter(t => t !== full))
+    // EXT.OPEN: not a failure — a QUESTION. The words stay in the field, and the one confirmation
+    // sends exactly them (`continueHere`).
+    if (out.confirm) setContinueAsk({ message: out.message, text: full })
     setDraft(restore.draft)
     sessionScratch.writeDraft(scratchId, restore.draft)
     setAttached(restore.attached)
@@ -3539,6 +3566,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           }}
         />
       )}
+
+      {/* EXT.OPEN — asked ONCE, before a write ends an external process (`external-continue.ts`). */}
+      <ConfirmModal
+        open={continueAsk !== null}
+        title={pt ? 'Continuar esta sessão aqui?' : 'Continue this session here?'}
+        message={continueAsk?.message ?? ''}
+        confirmLabel={continuing ? (pt ? 'Continuando…' : 'Continuing…') : (pt ? 'Continuar aqui' : 'Continue here')}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={() => void continueHere()}
+        onCancel={() => setContinueAsk(null)}
+      />
 
       {/* THE ATTACHED PICTURE, full size. The same component a sent message opens, over the images
           attached right now — reused rather than reimplemented, so what you attached and what you

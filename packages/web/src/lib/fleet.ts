@@ -189,7 +189,9 @@ export interface FleetState {
      * nothing, which is not the same thing and is never collapsed into it.
      */
     ids?: readonly string[]
-  }) => Promise<{ ok: boolean; message: string; id?: string }>
+    /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
+    confirm?: boolean
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
 }
 
 /**
