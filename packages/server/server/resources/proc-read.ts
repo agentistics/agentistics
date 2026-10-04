@@ -8,6 +8,7 @@
  */
 
 import { readdir, readFile, readlink } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import type { ProcEntry } from './inventory'
 import { readProcCards, sweepProcCards, type ProcCard } from './proc-card'
 
@@ -42,6 +43,16 @@ let previous = new Map<number, { ticks: number; atMs: number }>()
 
 async function uptimeSec(): Promise<number | null> {
   try { return Number((await readFile('/proc/uptime', 'utf8')).split(' ')[0]) } catch { return null }
+}
+
+/** The kernel start time of a pid, or null when it is gone — what makes a pid an identity. */
+export function pidStarttime(pid: number): number | null {
+  try {
+    const t = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const f = t.slice(t.lastIndexOf(')') + 2).split(' ')
+    const n = Number(f[19])
+    return Number.isFinite(n) ? n : null
+  } catch { return null }
 }
 
 /** Is this pid alive right now? */
@@ -83,7 +94,8 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
       const stat = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8'))
       if (!stat) return
       // A card counts only for the process that wrote it — same pid AND same start time.
-      if (card && card.starttime === stat.starttime) env = { ...cardEnv(card), ...env }
+      const own = card && card.starttime === stat.starttime ? card : undefined
+      if (own) env = { ...cardEnv(own), ...env }
       const kb = (key: string): number | null => {
         const m = new RegExp(`^${key}:\\s+(\\d+) kB$`, 'm').exec(status)
         return m ? Number(m[1]) * 1024 : null
@@ -100,6 +112,7 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
         cpuPercent,
         ageSec: up !== null ? Math.max(0, Math.round(up - stat.starttime / CLK_TCK)) : 0,
         env,
+        ...(own?.owner ? { cardOwner: own.owner } : {}),
       })
     } catch { /* exited mid-read, or not ours */ }
   }))

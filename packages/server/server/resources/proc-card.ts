@@ -27,6 +27,13 @@ export interface ProcCard {
   home?: string
   claudePid?: number
   sessionId?: string
+  /**
+   * The ASSISTANT process this one was started under — whatever its harness — found by walking the
+   * parent chain at boot (`ownerFromChain`). `starttime` makes it an identity: a pid recycled after
+   * the assistant exited does not keep this process "owned". Absent when no assistant is above us
+   * (a user's own shell, a systemd unit) — which the governor reads as "owner unknown", never "gone".
+   */
+  owner?: { pid: number; starttime: number; harness: string }
   command: string
   version?: string
 }
@@ -60,6 +67,7 @@ export function writeProcCard(command: string, version?: string, dir = procCardD
     ...(Number.isInteger(claudePid) && claudePid > 0 ? { claudePid } : {}),
     ...(process.env.CLAUDE_CODE_SESSION_ID ? { sessionId: process.env.CLAUDE_CODE_SESSION_ID } : {}),
     ...(version ? { version } : {}),
+    ...(() => { const o = ownerFromProc(); return o ? { owner: o } : {} })(),
   }
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -92,4 +100,57 @@ export function sweepProcCards(valid: (card: ProcCard) => boolean, dir = procCar
     try { unlinkSync(join(dir, `${c.pid}.json`)); removed++ } catch { /* raced */ }
   }
   return removed
+}
+
+/** One link of the parent chain, as `ownerFromChain` needs it. */
+export interface ChainLink { pid: number; ppid: number; starttime: number; comm: string; argv: string[] }
+
+/**
+ * Which assistant harness a process IS, from its comm and argv — PURE. Native CLIs are matched by
+ * name; the node-shim ones (codex, gemini, copilot) by the package path in their argv, because their
+ * comm is `node`. Deliberately the same short list `live-sessions.ts` knows; an unknown is `null`.
+ */
+export function harnessOfProcess(comm: string, argv: readonly string[]): string | null {
+  const base = (argv[0] ?? '').split('/').pop() ?? ''
+  const names: Record<string, string> = { claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', agy: 'antigravity', antigravity: 'antigravity', kimi: 'kimi' }
+  if (names[comm]) return names[comm]!
+  if (names[base]) return names[base]!
+  // Claude Code's versioned install runs as `…/claude/versions/<v>`.
+  if (/\/claude\/versions\/[^/]+$/.test(argv[0] ?? '')) return 'claude'
+  const joined = argv.slice(0, 3).join(' ')
+  if (/@openai\/codex/.test(joined)) return 'codex'
+  if (/@google\/gemini-cli/.test(joined)) return 'gemini'
+  if (/@github\/copilot/.test(joined)) return 'copilot'
+  return null
+}
+
+/** The nearest assistant above `start` in the chain — PURE. Stops at init and after 32 links. */
+export function ownerFromChain(start: number, read: (pid: number) => ChainLink | null): ProcCard['owner'] | null {
+  let pid = start
+  for (let i = 0; i < 32 && pid > 1; i++) {
+    const link = read(pid)
+    if (!link) return null
+    if (i > 0) {
+      const harness = harnessOfProcess(link.comm, link.argv)
+      if (harness) return { pid: link.pid, starttime: link.starttime, harness }
+    }
+    pid = link.ppid
+  }
+  return null
+}
+
+function readLink(pid: number): ChainLink | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const close = stat.lastIndexOf(')')
+    const comm = stat.slice(stat.indexOf('(') + 1, close)
+    const f = stat.slice(close + 2).split(' ')
+    const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean)
+    return { pid, ppid: Number(f[1]), starttime: Number(f[19]), comm, argv }
+  } catch { return null }
+}
+
+function ownerFromProc(): ProcCard['owner'] | null {
+  if (process.platform !== 'linux') return null
+  return ownerFromChain(process.pid, readLink)
 }

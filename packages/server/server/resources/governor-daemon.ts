@@ -10,7 +10,7 @@
  * hatch for debugging a process by hand, never a default.
  */
 
-import { readProcEntries, pidAlive } from './proc-read'
+import { readProcEntries, pidAlive, pidStarttime } from './proc-read'
 import { buildInventory, DEFAULT_TEMP_ROOTS, type AgentopProcess } from './inventory'
 import { tmpdir } from 'node:os'
 import { planGovernor, type Alert, type Kill } from './governor'
@@ -78,6 +78,7 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
         selfPid: process.pid,
         home: process.env.HOME,
         tempRoots: tempRoots(),
+        startOf: pidStarttime,
         alive: pidAlive,
         helpers: new Map(helpers.map(h => [h.pid, { id: h.id, ...(h.ownerPid ? { ownerPid: h.ownerPid } : {}), ...(h.ownerSessionId ? { ownerSessionId: h.ownerSessionId } : {}) }])),
       })

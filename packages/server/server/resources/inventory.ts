@@ -49,6 +49,8 @@ export interface ProcEntry {
     AGENTISTICS_HEAVY_JOB?: string
     HOME?: string
   }
+  /** The assistant this process declared it was started under (proc-card.ts), with its start time. */
+  cardOwner?: { pid: number; starttime: number; harness: string }
 }
 
 export type ProcessKind =
@@ -136,6 +138,8 @@ export interface InventoryContext {
   home?: string
   /** Where throwaway HOMEs live (`/tmp`, `/var/tmp`, the OS temp dir). See `isThrowawayHome`. */
   tempRoots?: readonly string[]
+  /** The kernel start time of a live pid, `null` when gone — so a recycled pid is not an owner. */
+  startOf?: (pid: number) => number | null
   /** Is this pid alive right now? */
   alive: (pid: number) => boolean
   /** Registered helpers' pids → their ids and declared owner pids. */
@@ -174,6 +178,15 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       owner = e.ppid === 1 ? null : { kind: 'pid', pid: e.ppid, alive: ctx.alive(e.ppid) }
     } else if (helper?.ownerPid) {
       owner = { kind: 'pid', pid: helper.ownerPid, alive: ctx.alive(helper.ownerPid), ...(helper.ownerSessionId ? { sessionId: helper.ownerSessionId } : {}) }
+    } else if (e.cardOwner) {
+      // The assistant it was started under, as an IDENTITY: alive only while that pid still has the
+      // same start time. Without `startOf` (no /proc) liveness alone decides, which errs toward alive.
+      const st = ctx.startOf ? ctx.startOf(e.cardOwner.pid) : undefined
+      const alive = st === undefined ? ctx.alive(e.cardOwner.pid) : st === e.cardOwner.starttime
+      owner = {
+        kind: 'session', pid: e.cardOwner.pid, alive,
+        ...(e.env.CLAUDE_CODE_SESSION_ID ? { sessionId: e.env.CLAUDE_CODE_SESSION_ID } : {}),
+      }
     } else {
       const claudePid = Number(e.env.CLAUDE_PID)
       if (Number.isInteger(claudePid) && claudePid > 0) {
