@@ -33,7 +33,7 @@ describe('newSessionArgs', () => {
   it('uses our socket, detaches, sets the cwd, and separates the command with --', () => {
     expect(newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude', '--model', 'opus', 'fix it'] }))
       .toEqual([
-        '-L', 'agentop', 'new-session', '-d', '-s', 'agentop-a1', '-x', '120', '-y', '50',
+        '-L', TMUX_SOCKET, 'new-session', '-d', '-s', 'agentop-a1', '-x', '120', '-y', '50',
         '-c', '/home/u/p', '--', 'claude', '--model', 'opus', 'fix it',
       ])
   })
@@ -44,7 +44,7 @@ describe('newSessionArgs', () => {
     // `--`, or tmux reads it as one of the harness's own arguments.
     const args = newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude'], truecolor: true })
     expect(args).toEqual([
-      '-L', 'agentop', 'new-session', '-d', '-s', 'agentop-a1', '-x', '120', '-y', '50',
+      '-L', TMUX_SOCKET, 'new-session', '-d', '-s', 'agentop-a1', '-x', '120', '-y', '50',
       '-c', '/home/u/p', '-e', 'COLORTERM=truecolor', '--', 'claude',
     ])
     expect(args.indexOf('-e')).toBeLessThan(args.indexOf('--'))
@@ -130,14 +130,14 @@ describe('spawnArgs', () => {
     // tmux's 8-colour `screen` default. Chaining runs them against the single server tmux starts for
     // the batch, in order, so `default-terminal` precedes the pane it configures.
     const args = spawnArgs(C256, { id: 'a1', cwd: '/home/u/p', argv: ['claude', 'fix it'] })
-    expect(args.slice(0, 2)).toEqual(['-L', 'agentop'])
+    expect(args.slice(0, 2)).toEqual(['-L', TMUX_SOCKET])
     // -L appears exactly once, at the front; subcommands carry no socket flag of their own.
     expect(args.filter(a => a === '-L')).toHaveLength(1)
     // default-terminal is set BEFORE new-session in the sequence.
     expect(args.indexOf('default-terminal')).toBeLessThan(args.indexOf('new-session'))
     // The command list is exactly serverOptionsArgs + newSessionArgs, de-prefixed and ;-joined.
     const cmds = [...serverOptionsArgs(C256), newSessionArgs({ id: 'a1', cwd: '/home/u/p', argv: ['claude', 'fix it'] })]
-    const expected: string[] = ['-L', 'agentop']
+    const expected: string[] = ['-L', TMUX_SOCKET]
     cmds.forEach((c, i) => { if (i) expected.push(';'); expected.push(...c.slice(2)) })
     expect(args).toEqual(expected)
   })
@@ -158,22 +158,22 @@ describe('spawnArgs', () => {
 
 describe('the other argv builders', () => {
   it('builds them all against our socket and our session name', () => {
-    expect(killSessionArgs('a1')).toEqual(['-L', 'agentop', 'kill-session', '-t', 'agentop-a1'])
-    expect(capturePaneArgs('a1', 40)).toEqual(['-L', 'agentop', 'capture-pane', '-p', '-t', 'agentop-a1', '-S', '-40'])
+    expect(killSessionArgs('a1')).toEqual(['-L', TMUX_SOCKET, 'kill-session', '-t', 'agentop-a1'])
+    expect(capturePaneArgs('a1', 40)).toEqual(['-L', TMUX_SOCKET, 'capture-pane', '-p', '-t', 'agentop-a1', '-S', '-40'])
     // The ANSI variant is the plain one with `-e` added — colours survive to the browser. Getting
     // this wrong is silent: without `-e` the terminal renders monochrome and looks fine.
-    expect(capturePaneAnsiArgs('a1', 40)).toEqual(['-L', 'agentop', 'capture-pane', '-p', '-e', '-t', 'agentop-a1', '-S', '-40'])
-    expect(paneInfoArgs('a1')).toEqual(['-L', 'agentop', 'display-message', '-p', '-t', 'agentop-a1', '-F', PANE_INFO_FORMAT])
-    expect(sendKeysLiteralArgs('a1', 'hello there')).toEqual(['-L', 'agentop', 'send-keys', '-t', 'agentop-a1', '-l', 'hello there'])
-    expect(sendKeysEnterArgs('a1')).toEqual(['-L', 'agentop', 'send-keys', '-t', 'agentop-a1', 'Enter'])
-    expect(attachArgs('a1')).toEqual(['tmux', '-L', 'agentop', 'attach-session', '-t', 'agentop-a1'])
+    expect(capturePaneAnsiArgs('a1', 40)).toEqual(['-L', TMUX_SOCKET, 'capture-pane', '-p', '-e', '-t', 'agentop-a1', '-S', '-40'])
+    expect(paneInfoArgs('a1')).toEqual(['-L', TMUX_SOCKET, 'display-message', '-p', '-t', 'agentop-a1', '-F', PANE_INFO_FORMAT])
+    expect(sendKeysLiteralArgs('a1', 'hello there')).toEqual(['-L', TMUX_SOCKET, 'send-keys', '-t', 'agentop-a1', '-l', 'hello there'])
+    expect(sendKeysEnterArgs('a1')).toEqual(['-L', TMUX_SOCKET, 'send-keys', '-t', 'agentop-a1', 'Enter'])
+    expect(attachArgs('a1')).toEqual(['tmux', '-L', TMUX_SOCKET, 'attach-session', '-t', 'agentop-a1'])
   })
 
   it('sends a NAMED key without -l, which is the opposite of sending text', () => {
     // Getting these two the wrong way round fails silently: `send-keys -l Enter` types the five
     // characters `E n t e r` into the assistant's prompt and reports success.
-    expect(sendKeysNamedArgs('a1', 'Enter')).toEqual(['-L', 'agentop', 'send-keys', '-t', 'agentop-a1', 'Enter'])
-    expect(sendKeysNamedArgs('a1', 'Escape')).toEqual(['-L', 'agentop', 'send-keys', '-t', 'agentop-a1', 'Escape'])
+    expect(sendKeysNamedArgs('a1', 'Enter')).toEqual(['-L', TMUX_SOCKET, 'send-keys', '-t', 'agentop-a1', 'Enter'])
+    expect(sendKeysNamedArgs('a1', 'Escape')).toEqual(['-L', TMUX_SOCKET, 'send-keys', '-t', 'agentop-a1', 'Escape'])
     expect(sendKeysNamedArgs('a1', 'Enter')).not.toContain('-l')
     expect(sendKeysLiteralArgs('a1', 'Enter')).toContain('-l')
   })
@@ -191,12 +191,12 @@ describe('the paste-buffer primitive', () => {
 
   it('writes the whole payload as ONE argv element — no stdin, no shell escaping', () => {
     expect(setBufferArgs('agentop-paste-a1', 'line one\nline two; rm -rf /'))
-      .toEqual(['-L', 'agentop', 'set-buffer', '-b', 'agentop-paste-a1', 'line one\nline two; rm -rf /'])
+      .toEqual(['-L', TMUX_SOCKET, 'set-buffer', '-b', 'agentop-paste-a1', 'line one\nline two; rm -rf /'])
   })
 
   it('pastes bracketed (-p) and deletes the buffer after (-d), never left behind', () => {
     expect(pasteBufferArgs('a1', 'agentop-paste-a1'))
-      .toEqual(['-L', 'agentop', 'paste-buffer', '-p', '-d', '-b', 'agentop-paste-a1', '-t', 'agentop-a1'])
+      .toEqual(['-L', TMUX_SOCKET, 'paste-buffer', '-p', '-d', '-b', 'agentop-paste-a1', '-t', 'agentop-a1'])
   })
 
   it('runs on whichever socket it is asked to, exactly like every other builder here', () => {
@@ -307,12 +307,12 @@ describe('serverOptionsArgs', () => {
   it('touches only agentop own socket', () => {
     // The whole reason setting global options is safe: none of this reaches the user's tmux, their
     // config, or the sessions they started themselves.
-    for (const args of all) expect(args.slice(0, 2)).toEqual(['-L', 'agentop'])
+    for (const args of all) expect(args.slice(0, 2)).toEqual(['-L', TMUX_SOCKET])
   })
 
   it('turns the mouse on, because a pane you cannot scroll is a pane you cannot read', () => {
     const mouse = all.find(a => a.includes('mouse'))
-    expect(mouse).toEqual(['-L', 'agentop', 'set-option', '-g', 'mouse', 'on'])
+    expect(mouse).toEqual(['-L', TMUX_SOCKET, 'set-option', '-g', 'mouse', 'on'])
   })
 
   it('raises the scrollback well past tmux own 2000', () => {
@@ -333,7 +333,7 @@ describe('serverOptionsArgs — colour', () => {
     // Measured on tmux 3.2a: tmux's default-terminal is `screen`, which advertises 8 colours, so a
     // CLI inside the pane self-downgrades. tmux-256color takes tput colors from 8 to 256.
     const term = serverOptionsArgs(C256).find(a => a.includes('default-terminal'))
-    expect(term).toEqual(['-L', 'agentop', 'set-option', '-g', 'default-terminal', 'tmux-256color'])
+    expect(term).toEqual(['-L', TMUX_SOCKET, 'set-option', '-g', 'default-terminal', 'tmux-256color'])
   })
 
   it('names no default-terminal when no 256-colour terminfo entry exists here', () => {
@@ -345,7 +345,7 @@ describe('serverOptionsArgs — colour', () => {
     // invoker's own $TERM is the compatibility guarantee — a differently-typed client attaching
     // later never matches and renders at 256 rather than being fed RGB it cannot show.
     const rgb = serverOptionsArgs(TRUECOLOR).find(a => a.includes('terminal-features'))
-    expect(rgb).toEqual(['-L', 'agentop', 'set-option', '-ga', 'terminal-features', ',xterm-256color:RGB'])
+    expect(rgb).toEqual(['-L', TMUX_SOCKET, 'set-option', '-ga', 'terminal-features', ',xterm-256color:RGB'])
   })
 
   it('adds no truecolor capability when the invoker did not declare truecolor', () => {
@@ -360,7 +360,7 @@ describe('the status bar', () => {
     // with one pane, its name is `agentop-<id>` rather than anything a person chose, and the
     // cockpit already shows all of it.
     const status = serverOptionsArgs(C256).find(a => a.includes('status'))
-    expect(status).toEqual(['-L', 'agentop', 'set-option', '-g', 'status', 'off'])
+    expect(status).toEqual(['-L', TMUX_SOCKET, 'set-option', '-g', 'status', 'off'])
   })
 })
 

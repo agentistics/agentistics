@@ -75,8 +75,8 @@ describe('pasteWriteArgs — the sanitizer is applied before ANYTHING reaches th
 describe('coldStartArgv — the tmux server is born in a scope of its own', () => {
   const { coldStartArgv } = require('./backend-tmux') as typeof import('./backend-tmux')
   test('linux with a user manager: a transient scope wraps the tmux command', () => {
-    expect(coldStartArgv(['-L', 'agentop', 'new-session', '-d'], { platform: 'linux', runtimeDir: '/run/user/1000', hasUserBus: true }, 42))
-      .toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--unit=agentop-tmux-42', '--', 'tmux', '-L', 'agentop', 'new-session', '-d'])
+    expect(coldStartArgv(['-L', TMUX_SOCKET, 'new-session', '-d'], { platform: 'linux', runtimeDir: '/run/user/1000', hasUserBus: true }, 42))
+      .toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--unit=agentop-tmux-42', '--', 'tmux', '-L', TMUX_SOCKET, 'new-session', '-d'])
   })
   test('no user bus, no runtime dir or not linux: the plain start', () => {
     expect(coldStartArgv(['x'], { platform: 'linux', runtimeDir: '/run/user/1000', hasUserBus: false })).toBeNull()

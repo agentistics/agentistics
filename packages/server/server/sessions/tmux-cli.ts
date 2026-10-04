@@ -5,7 +5,7 @@
  * that does not match the fields being parsed, a `--` that stops a harness flag being eaten by
  * tmux, seconds read as milliseconds — are tested without a tmux server.
  *
- * We run on our OWN socket (`-L agentop`). The user's sessions are then never listed, never killed
+ * We run on our OWN socket (`-L agentop`, or the data dir's own — `tmux-socket.ts`). The user's sessions are then never listed, never killed
  * and never affected by the server options we set, and `list-sessions` needs no trust in a prefix
  * filter to stay out of their way. The prefix on the name is belt and braces for the case where a
  * user points their own tmux at our socket deliberately.
@@ -15,12 +15,16 @@
  */
 
 import type { BackendSession, PaneInfo } from './types'
+import { SHELL_SOCKET, TMUX_SOCKET } from './tmux-socket'
 
-export const TMUX_SOCKET = 'agentop'
+// The socket names follow the data dir (`tmux-socket.ts`): `agentop` / `agentop-shell` for the
+// owner's own store, a suffixed pair for any other (a preview, a second instance, a test run).
+export { SHELL_SOCKET, TMUX_SOCKET }
 export const SESSION_PREFIX = 'agentop-'
 
-/**
- * The socket the per-session UTILITY SHELL runs on, and the reason it is not `TMUX_SOCKET`.
+/*
+ * `SHELL_SOCKET` (above, from `tmux-socket.ts`): the socket the per-session UTILITY SHELL runs on,
+ * and the reason it is not `TMUX_SOCKET`.
  *
  * A shell opened for a session is not a fleet row and must never become one. On the fleet socket it
  * would be, and silently: `idFromTmuxName` strips `agentop-`, so `parseTmuxList` KEEPS the session,
@@ -34,7 +38,6 @@ export const SESSION_PREFIX = 'agentop-'
  * already makes at the top for keeping OUR sessions out of the USER's tmux, applied one level down
  * to keep our shells out of our own fleet.
  */
-export const SHELL_SOCKET = 'agentop-shell'
 
 export function tmuxName(id: string): string {
   return SESSION_PREFIX + id
