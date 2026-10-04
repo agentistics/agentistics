@@ -15,6 +15,7 @@
     "./control/sessions": "./src/control/sessions.ts",
     "./control/session-fleet": "./src/control/session-fleet.ts",
     "./control/session-verbs": "./src/control/session-verbs.ts",
+    "./control/session-native": "./src/control/session-native.ts",
     "./control/session-order": "./src/control/session-order.ts",
     "./control/session-dimensions": "./src/control/session-dimensions.ts",
     "./control/search-scope": "./src/control/search-scope.ts",
@@ -27,6 +28,7 @@
   },
   "dependencies": {
     "@agentistics/core": "workspace:*",
+    "@agentistics/engine-api": "workspace:*",
     "es-toolkit": "^1.50.0",
     "ink": "^7.1.1",
     "react": "^19.2.5",

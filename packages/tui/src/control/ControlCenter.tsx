@@ -18,11 +18,15 @@
  * of the screen spent telling the user what they had just typed.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import type { WizardServices } from './code-wizard'
+import { wizardPlaces } from './wizard-places'
 import { Box, useInput } from 'ink'
 import { useTerminalSize } from '../useTerminalSize'
-import { bodyHeight, resolveScrollKey, resolveTabKey, scrollBy, type NavKey } from './nav'
-import { fitTabs, headerLayout, tabAtColumn } from './chrome.ts'
+import { bodyHeight, changedShellKeys, isQuitChord, pressMatches, rebindHint, resolveScrollKey, resolveShellKey, scrollBy, shellKeys, type NavKey, type ShellKeys } from './nav'
+import { attentionRings, fitTabs, headerLayout, tabAtColumn } from './chrome.ts'
+import { helpLines } from './keymap'
+import { HelpOverlay, helpMaxTop } from './HelpOverlay'
 import { paneHit, shellHit } from './hit'
 import { isActivation, trackClick, wheelDelta, type ClickTrack, type MouseReport, type Pointer } from './mouse'
 import { createPointerBus, PointerProvider, type MouseChannel } from './pointer'
@@ -41,6 +45,14 @@ import { Sessions } from './tabs/Sessions'
 import { Dashboard } from './tabs/Dashboard'
 import { HardwareTab } from './tabs/HardwareTab'
 import { Code } from './tabs/Code'
+import { Home } from './tabs/Home'
+import { Tasks } from './tabs/Tasks'
+import { Palette } from './PaletteOverlay'
+import { SettingsOverlay } from './SettingsOverlay'
+import { openSettings, settingsHints, settingsKey, type SettingsData, type SettingsEffect, type SettingsSectionId, type SettingsState } from './settings'
+import { applyTheme, type ThemeId } from '../theme'
+import { PALETTE_COMMANDS, filterCommands, whyNot, type PaletteCommand, type PaletteContext } from './palette'
+import type { CodeIntent } from './code'
 import type { CodeLaunch } from './code-types'
 import { writeFrame } from './altScreen'
 
@@ -64,6 +76,12 @@ import { writeFrame } from './altScreen'
 export interface ScreenChrome {
   capture: boolean
   claimArrows?: boolean
+  /**
+   * Single keys the SCREEN answers that the shell answers too (`r`, `m`, `q`, `?`). While claimed
+   * the shell stands down on exactly these, so one press does one thing: the sessions list's `m`
+   * writes a note there, and used to switch the mouse off in the same keystroke.
+   */
+  claimKeys?: readonly string[]
   hints: string[]
 }
 
@@ -150,7 +168,34 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const [lang, setLang] = useState<CliLang>(initialLang)
   const s = controlStrings(lang)
 
-  const [tab, setTab] = useState<TabId>(initial?.tab ?? 'services')
+  // GL-01: bare `agentop` opens on `home`; `agentop code` asks for `code` explicitly.
+  const [tab, setTab] = useState<TabId>(initial?.tab ?? 'home')
+  // The `code` tab's launch: `agentop code …` on the first mount, then whatever `home` asks for
+  // (HM-02 the first prompt, HM-04 a session to resume). A NEW object each time, so the tab acts on it.
+  const [codeLaunch, setCodeLaunch] = useState<CodeLaunch | undefined>(initial?.code)
+  const openCode = useCallback((launch: CodeLaunch) => {
+    setCodeLaunch({ ...launch })
+    setTab('code')
+  }, [])
+  // NW-02…NW-05: what the code tab's wizard asks for, from the host this app already has.
+  const wizardServices = useMemo((): WizardServices => ({
+    ...(host.startableHarnesses ? { harnesses: () => host.startableHarnesses!() } : {}),
+    ...(host.nativeModels ? { nativeModels: () => host.nativeModels!() } : {}),
+    // NW-04: recent repositories and places worked in (`wizardPlaces`), not every folder of $HOME.
+    ...(host.searchProjects ? { places: () => host.searchProjects!('').then(r => wizardPlaces(r.options)) } : {}),
+    ...(host.createWorktree ? { createWorktree: (repo: string, name: string) => host.createWorktree!(repo, name) } : {}),
+    ...(host.spawnSession ? {
+      spawn: (req: { harness: string; cwd: string; taskId: string; task: string; model?: string; prompt?: string }) =>
+        host.spawnSession!({ ...req, attach: false }).then(r => ({ ok: r.ok, message: r.message, ...(r.id ? { id: r.id } : {}) })),
+    } : {}),
+    landOn: (id: string) => { setSessionsFocus({ id }); setTab('sessions') },
+  }), [host])
+  // TK-04: the `tasks` tab hands a live session to `sessions`, which selects it (a new object each time).
+  const [sessionsFocus, setSessionsFocus] = useState<{ id: string } | undefined>(undefined)
+  const focusSession = useCallback((id: string) => {
+    setSessionsFocus({ id })
+    setTab('sessions')
+  }, [])
   // Seeded from what the host already knows, so a REMOUNT does not open on the defaults. Detaching
   // from a session remounts this app, `refresh()` takes about a second to probe systemd and docker,
   // and for that second the sessions list was drawn with the shipped arrangement instead of the
@@ -278,6 +323,20 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     if (next.rang.length > 0) writeFrame(BEL)
   }, [host])
 
+  /**
+   * The native session's open questions, as the `code` tab reports them (GL-02). They count toward
+   * the header's `● N need you` beside the fleet's, and a NEW one rings the bell — on the transition
+   * from none to some, never on the level, exactly like the fleet's `rang`. The tab reports whether
+   * or not it is the one on screen: a question waiting on a hidden tab is the case this is for.
+   */
+  const [codeAttention, setCodeAttention] = useState(0)
+  const codeAttentionRef = useRef(0)
+  const onCodeAttention = useCallback((count: number) => {
+    if (attentionRings(codeAttentionRef.current, count)) writeFrame(BEL)
+    codeAttentionRef.current = count
+    setCodeAttention(count)
+  }, [])
+
   useEffect(() => {
     if (!host.sessions) return
     void pollFleet()
@@ -356,6 +415,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     setChrome(prev =>
       prev.capture === next.capture
       && Boolean(prev.claimArrows) === Boolean(next.claimArrows)
+      && (prev.claimKeys ?? []).join('') === (next.claimKeys ?? []).join('')
       && prev.hints.join('\u0000') === next.hints.join('\u0000')
         ? prev
         : next,
@@ -427,7 +487,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // SIGINT is generated and this is the ONLY way out of a screen that is capturing input — without
   // it, a half-typed prompt would be a trap.
   useInput((_input, key) => {
-    if (key.ctrl && _input === 'c') onExit({ kind: 'quit', code: 130 })
+    if (isQuitChord({ input: _input, ctrl: key.ctrl })) onExit({ kind: 'quit', code: 130 })
   })
 
   // The header is the block wordmark when the terminal can carry it beside the machine's tag and
@@ -436,12 +496,15 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // the status line and the footer. The update notice costs no row of its own — it is a dot on the
   // header's right-hand tag.
   const header = headerLayout({
+    compact: tab === 'home',
     mode: status?.mode ?? '',
     version: status?.version ?? '',
     latestVersion: status?.latestVersion,
     // Drawn in the header so it is readable from every tab — a counter you have to navigate to in
-    // order to see cannot tell you to navigate there.
-    attention: fleet?.attention ?? 0,
+    // order to see cannot tell you to navigate there. The fleet's rows that need a person (an
+    // approval and a plain "needs you" alike) plus the native session's open questions.
+    attention: (fleet?.attention ?? 0) + codeAttention,
+    lang,
     // Absent on a machine whose memory cannot be read, and then no gauge is drawn at all — never a
     // zero. The host decides `red`, from the distance to the ceiling AND from swap pressure; the
     // TUI owns no logic here either.
@@ -462,9 +525,55 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // every claim to them means a screen that never reports cannot inherit a stale `true` and lock
   // the global keys with no owner left to release them.
   const reports = tab === 'services' || tab === 'sessions' || tab === 'backup' || tab === 'dashboard'
-    || tab === 'logs' || tab === 'code'
-  const capturing = chrome.capture && reports
+    || tab === 'logs' || tab === 'code' || tab === 'home' || tab === 'tasks'
+  /**
+   * The key reference (`?`, GL-04). While it is open it owns the keyboard: every screen stands down
+   * (`isActive` below), the global keys stand down, and the footer names only its own keys.
+   */
+  const [helpOpen, setHelpOpen] = useState(false)
+  // GL-03: the command palette. It owns the keyboard while open, like the help overlay.
+  const [palette, setPalette] = useState<{ query: string; sel: number } | null>(null)
+  const openPalette = useCallback(() => setPalette({ query: '', sel: 0 }), [])
+  // ST-01…07: the settings overlay. Like the palette it owns the body and the keyboard while open;
+  // its facts are read from the host when it opens, never cached across openings.
+  const [settings, setSettings] = useState<SettingsState | null>(null)
+  const [settingsFacts, setSettingsFacts] = useState<Pick<SettingsData, 'providers' | 'defaultModel' | 'prices' | 'floor'>>({ providers: null, defaultModel: null, prices: null, floor: null })
+  const [providerTests, setProviderTests] = useState<SettingsData['tests']>({})
+  // ST-04: applied BEFORE the first frame, so a light terminal never flashes the dark palette.
+  const [theme, setThemeState] = useState<ThemeId>(() => { const t = host.tuiTheme ?? 'dark'; applyTheme(t); return t })
+  // ST-05: the shell's keys, the person's table over the defaults.
+  const [binds, setBinds] = useState<ShellKeys>(() => shellKeys(host.shellKeys))
+  // ST-04: a density change the `sessions` tab applies (a new object each time, acted on once).
+  const [layoutRequest, setLayoutRequest] = useState<{ layout: 'list' | 'cards' } | undefined>(undefined)
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('compact')
+  const loadSettingsFacts = useCallback(() => {
+    void (host.settingsProviders?.() ?? Promise.resolve(null)).then(providers => setSettingsFacts(f => ({ ...f, providers })))
+    void (host.code ? host.code.defaults().catch(() => null) : Promise.resolve(null)).then(d => setSettingsFacts(f => ({
+      ...f, defaultModel: d?.model ? { provider: d.provider, model: d.model.id, source: d.model.source === 'flag' ? 'flag' : 'last-session' } : null,
+    })))
+    void (host.priceTable?.() ?? Promise.resolve(null)).then(prices => setSettingsFacts(f => ({ ...f, prices })))
+    void (host.policyFloor?.() ?? Promise.resolve(null)).then(floor => setSettingsFacts(f => ({ ...f, floor })))
+  }, [host])
+  // EX-01: stable, so the dashboard's read effect does not re-run on every render.
+  const costByTaskRead = useCallback(() => host.costByTaskToday?.() ?? Promise.resolve(null), [host])
+  const openSettingsAt = useCallback((section: SettingsSectionId = 'providers') => {
+    setSettingsFacts({ providers: null, defaultModel: null, prices: null, floor: null })
+    const layout = host.lastStatus?.()?.sessionView?.layout
+    setDensity(layout === 'cards' ? 'comfortable' : 'compact')
+    setSettings(openSettings(section))
+    loadSettingsFacts()
+  }, [host, loadSettingsFacts])
+  /** Help, palette or settings: each owns the body and the keyboard while it is up. */
+  const overlayOpen = helpOpen || palette !== null || settings !== null
+  const [paletteCtx, setPaletteCtx] = useState<Omit<PaletteContext, 'hasCode'>>({ sessionOpen: false, running: false, askWithDiff: false })
+  // A command the palette sends to the `code` tab — a new object each time, so the tab performs it once.
+  const [codeCommand, setCodeCommand] = useState<{ intent: CodeIntent } | undefined>(undefined)
+  const [helpTop, setHelpTop] = useState(0)
+  const openHelp = useCallback(() => { setHelpTop(0); setHelpOpen(true) }, [])
+
+  const capturing = (chrome.capture && reports) || helpOpen || palette !== null || settings !== null
   const arrowsClaimed = Boolean(chrome.claimArrows) && reports
+  const claimedKeys = reports ? (chrome.claimKeys ?? []) : []
 
   useInput((input, key) => {
     const nav: NavKey = {
@@ -482,15 +591,24 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     }
 
     // `tab` belongs to the panes and the digits belong to the screens' own lists; changing screen
-    // is `←`/`→`, and the only thing that can take those is a pane that is itself a horizontal list.
-    const next = resolveTabKey(nav, tab, !arrowsClaimed)
-    if (next && next !== tab) { setTab(next); return }
+    // is `[`/`]` always and `←`/`→` unless a pane claims them. Which key means what is the pure
+    // `resolveShellKey`, which the help overlay's EVERYWHERE table is tested against.
+    const intent = resolveShellKey({ ...nav, ctrl: key.ctrl }, { tab, arrows: !arrowsClaimed, mouse: Boolean(mouse), binds })
+    if (intent && intent.kind !== 'tab' && claimedKeys.includes(input)) return
+    if (intent) {
+      switch (intent.kind) {
+        case 'tab': return setTab(intent.tab)
+        case 'quit': return onExit({ kind: 'quit', code: 0 })
+        case 'refresh': return void refresh()
+        case 'mouse': return toggleMouse()
+        case 'help': return openHelp()
+        case 'palette': return openPalette()
+        case 'settings': return openSettingsAt()
+      }
+    }
 
-    if (input === 'q') { onExit({ kind: 'quit', code: 0 }); return }
-    if (input === 'r') { void refresh(); return }
-    if (input === 'm' && mouse) { toggleMouse(); return }
-
-    if (isStatic) {
+    // A `ctrl` chord is not a scroll key: `ctrl+g` must not jump a document to its top.
+    if (isStatic && !key.ctrl) {
       const id = tab as StaticTabId
       // The shell does not know how the content wrapped at this width, so it scrolls against an
       // OPEN-ENDED length and the screen clamps to its own line count and reports the corrected
@@ -499,6 +617,117 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       if (next !== null) return setScrollFor(id, next)
     }
   }, { isActive: !capturing })
+
+  // The overlay's lines, at the width its pane gives them. `helpTop` is clamped against them on
+  // every read, so a resize can never leave the page scrolled past its own end.
+  const help = helpOpen ? helpLines(lang, tab, paneBody(width), binds) : []
+  const helpMax = helpMaxTop(help.length, paneRows(height))
+
+  useInput((input, key) => {
+    // `esc` and `?` close it — the key that opened it closes it, like every toggle here.
+    if (key.escape || input === '?' || pressMatches(binds.help, { input, ctrl: key.ctrl })) { setHelpOpen(false); return }
+    if (key.ctrl) return
+    const next = resolveScrollKey(
+      { input, upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, home: key.home, end: key.end },
+      Math.min(helpTop, helpMax), helpMax + 1, Math.max(1, paneRows(height) - 1),
+    )
+    if (next !== null) setHelpTop(next)
+  }, { isActive: helpOpen })
+
+  const paletteList = palette ? filterCommands(palette.query, lang) : []
+  const fullCtx: PaletteContext = {
+    hasCode: Boolean(host.code), ...paletteCtx,
+    ...(host.nativeGate ? { gate: host.nativeGate() } : {}),
+  }
+  const runCommand = (c: PaletteCommand) => {
+    const why = whyNot(c, fullCtx, lang)
+    if (why) { say({ ok: false, message: why }); return }
+    setPalette(null)
+    // GL-06: the command leaves its own sentence — never the previous one left standing.
+    if (c.run.kind !== 'quit' && c.run.kind !== 'help') say({ ok: true, message: `${c.label} — ${c.description[lang]}` })
+    const r = c.run
+    switch (r.kind) {
+      case 'tab': setTab(r.tab); return
+      case 'help': openHelp(); return
+      case 'quit': onExit({ kind: 'quit', code: 0 }); return
+      case 'lang': switchLang(lang === 'pt' ? 'en' : 'pt'); return
+      case 'code': setCodeCommand({ intent: r.intent }); setTab('code'); return
+      case 'settings': openSettingsAt(r.section); return
+      case 'later': return
+    }
+  }
+  useInput((input, key) => {
+    if (!palette) return
+    if (key.escape || (key.ctrl && input === 'p')) { setPalette(null); return }
+    if (key.upArrow) { setPalette(p => p && { ...p, sel: Math.max(0, p.sel - 1) }); return }
+    if (key.downArrow) { setPalette(p => p && { ...p, sel: Math.min(Math.max(0, paletteList.length - 1), p.sel + 1) }); return }
+    if (key.return) { const c = paletteList[palette.sel]; if (c) runCommand(c); return }
+    if (key.backspace || key.delete) { setPalette(p => p && { query: p.query.slice(0, -1), sel: 0 }); return }
+    if (input && !key.ctrl && !key.meta && !key.tab) setPalette(p => p && { query: p.query + input, sel: 0 })
+  }, { isActive: palette !== null })
+
+  const settingsData: SettingsData = {
+    ...settingsFacts, tests: providerTests, sessionOpen: paletteCtx.sessionOpen, theme, density, binds, lang,
+  }
+  const performSettings = (e: SettingsEffect) => {
+    switch (e.kind) {
+      case 'none': return
+      case 'close': setSettings(null); return
+      case 'say': say({ ok: e.ok, message: e.sentence }); return
+      case 'test': {
+        if (!host.testProvider) { say({ ok: false, message: lang === 'pt' ? 'esta versão não testa provedores' : 'this build cannot test providers' }); return }
+        say({ ok: true, message: lang === 'pt' ? `testando ${e.provider}…` : `testing ${e.provider}…` })
+        void host.testProvider(e.provider).then(r => {
+          const at = new Date().toTimeString().slice(0, 5)
+          setProviderTests(t => ({ ...t, [e.provider]: { ok: r.ok, sentence: r.sentence, at } }))
+          say({ ok: r.ok, message: `${e.provider}: ${r.sentence}` })
+        })
+        return
+      }
+      case 'set-key': {
+        if (!host.setProviderKey) { say({ ok: false, message: lang === 'pt' ? 'esta versão não grava chaves' : 'this build cannot store keys' }); return }
+        void host.setProviderKey(e.provider, e.key).then(r => {
+          say({ ok: r.ok, message: r.sentence })
+          if (r.ok) {
+            setProviderTests(t => { const n = { ...t }; delete n[e.provider]; return n })
+            void host.settingsProviders?.().then(providers => setSettingsFacts(f => ({ ...f, providers })))
+          }
+        })
+        return
+      }
+      case 'theme':
+        applyTheme(e.theme)
+        setThemeState(e.theme)
+        void host.setTheme?.(e.theme)
+        say({ ok: true, message: lang === 'pt' ? `tema: ${e.theme} — lembrado` : `theme: ${e.theme} — remembered` })
+        return
+      case 'density':
+        setDensity(e.density)
+        setLayoutRequest({ layout: e.density === 'comfortable' ? 'cards' : 'list' })
+        say({ ok: true, message: lang === 'pt'
+          ? `densidade ${e.density === 'compact' ? 'compacta: sessões em lista' : 'confortável: sessões em cartões'} — lembrada`
+          : `density ${e.density === 'compact' ? 'compact: sessions as a list' : 'comfortable: sessions as cards'} — remembered` })
+        return
+      case 'lang':
+        switchLang(e.lang)
+        say({ ok: true, message: e.lang === 'pt' ? 'idioma: Português (Brasil) — lembrado' : 'language: English — remembered' })
+        return
+      case 'bind':
+        setBinds(e.binds)
+        void host.setShellKeys?.(changedShellKeys(e.binds) as Record<string, string>)
+        say({ ok: true, message: e.sentence })
+        return
+    }
+  }
+  useInput((input, key) => {
+    if (!settings) return
+    const r = settingsKey(settings, {
+      input, return: key.return, escape: key.escape, backspace: key.backspace, delete: key.delete, ctrl: key.ctrl,
+      meta: key.meta, tab: key.tab, upArrow: key.upArrow, downArrow: key.downArrow, leftArrow: key.leftArrow, rightArrow: key.rightArrow,
+    }, settingsData, width < 100)
+    if (r.effect.kind !== 'close') setSettings(r.state)
+    performSettings(r.effect)
+  }, { isActive: settings !== null })
 
   const tabs = tabBarTabs(TAB_ORDER, s.tabsShort)
   // Computed HERE and handed to the bar, rather than measured again inside it: the strip's cell
@@ -532,6 +761,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
     const hit = shellHit({ headerRows: header.rows, bodyRows: height }, report.column, report.row)
     if (hit.region === 'chrome') return
+
+    // The key reference owns the body while it is up: the wheel reads it, and nothing under it is
+    // live — a click must not act on a screen the overlay is covering.
+    if (helpOpen) {
+      const delta = wheelDelta(report.button)
+      if (delta !== 0) setHelpTop(prev => scrollBy(Math.min(prev, helpMax), delta, helpMax + 1))
+      return
+    }
 
     const track = report.kind === 'press'
       ? (clicks.current = trackClick(clicks.current, report, Date.now()))
@@ -577,7 +814,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       : paneHit(width, height, hit.x, hit.y)
     if (!frame) return
     mouse?.pointer.emit({ ...local, x: frame.x, y: frame.y })
-  }, [mouseOn, header.rows, height, width, tab, tabLayout, capturing, isStatic, scroll, setScrollFor, mouse])
+  }, [mouseOn, header.rows, height, width, tab, tabLayout, capturing, isStatic, scroll, setScrollFor, mouse, helpOpen, helpMax])
 
   const onReportRef = useRef(onReport)
   onReportRef.current = onReport
@@ -600,10 +837,20 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
    * gesture back to the terminal. A workaround nobody can discover is not one.
    */
   const mouseHints = mouse ? (mouseOn ? [s.keyMouseCopy, s.keyMouse] : [s.keyMouse]) : []
-  const hints = [...(isStatic ? staticHints : chrome.hints), ...mouseHints]
+  // While the key reference is up the footer names ITS keys and nothing else — every other key on
+  // this frame stands down, and a hint for one of them would be the lie the footer exists to avoid.
+  const hints = settings
+    ? settingsHints(settings, settingsData, width < 100)
+    : palette
+    ? [lang === 'pt' ? 'digite filtra' : 'type filter', '↑↓ move', lang === 'pt' ? 'enter executa' : 'enter run', lang === 'pt' ? 'esc fecha' : 'esc close']
+    : helpOpen
+    ? [binds.help === '?' ? s.keyHelpClose : s.keyHelpClose.replace('?', binds.help), s.keyScroll, s.keyEnds]
+    : [...(isStatic ? [...staticHints, s.keyHelp] : chrome.hints), ...mouseHints]
   // Same correction on the read-only screens' own footer: while the mouse reports, "select with the
   // mouse to copy" is no longer true on its own.
   const copyHint = mouse && mouseOn ? s.copyHintShift : s.copyHint
+  // ST-05: only the SHELL's own hints follow a rebinding — a screen's `r rename` is not the shell's `r`.
+  const shellHints = new Set([s.keyQuit, s.keyHelp, s.keyTabsAlt, s.keyMouse, s.keyRefresh])
 
   /**
    * Everything that is not the cockpit is framed by the shell rather than by the screen.
@@ -637,22 +884,69 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* The native session. It frames its own regions (the conversation, the permission card, the
             composer, the session panel) like the two cockpits do, so the one that needs the person
             can wear the accent border. */}
-        <Screen visible={tab === 'code'}>
+        <Screen visible={tab === 'home' && !overlayOpen}>
+          <Home
+            host={host}
+            status={status}
+            fleet={fleet ?? null}
+            lang={lang}
+            width={width}
+            height={height}
+            isActive={tab === 'home' && !overlayOpen}
+            nonce={nonce}
+            onChrome={reportChrome}
+            onSay={say}
+            onTab={stepTab}
+            onGoto={setTab}
+            onOpenCode={openCode}
+            onExit={onExit}
+            onHelp={openHelp}
+            onPalette={openPalette}
+          />
+        </Screen>
+
+        <Screen visible={tab === 'tasks' && !overlayOpen}>
+          <Tasks
+            host={host}
+            status={status}
+            lang={lang}
+            width={width}
+            height={height}
+            isActive={tab === 'tasks' && !overlayOpen}
+            nonce={nonce}
+            onChrome={reportChrome}
+            onSay={say}
+            onOpenCode={openCode}
+            onFocusSession={focusSession}
+          />
+        </Screen>
+
+        <Screen visible={tab === 'code' && !overlayOpen}>
           <Code
             code={host.code}
-            launch={initial?.code}
+            {...(host.editDraft ? { editDraft: host.editDraft } : {})}
+            services={wizardServices}
+            {...(host.nativeGate ? { gateSentence: host.nativeGate() } : {})}
+            launch={codeLaunch}
+            command={codeCommand}
+            onPalette={openPalette}
+            onPaletteContext={setPaletteCtx}
             lang={lang}
             strings={s}
             width={width}
             height={height}
-            isActive={tab === 'code'}
+            isActive={tab === 'code' && !overlayOpen}
             onChrome={reportChrome}
             onSay={say}
             onTab={stepTab}
+            // GL-02: the native session's open questions join the header's counter (and ring the
+            // bell on the transition); GL-04: the tab captures the keyboard, so it forwards `?`.
+            onAttention={onCodeAttention}
+            onHelp={openHelp}
           />
         </Screen>
 
-        <Screen visible={tab === 'services'}>
+        <Screen visible={tab === 'services' && !overlayOpen}>
           <Services
             host={host}
             status={status}
@@ -660,7 +954,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             lang={lang}
             width={width}
             height={height}
-            isActive={tab === 'services'}
+            isActive={tab === 'services' && !overlayOpen}
             run={run}
             // The output of whatever was last performed, and the way back to the facts. The cockpit
             // draws it into the detail region — the big pane the user pointed at.
@@ -684,7 +978,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         {/* Like the services cockpit, the sessions screen frames its OWN regions — a menu, the
             list and the detail — so the one holding the keyboard can wear the accent border. One
             frame around all three said nothing about which of them the arrows were talking to. */}
-        <Screen visible={tab === 'sessions'}>
+        <Screen visible={tab === 'sessions' && !overlayOpen}>
             <Sessions
               host={host}
               // Polled by the shell, not by this screen — the counter it feeds is in the header,
@@ -693,7 +987,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               strings={s}
               width={width}
               height={height}
-              isActive={tab === 'sessions'}
+              isActive={tab === 'sessions' && !overlayOpen}
               run={run}
               onChrome={reportChrome}
               onExit={onExit}
@@ -704,6 +998,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               // center owns no persistence, so a setting it can toggle is a setting the host stores.
               view={status?.sessionView}
               onView={v => { void host.setSessionView?.(v) }}
+              onOpenCode={openCode}
+              lang={lang}
+              {...(sessionsFocus ? { focus: sessionsFocus } : {})}
+              {...(layoutRequest ? { layoutRequest } : {})}
             />
         </Screen>
 
@@ -711,13 +1009,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             are the selection, and the detail pane is a fuller view of the same facts or the place
             a running backup streams into. It is its own tab rather than a corner of Services —
             an operation over the data, and operations come before the numbers. */}
-        <Screen visible={tab === 'backup'}>
+        <Screen visible={tab === 'backup' && !overlayOpen}>
           <Backup
             host={host}
             strings={s}
             width={width}
             height={height}
-            isActive={tab === 'backup'}
+            isActive={tab === 'backup' && !overlayOpen}
             run={run}
             task={task}
             onDismissTask={dismissTask}
@@ -730,7 +1028,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
             selector over it, not a cockpit of related panes. The connection state that used to sit
             in the standalone app's header rides on its screen strip instead of on a pane badge, so
             the same row says where you are and whether the numbers under it are live. */}
-        <Screen visible={tab === 'dashboard'}>
+        <Screen visible={tab === 'dashboard' && !overlayOpen}>
           <Pane title={s.tabsShort.dashboard} width={width} height={height}>
             <Dashboard
               status={status}
@@ -738,14 +1036,15 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'dashboard'}
+              isActive={tab === 'dashboard' && !overlayOpen}
               nonce={nonce}
               onChrome={reportChrome}
+              {...(host.costByTaskToday ? { costByTask: costByTaskRead } : {})}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'hardware'}>
+        <Screen visible={tab === 'hardware' && !overlayOpen}>
           <Pane title={s.tabsShort.hardware} width={width} height={height}>
             <HardwareTab
               status={status}
@@ -754,14 +1053,14 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'hardware'}
+              isActive={tab === 'hardware' && !overlayOpen}
               nonce={nonce}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'logs'}>
+        <Screen visible={tab === 'logs' && !overlayOpen}>
           <Pane title={s.tabsShort.logs} width={width} height={height}>
             <Logs
               host={host}
@@ -773,13 +1072,13 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               lang={lang}
               width={bodyWidth}
               height={bodyRows}
-              isActive={tab === 'logs'}
+              isActive={tab === 'logs' && !overlayOpen}
               onChrome={reportChrome}
             />
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'cheatsheet'}>
+        <Screen visible={tab === 'cheatsheet' && !overlayOpen}>
           <Pane title={s.tabsShort.cheatsheet} width={width} height={height}>
             <StaticTab
               sections={cheatContent(lang)}
@@ -793,7 +1092,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'help'}>
+        <Screen visible={tab === 'help' && !overlayOpen}>
           <Pane title={s.tabsShort.help} width={width} height={height}>
             <StaticTab
               sections={helpContent(lang)}
@@ -807,7 +1106,22 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
-        <Screen visible={tab === 'contribute'}>
+        {settings ? <SettingsOverlay state={settings} data={settingsData} width={width} height={height} /> : null}
+        {palette ? (
+          <Palette list={paletteList} total={PALETTE_COMMANDS.length} query={palette.query} sel={palette.sel} ctx={fullCtx} lang={lang} width={width} height={height} />
+        ) : null}
+        {helpOpen ? (
+          <HelpOverlay
+            lines={help}
+            current={tab}
+            top={Math.min(helpTop, helpMax)}
+            title={s.helpOverlayTitle}
+            width={width}
+            height={height}
+          />
+        ) : null}
+
+        <Screen visible={tab === 'contribute' && !overlayOpen}>
           <Pane title={s.tabsShort.contribute} width={width} height={height}>
             <StaticTab
               sections={contributeContent(lang)}
@@ -825,7 +1139,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       {busy
         ? <Spinner label={s.working} />
         : <StatusLine message={result?.message} ok={result?.ok} width={width} />}
-      <Footer hints={hints} width={width} />
+      <Footer hints={hints.map(h => (shellHints.has(h) ? rebindHint(h, binds) : h))} width={width} />
     </Box>
     </PointerProvider>
   )

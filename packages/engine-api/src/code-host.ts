@@ -54,9 +54,68 @@ export interface CodeStartInput {
   /** REQUIRED (D-TUI-6): a session the TUI starts is always filed under a task. */
   taskId: string
   model: string
+  /** NW-03: the keyed provider to run it on (`anthropic`, `openrouter`, `ollama`, …); absent = the host's default. */
+  provider?: string
   cwd: string
   /** Sent as the first prompt right after the session starts. */
   firstMessage?: string
+}
+
+/**
+ * CD-15: the permission mode, by the runtime's own profile ids (B4.7, `policy/profiles.ts`). The words the tab
+ * prints map onto them exactly: `ask` = `default` (everything not allowlisted asks first), `edits` =
+ * `accept-edits` (file writes inside the workspace are allowed; the shell still asks), `plan` = `plan` (writes
+ * and mutating shell commands are refused).
+ */
+export type CodeModeId = 'default' | 'accept-edits' | 'plan'
+
+/** CD-16: one "allow for this session" answer the policy is holding, in the question's own words. */
+export interface CodeSessionRule {
+  label: string
+  /** When the person gave it (ISO). */
+  at: string
+}
+
+/**
+ * CD-13: what the policy decided about one call, read off the runtime's own `policy.approved` /
+ * `policy.denied` events — never inferred from the tool's outcome.
+ */
+export interface CodePolicyDecision {
+  decision: 'allowed' | 'denied'
+  /** `user`: a person answered (or a session rule they gave matched); `policy`: rules/defaults decided. */
+  by: 'user' | 'policy'
+  /** The deciding layer or rule, verbatim from the verdict. */
+  rule: string
+  /** A question was put to a person for this call. */
+  asked: boolean
+  /** The denial's stable code, when denied (`policy.denied.by-person`, …). */
+  code?: string
+}
+
+/** CD-18: one earlier prompt on this machine. */
+export interface CodePromptRecord {
+  text: string
+  /** When it was sent (ISO). */
+  at: string
+  sessionId: string
+}
+
+/** HM-04 / SS-01: one native session the home's resume card and the sessions fleet can show. */
+export interface CodeRecentSession {
+  sessionId: string
+  title: string
+  /** The task it is filed under, by its short handle and title, when it is filed. */
+  task?: string
+  /** Last activity (ISO). */
+  updatedAt: string
+  status: string
+  model: string
+  /** Where it works (SS-01: the fleet row's folder). */
+  cwd?: string
+  /** Its latest run is running right now (SS-02: "working"). */
+  running?: boolean
+  /** SS-06: the policy question it is waiting on right now (answered through `answer`). */
+  ask?: { questionId: string; prompt: string; options: readonly string[] }
 }
 
 /** What the header (CD-01) says about the open session. */
@@ -73,10 +132,11 @@ export interface CodeSessionFacts {
   model: string
   provider: string
   /**
-   * The permission mode, named. The runtime policy has no named modes yet (spec §5), so this is
-   * `ask` — what the policy does: everything not allowlisted asks first.
+   * The permission mode, named. A host that speaks CD-15 says a `CodeModeId`; one whose policy has no named
+   * modes says `ask` — what the policy does: everything not allowlisted asks first (the tab reads it as
+   * `default`). Kept a `string` so a 1.8 engine that says `ask` still satisfies it.
    */
-  mode: string
+  mode: CodeModeId | (string & {})
 }
 
 /** How the tab was opened by `agentop code …` — carried into the tab on its first mount. */
@@ -85,6 +145,8 @@ export interface CodeLaunch {
   prompt?: string
   /** `agentop code --resume <id>`: open that session instead of starting a new one. */
   resume?: string
+  /** TK-06: the wizard opens with this board task already chosen (straight to the review). */
+  taskId?: string
 }
 
 // ── the conversation, as events ───────────────────────────────────────────────────────────────
@@ -139,6 +201,22 @@ export interface CodeToolCall {
   failure?: string
   /** For a write/patch: the change, for the inline diff (CD-04). */
   diff?: CodeDiff
+  /** When the call was requested (`tool.requested.occurredAt`, ISO). */
+  requestedAt?: string
+  /** When it finished — completed, failed or denied (that event's `occurredAt`, ISO). */
+  endedAt?: string
+  /** CD-13: the policy's decision on this call. Absent until the policy decided (or a host that does not say). */
+  policy?: CodePolicyDecision
+  /**
+   * CD-14: the span a person was asked about this call — the question opening and closing, as the host
+   * observed it. Absent: nobody was asked. `closedAt` absent: still waiting.
+   */
+  waited?: { openedAt: string; closedAt?: string }
+  /**
+   * CD-10: what the tool returned, as text. `lines` is capped (the host keeps the head); `total` is the true
+   * line count. Absent: the call returned nothing readable (or the host does not send it).
+   */
+  output?: { lines: string[]; total: number }
 }
 
 /** A question the session is waiting on (CD-07). Options are the POLICY's, in its order. */
@@ -184,6 +262,20 @@ export interface CodeUsage {
   /** A gauge of this call's context, never a sum. */
   contextTokens?: number
   contextWindow?: number
+  /** The provider attempt this response is (`attemptId` of `model.invoked` / `model.completed`). */
+  attemptId?: string
+  /** When the call was sent (ISO). Absent: the invoke was not seen. */
+  startedAt?: string
+  /** When it completed (ISO). */
+  endedAt?: string
+  /** Time to first token, measured by the host on one clock. ABSENT when no text streamed — never a 0. */
+  ttftMs?: number
+  /** The provider's own latency for the call (`model.completed.latencyMs`). */
+  latencyMs?: number
+  /** Why the model stopped, normalised (`end_turn`, `tool_use`, `max_tokens`, …). */
+  stopReason?: string
+  /** CD-13: each counter at its own rate. Present exactly when `costUSD` is. */
+  costs?: { input: number; output: number; cacheRead: number; cacheWrite: number }
 }
 
 /** A turn of a RESUMED session, read from its stored window (text + the tools it called). */
@@ -210,6 +302,10 @@ export type CodeEvent =
   | { kind: 'ask-closed'; id: string; outcome: 'answered' | 'cancelled' | 'timeout'; choiceLabel?: string }
   | { kind: 'usage'; usage: CodeUsage }
   | { kind: 'plan'; items: CodePlanItem[] }
+  /** CD-15: the session moved to another permission mode. `dropped`: session rules it cost. */
+  | { kind: 'mode'; mode: CodeModeId; direction: 'stricter' | 'looser' | 'same'; dropped: number }
+  /** CD-16: the session rules now in force — the WHOLE list, replacing the previous one. */
+  | { kind: 'rules'; rules: CodeSessionRule[] }
   | { kind: 'run-ended'; runId: string; status: 'completed' | 'failed' | 'abandoned' | 'lost'; sentence: string; at: string }
   /** Something the person should read: an input refusal, a gap in the stream, a repair. */
   | { kind: 'notice'; tone: 'info' | 'warn' | 'error'; sentence: string }
@@ -239,10 +335,26 @@ export interface CodeHostPort {
   subscribe(sessionId: string, listener: (e: CodeEvent) => void): () => void
   /** Queue a prompt. `ok` means QUEUED (the run may still be refused later, with a notice). */
   submit(sessionId: string, text: string): CodeResult<{ sentence?: string }>
-  /** Answer an open question with the option at `choice` (0-based), exactly as the person picked. */
-  answer(sessionId: string, questionId: string, choice: number): CodeResult<{ sentence: string }>
+  /**
+   * Answer an open question with the option at `choice` (0-based), exactly as the person picked.
+   * CD-08: `reason`, with the policy's Deny option, is the person's reason — handed to the agent with the
+   * denial (never journaled). A host that does not read it denies without it.
+   */
+  answer(sessionId: string, questionId: string, choice: number, reason?: string): CodeResult<{ sentence: string }>
   /** Cancel the run in progress. */
   cancel(sessionId: string): CodeResult<{ sentence: string }>
   /** Stop driving the session here: release its lease. The session stays on disk, resumable. */
   end(sessionId: string): Promise<void>
+  /**
+   * CD-15 (optional): move the session to the next permission mode — `default` → `accept-edits` → `plan` →
+   * `default` — and emit `mode` (and `rules` when the switch dropped any). Absent: the tab names the mode and
+   * says it cannot be changed here.
+   */
+  cycleMode?(sessionId: string): CodeResult<{ mode: CodeModeId; sentence: string }>
+  /** HM-04 / SS-01 (optional): this machine's most recent native sessions, newest activity first. Absent: none listed. */
+  recentSessions?(limit: number): Promise<CodeResult<{ sessions: CodeRecentSession[] }>>
+  /** SS-08 (optional): rename a native session (its title in the engine's store). Absent: the rename is refused in words. */
+  rename?(sessionId: string, title: string): Promise<CodeResult<{ sentence: string }>>
+  /** CD-18 (optional): this machine's earlier prompts, newest first, identical texts once. Absent: no history. */
+  promptHistory?(): Promise<CodeResult<{ prompts: CodePromptRecord[] }>>
 }

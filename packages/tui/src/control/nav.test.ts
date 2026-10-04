@@ -390,3 +390,21 @@ describe('scrollTailBy', () => {
     expect(scrollTailBy({ index: 0, follow: true }, 3, 0)).toBeNull()
   })
 })
+
+describe('ST-05 — the footer and the help table follow a rebinding', () => {
+  it('a default shell key becomes the person\'s; other hints pass through', async () => {
+    const { rebindHint, DEFAULT_SHELL_KEYS } = await import('./nav')
+    const binds = { ...DEFAULT_SHELL_KEYS, quit: 'Q', 'prev-tab': '<', 'next-tab': '>' }
+    expect(rebindHint('q quit', binds)).toBe('Q quit')
+    expect(rebindHint('[ ] screens', binds)).toBe('< > screens')
+    expect(rebindHint('x stop', binds)).toBe('x stop')
+  })
+})
+
+describe('ST-05 — only the changed keys are stored', () => {
+  it('a table at the defaults stores nothing; one change stores one key', async () => {
+    const { changedShellKeys, DEFAULT_SHELL_KEYS } = await import('./nav')
+    expect(changedShellKeys({ ...DEFAULT_SHELL_KEYS })).toEqual({})
+    expect(changedShellKeys({ ...DEFAULT_SHELL_KEYS, help: 'H' })).toEqual({ help: 'H' })
+  })
+})

@@ -47,6 +47,18 @@ export interface ControlStrings {
    * the bar and in the frame around it.
    */
   tabsShort: Record<TabId, string>
+  /** SS-09: the file-under-a-task picker's pane title. */
+  sessionsFileTitle: string
+  /** SS-07: why enter does not open an external session. */
+  sessionsExternalOpen: string
+  /** SS-06: heads a native session's question — the policy's, not a screen read. */
+  sessionsApproveWhatPolicy: string
+  /** SS-03…05: the footer hint for ← → on the list. */
+  keySessionsDetailTab: string
+  /** SS-03…05: the detail pane's tabs. */
+  sessionsDetailTabs: import('./session-fleet').DetailTabWords
+  /** SS-01: the sentence `g` leaves. */
+  sessionsGroupedBy: (grouping: string) => string
 
   /** Footer key hints. */
   keyTabs: string
@@ -235,6 +247,8 @@ export interface ControlStrings {
   sessionsEmptyActive: (total: number) => string
   /** The list is empty because a search or a scope is narrowing it. */
   sessionsEmptyFiltered: string
+  /** SS-11: the empty list under a search — names what was searched, and the way out. */
+  sessionsEmptySearch: (query: string) => string
   sessionsLoading: string
   /** Said when the host does not implement the fleet at all — not the same as an empty fleet. */
   sessionsUnsupported: string
@@ -338,6 +352,14 @@ export interface ControlStrings {
   /** Pane titles — the SHORT lowercase names, the same words the tab bar prints. */
   sessionsPaneMenu: string
   sessionsPaneDetail: string
+  /** A narrow cockpit's detail pane with no session selected — said, never a blank frame. */
+  sessionsNoneSelected: string
+  /** The help overlay's frame title (GL-04). */
+  helpOverlayTitle: string
+  /** The help overlay's own footer: the two keys that close it. */
+  keyHelpClose: string
+  /** The footer hint that opens the help overlay. */
+  keyHelp: string
   sessionsPaneAsk: string
   sessionsPaneKeys: string
   /** Said only while the reference has more below the fold: `12 of 34  ·  ↑↓ scroll`. */
@@ -365,6 +387,8 @@ export interface ControlStrings {
    * `cli-start.ts`.
    */
   sessionsFinishConfirm: (task: string, count: number, running: number) => string
+  /** SS-10: the question after a task's last live session was stopped. */
+  sessionsFinishAfterStop: (task: string) => string
   sessionsReopenConfirm: (task: string) => string
   /** The heading over the sessions the machine took at once. */
   sessionsFellWord: string
@@ -819,7 +843,9 @@ const EN: ControlStrings = {
   tagline: 'AI coding-assistant analytics',
 
   tabs: {
+    home: 'Home',
     code: 'Code',
+    tasks: 'Tasks',
     services: 'Services',
     sessions: 'Sessions',
     backup: 'Backup',
@@ -831,8 +857,31 @@ const EN: ControlStrings = {
     contribute: 'Contribute',
   },
 
+  sessionsDetailTabs: {
+    tabs: { chat: 'chat', terminal: 'terminal', metrics: 'metrics' },
+    hint: '← → switch',
+    chatNative: 'A native session: its conversation is in the code tab — enter opens it there.',
+    chatExternal: 'agentop did not start this assistant and its conversation is not linked, so nothing is shown rather than a guess. t files it under a task.',
+    chatUnlinked: 'No conversation is linked to this session exactly, so none is shown — the terminal tab has its screen.',
+    chatClosed: 'Not running, and no conversation is linked to it exactly — enter reopens it where it can be.',
+    termCaptured: 'captured on the last poll · enter attaches',
+    termNative: 'A native session has no terminal to capture: the conversation is the session. enter opens it in code.',
+    termExternal: 'Nothing to capture: agentop did not start this process.',
+    termClosed: 'Not running: there is no screen to capture.',
+    termEmpty: 'Nothing captured from its screen yet.',
+    tokens: 'tokens', input: 'input', output: 'output', cacheRead: 'cache read', cacheWrite: 'cache write',
+    notRecorded: 'N/A · not recorded',
+    cost: 'cost', costNote: 'api-equivalent estimate',
+    context: 'context', contextNA: 'N/A — no window reported or verified for this model',
+    turns: 'turns',
+    metricsNone: 'No metrics: no conversation with recorded usage is linked to this session.',
+    metricsNative: 'Its usage is in the code tab\'s panel (enter opens it); the fleet carries no native counters yet.',
+  },
+  sessionsGroupedBy: g => `Grouped by ${({ task: 'task', harness: 'harness', status: 'state' } as Record<string, string>)[g] ?? g} — g groups by the next one.`,
   tabsShort: {
+    home: 'home',
     code: 'code',
+    tasks: 'tasks',
     services: 'services',
     sessions: 'sessions',
     backup: 'backup',
@@ -860,7 +909,7 @@ const EN: ControlStrings = {
   keyScroll: '↑↓/pg scroll',
   keyEnds: 'g/G ends',
   keyRefresh: 'r refresh',
-  keyLogSource: '[ ] source',
+  keyLogSource: '1-9 source',
   dashView: '1-6/tab view',
   dashFilter: 'f harness',
   dashPage: ', . page',
@@ -955,6 +1004,7 @@ const EN: ControlStrings = {
   sessionsEmptyActive: (total: number) =>
     `nothing running · ${total} session${total === 1 ? '' : 's'} withheld — l shows them`,
   sessionsEmptyFiltered: 'nothing matches · esc clears the filter',
+  sessionsEmptySearch: q => `nothing matches "${q}" · esc clears the search`,
   sessionsLoading: 'reading…',
   sessionsUnsupported: 'session management is not available on this machine.',
   profileHeading: (days, sessions) => `Your last ${days} days · ${sessions} sessions`,
@@ -1054,6 +1104,10 @@ const EN: ControlStrings = {
   sessionsDoneWord: 'finished',
   sessionsPaneMenu: 'menu',
   sessionsPaneDetail: 'detail',
+  sessionsNoneSelected: 'no session selected — tab back to the list and pick one',
+  helpOverlayTitle: 'help · every key',
+  keyHelpClose: 'esc/? close',
+  keyHelp: '? keys',
   sessionsPaneAsk: 'question',
   sessionsPaneKeys: 'keys',
   sessionsKeysMore: (shown, total) => `${shown} of ${total}  ·  ↑↓ scroll`,
@@ -1094,6 +1148,8 @@ const EN: ControlStrings = {
   // Says what finishing ACTUALLY does. It marks the task and hides its sessions behind a switch —
   // it stops nothing — so the sentence names the count, calls out the ones still running, and names
   // the switch that brings them back.
+  sessionsFinishAfterStop: task =>
+    `That was the last session working on "${task}". Is the task done? Yes marks it done on the board.`,
   sessionsFinishConfirm: (task, count, running) =>
     `Mark "${task}" finished? Its ${count} session${count === 1 ? '' : 's'}`
     + `${running > 0 ? ` (${running} still running)` : ''}`
@@ -1121,6 +1177,7 @@ const EN: ControlStrings = {
   sessionsApproveCaveat:
     'it takes whichever option the dialog above has highlighted — read it first.',
   sessionsApproveWhat: 'on its screen right now',
+  sessionsApproveWhatPolicy: 'the policy asks — the same options the code tab shows',
   sessionsChoiceHighlighted: '(its default)',
   sessionsChooseBlind: 'this dialog is a choice, and agentop cannot pick an option on this harness.',
   sessionsChooseAttach: 'o attaches to the session, where you can answer it — esc goes back.',
@@ -1147,7 +1204,7 @@ const EN: ControlStrings = {
     usage: 'usage', project: 'project',
   },
   sessionsStates: {
-    'waiting-approval': 'needs approval',
+    'waiting-approval': 'approve',
     // Named for what it means to the READER, not for what the machine is doing. `waiting` and
     // `working` differ by two letters in the middle of a narrow column, and the one that needs a
     // person was the one being read as the one that does not.
@@ -1155,9 +1212,9 @@ const EN: ControlStrings = {
     working: 'working',
     // ONE word for every way a session is not running — see `cli-i18n.ts`'s `sessState`, which this
     // table has to agree with or a row reads `off` under a band called `closed`.
-    exited: 'off',
-    lost: 'off',
-    closed: 'off',
+    exited: 'ended',
+    lost: 'ended',
+    closed: 'ended',
     unknown: 'external',
   },
   sessionsSearching: q => `search: ${q} · esc clears`,
@@ -1199,7 +1256,7 @@ const EN: ControlStrings = {
   spawnUnknownEffort: e => `${e} is not a reasoning effort this CLI accepts.`,
   spawnModelUnsupported: h => `${h} has no model flag — a model was asked for and it could not be honoured.`,
   keySessionsGroup: 'v group',
-  keySessionsAttach: 'o attach',
+  keySessionsAttach: 'enter open',
   keySessionsReset: '^r reset view',
   keySessionsKill: 'x kill',
   keySessionsDeleteTask: 'x delete task',
@@ -1241,7 +1298,7 @@ const EN: ControlStrings = {
     'the assistant running it will be STOPPED and the conversation reopened here — the turn in flight is lost, the conversation is not.',
   sessionsSearchLabel: 'Search sessions and closed conversations',
   sessionsSearchEmpty: 'nothing matches.',
-  sessionsClosedWord: 'off',
+  sessionsClosedWord: 'ended',
   sessionsShowClosed: 'closed: shown',
   viewTitle: 'What this list shows',
   viewGroupBy: 'Group by',
@@ -1274,6 +1331,7 @@ const EN: ControlStrings = {
   keySessionsNoTask: 'u unfiled',
   keyTabsAlt: '[ ] screens',
   keyAsideSection: '1-9 ←→ section',
+  keySessionsDetailTab: '←→ chat·terminal·metrics',
   sessionsNoTaskHidden: 'unfiled: hidden',
   sessionsNoTaskShown: 'unfiled: shown',
   wizHarness: 'Which assistant?',
@@ -1311,6 +1369,8 @@ const EN: ControlStrings = {
   sessionsNotePrompt: 'Describe this session',
   sessionsKillConfirm: (title: string) => `Stop "${title}"? The assistant running in it is ended.`,
   sessionsNotActionable: 'that session was not started by agentop, so it cannot be driven from here.',
+  sessionsFileTitle: 'file under a task',
+  sessionsExternalOpen: 'agentop did not start it: it runs in another terminal — nothing to attach.',
   sessionsNotAsking: 'that session is not blocked on a question — there is nothing to answer.',
   sessionsNoFell: 'nothing fell — no session was lost with the machine still on record.',
 
@@ -1412,7 +1472,9 @@ const PT: ControlStrings = {
   tagline: 'Analytics de assistentes de código IA',
 
   tabs: {
+    home: 'Início',
     code: 'Código',
+    tasks: 'Tarefas',
     services: 'Serviços',
     sessions: 'Sessões',
     backup: 'Backup',
@@ -1424,8 +1486,31 @@ const PT: ControlStrings = {
     contribute: 'Contribuir',
   },
 
+  sessionsDetailTabs: {
+    tabs: { chat: 'chat', terminal: 'terminal', metrics: 'métricas' },
+    hint: '← → alterna',
+    chatNative: 'Sessão nativa: a conversa está na aba código — enter abre lá.',
+    chatExternal: 'O agentop não iniciou este assistente e a conversa não está vinculada, então nada é mostrado em vez de um palpite. t arquiva numa tarefa.',
+    chatUnlinked: 'Nenhuma conversa está vinculada exatamente a esta sessão, então nenhuma é mostrada — a aba terminal tem a tela.',
+    chatClosed: 'Não está rodando, e nenhuma conversa está vinculada exatamente — enter reabre onde der.',
+    termCaptured: 'capturada no último poll · enter anexa',
+    termNative: 'Uma sessão nativa não tem terminal para capturar: a conversa é a sessão. enter abre no código.',
+    termExternal: 'Nada a capturar: o agentop não iniciou este processo.',
+    termClosed: 'Não está rodando: não há tela para capturar.',
+    termEmpty: 'Nada capturado da tela ainda.',
+    tokens: 'tokens', input: 'entrada', output: 'saída', cacheRead: 'cache lido', cacheWrite: 'cache escrito',
+    notRecorded: 'N/A · não registrado',
+    cost: 'custo', costNote: 'estimativa equivalente à API',
+    context: 'contexto', contextNA: 'N/A — janela não informada nem verificada para o modelo',
+    turns: 'turnos',
+    metricsNone: 'Sem métricas: nenhuma conversa com uso registrado está vinculada a esta sessão.',
+    metricsNative: 'O uso está no painel da aba código (enter abre); a frota ainda não traz contadores nativos.',
+  },
+  sessionsGroupedBy: g => `Agrupado por ${({ task: 'tarefa', harness: 'harness', status: 'estado' } as Record<string, string>)[g] ?? g} — g agrupa pelo próximo.`,
   tabsShort: {
+    home: 'início',
     code: 'código',
+    tasks: 'tarefas',
     services: 'serviços',
     sessions: 'sessões',
     backup: 'backup',
@@ -1453,7 +1538,7 @@ const PT: ControlStrings = {
   keyScroll: '↑↓/pg rolar',
   keyEnds: 'g/G extremos',
   keyRefresh: 'r atualizar',
-  keyLogSource: '[ ] fonte',
+  keyLogSource: '1-9 fonte',
   dashView: '1-6/tab tela',
   dashFilter: 'f assistente',
   dashPage: ', . paginar',
@@ -1546,6 +1631,7 @@ const PT: ControlStrings = {
   sessionsEmptyActive: (total: number) =>
     `nada rodando · ${total} ${total === 1 ? 'sessão retida' : 'sessões retidas'} — l mostra`,
   sessionsEmptyFiltered: 'nada corresponde · esc limpa o filtro',
+  sessionsEmptySearch: q => `nada corresponde a "${q}" · esc limpa a busca`,
   sessionsLoading: 'lendo…',
   sessionsUnsupported: 'gerenciamento de sessões não está disponível nesta máquina.',
   profileHeading: (days, sessions) => `Seus últimos ${days} dias · ${sessions} sessões`,
@@ -1634,6 +1720,10 @@ const PT: ControlStrings = {
   sessionsDoneWord: 'finalizada',
   sessionsPaneMenu: 'menu',
   sessionsPaneDetail: 'detalhe',
+  sessionsNoneSelected: 'nenhuma sessão selecionada — tab volta à lista para escolher uma',
+  helpOverlayTitle: 'ajuda · todas as teclas',
+  keyHelpClose: 'esc/? fechar',
+  keyHelp: '? teclas',
   sessionsPaneAsk: 'pergunta',
   sessionsPaneKeys: 'teclas',
   sessionsKeysMore: (shown, total) => `${shown} de ${total}  ·  ↑↓ rolar`,
@@ -1671,6 +1761,8 @@ const PT: ControlStrings = {
     prompt: 'envia uma linha para ela sem anexar',
     reopenFell: 'reabre tudo que a máquina levou de uma vez',
   },
+  sessionsFinishAfterStop: task =>
+    `Essa era a última sessão trabalhando em "${task}". A tarefa terminou? Sim marca como concluída no board.`,
   sessionsFinishConfirm: (task, count, running) =>
     `Finalizar "${task}"? ${count === 1 ? 'A sessão dela' : `As ${count} sessões dela`}`
     + `${running > 0 ? ` (${running} ainda rodando)` : ''}`
@@ -1700,6 +1792,7 @@ const PT: ControlStrings = {
   sessionsApproveCaveat:
     'ela pega a opção que o diálogo acima está destacando — leia antes.',
   sessionsApproveWhat: 'na tela dela agora',
+  sessionsApproveWhatPolicy: 'a política pergunta — as mesmas opções da aba código',
   sessionsChoiceHighlighted: '(o padrão dela)',
   sessionsChooseBlind: 'esse diálogo é uma escolha, e o agentop não sabe selecionar uma opção neste harness.',
   sessionsChooseAttach: 'o anexa na sessão, onde dá para responder — esc volta.',
@@ -1726,7 +1819,7 @@ const PT: ControlStrings = {
     usage: 'uso', project: 'projeto',
   },
   sessionsStates: {
-    'waiting-approval': 'precisa aprovação',
+    'waiting-approval': 'aprovar',
     // The same word the state COLUMN shows (`cli-i18n.ts`'s `sessState.waiting`). Two tables of one
     // vocabulary, and the sessions screen draws from both at once — the column from the host, the
     // band heading and the filter row from here. They have to say the same thing or the row reads
@@ -1734,8 +1827,8 @@ const PT: ControlStrings = {
     waiting: 'precisa de você',
     working: 'trabalhando',
     exited: 'encerrada',
-    lost: 'desconectada',
-    closed: 'fechada',
+    lost: 'encerrada',
+    closed: 'encerrada',
     unknown: 'externa',
   },
   sessionsSearching: q => `busca: ${q} · esc limpa`,
@@ -1777,7 +1870,7 @@ const PT: ControlStrings = {
   spawnUnknownEffort: e => `${e} não é um nível de esforço que esta CLI aceite.`,
   spawnModelUnsupported: h => `${h} não tem flag de modelo — um modelo foi pedido e não teria como ser aplicado.`,
   keySessionsGroup: 'v agrupar',
-  keySessionsAttach: 'o anexar',
+  keySessionsAttach: 'enter abrir',
   keySessionsReset: '^r restaurar view',
   keySessionsKill: 'x encerrar',
   keySessionsDeleteTask: 'x apagar tarefa',
@@ -1819,7 +1912,7 @@ const PT: ControlStrings = {
     'o assistente que roda ela vai ser ENCERRADO e a conversa reaberta aqui — perde-se o turno em andamento, não a conversa.',
   sessionsSearchLabel: 'Buscar sessões e conversas fechadas',
   sessionsSearchEmpty: 'nada corresponde.',
-  sessionsClosedWord: 'desligada',
+  sessionsClosedWord: 'encerrada',
   sessionsShowClosed: 'fechadas: visíveis',
   viewTitle: 'O que esta lista mostra',
   viewGroupBy: 'Agrupar por',
@@ -1852,6 +1945,7 @@ const PT: ControlStrings = {
   keySessionsNoTask: 'u sem tarefa',
   keyTabsAlt: '[ ] telas',
   keyAsideSection: '1-9 ←→ seção',
+  keySessionsDetailTab: '←→ chat·terminal·métricas',
   sessionsNoTaskHidden: 'sem tarefa: ocultas',
   sessionsNoTaskShown: 'sem tarefa: visíveis',
   wizHarness: 'Qual assistente?',
@@ -1889,6 +1983,8 @@ const PT: ControlStrings = {
   sessionsNotePrompt: 'Descreva esta sessão',
   sessionsKillConfirm: (title: string) => `Encerrar "${title}"? O assistente que roda nela é finalizado.`,
   sessionsNotActionable: 'essa sessão não foi iniciada pelo agentop, então não dá para controlá-la daqui.',
+  sessionsFileTitle: 'arquivar numa tarefa',
+  sessionsExternalOpen: 'o agentop não a iniciou: roda em outro terminal — nada para anexar.',
   sessionsNotAsking: 'essa sessão não está travada em uma pergunta — não há o que responder.',
   sessionsNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
 

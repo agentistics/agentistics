@@ -11,6 +11,8 @@ import {
   listPlan,
   listRows,
   overviewPlan,
+  costByTaskLines,
+  costByTaskRows,
   PAGE_SIZE,
   pageWindow,
   resolveDashboardScreen,
@@ -165,8 +167,24 @@ describe('row budgets', () => {
   test('the sparkline gives way before the harness bars do', () => {
     // Room for the KPIs and all six bars but not the chart: the bars are the substance.
     const tight = overviewPlan(2 + 2 + 6, 6)
-    expect(tight).toEqual({ kpis: true, activity: false, bars: 6, empty: false })
+    expect(tight).toEqual({ kpis: true, activity: false, bars: 6, empty: false, tasks: 0 })
     expect(overviewPlan(2 + 3 + 2 + 6, 6).activity).toBe(true)
+  })
+
+  test('EX-01: the cost-by-task panel gives way after the sparkline, before the harness bars', () => {
+    // KPIs 2 + harness 2+6 + panel 2+3 + sparkline 3.
+    expect(overviewPlan(2 + 8 + 5 + 3, 6, 3)).toMatchObject({ activity: true, bars: 6, tasks: 3 })
+    expect(overviewPlan(2 + 8 + 5, 6, 3)).toMatchObject({ activity: false, bars: 6, tasks: 3 })
+    expect(overviewPlan(2 + 8 + 3, 6, 3)).toMatchObject({ activity: false, bars: 6, tasks: 1 })
+    expect(overviewPlan(2 + 8, 6, 3)).toMatchObject({ bars: 6, tasks: 0 })
+  })
+
+  test('EX-01: "not filed" is the last line and is never dropped while it holds money', () => {
+    const d = { sessions: 4, tasks: [{ ref: 't-1', title: 'a', cost: 3 }, { ref: 't-2', title: 'b', cost: 2 }, { ref: 't-3', title: 'c', cost: 1 }], notFiled: 1.5 }
+    expect(costByTaskRows(d)).toBe(4)
+    expect(costByTaskLines(d, 2).map(l => l.kind)).toEqual(['task', 'not-filed'])
+    expect(costByTaskLines({ sessions: 0, tasks: [], notFiled: 0 }, 3)).toEqual([{ kind: 'none', label: '', cost: 0 }])
+    expect(costByTaskLines({ sessions: 2, tasks: [], notFiled: 0.4 }, 3).map(l => l.kind)).toEqual(['not-filed'])
   })
 
   test('the share panel goes whole rather than showing part of a proportion', () => {

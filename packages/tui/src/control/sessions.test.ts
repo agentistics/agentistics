@@ -743,7 +743,7 @@ describe('sessionColumns', () => {
     // Two spaces between unpadded cells started every title at a different column, because the
     // state words differ by ten characters. Nothing after them ever lined up.
     const c = sessionColumns(rows, 100)
-    expect(c.state).toBe('needs approval'.length)
+    expect(c.state).toBe('● needs approval'.length)
     expect(c.title).toBe('migrate the auth store'.length)
     expect(c.harness).toBe('claude'.length)
   })
@@ -760,12 +760,12 @@ describe('sessionColumns', () => {
     expect(sessionColumns(rows, 46).where).toBe(0)
     expect(sessionColumns(rows, 46).harness).toBeGreaterThan(0)
     expect(sessionColumns(rows, 24).harness).toBe(0)
-    expect(sessionColumns(rows, 24).state).toBe("needs approval".length)
+    expect(sessionColumns(rows, 24).state).toBe('● needs approval'.length)
   })
 
   it('never asks for more columns than it was given, at any width', () => {
     for (let w = 4; w <= 160; w++) {
-      expect(drawn(sessionColumns(rows, w))).toBeLessThanOrEqual(Math.max(w, 2 + 'needs approval'.length + 3))
+      expect(drawn(sessionColumns(rows, w))).toBeLessThanOrEqual(Math.max(w, 2 + '● needs approval'.length + 3))
     }
   })
 
@@ -804,7 +804,7 @@ describe('sessionColumns', () => {
     // And the state word and a usable name outlive all three.
     const bare = sessionColumns(withUse, metrics)
     expect(bare.metrics).toBe(0)
-    expect(bare.state).toBe('needs approval'.length)
+    expect(bare.state).toBe('● needs approval'.length)
     expect(bare.title).toBeGreaterThan(0)
   })
 
@@ -819,7 +819,7 @@ describe('sessionColumns', () => {
       + (c.harness ? 2 + c.harness : 0) + (c.where ? 2 + c.where : 0)
     for (let w = 4; w <= 200; w++) {
       expect(wide(sessionColumns(withUse, w)))
-        .toBeLessThanOrEqual(Math.max(w, 2 + 'needs approval'.length + 3))
+        .toBeLessThanOrEqual(Math.max(w, 2 + '● needs approval'.length + 3))
     }
   })
 })
@@ -2682,7 +2682,8 @@ describe('sessionColumns — the context cell', () => {
       const cells = [c.id, c.state, c.title, c.where, c.harness, c.metrics, c.context, c.task, c.worktree, c.age]
       const drawn = cells.filter(n => n > 0).length
       const total = 2 + cells.reduce((n, v) => n + v, 0) + 2 * (drawn - 1)
-      expect(total, `width=${w} → ${total}`).toBeLessThanOrEqual(w)
+      // The floor is the state cell (dot + word, SS-02) and a sliver of name: below it nothing fits.
+      expect(total, `width=${w} → ${total}`).toBeLessThanOrEqual(Math.max(w, 2 + '● needs approval'.length + 3))
     }
   })
 })

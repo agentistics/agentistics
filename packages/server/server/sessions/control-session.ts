@@ -270,6 +270,14 @@ export function toControlSession(
     // Already formatted, because formatting is a presentation concern the host owns for everything
     // else it hands over — and `fmt`/`fmtCost` are the shared helpers the dashboard uses.
     ...(v.tokens !== undefined ? { tokens: fmt(v.tokens) } : {}),
+    // SS-05: each counter formatted, `null` where the harness did not record it (said N/A, never 0).
+    ...(v.tokenParts ? { tokenParts: {
+      input: v.tokenParts.input !== undefined ? fmt(v.tokenParts.input) : null,
+      output: v.tokenParts.output !== undefined ? fmt(v.tokenParts.output) : null,
+      cacheRead: v.tokenParts.cacheRead !== undefined ? fmt(v.tokenParts.cacheRead) : null,
+      cacheWrite: v.tokenParts.cacheWrite !== undefined ? fmt(v.tokenParts.cacheWrite) : null,
+    } } : {}),
+    ...(v.turns ? { turns: v.turns } : {}),
     ...(v.costUSD !== undefined ? { cost: fmtCost(v.costUSD) } : {}),
     ...(fraction !== null
       ? {
