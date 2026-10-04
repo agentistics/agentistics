@@ -32,7 +32,7 @@ import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/na
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
-import { existsSync, writeSync } from 'node:fs'
+import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
@@ -685,6 +685,7 @@ export function buildService(
     // Two processes of the ONE runtime — invisible to every runtime probe, because they all ask
     // which pid holds the port. See `idle-servers.ts` for the seventy-minute incident.
     idle: facts.idlePids?.length ? s.svcIdleServer(facts.idlePids) : undefined,
+    idleStopLabel: facts.idlePids?.length ? s.actStopIdle : undefined,
     reason,
     // The single most important line in the model: while anything is up there is nothing to start.
     startOptions: up.length > 0
@@ -3103,6 +3104,28 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const ok = watchable ? await streamOutput(work) : (await captureOutput(work)).value
       if (!ok) return { ok: false, message: mode.failure ?? s.restartFailed }
       return { ok: true, message: target === 'all' ? s.restartedAll : s.restartedDone }
+    },
+
+    // The extra copies `idle-servers.ts` found: `agentop server` processes holding no port. They
+    // are re-identified HERE, at the moment of the press, never taken from a five-second-old
+    // snapshot — a pid named then may be somebody else's by now.
+    async stopIdle(): Promise<ActionResult> {
+      const s = S()
+      const { dataDirOfEnv, stoppableIdle } = await import('./idle-servers')
+      const pids = stoppableIdle({
+        idle: await idleServerPids(),
+        dataDirOf: pid => { try { return dataDirOfEnv(readFileSync(`/proc/${pid}/environ`, 'utf8')) } catch { return null } },
+        ours: AGENTISTICS_DATA_DIR,
+        lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+        self: process.pid,
+      })
+      if (pids.length === 0) return { ok: true, message: s.idleNoneLeft }
+      for (const pid of pids) await sh(['kill', String(pid)])
+      for (let i = 0; i < 20; i++) {
+        if ((await idleServerPids()).every(p => !pids.includes(p))) break
+        await sleep(150)
+      }
+      return { ok: true, message: s.idleStopped(pids.length) }
     },
 
     async stop(target: ActionTarget): Promise<ActionResult> {

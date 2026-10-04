@@ -370,6 +370,9 @@ export interface ControlService {
    * The pid is the point. "Something is wrong" that cannot be acted on is a worse message than none.
    */
   idle?: string
+  /** Already-localized verb that stops those extra copies (`ControlHost.stopIdle`). Present only
+   *  beside `idle`: the sentence states the problem, this is the button that fixes it. */
+  idleStopLabel?: string
   /** Why the state is `unknown`, already localized. */
   reason?: string
   /**
@@ -1441,6 +1444,9 @@ export interface ControlHost {
    */
   restart(target: ActionTarget, rebuild?: boolean): Promise<ActionResult>
   stop(target: ActionTarget): Promise<ActionResult>
+  /** Stop the extra copies of a service that hold no port (`ControlService.idle`). Optional: a host
+   *  that cannot identify them offers no verb rather than one that refuses. */
+  stopIdle?(service: ServiceRef): Promise<ActionResult>
 
   /** Persist a team mode from the Setup tab. `member` also needs `connect`. */
   setMode(mode: 'solo'): Promise<ActionResult>
