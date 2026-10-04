@@ -332,3 +332,7 @@ export function howConfirms(v: Pick<VaultView, 'authenticator' | 'presence'>): '
 export function primarySection(missing: readonly WizardStep[], bannerShowing: boolean): WizardStep | null {
   return bannerShowing ? null : (missing[0] ?? null)
 }
+
+/** VAULT.UI2: "keep it open" — one more auto-lock window. On this computer a click is enough; remote asks the code. */
+export const extendVaultOpen = (code?: string) => vaultPost<{ autoLockInMs: number }>('/api/vault/extend', code ? { code } : {})
+export const lockVaultFromCard = (code?: string) => lockNow(code)

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   GROUP_ID, ITEM_ID, KIND_FIELDS, newPersonalId, parseDotEnv, parseVersionFile, recordName, revealAsks, trashExpired,
   validateInput, versionTag, versionsToPrune,
+  needsConfirm,
 } from './personal'
 import { scopeOfPurpose } from './format'
 
@@ -77,5 +78,18 @@ describe('revealAsks — spec §3', () => {
     expect(revealAsks({ hasPresence: true, hasAuthenticator: true, unlockMode: 'always' })).toEqual({ code: true, gesture: true, blocked: false })
     expect(revealAsks({ hasPresence: false, hasAuthenticator: true, unlockMode: 'daily' })).toEqual({ code: true, gesture: false, blocked: false })
     expect(revealAsks({ hasPresence: false, hasAuthenticator: false, unlockMode: 'daily' }).blocked).toBe(true)
+  })
+})
+
+describe('needsConfirm — "Sempre confirmar" absent reads as ON', () => {
+  test('only an explicit false goes without the prompt', () => {
+    expect(needsConfirm({})).toBe(true)
+    expect(needsConfirm({ confirmEach: true })).toBe(true)
+    expect(needsConfirm({ confirmEach: false })).toBe(false)
+  })
+  test('validateInput accepts a boolean and refuses anything else', () => {
+    const base = { kind: 'note', name: 'n', fields: { value: 'x' } }
+    expect(validateInput({ ...base, confirmEach: false }, { requireFields: true })).toMatchObject({ ok: true, value: { confirmEach: false } })
+    expect(validateInput({ ...base, confirmEach: 'no' }, { requireFields: true })).toMatchObject({ ok: false, field: 'confirmEach' })
   })
 })

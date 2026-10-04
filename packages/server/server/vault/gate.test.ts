@@ -9,6 +9,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { engineSecrets } from './engine-secrets'
 import { base32Decode, hotp, parseVaultJson, refusalSentence, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import {
   __resetVaultForTests, __setVaultClockForTests, autoLockTick, ensureVaultOpen, noteVaultActivity, openFromFile, pendingUnlock,
@@ -163,6 +164,7 @@ describe('§2.4 — every row of the table', () => {
     test(`${action}: code ${row.code ? 'yes' : 'no'}, gesture ${row.gesture ? 'yes' : 'no'}, grant ${row.grant ?? 'none'}`, async () => {
       // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
       // passkey token — tested in mobile.test.ts).
+      if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
       const C = action.startsWith('personal-') ? { ...S, loopback: true } : S
       if (!row.code && !row.gesture) {
         expect((await requireVaultStepUp(action, C)).ok).toBe(true)
@@ -190,7 +192,7 @@ describe('§2.4 — every row of the table', () => {
         expect((await requireVaultStepUp(action, { ...C, session: 'session-B', grant })).ok).toBe(false)     // bound to the session
       } else {
         // destructive: a grant from a read step-up is NOT accepted
-        const read = await requireVaultStepUp('list', { ...S, code: codeAt() })
+        const read = await requireVaultStepUp('set-auto-lock', { ...S, code: codeAt() })
         next()
         expect((await requireVaultStepUp(action, { ...C, grant: read.ok ? read.grant : undefined })).ok).toBe(false)
       }
@@ -202,8 +204,9 @@ describe('§2.4 — every row of the table', () => {
     expect((await requireVaultStepUp('reset', { ...S, code: codeAt() })).ok).toBe(false)
   })
 
-  test('lock from the dashboard is gated; lock-local never is; set-auto-lock refuses "never"', async () => {
-    expect((await requireVaultStepUp('lock', S)).ok).toBe(false)
+  test('lock and lock-local ask nothing (locking only reduces exposure); set-auto-lock is gated; set-auto-lock refuses "never"', async () => {
+    expect((await requireVaultStepUp('lock', S)).ok).toBe(true)
+    expect((await requireVaultStepUp('set-auto-lock', S)).ok).toBe(false)
     expect((await requireVaultStepUp('lock-local', S)).ok).toBe(true)
     expect((await setAutoLockMinutes('never', { ...S, code: codeAt() })).ok).toBe(false)
     expect((await setAutoLockMinutes(0, { ...S, code: codeAt() })).ok).toBe(false)
@@ -225,13 +228,133 @@ describe('§2.4 — every row of the table', () => {
   })
 })
 
+describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an open vault', () => {
+  beforeEach(async () => { await ownerMachine() })
+
+  test('"Sempre confirmar" OFF on every chosen secret: an open vault is the proof — no code, no gesture', async () => {
+    const g0 = hello.gestures
+    for (let i = 0; i < 3; i++) expect(await requireVaultStepUp('personal-grant-open', { ...S, loopback: true })).toMatchObject({ ok: true })
+    expect(hello.gestures - g0).toBe(0)
+  })
+
+  test('"Sempre confirmar" ON (the default): the gesture, fresh each time, and NEVER the code', async () => {
+    const g0 = hello.gestures
+    expect(await requireVaultStepUp('personal-grant', { ...S, loopback: true })).toMatchObject({ ok: true })
+    expect(await requireVaultStepUp('personal-grant', { ...S, loopback: true })).toMatchObject({ ok: true })
+    expect(hello.gestures - g0).toBe(2)
+    hello.cancel = true
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(false)
+  })
+
+  test('locked: refused as locked either way — the composer opens the vault once first', async () => {
+    lockVault('user')
+    expect(await requireVaultStepUp('personal-grant-open', { ...S, loopback: true })).toMatchObject({ ok: false, code: 'locked' })
+    expect(await requireVaultStepUp('personal-grant', { ...S, loopback: true })).toMatchObject({ ok: false, code: 'locked' })
+  })
+
+  test('locked → one unlock → an OFF secret then goes with no more prompts until it locks again', async () => {
+    lockVault('user')
+    await unlockWithGesture()
+    expect((await completeUnlock(codeAt())).ok).toBe(true)
+    next()
+    const g0 = hello.gestures
+    for (let i = 0; i < 3; i++) expect((await requireVaultStepUp('personal-grant-open', { ...S, loopback: true })).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(0)
+    lockVault('user')
+    expect((await requireVaultStepUp('personal-grant-open', { ...S, loopback: true })).ok).toBe(false)
+  })
+
+  test('a remote origin never gets a Hello prompt: an ON secret wants the phone passkey token', async () => {
+    const g0 = hello.gestures
+    expect(await requireVaultStepUp('personal-grant', S)).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(hello.gestures - g0).toBe(0)
+  })
+
+  test('polling the list is not use: it does not postpone the auto-lock', async () => {
+    const before = autoLockRemainingMs()!
+    T += 10 * 60_000
+    expect((await requireVaultStepUp('list', S)).ok).toBe(true)
+    expect(autoLockRemainingMs()!).toBeLessThan(before - 9 * 60_000)
+  })
+
+  test('extend-open: a click on this computer is enough; a remote origin must give the code', async () => {
+    expect((await requireVaultStepUp('extend-open', { ...S, loopback: true })).ok).toBe(true)
+    expect(await requireVaultStepUp('extend-open', S)).toMatchObject({ ok: false, code: 'stepup-required' })
+    expect((await requireVaultStepUp('extend-open', { ...S, code: codeAt() })).ok).toBe(true)
+    next()
+  })
+
+  test('extendAutoLock moves the clock by a whole window, audited; nothing open → null', async () => {
+    const before = autoLockRemainingMs()!
+    T += 25 * 60_000
+    expect(autoLockRemainingMs()!).toBeLessThan(before)
+    const left = extendAutoLock()
+    expect(left).toBeGreaterThan(before - 1000)
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.auto-lock-extended')
+    lockVault('user')
+    expect(extendAutoLock()).toBeNull()
+  })
+})
+
+describe('VAULT.UI2 — a provider session start prompts at most ONCE (owner, 2026-10-04: it asked twice)', () => {
+  const PURPOSE = 'engine/provider-key', NAME = 'anthropic'
+  const secrets = () => engineSecrets()
+  /** An owner machine that has done its day's first open (Hello + code), then locked: Hello alone reopens it. */
+  const warmWindow = async () => { await ownerMachine(); restart(); await coldUnlock(); lockVault('user') }
+
+  test('vault OPEN: sealing and opening the provider key raise 0 prompts', async () => {
+    await ownerMachine()
+    restart(); await coldUnlock()
+    const g0 = hello.gestures
+    const sealed = await secrets().seal(PURPOSE, NAME, new TextEncoder().encode('sk-test-NOT-A-KEY'))
+    expect(sealed.ok).toBe(true)
+    for (let i = 0; i < 3; i++) expect((await secrets().open(PURPOSE, NAME, (sealed as { sealed: Uint8Array }).sealed)).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(0)
+  })
+
+  test('vault LOCKED: the open refuses without prompting; ONE Hello opens it; every start after that is silent', async () => {
+    await warmWindow()
+    await unlockWithGesture()
+    const sealed = (await secrets().seal(PURPOSE, NAME, new TextEncoder().encode('sk-test-NOT-A-KEY'))) as { sealed: Uint8Array }
+    lockVault('user')
+    const g0 = hello.gestures
+    expect(await secrets().open(PURPOSE, NAME, sealed.sealed)).toMatchObject({ ok: false, code: 'locked' })
+    expect(hello.gestures - g0).toBe(0)                     // refusing is not prompting
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' }) // inside the per-day window: Hello alone
+    for (let i = 0; i < 3; i++) expect((await secrets().open(PURPOSE, NAME, sealed.sealed)).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(1)                     // exactly one prompt for the whole sequence
+  })
+
+  test('opening and then sending a chip with "Sempre confirmar" ON costs ONE Hello, not two', async () => {
+    await warmWindow()
+    const g0 = hello.gestures
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(true) // covered by the unlock's Hello
+    expect(hello.gestures - g0).toBe(1)
+    // the cover is single-use: the NEXT send asks again
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(2)
+  })
+
+  test('the cover dies with the lock and with time', async () => {
+    await warmWindow()
+    await unlockWithGesture()
+    lockVault('user')
+    await unlockWithGesture()
+    T += 120_000
+    const g0 = hello.gestures
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(1)
+  })
+})
+
 describe('§2.3 on the host: the counter is on disk, and 20 failures freeze (and lock)', () => {
   test('frozen → every gated action refused, the vault locked, until recover', async () => {
     const { words } = await ownerMachine()
     for (let i = 0; i < 20; i++) {
       const s = await stepUpState()
       if (s.pausedUntilMs) T = s.pausedUntilMs + 1
-      await requireVaultStepUp('list', { ...S, code: '000000' === codeAt() ? '111111' : '000000' })
+      await requireVaultStepUp('set-auto-lock', { ...S, code: '000000' === codeAt() ? '111111' : '000000' })
     }
     expect((await stepUpState()).frozen).toBe(true)
     expect(existsSync(join(vaultDir(), 'stepup.json'))).toBe(true)
@@ -239,7 +362,7 @@ describe('§2.3 on the host: the counter is on disk, and 20 failures freeze (and
     // a "restart" does not reset it (the file is read back)
     restart()
     expect((await stepUpState()).frozen).toBe(true)
-    expect(await requireVaultStepUp('list', { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'stepup-frozen' })
+    expect(await requireVaultStepUp('set-auto-lock', { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'stepup-frozen' })
     // recover lifts it into recovery mode
     expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
     expect((await stepUpState()).frozen).toBe(false)
@@ -327,7 +450,7 @@ describe('§5.1 / §12.5 auto-lock', () => {
 
 // ── the unlock policy (owner decision 2026-10-02): always / hello-only / daily (the default) ─────
 
-import { lockVault, unlockWindowAnchor } from './service'
+import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor } from './service'
 import { setUnlockPolicy, unlockPolicyView } from './gate'
 
 const H = 3_600_000
@@ -382,7 +505,7 @@ describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hel
     restart()
     await coldUnlock()
     const wrong = codeAt() === '000000' ? '111111' : '000000'
-    expect((await requireVaultStepUp('list', { ...S, code: wrong })).ok).toBe(false)
+    expect((await requireVaultStepUp('set-auto-lock', { ...S, code: wrong })).ok).toBe(false)
     expect(unlockWindowAnchor()).toBeNull()
     autoLock()
     expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
@@ -427,7 +550,7 @@ describe('unlock policy — Hello only', () => {
     next()
     restart()
     expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
-    const l = await requireVaultStepUp('list', S)
+    const l = await requireVaultStepUp('set-auto-lock', S)
     expect(!l.ok && l.code).toBe('stepup-required')
   })
 })

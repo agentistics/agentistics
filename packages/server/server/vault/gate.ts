@@ -39,6 +39,7 @@ import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
   presenceWord, presenceCandidates, presenceSoon, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
+  consumeFreshPresence,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -49,7 +50,7 @@ import { REKEY_SUFFIX, abandonRekey, finishRekey, finishRekeyIfPending, markComm
 // ── the table ────────────────────────────────────────────────────────────────────────────────
 
 export type VaultAction =
-  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock' | 'set-unlock-policy'
+  | 'unlock' | 'list' | 'lock' | 'lock-local' | 'set-auto-lock' | 'extend-open' | 'set-unlock-policy'
   | 'change-protector' | 'rekey' | 'enroll-presence' | 'disable-presence' | 'reset' | 'rotate-recovery'
   | 'enroll-runner' | 'rotate-runner' | 'enroll-authenticator' | 'add-passphrase' | 'create-recovery'
   // VAULT.PERSONAL (spec 2026-10-03-vault-personal.md §3)
@@ -59,7 +60,7 @@ export type VaultAction =
   // reveal, removing one, and loosening reveal to the code are escalations made at the desk.
   | 'mobile-passkey-add' | 'mobile-passkey-remove' | 'mobile-code-reveal'
   // VAULT.PERSONAL §8: handing secrets to an agent session is a reveal by proxy — the gesture, fresh.
-  | 'personal-grant'
+  | 'personal-grant' | 'personal-grant-open'
   // VAULT.PERSONAL backup: erase the vault's older bundles from the GitHub backup — irreversible, so code + gesture, fresh.
   | 'personal-backup-wipe'
   // VAULT.PERSONAL §10 — opening from a phone. The phone's REQUEST to be registered costs the code
@@ -72,9 +73,15 @@ export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | nu
 /** §2.4, exactly. A `Record` so a new action does not compile until its row is chosen. */
 export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   unlock: { code: true, gesture: true, grant: null },
-  list: { code: true, gesture: false, grant: 'read' },
-  lock: { code: true, gesture: false, grant: 'read' },
+  // VAULT.UI2 auth policy (owner, 2026-10-04): the vault being OPEN is the proof for metadata — opening it
+  // already cost Hello/biometrics + the code. Viewing the list asks nothing more; the authenticator code is
+  // the SECOND factor for critical actions only (open, recovery, export/restore, security settings, deleting).
+  list: { code: false, gesture: false, grant: null },
+  lock: { code: false, gesture: false, grant: null }, // locking only REDUCES exposure
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
+  // VAULT.UI2: "keep it open" — one more idle window. On this computer the vault is already open and the click
+  // is the consent (no proof); from a remote origin it costs the authenticator code, never silently.
+  'extend-open': { code: true, gesture: false, grant: null },
   // Owner decision 2026-10-02: loosening what an unlock asks is an escalation — code AND gesture, fresh.
   'set-unlock-policy': { code: true, gesture: true, grant: null },
   'lock-local': { code: false, gesture: false, grant: null },
@@ -95,21 +102,26 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   // a secret asks the gesture FRESH (owner, 2026-10-03: editing and deleting are dangerous and need
   // Windows Hello); the code may come from the grant there. Restoring a version and deleting for good
   // ask both, fresh. Reveal is its own rule (`requirePersonalReveal`): this row only draws its icons.
-  'personal-list': { code: true, gesture: false, grant: 'read' },
-  'personal-create': { code: true, gesture: false, grant: 'read' },
-  'personal-reveal': { code: true, gesture: true, grant: null },
-  'personal-edit': { code: true, gesture: true, grant: 'read' },
+  'personal-list': { code: false, gesture: false, grant: null },
+  'personal-create': { code: false, gesture: false, grant: null },
+  // Reveal and send: Hello (PC) / the passkey (phone), never the code — and only for a secret with
+  // "Sempre confirmar" ON (the default). `requirePersonalReveal` / the grants route decide per secret.
+  'personal-reveal': { code: false, gesture: true, grant: null },
+  'personal-edit': { code: false, gesture: true, grant: null },
   'personal-trash': { code: true, gesture: true, grant: 'read' },
-  'personal-restore': { code: true, gesture: true, grant: 'read' },
+  'personal-restore': { code: false, gesture: true, grant: null },
   'personal-restore-version': { code: true, gesture: true, grant: null },
   'personal-purge': { code: true, gesture: true, grant: null },
-  'personal-group-write': { code: true, gesture: false, grant: 'read' },
+  'personal-group-write': { code: false, gesture: false, grant: null },
   'personal-group-delete': { code: true, gesture: true, grant: 'read' },
-  'personal-import-env': { code: true, gesture: false, grant: 'read' },
+  'personal-import-env': { code: false, gesture: false, grant: null },
   'mobile-passkey-add': { code: true, gesture: true, grant: null },
   'mobile-passkey-remove': { code: true, gesture: true, grant: null },
   'mobile-code-reveal': { code: true, gesture: true, grant: null },
-  'personal-grant': { code: true, gesture: true, grant: 'read' },
+  // Sending secrets to a session is a reveal by proxy: Hello/biometrics when any chosen secret says "Sempre
+  // confirmar"; with every chosen secret OFF, an OPEN vault is the proof (`personal-grant-open`).
+  'personal-grant': { code: false, gesture: true, grant: null },
+  'personal-grant-open': { code: false, gesture: false, grant: null },
   'personal-backup-wipe': { code: true, gesture: true, grant: null },
   'phone-enrol-request': { code: true, gesture: false, grant: null },
   'phone-enrol-approve': { code: false, gesture: true, grant: null },
@@ -286,7 +298,16 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   const row = VAULT_ACTION_ROWS[action]
   if (!row) return refused('bad-request', 'unknown vault action')
   if (action === 'unlock') return refused('bad-request', 'unlock is the two-phase flow (completeUnlock)')
-  if (!row.code && !row.gesture) return { ok: true }
+  if (action === 'personal-grant-open') {
+    // No proof — but the vault must BE open (a locked one is the composer's one inline unlock, not a grant).
+    if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+    if (!(await ensureVaultOpen({ create: false, migrate: false }))) return refused('locked', sentence('locked'))
+    noteVaultActivity()
+    return { ok: true }
+  }
+  // Only locking passes unconditionally (it reduces exposure). A no-proof row (the list, creating, …) still
+  // refuses in recovery, when frozen and when the vault is LOCKED — it just asks nothing more of the person.
+  if (!row.code && !row.gesture && (action === 'lock' || action === 'lock-local')) return { ok: true }
   const todo = recoveryTodo()
   if (todo) {
     if (!RECOVERY_ALLOWED.has(action)) return refused('recovery-mode', sentence('recovery-mode'))
@@ -301,6 +322,11 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     if (action === 'lock') return { ok: true }
     if (action === 'reset') return resetUnopenable(ctx)
     return refused('locked', sentence('locked'))
+  }
+  // VAULT.UI2: "keep it open" on THIS computer — the vault is already open and the click is the consent.
+  if (action === 'extend-open' && ctx.loopback) {
+    noteVaultActivity()
+    return { ok: true }
   }
   if (row.code && enrolled(o.vault)) {
     if (row.grant && grantValid(ctx.grant, ctx.session, row.grant)) { /* reused */ }
@@ -319,7 +345,9 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     const g = await gestureFor(action, ctx, o)
     if (!g.ok) return g
   }
-  noteVaultActivity()
+  // A no-proof row (polled lists, the header's lock dot) is NOT use: counting it would keep an open tab's
+  // vault from ever auto-locking.
+  if (row.code || row.gesture) noteVaultActivity()
   return { ok: true }
 }
 
@@ -344,13 +372,16 @@ async function resetUnopenable(ctx: GateContext): Promise<GateResult> {
  * (a reveal that asks nothing is not a gate). Frozen, recovery mode and a locked vault refuse as the
  * table does.
  */
-export async function requirePersonalReveal(ctx: GateContext): Promise<GateResult> {
+export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: boolean } = {}): Promise<GateResult> {
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
   const state = await loadState()
   if (state.frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  const asks = revealAsks({ hasPresence: hasPresence(o.vault), hasAuthenticator: enrolled(o.vault), unlockMode: effectiveUnlockPolicy(o.vault.unlockPolicy).mode })
+  // "Sempre confirmar" OFF on this secret: the open vault is the proof (owner, 2026-10-04).
+  if (opts.confirm === false) { noteVaultActivity(); return { ok: true } }
+  // The authenticator code is never part of a reveal when a presence proof exists (Hello / passkey).
+  const asks = revealAsks({ hasPresence: hasPresence(o.vault), hasAuthenticator: enrolled(o.vault), unlockMode: 'daily' })
   if (asks.blocked) {
     return refused('reveal-needs-setup', vaultLang() === 'pt'
       ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
@@ -378,7 +409,7 @@ export async function requirePersonalReveal(ctx: GateContext): Promise<GateResul
     const c = await checkCodeWith(o.dek, o.kid, ctx.code)
     if (!c.ok) return c
   }
-  if (asks.gesture) { const g = await proveGesture(o); if (!g.ok) return g }
+  if (asks.gesture && !(ctx.loopback && consumeFreshPresence())) { const g = await proveGesture(o); if (!g.ok) return g }
   noteVaultActivity()
   return { ok: true }
 }
@@ -390,6 +421,8 @@ export async function requirePersonalReveal(ctx: GateContext): Promise<GateResul
  * and to exactly this action and target (VAULT.PERSONAL §7).
  */
 async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<{ ok: true } | Refusal> {
+  // The Hello that just opened the vault covers the ONE send that follows it (single-use, 90 s).
+  if (action === 'personal-grant' && ctx.loopback && consumeFreshPresence()) return { ok: true }
   if (action.startsWith('personal-') && !ctx.loopback && !fromSocket(ctx)) {
     if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
     return refused('mobile-gesture-required', vaultLang() === 'pt'
@@ -401,7 +434,7 @@ async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */
 export async function stepUpForRead(code: string, session: string): Promise<GateResult> {
-  return requireVaultStepUp('list', { code, session })
+  return requireVaultStepUp('set-auto-lock', { code, session })
 }
 
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */

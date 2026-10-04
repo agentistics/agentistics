@@ -43,7 +43,16 @@ export interface PersonalMeta {
   updatedAt: string
   version: number
   deletedAt: string | null
+  /**
+   * "Sempre confirmar" (owner, 2026-10-04): ask Windows Hello / the phone's biometrics on EVERY reveal and
+   * every send to a session, even with the vault open. ABSENT READS AS ON — every existing secret has it
+   * and every new one starts with it; only an explicit `false` goes without the prompt (and writing that
+   * `false` is itself an edit, which asks the gesture).
+   */
+  confirmEach?: boolean
 }
+/** One reading of the flag, so "absent" can never be interpreted two ways. */
+export const needsConfirm = (m: Pick<PersonalMeta, 'confirmEach'>): boolean => m.confirmEach !== false
 export interface PersonalValue { v: 1; fields: Record<string, string> }
 export interface PersonalGroup { v: 1; id: string; name: string; createdAt: string; updatedAt: string; version: number }
 
@@ -92,6 +101,7 @@ export interface PersonalInput {
   notes?: string
   url?: string
   fields?: Record<string, string>
+  confirmEach?: boolean
 }
 
 export type Invalid = { ok: false; field: string; reason: 'required' | 'too-long' | 'bad-kind' | 'bad-field' | 'bad-group' | 'too-many' }
@@ -142,7 +152,8 @@ export function validateInput(x: unknown, opts: { requireFields: boolean }): { o
     const main = kind === 'login' ? ['password'] : KIND_FIELDS[kind]
     for (const k of main) if (!f[k]) return { ok: false, field: `fields.${k}`, reason: 'required' }
   }
-  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(fields ? { fields } : {}) } }
+  if (o.confirmEach !== undefined && typeof o.confirmEach !== 'boolean') return { ok: false, field: 'confirmEach', reason: 'bad-field' }
+  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(fields ? { fields } : {}), ...(typeof o.confirmEach === 'boolean' ? { confirmEach: o.confirmEach } : {}) } }
 }
 
 export function validGroupName(x: unknown): string | null {

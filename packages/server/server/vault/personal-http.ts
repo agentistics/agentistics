@@ -6,7 +6,7 @@
  * `personal.test.ts` seals a marker and drives every route to prove it.
  */
 import { readJsonLimited } from '../limits'
-import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
+import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, needsConfirm, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
 import * as gate from './gate'
 import * as store from './personal'
 import * as mobile from './mobile'
@@ -100,7 +100,8 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const id = typeof b.id === 'string' ? b.id : '', field = typeof b.field === 'string' ? b.field : ''
     const version = b.version === undefined ? undefined : ver(b.version)
     if (!ITEM_ID.test(id) || !field || version === null) return reply(bad())
-    const g = await gate.requirePersonalReveal({ session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` })
+    const meta = await store.latestMeta(id)
+    const g = await gate.requirePersonalReveal({ session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` }, { confirm: meta ? needsConfirm(meta) : true })
     if (!g.ok) return reply(g)
     const r = await store.revealField(id, field, version)
     if (!r.ok) return reply(storeFail(r))
@@ -217,7 +218,9 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const ids = Array.isArray(b.itemIds) ? b.itemIds.filter((x): x is string => typeof x === 'string' && ITEM_ID.test(x)).slice(0, 100) : []
     const gids = Array.isArray(b.groupIds) ? b.groupIds.filter((x): x is string => typeof x === 'string' && GROUP_ID.test(x)).slice(0, 50) : []
     if (!sid || (ids.length === 0 && gids.length === 0)) return reply(bad())
-    const g = await step('personal-grant', b, sid)
+    // Per secret: any chosen secret with "Sempre confirmar" ON (the default) asks Hello/biometrics.
+    const chosen = (await store.listItems()).filter(m => !m.deletedAt && (ids.includes(m.id) || (m.groupId !== null && gids.includes(m.groupId))))
+    const g = await step(chosen.some(needsConfirm) ? 'personal-grant' : 'personal-grant-open', b, sid)
     if (!g.ok) return reply(g)
     const r = await grants.grantSession(sid, ids, gids)
     if (!r.ok) return reply(fail(r.code === 'grant-empty' ? 'grant-empty' : 'not-found', 'Nothing to grant: the chosen secrets no longer exist.', 'Nada a liberar: os segredos escolhidos não existem mais.'))

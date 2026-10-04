@@ -52,7 +52,7 @@ async function readMeta(id: string, v: number): Promise<PersonalMeta | null> {
 async function readValue(id: string, v: number): Promise<PersonalValue | null> {
   return openJson<PersonalValue>(file(itemDir(id), v, 'value'), id, v, 'value')
 }
-async function latestMeta(id: string): Promise<PersonalMeta | null> {
+export async function latestMeta(id: string): Promise<PersonalMeta | null> {
   const vs = await versionsIn(itemDir(id))
   for (let i = vs.length - 1; i >= 0; i--) { const m = await readMeta(id, vs[i]!); if (m) return m }
   return null
@@ -91,10 +91,12 @@ export async function listVersions(id: string): Promise<PersonalMeta[] | StoreFa
   return out
 }
 
-function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string }, fields: string[], deletedAt: string | null = null): PersonalMeta {
+function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string; confirmEach?: boolean }, fields: string[], deletedAt: string | null = null): PersonalMeta {
   return {
     v: 1, id: base.id, kind: input.kind, name: input.name, groupId: input.groupId ?? null, tags: input.tags ?? [], notes: input.notes ?? '',
     url: input.url ?? '', fields, createdAt: base.createdAt, updatedAt: iso(), version: base.version, deletedAt,
+    // Always written explicitly from here on; an older record without it still reads as ON (`needsConfirm`).
+    confirmEach: input.confirmEach ?? base.confirmEach ?? true,
   }
 }
 const presentFields = (kind: PersonalMeta['kind'], f: Record<string, string>) => KIND_FIELDS[kind].filter(k => typeof f[k] === 'string' && f[k] !== '')
@@ -126,7 +128,7 @@ export async function editItem(id: string, expectedVersion: number, input: Perso
     const v = input.fields?.[k] ?? (input.kind === m.kind ? prev.fields[k] : undefined)
     if (typeof v === 'string') fields[k] = v
   }
-  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt }, presentFields(input.kind, fields), m.deletedAt)
+  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt, confirmEach: m.confirmEach !== false }, presentFields(input.kind, fields), m.deletedAt)
   await writeVersion(meta, { v: 1, fields })
   return { ok: true, meta }
 }
