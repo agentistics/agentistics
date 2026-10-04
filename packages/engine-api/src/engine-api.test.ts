@@ -140,8 +140,7 @@ describe('ES.6h — the typed code host (1.8)', () => {
     resume: async () => ({ ok: false as const, sentence: 'x' }), subscribe: () => () => {}, submit: () => ({ ok: true as const }),
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
-  test('the engine-api is 1.8 and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.8.0')
+  test('a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()
@@ -154,5 +153,17 @@ describe('ES.6h — the typed code host (1.8)', () => {
   test('apiCompatible: an engine built against 1.7 loads on a 1.8 host, and the reverse is refused', () => {
     expect(apiCompatible('1.8.0', '1.7.0')).toBe(true)
     expect(apiCompatible('1.7.0', '1.8.0')).toBe(false)
+  })
+})
+
+describe('MKT.UI — the marketplace prefix (1.9)', () => {
+  test('the engine-api is 1.9 and /api/marketplace is reserved', () => {
+    expect(ENGINE_API_VERSION).toBe('1.9.0')
+    expect(isReservedPrefix('/api/marketplace')).toBe(true)
+    expect(isReservedPrefix('/api/marketplace/index')).toBe(false)
+  })
+  test('apiCompatible: a 1.8 engine loads on a 1.9 host, and the reverse is refused', () => {
+    expect(apiCompatible('1.9.0', '1.8.0')).toBe(true)
+    expect(apiCompatible('1.8.0', '1.9.0')).toBe(false)
   })
 })

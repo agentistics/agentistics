@@ -150,6 +150,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/v1/logs', 'localTranscripts'],
   ['/v1/metrics', 'localTranscripts'],
   ['/v1/traces', 'localTranscripts'],
+  // MKT.UI: the marketplace (engine route) installs into the native harness's catalogue on THIS
+  // machine — a downloaded package's skills, agents and permission profiles. Host power: `localShell`.
+  ['/api/marketplace', 'localShell'],
 ]
 
 /** One registration, as `registeredRoutes()` reports it. */

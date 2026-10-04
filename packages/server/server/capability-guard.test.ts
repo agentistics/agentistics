@@ -313,6 +313,7 @@ describe("the engine's reserved prefixes", () => {
       '/v1/logs': 'localTranscripts',
       '/v1/metrics': 'localTranscripts',
       '/v1/traces': 'localTranscripts',
+      '/api/marketplace': 'localShell',
     })
   })
 })

@@ -84,7 +84,13 @@
  * (B9.1) and `NativeSessionUsage.byModel` (H24). All optional: a 1.7 engine never reads them, and a
  * 1.8 engine on an older host runs without memory, artifacts index or vault references.
  */
-export const ENGINE_API_VERSION = '1.8.0'
+/**
+ * 1.9.0 — MKT.UI: `/api/marketplace` joins `RESERVED_PREFIXES` (guarded `localShell`), the web door
+ * onto the installer the `code` verb already runs. A minor bump: an engine registers that prefix only
+ * on a host that speaks 1.9 (an older host refuses an unreserved prefix at load), and a 1.8 engine
+ * still loads here without offering it.
+ */
+export const ENGINE_API_VERSION = '1.9.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

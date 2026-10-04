@@ -8,7 +8,7 @@ describe('the native harness and providers are experimental (owner, 2026-10-03)'
     expect(nativeExperimentalOn({ AGENTISTICS_PROVIDER: '0' })).toBe(false)
   })
   test('off: the native and provider routes are a 403 "experimental" naming the command; others pass', () => {
-    for (const p of ['/api/runtime/sessions', '/api/runtime/sessions/ses_x/messages', '/api/provider', '/api/provider/anthropic/models']) {
+    for (const p of ['/api/runtime/sessions', '/api/runtime/sessions/ses_x/messages', '/api/provider', '/api/provider/anthropic/models', '/api/marketplace', '/api/marketplace/install']) {
       expect(nativeGateRefusal(p, false)).toMatchObject({ status: 403, body: { error: 'experimental' } })
     }
     expect(nativeGateRefusal('/api/runtime/metrics', false)).toBeNull()

@@ -61,6 +61,12 @@ export const RESERVED_PREFIXES = [
   '/v1/metrics',
   /** 1.7 (A5.2): OTLP spans — a harness's traces reach the engine's receiver like its logs. */
   '/v1/traces',
+  /**
+   * 1.9 (MKT.UI): the marketplace — the web door onto the SAME installer `agentop code install` runs
+   * (browse the signed index, the trust screen, install / update / uninstall, the lock). Host power:
+   * it writes the native harness's catalogue, so the host guards it `localShell`.
+   */
+  '/api/marketplace',
 ] as const
 
 export type ReservedPrefix = (typeof RESERVED_PREFIXES)[number]

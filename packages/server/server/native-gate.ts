@@ -15,8 +15,9 @@ import { providerFlagOn } from './config'
 /** The native runtime's harness id in the journal and the projections. */
 export const NATIVE_HARNESS = 'agentistics'
 
-/** The engine prefixes that belong to the native harness and the providers. */
-export const NATIVE_PREFIXES = ['/api/runtime/sessions', '/api/provider'] as const
+/** The engine prefixes that belong to the native harness and the providers. The marketplace installs
+ *  into the native harness's catalogue, so it is gated with it (MKT.UI). */
+export const NATIVE_PREFIXES = ['/api/runtime/sessions', '/api/provider', '/api/marketplace'] as const
 
 export function nativeExperimentalOn(env: Record<string, string | undefined> = process.env): boolean {
   return providerFlagOn(env)
