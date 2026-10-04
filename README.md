@@ -60,7 +60,7 @@ It tracks **six harnesses** side by side:
 |---|---|---|---|---|
 | **Claude Code** | `~/.claude/` | ✅ | ✅ | The deepest source — agent invocations, git line counts, workflow runs |
 | **Codex CLI** | `~/.codex/sessions/` | ✅ | — | |
-| **Gemini CLI** | `~/.gemini/tmp/` | — | — | Local files carry no token data |
+| **Gemini CLI** | `~/.gemini/tmp/` | ✅ | — | Tokens, cost and model from its `chats/*.json` sessions; bootstrap-only stubs are skipped |
 | **GitHub Copilot CLI** | `~/.copilot/session-state/` | ✅ | — | MCP tool calls counted |
 | **Antigravity (`agy`)** | `~/.gemini/antigravity-cli/` | ✅ | — | Decoded from its own protobuf blobs; edit deltas for lines changed |
 | **Kimi Code** | `~/.kimi-code/sessions/` | ✅ | — | Routes to other providers; priced by the routed model |

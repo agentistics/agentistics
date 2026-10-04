@@ -321,8 +321,8 @@ export default function PricingSettings() {
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 6 }}>
             {pt
-              ? 'Nenhuma fonte lista estes modelos, então eles usam a tarifa padrão: o custo deles é aproximação, não cálculo.'
-              : 'No source lists these models, so they fall back to the default rate: their cost is an approximation, not a calculation.'}
+              ? 'Nenhuma fonte lista estes modelos, então o custo deles aparece como desconhecido — nunca é estimado com a tarifa de outro modelo.'
+              : 'No source lists these models, so their cost shows as unknown — it is never estimated from another model\'s rate.'}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {unpriced.map(m => <code key={m} style={{ fontSize: 11.5 }}>{m}</code>)}

@@ -278,8 +278,8 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
       {
         item: { en: 'Prices for Kimi\'s own models', pt: 'Preços dos modelos próprios do Kimi' },
         why: {
-          en: 'Routed provider models (google/…, etc.) price correctly. Kimi-native `kimi-*` ids are not in the pricing table yet, so — like any unknown id on any harness — they would take the shared fallback rate until verified prices are added.',
-          pt: 'Modelos roteados de provedores (google/…, etc.) são precificados corretamente. Os ids nativos `kimi-*` ainda não estão na tabela, então — como qualquer id desconhecido em qualquer harness — usariam a tarifa padrão até que preços verificados sejam adicionados.',
+          en: 'Routed provider models (google/…, etc.) price correctly. Kimi-native `kimi-*` ids are not in the pricing table yet, so — like any unknown id on any harness — their cost shows as unknown (never guessed) until verified prices are added.',
+          pt: 'Modelos roteados de provedores (google/…, etc.) são precificados corretamente. Os ids nativos `kimi-*` ainda não estão na tabela, então — como qualquer id desconhecido em qualquer harness — têm o custo mostrado como desconhecido (nunca estimado) até que preços verificados sejam adicionados.',
         },
       },
       {
