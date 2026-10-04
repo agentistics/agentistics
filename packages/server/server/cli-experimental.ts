@@ -65,8 +65,7 @@ export function statusLines(pref: boolean | undefined, rows: ExperimentalStatus[
 }
 
 /** The running server's own answer, when there is one (`GET /api/experimental`). */
-async function askServer(): Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null> {
-  const port = process.env.PORT ?? '47291'
+async function askServer(port: string | number = process.env.PORT ?? '47291'): Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/experimental`, { signal: AbortSignal.timeout(2000) })
     if (!res.ok) return null
@@ -74,10 +73,22 @@ async function askServer(): Promise<{ enabled: boolean; features: ExperimentalSt
   } catch { return null }
 }
 
-async function waitForState(enabled: boolean, timeoutMs = 25000): Promise<boolean> {
+/** The port THIS data dir's server listens on (its recorded ports, while it holds the lock), else `PORT`. */
+async function ownServerPort(): Promise<number> {
+  const { AGENTISTICS_DATA_DIR, PORT, WEB_PORT, serverLockFile } = await import('./config')
+  const { probeInstanceLock } = await import('./single-instance')
+  const { bounceTarget, readServerPorts } = await import('./server-ports')
+  const t = bounceTarget({
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    recorded: await readServerPorts(AGENTISTICS_DATA_DIR), cliPort: PORT, cliWebPort: WEB_PORT,
+  })
+  return t.kind === 'server' ? t.port : PORT
+}
+
+async function waitForState(enabled: boolean, port: number, timeoutMs = 25000): Promise<boolean> {
   const end = Date.now() + timeoutMs
   while (Date.now() < end) {
-    const r = await askServer()
+    const r = await askServer(port)
     if (r && r.enabled === enabled) return true
     await new Promise(res => setTimeout(res, 1000))
   }
@@ -93,7 +104,7 @@ export async function runExperimental(args: string[]): Promise<number> {
     return 1
   }
   if (verb === 'status') {
-    const live = await askServer()
+    const live = await askServer(await ownServerPort())
     if (live) {
       console.log(statusLines(live.enabled, live.features, lang).join('\n'))
       return 0
@@ -112,7 +123,7 @@ export async function runExperimental(args: string[]): Promise<number> {
   if (r.state === 'nothing-running') { console.log(t.nothingRunning); return 0 }
   if (r.state === 'failed') { console.error(t.failed(r.message)); return 1 }
   console.log(t.restarting)
-  if (await waitForState(enabled)) { console.log(t.back); return 0 }
+  if (await waitForState(enabled, r.port)) { console.log(t.back); return 0 }
   console.error(t.notBack)
   return 1
 }

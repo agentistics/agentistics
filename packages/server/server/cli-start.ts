@@ -37,7 +37,7 @@ import { join } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
-import { homedir, platform } from 'node:os'
+import { homedir, platform, userInfo } from 'node:os'
 import {
   DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type HarnessId, type TeamConnection,
@@ -989,9 +989,12 @@ function serverReinvocation(): string {
 }
 
 /** Detach a server into the background. Silent: the caller is the one that knows whether it may
- *  print (the control center reports through the status line instead). Returns the log path. */
-function startBackground(): string {
-  const child = spawn('sh', ['-c', `nohup ${serverReinvocation()} >> "${SERVER_LOG}" 2>&1 &`], { stdio: 'ignore', detached: true })
+ *  print (the control center reports through the status line instead). Returns the log path.
+ *  `env` overrides (the ports of the data dir's own server, `bounceOwnServer`) join this process's. */
+function startBackground(env?: Record<string, string>): string {
+  const child = spawn('sh', ['-c', `nohup ${serverReinvocation()} >> "${SERVER_LOG}" 2>&1 &`], {
+    stdio: 'ignore', detached: true, ...(env ? { env: { ...process.env, ...env } } : {}),
+  })
   child.unref()
   return SERVER_LOG
 }
@@ -1309,22 +1312,66 @@ export async function restartNativeServer(
  * answer — the caller persisted a preference and there is no process to apply it to, which is not a
  * failure and must not be reported as a restart that never happened.
  */
-export async function restartForConfigChange(): Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string }> {
+export async function restartForConfigChange(): Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string; port: number }> {
   const s = cliStrings(await resolveLang())
   const { unitInstalled } = await import('./autostart')
-  const targets = await runningRuntimes()
-  const unit = await unitInstalled('server')
-  if (targets.length === 0 && !unit) return { state: 'nothing-running', message: s.nothingRunning }
+  const { bounceTarget, isOwnersStore, readServerPorts } = await import('./server-ports')
+  // THIS data dir's server — the holder of its lock, on the ports it recorded — never whatever
+  // answers on the default port. The service unit is the OWNER's store's; no other data dir bounces it.
+  const owners = isOwnersStore(AGENTISTICS_DATA_DIR, ownerHome())
+  const unit = owners && await unitInstalled('server')
+  const target = bounceTarget({
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    recorded: await readServerPorts(AGENTISTICS_DATA_DIR),
+    cliPort: PORT, cliWebPort: WEB_PORT,
+  })
+  const docker = owners ? (await runningRuntimes()).filter(t => t !== 'local') : []
+  if (target.kind === 'none' && !unit && docker.length === 0) return { state: 'nothing-running', message: s.nothingRunning, port: PORT }
   let ok = true
   let message = s.restartedDone
-  if (targets.includes('local') || unit) {
+  let port = PORT
+  if (unit || (target.kind === 'server' && target.port === PORT)) {
     const r = await restartNativeServer(false)
     ok = r.ok && ok
     message = r.message
+  } else if (target.kind === 'server') {
+    const r = await bounceOwnServer(target)
+    ok = r.ok && ok
+    message = r.ok ? s.restartedDone : s.localStartFailed
+    port = target.port
   }
-  const docker = targets.filter(t => t !== 'local')
   if (docker.length > 0) ok = (await restartRuntimes(s, docker, {})) && ok
-  return { state: ok ? 'restarted' : 'failed', message }
+  return { state: ok ? 'restarted' : 'failed', message, port }
+}
+
+/** The account's own home (`os.userInfo()`), which an overridden `HOME` does not move. */
+function ownerHome(): string {
+  try { return userInfo().homedir } catch { return homedir() }
+}
+
+/**
+ * Bounce the data dir's own server when it listens on other ports than this CLI's: signal ONLY the
+ * lock holder, start a new server with ITS ports, and wait until a different process answers there.
+ */
+async function bounceOwnServer(t: { pid: number; port: number; webPort: number }): Promise<{ ok: boolean }> {
+  await sh(['kill', String(t.pid)])
+  for (let i = 0; i < 40; i++) {
+    const held = await probeInstanceLock(serverLockFile()).catch(() => null)
+    if (held !== t.pid) break
+    await sleep(150)
+  }
+  startBackground({ PORT: String(t.port), WEB_PORT: String(t.webPort) })
+  for (let i = 0; i < 60; i++) {
+    const held = await probeInstanceLock(serverLockFile()).catch(() => null)
+    if (held !== null && held !== t.pid) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${t.port}/api/health`, { signal: AbortSignal.timeout(600) })
+        if (res.ok) return { ok: true }
+      } catch { /* still booting */ }
+    }
+    await sleep(250)
+  }
+  return { ok: false }
 }
 
 export async function restartAllServices(rebuild = false, flags: RebuildFlags = {}): Promise<number> {

@@ -4563,6 +4563,10 @@ const scheduleBackfillCheck = () => {
 }
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
 console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
+// Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
+// restarts THIS server on its own ports, never whatever answers on the default one (`server-ports.ts`).
+void import('./server-ports').then(m => m.recordServerPorts(AGENTISTICS_DATA_DIR, { pid: process.pid, port: PORT, webPort: WEB_PORT }))
+  .catch(err => console.error('[boot] could not record the server ports:', err instanceof Error ? err.message : String(err)))
 
 // B4.6: the machine-local door to the engine's native runtime (`runtime-socket.ts`): `agentop code`
 // on this machine drives sessions HOSTED here through it. Bound only when the engine asks for it and
