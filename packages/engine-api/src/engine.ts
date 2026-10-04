@@ -31,7 +31,7 @@ export interface EngineRequestContext {
   /** The peer address the host's own rate limits and audit use. */
   clientIp: string
   /**
-   * B4.6 (1.7, optional): the door the request came through — the TCP port every surface uses, or the
+   * B4.6 (1.8, optional): the door the request came through — the TCP port every surface uses, or the
    * machine-local unix socket (`<dataDir>/run/runtime.sock`, 0600) a terminal client uses. Absent: tcp.
    */
   transport?: 'tcp' | 'unix'
@@ -46,7 +46,7 @@ export interface EngineRoute {
   /** `null` = not mine; the host answers 404. */
   handle(req: Request, url: URL, ctx?: EngineRequestContext): Promise<Response | null>
   /**
-   * B4.6 (1.7, optional): may this route also be served on the machine-local unix socket? Only a route
+   * B4.6 (1.8, optional): may this route also be served on the machine-local unix socket? Only a route
    * that says so is reachable there; the host binds the socket only when some route does.
    */
   localSocket?: boolean

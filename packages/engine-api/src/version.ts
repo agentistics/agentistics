@@ -77,7 +77,7 @@
  * 1.8 engine loads on an older host (it offers no references there) and an older engine never reads it.
  * Also (the native harness queue, B6/ART/H24): `journal.readRare` (ART.2, the artifact store's index),
  * `memory` (B6.6), `serverOrigins` (B6.4, the browser never drives the host's own API), `environment`
- * (B8.8, the names a declaration references), the `reasoning` part of a stored assistant message
+ * (B8.8, the names a declaration references), the route `transport` / `localSocket` (B4.6), the `reasoning` part of a stored assistant message
  * (B9.1) and `NativeSessionUsage.byModel` (H24). All optional: a 1.7 engine never reads them, and a
  * 1.8 engine on an older host runs without memory, artifacts index or vault references.
  */
