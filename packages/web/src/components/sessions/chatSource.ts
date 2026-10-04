@@ -25,6 +25,8 @@ export interface ChatSource {
   working: boolean
   /** The model's own in-flight text — exact, so it is drawn as a bubble (unlike a screen scrape). */
   liveText: string | null
+  /** The in-flight turn's reasoning, folded above the live text (`ReasoningBlock`). */
+  liveReasoning?: string | null
   /** Tools running right now, for the standard working note. */
   runningTools?: { name: string; detail?: string }[]
   /** Every verb the chat performs: `prompt`, `interrupt`, `approve`. */

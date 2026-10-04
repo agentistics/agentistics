@@ -64,6 +64,7 @@ export function nativeChatTurns(items: readonly NativeChatItem[], lang: 'pt' | '
     const turn: ChatTurn = { role: i.turn.role, text: i.stopped ? `${text}\n\n${STOPPED[lang]}` : text }
     if (i.turn.at) turn.at = i.turn.at
     if (i.turn.thinking) turn.thinking = i.turn.thinking
+    if (i.turn.reasoning) turn.reasoning = i.turn.reasoning
     out.push(turn)
   }
   flushTools()
@@ -73,6 +74,12 @@ export function nativeChatTurns(items: readonly NativeChatItem[], lang: 'pt' | '
 /** The model's in-flight text, or null — the native counterpart of the CLI's screen-read live turn. */
 export function nativeLiveText(items: readonly NativeChatItem[]): string | null {
   for (const i of items) if (i.kind === 'turn' && i.key === 'live' && i.turn.text.trim() !== '') return i.turn.text
+  return null
+}
+
+/** The in-flight turn's REASONING (its own channel), or null — folded above the live text. */
+export function nativeLiveReasoning(items: readonly NativeChatItem[]): string | null {
+  for (const i of items) if (i.kind === 'turn' && i.key === 'live' && i.turn.reasoning?.trim()) return i.turn.reasoning
   return null
 }
 

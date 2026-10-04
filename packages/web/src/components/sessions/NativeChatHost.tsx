@@ -17,7 +17,7 @@ import { NativeRunsStrip } from './NativeRunsStrip'
 import type { ChatAct, ChatSource } from './chatSource'
 import { useNativeSession } from '../../hooks/useNativeSession'
 import { nativeChatItems } from '../../lib/nativeChat'
-import { nativeAsks, nativeChatTurns, nativeLiveText, nativeRunningTools, nativeSendParts } from '../../lib/nativeChatSource'
+import { nativeAsks, nativeChatTurns, nativeLiveReasoning, nativeLiveText, nativeRunningTools, nativeSendParts } from '../../lib/nativeChatSource'
 import { nativeAct } from '../../lib/nativeFleet'
 
 export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
@@ -54,6 +54,7 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
     ...(state.window === null && loadError ? { unavailable: loadError } : {}),
     working: state.running,
     liveText: nativeLiveText(items),
+    liveReasoning: nativeLiveReasoning(items),
     runningTools: nativeRunningTools(items),
     act,
     canStop: state.runId !== undefined,

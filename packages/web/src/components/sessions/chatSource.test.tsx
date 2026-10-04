@@ -57,3 +57,19 @@ describe('SessionChat with a ChatSource', () => {
     expect(html).not.toContain('streaming words')
   })
 })
+
+describe('ReasoningBlock — the native reasoning, collapsed above the answer', () => {
+  test('closed by default: the label shows, the reasoning text does not, the answer does', async () => {
+    const { ChatBubble } = await import('./ChatBubble')
+    const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'The answer.', reasoning: 'secret plan' }} lang="pt" harness="agentistics" /></MemoryRouter>)
+    expect(html).toContain('Raciocínio')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('secret plan')
+    expect(html).toContain('The answer.')
+  })
+  test('the CLI transcript\'s `thinking` is still not drawn (that decision is untouched)', async () => {
+    const { ChatBubble } = await import('./ChatBubble')
+    const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'ok', thinking: 'claude thought' }} lang="en" harness="claude" /></MemoryRouter>)
+    expect(html).not.toContain('reasoning-block')
+  })
+})

@@ -73,12 +73,14 @@ export type NativeFrame =
   | { kind: 'hello'; sessionId: string; cursor: number; protocol: number }
   | { kind: 'event'; seq: number; event: { type: string; runId?: string; data?: Record<string, unknown> } }
   | { kind: 'delta'; seq: number; runId?: string; text: string }
+  /** TOOLS-NATIVE item 5: the model's reasoning, on its own channel — never answer text. */
+  | { kind: 'reasoning'; seq: number; runId?: string; text: string }
   | { kind: 'ask'; seq: number; question: NativeQuestion }
   | { kind: 'ask-closed'; seq: number; questionId: string; outcome: string }
   | { kind: 'gap'; missed: number; resumeAt: number }
   | { kind: 'closed'; reason: string }
 
-const KINDS = new Set(['hello', 'event', 'delta', 'ask', 'ask-closed', 'gap', 'closed'])
+const KINDS = new Set(['hello', 'event', 'delta', 'reasoning', 'ask', 'ask-closed', 'gap', 'closed'])
 
 export function parseNativeFrame(raw: string): NativeFrame | null {
   try {
@@ -113,6 +115,12 @@ export interface NativeChatState {
   runId?: string
   /** Text streamed by the model call in flight. */
   liveText: string
+  /**
+   * The REASONING streamed by the latest run (the `reasoning` channel). Not persisted by the engine,
+   * so it is the latest run's only, for as long as this page holds it; a fresh read has none — never
+   * invented back.
+   */
+  reasoning?: { runId?: string; text: string }
   calls: Record<string, LiveCall>
   /** toolUseId → toolExecutionId, ACCUMULATED from every window read (each names only its latest run). */
   execByUse: Record<string, string>
@@ -169,6 +177,10 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   const next: NativeChatState = { ...s, lastSeq: f.seq }
 
   if (f.kind === 'delta') return { ...next, liveText: next.liveText + f.text }
+  if (f.kind === 'reasoning') {
+    const same = next.reasoning && next.reasoning.runId === f.runId
+    return { ...next, reasoning: { ...(f.runId ? { runId: f.runId } : {}), text: (same ? next.reasoning!.text : '') + f.text } }
+  }
 
   if (f.kind === 'ask') return { ...next, asks: { ...next.asks, [f.question.id]: f.question } }
   if (f.kind === 'ask-closed') {
@@ -181,7 +193,7 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   const tx = typeof data.toolExecutionId === 'string' ? data.toolExecutionId : undefined
   switch (type) {
     case 'run.started': {
-      const { stopped: _s, ...rest } = next
+      const { stopped: _s, reasoning: _r, ...rest } = next
       return { ...rest, running: true, ...(runId ? { runId } : {}), liveText: '' }
     }
     case 'run.ended': {
@@ -432,8 +444,21 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
 
   if (s.stopped !== undefined) items.push({ kind: 'turn', key: 'stopped', stopped: true, turn: { role: 'assistant', text: s.stopped } })
 
+  const reasoning = s.reasoning?.text.trim() ? s.reasoning.text : undefined
   if (s.liveText !== '' && !persisted(w, s.liveText)) {
-    items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: s.liveText, pending: true } })
+    items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: s.liveText, pending: true, ...(reasoning ? { reasoning } : {}) } })
+  } else if (reasoning) {
+    // The latest run's answer is persisted (or not written yet): its reasoning folds above the LAST
+    // assistant text after the person's latest message — that run's answer. While the run is still
+    // thinking and nothing is written, it is the live turn on its own.
+    const lastUser = items.findLastIndex(i => i.kind === 'turn' && i.turn.role === 'user')
+    const at = items.findLastIndex((i, n) => n > lastUser && i.kind === 'turn' && i.turn.role === 'assistant' && i.key !== 'stopped')
+    if (at >= 0) {
+      const it = items[at] as Extract<NativeChatItem, { kind: 'turn' }>
+      items[at] = { ...it, turn: { ...it.turn, reasoning } }
+    } else if (s.running) {
+      items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: '', pending: true, reasoning } })
+    }
   }
 
   for (const q of asks) if (!usedAsks.has(q.id)) items.push({ kind: 'approval', key: `q${q.id}`, ask: toAsk(q) })

@@ -2220,8 +2220,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
-          {source?.liveText && (
-            <ChatBubble turn={{ role: 'assistant', text: source.liveText }} lang={lang} harness={session.harness} />
+          {(source?.liveText || source?.liveReasoning) && (
+            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} />
           )}
 
           {showWorking && (
