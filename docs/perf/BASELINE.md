@@ -79,3 +79,25 @@ When measured:
 - two orphaned `bun … cli.ts mcp`: 88 MB each, 25 min old.
 
 Swap was 8.08 of 8 GB. Every number on the real machine includes paging.
+
+## After PERF.1 (same synthetic home, same scripts)
+
+| what | before | after | commit |
+|---|---|---|---|
+| harness writes the answer → chat shows it (70 MB session) | 1631 ms | 74–86 ms | 0bbb0d23 (chat pushed over SSE) |
+| same, 8 MB session, p95 | 5192 ms | 54 ms | 0bbb0d23 |
+| in-flight answer on screen, p50 | 304–351 ms | 196–216 ms | 983d71d4 (capture follows a changing screen) |
+| chat requests while the stream is healthy | 1 fleet walk + whole transcript every 3 s | none | 0bbb0d23 |
+| first render of a 400-turn chat (React work) | 165 ms | 34 ms | c277d877 (end first, older on scroll) |
+| list a project's sessions (40 projects, warm) | 1179 ms | 20 ms | 9513b558 (parse once, then new lines) |
+| open a 70 MB history | 173 ms, 9 MB | 13 ms; paged ~1 ms, 40 KB | 9513b558 |
+| transcript append → `change` | 2006 ms, then a STALE refetch | 601 ms, refetch holds the new data | be34ff3d |
+| `/api/data` warm | 67 ms | 24 ms | be34ff3d (serialised once per build) |
+| server RSS, 12-min soak | — | 280–600 MB, no upward trend | 7e40ba64 (`[mem]` sampler, soak.ts) |
+
+**Budgets in CI** (`scripts/perf/budget.ts`, `budgets.json`, job `perf-budgets`): boot, first and warm
+`/api/data`, a paged history open and its size, a change reaching the dashboards, and a live chat (open,
+send → echo, answer → shown). They run over a synthetic home at `--scale 0.1`.
+
+**Still open:** the real machine's first `/api/data` (30–78 s) against ~1 s synthetic. The `[data]` phase
+line (32c57900) names its slow phase on the service's next restart.
