@@ -116,6 +116,7 @@ import { SessionPickModal } from './SessionPickModal'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
+import type { SessionStats } from '../../lib/sessionStats'
 import type { ChatSource } from './chatSource'
 import { ConfirmModal } from '../../pages/settings/primitives'
 
@@ -167,6 +168,8 @@ export interface SessionComposerMetrics {
   /** Open the full reading — the aside's own Metrics tab. Absent when the store has no record of
    *  this conversation, the same fact that decides whether that tab exists at all. */
   onOpenFull?: () => void
+  /** The card's figures already computed (a NATIVE session's engine usage) — see `SessionStatsMenu`. */
+  stats?: SessionStats
 }
 
 export interface SessionChatProps {
@@ -3169,6 +3172,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     harness={session.harness}
                     sessionId={session.conversationId ?? session.id}
                     meta={metrics.meta}
+                    {...(metrics.stats ? { stats: metrics.stats } : {})}
                     lang={lang}
                     currency={metrics.currency}
                     brlRate={metrics.brlRate}

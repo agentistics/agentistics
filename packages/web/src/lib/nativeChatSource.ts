@@ -11,9 +11,9 @@
  * this file is the native half of it, kept pure so it can be pinned:
  *
  *   - `nativeChatTurns`  the engine's items -> `ChatTurn[]`, the shape `ChatBubble` already draws.
- *                        Tool calls become the chip row a CLI assistant turn carries (`tools`), with
- *                        a status word only when the call did NOT simply complete — the CLI path
- *                        never claims one either. A sent attachment becomes a markdown link/image to
+ *                        Tool calls become the `tools` a CLI assistant turn carries, in the shared
+ *                        vocabulary (`nativeToolName`), so the live feed, the artifacts list and the
+ *                        working note read them exactly as they read a CLI session's. A sent attachment becomes a markdown link/image to
  *                        the engine's own URL, so the bubble renders it with no new component.
  *   - `nativeLiveText`   the model's own stream (the `live` item), which is what the screen scrape
  *                        is for a CLI session — and unlike the scrape it is exact.
@@ -23,13 +23,17 @@
  *                        engine attaches.
  */
 import type { ChatTurn } from '../components/sessions/ChatBubble'
-import type { NativeAsk, NativeChatItem, ToolStatus } from './nativeChat'
+import type { NativeAsk, NativeChatItem } from './nativeChat'
 import { ATTACHMENT_DIR_MARK, attachmentName, splitMessage } from './messageAttachments'
 import { mediaTypeOf } from './nativeAttachments'
 
-const STATUS_WORD: Record<'pt' | 'en', Partial<Record<ToolStatus, string>>> = {
-  en: { failed: 'failed', denied: 'denied', cancelled: 'cancelled', awaiting: 'awaiting approval', running: 'running' },
-  pt: { failed: 'falhou', denied: 'negada', cancelled: 'cancelada', awaiting: 'aguardando aprovação', running: 'rodando' },
+/** The native runtime's tool names in the shared vocabulary. A MAPPING, never a filter. */
+const NATIVE_TOOL_NAMES: Record<string, string> = {
+  'file.read': 'Read', 'file.write': 'Write', 'file.patch': 'Edit',
+  'shell.start': 'Bash', 'fs.grep': 'Grep', 'fs.glob': 'Glob',
+}
+export function nativeToolName(name: string): string {
+  return NATIVE_TOOL_NAMES[name] ?? name
 }
 
 const STOPPED = {
@@ -48,9 +52,12 @@ export function nativeChatTurns(items: readonly NativeChatItem[], lang: 'pt' | '
   }
   for (const i of items) {
     if (i.kind === 'tool') {
-      const word = STATUS_WORD[lang][i.card.status]
-      const detail = [i.card.detail, word].filter(Boolean).join(' · ')
-      ;(tools ??= []).push({ name: i.card.name, ...(detail ? { detail } : {}) })
+      // In the SHARED vocabulary (Claude's, the one every surface selects on — `canonicalTool` on the
+      // server), with the bare path or command as `detail`: that is what lets the aside's live feed
+      // and its artifacts list a native call exactly as they list a CLI one. A name with no mapping
+      // passes through unchanged, never dropped.
+      const detail = i.card.detail
+      ;(tools ??= []).push({ name: nativeToolName(i.card.name), ...(detail ? { detail } : {}) })
       continue
     }
     if (i.kind === 'approval') continue
@@ -99,7 +106,7 @@ export function nativeAsks(items: readonly NativeChatItem[]): NativeAsk[] {
 /** Whether a tool call is running and no question is open — the standard chat's "working" note. */
 export function nativeRunningTools(items: readonly NativeChatItem[]): { name: string; detail?: string }[] {
   return items.flatMap(i => (i.kind === 'tool' && i.card.status === 'running'
-    ? [{ name: i.card.name, ...(i.card.detail ? { detail: i.card.detail } : {}) }]
+    ? [{ name: nativeToolName(i.card.name), ...(i.card.detail ? { detail: i.card.detail } : {}) }]
     : []))
 }
 

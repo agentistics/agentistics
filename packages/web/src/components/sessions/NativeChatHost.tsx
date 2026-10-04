@@ -19,6 +19,7 @@ import { useNativeSession } from '../../hooks/useNativeSession'
 import { nativeChatItems } from '../../lib/nativeChat'
 import { nativeAsks, nativeChatTurns, nativeLiveReasoning, nativeLiveText, nativeRunningTools, nativeSendParts } from '../../lib/nativeChatSource'
 import { nativeAct } from '../../lib/nativeFleet'
+import { nativeSessionStats } from '../../lib/nativeStats'
 
 export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
   const { session, lang } = props
@@ -61,8 +62,15 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
     approvals: asks.length > 0
       ? <>{asks.map(a => <NativeApprovalCard key={a.questionId} ask={a} lang={lang} onAnswer={x => answer(a.questionId, x)} />)}</>
       : null,
-    status: <NativeRunsStrip runs={runs} lang={lang} />,
+    // The gauge is the composer's ring now (`stats`); the strip keeps the per-run lines.
+    status: <NativeRunsStrip runs={runs} lang={lang} gauge={false} />,
     notice: state.notice ?? (state.window !== null ? loadError : null),
   }
-  return <SessionChat {...props} source={source} />
+  // The composer's context meter and metrics card, from the engine's real usage (`nativeStats.ts`).
+  const stats = nativeSessionStats({
+    sessionId: session.id, runs, turns,
+    ...(state.window?.session.model ? { model: state.window.session.model } : {}),
+  })
+  const metrics = props.metrics ? { ...props.metrics, stats } : undefined
+  return <SessionChat {...props} {...(metrics ? { metrics } : {})} source={source} />
 }
