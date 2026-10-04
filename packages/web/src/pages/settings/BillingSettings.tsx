@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Sparkles, AlertTriangle, Info, ArrowRightLeft, ChevronDown } from 'lucide-react'
 import {
-  HARNESS_ORDER,
   billingReadiness,
   findPlan,
   plansForHarness,

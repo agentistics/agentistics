@@ -68,7 +68,7 @@ import {
   totalTokens,
   USAGE_COUNTERS,
   activeMinutesOf,
-  HARNESS_ORDER,
+  SURFACE_HARNESS_ORDER,
   type AnyAgentisticsEvent,
   type HarnessId,
   type ModelUsageCounters,
@@ -367,11 +367,13 @@ function recordsSince(table: Readonly<Record<string, string>>, e: AnyAgentistics
   return since !== undefined && atLeast(e.provenance.adapterVersion, since)
 }
 
-// `HARNESS_ORDER` (core `types.ts`), NEVER a hardcoded array — CLAUDE.md step 3 exists precisely
-// because a plain array literal here would silently drop the next harness added to `HarnessId`
-// (which this line itself once did: it hardcoded six ids and was found missing 'opencode' by the
-// A3.8 ease test, the same class of bug the rule already names).
-const HARNESS_IDS: readonly string[] = HARNESS_ORDER
+// `SURFACE_HARNESS_ORDER` (core `types.ts`), NEVER a hardcoded array — CLAUDE.md step 3 exists
+// precisely because a plain array literal here would silently drop the next harness added to
+// `HarnessId` (which this line itself once did: it hardcoded six ids and was found missing 'opencode'
+// by the A3.8 ease test, the same class of bug the rule already names). The SURFACE list, so a run of
+// the native harness (`run.started.harness: 'agentistics'`) is filed under it rather than left to the
+// default.
+const HARNESS_IDS: readonly string[] = SURFACE_HARNESS_ORDER
 
 /**
  * How a harness's TOOL facts become the `uses_*` flags and the error figures. The flags are a
@@ -852,7 +854,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   }
   if (s.run) {
     if (s.run.conversationId) meta.session_id = s.run.conversationId
-    if (HARNESS_IDS.includes(s.run.harness)) meta.harness = s.run.harness as HarnessId
+    if (HARNESS_IDS.includes(s.run.harness)) meta.harness = s.run.harness as SessionMeta['harness']
   }
   if (main.firstModel) meta.model = main.firstModel.model
   if (main.gauge) {

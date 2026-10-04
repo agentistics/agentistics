@@ -394,6 +394,28 @@ describe('computeHarnessSummaries', () => {
     expect('codex' in summaries).toBe(false)
   })
 
+  test('the NATIVE harness is a column like any other, summed from its sessions — never from the Claude-only cache', () => {
+    const base = makeAppData()
+    const native = {
+      ...base.sessions[0]!,
+      session_id: 'ses_n1', harness: 'agentistics' as const, model: 'claude-sonnet-4-6',
+      input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0,
+      user_message_count: 3, assistant_message_count: 3,
+    }
+    const data = makeAppData({ sessions: [...base.sessions, native], harnesses: ['claude', 'codex', 'agentistics'] })
+    const summaries = computeHarnessSummaries(data)
+    expect(summaries['agentistics'].sessions).toBe(1)
+    expect(summaries['agentistics'].messages).toBe(6)
+    expect(totalTokens(summaries['agentistics'].tokens)).toBe(3500)
+    expect(summaries['agentistics'].costUSD).toBeGreaterThan(0)
+    // Claude's figures are untouched by a native session that ran a Claude model.
+    expect(summaries['claude'].sessions).toBe(computeHarnessSummaries(makeAppData()).claude.sessions)
+    // The harness filter selects it.
+    const filtered = computeFilteredHarnessSummaries(data, { dateRange: 'all', projects: [], models: [], harnesses: ['agentistics'] } as never)
+    expect(filtered.activeHarnesses).toEqual(['agentistics'])
+    expect(filterByHarness(data.sessions, 'agentistics').map(s => s.session_id)).toEqual(['ses_n1'])
+  })
+
   test('claude costUSD uses calcCost on statsCache.modelUsage (no inline math)', () => {
     const data = makeAppData()
     const summaries = computeHarnessSummaries(data)
