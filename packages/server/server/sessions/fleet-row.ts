@@ -41,6 +41,20 @@ const NOT_IN_BROWSER: ReadonlySet<SessionAction> = new Set<SessionAction>([
 /** A NATIVE Agentistics row (`native-fleet.ts`) — the engine's session, not a pane. */
 const isNativeRow = (v: Pick<ControlSession, 'harness'>): boolean => v.harness === 'agentistics'
 
+/**
+ * The two verbs only a NATIVE row takes: archive and delete. Offered only once the session has
+ * ENDED (the engine refuses to delete a session with a run in progress, and archiving a live one
+ * would hide it while it works), with that reason while it has not.
+ */
+function nativeStoreVerbs(v: ControlSession, s: ControlStrings): FleetVerb[] {
+  const ended = v.state === 'closed'
+  const off = ended ? {} : { reason: s.sessionsEndFirst }
+  return [
+    { action: 'archive' as SessionAction, label: s.sessionsArchive, enabled: ended, ...off },
+    { action: 'delete' as SessionAction, label: s.sessionsDelete, enabled: ended, ...off },
+  ]
+}
+
 function interruptVerb(v: ControlSession, s: ControlStrings): FleetVerb {
   // A native turn is stopped by the chat's own stop button, which knows the run id; the row has none.
   if (isNativeRow(v)) return { action: 'interrupt' as SessionAction, label: s.sessionsInterrupt, enabled: false, reason: s.sessionsNativeNote }
@@ -100,6 +114,13 @@ export type FleetActionId =
    * subject comes from `text`.
    */
   | 'reopenFell' | 'deleteTask' | 'broadcast'
+  /**
+   * NATIVE-only (`native-fleet.ts`): file an ended native session away, or delete it. Only a native row
+   * offers them — a pane session has no store of its own to archive or delete from — and both need
+   * the session ENDED first, so neither can remove work that is still running. Deliberately absent
+   * from `machineActions.ts`'s closed list: a central never reaches them.
+   */
+  | 'archive' | 'delete'
 
 export interface FleetActionRequest {
   id: string
@@ -238,6 +259,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
+  if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,
     title: row.title,

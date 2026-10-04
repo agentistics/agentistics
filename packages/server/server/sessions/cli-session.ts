@@ -77,6 +77,11 @@ const USAGE = `Usage:
   agentop session kill   <id|name>
   agentop session rename <id|name> "label"
   agentop session note   <id|name> "text"
+  agentop session archive|unarchive|delete <ses_…>
+
+  A NATIVE Agentistics session (\`ses_…\`, the engine's own) takes \`kill\` (end), \`rename\`, and the
+  three above; a prefix is enough when it is unique. \`archive\` and \`delete\` need it ended first —
+  \`delete\` is permanent.
 
   \`ls\` is the table a PERSON reads: aligned columns, one section per project, and only what is
   running — \`--all\` adds the finished, lost and closed conversations, \`--group\` changes the
@@ -165,6 +170,14 @@ export async function runSession(argv: string[]): Promise<number> {
   if ((cmd.kind === 'kill' || cmd.kind === 'rename') && cmd.ref.startsWith('ses_')) {
     return nativeCliVerb(cmd.kind, cmd.ref, cmd.kind === 'rename' ? cmd.label : undefined)
   }
+  // The store verbs exist ONLY for native sessions; a managed handle is refused in words, before tmux.
+  if (cmd.kind === 'archive' || cmd.kind === 'unarchive' || cmd.kind === 'delete') {
+    if (!cmd.ref.startsWith('ses_')) {
+      console.error(`\`${cmd.kind}\` is for native Agentistics sessions (ids starting with ses_). For a terminal session use \`agentop session kill\`.`)
+      return 1
+    }
+    return nativeCliVerb(cmd.kind, cmd.ref)
+  }
 
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
@@ -217,7 +230,7 @@ export async function runSession(argv: string[]): Promise<number> {
  * to catch.
  */
 /** `agentop session kill|rename ses_…` — the engine's lifecycle, through `native-fleet.ts`. */
-async function nativeCliVerb(kind: 'kill' | 'rename', ref: string, label?: string): Promise<number> {
+async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' | 'delete', ref: string, label?: string): Promise<number> {
   const lang = await resolveLang()
   const rows = await loadNativeFleet(lang, { includeArchived: true })
   const found = resolveNativeRef(rows, ref)

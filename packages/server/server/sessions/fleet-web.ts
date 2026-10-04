@@ -342,6 +342,14 @@ export async function runFleetAction(
     case 'kill':
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
+    // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is
+    // refused in words rather than reaching a host verb that does not exist.
+    case 'archive':
+    case 'delete': {
+      const { isNativeSessionId, runNativeVerb } = await import('./native-fleet')
+      if (!isNativeSessionId(req.id)) return { ok: false, message: s.sessionsNativeOnly }
+      return await runNativeVerb(req.id, req.action, lang)
+    }
     case 'rewind': {
       if (!host.rewindSession) return { ok: false, message: s.sessionsNoHost }
       // The prompt is the ANCHOR, compared against the harness's own menu row by row — not an index,

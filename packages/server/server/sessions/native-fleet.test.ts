@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { sessionActions } from '@agentistics/tui/control/session-verbs'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { fleetRow } from './fleet-row'
+import { parseSessionArgs } from './cli-parse'
 import {
   isNativeSessionId, loadNativeFleet, withNativeUsage, nativeControlSessions, nativeState, nativeVerbCall, nativeVerbResult,
   resolveNativeRef, runNativeVerb, type NativeListRecord,
@@ -152,7 +153,8 @@ describe('fleetRow on a native row', () => {
     const row = fleetRow(nativeControlSessions([rec({ activity: 'working' })], 'en')[0]!, c)
     expect(row.attachCommand).toBe('')
     expect(row.harness).toBe('agentistics')
-    const off = row.verbs.filter(v => !v.enabled && v.action !== 'reopenFell' && v.action !== 'resume')
+    // archive/delete carry their own reason (end the session first) — tested below.
+    const off = row.verbs.filter(v => !v.enabled && !['reopenFell', 'resume', 'archive', 'delete'].includes(v.action))
     expect(off.length).toBeGreaterThan(0)
     for (const v of off) expect(v.reason).toBe(c.sessionsNativeNote)
     expect(row.verbs.find(v => v.action === 'kill')!.enabled).toBe(true)
@@ -179,5 +181,42 @@ describe('withNativeUsage', () => {
   test('a session the facts do not carry is left as it was', () => {
     const rows = nativeControlSessions([rec()], 'en')
     expect(withNativeUsage(rows, [])).toEqual(rows)
+  })
+})
+
+describe('archive and delete — native rows only, and only once ended', () => {
+  const c = controlStrings('pt')
+  test('an open native row lists both, disabled, with the reason', () => {
+    const row = fleetRow(nativeControlSessions([rec({ activity: 'waiting' })], 'pt')[0]!, c)
+    for (const a of ['archive', 'delete']) {
+      const v = row.verbs.find(x => x.action === a)!
+      expect(v.enabled).toBe(false)
+      expect(v.reason).toBe(c.sessionsEndFirst)
+    }
+  })
+  test('an ended native row offers both', () => {
+    const row = fleetRow(nativeControlSessions([rec({ status: 'ended' })], 'pt')[0]!, c)
+    expect(row.verbs.find(x => String(x.action) === 'archive')!.enabled).toBe(true)
+    expect(row.verbs.find(x => String(x.action) === 'delete')!.enabled).toBe(true)
+    expect(row.verbs.find(x => String(x.action) === 'archive')!.label).toBe('Arquivar')
+  })
+  test('a pane session never carries them', () => {
+    const pane = { ...nativeControlSessions([rec({ status: 'ended' })], 'pt')[0]!, id: '3f5f21a8b0c1', harness: 'claude' }
+    const row = fleetRow(pane, c)
+    expect(row.verbs.some(x => String(x.action) === 'archive' || String(x.action) === 'delete')).toBe(false)
+  })
+  test('the CLI parses archive / unarchive / delete with a ref, and refuses one without', () => {
+    expect(parseSessionArgs(['archive', 'ses_6dc8'])).toEqual({ kind: 'archive', ref: 'ses_6dc8' })
+    expect(parseSessionArgs(['unarchive', 'ses_6dc8'])).toEqual({ kind: 'unarchive', ref: 'ses_6dc8' })
+    expect(parseSessionArgs(['delete', 'ses_6dc8'])).toEqual({ kind: 'delete', ref: 'ses_6dc8' })
+    expect(parseSessionArgs(['delete']).kind).toBe('error')
+  })
+  test('runNativeVerb routes archive / unarchive / delete to the engine', async () => {
+    const seen: string[] = []
+    const ask = async (p: string, i?: RequestInit) => { seen.push(`${i?.method} ${p}`); return new Response('{}', { status: 200 }) }
+    expect((await runNativeVerb(ID, 'archive', 'pt', { central: false, on: true, ask })).message).toBe('Sessão arquivada.')
+    expect((await runNativeVerb(ID, 'unarchive', 'pt', { central: false, on: true, ask })).ok).toBe(true)
+    expect((await runNativeVerb(ID, 'delete', 'pt', { central: false, on: true, ask })).message).toBe('Sessão apagada.')
+    expect(seen).toEqual([`POST /api/runtime/sessions/${ID}/archive`, `POST /api/runtime/sessions/${ID}/unarchive`, `DELETE /api/runtime/sessions/${ID}`])
   })
 })
