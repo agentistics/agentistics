@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { daysSince, lastAssistantText, liveSessionsOf, mixOf, participantState, replyReach } from './threadView'
+import { daysSince, liveSessionsOf, mixOf, participantState, replyReach } from './threadView'
 
 const R = (id: string, state: string, o: { conversationId?: string; actionable?: boolean } = {}) =>
   ({ id, state, actionable: o.actionable ?? true, ...(o.conversationId ? { conversationId: o.conversationId } : {}) })
@@ -38,13 +38,5 @@ describe('replyReach', () => {
   test('participantState reads the standing row', () => {
     expect(participantState({ sessionId: 'a', joinedAt: '' }, [R('a', 'waiting')])).toBe('waiting')
     expect(participantState({ sessionId: 'q', joinedAt: '' }, [])).toBeNull()
-  })
-})
-
-describe('lastAssistantText', () => {
-  test('the newest non-empty assistant turn', () => {
-    expect(lastAssistantText([{ role: 'assistant', text: 'old' }, { role: 'user', text: 'u' }, { role: 'assistant', text: ' new? ' }])).toBe('new?')
-    expect(lastAssistantText([{ role: 'user', text: 'u' }])).toBeNull()
-    expect(lastAssistantText(undefined)).toBeNull()
   })
 })

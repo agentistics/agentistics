@@ -1,25 +1,24 @@
 /**
- * task-threads.ts — Agentask THREADS, the IO half: open, post into, reply 1:N, resolve, mute, and the
- * queued deliveries. The rules are `@agentistics/core`'s `taskThreads.ts` (pure, tested); this file
- * only reads the book and the fleet, and writes what happened.
+ * task-threads.ts — Agentask THREADS, the IO half: open, post into, SEND to the sessions, resolve,
+ * mute, and the queued sends. The rules are `@agentistics/core`'s `taskThreads.ts` (pure, tested);
+ * this file only reads the book and the fleet, and writes what happened.
  *
- * Owner's rules (2026-10-04), restated where they bind code:
- *  - a thread never blocks a session — nothing here waits on a session or holds one back;
- *  - there is NO bell for a thread — nothing here notifies anybody;
- *  - a reply reaches a session through the SAME fleet `prompt` path the session's own composer uses
- *    (`runFleetAction`), so a dialog is never typed into and a send is recorded only when confirmed;
- *  - an answer to a session's mirrored question is ONE prompt, delivered once, recorded once — typed
- *    in the thread (`answerTo`) or in the session's chat (`recordSessionChatAnswer`).
+ * The owner's rules (2026-10-04, as approved), restated where they bind code:
+ *  - a thread is a RECORD — posting a comment reaches no session (`addComment` writes and stops);
+ *  - delivering is a separate, explicit act (`sendFromThread`), and the text lands in each session's
+ *    OWN chat through the same fleet `prompt` path its composer uses — so a dialog is never typed
+ *    into and a send is recorded only when confirmed; the thread records that it was sent, to whom;
+ *  - a session's answer stays in its chat: nothing here reads a chat back into a thread;
+ *  - there is no bell and no "waiting on you".
  *
- * Security: a reply is TEXT typed into a session, never a grant. Participants are only ever sessions
- * that PROVED their identity (`session-identity.ts`), and a request carrying a session identity can
- * never fan out — only the person replies to N.
+ * Security: a send is TEXT typed into a session, never a grant. Recipients are only ever sessions that
+ * PROVED their identity (`session-identity.ts`), and a request carrying a session identity can never
+ * send — only the person delivers to N.
  */
 
 import {
-  canSessionOpenThread, planQueuedFlush, planThreadFanout, sessionAwaitsOwner, threadComments,
-  threadDeliveryText, withParticipant,
-  type FleetRowLike, type ThreadDelivery, type ThreadKind, type ThreadParticipant,
+  canSessionOpenThread, planQueuedFlush, planThreadFanout, threadDeliveryText, withParticipant,
+  type CommentKind, type FleetRowLike, type ThreadDelivery, type ThreadKind, type ThreadParticipant,
 } from '@agentistics/core'
 import { loadTaskBoard } from './task-source'
 import { findTask } from './task-report'
@@ -120,42 +119,39 @@ async function fleetRows(lang: CliLang): Promise<FleetRowLike[]> {
 
 async function promptRow(lang: CliLang, rowId: string, text: string): Promise<{ ok: boolean; message?: string }> {
   const { runFleetAction } = await import('./fleet-web')
-  // `fromThread`: this prompt IS the thread's own record — the session-chat mirror must not copy it back.
-  const out = await runFleetAction(lang, { action: 'prompt', id: rowId, text }, { fromThread: true })
+  const out = await runFleetAction(lang, { action: 'prompt', id: rowId, text })
   return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
 }
 
-export interface ReplyInput {
+export interface SendInput {
   body: string
   author: string
-  /** Answer ONE participant's mirrored question instead of replying to all. */
-  answerTo?: string
+  kind?: CommentKind
   attachments?: TaskComment['attachments']
   /** Set by the route when the request carried a (verified) session identity — refused. */
   fromSession?: boolean
 }
 
 /**
- * The owner's reply: one comment, delivered to every participant (or to `answerTo` alone), each
- * delivery recorded with what actually happened.
+ * The person's EXPLICIT send: one comment in the record, and the same text delivered into every
+ * participant's own chat, each delivery recorded with what actually happened.
  */
-export async function replyToThread(ref: string, threadId: string, o: ReplyInput, lang: CliLang): Promise<
+export async function sendFromThread(ref: string, threadId: string, o: SendInput, lang: CliLang): Promise<
   { ok: true; id: string; deliveries: ThreadDelivery[] } | { ok: false; reason: ThreadRefusal; message: string }
 > {
   if (o.fromSession) {
-    return { ok: false, reason: 'session_fanout', message: 'Only the person replies to a thread; a session comments in it.' }
+    return { ok: false, reason: 'session_fanout', message: 'Only the person sends from a thread; a session comments in it.' }
   }
   const body = o.body.trim()
-  if (!body && !(o.attachments?.length)) return { ok: false, reason: 'empty', message: 'A reply needs a body.' }
+  if (!body) return { ok: false, reason: 'empty', message: 'There is nothing to send.' }
   const w = await loadTaskBoard()
   const task = findTask(ref, w.book.tasks)
   if (!task) return { ok: false, reason: 'no_such_task', message: `No task "${ref}" exists.` }
   const thread = w.book.threads.find(t => t.id === threadId && t.taskId === task.id)
   if (!thread) return { ok: false, reason: 'no_such_thread', message: `No thread "${threadId}" on this task.` }
 
-  const targets = o.answerTo ? thread.participants.filter(p => p.sessionId === o.answerTo) : thread.participants
-  const rows = targets.length > 0 ? await fleetRows(lang).catch(() => []) : []
-  const plan = planThreadFanout(targets, rows, thread.mutedSessions ?? [])
+  const rows = thread.participants.length > 0 ? await fleetRows(lang).catch(() => []) : []
+  const plan = planThreadFanout(thread.participants, rows, thread.mutedSessions ?? [])
   const text = threadDeliveryText({ taskTitle: task.title, threadTitle: thread.title, body })
   const now = () => new Date().toISOString()
   const deliveries: ThreadDelivery[] = []
@@ -173,9 +169,9 @@ export async function replyToThread(ref: string, threadId: string, o: ReplyInput
   const id = newCommentId()
   await w.store.addComment({
     id, taskId: task.id, author: o.author.trim() || 'owner', body, createdAt: now(),
-    threadId, role: 'owner', via: 'thread', deliveries,
+    threadId, role: 'owner', deliveries,
+    ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
     ...(thread.subtaskId ? { subtaskId: thread.subtaskId } : {}),
-    ...(o.answerTo ? { answerTo: o.answerTo } : {}),
     ...(o.attachments?.length ? { attachments: o.attachments } : {}),
   })
   await w.store.updateThread(threadId, t => { const { resolvedAt: _r, ...rest } = t; return rest })
@@ -249,31 +245,4 @@ export async function flushQueuedDeliveries(lang: CliLang): Promise<number> {
     }))
   }
   return sent
-}
-
-/**
- * The person answered a session IN ITS OWN CHAT. When that session posted in an open thread and was
- * waiting on the person there, the answer is recorded ONCE in that thread — as delivered, with no
- * fan-out — so it shows in both places. Every other prompt is left alone: a thread mirrors questions,
- * it does not copy a session's whole conversation.
- */
-export async function recordSessionChatAnswer(rowId: string, conversationId: string | undefined, text: string): Promise<number> {
-  const body = text.trim()
-  if (!body) return 0
-  const w = await loadTaskBoard()
-  let recorded = 0
-  for (const thread of w.book.threads) {
-    if (thread.resolvedAt) continue
-    const p = thread.participants.find(x => x.sessionId === rowId || (!!conversationId && x.conversationId === conversationId))
-    if (!p) continue
-    if (!sessionAwaitsOwner(p.sessionId, threadComments(w.book.comments, thread.id))) continue
-    await w.store.addComment({
-      id: newCommentId(), taskId: thread.taskId, author: 'owner', body, createdAt: new Date().toISOString(),
-      threadId: thread.id, role: 'owner', via: 'session', answerTo: p.sessionId,
-      deliveries: [{ sessionId: p.sessionId, ...(p.conversationId ? { conversationId: p.conversationId } : {}), state: 'delivered', at: new Date().toISOString() }],
-      ...(thread.subtaskId ? { subtaskId: thread.subtaskId } : {}),
-    })
-    recorded++
-  }
-  return recorded
 }
