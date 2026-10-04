@@ -6,6 +6,7 @@ import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays,
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
+import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, partialPollMs, retryDelayMs, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 
 /**
@@ -382,77 +383,98 @@ export function useData() {
   const [loading, setLoading] = useState(() => readDataCache() === null)
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({})
   const [error, setError] = useState<string | null>(null)
+  /** Why the last load failed, classified — set together with `error` when there is NO data to show. */
+  const [loadError, setLoadError] = useState<LoadError | null>(null)
+  /** The last refresh failed while data WAS on screen: the page stays, a line says the server is not
+   *  answering. Cleared by the next success. */
+  const [offline, setOffline] = useState<LoadError | null>(null)
   const [liveUpdates, setLiveUpdates] = useState(true)
   const [updateInterval, setUpdateInterval] = useState(30)
   const streamRef = useRef<EventSource | null>(null)
+  const dataRef = useRef<AppData | null>(data)
+  const pollRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; partial: number; failures: number }>({ timer: null, partial: 0, failures: 0 })
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
 
-  // Silent background refresh — no loading screen, no progress bars
-  const fetchData = useCallback(async () => {
-    try {
-      const res = await fetch('/api/data')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const fresh = (await res.json()) as AppData
-      setData(fresh)
-      writeDataCache(fresh)
-    } catch { /* ignore silent update errors */ }
-  }, [])
-
-  const startStreamLoad = useCallback(() => {
-    streamRef.current?.close()
-    streamRef.current = null
-
-    setLoading(true)
-    setError(null)
-    setLoadProgress({})
-
+  /** The server's own progress for its first build, for the non-blocking strip. Never gates anything:
+   *  a stream that errors is closed rather than left reconnecting. */
+  const openProgress = useCallback(() => {
+    if (streamRef.current || typeof EventSource === 'undefined') return
     const es = new EventSource('/api/data-stream')
     streamRef.current = es
-    let settled = false
-
-    const complete = async (isError?: string) => {
-      if (settled) return
-      settled = true
-      es.close()
-      streamRef.current = null
-      try {
-        const res = await fetch('/api/data')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const fresh = (await res.json()) as AppData
-        setData(fresh)
-        writeDataCache(fresh)
-        if (isError) setError(null)
-      } catch (err) {
-        setError(String(err))
-      } finally {
-        setLoading(false)
-      }
-    }
-
     es.addEventListener('progress', (e: Event) => {
-      const ev = JSON.parse((e as MessageEvent).data) as { stage: string; progress: number; detail?: string }
-      setLoadProgress(prev => ({
-        ...prev,
-        [ev.stage]: {
-          progress: ev.progress,
-          detail: ev.detail,
-          status: ev.progress >= 1 ? 'done' : 'active',
-        },
-      }))
+      try {
+        const ev = JSON.parse((e as MessageEvent).data) as { stage: string; progress: number; detail?: string }
+        setLoadProgress(prev => ({ ...prev, [ev.stage]: { progress: ev.progress, detail: ev.detail, status: ev.progress >= 1 ? 'done' : 'active' } }))
+      } catch { /* a malformed event costs one bar update */ }
     })
-
-    es.addEventListener('done', () => { void complete() })
-    es.onerror = () => { void complete('stream error') }
+    const close = () => { es.close(); if (streamRef.current === es) streamRef.current = null }
+    es.addEventListener('done', close)
+    es.onerror = close
   }, [])
 
-  useEffect(() => {
-    // If we painted from cache, refresh quietly (no loading screen). Otherwise
-    // run the streamed first load with progress.
-    if (readDataCache()) {
-      void fetchData()
-    } else {
-      startStreamLoad()
+  const schedule = useCallback((ms: number) => {
+    const p = pollRef.current
+    if (p.timer) clearTimeout(p.timer)
+    p.timer = setTimeout(() => { p.timer = null; void refreshRef.current() }, ms)
+  }, [])
+
+  /**
+   * Ask for the data — `?partial=1`, so the server answers within about a second with whatever it
+   * has — and keep asking while the answer is partial or the request failed. A failure with data on
+   * screen keeps the data (`offline` says why); with nothing on screen it becomes the error screen,
+   * which retries on its own.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      let res: Response
+      try { res = await fetchWithTimeout('/api/data?partial=1', DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
+      if (!res.ok) throw classifyLoadError(null, res.status)
+      let fresh: unknown
+      try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }
+      if (!isUsableDataCache(fresh)) throw classifyLoadError(new Error("the answer is not this app's data"))
+      const next = fresh as AppData
+      if (acceptPayload(dataRef.current, next)) {
+        dataRef.current = next
+        setData(next)
+      }
+      setError(null); setLoadError(null); setOffline(null)
+      setLoading(false)
+      pollRef.current.failures = 0
+      if (next.partial) {
+        openProgress()
+        schedule(partialPollMs(pollRef.current.partial++))
+      } else {
+        pollRef.current.partial = 0
+        writeDataCache(next)
+        streamRef.current?.close()
+        streamRef.current = null
+      }
+    } catch (raw) {
+      const e = (raw && typeof raw === 'object' && 'kind' in raw) ? raw as LoadError : classifyLoadError(raw)
+      const attempt = pollRef.current.failures++
+      if (dataRef.current) {
+        setOffline(e)
+      } else {
+        setLoadError(e)
+        setError(e.detail)
+        setLoading(false)
+      }
+      // 401/403 are an AUTH state the app resolves (a login screen); asking again cannot change them.
+      if (!(e.kind === 'server' && (e.status === 401 || e.status === 403))) schedule(retryDelayMs(attempt))
     }
-    return () => { streamRef.current?.close() }
+  }, [openProgress, schedule])
+  refreshRef.current = refresh
+
+  // Silent background refresh (a `change` event, the live-updates interval).
+  const fetchData = useCallback(async () => { await refresh() }, [refresh])
+
+  useEffect(() => {
+    void refresh()
+    const p = pollRef.current
+    return () => {
+      if (p.timer) clearTimeout(p.timer)
+      streamRef.current?.close()
+    }
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -473,9 +495,22 @@ export function useData() {
     return () => { clearInterval(id) }
   }, [liveUpdates, updateInterval, fetchData])
 
-  const refetch = useCallback(() => startStreamLoad(), [startStreamLoad])
+  // Retry / re-load on demand (the error screen's button, after a login). Shows the boot screen only
+  // when there is nothing on screen to keep.
+  const refetch = useCallback(() => {
+    if (!dataRef.current) { setLoading(true); setError(null); setLoadError(null) }
+    pollRef.current.failures = 0
+    void refresh()
+  }, [refresh])
 
-  return { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
+  const startup: StartupStripState = {
+    partial: data?.partial === true,
+    partialReason: data?.partialReason,
+    deferredRepos: data?.deferredRepos?.length,
+    projects: loadProgress.projects?.progress,
+  }
+
+  return { data, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
 }
 
 /** Start (00:00:00.000) of a Date's UTC calendar day. */

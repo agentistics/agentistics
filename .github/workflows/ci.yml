@@ -126,3 +126,12 @@ jobs:
 
       - name: Rebuild storm budgets
         run: bun scripts/perf/storm.ts "$RUNNER_TEMP/storm-home" --seconds 45 --budget
+
+      # Fast startup: the app must be usable within 2 s of the server answering — on a fresh, empty
+      # machine and on one whose repositories are slow to read (every `git log --numstat` held 20 s),
+      # cold and after a restart — and the full data must still arrive.
+      - name: Startup budget (fresh empty home)
+        run: bun scripts/perf/startup.ts --empty --budget
+
+      - name: Startup budget (slow git)
+        run: bun scripts/perf/startup.ts "$RUNNER_TEMP/storm-home" --slow-git 20000 --budget

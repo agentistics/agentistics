@@ -155,7 +155,7 @@ async function readTranscript(path: string, now: number): Promise<TranscriptRead
         // is what makes this step atomic: a throw here leaves `prev` exactly as it was.
         const next = consumed > 0 ? cloneClaudeParseState(prev.state) : prev.state
         if (consumed > 0) {
-          foldClaudeParse(next, iterLines(fresh.subarray(0, consumed).toString('utf-8')))
+          await foldYielding(next, fresh.subarray(0, consumed).toString('utf-8'))
         }
         const offset = plan.lineFrom + consumed
         prev.state = next
@@ -176,7 +176,7 @@ async function readTranscript(path: string, now: number): Promise<TranscriptRead
     const chunk = buf.subarray(0, await readFully(fh, buf, 0))
     const consumed = consumedEnd(chunk)
     const state = emptyClaudeParse()
-    if (consumed > 0) foldClaudeParse(state, iterLines(chunk.subarray(0, consumed).toString('utf-8')))
+    if (consumed > 0) await foldYielding(state, chunk.subarray(0, consumed).toString('utf-8'))
     walks.set(path, { cursor: cursorFrom(chunk, chunk.length, consumed, stat), state, usedMs: now })
     sweep(now)
     return { state, stamp, info: { mode: 'full', reason, bytesRead: chunk.length, fileBytes: stat.size } }
@@ -184,6 +184,32 @@ async function readTranscript(path: string, now: number): Promise<TranscriptRead
     return null
   } finally {
     await fh.close().catch(() => {})
+  }
+}
+
+/** How much text one synchronous fold may take before the event loop gets a turn. */
+const FOLD_SLICE_CHARS = 1 << 20
+
+/**
+ * `foldClaudeParse` over `text`, in slices cut at line boundaries, yielding to the event loop between
+ * them. A 40 MB transcript folded in one call held the event loop for about a second — during the
+ * first build after a start, that second was taken from every request, including the quick first
+ * payload the app paints with and `/api/health`. Folding in slices is exactly what the append path
+ * already does (folding lines 1..n then n+1..m is the same state as folding 1..m — the property this
+ * whole module rests on), so the numbers cannot change; only who waits does.
+ */
+async function foldYielding(state: ClaudeParseState, text: string): Promise<void> {
+  let start = 0
+  while (start < text.length) {
+    let end = start + FOLD_SLICE_CHARS
+    if (end >= text.length) end = text.length
+    else {
+      const nl = text.indexOf('\n', end)
+      end = nl === -1 ? text.length : nl + 1
+    }
+    foldClaudeParse(state, iterLines(start === 0 && end === text.length ? text : text.slice(start, end)))
+    start = end
+    if (start < text.length) await new Promise<void>(r => setImmediate(r))
   }
 }
 

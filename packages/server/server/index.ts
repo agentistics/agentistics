@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
-import { buildApiResponse, buildApiResponseStream, invalidateCache, serializedData } from './data'
+import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -221,6 +221,12 @@ void (async () => {
   // the full cold build (tens of seconds on a busy central). Runs for every mode — non-'off' modes
   // also persist the consolidated per-session store as a side effect; 'off' just warms the cache.
   const warmStart = performance.now()
+  // Read the previous run's snapshot NOW, so the first `/api/data?partial=1` finds it parsed — and
+  // when there is none (a fresh install), have the quick subset ready before the full build starts
+  // occupying the event loop. Both are awaited before the full build is kicked: together they cost
+  // tens of milliseconds, and started after it they would queue behind its transcript parsing.
+  const snapshot = await loadDataSnapshot()
+  if (!snapshot) prepareQuickPayload()
   buildApiResponse()
     .then(() => console.log(`[boot] +${Math.round(performance.now())} ms first /api/data built (${Math.round(performance.now() - warmStart)} ms)`))
     .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
@@ -3585,7 +3591,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/data' && req.method === 'GET') {
       try {
-        let data = await buildApiResponse()
+        // `?partial=1` (the web app): answer within about a second, with a partial payload marked as
+        // such when the first build is still running. Without it — the MCP, the VS Code extension,
+        // anything older — the answer is the full build, exactly as before.
+        let data = url.searchParams.get('partial') === '1' ? await buildApiResponseForClient() : await buildApiResponse()
         // Presence is live (in-memory sockets + heartbeat) — merge it in AFTER the cached
         // build so online/offline + latency stay fresh without recomputing the whole response.
         let extra: { presence?: unknown; includeOfflineData?: boolean } = {}

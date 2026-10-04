@@ -756,6 +756,15 @@ export interface AppData {
    *  know" rather than "nobody is working", and the UI must say which — the same
    *  N/A-versus-a-confident-0 rule `HARNESS_CAPABILITIES` applies to metrics. */
   liveUnavailable?: LiveUnavailableReason
+  /** The server answered before its first full build finished (`/api/data?partial=1`): `quick` is
+   *  the cheap subset (stats cache + stored sessions, no project scan, no git), `snapshot` the
+   *  previous run's full data read back from disk. Render it, and keep asking until an answer
+   *  arrives without this flag. Absent on every full answer. */
+  partial?: boolean
+  partialReason?: 'quick' | 'snapshot'
+  /** Project paths whose git facts were slower than the build's soft deadline; their numbers follow
+   *  in a later build. Absent when every project answered in time. */
+  deferredRepos?: string[]
 }
 
 /** Why live-session detection cannot work in this configuration. */

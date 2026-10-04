@@ -15,5 +15,8 @@
   "stormCpuPct": 60,
   "stormFleetP95Ms": 1000,
   "stormDataP95Ms": 500,
-  "stormEchoP95Ms": 2000
+  "stormEchoP95Ms": 2000,
+  "_comment_startup": "Fast startup (startup.ts): ms from /api/health answering to the first /api/data?partial=1 + /api/team/session — what the web app waits on before it paints — on a fresh install (cold) AND a restart (warm), over an EMPTY home and over a git home whose every `git log --numstat` takes 20 s. Before: cold first screen 2.3 s on a small synthetic home and NEVER (connection dropped at 120 s, 180 s, 240 s) with slow git; after: 0.4-0.9 s and full data in ~6 s.",
+  "startupFirstScreenMs": 2000,
+  "startupFullDataMs": 60000
 }

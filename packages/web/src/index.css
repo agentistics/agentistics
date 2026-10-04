@@ -1100,3 +1100,7 @@ button:focus-within .ag-row-pin,
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent); }
   100% { box-shadow: 0 0 0 16px color-mix(in srgb, var(--anthropic-orange) 0%, transparent); }
 }
+
+/* The startup strip's dot (App.tsx): the data is still arriving. Motion-sensitive users get a still dot. */
+@keyframes agStartupPulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
+@media (prefers-reduced-motion: reduce) { [style*="agStartupPulse"] { animation: none !important; } }
