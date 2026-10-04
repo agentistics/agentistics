@@ -3188,7 +3188,28 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
       const { handleShellRoute } = await import('./sessions/shell-web')
       const shellLang = fleetLang(url.searchParams.get('lang'))
-      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang)
+      // A NATIVE session (UI.UNIFY) is no fleet row: its directory is the one the ENGINE records,
+      // read through the engine's own route — gated exactly like every other native surface.
+      const nativeCwd = async (id: string): Promise<string | null> => {
+        if (!/^ses_[0-9a-f]{32}$/.test(id)) return null
+        const { nativeExperimentalOn } = await import('./native-gate')
+        if (!nativeExperimentalOn()) return null
+        await loadEngine()
+        const live = engine()
+        if (!live) return null
+        const path = `/api/runtime/sessions/${id}`
+        const inner = new URL(path, url.origin)
+        for (const route of live.routes) {
+          if (!path.startsWith(route.prefix + '/')) continue
+          const res = await route.handle(new Request(inner, { method: 'GET' }), inner, { clientIp })
+          if (!res) continue
+          if (!res.ok) return null
+          const b = await res.json().catch(() => null) as { session?: { cwd?: unknown } } | null
+          return typeof b?.session?.cwd === 'string' && b.session.cwd !== '' ? b.session.cwd : null
+        }
+        return null
+      }
+      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang, { nativeCwd })
       if (res) {
         for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
         return res

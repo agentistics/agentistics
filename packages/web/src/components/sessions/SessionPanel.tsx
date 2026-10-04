@@ -57,6 +57,8 @@ import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, PanelPinButton, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
 } from './bandControls'
+import { NativeChatHost } from './NativeChatHost'
+import { isNativeSessionId } from '../../lib/sessionRoute'
 import { PanelGapDots } from './PanelGap'
 import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
@@ -219,6 +221,13 @@ export function SessionPanel({
    * toggle must give one answer, and this is the one place that could quietly disagree.
    */
   const chattable = session.conversationBlind === undefined && !relayed
+  /**
+   * A NATIVE Agentistics session (UI.UNIFY) opens in THIS shell like every harness. What it lacks is
+   * a SCREEN — the runtime is no process in a pane — so the one view and the one tab that are a
+   * screen (`terminal` here, `cli` in the bottom bar) are absent rather than present and dead; the
+   * conversation comes through the chat's `ChatSource` seam (`NativeChatHost`).
+   */
+  const native = isNativeSessionId(session.id)
 
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just
@@ -227,7 +236,7 @@ export function SessionPanel({
   const controlled = onViewChange !== undefined
   const view = controlled ? (viewProp ?? 'chat') : localView
   const setView = controlled ? onViewChange! : setLocalView
-  const active: SessionView = chattable ? view : 'terminal'
+  const active: SessionView = native ? 'chat' : chattable ? view : 'terminal'
 
   /**
    * WHERE THE STUDIO SITS — `lib/panelSlots.ts`, design §1. Read through `resolveForViewport` with
@@ -278,6 +287,7 @@ export function SessionPanel({
     shellEnabled: shellEnabled === true,
     relayed,
     hardwareOffered: hardwareOffered === true,
+    screen: !native,
   }
   const bottomIds = bottomPanels(slotLayout)
   // GATED — a stale `bottom: 'shell'` left over from before the switch turned off reads as `'cli'`
@@ -422,7 +432,15 @@ export function SessionPanel({
             was sent into ANOTHER after switching rows mid-request, with every button in the new
             session's composer stuck on a spinner that belonged to the old one. Per-session state
             must not outlive the session, and a `key` is how React is told that. */}
-        {active === 'chat' ? (
+        {active === 'chat' && native ? (
+          <NativeChatHost
+            key={session.id}
+            session={session} {...(row ? { row } : {})} lang={lang} act={act}
+            {...(onArtifacts ? { onArtifacts } : {})}
+            {...(metrics ? { metrics } : {})}
+            {...(onOpened ? { onReopened: onOpened } : {})}
+          />
+        ) : active === 'chat' ? (
           <SessionChat
             key={session.id}
             session={session} {...(row ? { row } : {})} lang={lang} act={act}
@@ -502,6 +520,8 @@ export function SessionPanel({
         <ShellBand
           key={session.id}
           sessionId={session.id}
+          // No harness SCREEN behind a native session: the band holds its shell only.
+          {...(native ? { fixedTarget: 'shell' as const } : {})}
           {...(session.cwd ? { cwd: session.cwd } : {})}
           {...(onOpenShellFullscreen ? { onOpenFullscreen: onOpenShellFullscreen } : {})}
           {...(session.harness ? { harness: session.harness } : {})}

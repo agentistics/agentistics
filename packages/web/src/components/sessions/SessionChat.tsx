@@ -274,7 +274,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const scratchId = scratchKey(session)
 
-  const [payload, setPayload] = useState<ChatPayload | null>(() => sessionScratch.readChat(scratchId) as ChatPayload | null)
+  const [feedPayload, setPayload] = useState<ChatPayload | null>(() => sessionScratch.readChat(scratchId) as ChatPayload | null)
+  // A SOURCE's turns ARE the payload (`chatSource.ts`) — derived, not copied in an effect, so the
+  // first paint already shows them.
+  const sourceTurns = source?.turns
+  const sourceUnavailable = source?.unavailable
+  const hasSource = source !== undefined
+  const sourcePayload = useMemo<ChatPayload | null>(() => (
+    sourceTurns === null || sourceTurns === undefined
+      ? (sourceUnavailable ? { turns: [], live: true, unavailable: sourceUnavailable } : null)
+      : { turns: sourceTurns, live: true }
+  ), [sourceTurns, sourceUnavailable])
+  const payload = hasSource ? sourcePayload : feedPayload
   /**
    * The frame on screen is one this session cached a while ago, and a fresh read is on its way.
    *
@@ -1055,19 +1066,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * a minute, and the warm read stands down there too — so coming back into view asks immediately,
    * which is the exact moment somebody wants what they missed.
    */
-  // A SOURCE replaces the feed: its turns ARE the payload (`chatSource.ts`).
-  const sourceTurns = source?.turns
-  const sourceUnavailable = source?.unavailable
-  const hasSource = source !== undefined
+  // A SOURCE replaces the feed (`chatSource.ts`): no transcript subscription at all.
   useEffect(() => {
-    if (!hasSource) return
-    setPayload(sourceTurns === null || sourceTurns === undefined
-      ? (sourceUnavailable ? { turns: [], live: true, unavailable: sourceUnavailable } : null)
-      : { turns: sourceTurns, live: true })
-    setRefreshing(false)
-  }, [hasSource, sourceTurns, sourceUnavailable])
-  useEffect(() => {
-    if (hasSource) return
+    if (hasSource) { setRefreshing(false); return }
     const stop = subscribeChat({ id: session.id, key: scratchId, lang }, next => {
       setPayload(next as unknown as ChatPayload)
       setRefreshing(false)
@@ -3011,7 +3012,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     if (e.key === 'Escape' && answeringNow) { e.preventDefault(); setAnswering(null); return }
                     // The composer's own "esc": stops the CURRENT turn without touching the draft
                     // or the field's own ability to keep taking text — see `stopNow`.
-                    if (e.key === 'Escape' && stopVerb?.enabled) { e.preventDefault(); void stopNow() }
+                    if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
                   }}
                   // NEVER WHILE IT HAS THE CARET. `disabled` blurs, so making it depend on a
                   // 5s poll makes the poll able to interrupt a sentence. What the state actually
@@ -3284,8 +3285,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   <button
                     onClick={() => void stopNow()}
                     disabled={stopping}
-                    title={stopVerb!.label}
-                    aria-label={stopVerb!.label}
+                    title={stopVerb?.label ?? (pt ? 'Parar' : 'Stop')}
+                    aria-label={stopVerb?.label ?? (pt ? 'Parar' : 'Stop')}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       width: 34, height: 34, borderRadius: 9, flexShrink: 0, border: 'none',

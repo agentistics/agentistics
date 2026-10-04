@@ -55,11 +55,29 @@ const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 /** `null` when the path is not ours, so `index.ts` falls through to its next route. */
+/**
+ * WHERE A SHELL OPENS for this session id: a fleet row's own `cwd`, or — for a NATIVE Agentistics
+ * session (UI.UNIFY), which is no fleet row — the directory the ENGINE records for it. Either way the
+ * directory comes from a record this server holds, never from the caller. `null` = unknown session.
+ */
+export async function resolveShellTarget(
+  rows: readonly { id: string; conversationId?: string; cwd?: string }[],
+  id: string,
+  nativeCwd?: (id: string) => Promise<string | null>,
+): Promise<{ sessionId: string; cwd: string | undefined } | null> {
+  const row = rows.find(r => r.id === id || r.conversationId === id)
+  if (row) return { sessionId: row.id, cwd: row.cwd }
+  if (!nativeCwd) return null
+  const cwd = await nativeCwd(id)
+  return cwd ? { sessionId: id, cwd } : null
+}
+
 export async function handleShellRoute(
   req: Request,
   url: URL,
   host: StartHost,
   lang: CliLang,
+  opts: { nativeCwd?: (id: string) => Promise<string | null> } = {},
 ): Promise<Response | null> {
   // The live READ channel — the same SSE frames `/api/fleet/stream` sends, so the browser's reader
   // is the same reader. The three checks are the ones a stream needs and no more: an id, SCOPE (the
@@ -133,10 +151,10 @@ export async function handleShellRoute(
     // shell somewhere. `/api/fleet/new` is the one route that takes a directory from a body, and it
     // says why.
     const fleet = await host.sessions()
-    const row = fleet.sessions.find(r => r.id === body.sessionId || r.conversationId === body.sessionId)
-    if (!row) return json({ error: 'unknown_session' }, 404)
+    const target = await resolveShellTarget(fleet.sessions, body.sessionId, opts.nativeCwd)
+    if (!target) return json({ error: 'unknown_session' }, 404)
 
-    const out = await openShell({ sessionId: row.id, cwd: row.cwd })
+    const out = await openShell(target)
     if (!out.ok) {
       // A REFUSAL IS A 200 CARRYING A SENTENCE, not an error status. The request was well formed
       // and the answer is "no, and here is why" — a 4xx would make the browser draw its generic
