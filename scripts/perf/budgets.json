@@ -8,5 +8,12 @@
   "liveOpenFirstFrameMs": 1000,
   "sendToEchoP95Ms": 2000,
   "answerShownP95Ms": 800,
-  "changeAfterAppendP95Ms": 3000
+  "changeAfterAppendP95Ms": 3000,
+  "_comment_storm": "The rebuild storm (storm.ts): 10 sessions writing every 500 ms over a git-backed synthetic home. Before the fix, measured on the reference machine: build p50 397 ms (one git spawn pair per project per build), rebuild duty 20 %, /api/fleet p95 389 ms, echo p95 822 ms; after: 98 ms, 5 %, 61 ms, 392 ms.",
+  "stormBuildP50Ms": 250,
+  "stormBuildDutyPct": 12,
+  "stormCpuPct": 60,
+  "stormFleetP95Ms": 1000,
+  "stormDataP95Ms": 500,
+  "stormEchoP95Ms": 2000
 }

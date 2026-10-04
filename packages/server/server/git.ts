@@ -6,6 +6,7 @@ import type { ProjectGitStats } from '@agentistics/core'
 import { openGitStatsCache, NOOP_GIT_STATS_CACHE, type GitStatsCache } from './git-stats-cache'
 import { GIT_STATS_CACHE_FILE } from './config'
 import { normalizeGitRemote } from '@agentistics/core'
+import { configFingerprint, createFingerprintMemo, findGitDirs, headFingerprint, type GitDirs } from './git-fs'
 
 const execFileAsync = promisify(execFile)
 
@@ -222,18 +223,50 @@ export async function getGitFileStats(
  * Windows/WSL split and no-prompt env guard as the stats helpers so a misconfigured
  * remote can never hang the scan. This is the local-machine source of the group-by-repo key.
  */
+/** Where each path's `.git` is, for the fingerprints below. A directory does not change repository
+ *  often; 60 s bounds how long a `git init` (or a removed `.git`) goes unnoticed, negatives included. */
+const GIT_DIRS_TTL_MS = 60_000
+const gitDirsMemo = new Map<string, { at: number; value: GitDirs | null }>()
+async function gitDirsOf(path: string): Promise<GitDirs | null> {
+  const e = gitDirsMemo.get(path)
+  if (e && Date.now() - e.at < GIT_DIRS_TTL_MS) return e.value
+  const value = await findGitDirs(path).catch(() => null)
+  if (gitDirsMemo.size > 4096) gitDirsMemo.clear()
+  gitDirsMemo.set(path, { at: Date.now(), value })
+  return value
+}
+
+/** How many git processes the two fingerprinted reads have spent — the rebuild-storm budget. */
+let fingerprintedSpawns = 0
+export function gitMetaSpawnCount(): number { return fingerprintedSpawns }
+
+const remoteMemo = createFingerprintMemo<string | undefined>()
+const headMemo = createFingerprintMemo<string | undefined>()
+
+/** `origin`'s remote, normalized. Spawns git only when the repository's config changed since the
+ *  last answer (git-fs.ts) — it was one process per project per `/api/data` build. */
 export async function getGitRemote(projectPath: string): Promise<string | undefined> {
+  const dirs = await gitDirsOf(projectPath)
+  // No `.git` anywhere up the tree: not a repository, and git would say the same.
+  if (dirs === null && process.platform !== 'win32') return undefined
+  const fp = dirs ? await configFingerprint(dirs) : null
+  const key = dirs ? dirs.commonDir + '\0' + dirs.gitDir : projectPath
+  const cached = remoteMemo.get(key, fp)
+  if (cached.hit) return cached.value
+  let value: string | undefined
   try {
+    fingerprintedSpawns++
     const stdout = await git(
       projectPath,
       ['config', '--get', 'remote.origin.url'],
       { timeout: 3000, maxBuffer: 1024 * 1024 }
     )
-    const normalized = normalizeGitRemote(stdout.trim())
-    return normalized || undefined
+    value = normalizeGitRemote(stdout.trim()) || undefined
   } catch {
-    return undefined
+    value = undefined
   }
+  remoteMemo.set(key, fp, value)
+  return value
 }
 
 
@@ -330,6 +363,9 @@ function memoWrite<T>(memo: Map<string, Memo<T>>, key: string, value: T): void {
 export function clearGitStatsCache(): void {
   toplevelMemo.clear()
   statsMemo.clear()
+  headMemo.clear()
+  remoteMemo.clear()
+  gitDirsMemo.clear()
   walkCount = 0
   // Also drop the open handle, so a caller that has just repointed the store gets the new one.
   try { diskCache?.close() } catch { /* already closed */ }
@@ -358,16 +394,27 @@ let walkCount = 0
  *   - it self-invalidates. Commit, and the SHA changes, so the new numbers appear on the next read
  *     instead of waiting out the TTL — which is what makes a 10 minute TTL safe to have at all.
  *
- *  Not memoized: `rev-parse HEAD` costs ~0.02s, and memoizing it is precisely how the cache would
- *  go stale on the commit it must notice. */
+ *  Memoized only under a FINGERPRINT of the files it reads (below): a TTL memo would be precisely
+ *  how the cache went stale on the commit it must notice; a fingerprint memo cannot. */
 async function resolveHead(repoPath: string): Promise<string | undefined> {
+  // The memo is VALIDATED by the files `rev-parse HEAD` reads (git-fs.ts), so it notices a commit
+  // exactly when git would — the staleness the note above refuses cannot happen. It only saves the
+  // process when nothing moved, which on a 280-project machine was 280 processes per build.
+  const dirs = await gitDirsOf(repoPath)
+  const fp = dirs ? await headFingerprint(dirs) : null
+  const cached = headMemo.get(repoPath, fp)
+  if (cached.hit) return cached.value
+  let value: string | undefined
   try {
+    fingerprintedSpawns++
     const stdout = await git(repoPath, ['rev-parse', 'HEAD'], { timeout: 3000, maxBuffer: 1024 * 1024 })
-    return stdout.trim() || undefined
+    value = stdout.trim() || undefined
   } catch {
     // No HEAD: an empty repository. Nothing to walk, and nothing to cache under a commit.
-    return undefined
+    value = undefined
   }
+  headMemo.set(repoPath, fp, value)
+  return value
 }
 
 /** The repository ROOT containing `projectPath`, or `undefined` when it is not inside a repo.

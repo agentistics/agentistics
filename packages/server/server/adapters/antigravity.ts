@@ -1,6 +1,6 @@
 // packages/server/server/adapters/antigravity.ts
 import { join } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import type { SessionMeta } from '@agentistics/core'
 import type { HarnessAdapter } from './types'
@@ -238,6 +238,23 @@ function tokenOnlyStub(conversationId: string, tokens: AntigravityTokenTotals): 
   }
 }
 
+/**
+ * The rebuild storm (v2.103.1): every `/api/data` build re-read every agy transcript and re-opened
+ * every conversation DB — ~100–160 ms a build, every ~2 s, for conversations nobody had touched.
+ * The whole result is a function of those files, so it is remembered under a fingerprint of their
+ * (mtime, size) — one `stat` per file — and handed out as a COPY (callers stamp fields onto it).
+ */
+let lastLoad: { fp: string; sessions: SessionMeta[] } | null = null
+async function antigravityFingerprint(ids: readonly string[]): Promise<string> {
+  const one = async (p: string) => { const st = await stat(p).catch(() => null); return st ? `${st.mtimeMs}:${st.size}` : '-' }
+  const limit = createLimiter(40)
+  const parts = await Promise.all(ids.map(id => limit(async () =>
+    `${id}|${await one(transcriptPath(id, true))}|${await one(transcriptPath(id, false))}|${await one(join(ANTIGRAVITY_CONVERSATIONS_DIR, `${id}.db`))}`)))
+  // Children with a DB and no transcript directory are read too, so the DB DIRECTORY's listing counts.
+  const dbs = (await safeReadDir(ANTIGRAVITY_CONVERSATIONS_DIR)).filter(f => f.endsWith('.db')).sort().join(',')
+  return [await one(ANTIGRAVITY_HISTORY_FILE), await one(ANTIGRAVITY_SUMMARIES_DB), dbs, ...parts].join('\n')
+}
+
 export const antigravityAdapter: HarnessAdapter = {
   id: 'antigravity',
   dataRoot: ANTIGRAVITY_DIR,
@@ -253,6 +270,10 @@ export const antigravityAdapter: HarnessAdapter = {
       rollUpAntigravitySessions,
     } = await import('./antigravity-parse')
     type Parsed = import('./antigravity-parse').AntigravityParsed
+
+    const fpIds = (await safeReadDir(ANTIGRAVITY_BRAIN_DIR)).sort()
+    const fp = await antigravityFingerprint(fpIds)
+    if (lastLoad && lastLoad.fp === fp) return structuredClone(lastLoad.sessions)
 
     // history.jsonl is global (all conversations) — read it once and index by conversationId.
     // It rotates, so it is only ever a hint (first_prompt + workspace), never a drop reason.
@@ -309,6 +330,8 @@ export const antigravityAdapter: HarnessAdapter = {
     }
 
     const sessions = rollUpAntigravitySessions(parsedById, parentOf)
-    return sessions.filter((s): s is SessionMeta => s !== null && !!s.start_time)
+    const out = sessions.filter((s): s is SessionMeta => s !== null && !!s.start_time)
+    lastLoad = { fp, sessions: structuredClone(out) }
+    return out
   },
 }
