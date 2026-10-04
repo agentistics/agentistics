@@ -11,7 +11,8 @@
  */
 
 import { readProcEntries, pidAlive } from './proc-read'
-import { buildInventory, type AgentopProcess } from './inventory'
+import { buildInventory, DEFAULT_TEMP_ROOTS, type AgentopProcess } from './inventory'
+import { tmpdir } from 'node:os'
 import { planGovernor, type Alert, type Kill } from './governor'
 import { readHelpers, mutateHelpers, pruneHelpers, type HelperRecord } from './helpers'
 import { readHeavyState, type HeavyState } from './heavy-io'
@@ -76,6 +77,7 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
       ? buildInventory(entries, {
         selfPid: process.pid,
         home: process.env.HOME,
+        tempRoots: tempRoots(),
         alive: pidAlive,
         helpers: new Map(helpers.map(h => [h.pid, { id: h.id, ...(h.ownerPid ? { ownerPid: h.ownerPid } : {}), ...(h.ownerSessionId ? { ownerSessionId: h.ownerSessionId } : {}) }])),
       })
@@ -139,6 +141,14 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
     return snapshot
   })().finally(() => { running = null })
   return running
+}
+
+/** The temp roots, plus this machine's own temp dir when it lives somewhere else. */
+export function tempRoots(): string[] {
+  const roots = [...DEFAULT_TEMP_ROOTS]
+  const t = tmpdir()
+  if (t && t !== '/' && !roots.some(r => `${t}/`.startsWith(r))) roots.push(`${t.replace(/\/+$/, '')}/`)
+  return roots
 }
 
 function mbText(bytes: number | null): string {

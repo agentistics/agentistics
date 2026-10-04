@@ -174,3 +174,22 @@ describe('manual flock jobs', () => {
     expect(parseFlockArgv(['flock'])).toBeNull()
   })
 })
+
+describe('a throwaway HOME is one under a temp root, never just "another HOME"', () => {
+  test('isThrowawayHome', async () => {
+    const { isThrowawayHome } = await import('./inventory')
+    expect(isThrowawayHome('/tmp/rel/home', '/home/u')).toBe(true)
+    expect(isThrowawayHome('/home/u', '/tmp/rel/home')).toBe(false)   // the real HOME, seen from a preview
+    expect(isThrowawayHome('/home/u', '/home/u')).toBe(false)
+    expect(isThrowawayHome(undefined, '/home/u')).toBe(false)
+    expect(isThrowawayHome('/tmpx/home', '/home/u')).toBe(false)
+    expect(isThrowawayHome('/scratch/h', '/home/u', ['/scratch/'])).toBe(true)
+  })
+  test('a PREVIEW governor never takes the real orphaned main server for a test leftover', () => {
+    const i = buildInventory([
+      entry({ pid: 50, ppid: 1, argv: ['agentop', 'server'], env: { HOME: '/home/u' }, ageSec: 99_999 }),
+    ], { selfPid: 1, home: '/tmp/rel/home', alive: () => true, helpers: new Map() })
+    expect(i[0]!.isolatedHome).toBe(false)
+    expect(planGovernor({ inventory: i, helpers: [], nowMs: 0 }).kills).toEqual([])
+  })
+})
