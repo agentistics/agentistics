@@ -12,6 +12,7 @@ import { buildInventory, type AgentopProcess } from './inventory'
 import { planGovernor, type Alert } from './governor'
 import { readHelpers } from './helpers'
 import { readHeavyState } from './heavy-io'
+import { tempRoots } from './governor-daemon'
 
 const mb = (b: number | null): string => (b === null ? '?' : `${Math.round(b / 1048576)} MB`)
 const age = (s: number): string => (s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}` : `${Math.floor(s / 60)}m`)
@@ -34,7 +35,7 @@ export async function printResources(args: string[]): Promise<number> {
     const entries = await readProcEntries(always)
     if (!entries) { process.stderr.write('agentop resources: /proc is not readable here (Linux only).\n'); return 1 }
     const inventory = buildInventory(entries, {
-      selfPid: process.pid, home: process.env.HOME, alive: pidAlive,
+      selfPid: process.pid, home: process.env.HOME, tempRoots: tempRoots(), alive: pidAlive,
       helpers: new Map(helpers.map(h => [h.pid, { id: h.id, ...(h.ownerPid ? { ownerPid: h.ownerPid } : {}) }])),
     }).filter(p => !p.self)
     snap = { inventory, alerts: planGovernor({ inventory, helpers, nowMs: Date.now() }).alerts, source: 'local (no server — nothing is acted on)' }

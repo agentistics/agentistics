@@ -134,10 +134,30 @@ export interface InventoryContext {
   selfPid: number
   /** This server's own HOME; a process under another HOME is an isolated (test/preview) instance. */
   home?: string
+  /** Where throwaway HOMEs live (`/tmp`, `/var/tmp`, the OS temp dir). See `isThrowawayHome`. */
+  tempRoots?: readonly string[]
   /** Is this pid alive right now? */
   alive: (pid: number) => boolean
   /** Registered helpers' pids → their ids and declared owner pids. */
   helpers: ReadonlyMap<number, { id: string; ownerPid?: number; ownerSessionId?: string }>
+}
+
+/** The temp roots a throwaway HOME is made under, by default. */
+export const DEFAULT_TEMP_ROOTS: readonly string[] = ['/tmp/', '/var/tmp/', '/dev/shm/']
+
+/**
+ * Is this a THROWAWAY HOME — a test or preview instance — PURE.
+ *
+ * Two conditions, and the second is the one that matters. "A HOME other than mine" alone is
+ * RELATIVE: found in the release-0410 smoke, a preview server running under `/tmp/…/home` saw the
+ * user's REAL HOME as "another HOME", so its governor would have treated the user's own orphaned
+ * main server (a `nohup agentop server &`) as a test leftover and stopped it. A throwaway HOME is one
+ * made under a temp root; the user's real HOME never is, whoever is asking.
+ */
+export function isThrowawayHome(home: string | undefined, selfHome: string | undefined, roots: readonly string[] = DEFAULT_TEMP_ROOTS): boolean {
+  if (!home || !selfHome || home === selfHome) return false
+  const h = home.endsWith('/') ? home : `${home}/`
+  return roots.some(r => h.startsWith(r.endsWith('/') ? r : `${r}/`))
 }
 
 /** Build the inventory — PURE over what was read. Sorted by memory, biggest first. */
@@ -177,7 +197,7 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       orphan: e.ppid === 1,
       owner,
       self: e.pid === ctx.selfPid,
-      isolatedHome: !!ctx.home && !!e.env.HOME && e.env.HOME !== ctx.home,
+      isolatedHome: isThrowawayHome(e.env.HOME, ctx.home, ctx.tempRoots),
       ...(c.helperId ? { helperId: c.helperId } : {}),
     })
   }
