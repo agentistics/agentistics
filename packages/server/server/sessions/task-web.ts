@@ -31,6 +31,8 @@ import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-a
 import { planMove } from './task-rank'
 import { resolveAttachmentRead } from './attachment-web'
 import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
+import { noteThreadComment, openThread } from './task-threads'
+import type { ThreadKind } from '@agentistics/core'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
@@ -67,6 +69,7 @@ export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
       metas: scoped.metas,
       costOf: w.costOf,
       comments: w.book.comments,
+      threads: w.book.threads,
       subtasks: w.book.subtasks,
       files: w.book.files,
     }),
@@ -105,6 +108,7 @@ export async function showTask(
       metas: scoped.metas,
       costOf: w.costOf,
       comments: w.book.comments.filter(c => c.taskId === task.id).map(withAttachmentRefs),
+      threads: w.book.threads.filter(t => t.taskId === task.id),
       subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
       files: w.book.files.filter(f => f.taskId === task.id),
     }),
@@ -369,10 +373,20 @@ export async function deleteTask(ref: string): Promise<boolean> {
  */
 export async function addComment(
   ref: string,
-  o: { author: string; body: string; subtaskId?: string; attachments?: unknown },
+  o: {
+    author: string; body: string; subtaskId?: string; attachments?: unknown
+    /** Post INTO this thread (must be on the same task). */
+    threadId?: string
+    /** Open a thread and post into it, in one call. A session may only use `handback`/`block`. */
+    newThread?: { title: string; kind?: ThreadKind }
+    /** A VERIFIED session id — the route verifies (`session-identity.ts`), never this function. */
+    session?: string
+    /** The person wrote it on the board (no session identity). */
+    owner?: boolean
+  },
 ): Promise<
-  | { ok: true; id: string }
-  | { ok: false; reason: 'empty' | 'no_such_task' | CommentTargetRefusal; message: string }
+  | { ok: true; id: string; threadId?: string }
+  | { ok: false; reason: 'empty' | 'no_such_task' | 'no_such_thread' | 'bad_title' | 'session_kind' | CommentTargetRefusal; message: string }
 > {
   const body = o.body.trim()
   // Only paths inside agentop's attachments directory survive — see `commentAttachments.ts`.
@@ -383,9 +397,26 @@ export async function addComment(
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return { ok: false, reason: 'no_such_task', message: `No task "${ref}" exists.` }
-  const plan = planCommentTarget(task.id, o.subtaskId, w.book.subtasks)
-  if (!plan.ok) return plan
   const author = o.author.trim() || 'unknown'
+  // A THREAD decides the target: a comment in a thread lives where the thread lives.
+  let threadId: string | undefined
+  let subtaskId: string | undefined = o.subtaskId
+  if (o.newThread) {
+    const opened = await openThread(task.id, {
+      title: o.newThread.title, ...(o.newThread.kind ? { kind: o.newThread.kind } : {}),
+      ...(o.subtaskId ? { subtaskId: o.subtaskId } : {}), openedBy: author, ...(o.session ? { session: o.session } : {}),
+    })
+    if (!opened.ok) return opened as Extract<typeof opened, { ok: false }> & { reason: 'bad_title' | 'session_kind' | CommentTargetRefusal | 'no_such_task' }
+    threadId = opened.thread.id
+    subtaskId = opened.thread.subtaskId
+  } else if (o.threadId) {
+    const thread = w.book.threads.find(t => t.id === o.threadId && t.taskId === task.id)
+    if (!thread) return { ok: false, reason: 'no_such_thread', message: `No thread "${o.threadId}" on this task.` }
+    threadId = thread.id
+    subtaskId = thread.subtaskId
+  }
+  const plan = planCommentTarget(task.id, subtaskId, w.book.subtasks)
+  if (!plan.ok) return plan
   const id = newCommentId()
   await w.store.addComment({
     id,
@@ -395,9 +426,12 @@ export async function addComment(
     body,
     ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: new Date().toISOString(),
+    ...(threadId ? { threadId } : {}),
+    ...(o.session ? { role: 'session' as const, sessionId: o.session } : o.owner ? { role: 'owner' as const } : {}),
   })
+  if (threadId) await noteThreadComment(threadId, o.session)
   await w.store.logEvents([event(task.id, author, 'comment', { detail: commentTargetPhrase(plan.target) })])
-  return { ok: true, id }
+  return { ok: true, id, ...(threadId ? { threadId } : {}) }
 }
 
 /** An empty body is a DELETE by another name, so it is refused rather than silently blanking a row. */
