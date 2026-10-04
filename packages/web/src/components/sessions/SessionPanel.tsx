@@ -521,7 +521,7 @@ export function SessionPanel({
           key={session.id}
           sessionId={session.id}
           // No harness SCREEN behind a native session: the band holds its shell only.
-          {...(native ? { fixedTarget: 'shell' as const } : {})}
+          {...(native ? { fixedTarget: 'shell' as const, cliAvailable: false } : {})}
           {...(session.cwd ? { cwd: session.cwd } : {})}
           {...(onOpenShellFullscreen ? { onOpenFullscreen: onOpenShellFullscreen } : {})}
           {...(session.harness ? { harness: session.harness } : {})}
