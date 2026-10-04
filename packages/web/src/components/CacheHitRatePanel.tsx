@@ -1,7 +1,7 @@
 import React from 'react'
 import { Zap, Lightbulb, TrendingDown, TrendingUp, Info } from 'lucide-react'
 import { fmt, formatModel, getModelColor, fmtCost } from '@agentistics/core'
-import type { Lang, HarnessId } from '@agentistics/core'
+import type { Lang, SurfaceHarnessId } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { NAtag } from './NAtag'
 import { MetricNote } from './MetricNote'
@@ -28,7 +28,7 @@ interface Props {
    * When a harness does not support tokens (!capable(harness, 'tokens')),
    * cache data is meaningless — show N/A instead of a misleading 0%.
    */
-  harness?: HarnessId
+  harness?: SurfaceHarnessId
 }
 
 

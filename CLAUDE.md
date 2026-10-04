@@ -808,7 +808,6 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   │   ├── TagsPage.tsx        → tags overview (/tags): a card per visible tag (GET /api/tags, aggregate-only) in a **grid or list** layout (persisted; grid ~6 metrics, list ~10), plus a create/edit drawer for principals with `tags:write` (source picker adds on pick, with a bulk checkbox mode beside it; searchable share-with). Clicking a tag navigates to /tags/:id
   │   ├── TagDetailPage.tsx   → per-tag detail (/tags/:id) fed by GET /api/tags/:id: KPI row (cost, sessions, tokens, **distinct members + machines**), activity chart, ranked distributions (projects/repos/models/harnesses/machines), per-source breakdown, and a **Who has access** panel split by category — owners / creator / shared-with, each stating its own permission. Pencil + trash (ConfirmModal) when the viewer may edit
   │   ├── ToolsPage.tsx         → tools breakdown page
-  │   ├── HarnessPage.tsx       → generic per-harness dashboard at /h/:harness (validates param; sets harness filter; tab bar: "Overview" = dashboard, "Data & sources" = HarnessInfoPanel); replaced the old hardcoded CodexPage
   │   └── ComparePage.tsx       → unified side-by-side comparison at /compare (per-harness colors; N/A for incapable metrics; sessions/messages/tokens/cost + comparatives: usage-by-hour with peak hour, busiest day-of-week, activity-over-time sparkline, peak token day / peak session cost)
   └── components/               → UI (charts, cards, heatmap, modals, PDF export)
       ├── SessionDrilldown.tsx  → **everything the store knows about ONE conversation**, as a HEAD
@@ -904,6 +903,12 @@ clean and is then silently missing from half the product.
    list anywhere else.** Five places used to, as plain arrays, and TypeScript accepts an array
    literal with a member missing: a new harness vanished from the Compare page, the filter bar, the
    data-source list and the consolidate store while the build stayed green.
+   **Two registries, on purpose**: `HARNESS_ORDER` / `HarnessId` is the ADAPTER set (transcript,
+   spawn spec, backup directory, consolidate store); `SURFACE_HARNESS_ORDER` / `SurfaceHarnessId`
+   adds the native `agentistics` harness (no adapter — its sessions are the engine's facts,
+   `native-sessions.ts`) and is what every SCREEN enumerates. `harnessRegistry.lint.test.ts` fails a
+   surface (web/tui/mcp) that reaches for the adapter list or keys a table by `HarnessId`, and any
+   hardcoded array of harness ids; `@harness-adapters-only` + a reason is the escape hatch.
 4. **Adapter** — `packages/server/server/adapters/<id>.ts` (I/O) plus `<id>-parse.ts` (pure), and
    register it in `adapters/types.ts`. Add a data-dir constant to `config.ts` following the existing
    env-override pattern.
@@ -3367,7 +3372,7 @@ harness must not break.
 - **`format.ts`** contains shared display helpers (`fmt`, `fmtCost`, `fmtDuration`, `fmtFull`) — never duplicate these inline
 - **`chatSounds.ts`** (`packages/web/src/lib/chatSounds.ts`) defines `CHAT_SOUNDS` (5 sounds: ping, chime, soft, bell, pop), all synthesized via Web Audio API — no audio files needed. `chatSoundId` preference is wired through App.tsx → TtyChat.tsx
 - **`PreferencesModal.tsx`** is the single Settings modal — it replaced 3 separate modals with one tabbed interface (Preferences / Live / Install / Environment tabs). Do not add separate settings modals.
-- **Per-harness pages live at `/h/:harness`** via the generic `HarnessPage` — never create one page per harness. Harness data-source info is shown via the page's "Data & sources" tab (powered by `HarnessInfoPanel` + `HARNESS_INFO` in `lib/harness.ts`); do not add per-harness info icons or modals elsewhere.
+- **There is no per-harness page** (the old `/h/:harness` + `HarnessPage` are gone) — never create one page per harness. A per-harness VIEW is the harness FILTER, which every dashboard page honours, and harness data-source info is **Settings → Data sources** (`DataSourcesSettings.tsx`: one tab per harness in `SURFACE_HARNESS_ORDER`, rendering `HarnessInfoPanel` from `HARNESS_INFO` in `lib/harness.ts`); do not add per-harness info icons or modals elsewhere.
 - **A harness appears in the selector and Compare page** only when `AppData.harnesses` includes it (i.e., it contributes at least one real session). Gemini bootstrap-only stub files do not count.
 - **PWA**: `vite-plugin-pwa` is configured in `packages/web/vite.config.ts` with `devOptions: { enabled: true }`. Icons are in `packages/web/public/icons/`. The Install tab in PreferencesModal handles both web PWA install and desktop app download.
 - **An image whose URL stays put must be REVALIDATED, and REFERENCED BY ITS CONTENT HASH.** The server

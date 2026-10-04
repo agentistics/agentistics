@@ -199,6 +199,9 @@ export interface SessionView {
   resume?: { sessionId: string; title: string }
   /** Metrics of the conversation behind this row, when it has any. Absent is never zero. */
   tokens?: number
+  /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
+  tokenParts?: import('./conversations').TokenParts
+  turns?: number
   costUSD?: number
   /** How full the context window was on the last turn, and out of how much. Both or neither. */
   contextTokens?: number
@@ -669,6 +672,8 @@ export function buildSessionViews(o: {
         ? claimResume(r.managed, harness, own?.sessionId)
         : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
+      ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
+      ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -790,6 +795,11 @@ export function buildSessionViews(o: {
       harness: p.harness,
       cwd: p.cwd,
       status: 'external' as const,
+      // EXT.OPEN: the conversation the process ITSELF named (its harness record, its argv, its open
+      // file) is an EXACT link — so the row reads its chat, artifacts and metrics like any session.
+      // The directory guess never becomes one: that would show some other conversation under it.
+      ...(own?.sessionId ?? p.sessionId ? { conversationId: (own?.sessionId ?? p.sessionId)! } : {}),
+      ...(p.pid !== undefined ? { pid: p.pid } : {}),
       ...(ownName ? { harnessName: ownName } : {}),
       ...(ownName && own?.nameSince !== undefined ? { harnessNameSince: own.nameSince } : {}),
       ...(p.startedMs !== undefined ? { createdMs: p.startedMs } : {}),
@@ -797,6 +807,8 @@ export function buildSessionViews(o: {
       approvalDetection: false,
       ...(conv?.resumable ? { resume: { sessionId: conv.sessionId, title: conv.title } } : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
+      ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
+      ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -898,6 +910,8 @@ export function buildSessionViews(o: {
       approvalDetection: false,
       ...(c.resumable ? { resume: { sessionId: c.sessionId, title: c.title } } : {}),
       ...(c.tokens !== undefined ? { tokens: c.tokens } : {}),
+      ...(c.tokenParts ? { tokenParts: c.tokenParts } : {}),
+      ...(c.turns ? { turns: c.turns } : {}),
       ...(c.costUSD !== undefined ? { costUSD: c.costUSD } : {}),
       ...(c.contextTokens !== undefined && c.contextWindow !== undefined
         ? { contextTokens: c.contextTokens, contextWindow: c.contextWindow }

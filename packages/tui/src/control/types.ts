@@ -11,6 +11,10 @@ import type { Baseline, HarnessId, ProjectKind, SessionConversationLink } from '
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
+import type { CodeDraftEditor, CodeHost } from './code-types'
+import type { SettingsPriceRow, SettingsProviders } from './settings'
+import type { ThemeId } from '../theme'
+import type { HomeProvider, HomeTask } from './home'
 // The default ARRANGEMENT is derived from the dimension vocabulary rather than written out beside
 // it. `session-dimensions.ts` imports this file for TYPES only, so this is the one value direction.
 import {
@@ -19,6 +23,12 @@ import {
 } from './session-dimensions'
 
 export type TabId =
+  /** The front door (HM-01…HM-07): the logo, the first prompt, today / resume / your tasks / providers. */
+  | 'home'
+  /** The native session — see `tabs/Code.tsx` and docs/superpowers/specs/2026-09-28-harness-tui-design.md. */
+  | 'code'
+  /** Your tasks, read-only (TK-01…): the ALM as the terminal needs to SEE it. */
+  | 'tasks'
   | 'services'
   | 'sessions'
   /** Configure, run, and watch a backup — see `control/backup.ts`. Between sessions and the
@@ -42,11 +52,19 @@ export type TabId =
 // wizard is a QUESTION the cockpit asks, drawn in the detail region like every other one, reached
 // from the config pane's mode row. `agentop setup` still exists as the non-interactive command —
 // one implementation, two entrances.
+//
+// GL-01: the spec's order — `home code sessions tasks dashboard services` — then the screens that
+// were already here (backup, hardware, logs and the documentation). Bare `agentop` opens on `home`;
+// `agentop code` asks for `tab: 'code'` explicitly. Every tab in the bar has real content: `home` its
+// cards, `tasks` your tasks — no placeholder stands in for a later phase.
 export const TAB_ORDER: readonly TabId[] = [
-  'services',
+  'home',
+  'code',
   'sessions',
-  'backup',
+  'tasks',
   'dashboard',
+  'services',
+  'backup',
   'hardware',
   'logs',
   'cheatsheet',
@@ -800,6 +818,12 @@ export interface ControlSession {
   fell?: boolean
   /** Already-formatted token count, when this row's conversation has metrics. */
   tokens?: string
+  /** SS-05: the four counters, formatted; `null` = not recorded by the harness (drawn N/A). */
+  tokenParts?: { input: string | null; output: string | null; cacheRead: string | null; cacheWrite: string | null }
+  /** SS-05: the person's turn count, when recorded. */
+  turns?: number
+  /** SS-06: a native session's pending policy question (answered through the code host). */
+  nativeAsk?: { questionId: string }
   /** Already-formatted cost, same. */
   cost?: string
   /**
@@ -1303,6 +1327,66 @@ export type SelfCheck =
   | { action: 'reload' | 'restart' | 'alert'; message: string }
 
 export interface ControlHost {
+  /**
+   * Drives native runtime sessions for the `code` tab (`code-types.ts`): the ENGINE's typed port
+   * (`engine.codeHost`, read through `asCodePort()`, engine-api 1.8). Optional: a host without one —
+   * the preview, a build with no runtime, an engine whose handle is not a port — gets a tab that says so in words.
+   */
+  code?: CodeHost
+  /**
+   * CD-17: open `$VISUAL`/`$EDITOR` on the composer's draft (the host owns the tty) and answer with what
+   * was saved. Absent: `ctrl+g` says the editor is not available here.
+   */
+  editDraft?: CodeDraftEditor
+  /**
+   * The native harness is present but EXPERIMENTAL and switched off (`agentop experimental enable`):
+   * the sentence every native surface says instead. Absent when it is on, or when there is none.
+   */
+  nativeGate?(): string
+  /**
+   * SS-09: file a session under a board task — a native session, an agentop session, or an external
+   * one through its conversation. The sentence says what happened (or why not).
+   */
+  fileSession?(session: ControlSession, taskId: string): Promise<ActionResult>
+  /**
+   * HM-05 / TK-01: the person's tasks — open tasks they claimed or that one of their sessions is filed
+   * under (spec §5), most active first, with subtask progress and the rollup cost. A refusal is a
+   * sentence (no board here), never an empty list alone.
+   */
+  homeTasks?(): Promise<{ tasks: HomeTask[] } | { unavailable: string }>
+  /** HM-06: the configured providers and their state, from the real credential state. */
+  homeProviders?(): Promise<{ providers: HomeProvider[] } | { unavailable: string }>
+  /**
+   * NW-03: the native assistant's models — per configured provider, with price, window and where each
+   * comes from; a provider that is not configured (or not reachable) is a row that says why.
+   */
+  nativeModels?(): Promise<{ models: { id: string; label: string; detail: string; disabled?: string }[] } | { sentence: string }>
+  /** NW-04: create a worktree of `repo` for this task; the folder it made, or why not. */
+  createWorktree?(repo: string, name: string): Promise<{ ok: true; path: string; sentence: string } | { ok: false; sentence: string }>
+  /**
+   * EX-01: today's cost (UTC day, sessions that started today, api-equivalent) per task they are filed
+   * under, plus what nobody filed. `null` when the board or the store cannot be read.
+   */
+  costByTaskToday?(): Promise<CostByTask | null>
+  /** ST-01: every provider with its status and the stored key's end, as the service lists them (the host reads it). */
+  settingsProviders?(): Promise<SettingsProviders>
+  /** ST-01: the web's "test connection", run by the host, as one localized sentence with its latency. */
+  testProvider?(id: string): Promise<{ ok: boolean; sentence: string }>
+  /** ST-01: store a key through the service (the host sends it); a wrong-vendor key comes back refused in the service's words. */
+  setProviderKey?(id: string, key: string): Promise<{ ok: boolean; sentence: string }>
+  /** ST-02: each priced model with its provenance and window, plus what configured providers offer. */
+  priceTable?(): Promise<SettingsPriceRow[]>
+  /** ST-03: the machine's policy floor as globs — never liftable. */
+  policyFloor?(): Promise<string[]>
+  /** ST-04: the theme read from the preferences at start (written back by `setTheme`). */
+  tuiTheme?: ThemeId
+  setTheme?(id: ThemeId): Promise<void>
+  /** ST-05: the person's rebound shell keys, action → key (unknown or malformed entries are ignored). */
+  shellKeys?: Partial<Record<string, string>>
+  setShellKeys?(keys: Record<string, string>): Promise<void>
+  /** TK-02…TK-07: one task's detail — rollup, subtasks, its sessions (with live state), activity. */
+  taskDetail?(id: string): Promise<import('./task-detail').TaskDetailView | { unavailable: string }>
+
   /** Re-detect config + services. Must never throw; failures come back as `unknown` services. */
   refresh(): Promise<ControlStatus>
   /**
@@ -1761,6 +1845,15 @@ export interface ControlHost {
 }
 
 /** One search of the places a session could start: what to show, and how much there is. */
+/** EX-01: one day's cost by task. */
+export interface CostByTask {
+  day: string
+  /** Sessions that started that day — 0 is a fact, and the panel says so. */
+  sessions: number
+  tasks: { ref: string; title: string; cost: number }[]
+  notFiled: number
+}
+
 export interface ProjectSearchResult {
   options: ProjectOption[]
   /** Matches per kind BEFORE the cap — see `countPerKind`. */
@@ -1831,6 +1924,11 @@ export interface ProjectOption {
    * `source: 'repo'`), so a worktree row is no longer labelled "git repo" there either.
    */
   worktree?: boolean
+  /**
+   * A git checkout (a remote, a `.git` the walk saw, or one the host checked for on `cwd` / history
+   * rows, whose `source` hides it). What the code wizard's folder step offers "new worktree" on (NW-04).
+   */
+  git?: boolean
 }
 
 export interface SpawnSessionRequest {
@@ -1844,6 +1942,8 @@ export interface SpawnSessionRequest {
    * would ask the question and throw the answer away.
    */
   task?: string
+  /** NW-02: the BOARD task to file it under (its id) — filed on the board right after it starts. */
+  taskId?: string
   prompt?: string
   model?: string
   effort?: string
@@ -1876,6 +1976,12 @@ export interface ResumeSessionRequest {
    * you wrote about a piece of work must survive picking that work back up.
    */
   replaces?: string
+  /**
+   * EXT.OPEN: the message to continue the conversation with — delivered as the resumed session's
+   * first prompt (`planSpawn`'s `resumeId` + `prompt`), so it is never typed into a pane that is
+   * still coming up.
+   */
+  prompt?: string
   attach: boolean
 }
 

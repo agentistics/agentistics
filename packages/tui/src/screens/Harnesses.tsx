@@ -1,11 +1,11 @@
 import type { DashboardFigures } from '../projected-figures'
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
 import { fmt, fmtCost, HARNESS_CAPABILITIES } from '@agentistics/core'
 import { harnessRows, type HarnessRow } from '../selectors'
 import { DataTable, Empty, type Column } from '../components/Primitives'
-import { COLORS, HARNESS_COLOR, HARNESS_LABEL } from '../theme'
+import { COLORS, harnessColor, harnessLabel } from '../theme'
 import { listRows } from '../dashboard/view'
 import type { TuiStrings } from '../i18n'
 
@@ -15,7 +15,7 @@ import type { TuiStrings } from '../i18n'
  * A harness with no token data must never render a confident `0` — the whole point of
  * HARNESS_CAPABILITIES is that an admitted gap beats a wrong number.
  */
-function capable(harness: HarnessId, metric: 'tokens' | 'cost' | 'agents'): boolean {
+function capable(harness: SurfaceHarnessId, metric: 'tokens' | 'cost' | 'agents'): boolean {
   return HARNESS_CAPABILITIES[harness]?.[metric] ?? false
 }
 
@@ -33,7 +33,7 @@ export function Harnesses({ data, figures = null, s, width, height }: {
 
   const nameWidth = 14
   const columns: Column<HarnessRow>[] = [
-    { key: 'h', header: s.harness, width: nameWidth, render: r => HARNESS_LABEL[r.harness], color: r => HARNESS_COLOR[r.harness] },
+    { key: 'h', header: s.harness, width: nameWidth, render: r => harnessLabel(r.harness), color: r => harnessColor(r.harness) },
     {
       key: 'cost', header: s.cost, width: 14, align: 'right',
       render: r => (capable(r.harness, 'cost') ? fmtCost(r.costUSD) : 'N/A'),

@@ -1,6 +1,6 @@
 import { Check } from 'lucide-react'
 import { t } from '@agentistics/core'
-import type { HarnessId, HarnessCapabilities, Lang } from '@agentistics/core'
+import type { SurfaceHarnessId, HarnessCapabilities, Lang } from '@agentistics/core'
 import { HARNESS_INFO, HARNESS_LABELS, HARNESS_COLORS, HARNESS_PROVIDERS, capable } from '../lib/harness'
 import { useChatHarnesses } from '../hooks/useChatHarnesses'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -29,7 +29,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 interface Props {
-  harness: HarnessId
+  harness: SurfaceHarnessId
   lang: Lang
 }
 

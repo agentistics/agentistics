@@ -7,7 +7,11 @@
 import { contextGauge, runLineText, type RunLineView } from '../../lib/nativeRuns'
 import { fmt } from '@agentistics/core'
 
-export function NativeRunsStrip({ runs, lang }: { runs: readonly RunLineView[]; lang: 'pt' | 'en' }) {
+export function NativeRunsStrip({ runs, lang, gauge: showGauge = true }: {
+  runs: readonly RunLineView[]; lang: 'pt' | 'en'
+  /** Draw the context bar here. Off where the composer's own ring shows the same figure. */
+  gauge?: boolean
+}) {
   const pt = lang === 'pt'
   const billed = runs.filter(r => r.responses > 0)
   if (billed.length === 0) return null
@@ -17,7 +21,7 @@ export function NativeRunsStrip({ runs, lang }: { runs: readonly RunLineView[]; 
   const pct = gauge ? Math.min(100, Math.floor(gauge.fraction * 100)) : null
   return (
     <div data-testid="native-runs" style={{ maxWidth: 820, width: 'calc(100% - 28px)', margin: '0 auto 6px', display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0 }}>
-      {gauge && pct !== null && (
+      {showGauge && gauge && pct !== null && (
         <div role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
           aria-label={pt ? 'Contexto usado' : 'Context used'}
           title={pt ? `${fmt(gauge.tokens)} de ${fmt(gauge.window)} tokens na janela, na última chamada` : `${fmt(gauge.tokens)} of ${fmt(gauge.window)} tokens in the window, on the last call`}

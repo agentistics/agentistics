@@ -3,7 +3,7 @@
  *
  * Which screen is open and which harness is selected are the same two questions full-screen and
  * inside the control center's tab, answered by the same keys, so they are answered ONCE here rather
- * than in both entry points. The rules themselves are pure (`resolveDashboardScreen`); this holds
+ * than in both entry points. The rules themselves are pure (`resolveDashboardKey`); this holds
  * the state and the `useInput` subscription.
  *
  * `capture` is the contract with whatever is hosting it: while the harness picker is open the
@@ -15,8 +15,8 @@
 import type { DashboardFigures } from '../projected-figures'
 import { useCallback, useMemo, useState } from 'react'
 import { useInput } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
-import { HARNESS_ORDER } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
+import { SURFACE_HARNESS_ORDER } from '@agentistics/core'
 import {
   applyHarnessFilter,
   dashboardRows,
@@ -24,13 +24,13 @@ import {
   listPlan,
   pageableTotal,
   pageWindow,
-  resolveDashboardScreen,
+  resolveDashboardKey,
   type DashboardScreenId,
 } from './view'
 
 export interface DashboardFilter {
   /** `null` is the "all harnesses" entry, always first. */
-  options: (HarnessId | null)[]
+  options: (SurfaceHarnessId | null)[]
   index: number
 }
 
@@ -38,7 +38,7 @@ export interface DashboardNav {
   screen: DashboardScreenId
   setScreen: (id: DashboardScreenId) => void
   /** `null` means every harness — the filter is off. */
-  harness: HarnessId | null
+  harness: SurfaceHarnessId | null
   /** The harness picker, or `null` when it is closed. */
   filter: DashboardFilter | null
   /** True while the picker owns the keyboard. */
@@ -47,22 +47,10 @@ export interface DashboardNav {
   page: number
 }
 
-/**
- * The keys that page a list.
- *
- * The ARROWS are not among them, deliberately — see `resolveDashboardScreen`: the control center
- * answers `←`/`→` for its tabs, and a key answered here as well would do two things at once. `pgup`
- * and `pgdn` are free everywhere this is drawn, and `,` / `.` are the fallback for the terminals
- * that keep those two for their own scrollback. Both are named by the pager line itself, which is
- * the only documentation a screen this dense can afford.
- */
-const PAGE_BACK = ','
-const PAGE_FORWARD = '.'
-
 export function useDashboardNav(opts: {
   isActive: boolean
   /** The harnesses that actually have data, so the picker never offers an empty one. */
-  harnesses: readonly HarnessId[] | undefined
+  harnesses: readonly SurfaceHarnessId[] | undefined
   /**
    * What the screens are drawing, so a page can be clamped against the rows that EXIST.
    *
@@ -77,7 +65,7 @@ export function useDashboardNav(opts: {
   height?: number
 }): DashboardNav {
   const [screen, setScreen] = useState<DashboardScreenId>(DASHBOARD_SCREENS[0]!)
-  const [harness, setHarness] = useState<HarnessId | null>(null)
+  const [harness, setHarness] = useState<SurfaceHarnessId | null>(null)
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
   const [page, setPage] = useState(0)
@@ -85,9 +73,9 @@ export function useDashboardNav(opts: {
   // Keyed on the joined ids rather than the array: `data.harnesses` is a fresh array on every
   // payload, and rebuilding this list each time would reset nothing but would churn every consumer.
   const key = (opts.harnesses ?? []).join(',')
-  const options = useMemo<(HarnessId | null)[]>(() => {
-    const present = new Set(key ? (key.split(',') as HarnessId[]) : [])
-    return [null, ...HARNESS_ORDER.filter(h => present.has(h))]
+  const options = useMemo<(SurfaceHarnessId | null)[]>(() => {
+    const present = new Set(key ? (key.split(',') as SurfaceHarnessId[]) : [])
+    return [null, ...SURFACE_HARNESS_ORDER.filter(h => present.has(h))]
   }, [key])
 
   /**
@@ -109,35 +97,39 @@ export function useDashboardNav(opts: {
   const pages = pageWindow(total, listPlan(body, total).size, 0).pages
 
   useInput((input, key2) => {
-    if (open) {
-      if (key2.escape) { setOpen(false); return }
-      if (key2.upArrow) { setIndex(i => Math.max(0, i - 1)); return }
-      if (key2.downArrow) { setIndex(i => Math.min(options.length - 1, i + 1)); return }
-      if (key2.return) {
+    // WHICH key means WHAT is the pure `resolveDashboardKey` — what the help overlay's key table is
+    // tested against; only the state changes live here.
+    const intent = resolveDashboardKey(
+      {
+        input, upArrow: key2.upArrow, downArrow: key2.downArrow, return: key2.return, escape: key2.escape,
+        pageUp: key2.pageUp, pageDown: key2.pageDown, tab: key2.tab, shift: key2.shift, ctrl: key2.ctrl,
+      },
+      { open, screen },
+    )
+    if (!intent) return
+    switch (intent.kind) {
+      case 'filterClose': return setOpen(false)
+      case 'filterMove':
+        return setIndex(i => Math.max(0, Math.min(options.length - 1, i + intent.step)))
+      case 'filterPick':
         setHarness(options[index] ?? null)
         // A new filter is a new list; keeping the page would land on a window of it that has
         // nothing to do with where the reader was.
         setPage(0)
         setOpen(false)
-      }
-      return
+        return
+      case 'filterOpen':
+        // Opens on whatever is currently selected, so `f` twice is a no-op rather than a reset.
+        setIndex(Math.max(0, options.indexOf(harness)))
+        setOpen(true)
+        return
+      case 'page':
+        if (intent.step < 0) setPage(p => Math.max(0, p - 1))
+        else setPage(p => Math.min(pages - 1, p + 1))
+        return
+      case 'screen':
+        return goto(intent.screen)
     }
-
-    if (input === 'f') {
-      // Opens on whatever is currently selected, so `f` twice is a no-op rather than a reset.
-      setIndex(Math.max(0, options.indexOf(harness)))
-      setOpen(true)
-      return
-    }
-
-    if (key2.pageUp || input === PAGE_BACK) { setPage(p => Math.max(0, p - 1)); return }
-    if (key2.pageDown || input === PAGE_FORWARD) {
-      setPage(p => Math.min(pages - 1, p + 1))
-      return
-    }
-
-    const next = resolveDashboardScreen({ input, tab: key2.tab, shift: key2.shift }, screen)
-    if (next) goto(next)
   }, { isActive: opts.isActive })
 
   return {

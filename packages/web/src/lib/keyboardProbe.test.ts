@@ -84,3 +84,9 @@ describe('diagnose — it names the quantity, and withholds where it cannot', ()
     expect(diagnose([s()], true)).toContain('voltou ao lugar')
   })
 })
+
+describe('formatSample — the screen height beside ih', () => {
+  it('names it, so the stale-height gap is visible in one line', () => {
+    expect(formatSample({ ...s({ innerH: 793 }), screenH: 852 })).toContain('ih=793 scr=852')
+  })
+})

@@ -13,6 +13,8 @@ import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SIZE_SLIDER_MAX_PX, ZOOM_SLIDER_STEP, fmtZoom } from '../../lib/magnifier'
 import { a11yText, type A11yText } from '../../components/a11y/i18n'
+import { PrefRow, SectionHeader } from './primitives'
+import { TEXT_SCALE_MAX, TEXT_SCALE_MIN } from '../../lib/textScale'
 
 /** The preview's fixed footprint — the frame scales DOWN into this, preserving its aspect ratio,
  *  so dragging the size slider always visibly changes the shape (see `StyleEditor`'s preview
@@ -168,9 +170,56 @@ export default function AccessibilitySettings() {
   const pages = Object.entries(a11y.prefs.lensesByPage)
   const globalLenses = a11y.prefs.globalLenses
   const hasGlobal = globalLenses.length > 0
+  const textScalePresets = [
+    { value: 0.9, label: text.textSizeSmall },
+    { value: 1, label: text.textSizeDefault },
+    { value: 1.12, label: text.textSizeMedium },
+    { value: 1.25, label: text.textSizeLarge },
+    { value: 1.4, label: text.textSizeVeryLarge },
+  ]
 
   return (
     <div style={{ maxWidth: 760 }}>
+      <div style={card}>
+        <SectionHeader label={text.textSize} />
+        <div style={{ ...note, marginBottom: 14 }}>{text.textSizeHelp}</div>
+        <PrefRow label={text.textSize}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+            {textScalePresets.map(preset => (
+              <button
+                key={preset.value}
+                className="ag-tap"
+                onClick={() => ctx.setTextScale(preset.value)}
+                aria-pressed={Math.abs(ctx.textScale - preset.value) < 0.001}
+                style={{
+                  padding: isMobile ? '7px 10px' : '6px 10px', borderRadius: 8, fontSize: 12,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  border: `1px solid ${Math.abs(ctx.textScale - preset.value) < 0.001 ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+                  background: Math.abs(ctx.textScale - preset.value) < 0.001 ? 'var(--anthropic-orange-dim)' : 'transparent',
+                  color: 'var(--text-primary)', whiteSpace: 'nowrap',
+                }}
+              >{preset.label}</button>
+            ))}
+          </div>
+        </PrefRow>
+        <PrefRow label={text.textSize} sub={text.textSizeHelp}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: isMobile ? '100%' : 300 }}>
+            <input
+              type="range" min={TEXT_SCALE_MIN * 100} max={TEXT_SCALE_MAX * 100} step={5}
+              value={Math.round(ctx.textScale * 100)} style={{ flex: 1 }}
+              aria-label={text.textSize}
+              onChange={e => ctx.setTextScale(Number(e.target.value) / 100)}
+            />
+            <span style={{ minWidth: 48, textAlign: 'right', color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtZoom(ctx.textScale * 100)}%
+            </span>
+          </div>
+        </PrefRow>
+        <div style={{ marginTop: 6, padding: 12, background: 'var(--bg-base)', borderRadius: 10, color: 'var(--text-secondary)', fontSize: '1rem' }}>
+          {text.textSizePreview}
+        </div>
+      </div>
+
       <div style={card}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div>

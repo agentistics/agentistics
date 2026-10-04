@@ -1,5 +1,5 @@
 import type { SessionMeta, HarnessId, StatsCache } from './types'
-import { HARNESS_ORDER } from './types'
+import { SURFACE_HARNESS_ORDER, type SurfaceHarnessId } from './types'
 
 // NOTHING in this file may import `node:crypto`. It is re-exported by core's barrel and core is
 // bundled into packages/web by Vite, which replaces Node builtins with a shim that THROWS on
@@ -438,9 +438,9 @@ export function distinctUsers(sessions: SessionMeta[]): string[] {
 
 /** Distinct, sorted list of harnesses present in a session list (missing harness = 'claude').
  *  Sorted by the canonical order claude→codex→gemini→copilot→antigravity. Pure. */
-export function distinctHarnesses(sessions: { harness?: HarnessId }[]): HarnessId[] {
-  const order: HarnessId[] = HARNESS_ORDER
-  const set = new Set<HarnessId>()
+export function distinctHarnesses(sessions: { harness?: SurfaceHarnessId }[]): SurfaceHarnessId[] {
+  const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+  const set = new Set<SurfaceHarnessId>()
   for (const s of sessions) set.add(s.harness ?? 'claude')
   return order.filter(h => set.has(h))
 }
@@ -455,7 +455,7 @@ export function filterByUsers<T extends { user?: string }>(sessions: T[], users:
 
 /** Multi-select harness predicate. Empty/undefined selection = all sessions pass.
  *  Sessions with no `harness` field are treated as 'claude'. Pure. */
-export function filterByHarnesses<T extends { harness?: HarnessId }>(sessions: T[], harnesses: HarnessId[]): T[] {
+export function filterByHarnesses<T extends { harness?: SurfaceHarnessId }>(sessions: T[], harnesses: SurfaceHarnessId[]): T[] {
   if (!harnesses || harnesses.length === 0) return sessions
   const set = new Set(harnesses)
   return sessions.filter(s => set.has(s.harness ?? 'claude'))

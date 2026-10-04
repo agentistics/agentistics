@@ -286,6 +286,11 @@ export interface NativeSessionUsage {
   model?: string
   /** When this snapshot was taken, ISO. */
   updatedAt: string
+  /**
+   * H24 (optional): per model, when the session ran on more than one (a mid-session switch). Same
+   * money rules per model as the total; an unpriceable model reads `costUSD: null`.
+   */
+  byModel?: Record<string, { responses: number; tokens: number | null; costUSD: number | null }>
 }
 
 /** A native session filed on the task board. */
@@ -370,6 +375,28 @@ export interface EngineSecrets {
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
 }
 
+export interface EngineMemoryFact {
+  chainId: string
+  factId: string
+  scope: 'repo' | 'person'
+  repoKey?: string
+  category: 'decision' | 'convention' | 'pitfall' | 'preference' | 'other'
+  /** `null` when the statement is no longer in the content store. */
+  statement: string | null
+  origin: 'person' | 'model' | 'derived'
+  validFrom: string
+  /** `null` = current; set when a later version closed it. */
+  validTo: string | null
+  sessionId: string | null
+  supersedes?: string
+}
+
+export interface EngineMemory {
+  recall(q: { repoKey: string | null }): Promise<EngineMemoryFact[]>
+  list(): Promise<EngineMemoryFact[]>
+  forget(chainId: string): Promise<{ ok: true; versions: number } | { ok: false; reason: 'not-found' | 'journal-unavailable' }>
+}
+
 /**
  * An answer the host already holds for a model call, by its deterministic invocation id (INV.1).
  * Only what the loop needs to carry on; never a raw body or a credential.
@@ -381,7 +408,17 @@ export interface EngineCachedInvocation {
   usage: unknown
   usageAnomalies?: unknown[]
   stopReason: unknown
-  content: ReadonlyArray<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'other'; rawType: string }>
+  /**
+   * `reasoning` (B9.1, 1.8): the model's reasoning — an Anthropic thinking block keeps the `signature`
+   * (or `redactedData`) it must be resent with, so a replayed answer can continue a tool turn. A host
+   * stores the parts as JSON and hands them back unchanged.
+   */
+  content: ReadonlyArray<
+    | { type: 'text'; text: string }
+    | { type: 'tool_use'; id: string; name: string; input: unknown }
+    | { type: 'reasoning'; text: string; signature?: string; redactedData?: string }
+    | { type: 'other'; rawType: string }
+  >
   requestId?: string
 }
 
@@ -426,7 +463,16 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
     opencodeDbPath: string
   }
   /** The public journal. `null` = journal off or unwritable — the engine must cope. */
-  journal: { sink(): Promise<ProviderJournalSink<E> | null>; status(): JournalStatus }
+  journal: {
+    sink(): Promise<ProviderJournalSink<E> | null>
+    status(): JournalStatus
+    /**
+     * ART.2 (1.8, optional): the journal's RARE events of these types (the artifact store's metadata),
+     * oldest first, for one session when `sessionId` is given — read through the host's rare-event
+     * side table, never a walk of the whole journal. Absent: the engine keeps no artifact index.
+     */
+    readRare?(types: readonly string[], opts?: { sessionId?: string }): Promise<readonly unknown[]>
+  }
   /**
    * The machine's policy floor as GLOBS (1.3): `protectedGlobs(rules)` over the backup plan's
    * `secret` rows, in the dialect `floor.ts` defines (`~/`, `*`, `**`). This is the floor an engine
@@ -457,6 +503,25 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * native session is then simply not in that channel.
    */
   events?: { nativeSession(e: EngineNativeSessionEvent): void }
+  /**
+   * B6.6 (1.8, optional): memory — facts folded from the journal's `memory.*` events. The HOST enforces
+   * the scope on the read path (`recall` answers one repository's facts and the person's, §24.6 rule 3)
+   * and forgetting deletes the statements. Writes are the engine's own `memory.noted` events through
+   * `journal.sink()`, their statements in `paths.contentDir`. Absent on an older host: no memory.
+   */
+  memory?: EngineMemory
+  /**
+   * B6.4 (1.8, optional): the origins this host's own server answers on (`http://127.0.0.1:<port>`, …).
+   * The engine's browser runtime never drives them — a page the model opens must not reach the
+   * product's own API. Absent: the engine assumes the default port.
+   */
+  serverOrigins?: readonly string[]
+  /**
+   * B8.8 (1.8, optional): an environment variable the PERSON named in a declaration (`{env:VAR}` in an
+   * MCP server's env or headers). The engine reads no environment of its own; it asks for exactly the
+   * names a declaration references. Absent: such a reference reads as unset.
+   */
+  environment?: { get(name: string): string | undefined }
   lang(): 'en' | 'pt'
   /** The board, for filing native sessions. The ONLY write into a public store an engine gets. */
   tasks: {

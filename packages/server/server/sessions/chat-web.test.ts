@@ -193,3 +193,9 @@ test('an ENDED agy session with no conversation keeps the refusal — there it i
   )
   expect(out.unavailable).toBeTruthy()
 })
+
+test('EXT.OPEN: an EXTERNAL row is a running process — its conversation reads as LIVE', async () => {
+  const id = 'external:claude:00000000-0000-4000-8000-000000000001'
+  const out = await readSessionChat(hostWithRow({ id, state: 'unknown' }), 'en', id)
+  expect(out.live).toBe(true)
+})

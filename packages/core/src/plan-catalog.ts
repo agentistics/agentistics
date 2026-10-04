@@ -218,6 +218,7 @@ export const PLAN_CATALOG: readonly PlanCatalogEntry[] = [
     provider: 'google',
     label: 'Google AI Plus',
     mode: 'subscription',
+    // @harness-adapters-only: the CLIs this subscription covers — data about the plan, not an enumeration.
     suggestedHarnesses: ['gemini', 'antigravity'],
     noteEn: "Google prices this per region — enter the amount your account is charged.",
     notePt: 'O Google cobra por região — digite o valor cobrado na sua conta.',
@@ -227,6 +228,7 @@ export const PLAN_CATALOG: readonly PlanCatalogEntry[] = [
     provider: 'google',
     label: 'Google AI Pro',
     mode: 'subscription',
+    // @harness-adapters-only: the CLIs this subscription covers — data about the plan, not an enumeration.
     suggestedHarnesses: ['gemini', 'antigravity'],
     noteEn: "Google prices this per region — enter the amount your account is charged.",
     notePt: 'O Google cobra por região — digite o valor cobrado na sua conta.',
@@ -236,6 +238,7 @@ export const PLAN_CATALOG: readonly PlanCatalogEntry[] = [
     provider: 'google',
     label: 'Google AI Ultra',
     mode: 'subscription',
+    // @harness-adapters-only: the CLIs this subscription covers — data about the plan, not an enumeration.
     suggestedHarnesses: ['gemini', 'antigravity'],
     noteEn: "Google prices this per region — enter the amount your account is charged.",
     notePt: 'O Google cobra por região — digite o valor cobrado na sua conta.',

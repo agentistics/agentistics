@@ -1062,6 +1062,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    // B6.6: the native runtime's memory — inspect and forget (`memory-web.ts`).
+    if (url.pathname === '/api/memory' || url.pathname.startsWith('/api/memory/')) {
+      const { handleMemoryRequest, liveMemoryDeps } = await import('./memory-web')
+      const out = await handleMemoryRequest(req, url, await liveMemoryDeps(TEAM_CENTRAL))
+      return json(out.body, out.status)
+    }
     if (url.pathname === '/api/experimental' && req.method === 'GET') {
       // Read-only: `agentop experimental status` and the post-restart confirmation ask the RUNNING
       // server what it booted with. There is deliberately no write route and no Settings switch.
@@ -1796,7 +1802,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (live) {
           for (const route of live.routes) {
             if (url.pathname !== route.prefix && !url.pathname.startsWith(route.prefix + '/')) continue
-            const res = await route.handle(req, url, { clientIp })
+            const res = await route.handle(req, url, { clientIp, transport: 'tcp' })
             if (res === null) continue
             const headers = new Headers(res.headers)
             for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
@@ -1890,6 +1896,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/tasks/native-filing' && req.method === 'GET') {
       const { nativeFilingOf } = await import('./sessions/task-web')
       return json({ filing: await nativeFilingOf(url.searchParams.get('session') ?? '') })
+    }
+    // Every native session's note (the session menu's Note, `native-notes.ts`) — the web's native rows read it.
+    if (url.pathname === '/api/fleet/native-notes' && req.method === 'GET') {
+      const { readNativeNotes } = await import('./sessions/native-notes')
+      return json({ notes: await readNativeNotes(AGENTISTICS_DATA_DIR) })
+    }
+    // Every native session's filing at once (UI.UNIFY) — the fleet list's native rows read it.
+    if (url.pathname === '/api/tasks/native-filings' && req.method === 'GET') {
+      const { nativeFilingsAll } = await import('./sessions/task-web')
+      return json({ filings: await nativeFilingsAll() })
     }
     if (url.pathname === '/api/tasks/activity' && req.method === 'GET') {
       const { taskActivity } = await import('./sessions/task-web')
@@ -2875,8 +2891,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           return rows
         }
       }
+      // LIVE.2: the pushed payload carries the same surface marks as the GET (absent = legacy).
+      const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
+      const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
       const res = chatStreamResponse(id, {
-        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath) },
+        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath, surface) },
       }, req.signal)
       if (!res) {
         return new Response(JSON.stringify({ error: 'too_many_streams' }), {
@@ -2899,10 +2918,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const { readSessionChat } = await import('./sessions/chat-web')
         const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+        // LIVE.2: the journal's word on this conversation, only with an engine present AND the opt-in
+        // `sessions` surface on; otherwise `undefined` and the payload is the legacy one, byte for byte.
+        const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
+        const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
         const payload = await readSessionChat(
           await hostForFleet(fleetLang(url.searchParams.get('lang'))),
           fleetLang(url.searchParams.get('lang')),
           id,
+          undefined,
+          undefined,
+          surface,
         )
         return new Response(JSON.stringify(payload), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -3260,7 +3286,28 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
       const { handleShellRoute } = await import('./sessions/shell-web')
       const shellLang = fleetLang(url.searchParams.get('lang'))
-      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang)
+      // A NATIVE session (UI.UNIFY) is no fleet row: its directory is the one the ENGINE records,
+      // read through the engine's own route — gated exactly like every other native surface.
+      const nativeCwd = async (id: string): Promise<string | null> => {
+        if (!/^ses_[0-9a-f]{32}$/.test(id)) return null
+        const { nativeExperimentalOn } = await import('./native-gate')
+        if (!nativeExperimentalOn()) return null
+        await loadEngine()
+        const live = engine()
+        if (!live) return null
+        const path = `/api/runtime/sessions/${id}`
+        const inner = new URL(path, url.origin)
+        for (const route of live.routes) {
+          if (!path.startsWith(route.prefix + '/')) continue
+          const res = await route.handle(new Request(inner, { method: 'GET' }), inner, { clientIp })
+          if (!res) continue
+          if (!res.ok) return null
+          const b = await res.json().catch(() => null) as { session?: { cwd?: unknown } } | null
+          return typeof b?.session?.cwd === 'string' && b.session.cwd !== '' ? b.session.cwd : null
+        }
+        return null
+      }
+      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang, { nativeCwd })
       if (res) {
         for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
         return res
@@ -4521,6 +4568,38 @@ const scheduleBackfillCheck = () => {
 }
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
 console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
+// Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
+// restarts THIS server on its own ports, never whatever answers on the default one (`server-ports.ts`).
+void import('./server-ports').then(m => m.recordServerPorts(AGENTISTICS_DATA_DIR, { pid: process.pid, port: PORT, webPort: WEB_PORT }))
+  .catch(err => console.error('[boot] could not record the server ports:', err instanceof Error ? err.message : String(err)))
+
+// B4.6: the machine-local door to the engine's native runtime (`runtime-socket.ts`): `agentop code`
+// on this machine drives sessions HOSTED here through it. Bound only when the engine asks for it and
+// this is not a central; removed on exit. Never on the startup path.
+if (!TEAM_CENTRAL) {
+  void (async () => {
+    try {
+      await loadEngine()
+      const { shouldBindRuntimeSocket, startRuntimeSocket } = await import('./runtime-socket')
+      const routes = () => engine()?.routes ?? null
+      if (!shouldBindRuntimeSocket({ central: false, routes: routes() })) return
+      const sock = startRuntimeSocket({
+        dataDir: AGENTISTICS_DATA_DIR,
+        routes,
+        guard: pathname => {
+          const needed = routeCapability(pathname)
+          const denied = needed ? capabilityDenied(needed) : null
+          return denied
+        },
+      })
+      process.on('exit', () => sock.stop())
+      process.on('SIGTERM', () => sock.stop())
+      console.log(`[boot] +${Math.round(performance.now())} ms runtime socket ${sock.path}`)
+    } catch (err) {
+      console.warn('[runtime-socket] not bound:', err instanceof Error ? err.message : String(err))
+    }
+  })()
+}
 setTimeout(scheduleBackfillCheck, 120_000).unref()
 setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
 } catch (err: unknown) {

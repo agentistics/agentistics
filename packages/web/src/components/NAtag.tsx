@@ -1,9 +1,9 @@
 import React from 'react'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
 
 interface NAtagProps {
-  harness: HarnessId
+  harness: SurfaceHarnessId
   /** Short label for the metric that is not available (e.g. "Agent metrics"). */
   label: string
 }

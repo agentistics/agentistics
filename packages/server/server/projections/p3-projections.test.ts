@@ -349,10 +349,10 @@ describe('taskRollup (§41 costMeasured)', () => {
 })
 
 describe('catalog', () => {
-  test('six materialised projections, distinct table ids, each with its own version', () => {
+  test('seven materialised projections (six of P3 + LIVE.2\'s session-surface), distinct table ids, each with its own version', () => {
     expect(STORED_PROJECTIONS.map(d => d.projection.name).sort()).toEqual(
-      ['agent-metrics', 'cost-by-dimension', 'run-metrics', 'session-meta', 'task-rollup', 'tool-metrics'])
-    expect(new Set(STORED_PROJECTIONS.map(d => d.id)).size).toBe(6)
+      ['agent-metrics', 'cost-by-dimension', 'run-metrics', 'session-meta', 'session-surface', 'task-rollup', 'tool-metrics'])
+    expect(new Set(STORED_PROJECTIONS.map(d => d.id)).size).toBe(7)
     for (const d of STORED_PROJECTIONS) expect(Number.isInteger(d.projection.version)).toBe(true)
   })
 

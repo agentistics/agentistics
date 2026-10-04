@@ -262,6 +262,12 @@ export interface CliStrings {
    * line cannot describe one situation two ways.
    */
   sessTakeoverRefused: (reason: TakeoverRefusal) => string
+  /** EXT.OPEN: the one question before a write ends an external process and continues here. */
+  sessContinueConfirm: (harness: string, pid: number | undefined) => string
+  /** EXT.OPEN: why an external session stays read-only. */
+  sessContinueRefused: (reason: 'no-conversation' | 'not-resumable', harness: string) => string
+  /** EXT.OPEN: the one line saying it continued here. */
+  sessContinuedHere: string
   /** The fallback title for a session the user never named. */
   sessUntitled: (harness: string, project: string) => string
   /**
@@ -322,6 +328,12 @@ export interface CliStrings {
   sessAttaching: (title: string, detach: string) => string
   sessNoted: string
   sessTasked: string
+  /** SS-09: filed under a board task — and what that changes. */
+  sessFiled: (task: string) => string
+  /** SS-09: an external session with no known conversation has nothing the board can hold. */
+  sessFileNoConversation: string
+  /** SS-09: the board refused the filing — its reason, in words. */
+  sessFileRefused: (reason: string) => string
   sessTaskEmpty: (task: string) => string
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) => string
   sessTaskNoneOpened: (task: string, skipped: number) => string
@@ -625,7 +637,7 @@ const EN: CliStrings = {
 
   sessState: {
     working: 'working',
-    waitingApproval: 'needs approval',
+    waitingApproval: 'approve',
     // Named for what it means to the READER. `waiting` and `working` differ by two letters in the
     // middle of a narrow column, so the state that needs a person was being read as the one that
     // does not — and `needs you` sits beside `needs approval` as the pair they are.
@@ -635,9 +647,9 @@ const EN: CliStrings = {
     // running?") and one move available ("reopen it"), so three answers to it was noise dressed as
     // precision. The distinction still exists in the state and is still said by the DETAIL pane;
     // the column stops spending three vocabularies on one bit.
-    exited: 'off',
-    lost: 'off',
-    closed: 'off',
+    exited: 'ended',
+    lost: 'ended',
+    closed: 'ended',
     external: 'external',
   },
   sessBackground: 'subagent',
@@ -732,6 +744,12 @@ const EN: CliStrings = {
         return 'this conversation has no directory to reopen in — a removed worktree, most likely.'
     }
   },
+  sessContinueConfirm: (harness, pid) =>
+    `this ${harness} session is still open in another terminal${pid !== undefined ? ` (pid ${pid})` : ''}. Sending ends that process and continues the same conversation here — a turn it is in the middle of is cut.`,
+  sessContinueRefused: (reason, harness) => reason === 'no-conversation'
+    ? `this ${harness} process never said which conversation it is writing, so it is shown live and read-only — continuing a guessed conversation here could write into the wrong one.`
+    : `${harness} cannot reopen a conversation by id, so this session is shown live and read-only — write to it in its own terminal.`,
+  sessContinuedHere: 'continued here — the conversation is now an agentop session.',
   sessUntitled: (harness: string, project: string) => (project ? `${harness} in ${project}` : harness),
   sessUnregistered: (handle: string) => `unregistered session ${handle}`,
   sessModeUnknown: (harness: string) =>
@@ -774,6 +792,9 @@ const EN: CliStrings = {
     `Attaching to ${title}. To leave it running and come back here, press ${detach}.`,
   sessNoted: 'note saved.',
   sessTasked: 'task set.',
+  sessFiled: (task: string) => `filed under ${task} — its cost rolls up there from now on.`,
+  sessFileNoConversation: 'agentop cannot see which conversation this external session is, so there is nothing to file — start it from agentop, or file it from the web once its conversation is known.',
+  sessFileRefused: (reason: string) => `the board did not file it: ${reason}.`,
   sessTaskEmpty: (task: string) => `no sessions are filed under "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) of "${task}".`
@@ -1063,13 +1084,14 @@ const PT: CliStrings = {
 
   sessState: {
     working: 'trabalhando',
-    waitingApproval: 'precisa de aprovação',
+    waitingApproval: 'aprovar',
     // Named for what it means to the READER rather than for what the machine is doing, and it
     // pairs with `precisa de aprovação` above as the distinction it is.
     waiting: 'precisa de você',
+    // One word for every way it is not running, as in English (the detail pane says which).
     exited: 'encerrada',
-    lost: 'desconectada',
-    closed: 'fechada',
+    lost: 'encerrada',
+    closed: 'encerrada',
     external: 'externa',
   },
   sessBackground: 'subagente',
@@ -1156,6 +1178,12 @@ const PT: CliStrings = {
         return 'esta conversa não tem diretório para reabrir — provavelmente uma worktree removida.'
     }
   },
+  sessContinueConfirm: (harness, pid) =>
+    `esta sessão ${harness} ainda está aberta em outro terminal${pid !== undefined ? ` (pid ${pid})` : ''}. Enviar encerra aquele processo e continua a mesma conversa aqui — um turno em andamento é cortado.`,
+  sessContinueRefused: (reason, harness) => reason === 'no-conversation'
+    ? `este processo ${harness} nunca disse qual conversa está escrevendo, então ela aparece ao vivo e só para leitura — continuar aqui uma conversa adivinhada poderia escrever na errada.`
+    : `${harness} não reabre uma conversa pelo id, então esta sessão aparece ao vivo e só para leitura — escreva nela no próprio terminal.`,
+  sessContinuedHere: 'continuou aqui — a conversa agora é uma sessão do agentop.',
   sessUntitled: (harness: string, project: string) => (project ? `${harness} em ${project}` : harness),
   sessUnregistered: (handle: string) => `sessão sem registro ${handle}`,
   sessModeUnknown: (harness: string) =>
@@ -1198,6 +1226,9 @@ const PT: CliStrings = {
     `Anexando a ${title}. Para deixá-la rodando e voltar aqui, aperte ${detach}.`,
   sessNoted: 'nota salva.',
   sessTasked: 'tarefa definida.',
+  sessFiled: (task: string) => `arquivada em ${task} — o custo dela soma lá a partir de agora.`,
+  sessFileNoConversation: 'o agentop não consegue ver qual conversa é esta sessão externa, então não há o que arquivar — inicie pelo agentop, ou arquive pela web quando a conversa for conhecida.',
+  sessFileRefused: (reason: string) => `o board não arquivou: ${reason}.`,
   sessTaskEmpty: (task: string) => `nenhuma sessão está na tarefa "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) de "${task}" reabertas.`

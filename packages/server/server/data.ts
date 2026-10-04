@@ -1,7 +1,7 @@
 import { createBuildTimer } from './build-timer'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
-import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, HarnessId, WorkflowRun } from '@agentistics/core'
+import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, SurfaceHarnessId, WorkflowRun } from '@agentistics/core'
 import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
 import { PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED } from './config'
 import { getArchiveMode } from './preferences'
@@ -62,7 +62,7 @@ export interface ApiResponse {
   sessions: SessionMeta[]
   healthIssues: HealthIssue[]
   homeDir: string
-  harnesses: HarnessId[]
+  harnesses: SurfaceHarnessId[]
   /** Team/central only: each member's own statsCache, keyed by resolved display name. */
   userStatsCaches?: Record<string, StatsCache>
   /** Team/central only: the same caches keyed by machine id (memberId), un-grouped. */
@@ -907,7 +907,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // reach `AppData.harnesses` — that list is what gates the harness selector and the Compare
     // page. Consolidate mode exists precisely because the harnesses delete their own transcripts,
     // so "its raw files are gone" is the normal case, not an edge one.
-    const harnessSet = new Set<HarnessId>(['claude'])
+    const harnessSet = new Set<SurfaceHarnessId>(['claude'])
     if (mode === 'consolidate') {
       const stored = await loadConsolidated()
       const liveIds = new Set(sessions.map(s => s.session_id))
@@ -982,6 +982,27 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
             name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path,
             sessions: [{ sessionId: s.session_id, created: s.start_time }],
             gitRemote: s.git_remote || undefined,
+          })
+        }
+      }
+    }
+    // --- The NATIVE Agentistics harness (`native-sessions.ts`) ---
+    // Its sessions are rows like any other once the engine has stated their numbers; they join here —
+    // BEFORE repository discovery, so a native session's repository resolves exactly as a Codex one does —
+    // and are never persisted (`consolidate.ts`) nor fed to the shadow journal (they ARE the journal's).
+    if (!TEAM_CENTRAL) {
+      const { loadNativeSessions } = await import('./native-sessions')
+      for (const s of await loadNativeSessions()) {
+        sessions.push(s)
+        harnessSet.add(s.harness)
+        const existing = projects.find(p => p.path === s.project_path && p.path)
+        if (existing) {
+          existing.sessions.push({ sessionId: s.session_id, created: s.start_time })
+        } else if (s.project_path) {
+          projects.push({
+            path: s.project_path,
+            name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path,
+            sessions: [{ sessionId: s.session_id, created: s.start_time }],
           })
         }
       }
@@ -1209,7 +1230,8 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     try {
       if (JOURNAL_ENABLED) {
         void loadEngine()
-          .then(() => shadowIngest(dedupedSessions, { integrations: engineIntegrations() }))
+          // The native harness is not an adapter: its sessions come FROM the journal, never into it.
+          .then(() => shadowIngest(dedupedSessions.filter(s => s.harness !== 'agentistics'), { integrations: engineIntegrations() }))
           .catch(err => console.warn('[journal] shadow ingest could not start:', String(err)))
       }
     } catch (err) {

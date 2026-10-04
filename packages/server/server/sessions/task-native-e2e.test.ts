@@ -49,6 +49,7 @@ test('filed under a subtask, reported, it rolls up into the subtask, the task an
       events: (await store.read()).events.filter(e => e.kind === 'session').map(e => e.detail),
       where: await web.nativeFilingOf('${SID}'),
       nowhere: await web.nativeFilingOf('ses_' + 'c'.repeat(32)),
+      all: await web.nativeFilingsAll(),
     }))
   `)
   expect(out.filed).toEqual({ ok: true, id: `native:${SID}` })
@@ -61,6 +62,8 @@ test('filed under a subtask, reported, it rolls up into the subtask, the task an
   expect(out.events).toEqual(['agentistics · native'])
   expect(out.where).toEqual({ taskId: 't-1', taskTitle: 'Delivery', subtaskId: 's-1' })
   expect(out.nowhere).toBeNull()
+  // UI.UNIFY: the whole board at once, for the fleet list's native rows — with the engine's cost.
+  expect(out.all).toEqual({ [SID]: { taskId: 't-1', taskTitle: 'Delivery', subtaskId: 's-1', costUSD: 0.75, tokens: 900 } })
 }, 60000)
 
 test('refused like a fleet filing: no task, foreign subtask, blocked subtask, a forged id', async () => {

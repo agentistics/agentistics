@@ -45,6 +45,7 @@ import type {
   AgentKind,
   AgentStatus,
   ArtifactKind,
+  WorkArtifactKind,
   BrowserActionKind,
   BrowserImplementation,
   ConversationLink,
@@ -169,6 +170,16 @@ export const EVENT_TYPES = [
   'process.started', 'process.ended',
   // human turns (D22) and their close (D25)
   'turn.started', 'turn.ended',
+  // H24: a native session switched model (same provider) between runs
+  'session.model.changed',
+  // B6.6: memory — a fact noted (by the person, the model, or derived), and a fact forgotten
+  'memory.noted', 'memory.forgotten',
+  // ART.2: the artifact store's metadata (the content is a blob, never in an event)
+  'artifact.created', 'artifact.versioned', 'artifact.blocked', 'artifact.pinned', 'artifact.unpinned', 'artifact.expired',
+  // schema-validated structured output (TOOL.1)
+  'structured.attempt', 'structured.exhausted',
+  // the native loop's completion gate (TOOL.3)
+  'completion.blocked', 'completion.released',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -200,6 +211,8 @@ export interface SessionStartedData {
   /** `normalizeGitRemote()`; `''` is the "no linked repository" bucket, a real value. */
   repoKey?: string
   projectPath?: string
+  /** H21: a native session forked from another — the source and the last message copied. */
+  forkedFrom?: { sessionId: string; seq: number }
 }
 
 export interface RunStartedData {
@@ -533,6 +546,76 @@ export interface ContextWindowObservedData {
   model?: string
 }
 
+/**
+ * H24: a session switched model between runs, on the SAME provider. The runs before it were priced on
+ * `from`, the runs after it on `to`: every `model.completed` already names its own model, so cost per
+ * model needs nothing else. Facts only.
+ */
+export interface SessionModelChangedData {
+  provider: string
+  from: string
+  to: string
+}
+
+/** B6.6 (§24.6): which memory a fact belongs to — a repository's, or the person's own. */
+export type MemoryScope = 'repo' | 'person'
+export type MemoryCategory = 'decision' | 'convention' | 'pitfall' | 'preference' | 'other'
+
+/**
+ * B6.6: a fact noted. The STATEMENT is not in the event: it lives in the content store by reference,
+ * so forgetting can delete it (§24.6 rule 6) while the journal keeps only a hash. A new version of a
+ * fact names the one it `supersedes` and shares its `chainId`; the older one is closed, never
+ * overwritten (rule 7).
+ */
+export interface MemoryNotedData {
+  /** This version. */
+  factId: string
+  /** The fact across its versions: the first version's `factId`. */
+  chainId: string
+  /** The version this one closes. */
+  supersedes?: string
+  scope: MemoryScope
+  /** `scope: 'repo'`: `memoryRepoKey()` — the normalised remote, or `path:<root>` without one. */
+  repoKey?: string
+  category: MemoryCategory
+  statement: { sha256: string; bytes: number }
+  /** Who noted it: the person (`/remember`), the model (`memory.note`, approved), or a derivation. */
+  origin: 'person' | 'model' | 'derived'
+  /** `derived`: the events it was derived from (rule 8: at least two). */
+  derivedFrom?: string[]
+}
+
+/** B6.6: a fact forgotten — every version of the chain leaves memory, and its statements are deleted. */
+export interface MemoryForgottenData { chainId: string }
+
+/** ART.2: an artifact came to exist (its first version follows as `artifact.versioned`). No content. */
+export interface ArtifactCreatedData {
+  artifactId: string
+  kind: WorkArtifactKind
+  title: string
+  slug: string
+  createdBy: 'agent' | 'person'
+}
+
+/** ART.2: an immutable version — its blob by sha256, the event that produced it. No content. */
+export interface ArtifactVersionedData {
+  artifactId: string
+  n: number
+  sha256: string
+  size: number
+  mime: string
+  basedOn?: number
+  sourceEventId: string
+  note?: string
+}
+
+/** ART.2: a version's remote references were blocked (ART.1's scan) — how many and of what kind, never the URLs. */
+export interface ArtifactBlockedData { artifactId: string; n: number; count: number; kinds: string[] }
+export interface ArtifactPinnedData { artifactId: string; n: number; reason: string }
+export interface ArtifactUnpinnedData { artifactId: string; n: number }
+/** ART.2: a version's blob was pruned under the disk budget — it reads back as expired, in words. */
+export interface ArtifactExpiredData { artifactId: string; n: number; reason: string }
+
 export interface PolicyRequestedData {
   /** The policy that was consulted. */
   policy: string
@@ -623,6 +706,43 @@ export interface TurnEndedData {
 }
 
 /**
+ * One attempt at a schema-validated result (TOOL.1, runtime `structured/`): a `result.submit` call, or
+ * a model turn that ended without one. Counts only — never the submitted value nor the validation
+ * messages. `invocationId` names the billed model response the attempt came from, so the attempt is
+ * tied to a `model.completed` that carries its cost.
+ */
+export interface StructuredAttemptData {
+  attempt: number
+  ok: boolean
+  errorCount: number
+  /** `false`: the model ended a turn without calling `result.submit` at all. */
+  submitted: boolean
+  invocationId: string
+}
+
+/** The run stopped with no value: every attempt `maxRetries` allowed failed validation. */
+export interface StructuredExhaustedData {
+  attempts: number
+}
+
+/**
+ * The native loop's completion gate (TOOL.3, runtime `completion/gate.ts`) held a run that tried to
+ * end: `openItems` open `task.plan` steps, the `attempt`-th continuation of `rule`. Counts only —
+ * never a plan step's text nor the injected message.
+ */
+export interface CompletionBlockedData {
+  openItems: number
+  attempt: number
+  rule: 'open-plan' | 'verify-after-edit'
+}
+
+/** The completion gate let a run end that it had held, or released one with something still open. */
+export interface CompletionReleasedData {
+  reason: 'satisfied' | 'forced-limit' | 'no-progress' | 'run-budget'
+  openItems: number
+}
+
+/**
  * One data shape per event type. Its keys are checked against `EVENT_TYPES` in BOTH directions
  * below, so a type added without a shape — or a shape for a type that does not exist — fails the
  * build rather than reaching the journal with a payload nobody specified.
@@ -630,6 +750,15 @@ export interface TurnEndedData {
 export interface EventData {
   'session.started': SessionStartedData
   'session.ended': NoData
+  'session.model.changed': SessionModelChangedData
+  'memory.noted': MemoryNotedData
+  'memory.forgotten': MemoryForgottenData
+  'artifact.created': ArtifactCreatedData
+  'artifact.versioned': ArtifactVersionedData
+  'artifact.blocked': ArtifactBlockedData
+  'artifact.pinned': ArtifactPinnedData
+  'artifact.unpinned': ArtifactUnpinnedData
+  'artifact.expired': ArtifactExpiredData
   'run.started': RunStartedData
   'run.ended': RunEndedData
   'agent.started': AgentStartedData
@@ -674,6 +803,10 @@ export interface EventData {
   'process.ended': ProcessEndedData
   'turn.started': TurnStartedData
   'turn.ended': TurnEndedData
+  'structured.attempt': StructuredAttemptData
+  'structured.exhausted': StructuredExhaustedData
+  'completion.blocked': CompletionBlockedData
+  'completion.released': CompletionReleasedData
 }
 
 // Compile-time totality. Each alias fails to type-check (`true` is not assignable to `never`) if the

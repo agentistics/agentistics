@@ -128,3 +128,64 @@ describe('ControlCenter — the frame drawn before the probe answers', () => {
     expect(frame).toContain('GROUP project')
   })
 })
+
+// ---------------------------------------------------------------------------
+// GL-02 and GL-04, through the real shell
+// ---------------------------------------------------------------------------
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/** A host whose fleet has two rows waiting on a person, and whose probe answers at once. */
+function waitingHost(): ControlHost {
+  const host = probingHost(STORED)
+  return {
+    ...host,
+    refresh: async () => STORED,
+    sessions: async () => ({ sessions: [], attention: 2, rang: [] }),
+  } as unknown as ControlHost
+}
+
+async function mounted(host: ControlHost, tab: 'help' | 'logs') {
+  const size = { columns: process.stdout.columns, rows: process.stdout.rows }
+  Object.defineProperty(process.stdout, 'columns', { value: COLS, configurable: true })
+  Object.defineProperty(process.stdout, 'rows', { value: ROWS, configurable: true })
+  const app = render(<ControlCenter host={host} lang="en" initial={{ tab }} onExit={() => {}} />)
+  await sleep(60)
+  const restore = () => {
+    app.unmount()
+    Object.defineProperty(process.stdout, 'columns', { value: size.columns, configurable: true })
+    Object.defineProperty(process.stdout, 'rows', { value: size.rows, configurable: true })
+  }
+  return { app, restore }
+}
+
+describe('ControlCenter — the attention counter and the key reference', () => {
+  test('`● N need you` is in the header on a tab that is not the sessions screen (GL-02)', async () => {
+    const { app, restore } = await mounted(waitingHost(), 'help')
+    try {
+      expect(plain(app.lastFrame())).toContain('● 2 need you')
+    } finally {
+      restore()
+    }
+  })
+
+  test('`?` opens the key reference over the body, and `esc` puts the screen back (GL-04)', async () => {
+    const { app, restore } = await mounted(waitingHost(), 'logs')
+    try {
+      app.stdin.write('?')
+      await sleep(40)
+      const open = plain(app.lastFrame())
+      expect(open).toContain('help · every key')
+      expect(open).toContain('EVERYWHERE')
+      // The screen you were on is listed right after EVERYWHERE.
+      expect(open.indexOf('LOGS')).toBeGreaterThan(open.indexOf('EVERYWHERE'))
+      // While it is up the footer names only its own keys.
+      expect(open).toContain('esc/? close')
+      app.stdin.write('\u001b')
+      await sleep(80)
+      expect(plain(app.lastFrame())).not.toContain('help · every key')
+    } finally {
+      restore()
+    }
+  })
+})

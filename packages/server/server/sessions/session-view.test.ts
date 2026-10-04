@@ -87,6 +87,17 @@ describe('buildSessionViews', () => {
     expect(views[0]!.cwd).toBe('/repo/other')
   })
 
+  it('EXT.OPEN: an external process that NAMED its conversation carries it as an exact link, and its pid', () => {
+    const [v] = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc({ sessionId: 'c-ext', pid: 4242 })] })
+    expect(v!.conversationId).toBe('c-ext')
+    expect(v!.pid).toBe(4242)
+  })
+
+  it('EXT.OPEN: an external process known only by its directory gets NO conversation link — the guess is never exact', () => {
+    const [v] = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })
+    expect(v!.conversationId).toBeUndefined()
+  })
+
   it('gives an external process a stable id across polls', () => {
     const once = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })
     const again = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })

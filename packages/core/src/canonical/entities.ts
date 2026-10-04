@@ -365,6 +365,13 @@ export interface BrowserAction {
 
 // ── Artifact ─────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ART.1/ART.2: what an agent PRODUCES into the artifact store (a document, a diagram, a table, review
+ * findings…) — not to be confused with `ArtifactKind` below, which is ALM evidence.
+ */
+export const WORK_ARTIFACT_KINDS = ['html', 'svg', 'mermaid', 'markdown', 'chart', 'slides', 'table', 'findings', 'image', 'diff'] as const
+export type WorkArtifactKind = (typeof WORK_ARTIFACT_KINDS)[number]
+
 export const ARTIFACT_KINDS = ['file', 'screenshot', 'diff', 'log', 'report'] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 

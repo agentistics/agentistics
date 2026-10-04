@@ -1,0 +1,77 @@
+import { describe, expect, test } from 'bun:test'
+import { isNativeRow, nativeFleetRows } from './session-native'
+
+const L = { working: 'working', idle: 'ended', ended: 'ended' }
+describe('native sessions in the fleet (SS-01)', () => {
+  test('running → working; otherwise a reopenable conversation (closed), never a guessed "needs you"', () => {
+    const rows = nativeFleetRows([
+      { sessionId: 'ses_a', title: 'Parser fix', task: 't-0539 Parser', updatedAt: '2026-10-03T12:00:00.000Z', status: 'open', model: 'm', cwd: '/w/repo', running: true },
+      { sessionId: 'ses_b', title: 'Old', updatedAt: '2026-10-02T12:00:00.000Z', status: 'open', model: 'm', cwd: '/w/repo' },
+      { sessionId: 'ses_c', title: 'Done', updatedAt: '2026-10-01T12:00:00.000Z', status: 'ended', model: 'm' },
+    ], L)
+    expect(rows.map(r => [r.id, r.state, r.stateLabel, r.harness])).toEqual([
+      ['ses_a', 'working', 'working', 'agentistics'],
+      ['ses_b', 'closed', 'ended', 'agentistics'],
+      ['ses_c', 'closed', 'ended', 'agentistics'],
+    ])
+    expect(rows[0]).toMatchObject({ task: 'Parser', project: 'repo', cwd: '/w/repo', searchFields: { name: 'Parser fix', task: 't-0539 Parser' } })
+    expect(isNativeRow(rows[1]!)).toBe(true)
+  })
+})
+
+describe('g groups by task · harness · state (SS-01, D-TUI-12)', () => {
+  test('the cycle, and anything outside it starts it', async () => {
+    const { nextCycleGrouping, resolveSessionsKey } = await import('./sessions')
+    expect(nextCycleGrouping('task')).toBe('harness')
+    expect(nextCycleGrouping('harness')).toBe('status')
+    expect(nextCycleGrouping('status')).toBe('task')
+    expect(nextCycleGrouping('project')).toBe('task')
+    expect(resolveSessionsKey({ input: 'g' }, { actionsFocused: false, asideFocused: false, detailPane: false, grid: false } as never)).toEqual({ kind: 'cycleGroup' })
+    expect(resolveSessionsKey({ input: '', return: true }, { actionsFocused: false, asideFocused: false, detailPane: false, grid: false } as never)).toEqual({ kind: 'enter' })
+  })
+})
+
+describe('state in words, with the dot beside the word (SS-02)', () => {
+  test('live ●, ended ○, external ◌', async () => {
+    const { stateCell } = await import('./sessions')
+    expect(stateCell({ state: 'waiting-approval', stateLabel: 'approve' })).toBe('● approve')
+    expect(stateCell({ state: 'waiting', stateLabel: 'needs you' })).toBe('● needs you')
+    expect(stateCell({ state: 'working', stateLabel: 'working' })).toBe('● working')
+    expect(stateCell({ state: 'closed', stateLabel: 'ended' })).toBe('○ ended')
+    expect(stateCell({ state: 'unknown', stateLabel: 'external' })).toBe('◌ external')
+  })
+})
+
+describe('a native session waiting on the policy (SS-06)', () => {
+  test('approve, with the policy\'s options numbered and none pre-selected', () => {
+    const [row] = nativeFleetRows([{
+      sessionId: 'ses_q', title: 'Patch', updatedAt: '2026-10-03T12:00:00.000Z', status: 'open', model: 'm', running: true,
+      ask: { questionId: 'x:permission', prompt: 'file.patch notes.txt', options: ['Allow once', 'Allow for this session', 'Deny'] },
+    }], { ...L, approve: 'approve' })
+    expect(row).toMatchObject({
+      state: 'waiting-approval', stateLabel: 'approve', canChoose: true, nativeAsk: { questionId: 'x:permission' },
+      approvalLines: ['file.patch notes.txt'],
+    })
+    expect(row!.dialogOptions).toEqual([
+      { number: 1, label: 'Allow once', selected: false },
+      { number: 2, label: 'Allow for this session', selected: false },
+      { number: 3, label: 'Deny', selected: false },
+    ])
+  })
+})
+
+describe('stop → finish the task? (SS-10)', () => {
+  test('asked only when the stopped session was the task\'s last live one', async () => {
+    const { lastLiveOfTask } = await import('./sessions')
+    const fleet = [
+      { id: 'a', task: 'T', state: 'working' as const },
+      { id: 'b', task: 'T', state: 'waiting' as const },
+      { id: 'c', task: 'T', state: 'closed' as const },
+      { id: 'd', task: 'U', state: 'working' as const },
+    ]
+    expect(lastLiveOfTask(fleet, { id: 'a', task: 'T' })).toBe(false)
+    expect(lastLiveOfTask(fleet.filter(f => f.id !== 'b'), { id: 'a', task: 'T' })).toBe(true)
+    expect(lastLiveOfTask(fleet, { id: 'd', task: 'U' })).toBe(true)
+    expect(lastLiveOfTask(fleet, { id: 'x' })).toBe(false)
+  })
+})

@@ -237,3 +237,71 @@ describe('attachments in the conversation (UI follow-up 3)', () => {
     ])
   })
 })
+
+describe('the REASONING channel (TOOLS-NATIVE item 5) — folded above the answer, never in it', () => {
+  const R = (seq: number, text: string): NativeFrame => ({ kind: 'reasoning', seq, runId: RUN, text })
+  const user = { seq: 1, message: { role: 'user' as const, content: 'price?' } }
+  test('parsed, accumulated per run, carried on the live turn — the answer text stays clean', () => {
+    expect(parseNativeFrame('{"kind":"reasoning","seq":4,"text":"hmm"}')).toEqual({ kind: 'reasoning', seq: 4, text: 'hmm' })
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([user]) },
+      { type: 'frame', frame: ev(1, 'run.started') }, { type: 'frame', frame: R(2, 'The user ') }, { type: 'frame', frame: R(3, 'asks a price.') },
+      { type: 'frame', frame: { kind: 'delta', seq: 4, runId: RUN, text: 'It is $3.' } })
+    const live = nativeChatItems(s).find(i => i.kind === 'turn' && i.key === 'live')
+    expect(live).toMatchObject({ turn: { text: 'It is $3.', reasoning: 'The user asks a price.' } })
+  })
+  test('still thinking, nothing written yet: a live turn with the reasoning only', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([user]) },
+      { type: 'frame', frame: ev(1, 'run.started') }, { type: 'frame', frame: R(2, 'planning') })
+    expect(nativeChatItems(s).at(-1)).toMatchObject({ key: 'live', turn: { text: '', reasoning: 'planning' } })
+  })
+  test('once the answer is persisted, the reasoning folds above THAT answer; a new run starts clean', () => {
+    const answered = windowWith([user, { seq: 2, message: { role: 'assistant', content: 'It is $3.' } }])
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([user]) },
+      { type: 'frame', frame: ev(1, 'run.started') }, { type: 'frame', frame: R(2, 'thought') },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, runId: RUN, text: 'It is $3.' } },
+      { type: 'frame', frame: ev(4, 'run.ended', { status: 'completed' }) }, { type: 'window', window: answered })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn')
+    expect(turns.at(-1)).toMatchObject({ turn: { role: 'assistant', text: 'It is $3.', reasoning: 'thought' } })
+    s = apply(s, { type: 'frame', frame: ev(5, 'run.started', {}, { runId: 'run_2' }) })
+    expect(nativeChatItems(s).some(i => i.kind === 'turn' && i.turn.reasoning)).toBe(false)
+  })
+})
+
+describe('message time — the store\'s own, never invented', () => {
+  test('a window message with createdAt carries it as the turn\'s `at`; one without carries none', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
+      { seq: 1, createdAt: '2026-10-04T13:05:00.000Z', message: { role: 'user', content: 'hi' } },
+      { seq: 2, message: { role: 'assistant', content: 'hello' } },
+    ]) })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn')
+    expect(turns[0]).toMatchObject({ turn: { text: 'hi', at: '2026-10-04T13:05:00.000Z' } })
+    expect('at' in (turns[1] as { turn: object }).turn).toBe(false)
+  })
+})
+
+describe('B9.1: the model\'s reasoning in the chat — the same folded block as the reasoning frame', () => {
+  test('live: reasoning deltas on the reasoning channel fold above the answer, never into it', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([]) })
+    s = apply(s, { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: { kind: 'delta', seq: 2, runId: RUN, text: 'Let me ', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, runId: RUN, text: 'think.', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 4, runId: RUN, text: 'Answer' } })
+    const live = nativeChatItems(s).find(i => i.kind === 'turn' && i.key === 'live')
+    expect(live).toMatchObject({ turn: { text: 'Answer', reasoning: 'Let me think.' } })
+  })
+
+  test('the window: a reasoning part folds above the answer after it; a redacted one (no text) is not drawn', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'q' } },
+      { seq: 2, message: { role: 'assistant', content: [
+        { type: 'reasoning', text: 'plan', signature: 'sig' },
+        { type: 'reasoning', text: '', redactedData: 'opaque' },
+        { type: 'text', text: 'a' },
+      ] } },
+    ]) })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn')
+    expect(turns).toHaveLength(2)
+    expect(turns[1]).toMatchObject({ turn: { role: 'assistant', text: 'a' } })
+    expect((turns[1] as { turn: { reasoning?: string } }).turn.reasoning?.trim()).toBe('plan')
+  })
+})

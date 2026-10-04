@@ -20,6 +20,9 @@ import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
+import { isExternalRowId, planContinueHere } from './external-continue'
+import { SPAWN_SPECS } from './spawn-spec'
+import { cliStrings } from '../cli-i18n'
 import { conversationOfRow } from './row-conversation'
 import { attachmentMessageOf, recordAttachmentMessage } from './attachment-web'
 import { controlStrings } from '@agentistics/tui/control/i18n'
@@ -111,6 +114,11 @@ export interface FleetActionResponse {
    * be a guess between two rows of the same conversation.
    */
   id?: string
+  /**
+   * EXT.OPEN: the write needs a YES first (it would end an external process). `message` is the
+   * question; resend with `confirm: true` to go ahead.
+   */
+  confirm?: boolean
 }
 
 /**
@@ -293,6 +301,10 @@ export async function runFleetAction(
     }
     case 'prompt': {
       if (!host.promptSession) return { ok: false, message: s.sessionsNoHost }
+      // EXT.OPEN: an EXTERNAL row has no pane to type into. The first write CONTINUES its conversation
+      // here (`external-continue.ts`): asked once, then the existing takeover ends the process and the
+      // same id is resumed with this message as its first prompt.
+      if (isExternalRowId(req.id)) return continueExternal(lang, req, text)
       // Taken BEFORE the message is typed, so the record can never be stamped later than the turn
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
@@ -345,6 +357,14 @@ export async function runFleetAction(
     case 'kill':
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
+    // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is
+    // refused in words rather than reaching a host verb that does not exist.
+    case 'archive':
+    case 'delete': {
+      const { isNativeSessionId, runNativeVerb } = await import('./native-fleet')
+      if (!isNativeSessionId(req.id)) return { ok: false, message: s.sessionsNativeOnly }
+      return await runNativeVerb(req.id, req.action, lang)
+    }
     case 'rewind': {
       if (!host.rewindSession) return { ok: false, message: s.sessionsNoHost }
       // The prompt is the ANCHOR, compared against the harness's own menu row by row — not an index,
@@ -1183,4 +1203,37 @@ export async function listFleetArtifacts(
 ): Promise<{ files: { raw: string; path: string; bytes: number }[]; unavailable?: string; outside?: string }> {
   const host = await hostFor(lang)
   return await listSessionArtifacts(host, lang, id)
+}
+
+/**
+ * EXT.OPEN — the first write to an EXTERNAL session (`external-continue.ts` for the rule). The row
+ * is read from the fleet, never trusted from the browser: the conversation id and the directory a
+ * resume runs in come from what this machine observed.
+ */
+async function continueExternal(lang: CliLang, req: FleetActionRequest, text: string): Promise<FleetActionResponse> {
+  const cli = cliStrings(lang)
+  const s = controlStrings(lang)
+  const host = await hostFor(lang)
+  if (!host.resumeSession || !host.sessions) return { ok: false, message: s.sessionsNoHost }
+  const fleet = await host.sessions()
+  const row = fleet.sessions.find(r => r.id === req.id)
+  if (!row) return { ok: false, message: s.sessionsRowGone }
+  const harness = row.harness as HarnessId
+  const plan = planContinueHere({
+    conversationId: row.conversationId,
+    resumable: SPAWN_SPECS[harness]?.resume !== undefined,
+    confirmed: req.confirm === true,
+  })
+  if (plan.kind === 'refuse') return { ok: false, message: cli.sessContinueRefused(plan.reason, row.harness) }
+  if (plan.kind === 'confirm') return { ok: false, confirm: true, message: cli.sessContinueConfirm(row.harness, row.pid) }
+  const out = await host.resumeSession({
+    sessionId: plan.conversationId,
+    harness: row.harness,
+    cwd: row.cwd,
+    label: row.title,
+    attach: false,
+    prompt: text,
+  })
+  if (out.ok) recordPrompt(plan.conversationId, text)
+  return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
 }

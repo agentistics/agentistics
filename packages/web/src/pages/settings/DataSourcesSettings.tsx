@@ -1,19 +1,19 @@
 import { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../../lib/harness'
 import { HarnessInfoPanel } from '../../components/HarnessInfoPanel'
 import { SectionHeader } from './primitives'
-import { HARNESS_ORDER } from '@agentistics/core'
+import { SURFACE_HARNESS_ORDER } from '@agentistics/core'
 
 export default function DataSourcesSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const harnesses = ctx.data.harnesses
-  const order: HarnessId[] = HARNESS_ORDER
+  const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
   const present = order.filter(h => harnesses.includes(h))
-  const [selected, setSelected] = useState<HarnessId>(present[0] ?? 'claude')
+  const [selected, setSelected] = useState<SurfaceHarnessId>(present[0] ?? 'claude')
 
   if (present.length === 0) {
     return (

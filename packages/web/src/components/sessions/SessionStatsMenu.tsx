@@ -21,7 +21,7 @@ import { asideCache, asideKey } from '../../lib/asideCache'
 import { Activity, BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, PanelRight, X } from 'lucide-react'
 import { fmt, fmtCost, type CostBasis, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
-import { sessionStats, statReason } from '../../lib/sessionStats'
+import { sessionStats, statReason, type SessionStats } from '../../lib/sessionStats'
 import { costBasisLabel, viewCost } from '../../lib/costBasis'
 import { sessionReferences, type SessionReference } from '../../lib/sessionReferences'
 import { useArtifactLive } from '../../lib/artifactsStore'
@@ -83,6 +83,11 @@ export interface SessionStatsMenuProps {
   sessionId: string
   /** The store's record for this conversation, or `undefined` when it has none yet. */
   meta: SessionMeta | undefined
+  /**
+   * The card's figures ALREADY computed, for a session with no store record whose numbers come from
+   * elsewhere — a NATIVE session's engine usage (`nativeStats.ts`). Wins over `meta` when given.
+   */
+  stats?: SessionStats
   lang: 'pt' | 'en'
   currency: 'USD' | 'BRL'
   brlRate: number
@@ -191,7 +196,7 @@ export interface SessionStatsMenuProps {
 }
 
 export function SessionStatsMenu({
-  harness, sessionId, meta, lang, currency, brlRate, startedModel, startedEffort, touch = false,
+  harness, sessionId, meta, stats, lang, currency, brlRate, startedModel, startedEffort, touch = false,
   variant = 'button', panelMaxWidth, costBasis = 'api', planFactor = null, onOpenFull, task, onOpenTask, onOpenLive, rowId,
 }: SessionStatsMenuProps) {
   const pt = lang === 'pt'
@@ -330,7 +335,7 @@ export function SessionStatsMenu({
   }, [open, variant])
 
   const h = harness as HarnessId
-  const s = sessionStats(h, sessionId, meta)
+  const s = stats ?? sessionStats(h, sessionId, meta)
   const money = (usd: number) => fmtCost(usd, currency, brlRate)
   /**
    * The plan side is offered only when it can actually be produced for THIS harness — see

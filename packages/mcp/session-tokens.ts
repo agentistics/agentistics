@@ -1,6 +1,6 @@
 import {
   calcCost, sessionCostUSD, unpricedTokens, sumTokens, totalTokens, usageTokens, usageTokenTotal, type ModelUsage,
-  HARNESS_ORDER,
+  SURFACE_HARNESS_ORDER,
 } from "@agentistics/core";
 
 export type AnySession = Record<string, any>;
@@ -79,12 +79,14 @@ export function statsCacheTotals(sc: { modelUsage?: Record<string, Partial<Model
   return { ...b, tokens: totalTokens(b), cost, topModel: top?.model ?? null };
 }
 
-export const HARNESS_IDS = HARNESS_ORDER;
+/** Every harness a surface may name — the adapters plus the native `agentistics` one. Its sessions only
+ *  exist in the server's answers while the experimental flag is on, so naming it here opens nothing. */
+export const HARNESS_IDS = SURFACE_HARNESS_ORDER;
 
 export function harnessParam() {
   return {
     type: "string",
-    enum: ["all", ...HARNESS_ORDER],
-    description: `Scope to one harness (${HARNESS_ORDER.join(" | ")}), or 'all' (default) for the unified view across every harness.`,
+    enum: ["all", ...SURFACE_HARNESS_ORDER],
+    description: `Scope to one harness (${SURFACE_HARNESS_ORDER.join(" | ")}), or 'all' (default) for the unified view across every harness.`,
   } as const;
 }

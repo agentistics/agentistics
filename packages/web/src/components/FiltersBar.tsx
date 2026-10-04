@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
-import type { Filters, DateRange, Project, Lang, HarnessId } from '@agentistics/core'
+import type { Filters, DateRange, Project, Lang, SurfaceHarnessId } from '@agentistics/core'
 import { formatModel, formatProjectName, repoShortName } from '@agentistics/core'
 import { Layers, Cpu, ChevronDown, SlidersHorizontal, X, CalendarDays, Check, Users, GitBranch, Search, Plus, Blocks, Radio, Server, FolderOpen, Tag as TagIcon } from 'lucide-react'
 import type { TagDef } from '../lib/tagMatch'
@@ -33,11 +33,11 @@ interface Props {
   models: string[]
   /** Models grouped by the harness that used them. Shown as sections in the
    *  unified view; a single group when a harness filter is active. */
-  modelGroups?: { harness: HarnessId; models: string[] }[]
+  modelGroups?: { harness: SurfaceHarnessId; models: string[] }[]
   modelsInProject?: Set<string> | null
   users: string[]
   /** Available harnesses in the data — drives visibility (show when length > 1). */
-  harnesses?: HarnessId[]
+  harnesses?: SurfaceHarnessId[]
   /** Team/central: live presence per member — drives the online/offline filter pill. */
   presence?: Record<string, MemberPresence>
   lang: Lang
@@ -197,7 +197,7 @@ const SEARCH_INPUT: React.CSSProperties = {
 
 export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
   // Fall back to a single unlabeled group when modelGroups isn't provided.
-  const groups: { harness: HarnessId | null; models: string[] }[] =
+  const groups: { harness: SurfaceHarnessId | null; models: string[] }[] =
     modelGroups && modelGroups.length > 0
       ? modelGroups
       : [{ harness: null, models }]
