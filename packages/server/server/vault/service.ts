@@ -528,6 +528,18 @@ export function autoLockTick(nowMs: number): boolean {
 /** Human interaction (dashboard/TUI heartbeat, an `agentop` verb): resets the idle clock. */
 export function noteVaultActivity(): void { _autoClock?.use(_now()) }
 
+/**
+ * VAULT.UI2: the person ANSWERED the "locks in 5 min" warning — keep it open for one more window. It
+ * only ever moves the idle clock of an OPEN vault, and says so in the audit; it never runs silently
+ * (the caller is a click, gated by the route). Returns the new remaining ms, or null when nothing was open.
+ */
+export function extendAutoLock(): number | null {
+  if (!_opened || !_autoClock) return null
+  _autoClock.use(_now())
+  vaultAudit({ type: 'vault.auto-lock-extended' })
+  return _autoClock.remainingMs(_now())
+}
+
 /** Change the idle period of the OPEN vault (persisted by the caller in vault.json). */
 export function setAutoLockPeriod(minutes: number): void { _autoClock?.setMinutes(minutes) }
 export function autoLockRemainingMs(): number | null { return _opened && _autoClock ? _autoClock.remainingMs(_now()) : null }
@@ -566,6 +578,19 @@ export type GestureUnlock =
  * when the vault has no presence). When the authenticator is enrolled AND the vault has presence, the
  * DEK goes to the PENDING slot and `completeUnlock` (gate.ts) checks the code; otherwise it opens.
  */
+/**
+ * The Hello gesture that just OPENED the vault is also the proof for the ONE send/reveal that follows it
+ * (owner, 2026-10-04: opening and then sending asked Hello twice for a single act). Single-use and short:
+ * `consumeFreshPresence` hands it out once, within `FRESH_PRESENCE_MS`, and a lock forgets it.
+ */
+export const FRESH_PRESENCE_MS = 90_000
+let _freshPresenceMs = 0
+export function consumeFreshPresence(): boolean {
+  const ok = _freshPresenceMs > 0 && _now() - _freshPresenceMs <= FRESH_PRESENCE_MS
+  _freshPresenceMs = 0
+  return ok
+}
+
 export async function unlockWithGesture(passphrase?: string): Promise<GestureUnlock> {
   if (_opened) return { ok: true, state: 'open' }
   if (_role !== 'holder') return refused('service-only', sentence('service-only'))
@@ -573,6 +598,7 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
   abandonPending()
   const s = await tryOpen(passphrase, { presence: true })
   if (s.state === 'open') {
+    if (hasPresence(s.vault)) _freshPresenceMs = _now()
     if (hasPresence(s.vault) && s.vault.stepup && unlockNeedsCode(effectiveUnlockPolicy(s.vault.unlockPolicy), _unlockWindowAnchorMs, _now())) {
       const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
       const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
@@ -767,6 +793,7 @@ export function lockVault(reason: LockedBy = 'user'): void {
   const was = _opened !== null
   if (_opened) _opened.dek.fill(0)
   _opened = null
+  _freshPresenceMs = 0
   _last = null
   _autoClock = null
   _lockedBy = reason
@@ -972,7 +999,7 @@ export async function openFromFile(path: string, purpose: string, name: string):
 export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
-  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
+  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
   | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 

@@ -452,7 +452,8 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 |---|---|---|---|
 | unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
 | change the unlock policy | yes | yes | none, asked every time |
-| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. **The code that completes an unlock IS that step-up** (owner decision, 2026-10-03): `POST /api/vault/unlock/code` and the phone's `/api/vault/phone/unlock` hand back the same 5-minute grant, bound to the session that typed it, so the list right behind an unlock never asks a second code. An unlock that asked NO code (gesture only, or inside the per-day window) mints nothing — its list still asks, inline in the vault's own header, never as a second card. |
+| list the vault, lock it from the dashboard | no | no | **VAULT.UI2 auth policy (owner, 2026-10-04):** an OPEN vault is itself the proof for metadata — opening it already cost presence + the code. Viewing the list asks nothing more, and the "Digite o código do seu autenticador para ver a lista" step is gone. Locking only reduces exposure. Neither counts as *use*: a polled list does not postpone the auto-lock. |
+| change auto-lock, "keep it open" from a remote origin | yes | no | the code (a 5-minute grant covers repeats). "Keep it open" on THIS computer needs no proof: the vault is already open and the click is the consent. |
 | rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
 | lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 
@@ -619,12 +620,44 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
   a marker value, drives every route, and fails if the marker appears in any other body, in
   `audit.jsonl`, on stdout/stderr, or anywhere on disk in the clear. The audit records the ACT and the
   opaque id — never the name or the value.
-- **What each action asks** (rows in `VAULT_ACTION_ROWS`, every one tested server-side): listing,
-  creating, groups and the `.env` import ride the 5-minute read grant (the code once). **Revealing asks
-  the gesture every time** (Windows Hello) and the code too when the unlock policy is "always"; with no
-  presence enrolled it asks the code, fresh; with neither it is refused. **Editing, moving to the trash
-  and restoring ask the gesture fresh** (owner rule: they are dangerous). **Restoring a version and
-  deleting for good ask code and gesture, fresh.**
+- **What each action asks** (rows in `VAULT_ACTION_ROWS`, every one tested server-side). **The rule:
+  the authenticator code is a SECOND factor for CRITICAL actions only** — opening the vault (presence +
+  code per the unlock policy), recovery, backup restore/export, changing security settings, deleting for
+  good. **Listing, creating, groups and the `.env` import ask nothing more of an open vault.**
+  **Revealing and sending a secret to a session ask presence — Windows Hello on this computer, the
+  phone's biometric passkey on mobile — and never the code**, *per secret* (next bullet). Editing and
+  restoring ask the gesture fresh; moving to the trash, restoring a version and deleting for good keep
+  code + gesture. With no presence enrolled a reveal falls back to the code (there is nothing else to
+  ask), and a phone with the opt-in "accept the code for reveals" setting keeps that path — an explicit
+  choice the owner made earlier, stated here rather than hidden.
+- **"Sempre confirmar" (`confirmEach`), per secret — default ON** (owner, 2026-10-04). A secret with it
+  ON asks presence on EVERY reveal and EVERY send, even with the vault open. **Absent reads as ON** —
+  every existing secret has it and every new one starts with it (`needsConfirm`, the one reading) — and
+  only an explicit `false` goes without a prompt while the vault is open. Writing that `false` is an
+  edit, which asks presence. A send of several secrets asks once if ANY of them has it ON
+  (`personal-grant`); with all OFF an open vault is the proof (`personal-grant-open`). **The trade-off,
+  stated honestly:** a secret with it OFF can be read by anything that can drive this page while the
+  vault is open — it is exactly as exposed as the open vault, and the 30-minute idle lock, the lock on
+  Win+L/sleep and "lock now" are the limits. Default ON exists so that exposure is a choice, not an accident.
+- **One act, one prompt.** The Hello that just opened the vault covers the ONE send/reveal that follows
+  within 90 s (`consumeFreshPresence`: single-use, forgotten on lock) — opening-then-sending is one act
+  and used to ask presence twice. Everything after it asks again.
+- **The grant for a `:vault` chip when the vault is LOCKED:** the composer says in one line why ("Para
+  enviar estas credenciais o cofre precisa ser aberto (Windows Hello + código)") and runs the ordinary
+  inline unlock ONCE; nothing else prompts until it locks again. A phone keeps its own passkey path —
+  never a Hello prompt off loopback.
+- **Auto-lock warning and "keep it open".** Five minutes before the idle lock the Nay floating chat shows
+  a card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
+  notification lands in Notificações, once per window (`nextWarn`; an extension or any use re-arms it).
+  [Manter aberto] moves the idle clock by ONE window (`extendAutoLock`, audited
+  `vault.auto-lock-extended`): a click on this computer, the authenticator code from a remote origin
+  (`extend-open`). It never extends silently, and nobody answering means it locks exactly as before.
+- **The vault locks with the screen.** On Linux from logind (`PrepareForSleep`, `Lock`); on a Windows
+  host from WSL through a `powershell.exe` child subscribed to `SessionSwitch` (Win+L, user switch,
+  logoff, remote disconnect) and `PowerModeChanged` (suspend). **What cannot be detected, said plainly:**
+  a lock when `powershell.exe` is not reachable from WSL (interop off), and a suspend that happens while
+  WSL itself is frozen — that event is only seen on resume, so the idle auto-lock is the backstop. macOS
+  is not wired.
 - **Versions** are append-only (the newest 10 kept) with a version counter: an edit based on an old
   version is refused as a conflict. **The trash** keeps an item 30 days, then removes it from disk.
 - **The `.env` import** sends the file text once; the server parses it, holds the pairs in memory for

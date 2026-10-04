@@ -111,7 +111,7 @@ describe('GET /api/vault — the payload the sections read', () => {
     expect(typeof r.json.autoLockInMs).toBe('number')
     expect(Array.isArray(r.json.items)).toBe(true)
     // the §2.4 table travels with the view, so the screen never keeps a second copy of it
-    expect(r.json.gates).toMatchObject({ list: { code: true, gesture: false, grant: true }, 'disable-presence': { code: true, gesture: true, grant: false }, 'lock-local': { code: false, gesture: false, grant: false } })
+    expect(r.json.gates).toMatchObject({ list: { code: false, gesture: false, grant: false }, 'disable-presence': { code: true, gesture: true, grant: false }, 'lock-local': { code: false, gesture: false, grant: false } })
   })
 
   test('carries the hardening report as lines, and no secret-shaped field', async () => {
@@ -125,13 +125,13 @@ describe('GET /api/vault — the payload the sections read', () => {
     for (const f of ['seed', 'dek', 'secret', 'words', 'uri']) expect(blob.toLowerCase()).not.toContain(`"${f}"`)
   })
 
-  test('once enrolled: the inventory needs a step-up (401), and the answer names the state without it', async () => {
+  test('once enrolled and OPEN: the inventory asks no code (owner 2026-10-04) — the open vault is the proof', async () => {
     await enrolOverHttp()
     const r = await http('GET', '/api/vault')
-    expect(r.status).toBe(401)
-    expect(r.json).toMatchObject({ needsStepUp: true, code: 'stepup-required' })
-    expect(r.json.items).toBeUndefined()
-    expect(r.json.view.authenticator).toBeTruthy()
+    expect(r.status).toBe(200)
+    expect(r.json.needsStepUp).toBeUndefined()
+    expect(Array.isArray(r.json.items)).toBe(true)
+    expect(r.json.authenticator).toBeTruthy()
   })
 })
 
@@ -315,7 +315,7 @@ describe('GET /api/vault/credentials', () => {
   test('needs a step-up (401 without a grant), then lists the presence credentials and the recovery date — never a key', async () => {
     await enrolOverHttp()
     const no = await http('GET', '/api/vault/credentials')
-    expect(no.status).toBe(401)
+    expect(no.status).toBe(200) // metadata of an OPEN vault: no code (owner 2026-10-04)
     const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
     expect(g.status).toBe(200)
     next()
@@ -347,8 +347,7 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 'never' }, g.json.grant)).status).toBe(400)
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 }, g.json.grant)).status).toBe(200)
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 })).status).toBe(401)               // no grant, no code
-    expect((await http('POST', '/api/vault/lock', {})).status).toBe(401)
-    expect((await http('POST', '/api/vault/lock', {}, g.json.grant)).status).toBe(200)
+    expect((await http('POST', '/api/vault/lock', {})).status).toBe(200)  // locking only reduces exposure: no code
   })
 
   test('activity is a heartbeat; an unknown path is not ours', async () => {
@@ -388,7 +387,7 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
     const uc = await http('POST', '/api/vault/unlock/code', { code: codeAt() })
     expect(uc.status).toBe(200)
     expect(typeof uc.json.grant).toBe('string')
-    expect((await http('GET', '/api/vault')).status).toBe(401) // without the grant: still its own step-up
+    expect((await http('GET', '/api/vault')).status).toBe(200) // the open vault lists with no further proof
     const open = await http('GET', '/api/vault', undefined, uc.json.grant)
     expect(open.json).toMatchObject({ state: 'open', presence: true, autoLockMinutes: 30 })
     expect(Array.isArray(open.json.items)).toBe(true)

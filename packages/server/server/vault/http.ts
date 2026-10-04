@@ -16,7 +16,7 @@ import { readJsonLimited } from '../limits'
 import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
-import { noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
+import { extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { uiReply } from './ui-sentence'
 import { handlePersonalHttp } from './personal-http'
@@ -143,6 +143,14 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     if (!str(b.code, 16)) return bad()
     return reply(await gate.stepUpForRead(b.code, session))
+  }
+  if (path === '/api/vault/extend' && req.method === 'POST') {
+    const b = await body()
+    const g = await gate.requireVaultStepUp('extend-open', { session, grant, loopback, code: codeOf(b) })
+    if (!g.ok) return reply(g)
+    const left = extendAutoLock()
+    if (left === null) return reply({ ok: false, code: String('locked'), sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
+    return reply({ ok: true, autoLockInMs: left })
   }
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()

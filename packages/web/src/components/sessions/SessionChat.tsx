@@ -118,6 +118,9 @@ import { sessionPath } from '../../lib/sessionRoute'
 import { copyText } from '../../lib/clipboard'
 import { SessionPickModal } from './SessionPickModal'
 import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
+import { loadVault } from '../../lib/vaultApi'
+import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
+import { ensureVaultOpen } from '../vault/VaultUnlockHost'
 import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
 import { grantSession, withStepUp } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
@@ -685,6 +688,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   async function grantVault(sel: VaultSelection) {
     const ids = sel.items.map(i => i.id), gids = sel.groups.map(g => g.id)
     const ms = await mobileState()
+    // VAULT.UI2: open + this computer → no gesture; locked → say why, unlock ONCE, then no more prompts.
+    const here = ms.ok && ms.loopback
+    if (here) {
+      const v = await loadVault()
+      if (grantStep({ loopback: true, locked: v.kind !== 'failed' && v.view.state === 'locked' }) === 'unlock-first') {
+        setNotice(UNLOCK_FIRST_LINE[pt ? 'pt' : 'en'])
+        if (!(await ensureVaultOpen())) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
+      }
+      return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+    }
     if (ms.ok && !ms.loopback && passkeySupport(window) === 'ok' && hasPasskeyHere(ms, window.location.hostname)) {
       const g = await withStepUp(c => phoneGesture('personal-grant', session.id, c), askVaultCode)
       if (!g.ok) return g
@@ -2083,7 +2096,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // session cannot use would only fail later, at the command.
     if (hasVaultChip(composed)) {
       if (!vaultSel) { setNotice(pt ? 'Escolha de novo os segredos do chip 🔐 (clique nele).' : 'Choose the 🔐 chip\'s secrets again (click it).'); return }
-      setNotice(pt ? 'Confirme neste computador (Windows Hello) para liberar os segredos…' : 'Confirm on this computer (Windows Hello) to grant the secrets…')
       const g = await grantVault(vaultSel)
       if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
       setNotice(null)
