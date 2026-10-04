@@ -56,6 +56,8 @@ export interface ResourcesSnapshot {
   }
   recent: ResKill[]
   killsEnabled: boolean
+  /** Absent from an older server. */
+  spawnQueue?: Array<{ id: string; label: string; sinceMs: number; position: number }>
 }
 
 export function fmtMb(bytes: number | null | undefined): string {

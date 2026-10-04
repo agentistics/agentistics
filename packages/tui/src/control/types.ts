@@ -1883,6 +1883,11 @@ export interface SpawnSessionResult {
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string
+  /**
+   * RES.1 — refused by the memory gate and QUEUED instead: it starts by itself when room frees
+   * (`spawn-queue.ts`). `ok` stays false — nothing has started yet — and `message` says so.
+   */
+  queued?: { id: string; position: number }
   /** Present only on a successful ATTACHED start — the shell reports it as `ControlExit.attach`. */
   ticket?: AttachTicket
   /**
@@ -1921,7 +1926,7 @@ export interface SpawnSessionResult {
  * `fleet-spawn.ts` documents for the reverse direction.
  */
 export interface AdmissionRefusal {
-  reason: 'swap' | 'no-room'
+  reason: 'swap' | 'no-room' | 'cpu'
   /** How many sessions were asked for. */
   requested: number
   /** How many WOULD fit right now. Always 0 for `swap`; the room left for `no-room`. */

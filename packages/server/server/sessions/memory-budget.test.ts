@@ -96,7 +96,7 @@ describe('memoryBudget', () => {
   it('counts what the sessions already hold as part of the room', () => {
     // Otherwise the total shrinks as you use the machine correctly: four sessions running would
     // report a smaller ceiling than the same machine with none.
-    const withNone = memoryBudget({ sample: sample(), sessionBytes: 0, sessions: 0 }).max
+    const withNone = memoryBudget({ sample: sample(), sessionBytes: 0, sessions: 0, assumedBytes: 250 * MB }).max
     const withFour = memoryBudget({
       sample: sample({ available: 10 * GB - 1000 * MB }),
       sessionBytes: 1000 * MB,

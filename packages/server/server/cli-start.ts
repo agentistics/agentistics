@@ -133,6 +133,7 @@ import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
 import { forgetRepoFacts, recordedRepo, repoFacts } from './sessions/repo-facts'
+import { createSpawnQueue, registerSpawnQueue } from './sessions/spawn-queue'
 import { markFleetPhase, timeFleetPhase } from './sessions/fleet-profile'
 // The `SessionView` -> `ControlSession` mapping, extracted so `agentop session ls` draws the same
 // rows from the same decision rather than mapping the fleet a second time.
@@ -1776,6 +1777,32 @@ async function spawnRow(a: {
     ...(await recordedRepo(req.cwd)),
   }
 }
+/**
+ * RES.1 — this process's spawn queue (`spawn-queue.ts`), created on first use. In the server it is
+ * also registered for `/api/resources`, where the panel lists it and can cancel an entry.
+ */
+type QueuedSpawnRequest = { req: Parameters<typeof spawnManaged>[0]; lang: CliLang }
+let queueSingleton: ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> | null = null
+function spawnQueue(): ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> {
+  if (queueSingleton) return queueSingleton
+  queueSingleton = createSpawnQueue<QueuedSpawnRequest>({
+    admit: async () => admitSpawn(await readSpawnBudget(), 1).admit,
+    start: async q => spawnManaged(q.req, cliStrings(q.lang), q.lang),
+    notify: n => {
+      if (!isServerProcess()) return
+      void import('./sse').then(m => m.broadcastNotification(n)).catch(() => {})
+    },
+  })
+  registerSpawnQueue(queueSingleton)
+  return queueSingleton
+}
+
+function queuedSentence(position: number, lang: CliLang): string {
+  return lang === 'pt'
+    ? `Sem espaço agora — a sessão entrou na fila (posição ${position}) e inicia sozinha quando houver memória; cancele em Hardware → Recursos.`
+    : `No room right now — the session is queued (position ${position}) and starts by itself when memory frees; cancel it in Hardware → Resources.`
+}
+
 async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
@@ -1796,6 +1823,12 @@ async function spawnManaged(req: {
    * (`overridden`/`note`) — nothing is admitted silently. See `spawn-admission.ts`.
    */
   force?: boolean
+  /**
+   * RES.1 — on a memory refusal, QUEUE the spawn to start by itself when room frees (the default)
+   * rather than failing. `false` keeps the old refusal; a caller that is itself a batch or a reopen
+   * gates the whole set and never queues one row of it.
+   */
+  queue?: boolean
   /**
    * Set ONLY by a caller that already accounted for this spawn's cost in its OWN admission check:
    * `reopenEntries` gates the WHOLE set it is about to spawn before this is ever called (so
@@ -1819,6 +1852,20 @@ async function spawnManaged(req: {
     const admission = admitSpawn(await readSpawnBudget(), 1, { force: req.force })
     if (!admission.admit) {
       const refusal = admission.refusal
+      // RES.1 — wait for room instead of failing. A queued spawn never attaches (nobody is waiting
+      // at a terminal when it finally starts) and skips the gate when it runs, because the queue's
+      // own tick has just asked it.
+      const queued = req.queue !== false
+        ? spawnQueue().enqueue(`${req.harness} · ${req.cwd}`, { req: { ...req, attach: false, skipAdmission: true, queue: false }, lang })
+        : null
+      if (queued) {
+        return {
+          ok: false,
+          message: `${queuedSentence(queued.position, lang)} ${admissionMessage(refusal, lang)}`,
+          admission: admissionRefusalBody(refusal, lang),
+          queued,
+        }
+      }
       return {
         ok: false,
         message: admissionMessage(refusal, lang),

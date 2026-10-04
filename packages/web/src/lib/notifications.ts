@@ -122,6 +122,14 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Servidores MCP numa versão antiga', message: '{count} servidor(es) MCP de sessões abertas ainda rodam o agentop anterior à atualização. Continuam funcionando; para usar a versão nova, reconecte o MCP na sessão (/mcp) ou reabra-a.' },
     en: { title: 'MCP servers on an old version', message: '{count} MCP server(s) of open sessions still run the agentop from before the upgrade. They keep working; to use the new version, reconnect the MCP in the session (/mcp) or reopen it.' },
   },
+  'hardware.spawn_started': {
+    pt: { title: 'Sessão da fila iniciada', message: 'Liberou memória e a sessão que estava na fila começou: {label} (esperou {waitedMin} min).' },
+    en: { title: 'Queued session started', message: 'Memory freed up and the queued session started: {label} (waited {waitedMin} min).' },
+  },
+  'hardware.spawn_failed': {
+    pt: { title: 'Sessão da fila não iniciou', message: 'Havia memória, mas a sessão da fila não pôde iniciar: {label}. Motivo: {reason}' },
+    en: { title: 'Queued session did not start', message: 'There was room, but the queued session could not start: {label}. Reason: {reason}' },
+  },
   'hardware.process_spinning': {
     pt: { title: 'Processo sem dono consumindo CPU', message: '{label} (pid {pid}) está com CPU alta e quem o iniciou já não existe. Abra Hardware → Recursos para encerrá-lo.' },
     en: { title: 'Ownerless process burning CPU', message: '{label} (pid {pid}) is using a lot of CPU and whoever started it is gone. Open Hardware → Resources to stop it.' },

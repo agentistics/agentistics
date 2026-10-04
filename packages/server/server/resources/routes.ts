@@ -6,6 +6,7 @@
  *   POST   /api/resources/helpers     {…}      register a helper (helpers.ts) → {id}
  *   POST   /api/resources/helpers/:id/touch    "something just used it" — resets its idle clock
  *   DELETE /api/resources/helpers/:id          unregister (the helper is NOT killed)
+ *   DELETE /api/resources/queue/:id            cancel a spawn the memory gate queued
  *
  * A kill acts only on a pid the governor's OWN inventory holds (never the server itself, never a
  * `server` kind — see governor.ts), re-read at the moment of the request, so this route cannot be
@@ -19,6 +20,7 @@ import { killAllowed } from './governor'
 import { mutateHelpers, parseHelperRegistration } from './helpers'
 import { broadcastNotification } from '../sse'
 import { pidAlive } from './proc-read'
+import { registeredSpawnQueue } from '../sessions/spawn-queue'
 
 const deps = {
   notify: (n: { type: 'warning' | 'info'; code: string; meta: Record<string, unknown> }) => broadcastNotification(n),
@@ -63,6 +65,12 @@ export async function handleResources(req: Request, url: URL, cors: Record<strin
       result: null,
     }))
     return json({ ok: true, id }, 201)
+  }
+
+  const q = /^\/api\/resources\/queue\/([\w-]+)$/.exec(path)
+  if (q && req.method === 'DELETE') {
+    const queue = registeredSpawnQueue()
+    return queue?.cancel(q[1]!) ? json({ ok: true }) : json(fail('no_such_entry'), 404)
   }
 
   const m = /^\/api\/resources\/helpers\/([\w-]+)(\/touch)?$/.exec(path)

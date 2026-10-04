@@ -818,6 +818,8 @@ export interface FleetSpawnResponse {
   ok: boolean
   /** Already localized, and always present. */
   message: string
+  /** RES.1 — refused by the memory gate and queued; it starts by itself when room frees. */
+  queued?: { id: string; position: number }
   /** The id of the session that was started, so the caller can attach to the very one it created. */
   id?: string
   /**
@@ -896,6 +898,7 @@ export async function runFleetSpawn(
     // routes to the same sentence.
     ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
+    ...(out.queued ? { queued: out.queued } : {}),
   }
 }
 

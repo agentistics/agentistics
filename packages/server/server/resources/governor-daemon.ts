@@ -15,6 +15,7 @@ import { buildInventory, type AgentopProcess } from './inventory'
 import { planGovernor, type Alert, type Kill } from './governor'
 import { readHelpers, mutateHelpers, pruneHelpers, type HelperRecord } from './helpers'
 import { readHeavyState, type HeavyState } from './heavy-io'
+import { registeredSpawnQueue } from '../sessions/spawn-queue'
 
 export const TICK_MS = 30_000
 export const KILL_GRACE_MS = 5_000
@@ -31,6 +32,8 @@ export interface ResourcesSnapshot {
   /** The kills this server carried out, newest first, capped. */
   recent: Array<Kill & { atMs: number }>
   killsEnabled: boolean
+  /** Spawns the memory gate refused and is holding until room frees (sessions/spawn-queue.ts). */
+  spawnQueue: Array<{ id: string; label: string; sinceMs: number; position: number }>
 }
 
 export interface GovernorDeps {
@@ -46,7 +49,8 @@ let running: Promise<ResourcesSnapshot> | null = null
 let lastStaleMcpCount = 0
 
 export function resourcesSnapshot(): ResourcesSnapshot | null {
-  return snapshot
+  // The queue moves between ticks (a spawn queued a second ago); read it live.
+  return snapshot ? { ...snapshot, spawnQueue: registeredSpawnQueue()?.list() ?? [] } : null
 }
 
 const killsEnabled = (): boolean => process.env.AGENTISTICS_GOVERNOR !== '0'
@@ -130,6 +134,7 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
       heavy,
       recent: [...recent],
       killsEnabled: killsEnabled(),
+      spawnQueue: registeredSpawnQueue()?.list() ?? [],
     }
     return snapshot
   })().finally(() => { running = null })

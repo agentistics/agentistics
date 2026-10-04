@@ -594,7 +594,7 @@ export function NewSessionModal({
           ...(force ? { force: true as const } : {}),
         }),
       })
-      const json = await res.json() as { ok: boolean; message: string; id?: string }
+      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number } }
       if (json.ok) {
         // Forced through despite the budget — surfaced through the persisted notification store
         // (never silently), the same "already-localized sentence, meta-carried" pattern
@@ -639,7 +639,10 @@ export function NewSessionModal({
       }
       setBusy(false)
       setNotice(json.message)
-      setForceable(isAdmissionRefusal(json))
+      const queued = json.queued !== undefined
+      // RES.1 — a QUEUED spawn starts by itself when room frees. "Start anyway" is withheld: it would
+      // start this session now AND leave the queued copy to start a second one later.
+      setForceable(!queued && isAdmissionRefusal(json))
     } catch {
       setBusy(false)
       setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')

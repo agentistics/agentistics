@@ -64,6 +64,14 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
     }
   }
 
+  const cancelQueued = async (id: string) => {
+    const res = await fetch(`/api/resources/queue/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    setNote(res.ok
+      ? (l === 'pt' ? 'Removida da fila.' : 'Removed from the queue.')
+      : (l === 'pt' ? `Não foi possível remover (HTTP ${res.status}).` : `Could not remove it (HTTP ${res.status}).`))
+    reload()
+  }
+
   const h2: React.CSSProperties = { fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }
   const box: React.CSSProperties = { padding: 12, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border)', fontSize: 13 }
   const btn: React.CSSProperties = {
@@ -181,6 +189,24 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
             {l === 'pt' ? 'Rode compilações e suítes completas com' : 'Run full builds and test suites with'} <code>agentop heavy -- &lt;cmd&gt;</code>
           </span>
+        </div>
+      )}
+
+      {snap && (snap.spawnQueue?.length ?? 0) > 0 && (
+        <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+            {l === 'pt' ? 'Sessões na fila (aguardando memória)' : 'Sessions queued (waiting for memory)'}
+          </span>
+          {snap.spawnQueue!.map(q => (
+            <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>
+                {q.position}. {q.label} <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>· {fmtAge(Math.round((Date.now() - q.sinceMs) / 1000))}</span>
+              </span>
+              <button style={{ ...btn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }} onClick={() => void cancelQueued(q.id)}>
+                {l === 'pt' ? 'Cancelar' : 'Cancel'}
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
