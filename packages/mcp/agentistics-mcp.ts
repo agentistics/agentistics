@@ -14,11 +14,11 @@ import {
   sessionMessages,
   sessionTokens,
   harnessParam,
-  HARNESS_IDS,
+  toolsForGate,
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
-import { projectionSurfaceOn } from "@agentistics/core";
+import { nativeVisibleFrom, projectionSurfaceOn } from "@agentistics/core";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -28,7 +28,18 @@ const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 // agentistics tracks sessions from every registered harness (Claude Code, Codex CLI, Gemini CLI,
 // Copilot CLI, Antigravity CLI, Kimi Code). Sessions carry a `harness` field; legacy/missing defaults to claude.
 
-const HARNESS_PARAM = harnessParam();
+// Hidden by default: the native harness is experimental, and `ListTools` re-derives this per gate answer.
+const HARNESS_PARAM = harnessParam(false);
+
+/** The server's gate (`GET /api/engine` → `nativeVisibleFrom`). An unreachable server reads as hidden. */
+async function nativeVisibleNow(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/api/engine`, { signal: AbortSignal.timeout(2000) });
+    return res.ok ? nativeVisibleFrom(await res.json()) : false;
+  } catch {
+    return false;
+  }
+}
 
 // Static mirror of src/lib/componentCatalog.tsx — keep in sync when adding components
 const CATALOG = [
@@ -775,7 +786,7 @@ const TOOLS: Tool[] = [
   },
 ];
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForGate(TOOLS, await nativeVisibleNow()) }));
 
 // The local agent audit (spec §4.6, P1.2): every W/D call is one line, R calls are counted per
 // hour. It records ids and outcome codes only — never an argument value — and a failed write never

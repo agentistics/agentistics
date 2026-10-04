@@ -32,7 +32,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, SURFACE_HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
@@ -3034,7 +3034,8 @@ export default function AppLayout() {
   // models are offered; in the unified view all harnesses are shown as sections.
   const modelGroups = useMemo<{ harness: SurfaceHarnessId; models: string[] }[]>(() => {
     if (!data) return []
-    const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+    // `data` comes gated from `useData` (`withoutHiddenNative`): the native section exists only when it may be seen.
+    const order: SurfaceHarnessId[] = surfaceHarnesses(data.harnesses.includes(NATIVE_HARNESS_ID))
     const byH: Partial<Record<SurfaceHarnessId, Set<string>>> = {}
     const add = (h: SurfaceHarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
     for (const id of Object.keys(data.statsCache.modelUsage ?? {})) add('claude', id)

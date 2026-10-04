@@ -11,7 +11,7 @@
  */
 
 import type { AppData, SurfaceHarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
-import { calcCost, isUnpricedModel, unpricedTokens, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, SURFACE_HARNESS_ORDER } from '@agentistics/core'
+import { calcCost, isUnpricedModel, unpricedTokens, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, surfaceHarnesses, NATIVE_HARNESS_ID } from '@agentistics/core'
 
 export interface HarnessRow {
   harness: SurfaceHarnessId
@@ -138,7 +138,8 @@ function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & {
 
 export function harnessRows(data: AppData): HarnessRow[] {
   const present = new Set(data.harnesses ?? [])
-  return SURFACE_HARNESS_ORDER.filter(h => present.has(h)).map(harness => {
+  // The server's /api/data is gated (`native-gate.ts`), so a native row is present only when it may be seen.
+  return surfaceHarnesses(present.has(NATIVE_HARNESS_ID)).filter(h => present.has(h)).map(harness => {
     const own = (data.sessions ?? []).filter(s => sessionHarness(s) === harness)
     if (harness === 'claude') return { harness, ...claudeTotals(data.statsCache, own) }
     return { harness, ...sessionTotals(own) }

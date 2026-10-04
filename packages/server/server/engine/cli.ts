@@ -73,11 +73,14 @@ function wrap(text: string, first: string, indent: string): string[] {
 /**
  * PURE. The engine verbs' lines for `agentop --help`: the engine's own summary where it offers the
  * verb, else a one-liner marked `(official build)` — hiding the verbs would make the docs lie to a
- * community user.
+ * community user. The native verbs are the exception: hidden while the experimental flag is off.
  */
-export function engineHelpLines(commands: readonly EngineCommand[] | null): string[] {
+export function engineHelpLines(commands: readonly EngineCommand[] | null, nativeOn = true): string[] {
   const lines: string[] = []
   for (const verb of ENGINE_VERBS) {
+    // `code` and `provider` are the experimental native harness: with the flag off they are not
+    // documented here at all, exactly as before v2.103 (the verb still answers, in its sentence).
+    if (!nativeOn && NATIVE_VERBS.includes(verb)) continue
     const cmd = commands?.find(c => c.verb === verb)
     const text = cmd ? cmd.summary.en : `${ENGINE_VERB_HELP[verb]} (official build)`
     lines.push(...wrap(text, `  ${verb.padEnd(NAME_COL - 2)}`, ' '.repeat(NAME_COL)))
@@ -89,5 +92,5 @@ export function engineHelpLines(commands: readonly EngineCommand[] | null): stri
 export async function engineHelpSection(): Promise<string> {
   const { engine, loadEngine } = await import('./load')
   await loadEngine({ log: () => {} })
-  return engineHelpLines(engine()?.commands ?? null).join('\n')
+  return engineHelpLines(engine()?.commands ?? null, nativeExperimentalOn()).join('\n')
 }

@@ -19,7 +19,7 @@
  */
 
 import type { AppData, SurfaceHarnessId } from '@agentistics/core'
-import { SURFACE_HARNESS_ORDER, projectedRollup, type MetricsQueryFn, type Rollup } from '@agentistics/core'
+import { NATIVE_HARNESS_ID, surfaceHarnesses, projectedRollup, type MetricsQueryFn, type Rollup } from '@agentistics/core'
 import { harnessRows, modelRows, overviewTotals, projectRows, type HarnessRow, type ModelRow, type ProjectRow, type Totals } from './selectors'
 
 export interface DashboardFigures {
@@ -49,11 +49,13 @@ export async function projectedFigures(q: MetricsQueryFn, harness: SurfaceHarnes
     projectedRollup(q, 'project', scope),
     projectedRollup(q, 'model', scope),
   ])
-  const harnesses: HarnessRow[] = [...byHarness.values()]
+  const rows: HarnessRow[] = [...byHarness.values()]
     .filter(r => r.key)
     .map(r => ({ harness: r.key as SurfaceHarnessId, sessions: r.sessions, messages: null, tokens: mainTokens(r), costUSD: r.mainCost, agents: null }))
-    // The legacy screen's order: SURFACE_HARNESS_ORDER.
-    .sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness))
+  // The legacy screen's order. The server's /api/runtime/metrics is gated (`native-gate.ts`), so a native
+  // row arrives only when it may be seen — and one that arrives otherwise is dropped by the order itself.
+  const order = surfaceHarnesses(rows.some(r => r.harness === NATIVE_HARNESS_ID))
+  const harnesses = rows.filter(r => order.includes(r.harness)).sort((a, b) => order.indexOf(a.harness) - order.indexOf(b.harness))
   const totals = harnesses.reduce<Totals>(
     (acc, r) => ({ sessions: acc.sessions + r.sessions, tokens: acc.tokens + r.tokens, costUSD: acc.costUSD + r.costUSD, messages: null }),
     { sessions: 0, tokens: 0, costUSD: 0, messages: null },

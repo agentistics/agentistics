@@ -172,6 +172,13 @@ describe('the engine verbs at the command line', () => {
     expect(some).toContain('fake provider command')
     expect(some.match(/\(official build\)/g)?.length).toBe(2)
   })
+
+  it('the help leaves the native verbs out while the experimental flag is off (the v2.103 leak)', () => {
+    const off = engineHelpLines(null, false).join('\n')
+    expect(off).not.toContain('  code')
+    expect(off).not.toContain('  provider')
+    expect(off).toContain('  ingest')
+  })
 })
 
 describe('the journal, fed through the engine', () => {

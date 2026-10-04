@@ -8,8 +8,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SURFACE_HARNESS_ORDER } from '@agentistics/core'
-import { harnessParam } from './session-tokens'
+import { HARNESS_ORDER, SURFACE_HARNESS_ORDER } from '@agentistics/core'
+import { harnessParam, toolsForGate } from './session-tokens'
 
 describe('MCP: no native or provider surface of its own', () => {
   test('no source names a native or provider route', () => {
@@ -22,8 +22,25 @@ describe('MCP: no native or provider surface of its own', () => {
   // NATIVE.SURF: the harness enum NAMES the native harness — its sessions reach the MCP only through
   // `/api/data` and `/api/runtime/metrics`, which leave them out while the flag is off, so the gate is
   // the server's and a name in an enum opens nothing.
-  test('the harness enum lists every surface harness, the native one included', () => {
-    expect(harnessParam().enum).toEqual(['all', ...SURFACE_HARNESS_ORDER])
-    expect((harnessParam().enum as readonly string[]).includes('agentistics')).toBe(true)
+  test('the harness enum names the native harness ONLY while the native runtime is visible', () => {
+    expect(harnessParam(true).enum).toEqual(['all', ...SURFACE_HARNESS_ORDER])
+    expect(harnessParam(false).enum).toEqual(['all', ...HARNESS_ORDER])
+    expect((harnessParam(false).enum as readonly string[]).includes('agentistics')).toBe(false)
+  })
+  test('ListTools re-derives every harness parameter for the gate, hidden included', () => {
+    const tools = [
+      { name: 'a', inputSchema: { type: 'object', properties: { harness: harnessParam(true) } } },
+      { name: 'b', inputSchema: { type: 'object', properties: {} } },
+    ]
+    const off = toolsForGate(tools, false)
+    expect((off[0]!.inputSchema.properties as { harness: { enum: string[] } }).harness.enum.includes('agentistics')).toBe(false)
+    expect(off[1]).toBe(tools[1]!)
+    const on = toolsForGate(tools, true)
+    expect((on[0]!.inputSchema.properties as { harness: { enum: string[] } }).harness.enum.includes('agentistics')).toBe(true)
+  })
+  test('the server never lists tools before asking the gate', () => {
+    const src = readFileSync(join(import.meta.dir, 'agentistics-mcp.ts'), 'utf8')
+    expect(src).toContain('toolsForGate(TOOLS, await nativeVisibleNow())')
+    expect(src).not.toMatch(/ListToolsRequestSchema,\s*async \(\) => \(\{ tools: TOOLS \}\)/)
   })
 })
