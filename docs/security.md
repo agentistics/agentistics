@@ -423,10 +423,10 @@ file (a test pins it).
 Central-side database secrets (the persisted session secret, password hashes, TOTP seeds) are a
 database-at-rest question, out of scope here.
 
-## 7b. Ultra secure vault — presence, an authenticator code, a recovery key
+## 7b. The vault: presence, an authenticator code, a recovery key
 
 §7a closes a copy of `~/.agentistics` read elsewhere. Its stated limit is that **a process running as
-you, on this machine, can ask the protector for the key in silence.** The ultra secure vault attacks
+you, on this machine, can ask the protector for the key in silence.** This protection attacks
 that limit. It is opt-in: a banner recommends it, and `agentop vault enroll` (or Settings → Vault) turns
 it on. A vault set up under §7a keeps working unchanged until you do.
 
