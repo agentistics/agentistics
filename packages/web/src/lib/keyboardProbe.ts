@@ -39,6 +39,12 @@ export interface ProbeSample {
   vvH: number
   /** The layout viewport's height, for comparison with `vvH`. */
   innerH: number
+  /**
+   * The screen's height in the current orientation — what a home-screen app owns. `ih` short of it
+   * with the keyboard down is the stale-height gap `standaloneHeight.ts` corrects. Optional so an
+   * older reading still formats.
+   */
+  screenH?: number
   /** `#root`'s top edge. The containing block every fixed descendant here answers to. */
   rootTop: number
   /** The composer's top edge, or `null` when it is not on screen. */
@@ -85,6 +91,7 @@ export function formatSample(s: ProbeSample): string {
     `vvTop=${n(s.vvTop)}`,
     `vvH=${n(s.vvH)}`,
     `ih=${n(s.innerH)}`,
+    ...(s.screenH !== undefined ? [`scr=${n(s.screenH)}`] : []),
     `root=${n(s.rootTop)}`,
     `comp=${n(s.composerTop)}`,
     s.focused ? 'FOCUSED' : 'blurred',
