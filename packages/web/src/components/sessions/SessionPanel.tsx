@@ -228,6 +228,12 @@ export function SessionPanel({
    * conversation comes through the chat's `ChatSource` seam (`NativeChatHost`).
    */
   const native = isNativeSessionId(session.id)
+  /**
+   * NO SCREEN agentop can show: a native session (no process in a pane) and an EXTERNAL one (EXT.OPEN
+   * — its pane, if any, is somebody else's terminal). Its conversation reads like any other; the
+   * screen-only parts are absent until a write continues it here, where it gets one.
+   */
+  const screenless = native || session.id.startsWith('external:')
 
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just
@@ -236,7 +242,7 @@ export function SessionPanel({
   const controlled = onViewChange !== undefined
   const view = controlled ? (viewProp ?? 'chat') : localView
   const setView = controlled ? onViewChange! : setLocalView
-  const active: SessionView = native ? 'chat' : chattable ? view : 'terminal'
+  const active: SessionView = screenless && chattable ? 'chat' : chattable ? view : 'terminal'
 
   /**
    * WHERE THE STUDIO SITS — `lib/panelSlots.ts`, design §1. Read through `resolveForViewport` with
@@ -287,7 +293,7 @@ export function SessionPanel({
     shellEnabled: shellEnabled === true,
     relayed,
     hardwareOffered: hardwareOffered === true,
-    screen: !native,
+    screen: !screenless,
   }
   const bottomIds = bottomPanels(slotLayout)
   // GATED — a stale `bottom: 'shell'` left over from before the switch turned off reads as `'cli'`
@@ -521,7 +527,7 @@ export function SessionPanel({
           key={session.id}
           sessionId={session.id}
           // No harness SCREEN behind a native session: the band holds its shell only.
-          {...(native ? { fixedTarget: 'shell' as const, cliAvailable: false } : {})}
+          {...(screenless ? { fixedTarget: 'shell' as const, cliAvailable: false } : {})}
           {...(session.cwd ? { cwd: session.cwd } : {})}
           {...(onOpenShellFullscreen ? { onOpenFullscreen: onOpenShellFullscreen } : {})}
           {...(session.harness ? { harness: session.harness } : {})}
