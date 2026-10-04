@@ -27,7 +27,7 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useMoney } from './money'
 import type { TaskListRow } from '../../lib/tasks'
-import { threadsAwaitingText, mobileBoardCopy } from './boardCopyThreads'
+import { threadsCountText, mobileBoardCopy } from './boardCopyThreads'
 
 function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
   lang?: 'pt' | 'en'
@@ -51,7 +51,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
     ? `${r.credits!.premiumRequests} req`
     : fmt(r.costUSD, r.costByHarness)
   const pct = counts ? taskProgress(counts.subtasksDone, counts.subtasks).percent : null
-  const awaiting = threadsAwaitingText(counts?.threadsAwaiting, lang)
+  const threadCount = threadsCountText(counts?.threads, lang)
   return (
     <button
       onClick={onOpen}
@@ -108,12 +108,11 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
           }}>{cost}</span>
         </div>
 
-        {awaiting && (
+        {threadCount && (
           <span style={{
             justifySelf: 'start', display: 'inline-flex', alignItems: 'center', gap: 5,
-            fontSize: 11.5, fontWeight: 600, color: 'var(--anthropic-orange-light)',
-            background: 'var(--anthropic-orange-dim)', borderRadius: 6, padding: '3px 7px',
-          }}>{awaiting}</span>
+            fontSize: 11.5, color: 'var(--text-tertiary)',
+          }}>{threadCount}</span>
         )}
 
         <Agents row={row} live={live} nowMs={nowMs} />

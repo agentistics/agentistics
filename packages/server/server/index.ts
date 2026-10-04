@@ -2109,6 +2109,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const claimed = body.session as { id?: unknown; token?: unknown } | undefined
         const session = claimed ? await verifySessionIdentity(claimed.id, claimed.token) : null
         const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
+        const { isCommentKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
           author: String(body.author ?? 'unknown'),
           body: String(body.body ?? ''),
@@ -2119,6 +2120,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ? { newThread: { title: nt.title, ...(nt.kind === 'topic' || nt.kind === 'handback' || nt.kind === 'block' ? { kind: nt.kind } : {}) } }
             : {}),
           ...(session ? { session } : body.owner === true ? { owner: true } : {}),
+          ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
         })
         if (res.ok) return json({ ok: true, id: res.id, ...(res.threadId ? { threadId: res.threadId } : {}) })
         const status = res.reason === 'no_such_task' ? 404 : res.reason === 'empty' ? 400 : 422
@@ -2126,8 +2128,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       if (verb === 'threads') {
         // Agentask THREADS (`task-threads.ts`). `action` picks the verb; `threadId` names the thread
-        // for every verb but `open`. A reply is the person's 1:N message — refused outright when the
-        // request carries a session identity, so a session can never fan out to the others.
+        // for every verb but `open`. A thread is a RECORD: an ordinary comment goes through
+        // `/comments` and reaches no session. `send` is the person's EXPLICIT delivery into the
+        // sessions' own chats — refused outright when the request carries a session identity.
         const th = await import('./sessions/task-threads')
         const action = String(body.action ?? '')
         const threadId = typeof body.threadId === 'string' ? body.threadId : ''
@@ -2141,14 +2144,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           if (res.ok) return json({ ok: true, thread: res.thread })
           return json({ ok: false, reason: res.reason, message: res.message }, res.reason === 'no_such_task' ? 404 : 422)
         }
-        if (action === 'reply') {
+        if (action === 'send') {
           const { fleetLang } = await import('./sessions/fleet-web')
           const { sanitizeCommentAttachments } = await import('@agentistics/core')
           const { resolveAttachmentRead } = await import('./sessions/attachment-web')
           const attachments = sanitizeCommentAttachments(body.attachments, resolveAttachmentRead)
-          const res = await th.replyToThread(ref, threadId, {
+          const { isCommentKind } = await import('@agentistics/core')
+          const res = await th.sendFromThread(ref, threadId, {
             body: String(body.body ?? ''), author: String(body.author ?? 'owner'),
-            ...(typeof body.answerTo === 'string' && body.answerTo ? { answerTo: body.answerTo } : {}),
+            ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
             ...(attachments.length ? { attachments } : {}),
             fromSession: body.session !== undefined,
           }, fleetLang(url.searchParams.get('lang')))

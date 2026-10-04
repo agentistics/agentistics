@@ -30,7 +30,7 @@ import type {
   Attempt, AttemptStatus, HistoricalSession, Subtask, Task, TaskBook, TaskClaim, TaskComment,
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
-import type { ThreadDelivery, ThreadParticipant } from '@agentistics/core'
+import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
 
 export interface TaskPatch {
   title?: string
@@ -359,8 +359,7 @@ function sanitizeComment(raw: unknown): TaskComment | null {
     ...(str(c.threadId) ? { threadId: str(c.threadId)! } : {}),
     ...(c.role === 'owner' || c.role === 'session' ? { role: c.role } : {}),
     ...(str(c.sessionId) ? { sessionId: str(c.sessionId)! } : {}),
-    ...(str(c.answerTo) ? { answerTo: str(c.answerTo)! } : {}),
-    ...(c.via === 'thread' || c.via === 'session' ? { via: c.via } : {}),
+    ...(isCommentKind(c.kind) && c.kind !== 'note' ? { kind: c.kind } : {}),
     ...(Array.isArray(c.deliveries) ? { deliveries: c.deliveries.map(sanitizeDelivery).filter((d): d is ThreadDelivery => d !== null) } : {}),
   }
 }

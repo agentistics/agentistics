@@ -32,7 +32,7 @@ import { planMove } from './task-rank'
 import { resolveAttachmentRead } from './attachment-web'
 import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
 import { noteThreadComment, openThread } from './task-threads'
-import type { ThreadKind } from '@agentistics/core'
+import type { CommentKind, ThreadKind } from '@agentistics/core'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
@@ -383,6 +383,8 @@ export async function addComment(
     session?: string
     /** The person wrote it on the board (no session identity). */
     owner?: boolean
+    /** What the record is (handback, block, decision). Absent = a note. */
+    kind?: CommentKind
   },
 ): Promise<
   | { ok: true; id: string; threadId?: string }
@@ -428,6 +430,7 @@ export async function addComment(
     createdAt: new Date().toISOString(),
     ...(threadId ? { threadId } : {}),
     ...(o.session ? { role: 'session' as const, sessionId: o.session } : o.owner ? { role: 'owner' as const } : {}),
+    ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
   })
   if (threadId) await noteThreadComment(threadId, o.session)
   await w.store.logEvents([event(task.id, author, 'comment', { detail: commentTargetPhrase(plan.target) })])
