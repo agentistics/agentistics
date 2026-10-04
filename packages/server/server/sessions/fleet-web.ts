@@ -260,6 +260,9 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
 export async function runFleetAction(
   lang: CliLang,
   req: FleetActionRequest,
+  // `fromThread`: the prompt is an Agentask thread's own delivery, already recorded there — so the
+  // session-chat mirror below must not record it a second time. Never set from a browser request.
+  opts: { fromThread?: boolean } = {},
 ): Promise<FleetActionResponse> {
   const s = controlStrings(lang)
   const host = await hostFor(lang)
@@ -334,6 +337,13 @@ export async function runFleetAction(
             // `attachmentMessageOf`. The same row lookup serves both, so it costs nothing more.
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
+            // An answer typed in the session's OWN chat to a question that session also raised in an
+            // Agentask thread is recorded once in that thread, so it shows in both places. See
+            // `recordSessionChatAnswer` — every other prompt is left alone.
+            if (!opts.fromThread) {
+              const { recordSessionChatAnswer } = await import('./task-threads')
+              await recordSessionChatAnswer(row?.id ?? req.id, conv || undefined, text)
+            }
           } catch { /* the message went; the queue is a view of it, not the record */ }
           // The pushed chat (PERF.1) hears about the send now, not on its next safety read.
           const { wakeChat } = await import('./chat-stream')

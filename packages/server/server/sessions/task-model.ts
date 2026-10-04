@@ -13,6 +13,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { PRIORITY_ORDER, type ChatAttachmentRef, type TaskPriorityId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import type { HarnessId, StagedSessionDraft } from '@agentistics/core'
+import type { TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 
 /**
  * Where the work stands.
@@ -418,7 +419,30 @@ export interface TaskComment {
   /** Files left with the comment — references into the chat's own attachment store. Absent = none. */
   attachments?: ChatAttachmentRef[]
   createdAt: string
+  /**
+   * The THREAD it was posted in (`TaskThread`). ABSENT = a loose comment, which is how every comment
+   * written before threads existed reads — additive, exactly like `subtaskId`. See
+   * `@agentistics/core`'s `taskThreads.ts`.
+   */
+  threadId?: string
+  /**
+   * Who wrote it, as far as the server can VOUCH: `session` only when the poster proved its identity
+   * (`session-identity.ts`), `owner` when the person wrote it on the board. Absent on legacy comments
+   * and on an unverified poster — `author` still says who it claims to be.
+   */
+  role?: 'owner' | 'session'
+  /** The verified session that posted it (`role: 'session'`). */
+  sessionId?: string
+  /** An owner answer written to ONE participant (a mirrored question) — that session's id. */
+  answerTo?: string
+  /** Where an owner answer was typed: the thread, or the session's own chat (mirrored here). */
+  via?: 'thread' | 'session'
+  /** What happened to an owner reply, per participant — see `ThreadDelivery`. */
+  deliveries?: ThreadDelivery[]
 }
+
+/** A topic on a task — see `@agentistics/core`'s `taskThreads.ts` for the rules. */
+export type TaskThread = TaskThreadRecord
 
 /**
  * A subtask is a ROW, not a checkbox.
@@ -650,6 +674,8 @@ export interface TaskBook {
   tasks: Task[]
   attempts: Attempt[]
   comments: TaskComment[]
+  /** Comment THREADS (topics). Always an array on a read; absent on a book from before threads. */
+  threads: TaskThread[]
   subtasks: Subtask[]
   files: TaskFile[]
   /**
