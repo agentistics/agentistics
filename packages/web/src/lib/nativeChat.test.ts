@@ -278,3 +278,30 @@ describe('message time — the store\'s own, never invented', () => {
     expect('at' in (turns[1] as { turn: object }).turn).toBe(false)
   })
 })
+
+describe('B9.1: the model\'s reasoning in the chat — the same folded block as the reasoning frame', () => {
+  test('live: reasoning deltas on the reasoning channel fold above the answer, never into it', () => {
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([]) })
+    s = apply(s, { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: { kind: 'delta', seq: 2, runId: RUN, text: 'Let me ', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 3, runId: RUN, text: 'think.', channel: 'reasoning' } },
+      { type: 'frame', frame: { kind: 'delta', seq: 4, runId: RUN, text: 'Answer' } })
+    const live = nativeChatItems(s).find(i => i.kind === 'turn' && i.key === 'live')
+    expect(live).toMatchObject({ turn: { text: 'Answer', reasoning: 'Let me think.' } })
+  })
+
+  test('the window: a reasoning part folds above the answer after it; a redacted one (no text) is not drawn', () => {
+    const s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'q' } },
+      { seq: 2, message: { role: 'assistant', content: [
+        { type: 'reasoning', text: 'plan', signature: 'sig' },
+        { type: 'reasoning', text: '', redactedData: 'opaque' },
+        { type: 'text', text: 'a' },
+      ] } },
+    ]) })
+    const turns = nativeChatItems(s).filter(i => i.kind === 'turn')
+    expect(turns).toHaveLength(2)
+    expect(turns[1]).toMatchObject({ turn: { role: 'assistant', text: 'a' } })
+    expect((turns[1] as { turn: { reasoning?: string } }).turn.reasoning?.trim()).toBe('plan')
+  })
+})

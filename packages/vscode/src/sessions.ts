@@ -14,6 +14,7 @@
 import * as vscode from 'vscode'
 import { AgentopClient } from './api'
 import { readAttention, type AttentionMemory } from './attention'
+import { nativeAttention, nativeSessionUrl } from './native'
 import { fill } from './i18n'
 import {
   DEFAULT_ARRANGEMENT,
@@ -169,10 +170,14 @@ export class SessionsHub implements vscode.Disposable {
     // A failed poll keeps the PREVIOUS fleet, exactly as the cockpit's poller does: the last known
     // truth beats a confident empty list, and the banner above it already says the link is down.
     if (payload) this.fleet = payload
+    // H22: the native sessions, beside the fleet (absent where the native runtime may not be shown).
+    const native = await this.deps.client().native()
+    if (native) this.fleet = { ...this.fleet, native }
+    else if (this.fleet.native) { const { native: _gone, ...rest } = this.fleet; this.fleet = rest }
 
     const update = readAttention(this.memory, this.fleet.sessions)
     this.memory = update.memory
-    this.deps.onAttention(update.count)
+    this.deps.onAttention(update.count + nativeAttention(this.fleet.native ?? []))
     if (this.deps.notifyOnAttention()) {
       for (const row of update.announce) this.announce(row.id, row.title)
     }
@@ -355,6 +360,9 @@ export class SessionsHub implements vscode.Disposable {
       case 'copy':
         await vscode.env.clipboard.writeText(msg.text)
         this.broadcast({ type: 'result', ok: true, message: this.deps.strings().copied ?? 'Copied.' })
+        return
+      case 'openNative':
+        await vscode.env.openExternal(vscode.Uri.parse(nativeSessionUrl(this.deps.api(), msg.id)))
         return
       case 'openFolder':
         // A new window, always: replacing the current one would close the panel the user is

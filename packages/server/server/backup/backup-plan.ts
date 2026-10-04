@@ -201,6 +201,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'Provider API keys entered for the native runtime (credentials.ts, 0600, never logged).',
   },
   {
+    pattern: '.agentistics/mcp-credentials', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop code mcp credential set <id> --origin <url>',
+    why: 'Tokens sent to remote MCP servers (B8.8, mcp-credentials.ts in the engine): sealed by the vault, '
+      + '0600, each bound to one origin. A credential is the archive\'s business never.',
+  },
+  {
     pattern: '.agentistics/content', match: 'prefix', reason: 'secret',
     restoreWith: 'nothing — the captures are evidence of calls made on this machine and expire with it',
     why: 'The content store (context-manager spec §8.1/§8.3): raw provider responses captured per '
@@ -517,6 +523,10 @@ const ALWAYS: string[] = [
   // for good if the machine is. It grows, which is an argument for watching it in the size
   // accounting rather than for leaving it behind.
   '.agentistics/task-files',
+  // ART.2: what native agents produced into the artifact store (documents, diagrams, tables, review
+  // findings, screenshots) — content-addressed blobs the journal's artifact.* events reference.
+  // Nothing regenerates them; the journal that names them travels too.
+  '.agentistics/artifacts',
   // The index that makes those attachments findable again: which session each was typed
   // into, and when (`attachment-web.ts`'s ATTACHMENT_LOG). It travels WITH them for the
   // obvious reason — restoring the images and losing the record would put every

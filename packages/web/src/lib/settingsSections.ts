@@ -1,7 +1,7 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
   | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
-  | 'chat' | 'providers' | 'notifications' | 'backup' | 'vault'
+  | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup' | 'vault'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
 export type SettingsGroup = 'personal' | 'governance'
@@ -41,6 +41,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
   // Ollama) — a machine-local secret store, same reason `connection`/`live`/`chat` are host-only.
   { id: 'providers', labelEn: 'Providers', labelPt: 'Provedores', group: 'personal' },
+  { id: 'memory', labelEn: 'Memory', labelPt: 'Memória', group: 'personal' },
   { id: 'users', labelEn: 'Users', labelPt: 'Usuários', group: 'governance' },
   { id: 'teams', labelEn: 'Teams', labelPt: 'Times', group: 'governance' },
   { id: 'machines', labelEn: 'Machines', labelPt: 'Máquinas', group: 'governance' },
@@ -71,6 +72,8 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       // local runtime to spawn assistants with, the same reason `chat`/`connection`/`live` hide.
       // And only where the native runtime may be shown: an engine that provides it AND the experimental
       // flag on (`nativeRuntimeFrom`). Unknown yet (loading) reads as hidden, never flashed.
+      // B6.6: the native runtime's memory — shown only where the native runtime may be (strictly).
+      case 'memory': return !v.central && v.nativeRuntime === true
       case 'providers': return !v.central && v.nativeRuntime === true
       case 'users':
       case 'teams': return v.central && (v.role === 'owner' || !!v.isManager)

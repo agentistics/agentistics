@@ -32,6 +32,8 @@ import type { ChatTurn } from '../components/sessions/ChatBubble'
 
 export type NativePart =
   | { type: 'text'; text: string }
+  /** B9.1: the model's reasoning (an Anthropic thinking block, a router's trace); redacted = no text. */
+  | { type: 'reasoning'; text: string; signature?: string; redactedData?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
   /** UI follow-up 3: an attachment the person sent — the window carries its REF, never its bytes. */
@@ -54,7 +56,7 @@ export interface NativeToolCallRef {
 }
 
 export interface NativeWindow {
-  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string } }
+  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string }; effort?: 'low' | 'medium' | 'high'; extraDirs?: string[]; browser?: boolean }
   /** `createdAt`: when the engine's store took the message (ISO). Absent from an older engine. */
   messages: { seq: number; createdAt?: string; message: NativeMessage }[]
   nextBefore?: number
@@ -73,7 +75,8 @@ export interface NativeQuestion {
 export type NativeFrame =
   | { kind: 'hello'; sessionId: string; cursor: number; protocol: number }
   | { kind: 'event'; seq: number; event: { type: string; runId?: string; data?: Record<string, unknown> } }
-  | { kind: 'delta'; seq: number; runId?: string; text: string }
+  /** `channel: 'reasoning'` (B9.1): a piece of the model's reasoning, never of its answer. */
+  | { kind: 'delta'; seq: number; runId?: string; text: string; channel?: 'reasoning' }
   /** TOOLS-NATIVE item 5: the model's reasoning, on its own channel — never answer text. */
   | { kind: 'reasoning'; seq: number; runId?: string; text: string }
   | { kind: 'ask'; seq: number; question: NativeQuestion }
@@ -177,8 +180,9 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   if (s.lastSeq !== null && f.seq <= s.lastSeq) return s
   const next: NativeChatState = { ...s, lastSeq: f.seq }
 
-  if (f.kind === 'delta') return { ...next, liveText: next.liveText + f.text }
-  if (f.kind === 'reasoning') {
+  if (f.kind === 'delta' && f.channel !== 'reasoning') return { ...next, liveText: next.liveText + f.text }
+  // The reasoning frame, or a B9.1 `delta` on the reasoning channel: the same collapsed block.
+  if (f.kind === 'reasoning' || f.kind === 'delta') {
     const same = next.reasoning && next.reasoning.runId === f.runId
     return { ...next, reasoning: { ...(f.runId ? { runId: f.runId } : {}), text: (same ? next.reasoning!.text : '') + f.text } }
   }
@@ -395,12 +399,23 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
       continue
     }
     let text = ''
+    // B9.1: a persisted reasoning part folds above the answer text that follows it (the standard
+    // shell's collapsed reasoning block), never into the answer.
+    let thought = ''
     const flush = (i: number) => {
-      if (text.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text, ...at } })
+      if (text.trim() !== '' || thought.trim() !== '') {
+        items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text, ...at, ...(thought.trim() !== '' ? { reasoning: thought } : {}) } })
+      }
       text = ''
+      thought = ''
     }
     msg.content.forEach((p, i) => {
       if (p.type === 'text') { text += (text ? '\n\n' : '') + p.text; return }
+      if (p.type === 'reasoning') {
+        if (text.trim() !== '') flush(i)
+        thought += (thought ? '\n\n' : '') + p.text
+        return
+      }
       if (p.type !== 'tool_use') return
       flush(i)
       const tx = execByUse.get(p.id)

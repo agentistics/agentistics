@@ -283,6 +283,25 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
         const j = journal
         return j.status().state === 'open' ? { append: events => j.append([...events]) } : null
       },
+      // ART.2: rare events (the artifact store's metadata), paged through the side table.
+      async readRare(types, opts) {
+        if (!config.JOURNAL_ENABLED) return []
+        if (!journal) {
+          const { openJournal } = await import('../journal/journal')
+          journal = await openJournal()
+        }
+        const j = journal
+        if (!j.readTypes || j.status().state !== 'open') return []
+        const out: AgentisticsEvent[] = []
+        let cursor = 0
+        for (let page = 0; page < 1000; page++) {
+          const r = await j.readTypes(types, cursor, 1000)
+          for (const e of r.events) if (!opts?.sessionId || e.sessionId === opts.sessionId) out.push(e)
+          if (r.events.length === 0 || r.cursor === cursor) break
+          cursor = r.cursor
+        }
+        return out
+      },
       status() {
         if (!journal) return config.JOURNAL_ENABLED ? { state: 'closed' } : { state: 'disabled', reason: 'flag-off' }
         const s = journal.status()
@@ -314,6 +333,36 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     notify: n => {
       void import('../sse').then(m => m.broadcastNotification(n)).catch(() => {})
     },
+    // B8.8: the variables a person's MCP declaration names (`{env:VAR}`) — read only when named.
+    environment: { get: name => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? process.env[name] : undefined) },
+    // B6.4: the origins this server answers on — the browser runtime never drives them.
+    serverOrigins: [`http://127.0.0.1:${config.PORT}`, `http://localhost:${config.PORT}`, `http://[::1]:${config.PORT}`],
+    // B6.6: memory, folded from the same journal the engine writes its `memory.noted` events to.
+    memory: (() => {
+      let svc: import('../memory-service').MemoryService | null = null
+      const get = async () => {
+        if (svc) return svc
+        const { createMemoryService } = await import('../memory-service')
+        svc = createMemoryService({
+          journal: async () => {
+            if (!config.JOURNAL_ENABLED) return null
+            if (!journal) {
+              const { openJournal } = await import('../journal/journal')
+              journal = await openJournal()
+            }
+            return journal.status().state === 'open' ? journal : null
+          },
+          contentDir: config.CONTENT_DIR,
+          adapterVersion: `agentistics-server@${(await import('../version')).CURRENT_VERSION}`,
+        })
+        return svc
+      }
+      return {
+        recall: async q => (await get()).recall(q),
+        list: async () => (await get()).list(),
+        forget: async chainId => (await get()).forget(chainId),
+      }
+    })(),
     // H17: a native session's own state change, into the `agentop events` channel and its desktop
     // delivery — the same inbox and notifier the fleet's poll uses. Fire-and-forget, never throws.
     events: {

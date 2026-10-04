@@ -14,6 +14,8 @@ export interface RunLineView {
   cacheShare: number | null
   context: { tokens: number; window: number | null; fraction: number | null } | null
   model?: string
+  /** B9.1: reasoning tokens over the run, when the provider counted them apart. */
+  reasoningTokens?: number
 }
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -31,10 +33,13 @@ const pct = (f: number) => `${Math.floor(f * 100)}%`
 export function runLineText(r: RunLineView, lang: 'pt' | 'en'): string {
   const pt = lang === 'pt'
   const parts: string[] = []
+  // H24: the model the run was priced on — after a switch, the cost per model reads run by run.
+  if (r.model) parts.push(r.model)
   parts.push(r.tokens ? `${fmt(r.tokens.total)} tokens` : (pt ? 'tokens não medidos' : 'tokens not measured'))
   parts.push(r.costUSD === null
     ? (pt ? 'sem preço' : 'no price')
     : `${fmtCost(r.costUSD)}${r.costMeasured ? '' : (pt ? ' (estimado)' : ' (estimated)')}`)
+  if (num(r.reasoningTokens)) parts.push(pt ? `raciocínio ${fmt(r.reasoningTokens)}` : `reasoning ${fmt(r.reasoningTokens)}`)
   if (r.cacheShare !== null) parts.push(`cache ${pct(r.cacheShare)}`)
   const c = r.context
   if (c) {
