@@ -222,6 +222,8 @@ export type CodeEvent =
  * never a throw.
  */
 export interface CodeHostPort {
+  /** What `agentop code --model/--cwd` named, handed over BEFORE the first `defaults()`; absent: the host's own defaults. */
+  configure?(o: { model?: string; cwd?: string }): void
   availability(): CodeAvailability
   defaults(): Promise<CodeDefaults>
   /** Open tasks on this machine's board, most relevant first. */
