@@ -88,3 +88,22 @@ describe('EXT.OPEN — an external session opens with a working composer', () =>
     expect(html).not.toContain('>Reopen<')
   })
 })
+
+describe('the composer context ring for a NATIVE session (from the engine usage)', () => {
+  const stats = {
+    sessionId: 'ses_x', harness: 'agentistics', tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    conversation: { input: 1, output: 1 }, costUSD: 0.01, context: { fraction: 0.42, used: 84_000, window: 200_000 },
+    messages: { user: 1, assistant: 1 }, subagents: null, git: null, activeMinutes: null, model: 'claude-sonnet-4.6',
+  } as never
+  const metrics = { meta: undefined, currency: 'USD' as const, brlRate: 5, costBasis: 'api' as const, planFactor: null, stats }
+  const src = { turns: [{ role: 'user' as const, text: 'hi' }], working: false, liveText: null, act: noAct, canStop: false }
+  test('the ring draws the engine\'s measured fraction', () => {
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={session} lang="en" act={noAct} metrics={metrics} source={src} /></MemoryRouter>)
+    expect(html).toContain('context at 42%')
+  })
+  test('no measured context: no ring, never 0%', () => {
+    const none = { ...metrics, stats: { ...(stats as object), context: null } as never }
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={session} lang="en" act={noAct} metrics={none} source={src} /></MemoryRouter>)
+    expect(html).not.toContain('context at')
+  })
+})
