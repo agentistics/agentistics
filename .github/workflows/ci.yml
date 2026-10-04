@@ -118,3 +118,11 @@ jobs:
 
       - name: Perf budgets
         run: bun scripts/perf/budget.ts "$RUNNER_TEMP/perf-home"
+
+      # The rebuild storm: ten sessions writing every 500 ms must not keep /api/data rebuilding
+      # back to back (build duration, rebuild duty cycle, /api/fleet, /api/data, the chat echo).
+      - name: Synthetic home with git repositories
+        run: bun scripts/perf/synth-home.ts "$RUNNER_TEMP/storm-home" --scale 0.2 --projects 280 --big 0 --git
+
+      - name: Rebuild storm budgets
+        run: bun scripts/perf/storm.ts "$RUNNER_TEMP/storm-home" --seconds 45 --budget

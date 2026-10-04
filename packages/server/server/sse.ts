@@ -70,7 +70,10 @@ const rebuilds = createRebuildScheduler({
   build: rebuildNow,
   onRebuilt: notifySseClients,
   debounceMs: 300,
+  // Idle time after a build, 4x its duration, 2–10 s: the rebuild storm (rebuild-scheduler.ts).
   minGapMs: 2000,
+  maxGapMs: 10_000,
+  loadFactor: 4,
 })
 
 let rebuildOnChange = false
