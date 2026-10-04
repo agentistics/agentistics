@@ -135,9 +135,12 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
   // Ink rejects its OWN exit promise when a tab throws during render, and `exited` is settled only
   // by `onExit` — so without racing the two, a crash would leave the process alive on an empty
   // alternate buffer with no prompt, which reads as a hang rather than as a failure.
+  // The crash's error is KEPT and printed once the primary screen is back: a render error used to
+  // end the process with code 1 and not one word, which reads as the app quitting on its own.
+  let crash: unknown = null
   const crashed: Promise<ControlExit> = app.waitUntilExit().then(
     () => ({ kind: 'quit', code: 0 }),
-    () => ({ kind: 'quit', code: 1 }),
+    (err: unknown) => { crash = err; return { kind: 'quit', code: 1 } },
   )
 
   try {
@@ -155,6 +158,7 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
     // Disables tracking as well as restoring the buffer — see `altScreen.leave`. A process that
     // returned from here with the mouse still on would leave the user's shell typing `<35;40;12M`.
     altScreen.leave()
+    if (crash) process.stderr.write(`agentop: the control center stopped on an error — ${crash instanceof Error ? (crash.stack ?? crash.message) : String(crash)}\n`)
   }
 }
 

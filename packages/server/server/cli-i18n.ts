@@ -328,6 +328,12 @@ export interface CliStrings {
   sessAttaching: (title: string, detach: string) => string
   sessNoted: string
   sessTasked: string
+  /** SS-09: filed under a board task — and what that changes. */
+  sessFiled: (task: string) => string
+  /** SS-09: an external session with no known conversation has nothing the board can hold. */
+  sessFileNoConversation: string
+  /** SS-09: the board refused the filing — its reason, in words. */
+  sessFileRefused: (reason: string) => string
   sessTaskEmpty: (task: string) => string
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) => string
   sessTaskNoneOpened: (task: string, skipped: number) => string
@@ -631,7 +637,7 @@ const EN: CliStrings = {
 
   sessState: {
     working: 'working',
-    waitingApproval: 'needs approval',
+    waitingApproval: 'approve',
     // Named for what it means to the READER. `waiting` and `working` differ by two letters in the
     // middle of a narrow column, so the state that needs a person was being read as the one that
     // does not — and `needs you` sits beside `needs approval` as the pair they are.
@@ -641,9 +647,9 @@ const EN: CliStrings = {
     // running?") and one move available ("reopen it"), so three answers to it was noise dressed as
     // precision. The distinction still exists in the state and is still said by the DETAIL pane;
     // the column stops spending three vocabularies on one bit.
-    exited: 'off',
-    lost: 'off',
-    closed: 'off',
+    exited: 'ended',
+    lost: 'ended',
+    closed: 'ended',
     external: 'external',
   },
   sessBackground: 'subagent',
@@ -786,6 +792,9 @@ const EN: CliStrings = {
     `Attaching to ${title}. To leave it running and come back here, press ${detach}.`,
   sessNoted: 'note saved.',
   sessTasked: 'task set.',
+  sessFiled: (task: string) => `filed under ${task} — its cost rolls up there from now on.`,
+  sessFileNoConversation: 'agentop cannot see which conversation this external session is, so there is nothing to file — start it from agentop, or file it from the web once its conversation is known.',
+  sessFileRefused: (reason: string) => `the board did not file it: ${reason}.`,
   sessTaskEmpty: (task: string) => `no sessions are filed under "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) of "${task}".`
@@ -1075,13 +1084,14 @@ const PT: CliStrings = {
 
   sessState: {
     working: 'trabalhando',
-    waitingApproval: 'precisa de aprovação',
+    waitingApproval: 'aprovar',
     // Named for what it means to the READER rather than for what the machine is doing, and it
     // pairs with `precisa de aprovação` above as the distinction it is.
     waiting: 'precisa de você',
+    // One word for every way it is not running, as in English (the detail pane says which).
     exited: 'encerrada',
-    lost: 'desconectada',
-    closed: 'fechada',
+    lost: 'encerrada',
+    closed: 'encerrada',
     external: 'externa',
   },
   sessBackground: 'subagente',
@@ -1216,6 +1226,9 @@ const PT: CliStrings = {
     `Anexando a ${title}. Para deixá-la rodando e voltar aqui, aperte ${detach}.`,
   sessNoted: 'nota salva.',
   sessTasked: 'tarefa definida.',
+  sessFiled: (task: string) => `arquivada em ${task} — o custo dela soma lá a partir de agora.`,
+  sessFileNoConversation: 'o agentop não consegue ver qual conversa é esta sessão externa, então não há o que arquivar — inicie pelo agentop, ou arquive pela web quando a conversa for conhecida.',
+  sessFileRefused: (reason: string) => `o board não arquivou: ${reason}.`,
   sessTaskEmpty: (task: string) => `nenhuma sessão está na tarefa "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) de "${task}" reabertas.`

@@ -4,7 +4,8 @@ import { render } from 'ink-testing-library'
 import { Code } from './Code'
 import { controlStrings } from '../i18n'
 import type { ActionResult } from '../types'
-import type { CodeAsk, CodeEvent, CodeHost, CodeLaunch, CodeSessionFacts } from '../code-types'
+import { asCodePort, type CodeHost as EngineCodeHandle } from '@agentistics/engine-api'
+import type { CodeAsk, CodeDraftEditor, CodeEvent, CodeHost, CodeLaunch, CodeSessionFacts } from '../code-types'
 
 /**
  * The wiring half of the `code` tab: the pure modules decide what a key MEANS (`code.test.ts`), and
@@ -20,7 +21,7 @@ const tick = (ms = 80) => new Promise(r => setTimeout(r, ms))
 const FACTS: CodeSessionFacts = {
   sessionId: 'ses_abcd', shortId: 'abcd', title: 'parser fix',
   task: { id: 'task-1', ref: 't-0539', title: 'Parser fix' },
-  cwd: '/repo', workspaceRoot: '/repo', model: 'claude-sonnet-5', provider: 'anthropic', mode: 'ask',
+  cwd: '/repo', workspaceRoot: '/repo', model: 'claude-sonnet-5', provider: 'anthropic', mode: 'default',
 }
 
 const ASK: CodeAsk = {
@@ -31,10 +32,13 @@ const ASK: CodeAsk = {
 
 interface Calls { [k: string]: unknown[][] }
 
-function fakeHost(script: CodeEvent[] = []): { host: CodeHost; calls: Calls } {
+/** A full port (every optional member) plus the host's `$EDITOR` door, which the shell hands the tab beside it. */
+type FakeHost = CodeHost & { editDraft: CodeDraftEditor }
+
+function fakeHost(script: CodeEvent[] = []): { host: FakeHost; calls: Calls } {
   const calls: Calls = {}
   const log = (k: string, ...a: unknown[]) => { (calls[k] ??= []).push(a) }
-  const host: CodeHost = {
+  const host: FakeHost = {
     availability: () => ({ ok: true }),
     defaults: async () => ({ model: { id: 'claude-sonnet-5', source: 'flag' }, cwd: '/repo', workspaceRoot: '/repo', provider: 'anthropic' }),
     openTasks: async () => ({ ok: true, tasks: [{ id: 'task-1', ref: 't-0539', title: 'Parser fix', status: 'todo', statusLabel: 'To do' }] }),
@@ -46,16 +50,29 @@ function fakeHost(script: CodeEvent[] = []): { host: CodeHost; calls: Calls } {
     answer: (id, q, choice) => { log('answer', id, q, choice); return { ok: true, sentence: `answered ${choice}` } },
     cancel: id => { log('cancel', id); return { ok: true, sentence: 'cancelled' } },
     end: async id => { log('end', id) },
+    cycleMode: id => { log('cycleMode', id); return { ok: true, mode: 'accept-edits', sentence: 'Mode edits: file writes inside the workspace are allowed; the shell still asks.' } },
+    promptHistory: async () => {
+      log('promptHistory')
+      return { ok: true, prompts: [
+        { text: 'run the core tests', at: '2026-09-28T14:00:00Z', sessionId: 'ses_1' },
+        { text: 'fix the parser', at: '2026-09-28T12:00:00Z', sessionId: 'ses_2' },
+      ] }
+    },
+    editDraft: async draft => { log('editDraft', draft); return { ok: true, text: `${draft} (edited)`, sentence: 'Brought the draft back from $EDITOR.' } },
   }
   return { host, calls }
 }
 
-function mount(host: CodeHost | undefined, launch?: CodeLaunch) {
+function mount(host: CodeHost | FakeHost | undefined, launch?: CodeLaunch) {
   const said: ActionResult[] = []
   const tabs: number[] = []
+  const written: string[] = []
+  const attention: number[] = []
+  let helps = 0
   const app = render(
     <Code
       code={host}
+      {...(host && 'editDraft' in host ? { editDraft: host.editDraft } : {})}
       launch={launch}
       lang="en"
       strings={controlStrings('en')}
@@ -65,9 +82,13 @@ function mount(host: CodeHost | undefined, launch?: CodeLaunch) {
       onChrome={() => {}}
       onSay={r => said.push(r)}
       onTab={s => tabs.push(s)}
+      onAttention={n => attention.push(n)}
+      onHelp={() => { helps++ }}
+      writeTerminal={b => written.push(b)}
+      inTmux={false}
     />,
   )
-  return { app, said, tabs }
+  return { app, said, tabs, written, attention, helps: () => helps }
 }
 
 describe('Code tab — wiring', () => {
@@ -139,12 +160,15 @@ describe('Code tab — wiring', () => {
     const { app, said } = mount(host, { prompt: 'fix it' })
     await tick(120)
     expect(plain(app.lastFrame())).toContain('Which task is this session for?')
-    app.stdin.write('\r')
-    await tick()
-    expect(plain(app.lastFrame())).toContain('Review')
+    // task → assistant (native) → model (the tab's default) → folder (here) → first message → review
+    for (const expected of ['Which assistant?', 'Which model?', 'Where does it work?', 'First message', 'Review']) {
+      app.stdin.write('\r')
+      await tick()
+      expect(plain(app.lastFrame())).toContain(expected)
+    }
     app.stdin.write('\r')
     await tick(120)
-    expect(calls.start).toEqual([[{ taskId: 'task-1', model: 'claude-sonnet-5', cwd: '/repo', firstMessage: 'fix it' }]])
+    expect(calls.start).toEqual([[{ taskId: 'task-1', model: 'claude-sonnet-5', provider: 'anthropic', cwd: '/repo', firstMessage: 'fix it' }]])
     expect(calls.subscribe).toEqual([['ses_abcd']])
     expect(said.some(r => r.message === 'Started.')).toBe(true)
     app.unmount()
@@ -159,6 +183,203 @@ describe('Code tab — wiring', () => {
     app.stdin.write('\r')
     await tick()
     expect(said.some(r => !r.ok && r.message.includes('/nope'))).toBe(true)
+    app.unmount()
+  })
+
+  test('shift+tab asks the host for the next mode; its sentence is said and the header follows', async () => {
+    const { host, calls } = fakeHost()
+    const { app, said } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    expect(plain(app.lastFrame())).toContain('mode ask')
+    app.stdin.write(`${ESC}[Z`)
+    await tick()
+    expect(calls.cycleMode).toEqual([['ses_abcd']])
+    expect(said.some(r => r.ok && r.message.startsWith('Mode edits'))).toBe(true)
+    expect(plain(app.lastFrame())).toContain('mode edits')
+    app.unmount()
+  })
+
+  test('tab (= ctrl+i) swaps the panel to the inspector, ctrl+t to the timeline', async () => {
+    const { host } = fakeHost([
+      { kind: 'user', text: 'hi', at: '2026-09-28T14:00:00Z' },
+      { kind: 'run-started', runId: 'r', at: '2026-09-28T14:00:00Z' },
+      { kind: 'usage', usage: { runId: 'r', model: 'claude-sonnet-5', input: 10, output: 5, cacheRead: 0, cacheWrite: 0, costUSD: 0.001 } },
+      { kind: 'run-ended', runId: 'r', status: 'completed', sentence: '', at: '2026-09-28T14:00:03Z' },
+    ])
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('\t')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('▸inspector')
+    expect(plain(app.lastFrame())).toContain('TURN 1')
+    app.stdin.write('\x14')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('▸timeline')
+    expect(plain(app.lastFrame())).toContain('WHERE THE TIME WENT')
+    app.unmount()
+  })
+
+  test('ctrl+r opens the prompt history; enter puts the pick in the composer and sends NOTHING', async () => {
+    const { host, calls } = fakeHost()
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('\x12')
+    await tick()
+    expect(plain(app.lastFrame())).toContain('prompt history')
+    app.stdin.write('parser')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(calls.submit).toBeUndefined()
+    expect(plain(app.lastFrame())).toContain('› fix the parser')
+    app.unmount()
+  })
+
+  test('ctrl+g hands the draft to $EDITOR and puts back what was saved — never sent', async () => {
+    const { host, calls } = fakeHost()
+    const { app } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('draft')
+    await tick()
+    app.stdin.write('\x07')
+    await tick()
+    expect(calls.editDraft).toEqual([['draft']])
+    expect(calls.submit).toBeUndefined()
+    expect(plain(app.lastFrame())).toContain('› draft (edited)')
+    app.unmount()
+  })
+
+  test('with a permission open, ctrl+g and ctrl+r refuse in words and GL-02 counts the question', async () => {
+    const { host, calls } = fakeHost([{ kind: 'ask', ask: ASK }])
+    const { app, said, attention } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('\x07')
+    await tick()
+    app.stdin.write('\x12')
+    await tick()
+    expect(calls.editDraft).toBeUndefined()
+    expect(calls.promptHistory).toBeUndefined()
+    expect(said.filter(r => !r.ok && r.message.startsWith('Answer the permission first'))).toHaveLength(2)
+    expect(attention[attention.length - 1]).toBe(1)
+    app.unmount()
+  })
+
+  test('/copy writes the last finished answer as OSC 52 through the frame gate, and says how much', async () => {
+    const { host } = fakeHost([
+      { kind: 'user', text: 'hi', at: 'x' },
+      { kind: 'run-started', runId: 'r', at: 'x' },
+      { kind: 'delta', runId: 'r', text: 'hello there' },
+      { kind: 'run-ended', runId: 'r', status: 'completed', sentence: '', at: 'x' },
+    ])
+    const { app, said, written } = mount(host, { resume: 'ses_abcd' })
+    await tick(150)
+    app.stdin.write('/copy')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(written).toEqual([`\x1b]52;c;${btoa('hello there')}\x07`])
+    expect(said.some(r => r.ok && r.message.startsWith('Copied 11 characters (OSC 52).'))).toBe(true)
+    app.unmount()
+  })
+
+  test('/copy with no finished answer says so; ? on an empty draft opens help', async () => {
+    const { host } = fakeHost()
+    const { app, said, written, helps } = mount(host, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write('/copy')
+    await tick()
+    app.stdin.write('\r')
+    await tick()
+    expect(written).toEqual([])
+    expect(said.some(r => !r.ok && r.message === 'Nothing to copy yet — no answer has finished.')).toBe(true)
+    app.stdin.write('?')
+    await tick()
+    expect(helps()).toBe(1)
+    app.unmount()
+  })
+})
+
+/**
+ * The tab is driven through the ENGINE's typed port (engine-api 1.8 `CodeHostPort`, read by `asCodePort()`): only
+ * the required members here — what the engine implements today — and every later screen degrades in words.
+ */
+describe('Code tab — the engine-api 1.8 port', () => {
+  function requiredOnly(script: CodeEvent[] = []): { port: CodeHost; calls: Calls } {
+    const calls: Calls = {}
+    const log = (k: string, ...a: unknown[]) => { (calls[k] ??= []).push(a) }
+    const handle: EngineCodeHandle = {
+      kind: 'code-host',
+      dispose: async () => {},
+      availability: () => ({ ok: true }),
+      defaults: async () => ({ model: { id: 'claude-sonnet-5', source: 'flag' }, cwd: '/repo', workspaceRoot: '/repo', provider: 'anthropic' }),
+      openTasks: async () => ({ ok: true, tasks: [] }),
+      createTask: async title => ({ ok: true, task: { id: 'task-9', ref: 't-0999', title, status: 'todo', statusLabel: 'To do' } }),
+      start: async input => { log('start', input); return { ok: true, facts: { ...FACTS, mode: 'ask' }, sentence: 'Started.' } },
+      resume: async id => { log('resume', id); return { ok: true, facts: { ...FACTS, mode: 'ask' }, sentence: 'Resumed.' } },
+      subscribe: (id, listener) => { log('subscribe', id); for (const e of script) listener(e); return () => log('unsubscribe', id) },
+      submit: (id, text) => { log('submit', id, text); return { ok: true } },
+      answer: (id, q, choice) => { log('answer', id, q, choice); return { ok: true, sentence: `answered ${choice}` } },
+      cancel: id => { log('cancel', id); return { ok: true, sentence: 'cancelled' } },
+      end: async id => { log('end', id) },
+    }
+    const port = asCodePort(handle)
+    if (!port) throw new Error('a handle with every required member is a port')
+    return { port, calls }
+  }
+
+  test('a resumed session is driven through the port: resume, subscribe, submit', async () => {
+    const { port, calls } = requiredOnly()
+    const { app } = mount(port, { resume: 'ses_abcd' })
+    await tick()
+    expect(calls.resume).toEqual([['ses_abcd']])
+    expect(calls.subscribe).toEqual([['ses_abcd']])
+    // An engine whose policy has no named modes says `ask` — the tab reads it as the default mode.
+    expect(plain(app.lastFrame())).toContain('mode ask')
+    for (const ch of 'hello') app.stdin.write(ch)
+    app.stdin.write('\r')
+    await tick()
+    expect(calls.submit).toEqual([['ses_abcd', 'hello']])
+    app.unmount()
+  })
+
+  test('a permission the port raises is answered through the port, esc with the policy’s Deny', async () => {
+    const { port, calls } = requiredOnly([{ kind: 'ask', ask: ASK }])
+    const { app } = mount(port, { resume: 'ses_abcd' })
+    await tick(150)
+    expect(plain(app.lastFrame())).toContain('permission · shell')
+    app.stdin.write('1')
+    await tick()
+    expect(calls.answer).toEqual([['ses_abcd', 'q1', 0]])
+    app.stdin.write(ESC)
+    await tick()
+    expect(calls.answer?.[1]).toEqual(['ses_abcd', 'q1', 2])
+    app.unmount()
+  })
+
+  test('without the optional members, shift+tab, ctrl+r and ctrl+g each say why in words', async () => {
+    const { port } = requiredOnly()
+    const { app, said } = mount(port, { resume: 'ses_abcd' })
+    await tick()
+    app.stdin.write(`${ESC}[Z`)
+    await tick()
+    app.stdin.write('\x12')
+    await tick()
+    app.stdin.write('\x07')
+    await tick()
+    const words = said.filter(r => !r.ok).map(r => r.message)
+    expect(words).toContain('This engine cannot switch the permission mode here — the session stays in ask.')
+    expect(words).toContain('This engine keeps no prompt history to search here.')
+    expect(words).toContain('Opening the draft in $EDITOR is not available here.')
+    app.unmount()
+  })
+
+  test('an engine whose handle is not a port (asCodePort → null) gets the unavailable sentence', async () => {
+    const opaque: EngineCodeHandle = { kind: 'code-host', dispose: async () => {} }
+    const port = asCodePort(opaque)
+    expect(port).toBeNull()
+    const { app } = mount(port ?? undefined)
+    await tick()
+    expect(plain(app.lastFrame())).toContain('The native runtime is not available in this build.')
     app.unmount()
   })
 })

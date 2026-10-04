@@ -1,7 +1,24 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  codeKeyIntent as codeKeyIntentForTest,
+  reasonOptionNumber,
   CODE_COMMANDS,
+  CODE_KEY_TABLE,
   CODE_WIDE_AT,
+  OUTPUT_OPEN_MAX,
+  TURN_MARK,
+  effectiveMode,
+  foldedTurnLine,
+  lastFinishedAnswer,
+  longOutputShown,
+  modeWord,
+  nextPanel,
+  outputLines,
+  panelTitle,
+  receiptLine,
+  turnSegments,
+  type CodeKey,
+  type TurnStat,
   COMPOSER_ROWS,
   EMPTY_VIEW,
   FOLLOW,
@@ -59,7 +76,7 @@ const FACTS: CodeSessionFacts = {
   workspaceRoot: '/home/someone/projects/agentistics',
   model: 'claude-sonnet-5',
   provider: 'anthropic',
-  mode: 'ask',
+  mode: 'default',
 }
 
 const DIFF: CodeDiff = {
@@ -120,13 +137,22 @@ const call = (over: Partial<CodeToolCall> & { id: string }): CodeToolCall => ({
 
 /** A session mid-answer: a finished turn, then a streaming one with tools and an applied patch. */
 function fixtureView(): CodeView {
-  const events: CodeEvent[] = [
+  return reduceAll(EMPTY_VIEW, fixtureEvents())
+}
+
+const LONG_OUTPUT: CodeToolCall = call({
+  id: 'out', name: 'shell', verb: 'shell', target: 'bun test packages/core', durationMs: 3100, result: 'exit 0',
+  output: { lines: Array.from({ length: 20 }, (_, i) => `line ${i + 1} of the test run \u001b[32mok\u001b[0m`), total: 216 },
+})
+
+function fixtureEvents(): CodeEvent[] {
+  return [
     { kind: 'user', text: 'why does the parser drop the last byte of a buffer?', at: '2026-09-28T14:00:00Z' },
     { kind: 'run-started', runId: 'r1', at: '2026-09-28T14:00:01Z' },
     { kind: 'delta', runId: 'r1', text: 'sliceEnd treats the end as inclusive, so a slice ' },
     { kind: 'delta', runId: 'r1', text: 'that ends on the last byte is rejected.' },
     { kind: 'tool', call: call({ id: 'tool-1', durationMs: 40, result: '212 lines' }) },
-    { kind: 'usage', usage: { runId: 'r1', model: 'claude-sonnet-5', input: 900, output: 200, cacheRead: 6900, cacheWrite: 200, costUSD: 0.011, contextTokens: 72_000, contextWindow: 200_000 } },
+    { kind: 'usage', usage: { runId: 'r1', model: 'claude-sonnet-5', input: 900, output: 200, cacheRead: 6900, cacheWrite: 200, costUSD: 0.011, contextTokens: 72_000, contextWindow: 200_000, ttftMs: 620 } },
     { kind: 'run-ended', runId: 'r1', status: 'completed', sentence: 'done', at: '2026-09-28T14:00:05Z' },
     { kind: 'user', text: 'now fix it and run the core tests', at: '2026-09-28T14:02:00Z' },
     { kind: 'run-started', runId: 'r2', at: '2026-09-28T14:02:01Z' },
@@ -138,7 +164,6 @@ function fixtureView(): CodeView {
     { kind: 'usage', usage: { runId: 'r2', model: 'claude-sonnet-5', input: 1000, output: 400, cacheRead: 8400, cacheWrite: 300, costUSD: 0.016, contextTokens: 78_000, contextWindow: 200_000 } },
     { kind: 'plan', items: [{ text: 'locate the boundary check', status: 'done' }, { text: 'patch the parser', status: 'done' }, { text: 'run the core tests', status: 'active' }, { text: 'summarize', status: 'todo' }] },
   ]
-  return reduceAll(EMPTY_VIEW, events)
 }
 
 const WIDTHS = [40, 80, 108, 140]
@@ -372,6 +397,30 @@ describe('no line wider than its width — every builder, every width', () => {
   }
 })
 
+describe('P2 builders fit every width the tab can hand them (30, 34, 76, 106)', () => {
+  const folded = reduceAll(EMPTY_VIEW, [
+    ...fixtureEvents(),
+    { kind: 'rules', rules: [{ label: 'Allow bun test * for this session, in packages/core and every package under it', at: 'x' }] },
+    { kind: 'mode', mode: 'accept-edits', direction: 'looser', dropped: 0 },
+  ])
+  for (const w of [30, 34, 76, 106]) {
+    test(`at ${w}`, () => {
+      for (const lang of [t, pt]) {
+        assertFits(conversationLines(folded, FACTS, lang, w), w, 'conversation folded')
+        assertFits(conversationLines(folded, FACTS, lang, w, { expand: 0, highlight: true, outputOpen: true }), w, 'conversation expanded')
+        assertFits([receiptLine(folded.turnStats[0]!, lang, w)], w, 'receipt')
+        assertFits([receiptLine({ runIds: [], usage: { calls: 0, unpriced: 0 }, calls: [], status: 'completed' }, lang, w)], w, 'receipt N/A')
+        assertFits([foldedTurnLine(12, 'a long question that goes on and on about the parser', 7, 0.1234, lang, w)], w, 'folded')
+        assertFits(outputLines(LONG_OUTPUT, lang, w, false), w, 'output folded')
+        assertFits(outputLines(LONG_OUTPUT, lang, w, true), w, 'output open')
+        assertFits(sessionPanelLines(folded, FACTS, lang, w), w, 'panel with rules')
+        assertFits([narrowStatusLine(folded, FACTS, lang, w)], w, 'status')
+        assertFits(permissionCardLines(SHELL_ASK, lang, w, undefined, 'plan'), w, 'card with mode')
+      }
+    })
+  }
+})
+
 describe('conversation (CD-02 / CD-03 / CD-04)', () => {
   test('the live cursor sits at the end of the streaming text, and only while the run is live', () => {
     const v = fixtureView()
@@ -437,7 +486,8 @@ describe('permission card (CD-07)', () => {
     const short = permissionCardLines(PATCH_ASK, t, 100, full.length - 3)
     expect(short).toHaveLength(full.length - 3)
     const text = short.map(lineText)
-    expect(text.slice(-3)).toEqual(['1 Apply once', expect.stringContaining('2 Apply'), '3 Reject'])
+    // the policy's three options, then CD-08's "deny with a reason" — none of them is ever dropped
+    expect(text.slice(-4)).toEqual(['1 Apply once', expect.stringContaining('2 Apply'), '3 Reject', expect.stringContaining('4 Deny with a reason')])
     expect(text.join('\n')).toContain('packages/core/src/tokens.ts')
   })
 
@@ -554,7 +604,8 @@ describe('composer and commands (CD-11)', () => {
   test('ONE command table, every entry with an id, a label, keys and an intent', () => {
     for (const c of CODE_COMMANDS) {
       expect(c.label.startsWith('/')).toBe(true)
-      expect(c.keys.length).toBeGreaterThan(0)
+      // `keys` may be '' only for a command no key replaces (`/copy`); the rest name theirs.
+      if (c.id !== 'copy') expect(c.keys.length).toBeGreaterThan(0)
       expect(c.intent.kind).not.toBe('none')
       expect(t.commandDescriptions[c.id]).toBeTruthy()
       expect(pt.commandDescriptions[c.id]).toBeTruthy()
@@ -582,7 +633,9 @@ const ctx = (over: Partial<CodeKeyContext> = {}): CodeKeyContext => ({
 describe('keys → intents', () => {
   test('with an ask open: digits answer in policy order, d opens the diff only when there is one, esc denies', () => {
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '2' })).toEqual({ kind: 'answer', choice: 1 })
-    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '4' })).toEqual({ kind: 'say', code: 'answer-first' })
+    // `4` is CD-08's reason field (the option after the policy's three); `5` names nothing
+    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '4' })).toEqual({ kind: 'reason-open' })
+    expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '5' })).toEqual({ kind: 'say', code: 'answer-first' })
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: 'd' })).toEqual({ kind: 'open-diff' })
     expect(codeKeyIntent(ctx({ ask: SHELL_ASK }), { input: 'd' })).toEqual({ kind: 'say', code: 'no-diff' })
     expect(codeKeyIntent(ctx({ ask: PATCH_ASK }), { input: '', escape: true })).toEqual({ kind: 'deny' })
@@ -625,7 +678,7 @@ const hs = (over: Partial<CodeHintState> = {}): CodeHintState => ({ ...ctx(), ca
 
 describe('codeHints (GL-05) — exactly the keys that work now', () => {
   test('ask open: answer, full diff only with a diff, deny', () => {
-    expect(codeHints(hs({ ask: PATCH_ASK }), t).slice(0, 3)).toEqual(['1-3 answer', 'd full diff', 'esc deny'])
+    expect(codeHints(hs({ ask: PATCH_ASK }), t).slice(0, 3)).toEqual(['1-4 answer', 'd full diff', 'esc deny'])
     expect(codeHints(hs({ ask: SHELL_ASK }), t)).not.toContain('d full diff')
     expect(codeHints(hs({ ask: { ...SHELL_ASK, denyIndex: null } }), t)).toContain('esc dismiss')
   })
@@ -694,5 +747,424 @@ describe('the no-sandbox words are never the ones cut', () => {
     const lines = sessionPanelLines(EMPTY_VIEW, null, t, 34).map(lineText)
     expect(lines.join(' ')).toContain('no session is open')
     expect(lines.join(' ')).not.toContain('N/A')
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// P2
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('turns: the fold keeps one stat per person’s message (CD-05/06/13)', () => {
+  test('usage goes to the turn whose run it names; run-ended records when and how', () => {
+    const v = fixtureView()
+    expect(v.turnStats).toHaveLength(2)
+    expect(v.turnStats[0]!.usage.input).toBe(900)
+    expect(v.turnStats[0]!.status).toBe('completed')
+    expect(v.turnStats[0]!.startedAt).toBe('2026-09-28T14:00:01Z')
+    expect(v.turnStats[0]!.endedAt).toBe('2026-09-28T14:00:05Z')
+    expect(v.turnStats[1]!.usage.input).toBe(1000)
+    expect(v.turnStats[1]!.status).toBeUndefined()
+    // A late response for the FIRST run still lands on the first turn, not the newest.
+    const late = reduceCode(v, { kind: 'usage', usage: { runId: 'r1', model: 'm', input: 5 } })
+    expect(late.turnStats[0]!.usage.input).toBe(905)
+    expect(late.turnStats[1]!.usage.input).toBe(1000)
+  })
+
+  test('segments: a user entry and what follows it, and nothing before the first one is lost', () => {
+    const segs = turnSegments(fixtureView().entries)
+    expect(segs.map(s => s.turn)).toEqual([0, 1])
+    const lead = turnSegments(reduceAll(EMPTY_VIEW, [{ kind: 'delta', text: 'hello' }, { kind: 'user', text: 'q', at: 'x' }]).entries)
+    expect(lead.map(s => s.turn)).toEqual([null, 0])
+  })
+
+  test('mode and rules fold; the choice a person made is kept against the call it answered', () => {
+    let v = reduceAll(fixtureView(), [
+      { kind: 'mode', mode: 'plan', direction: 'stricter', dropped: 1 },
+      { kind: 'rules', rules: [{ label: 'bun test *', at: 'x' }] },
+      { kind: 'ask', ask: PATCH_ASK },
+      { kind: 'ask-closed', id: 'q-1', outcome: 'answered', choiceLabel: 'Apply once' },
+    ])
+    expect(v.mode).toBe('plan')
+    expect(effectiveMode(v, FACTS)).toBe('plan')
+    expect(effectiveMode(EMPTY_VIEW, FACTS)).toBe('default')
+    expect(v.rules).toEqual([{ label: 'bun test *', at: 'x' }])
+    expect(v.choices['tool-3']).toBe('Apply once')
+    v = reduceCode(v, { kind: 'rules', rules: [] })
+    expect(v.rules).toEqual([])
+  })
+
+  test('history turns are marked historic: no receipt, but /copy counts them as finished', () => {
+    const v = reduceCode(EMPTY_VIEW, { kind: 'history', turns: [
+      { role: 'user', text: 'q', tools: [] },
+      { role: 'assistant', text: 'the stored answer', tools: [] },
+    ] })
+    expect(v.turnStats).toEqual([{ runIds: [], usage: { calls: 0, unpriced: 0 }, calls: [], historic: true }])
+    expect(conversationLines(v, FACTS, t, 80).map(lineText).join('\n')).not.toContain('↳')
+    expect(lastFinishedAnswer(v)).toBe('the stored answer')
+  })
+})
+
+describe('collapsed turns (CD-05)', () => {
+  test('every turn but the last folds to one line: question · tools · cost', () => {
+    const lines = conversationLines(fixtureView(), FACTS, t, 100).map(lineText)
+    const folded = lines.filter(l => l.startsWith('▸ turn'))
+    expect(folded).toHaveLength(1)
+    expect(folded[0]).toContain('▸ turn 1 · why does the parser drop the last byte')
+    expect(folded[0]).toContain('1 tool · USD 0.01')
+    expect(lines.join('\n')).not.toContain('sliceEnd treats the end as inclusive')
+    expect(lines.join('\n')).toContain('now fix it and run the core tests')
+  })
+
+  test('the inspector’s turn is expanded and marked with a bar; the rest stay folded', () => {
+    const lines = conversationLines(fixtureView(), FACTS, t, 100, { expand: 0, highlight: true }).map(lineText)
+    expect(lines.join('\n')).toContain('sliceEnd treats the end as inclusive')
+    const marked = lines.filter(l => l.startsWith(TURN_MARK))
+    expect(marked.length).toBeGreaterThan(3)
+    expect(marked[0]).toContain('you')
+    expect(lines.some(l => l.startsWith(TURN_MARK) && l.includes('now fix it'))).toBe(false)
+  })
+
+  test('a live turn and a turn holding the open question never fold', () => {
+    // Turn 1 still running while turn 2 was typed: both unfolded.
+    const live = reduceAll(EMPTY_VIEW, [
+      { kind: 'user', text: 'first', at: 'x' },
+      { kind: 'run-started', runId: 'r1', at: 'x' },
+      { kind: 'tool', call: call({ id: 'a', state: 'asking' }) },
+      { kind: 'user', text: 'second', at: 'x' },
+      { kind: 'ask', ask: { ...PATCH_ASK, toolId: 'a' } },
+    ])
+    const text = conversationLines(live, FACTS, t, 100).map(lineText)
+    expect(text.filter(l => l.startsWith('▸ turn'))).toHaveLength(0)
+  })
+
+  test('the folded line gives up the QUESTION under width pressure, never the count or the cost', () => {
+    const l = lineText(foldedTurnLine(3, 'a very long question '.repeat(10), 2, 0.1234, t, 40))
+    expect(l).toContain('▸ turn 3')
+    expect(l).toContain('2 tools')
+    expect(l).toContain('USD 0.12')
+    expect(lineText(foldedTurnLine(3, 'q', 2, null, t, 60))).toContain('N/A')
+  })
+})
+
+describe('turn receipt (CD-06)', () => {
+  test('duration · ttft · all four counters · cache hit · cost', () => {
+    const r = lineText(receiptLine(fixtureView().turnStats[0]!, t, 120))
+    expect(r).toBe('↳ 4.0s · ttft 620ms · 8.2K tok · cache 86% · USD 0.01')
+  })
+
+  test('only under a FINISHED answer', () => {
+    const lines = conversationLines(fixtureView(), FACTS, t, 100, { expand: 0 }).map(lineText)
+    expect(lines.filter(l => l.startsWith('↳ 4.0s'))).toHaveLength(1)
+    const ended = reduceCode(fixtureView(), { kind: 'run-ended', runId: 'r2', status: 'failed', sentence: 'boom', at: '2026-09-28T14:03:00Z' })
+    expect(conversationLines(ended, FACTS, t, 100).map(lineText).filter(l => l.startsWith('↳ ') && l.includes('ttft'))).toHaveLength(0)
+  })
+
+  test('every absent part reads N/A — never 0', () => {
+    const r = lineText(receiptLine({ runIds: ['r'], usage: { input: 5, output: 1, calls: 1, unpriced: 1 }, calls: [{ model: 'm', input: 5, output: 1 }], status: 'completed' }, t, 120))
+    expect(r).toBe('↳ N/A · ttft N/A · tok N/A · cache N/A · N/A')
+    expect(r).not.toMatch(/\b0\b/)
+  })
+
+  test('under pressure the parts give way right to left and the COST stays', () => {
+    const st = fixtureView().turnStats[0]!
+    expect(lineText(receiptLine(st, t, 42))).toBe('↳ 4.0s · ttft 620ms · 8.2K tok · USD 0.01')
+    expect(lineText(receiptLine(st, t, 32))).toBe('↳ 4.0s · ttft 620ms · USD 0.01')
+    expect(lineText(receiptLine(st, t, 20))).toBe('↳ 4.0s · USD 0.01')
+    expect(lineText(receiptLine(st, t, 12))).toBe('↳ USD 0.01')
+  })
+})
+
+describe('long output fold (CD-10)', () => {
+  test('three lines or fewer are shown inline', () => {
+    const short = call({ id: 's', output: { lines: ['a', 'b', 'c'], total: 3 } })
+    expect(outputLines(short, t, 80, false).map(lineText)).toEqual(['  │ a', '  │ b', '  │ c'])
+  })
+
+  test('more folds to one line; ctrl+o expands to 12, then says how many more, sanitized', () => {
+    expect(outputLines(LONG_OUTPUT, t, 80, false).map(lineText)).toEqual(['  ▸ 216 lines of output · ctrl+o expands'])
+    const open = outputLines(LONG_OUTPUT, t, 80, true).map(lineText)
+    expect(open).toHaveLength(OUTPUT_OPEN_MAX + 1)
+    expect(open[0]).toBe('  │ line 1 of the test run ok')
+    expect(open[OUTPUT_OPEN_MAX]).toBe('  … 204 more lines · ctrl+o collapses')
+  })
+
+  test('longOutputShown sees only unfolded turns', () => {
+    const v = reduceAll(EMPTY_VIEW, [
+      { kind: 'user', text: 'one', at: 'x' },
+      { kind: 'tool', call: LONG_OUTPUT },
+      { kind: 'user', text: 'two', at: 'x' },
+    ])
+    expect(longOutputShown(v)).toBe(false)
+    expect(longOutputShown(v, 0)).toBe(true)
+  })
+})
+
+describe('permission mode (CD-15)', () => {
+  test('the prototype’s words, EN and PT', () => {
+    expect(['default', 'accept-edits', 'plan'].map(m => modeWord(m, t))).toEqual(['ask', 'edits', 'plan'])
+    expect(['default', 'accept-edits', 'plan'].map(m => modeWord(m, pt))).toEqual(['perguntar', 'edições', 'plano'])
+  })
+
+  test('the header, the narrow status line and the card say it', () => {
+    expect(lineText(headerLine(FACTS, t, 120))).toContain('mode ask')
+    expect(lineText(headerLine({ ...FACTS, mode: 'plan' }, t, 120))).toContain('mode plan')
+    const v = reduceCode(fixtureView(), { kind: 'mode', mode: 'accept-edits', direction: 'looser', dropped: 0 })
+    expect(lineText(narrowStatusLine(v, FACTS, t, 90))).toContain('mode edits')
+    const card = permissionCardLines(PATCH_ASK, t, 100, undefined, 'default').map(lineText)
+    expect(card.some(l => l.startsWith('mode ask'))).toBe(true)
+    // The mode line survives a short card; it gives way only after the extra reasons.
+    const short = permissionCardLines(PATCH_ASK, t, 100, 8, 'default').map(lineText)
+    expect(short.some(l => l.startsWith('mode ask'))).toBe(true)
+  })
+})
+
+describe('session rules (CD-16)', () => {
+  test('a SESSION RULES section with each rule, and how long they last — only when there are any', () => {
+    const none = sessionPanelLines(fixtureView(), FACTS, t, 34).map(lineText).join('\n')
+    expect(none).not.toContain('SESSION RULES')
+    const v = reduceCode(fixtureView(), { kind: 'rules', rules: [{ label: 'bun test *', at: 'x' }, { label: 'patches under packages/core/', at: 'y' }] })
+    const text = sessionPanelLines(v, FACTS, t, 34).map(lineText)
+    const at = text.indexOf('SESSION RULES')
+    expect(at).toBeGreaterThan(-1)
+    expect(text[at + 1]).toBe('until the session ends')
+    expect(text[at + 2]).toBe('allow bun test *')
+    expect(text[at + 3]).toBe('allow patches under packages/core/')
+  })
+})
+
+describe('the swapping panel', () => {
+  test('ctrl+b shows and hides (opening on the session side); ctrl+i / ctrl+t swap, and swap back', () => {
+    expect(nextPanel({ side: 'timeline', open: true }, 'toggle')).toEqual({ side: 'timeline', open: false })
+    expect(nextPanel({ side: 'timeline', open: false }, 'toggle')).toEqual({ side: 'session', open: true })
+    expect(nextPanel({ side: 'session', open: false }, 'inspector')).toEqual({ side: 'inspector', open: true })
+    expect(nextPanel({ side: 'inspector', open: true }, 'inspector')).toEqual({ side: 'session', open: true })
+    expect(nextPanel({ side: 'inspector', open: true }, 'timeline')).toEqual({ side: 'timeline', open: true })
+  })
+
+  test('the title names the three with the one showing marked, or that one alone when narrow', () => {
+    expect(panelTitle('inspector', t, 38)).toBe('session · ▸inspector · timeline')
+    expect(panelTitle('timeline', t, 20)).toBe('▸timeline')
+    expect(panelTitle('session', pt, 80)).toBe('▸sessão · inspetor · cronologia')
+  })
+})
+
+describe('copy the last answer (CD-19)', () => {
+  test('the last FINISHED answer only — a streaming one is not finished', () => {
+    const v = fixtureView()
+    expect(lastFinishedAnswer(v)).toBe('sliceEnd treats the end as inclusive, so a slice that ends on the last byte is rejected.')
+    const done = reduceCode(v, { kind: 'run-ended', runId: 'r2', status: 'completed', sentence: '', at: '2026-09-28T14:03:00Z' })
+    expect(lastFinishedAnswer(done)).toContain("I'll read the parser")
+    expect(lastFinishedAnswer(done)).toContain('One test still fails')
+    expect(lastFinishedAnswer(EMPTY_VIEW)).toBeNull()
+  })
+})
+
+describe('P2 keys → intents', () => {
+  test('shift+tab cycles the mode, tab (= ctrl+i) the inspector, ctrl+t the timeline, ctrl+o the output', () => {
+    expect(codeKeyIntent(ctx(), { input: '', tab: true, shift: true })).toEqual({ kind: 'cycle-mode' })
+    expect(codeKeyIntent(ctx(), { input: '', tab: true })).toEqual({ kind: 'panel-side', side: 'inspector' })
+    expect(codeKeyIntent(ctx(), { input: 'i', ctrl: true })).toEqual({ kind: 'panel-side', side: 'inspector' })
+    expect(codeKeyIntent(ctx(), { input: 't', ctrl: true })).toEqual({ kind: 'panel-side', side: 'timeline' })
+    expect(codeKeyIntent(ctx(), { input: '\x14' })).toEqual({ kind: 'panel-side', side: 'timeline' })
+    expect(codeKeyIntent(ctx(), { input: 'o', ctrl: true })).toEqual({ kind: 'toggle-output' })
+  })
+
+  test('with a question open the views still answer; the editor and the history refuse in words', () => {
+    const a = ctx({ ask: PATCH_ASK })
+    expect(codeKeyIntent(a, { input: '', tab: true, shift: true })).toEqual({ kind: 'cycle-mode' })
+    expect(codeKeyIntent(a, { input: 't', ctrl: true })).toEqual({ kind: 'panel-side', side: 'timeline' })
+    expect(codeKeyIntent(a, { input: 'g', ctrl: true })).toEqual({ kind: 'say', code: 'locked' })
+    expect(codeKeyIntent(a, { input: 'r', ctrl: true })).toEqual({ kind: 'say', code: 'locked' })
+    expect(codeKeyIntent(ctx(), { input: 'g', ctrl: true })).toEqual({ kind: 'open-editor' })
+    expect(codeKeyIntent(ctx(), { input: 'r', ctrl: true })).toEqual({ kind: 'open-history' })
+  })
+
+  test('↑↓ pick a turn only while the inspector shows, and the / popup keeps its arrows', () => {
+    expect(codeKeyIntent(ctx({ panelSide: 'inspector' }), { input: '', upArrow: true })).toEqual({ kind: 'turn-move', delta: -1 })
+    expect(codeKeyIntent(ctx({ panelSide: 'inspector', panelVisible: false }), { input: '', upArrow: true })).toEqual({ kind: 'none' })
+    expect(codeKeyIntent(ctx({ panelSide: 'session' }), { input: '', downArrow: true })).toEqual({ kind: 'none' })
+    expect(codeKeyIntent(ctx({ panelSide: 'inspector', draft: '/', popup: 0 }), { input: '', downArrow: true })).toEqual({ kind: 'popup-move', delta: 1 })
+    expect(codeKeyIntent(ctx({ panelSide: 'inspector', panelFull: true }), { input: '', downArrow: true })).toEqual({ kind: 'turn-move', delta: 1 })
+  })
+
+  test('the panel scrolls on its own keys: shift+↑↓ when shown, pgup/pgdn only when it fills the screen', () => {
+    expect(codeKeyIntent(ctx({ panelSide: 'inspector' }), { input: '', downArrow: true, shift: true })).toEqual({ kind: 'panel-scroll', dir: 1, page: false })
+    expect(codeKeyIntent(ctx({ panelVisible: false }), { input: '', downArrow: true, shift: true })).toEqual({ kind: 'none' })
+    expect(codeKeyIntent(ctx({ panelFull: true }), { input: '', pageDown: true })).toEqual({ kind: 'panel-scroll', dir: 1, page: true })
+    expect(codeKeyIntent(ctx(), { input: '', pageDown: true })).toEqual({ kind: 'scroll', dir: 1 })
+    expect(codeHints(hs({ panelOverflow: true }), t)).toContain('shift+↑↓ panel')
+    expect(codeHints(hs(), t)).not.toContain('shift+↑↓ panel')
+    expect(codeHints(hs({ panelFull: true, panelOverflow: true }), t)).toContain('pgup/pgdn scroll')
+  })
+
+  test('? opens help on an empty draft when there is help to open; otherwise it is typed', () => {
+    expect(codeKeyIntent(ctx({ help: true }), { input: '?' })).toEqual({ kind: 'help' })
+    expect(codeKeyIntent(ctx({ help: true, draft: 'why' }), { input: '?' })).toEqual({ kind: 'draft', draft: 'why?' })
+    expect(codeKeyIntent(ctx(), { input: '?' })).toEqual({ kind: 'draft', draft: '?' })
+  })
+
+  test('the new commands run the same intents as their keys', () => {
+    const run = (d: string) => codeKeyIntent(ctx({ draft: d }), { input: '', return: true })
+    expect(run('/mode')).toEqual({ kind: 'cycle-mode' })
+    expect(run('/inspector')).toEqual({ kind: 'panel-side', side: 'inspector' })
+    expect(run('/timeline')).toEqual({ kind: 'panel-side', side: 'timeline' })
+    expect(run('/editor')).toEqual({ kind: 'open-editor' })
+    expect(run('/history')).toEqual({ kind: 'open-history' })
+    expect(run('/copy')).toEqual({ kind: 'copy' })
+  })
+})
+
+/**
+ * GL-04: the help overlay prints `CODE_KEY_TABLE`, so the table must be the keys `codeKeyIntent`
+ * really answers — both directions. Each row's PROBES are the key presses that row names.
+ */
+const PROBES: Record<string, CodeKey[]> = {
+  'enter': [{ input: '', return: true }],
+  '/': [{ input: '/' }],
+  '@': [{ input: '@' }],
+  '!': [{ input: '!' }],
+  'shift+tab': [{ input: '', tab: true, shift: true }],
+  '1-9': [{ input: '1' }, { input: '9' }],
+  'd': [{ input: 'd' }],
+  'esc': [{ input: '', escape: true }],
+  'ctrl+o': [{ input: 'o', ctrl: true }],
+  'ctrl+i/tab': [{ input: 'i', ctrl: true }, { input: '', tab: true }],
+  'ctrl+t': [{ input: 't', ctrl: true }],
+  'ctrl+b': [{ input: 'b', ctrl: true }],
+  '↑↓': [{ input: '', upArrow: true }, { input: '', downArrow: true }],
+  'shift+↑↓': [{ input: '', upArrow: true, shift: true }, { input: '', downArrow: true, shift: true }],
+  'ctrl+g': [{ input: 'g', ctrl: true }],
+  'ctrl+r': [{ input: 'r', ctrl: true }],
+  'pgup/pgdn': [{ input: '', pageUp: true }, { input: '', pageDown: true }],
+  '[ ]': [{ input: '[' }, { input: ']' }],
+  '?': [{ input: '?' }],
+  'n': [{ input: 'n' }],
+  'ctrl+u': [{ input: 'u', ctrl: true }],
+  'ctrl+w': [{ input: 'w', ctrl: true }],
+}
+
+const CONTEXTS: CodeKeyContext[] = [
+  ctx(), ctx({ draft: 'hello world' }), ctx({ draft: '/', popup: 0 }), ctx({ running: true }), ctx({ sessionOpen: false }),
+  ctx({ ask: PATCH_ASK }), ctx({ ask: PATCH_ASK, diffOpen: true }), ctx({ panelSide: 'inspector' }), ctx({ panelFull: true }),
+  ctx({ help: true }),
+]
+
+describe('CODE_KEY_TABLE (GL-04) — every key codeKeyIntent answers, and nothing else', () => {
+  test('every row names keys that do something in at least one state, EN and PT described', () => {
+    for (const row of CODE_KEY_TABLE) {
+      const probes = PROBES[row.keys]
+      expect(probes, `no probe for "${row.keys}"`).toBeDefined()
+      for (const p of probes!) {
+        const answered = CONTEXTS.some(c => codeKeyIntent(c, p).kind !== 'none')
+        expect(answered, `"${row.keys}" (${JSON.stringify(p)}) does nothing anywhere`).toBe(true)
+      }
+      expect(row.action.en.length).toBeGreaterThan(0)
+      expect(row.action.pt.length).toBeGreaterThan(0)
+    }
+  })
+
+  test('every special key that does something appears in the table', () => {
+    const listed = new Set(Object.values(PROBES).flat().map(k => JSON.stringify(k)))
+    const specials: CodeKey[] = [
+      ...'abcdefghijklmnopqrstuvwxyz'.split('').map(c => ({ input: c, ctrl: true })),
+      { input: '', return: true }, { input: '', escape: true }, { input: '', tab: true }, { input: '', tab: true, shift: true },
+      { input: '', upArrow: true }, { input: '', downArrow: true }, { input: '', leftArrow: true }, { input: '', rightArrow: true },
+      { input: '', upArrow: true, shift: true }, { input: '', downArrow: true, shift: true },
+      { input: '', pageUp: true }, { input: '', pageDown: true },
+      ...'123456789'.split('').map(c => ({ input: c })), { input: '[' }, { input: ']' }, { input: '?' }, { input: 'n' }, { input: 'd' },
+    ]
+    for (const k of specials) {
+      // A printable key whose only effect is to be TYPED is typing, not a binding.
+      const bound = CONTEXTS.some(c => {
+        const i = codeKeyIntent(c, k)
+        return i.kind !== 'none' && !(i.kind === 'draft' && i.draft === c.draft + k.input)
+      })
+      if (!bound) continue
+      const inTable = listed.has(JSON.stringify(k)) || (/^[1-9]$/.test(k.input) && !k.ctrl)
+      expect(inTable, `${JSON.stringify(k)} is bound but missing from CODE_KEY_TABLE`).toBe(true)
+    }
+  })
+})
+
+describe('P2 footer hints — only keys that work here', () => {
+  test('the new keys are named where they work and only there', () => {
+    const idle = codeHints(hs({ longOutput: true, help: true }), t)
+    for (const h of ['shift+tab mode', 'ctrl+i/tab inspector', 'ctrl+t timeline', 'ctrl+o output', 'ctrl+r prompts', 'ctrl+g editor', '? help']) expect(idle).toContain(h)
+    expect(codeHints(hs(), t)).not.toContain('ctrl+o output')
+    expect(codeHints(hs(), t)).not.toContain('? help')
+    expect(codeHints(hs({ sessionOpen: false }), t)).not.toContain('shift+tab mode')
+    expect(codeHints(hs({ panelSide: 'inspector' }), t)).toContain('↑↓ turn')
+    expect(codeHints(hs({ panelSide: 'inspector' }), t)).toContain('ctrl+i/tab session')
+    const asking = codeHints(hs({ ask: PATCH_ASK }), t)
+    expect(asking).not.toContain('ctrl+g editor')
+    expect(asking).not.toContain('ctrl+r prompts')
+  })
+
+  test('every hint names a key codeKeyIntent answers in that same state', () => {
+    const probe: Record<string, CodeKey> = {
+      'shift+tab mode': { input: '', tab: true, shift: true },
+      'ctrl+i/tab inspector': { input: '', tab: true },
+      'ctrl+i/tab session': { input: '', tab: true },
+      'ctrl+t timeline': { input: 't', ctrl: true },
+      'ctrl+t session': { input: 't', ctrl: true },
+      'ctrl+o output': { input: 'o', ctrl: true },
+      'ctrl+r prompts': { input: 'r', ctrl: true },
+      'ctrl+g editor': { input: 'g', ctrl: true },
+      '? help': { input: '?' },
+      '↑↓ turn': { input: '', downArrow: true },
+      'shift+↑↓ panel': { input: '', downArrow: true, shift: true },
+      'pgup/pgdn scroll': { input: '', pageDown: true },
+      'esc back': { input: '', escape: true },
+    }
+    const states: CodeHintState[] = [
+      hs({ longOutput: true, help: true }), hs({ panelSide: 'inspector' }), hs({ panelSide: 'timeline' }), hs({ ask: PATCH_ASK, panelSide: 'inspector' }),
+      hs({ panelFull: true, panelSide: 'inspector', panelOverflow: true }), hs({ panelOverflow: true }),
+    ]
+    for (const st of states) {
+      for (const h of codeHints(st, t)) {
+        const key = probe[h]
+        if (!key) continue
+        expect(codeKeyIntent(st, key).kind, `${h}`).not.toBe('none')
+      }
+    }
+  })
+})
+
+describe('CD-08 — deny with a reason', () => {
+  const T = codeStrings('en')
+  const ctx = (over: Partial<Parameters<typeof codeKeyIntentForTest>[0]> = {}) => ({
+    draft: '', sessionOpen: true, closed: false, ask: SHELL_ASK, diffOpen: false, panelFull: false, running: true, popup: null, ...over,
+  })
+  const key = (input: string, over: Record<string, boolean> = {}) => ({ input, ...over })
+  test('the option after the policy\'s own opens the reason field; the policy\'s options stay as they are', () => {
+    expect(reasonOptionNumber(SHELL_ASK)).toBe(4)
+    expect(codeKeyIntentForTest(ctx(), key('4'))).toEqual({ kind: 'reason-open' })
+    expect(codeKeyIntentForTest(ctx(), key('3'))).toEqual({ kind: 'answer', choice: 2 })
+    expect(codeKeyIntentForTest(ctx(), key('5'))).toEqual({ kind: 'say', code: 'answer-first' })
+    const lines = optionLines(SHELL_ASK, 80, T).map(l => l.map(sg => sg.text).join(''))
+    expect(lines).toHaveLength(4)
+    expect(lines[3]).toContain('4 Deny with a reason…')
+  })
+  test('in the field: typing edits, enter sends the Deny with the reason, empty enter refuses in words, esc goes back', () => {
+    const c = ctx({ reason: 'use ' })
+    expect(codeKeyIntentForTest(c, key('x'))).toEqual({ kind: 'reason-draft', draft: 'use x' })
+    expect(codeKeyIntentForTest(c, key('', { backspace: true }))).toEqual({ kind: 'reason-draft', draft: 'use' })
+    expect(codeKeyIntentForTest(ctx({ reason: '  use bun run clean ' }), key('', { return: true }))).toEqual({ kind: 'deny-reason', reason: 'use bun run clean' })
+    expect(codeKeyIntentForTest(ctx({ reason: '   ' }), key('', { return: true }))).toEqual({ kind: 'say', code: 'reason-empty' })
+    expect(codeKeyIntentForTest(c, key('', { escape: true }))).toEqual({ kind: 'reason-close' })
+    // a digit is text in the field, never an answer
+    expect(codeKeyIntentForTest(c, key('1'))).toEqual({ kind: 'reason-draft', draft: 'use 1' })
+  })
+  test('the footer and the composer say what the field does', () => {
+    const hints = codeHints({ ...ctx({ reason: '' }), canScroll: false, narrow: false }, T)
+    expect(hints).toEqual([T.keyReasonSend, T.keyReasonBack])
+    expect(codeHints({ ...ctx(), canScroll: false, narrow: false }, T)[0]).toBe('1-4 answer')
+    const comp = composerLine({ draft: '', ask: SHELL_ASK, closed: null, sessionOpen: true, reason: 'not now' }, T, 60).map(sg => sg.text).join('')
+    expect(comp).toContain('reason: not now')
+  })
+  test('a question with no Deny (a model\'s question) gets no reason option', () => {
+    const q: CodeAsk = { ...SHELL_ASK, kind: 'question', denyIndex: null }
+    expect(reasonOptionNumber(q)).toBeNull()
+    expect(optionLines(q, 80, T)).toHaveLength(3)
   })
 })

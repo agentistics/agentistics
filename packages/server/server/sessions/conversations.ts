@@ -45,6 +45,10 @@ export interface Conversation {
   firstPrompt: string
   /** Total tokens, when the harness records them. Absent is NOT zero — see HARNESS_CAPABILITIES. */
   tokens?: number
+  /** SS-05: the four counters one by one — a counter the harness did not record is ABSENT, not 0. */
+  tokenParts?: TokenParts
+  /** SS-05: how many turns the person took (`user_message_count`), when recorded. */
+  turns?: number
   costUSD?: number
   /**
    * How full the context window was on the last turn, and out of how much — the gauge's two halves.
@@ -59,6 +63,9 @@ export interface Conversation {
   /** Epoch ms of the person's last message (`user_message_timestamps`); absent when unknown. */
   lastUserMessageMs?: number
 }
+
+/** The four token counters of one conversation (SS-05). */
+export interface TokenParts { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 
 const CACHE_TTL_MS = 30_000
 let cache: { at: number; list: Conversation[] } | null = null
@@ -99,6 +106,13 @@ export function toConversation(s: SessionMeta): Conversation {
     // Absent rather than zero when the harness records none: a confident 0 next to real numbers is
     // the same lie `HARNESS_CAPABILITIES` exists to prevent on the dashboard.
     ...(total > 0 ? { tokens: total } : {}),
+    ...(total > 0 ? { tokenParts: {
+      ...(s.input_tokens !== undefined ? { input: s.input_tokens } : {}),
+      ...(s.output_tokens !== undefined ? { output: s.output_tokens } : {}),
+      ...(s.cache_read_input_tokens !== undefined ? { cacheRead: s.cache_read_input_tokens } : {}),
+      ...(s.cache_creation_input_tokens !== undefined ? { cacheWrite: s.cache_creation_input_tokens } : {}),
+    } } : {}),
+    ...(s.user_message_count ? { turns: s.user_message_count } : {}),
     // BOTH or NEITHER. Half a gauge is not a weaker gauge, it is an unreadable one: a measurement
     // with no window has no percentage, and a window with no measurement has no level.
     ...(s.context_tokens && window

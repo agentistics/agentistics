@@ -1043,16 +1043,12 @@ export interface ModelPrice { input: number; output: number; cacheRead: number; 
 export const UNPRICED_PRICE: Readonly<ModelPrice> = Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 })
 
 /**
- * The price of a model. **Never a guess** (PRICE.UNKNOWN, owner rule): a model outside the table is UNPRICED
- * on every harness — {@link UNPRICED_PRICE} — its tokens are counted, its cost is `null` through
- * {@link modelCostUSD}, and a surface shows it as {@link UNPRICED_MODEL_LABEL}. (It used to fall back to a
- * Sonnet-class price, which invented spending for every new or third-party model.)
+ * The `MODEL_PRICING` row a model id is priced by — exact, then the longest prefix, then a truncated
+ * id (the resolution `getModelPrice` documents) — or `null` when the table does not know it. Local
+ * models are not table rows and read `null` here too (`isLocalModelId` says why they cost nothing).
  */
-export function getModelPrice(modelId: string): ModelPrice {
-  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
-  // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
-  // the table so no partial-prefix match can price it. See local-models.ts.
-  if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
+export function pricingKey(modelId: string): string | null {
+  if (MODEL_PRICING[modelId]) return modelId
   const id = String(modelId ?? '')
   let forwardKey = ''
   let reverseKey = ''
@@ -1065,7 +1061,21 @@ export function getModelPrice(modelId: string): ModelPrice {
       if (!reverseKey || key.length < reverseKey.length) reverseKey = key
     }
   }
-  const hit = forwardKey || reverseKey
+  return forwardKey || reverseKey || null
+}
+
+/**
+ * The price of a model. **Never a guess** (PRICE.UNKNOWN, owner rule): a model outside the table is UNPRICED
+ * on every harness — {@link UNPRICED_PRICE} — its tokens are counted, its cost is `null` through
+ * {@link modelCostUSD}, and a surface shows it as {@link UNPRICED_MODEL_LABEL}. (It used to fall back to a
+ * Sonnet-class price, which invented spending for every new or third-party model.)
+ */
+export function getModelPrice(modelId: string): ModelPrice {
+  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
+  // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
+  // the table so no partial-prefix match can price it. See local-models.ts.
+  if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
+  const hit = pricingKey(modelId)
   return hit ? MODEL_PRICING[hit]! : UNPRICED_PRICE
 }
 

@@ -13,6 +13,7 @@
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { SERVICE_MARKER, type DetailLine } from './chrome.ts'
 import { wrapText } from './surface.ts'
+import { isListKey, type KeyPress } from './nav'
 import type { ControlStrings } from './i18n'
 import type {
   ArchiveMode, BackupLayer, BackupPresence, BackupScheduleId, ControlBackupConfig,
@@ -395,13 +396,16 @@ export function harnessDetailLines(row: HarnessRow | undefined, s: ControlString
  * keeps this function total over every combination a future caller might pass.
  */
 export function backupHints(
-  focus: 'harnesses' | 'config', s: ControlStrings,
-  ctx: { task: boolean; editing?: boolean; history?: boolean },
+  focus: BackupFocus, s: ControlStrings,
+  ctx: { task: boolean; editing?: boolean; history?: boolean; narrow?: boolean },
 ): string[] {
   if (ctx.editing) return [s.keyLayerToggle, s.keyLayerSave, s.keyLayerCancel]
   if (ctx.history) return [s.keyHistoryPage, s.keyHistoryClose]
   if (ctx.task) return [s.keyTaskClose, s.keyScroll, s.logFollow]
-  const shared = [s.keyQuit, s.keyTabs, s.keyPane, s.keyMove]
+  // The detail pane only exists as a FOCUS on a narrow terminal, where it is a read-only view: the
+  // way back and the run/schedule letters are all that work on it.
+  if (focus === 'detail') return [s.keyQuit, s.keyTabs, s.keyPane, s.keyBack, s.keyBackupRun, s.keyBackupSchedule]
+  const shared = [s.keyQuit, s.keyTabs, s.keyPane, ...(ctx.narrow && focus === 'config' ? [s.keyBack] : []), s.keyMove]
   return focus === 'harnesses'
     ? [...shared, s.keyBackupToggle, s.keyBackupRun, s.keyBackupSchedule, s.keyRefresh]
     : [...shared, s.keyBackupRun, s.keyBackupSchedule, s.keyRefresh]
@@ -692,4 +696,70 @@ export function historyCells(rows: HistoryRow[], width: number): HistoryCells {
     { at: Math.max(1, width), layers: 0, size: 0, harnesses: 0, status: 0 },
   ]
   return ladder.find(c => historyRowCost(c) <= width) ?? ladder[ladder.length - 1]!
+}
+
+// -----------------------------------------------------------------------------
+// the backup cockpit's keys
+// -----------------------------------------------------------------------------
+
+/**
+ * Where the backup cockpit's keyboard is. `detail` is a focus only on a NARROW terminal, where the
+ * three panes are shown one at a time (D-TUI-10) and the detail pane has to be reachable with `tab`.
+ */
+export type BackupFocus = 'harnesses' | 'config' | 'detail'
+
+export type BackupIntent =
+  | { kind: 'focus'; focus: BackupFocus }
+  | { kind: 'move' }
+  | { kind: 'toggle' }
+  | { kind: 'configRun' }
+  | { kind: 'runNow' }
+  | { kind: 'schedule' }
+
+/**
+ * The backup cockpit's keys — PURE, and what the help overlay's table is tested against.
+ *
+ * `tab` walks the panes (`shift+tab` backwards, on a narrow terminal where there are three), `space`
+ * toggles the selected harness, `enter` runs the config row under the cursor, `b` backs up now and
+ * `s` cycles the schedule from any pane. On a narrow terminal `esc` walks back to the first pane.
+ */
+export function resolveBackupKey(key: KeyPress, ctx: { focus: BackupFocus; narrow: boolean }): BackupIntent | null {
+  const order: BackupFocus[] = ctx.narrow ? ['harnesses', 'config', 'detail'] : ['harnesses', 'config']
+  if (key.tab) {
+    const i = Math.max(0, order.indexOf(ctx.focus))
+    return { kind: 'focus', focus: order[(i + (key.shift ? -1 : 1) + order.length) % order.length]! }
+  }
+  if (key.ctrl) return null
+  if (key.escape && ctx.narrow && ctx.focus !== 'harnesses') return { kind: 'focus', focus: 'harnesses' }
+  if (ctx.focus !== 'detail' && isListKey(key)) return { kind: 'move' }
+  if (ctx.focus === 'harnesses' && key.input === ' ') return { kind: 'toggle' }
+  if (ctx.focus === 'config' && key.return) return { kind: 'configRun' }
+  if (key.input === 'b') return { kind: 'runNow' }
+  if (key.input === 's') return { kind: 'schedule' }
+  return null
+}
+
+export type LayerEditorIntent = { kind: 'cancel' } | { kind: 'save' } | { kind: 'toggle' } | { kind: 'move' }
+
+/** The layers editor's keys — PURE: `esc` cancels, `enter` saves, `space` toggles, the list keys move. */
+export function resolveLayerEditorKey(key: KeyPress): LayerEditorIntent | null {
+  if (key.escape) return { kind: 'cancel' }
+  if (key.return) return { kind: 'save' }
+  if (key.ctrl) return null
+  if (key.input === ' ') return { kind: 'toggle' }
+  if (isListKey(key)) return { kind: 'move' }
+  return null
+}
+
+export type HistoryIntent = { kind: 'close' } | { kind: 'page'; step: 1 | -1 }
+
+/**
+ * The backup history viewer's keys — PURE: `esc` closes it, page up/down (and `←`/`→`, for a soft
+ * keyboard with no page keys) move between pages.
+ */
+export function resolveHistoryKey(key: KeyPress): HistoryIntent | null {
+  if (key.escape) return { kind: 'close' }
+  if (key.pageDown || key.rightArrow) return { kind: 'page', step: 1 }
+  if (key.pageUp || key.leftArrow) return { kind: 'page', step: -1 }
+  return null
 }

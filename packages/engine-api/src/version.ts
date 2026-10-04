@@ -71,7 +71,10 @@
  * 1.8.0 — ES.6h: the `code` tab's contract. `CodeHost` (opaque until now) gains OPTIONAL typed members (`CodeHostPort`:
  * availability, defaults, tasks, start/resume, an event subscription, submit/answer/cancel/end; `code-host.ts`) and
  * `asCodePort()` reads them. An engine built against 1.7 still loads (its handle is simply not a port: the tab says
- * so); a 1.8 engine on an older host is offered no `code` tab.
+ * so); a 1.8 engine on an older host is offered no `code` tab. The port's later members are optional too (the
+ * TUI's P3–P5 screens): `cycleMode` (CD-15), `recentSessions` (HM-04/SS-01), `rename` (SS-08), `promptHistory`
+ * (CD-18), `answer`'s `reason` (CD-08), the `mode`/`rules` events and the tool/usage timing fields — a 1.8
+ * engine without them still satisfies the port and the tab degrades (says so, or shows nothing extra).
  * Also (VAULT.PERSONAL §8.3): `EngineHostServices.vaultRefs` (optional) — a native session's env overlay
  * for the personal secrets its person granted it, and a scrubber for every tool output. Optional, so a
  * 1.8 engine loads on an older host (it offers no references there) and an older engine never reads it.
